@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+
+# Data & checkpoints (large files)
+/data/
+/checkpoints/
+/memory/
+*.db
+*.sqlite3
+
+# Rust build artifacts
+/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+
+# Distribution
+wheels/
+*.whl
+
+# Model weights (too large for git)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+*.gguf
+/hbllm/__pycache__
