@@ -86,17 +86,58 @@ HBLLM uses **one small base model** (125M, 500M, or 1.5B parameters) with **ligh
 # 7. Decision Node picks the best answer
 ```
 
+### 🧬 Self-Expanding Zones — The Brain Grows Itself
+
+This is the part that no other framework does. **Zones are NOT hardcoded.** HBLLM ships with 3 starter zones (General, Coding, Math), but the **SpawnerNode** creates new specialists automatically when the Router encounters an unfamiliar domain:
+
+```
+User asks: "What's the best soil pH for tomatoes?"
+
+Router: "I don't have a GARDENING zone..."
+   │
+   ▼
+SpawnerNode activates:
+   │
+   ├── 1. Generates synthetic training data for "gardening"
+   │
+   ├── 2. Trains a new LoRA adapter (~2MB, takes seconds)
+   │
+   ├── 3. Creates DomainModuleNode("domain_gardening")
+   │
+   ├── 4. Wires it to the live MessageBus
+   │
+   └── 5. Announces SPAWN_COMPLETE → new zone is active!
+       
+Next gardening question → routes directly to the new expert.
+The brain literally grew a new region. 🧠
+```
+
+```python
+# This happens automatically — no restart, no redeployment:
+#
+# Boot:     [General] [Coding] [Math]           ← 3 starter zones
+# Week 1:   + [Gardening] + [Cooking]           ← spawned on demand
+# Week 4:   + [Home_Automation] + [IoT]         ← from smart home usage
+# Month 2:  + [Energy_Management] + [Security]  ← deeper specialization
+#
+# Each new zone is a 2MB LoRA adapter on the shared base model.
+# Total memory: base model + (N × 2MB) — scales to hundreds of zones.
+```
+
+This is **artificial neurogenesis** — the same process biological brains use to grow new neural pathways for new skills.
+
 ### Why This Matters
 
-| Metric             | GPT-4 / Claude     | HBLLM Zoning                 |
-| ------------------ | ------------------ | ---------------------------- |
-| **Parameters**     | 70B–1.7T           | 125M–1.5B                    |
-| **GPU Required**   | 80GB A100          | CPU / 4GB GPU / Raspberry Pi |
-| **Cost per Query** | $0.01–0.06         | $0.0001 (local)              |
-| **Domain Depth**   | Generalist         | Deep specialist per zone     |
-| **Add New Domain** | Retrain everything | Train 2MB LoRA adapter       |
-| **Privacy**        | Cloud-only         | 100% on-device               |
-| **Latency**        | 200–2000ms (API)   | 10–50ms (local)              |
+| Metric             | GPT-4 / Claude      | HBLLM Zoning                 |
+| ------------------ | ------------------- | ---------------------------- |
+| **Parameters**     | 70B–1.7T            | 125M–1.5B                    |
+| **GPU Required**   | 80GB A100           | CPU / 4GB GPU / Raspberry Pi |
+| **Cost per Query** | $0.01–0.06          | $0.0001 (local)              |
+| **Domain Depth**   | Generalist          | Deep specialist per zone     |
+| **Add New Domain** | Retrain everything  | Auto-spawns in seconds       |
+| **Privacy**        | Cloud-only          | 100% on-device               |
+| **Latency**        | 200–2000ms (API)    | 10–50ms (local)              |
+| **Self-Expanding** | ❌ Fixed at training | ✅ Grows new zones at runtime |
 
 ### Model Presets
 
@@ -122,9 +163,9 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 
 ### The Key Insight
 
-> **Intelligence isn't about having the biggest brain. It's about having the right specialists working together.**
+> **Intelligence isn't about having the biggest brain. It's about having the right specialists — and growing new ones when you need them.**
 >
-> A 125M base model + LoRA adapters + cognitive nodes can outperform a 70B monolith on domain-specific tasks — at 1/500th the cost.
+> A 125M base model + self-expanding LoRA zones + cognitive nodes = an AI that **gets smarter the more you use it**, on hardware you already own.
 
 ---
 
