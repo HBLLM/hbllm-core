@@ -426,6 +426,41 @@ python -m hbllm.benchmarks.runner --output results.json # Save JSON
 
 ```python
 import asyncio
+from hbllm.brain.factory import BrainFactory
+
+async def main():
+    # One-line brain setup with any LLM provider
+    brain = await BrainFactory.create("openai/gpt-4o-mini")
+    
+    # Process a query through the full cognitive pipeline
+    result = await brain.process("What's the optimal temperature for my living room?")
+    print(result.text)
+    print(f"Latency: {result.latency_ms:.0f}ms")
+    print(f"LLM usage: {brain.usage}")
+    
+    await brain.shutdown()
+
+asyncio.run(main())
+```
+
+**Supported providers:**
+
+```python
+# OpenAI (default)
+brain = await BrainFactory.create("openai/gpt-4o-mini")
+
+# Anthropic
+brain = await BrainFactory.create("anthropic/claude-sonnet-4-20250514")
+
+# Local model (runs on CPU/GPU, no API needed)
+brain = await BrainFactory.create("local", model=my_model, tokenizer=my_tokenizer)
+```
+
+<details>
+<summary><b>Advanced: Manual node wiring</b></summary>
+
+```python
+import asyncio
 from hbllm.network.bus import InProcessBus
 from hbllm.brain.router_node import RouterNode
 from hbllm.brain.decision_node import DecisionNode
@@ -436,7 +471,6 @@ async def main():
     bus = InProcessBus()
     await bus.start()
 
-    # Start cognitive nodes
     memory = MemoryNode(node_id="memory_01", db_path="brain.db")
     router = RouterNode(node_id="router_01")
     decision = DecisionNode(node_id="decision_01")
@@ -444,7 +478,6 @@ async def main():
     for node in [memory, router, decision]:
         await node.start(bus)
 
-    # Send a message through the cognitive pipeline
     msg = Message(
         type=MessageType.QUERY,
         source_node_id="user",
@@ -455,6 +488,8 @@ async def main():
 
 asyncio.run(main())
 ```
+
+</details>
 
 ---
 
@@ -478,7 +513,9 @@ hbllm-core/
 │   │   ├── sleep_node.py     #   Memory consolidation
 │   │   ├── spawner_node.py   #   Dynamic agent creation
 │   │   ├── policy_engine.py  #   Governance rules
-│   │   └── llm_interface.py  #   Model abstraction
+│   │   ├── llm_interface.py  #   Local model interface
+│   │   ├── provider_adapter.py # LLM provider adapter (OpenAI/Anthropic/Local)
+│   │   └── factory.py        #   One-line brain setup (BrainFactory)
 │   ├── memory/               # 5 memory systems
 │   │   ├── episodic.py       #   Event memory
 │   │   ├── semantic.py       #   Fact memory
@@ -511,7 +548,7 @@ hbllm-core/
 ├── rust/                     # Rust accelerators
 │   ├── tokenizer/            #   High-performance tokenizer
 │   └── data_tools/           #   Data cleaning & dedup
-├── tests/                    # 529+ tests
+├── tests/                    # 603+ tests
 └── pyproject.toml
 ```
 
