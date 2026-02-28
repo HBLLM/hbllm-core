@@ -135,3 +135,121 @@ class EpisodicMemory:
             deleted = cursor.rowcount
             conn.commit()
         return deleted
+
+    def search_by_content(
+        self, query: str, tenant_id: str = "default", limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Search across all sessions for turns containing the query string.
+
+        Args:
+            query: Substring to search for (case-insensitive).
+            tenant_id: Tenant scope.
+            limit: Max results.
+
+        Returns:
+            List of matching turn dicts ordered by recency.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT * FROM turns
+                   WHERE tenant_id = ? AND content LIKE ?
+                   ORDER BY timestamp_iso DESC
+                   LIMIT ?""",
+                (tenant_id, f"%{query}%", limit),
+            ).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "domain": row["domain"],
+                "timestamp": row["timestamp_iso"],
+                "metadata": json.loads(row["metadata"]),
+            }
+            for row in rows
+        ]
+
+    def retrieve_by_domain(
+        self, domain: str, tenant_id: str = "default", limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Retrieve turns tagged with a specific domain across all sessions.
+
+        Useful for cross-session context — e.g. recalling all "coding"
+        conversations regardless of session.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT * FROM turns
+                   WHERE tenant_id = ? AND domain = ?
+                   ORDER BY timestamp_iso DESC
+                   LIMIT ?""",
+                (tenant_id, domain, limit),
+            ).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "domain": row["domain"],
+                "timestamp": row["timestamp_iso"],
+                "metadata": json.loads(row["metadata"]),
+            }
+            for row in rows
+        ]
+
+    def cleanup_old_turns(self, days: int = 90, tenant_id: str | None = None) -> int:
+        """
+        Delete turns older than `days` to prevent unbounded growth.
+
+        Args:
+            days: Age threshold in days.
+            tenant_id: If set, only clean this tenant. Otherwise all tenants.
+
+        Returns:
+            Number of deleted turns.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        with sqlite3.connect(self.db_path) as conn:
+            if tenant_id:
+                cursor = conn.execute(
+                    "DELETE FROM turns WHERE tenant_id = ? AND timestamp_iso < ?",
+                    (tenant_id, cutoff),
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM turns WHERE timestamp_iso < ?",
+                    (cutoff,),
+                )
+            deleted = cursor.rowcount
+            conn.commit()
+
+        logger.info("Cleaned up %d turns older than %d days", deleted, days)
+        return deleted
+
+    def get_session_count(self, tenant_id: str = "default") -> int:
+        """Count distinct sessions for a tenant."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM turns WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
+            return row[0] if row else 0
+
+    def get_turn_count(self, tenant_id: str = "default") -> int:
+        """Count total turns for a tenant."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM turns WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
+            return row[0] if row else 0

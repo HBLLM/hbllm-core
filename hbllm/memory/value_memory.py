@@ -160,3 +160,22 @@ class ValueMemory:
                 (tenant_id,),
             ).fetchone()
             return row[0] if row else 0
+
+    def clear_tenant(self, tenant_id: str) -> int:
+        """Purge all rewards for a tenant. Returns count of deleted records."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM rewards WHERE tenant_id = ?", (tenant_id,),
+            )
+            deleted = cursor.rowcount
+            conn.commit()
+        return deleted
+
+    def get_all_topics(self, tenant_id: str) -> list[str]:
+        """Get all distinct topics that have been recorded for a tenant."""
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT topic FROM rewards WHERE tenant_id = ? ORDER BY topic",
+                (tenant_id,),
+            ).fetchall()
+        return [row[0] for row in rows]

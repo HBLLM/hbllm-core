@@ -75,12 +75,20 @@ class ProceduralMemory:
             tenant_id: Tenant owning this skill.
             skill_name: Human-readable skill name.
             trigger_pattern: Description of when this skill applies.
-            steps: List of step dicts, e.g. [{"action": "call_api", "params": {...}}, ...]
+            steps: List of step dicts. Must not be empty.
             source_node: Node that discovered/created the skill.
             
         Returns:
             The skill ID.
+            
+        Raises:
+            ValueError: If skill_name is empty or steps is empty.
         """
+        if not skill_name or not skill_name.strip():
+            raise ValueError("skill_name must not be empty")
+        if not steps:
+            raise ValueError("steps must not be empty")
+
         now = datetime.now(timezone.utc).isoformat()
         
         # Check if skill already exists for this tenant
@@ -196,3 +204,24 @@ class ProceduralMemory:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("DELETE FROM skills WHERE id = ?", (skill_id,))
             return cursor.rowcount > 0
+
+    def get_skill_by_id(self, skill_id: str) -> dict[str, Any] | None:
+        """Retrieve a single skill by its ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM skills WHERE id = ?", (skill_id,),
+            ).fetchone()
+        
+        if not row:
+            return None
+        
+        return {
+            "id": row["id"],
+            "tenant_id": row["tenant_id"],
+            "skill_name": row["skill_name"],
+            "trigger_pattern": row["trigger_pattern"],
+            "steps": json.loads(row["steps_json"]),
+            "success_rate": row["success_rate"],
+            "usage_count": row["usage_count"],
+        }
