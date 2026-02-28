@@ -79,31 +79,133 @@ def run_train(args):
                 trainer.save_checkpoint(metrics["loss"])
 
 
+def run_serve(args):
+    """Start the HBLLM API server."""
+    logging.info("Starting HBLLM server on %s:%d...", args.host, args.port)
+    try:
+        import uvicorn
+        uvicorn.run(
+            "hbllm.serving.api:app",
+            host=args.host,
+            port=args.port,
+            workers=args.workers,
+            log_level="info",
+        )
+    except ImportError:
+        logging.error("uvicorn not installed. Run: pip install uvicorn")
+
+
+def run_info(args):
+    """Show system architecture info."""
+    from hbllm import __version__
+    print(f"""
+🧠 HBLLM Core v{__version__}
+{"=" * 50}
+
+Architecture: Human-Brain Inspired Cognitive Architecture
+Nodes:        23 specialized brain nodes
+Memory:       5 systems (Episodic, Semantic, Procedural, Value, Working)
+Model:        Zoning — shared base + LoRA domain adapters
+Sizes:        125M / 500M / 1.5B parameters
+
+Zones:
+  ├── Perception:  Vision, Audio In, Audio Out
+  ├── Brain:       Router, Planner, Decision, Critic, Learner,
+  │                World Model, Curiosity, Identity, Meta, Workspace,
+  │                Collective, Sleep, Spawner
+  ├── Memory:      Episodic, Semantic, Procedural, Value
+  └── Actions:     Execution, API, Browser, Logic, Fuzzy, MCP, IoT/MQTT
+
+Features:
+  ✅ Self-expanding zones (SpawnerNode)
+  ✅ Async message bus with circuit breaker
+  ✅ Policy engine (YAML governance)
+  ✅ LoRA hot-swapping per domain
+  ✅ Home automation via MQTT
+  ✅ 100% local — runs on Raspberry Pi
+""")
+
+
+def run_nodes(args):
+    """List all brain nodes."""
+    nodes = [
+        ("🔀 Router", "brain", "Thalamus — routes inputs to specialists"),
+        ("📋 Planner", "brain", "Prefrontal Cortex — breaks tasks into steps"),
+        ("⚖️ Decision", "brain", "Gatekeeper — safety + output routing"),
+        ("🔍 Critic", "brain", "Quality Assurance — evaluates responses"),
+        ("🎓 Learner", "brain", "Continuous Learning — DPO from feedback"),
+        ("🌍 World Model", "brain", "Internal Simulation — predicts outcomes"),
+        ("🔭 Curiosity", "brain", "Exploration Drive — seeks knowledge gaps"),
+        ("🛡️ Identity", "brain", "Ethics Engine — value alignment"),
+        ("🧠 Meta", "brain", "Self-Awareness — monitors performance"),
+        ("📝 Workspace", "brain", "Global Blackboard — thought integration"),
+        ("📊 Collective", "brain", "Swarm Intelligence — consensus"),
+        ("💤 Sleep", "brain", "Memory Consolidation — optimization"),
+        ("🧬 Spawner", "brain", "Neurogenesis — grows new specialists"),
+        ("👁️ Vision", "perception", "Image Understanding — OCR + analysis"),
+        ("🎤 Audio In", "perception", "Speech Recognition"),
+        ("🔊 Audio Out", "perception", "Speech Synthesis"),
+        ("⚡ Execution", "actions", "Code Sandbox — safe Python execution"),
+        ("🌐 API", "actions", "Tool Synthesis — API schemas"),
+        ("🖥️ Browser", "actions", "Web Agent — browses + extracts"),
+        ("🔧 Logic", "actions", "Formal Reasoning — proofs"),
+        ("🌀 Fuzzy", "actions", "Fuzzy Logic — uncertainty"),
+        ("🔌 MCP", "actions", "Model Context Protocol — tools"),
+        ("📡 IoT/MQTT", "actions", "Home Automation — MQTT devices"),
+    ]
+
+    print(f"\n🧠 HBLLM Brain Nodes ({len(nodes)} cognitive modules)\n")
+    print(f"{'Node':<18} {'Zone':<12} {'Description'}")
+    print("─" * 65)
+    for name, zone, desc in nodes:
+        print(f"{name:<18} {zone:<12} {desc}")
+    print()
+
+
 def main():
-    parser = argparse.ArgumentParser(description="HBLLM CLI")
+    parser = argparse.ArgumentParser(
+        prog="hbllm",
+        description="🧠 HBLLM — Human-Brain Inspired Language Model",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Data Pipeline Command
-    data_parser = subparsers.add_parser("data", help="Run the data preparation pipeline")
-    data_parser.add_argument("--work-dir", type=str, default="./workspace", help="Working directory for data")
-    data_parser.add_argument("--dataset", type=str, default="fineweb", help="Dataset preset to download")
-    data_parser.add_argument("--samples", type=int, default=100_000, help="Max samples to download")
-    data_parser.add_argument("--vocab-size", type=int, default=32768, help="Target vocabulary size")
-    data_parser.add_argument("--seq-len", type=int, default=2048, help="Sequence length for sharding")
+    # Data pipeline
+    data_parser = subparsers.add_parser("data", help="Run data preparation pipeline")
+    data_parser.add_argument("--work-dir", type=str, default="./workspace")
+    data_parser.add_argument("--dataset", type=str, default="fineweb")
+    data_parser.add_argument("--samples", type=int, default=100_000)
+    data_parser.add_argument("--vocab-size", type=int, default=32768)
+    data_parser.add_argument("--seq-len", type=int, default=2048)
 
-    # Train Command
-    train_parser = subparsers.add_parser("train", help="Run the pre-training loop")
-    train_parser.add_argument("--work-dir", type=str, default="./workspace", help="Working directory with shards")
-    train_parser.add_argument("--model-size", type=str, default="125m", choices=["125m", "500m", "1.5b"], help="Model size preset")
-    train_parser.add_argument("--wandb-project", type=str, default=None, help="Weights & Biases project name")
+    # Training
+    train_parser = subparsers.add_parser("train", help="Run pre-training loop")
+    train_parser.add_argument("--work-dir", type=str, default="./workspace")
+    train_parser.add_argument("--model-size", type=str, default="125m", choices=["125m", "500m", "1.5b"])
+    train_parser.add_argument("--wandb-project", type=str, default=None)
+
+    # Serve
+    serve_parser = subparsers.add_parser("serve", help="Start the API server")
+    serve_parser.add_argument("--host", default="0.0.0.0")
+    serve_parser.add_argument("--port", type=int, default=8000)
+    serve_parser.add_argument("--workers", type=int, default=1)
+
+    # Info / Nodes
+    subparsers.add_parser("info", help="Show system architecture info")
+    subparsers.add_parser("nodes", help="List all brain nodes")
 
     args = parser.parse_args()
 
-    if args.command == "data":
-        run_pipeline(args)
-    elif args.command == "train":
-        run_train(args)
+    dispatch = {
+        "data": run_pipeline,
+        "train": run_train,
+        "serve": run_serve,
+        "info": run_info,
+        "nodes": run_nodes,
+    }
+    dispatch[args.command](args)
 
 
 if __name__ == "__main__":
     main()
+
