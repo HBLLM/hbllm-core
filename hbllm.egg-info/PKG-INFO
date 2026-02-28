@@ -1,0 +1,39 @@
+Metadata-Version: 2.4
+Name: hbllm
+Version: 0.1.0
+Summary: HBLLM Core — Hierarchical Brain LLM cognitive architecture
+Author: HBLLM Team
+License: MIT
+Requires-Python: >=3.11
+Requires-Dist: torch>=2.2.0
+Requires-Dist: transformers>=4.40.0
+Requires-Dist: datasets>=2.18.0
+Requires-Dist: tokenizers>=0.15.0
+Requires-Dist: sentencepiece>=0.2.0
+Requires-Dist: safetensors>=0.4.0
+Requires-Dist: wandb>=0.16.0
+Requires-Dist: accelerate>=0.28.0
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: pyarrow>=15.0.0
+Requires-Dist: zstandard>=0.22.0
+Requires-Dist: z3-solver>=4.12.0
+Requires-Dist: scikit-fuzzy>=0.5.0
+Requires-Dist: qdrant-client>=1.8.0
+Requires-Dist: pydantic>=2.6.0
+Requires-Dist: pydantic-settings>=2.2.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: rich>=13.7.0
+Requires-Dist: typer>=0.9.0
+Requires-Dist: networkx>=3.2.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn>=0.27.0
+Provides-Extra: gpu
+Requires-Dist: deepspeed>=0.14.0; extra == "gpu"
+Requires-Dist: chromadb>=0.4.0; extra == "gpu"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+Requires-Dist: mypy>=1.8.0; extra == "dev"

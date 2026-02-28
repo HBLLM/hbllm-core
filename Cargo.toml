@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rust/tokenizer",
+    "rust/data_tools",
+]
+resolver = "2"
