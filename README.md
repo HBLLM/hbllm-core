@@ -6,7 +6,7 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-390%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-529%2B%20passing-brightgreen.svg)](#)
   [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
@@ -16,7 +16,7 @@
 
 **Standard LLMs** are monolithic transformers: prompt → model → response. One path, one perspective, stateless.
 
-**HBLLM Core** is a **modular cognitive architecture** with 22 specialized brain nodes that communicate over an asynchronous message bus — like a real brain:
+**HBLLM Core** is a **modular cognitive architecture** with 25 specialized brain nodes that communicate over an asynchronous message bus — like a real brain:
 
 ```
                         ┌─────────────────────────────────────────┐
@@ -240,7 +240,7 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
-### 🧠 Brain Nodes (13 cognitive modules)
+### 🧠 Brain Nodes (13 cognitive modules + growing)
 
 | Node               | Role                                       | Analog               |
 | ------------------ | ------------------------------------------ | -------------------- |
@@ -276,16 +276,18 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 | **Value**      | Preferences and judgments | "User prefers warm lighting over cool"      |
 | **Working**    | Current task context      | Active conversation state                   |
 
-### ⚡ Action Nodes (6 output channels)
+### ⚡ Action Nodes (8 output channels)
 
-| Node           | Capability                           |
-| -------------- | ------------------------------------ |
-| **Execution**  | Run tasks and commands               |
-| **API**        | Call external APIs and services      |
-| **Browser**    | Web interaction and scraping         |
-| **Logic**      | Formal logical reasoning (Z3 solver) |
-| **Fuzzy**      | Probabilistic/fuzzy reasoning        |
-| **MCP Client** | Model Context Protocol integration   |
+| Node           | Capability                           | Optional Dependency |
+| -------------- | ------------------------------------ | ------------------- |
+| **Execution**  | Run tasks and commands               | —                   |
+| **API**        | Call external APIs and services      | —                   |
+| **Browser**    | Web interaction and scraping         | playwright          |
+| **Logic**      | Formal logical reasoning (Z3 solver) | z3-solver           |
+| **Fuzzy**      | Probabilistic/fuzzy reasoning        | —                   |
+| **MCP Client** | Model Context Protocol integration   | —                   |
+| **IoT/MQTT**   | Home automation device control       | paho-mqtt           |
+| **ROS2**       | Robotics (Nav2, MoveIt2, sensors)    | rclpy               |
 
 ### 🔌 Infrastructure
 
@@ -382,6 +384,22 @@ Sensors ──► Perception Nodes ──► Router ──► Planner ──► 
 
 ```bash
 pip install -e .
+
+# Optional dependencies (only needed if you use these features):
+pip install paho-mqtt        # For IoT/MQTT home automation
+# ROS2: install rclpy from your ROS2 distribution, then:
+export HBLLM_ROS2_ENABLED=1  # Enable real robot control
+```
+
+### CLI
+
+```bash
+hbllm info               # Show architecture summary
+hbllm nodes              # List all 25 brain nodes
+hbllm serve              # Start the API server
+hbllm serve --port 9000  # Custom port
+hbllm data --dataset fineweb --samples 100000  # Data pipeline
+hbllm train --model-size 125m                  # Training
 ```
 
 ### Run the API Server
@@ -392,6 +410,16 @@ python -m hbllm.serving.api
 
 # Provider mode (uses OpenAI/Anthropic as backend)
 HBLLM_PROVIDER=openai OPENAI_API_KEY=sk-... python -m hbllm.serving.api
+```
+
+### Run Benchmarks
+
+```bash
+python -m hbllm.benchmarks.runner --suite all          # All 4 suites
+python -m hbllm.benchmarks.runner --suite latency       # Bus latency
+python -m hbllm.benchmarks.runner --suite memory        # LoRA vs monolithic
+python -m hbllm.benchmarks.runner --suite multi_tenant  # Tenant isolation
+python -m hbllm.benchmarks.runner --output results.json # Save JSON
 ```
 
 ### Python API
@@ -466,7 +494,9 @@ hbllm-core/
 │   │   ├── browser_node.py
 │   │   ├── logic_node.py
 │   │   ├── fuzzy_node.py
-│   │   └── mcp_client_node.py
+│   │   ├── mcp_client_node.py
+│   │   ├── iot_mqtt_node.py  #   Home automation (optional paho-mqtt)
+│   │   └── ros2_node.py      #   Robotics (optional rclpy)
 │   ├── network/              # Communication infrastructure
 │   │   ├── bus.py            #   Message bus (pub/sub)
 │   │   ├── node.py           #   Base node abstraction
@@ -475,11 +505,13 @@ hbllm-core/
 │   │   └── ...
 │   ├── model/                # Transformer model
 │   ├── training/             # SFT, DPO, evaluation
+│   ├── benchmarks/           # Cognitive arch vs monolithic benchmarks
+│   │   └── runner.py         #   4 suites: latency, memory, routing, MT
 │   └── serving/              # FastAPI server
 ├── rust/                     # Rust accelerators
 │   ├── tokenizer/            #   High-performance tokenizer
 │   └── data_tools/           #   Data cleaning & dedup
-├── tests/                    # 390+ tests
+├── tests/                    # 529+ tests
 └── pyproject.toml
 ```
 
@@ -534,10 +566,11 @@ HBLLM_PROVIDER=openai python -m hbllm.serving.api --host 0.0.0.0 --port 8000
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Key areas where we need help:
-- 🤖 **IoT/Robotics nodes** — MQTT, Zigbee, ROS2 integrations
-- 🧠 **New cognitive nodes** — Emotion modeling, spatial reasoning
-- 📊 **Benchmarks** — Comparing cognitive architecture vs monolithic LLMs
+- 🧠 **New cognitive nodes** — Emotion modeling, spatial reasoning, temporal reasoning
 - 📱 **Edge optimization** — Running efficiently on Raspberry Pi / Jetson
+- 🏠 **IoT integrations** — Extend MQTT node with new device protocols
+- 🤖 **ROS2 packages** — Navigation planners, manipulation skills
+- 🌐 **New LoRA domains** — Medical, legal, creative writing specialists
 
 ## License
 
