@@ -3,8 +3,11 @@ HBLLM Training CLI — one-command training entry point.
 
 Usage:
     python -m hbllm.cli.train --size 125m --data fineweb --max-samples 100000
-    python -m hbllm.cli.train --size 125m --resume checkpoints/
     python -m hbllm.cli.train --size 125m --sft --sft-data alpaca
+    python -m hbllm.cli.train --dpo --reflection-dir workspace/reflection
+    python -m hbllm.cli.train --eval --checkpoint checkpoints/step_1000.pt
+    python -m hbllm.cli.train --export onnx --checkpoint checkpoints/step_1000.pt
+    python -m hbllm.cli.train --serve-local
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ logger = logging.getLogger("hbllm.train")
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="HBLLM Training")
+    p = argparse.ArgumentParser(description="HBLLM Training & Tools")
 
     # Model
     p.add_argument("--size", default="125m", choices=["125m", "500m", "1.5b"],
@@ -50,6 +53,8 @@ def parse_args() -> argparse.Namespace:
                    help="Gradient accumulation steps")
     p.add_argument("--checkpoint-dir", default="./checkpoints",
                    help="Checkpoint save directory")
+    p.add_argument("--checkpoint", default=None,
+                   help="Path to a specific checkpoint .pt file")
     p.add_argument("--resume", default=None,
                    help="Resume from checkpoint directory")
 
@@ -63,11 +68,30 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lora-r", type=int, default=8,
                    help="LoRA rank")
 
-    # Eval
+    # DPO (self-improvement)
+    p.add_argument("--dpo", action="store_true",
+                   help="Run DPO self-improvement on reflection data")
+    p.add_argument("--reflection-dir", default="workspace/reflection",
+                   help="Directory with reflection JSONL datasets")
+
+    # Evaluation
+    p.add_argument("--eval", action="store_true", dest="run_eval",
+                   help="Run model evaluation (perplexity, HellaSwag, samples)")
     p.add_argument("--eval-interval", type=int, default=500,
                    help="Steps between evaluations")
     p.add_argument("--no-eval", action="store_true",
-                   help="Skip evaluation")
+                   help="Skip evaluation during training")
+
+    # Export
+    p.add_argument("--export", default=None,
+                   choices=["onnx", "gguf", "fp16", "int8"],
+                   help="Export trained model to specified format")
+    p.add_argument("--export-output", default=None,
+                   help="Output path for exported model")
+
+    # Local serving
+    p.add_argument("--serve-local", action="store_true",
+                   help="Start a local brain with the trained model")
 
     # Device
     p.add_argument("--device", default="auto",
@@ -211,17 +235,165 @@ def run_sft(args: argparse.Namespace) -> None:
     )
 
 
+def run_dpo(args: argparse.Namespace) -> None:
+    """Run DPO self-improvement on reflection data."""
+    from hbllm.serving.self_improve import run_improvement_cycle
+
+    logger.info("=== DPO Self-Improvement ===")
+    results = run_improvement_cycle(
+        reflection_dir=args.reflection_dir,
+        model_size=args.size,
+        checkpoint_dir=args.checkpoint_dir,
+        use_lora=True,
+        lora_r=args.lora_r,
+        max_steps=args.max_steps,
+        lr=args.lr,
+        batch_size=args.batch_size,
+    )
+
+    if results:
+        logger.info("Self-improvement results:")
+        for domain, r in results.items():
+            logger.info("  %s: %s", domain, r)
+    else:
+        logger.info("No reflection data found. Nothing to improve.")
+
+
+def run_eval(args: argparse.Namespace) -> None:
+    """Run model evaluation."""
+    from hbllm.model.config import get_config
+    from hbllm.model.transformer import HBLLMForCausalLM
+    from hbllm.model.tokenizer import Tokenizer
+    from hbllm.training.evaluator import ModelEvaluator
+
+    device = get_device(args.device)
+
+    logger.info("=== Model Evaluation ===")
+    config = get_config(args.size)
+    model = HBLLMForCausalLM(config)
+
+    # Load checkpoint
+    if args.checkpoint:
+        logger.info("Loading checkpoint: %s", args.checkpoint)
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+    else:
+        logger.warning("No checkpoint specified, evaluating random model.")
+
+    model = model.to(device)
+    tokenizer = Tokenizer()
+
+    evaluator = ModelEvaluator(model, tokenizer, device)
+    results = evaluator.evaluate_all(
+        hellaswag=True,
+        generate=True,
+    )
+
+    logger.info("Evaluation Results:")
+    for key, value in results.items():
+        if key != "samples":
+            logger.info("  %s: %s", key, value)
+    if "samples" in results:
+        for s in results["samples"]:
+            logger.info("  Prompt: %s...", s["prompt"][:50])
+            logger.info("  Output: %s...", s["generated"][:100])
+
+
+def run_export(args: argparse.Namespace) -> None:
+    """Export trained model to various formats."""
+    from hbllm.model.config import get_config
+    from hbllm.model.transformer import HBLLMForCausalLM
+    from hbllm.model.tokenizer import Tokenizer
+    from hbllm.model.export import ModelExporter
+
+    logger.info("=== Model Export (%s) ===", args.export)
+    config = get_config(args.size)
+    model = HBLLMForCausalLM(config)
+
+    # Load checkpoint
+    if args.checkpoint:
+        logger.info("Loading checkpoint: %s", args.checkpoint)
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+    else:
+        logger.warning("No checkpoint specified, exporting random model.")
+
+    tokenizer = Tokenizer()
+    exporter = ModelExporter(model, tokenizer, config)
+
+    # Print summary
+    summary = exporter.summary()
+    logger.info("Model: %s (%s params)", summary["model_name"], f"{summary['total_params']:,}")
+    logger.info("Est. sizes: FP32=%.1f MB, FP16=%.1f MB, INT8=%.1f MB",
+                summary["estimated_fp32_mb"], summary["estimated_fp16_mb"], summary["estimated_int8_mb"])
+
+    # Default output paths
+    export_dir = Path("./exports")
+    output = args.export_output
+
+    if args.export == "onnx":
+        path = output or str(export_dir / f"{config.name}.onnx")
+        exporter.export_onnx(path)
+    elif args.export == "gguf":
+        path = output or str(export_dir / f"{config.name}.gguf")
+        exporter.export_gguf(path)
+    elif args.export == "fp16":
+        path = output or str(export_dir / f"{config.name}_fp16.pt")
+        exporter.export_fp16(path)
+    elif args.export == "int8":
+        path = output or str(export_dir / f"{config.name}_int8.pt")
+        exporter.quantize_dynamic(path)
+
+
+def run_serve_local(args: argparse.Namespace) -> None:
+    """Start a local brain for interactive use."""
+    import asyncio
+
+    async def _serve():
+        from hbllm.brain.factory import BrainFactory
+        brain = await BrainFactory.create_local(
+            checkpoint_path=args.checkpoint,
+            model_size=args.size,
+            device=args.device,
+        )
+        logger.info("Local brain ready! Type queries (Ctrl+C to exit):")
+        try:
+            while True:
+                query = input("\n> ")
+                if not query.strip():
+                    continue
+                result = await brain.process(query)
+                print(f"\n{result.text}")
+        except (KeyboardInterrupt, EOFError):
+            pass
+        finally:
+            await brain.shutdown()
+
+    asyncio.run(_serve())
+
+
 def main() -> None:
     args = parse_args()
 
     logger.info("HBLLM Training")
     logger.info("  Model: %s", args.size)
     logger.info("  Device: %s", args.device)
-    logger.info("  Mode: %s", "SFT" if args.sft else "Pre-training")
 
-    if args.sft:
+    if args.export:
+        run_export(args)
+    elif args.run_eval:
+        run_eval(args)
+    elif args.dpo:
+        logger.info("  Mode: DPO Self-Improvement")
+        run_dpo(args)
+    elif args.sft:
+        logger.info("  Mode: SFT")
         run_sft(args)
+    elif args.serve_local:
+        logger.info("  Mode: Local Serve")
+        run_serve_local(args)
     else:
+        logger.info("  Mode: Pre-training")
         run_pretrain(args)
 
 
