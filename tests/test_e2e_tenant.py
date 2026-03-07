@@ -141,6 +141,7 @@ class TestKnowledgeBase:
     """Test document upload, chunking, embedding, and search."""
 
     def setup_method(self):
+        hbllm_cloud = pytest.importorskip("hbllm_cloud", reason="hbllm_cloud not installed (cloud-only tests)")
         from hbllm_cloud.knowledge.vector_store import VectorStore
         from hbllm_cloud.knowledge.processor import DocumentProcessor
 
@@ -216,6 +217,7 @@ class TestUsageTracking:
     """Test per-tenant usage metering."""
 
     def setup_method(self):
+        hbllm_cloud = pytest.importorskip("hbllm_cloud", reason="hbllm_cloud not installed (cloud-only tests)")
         from hbllm_cloud.usage import UsageTracker
         self.db_path = tempfile.mktemp(suffix=".db")
         self.ut = UsageTracker(db_path=self.db_path)
@@ -260,6 +262,7 @@ class TestBilling:
     """Test billing plans and overage calculation."""
 
     def setup_method(self):
+        hbllm_cloud = pytest.importorskip("hbllm_cloud", reason="hbllm_cloud not installed (cloud-only tests)")
         from hbllm_cloud.billing import BillingManager
         self.billing = BillingManager()
 
@@ -313,6 +316,7 @@ class TestFullTenantJourney:
     """
 
     def setup_method(self):
+        hbllm_cloud = pytest.importorskip("hbllm_cloud", reason="hbllm_cloud not installed (cloud-only tests)")
         from hbllm_cloud.knowledge.vector_store import VectorStore
         from hbllm_cloud.knowledge.processor import DocumentProcessor
         from hbllm_cloud.usage import UsageTracker

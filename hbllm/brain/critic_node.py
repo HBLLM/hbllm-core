@@ -10,6 +10,7 @@ verdict to trigger backtracking if necessary.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
@@ -23,12 +24,15 @@ class CriticNode(Node):
     LLM-powered evaluator acting as a cognitive brake in the consensus loop.
     """
 
+    # Maximum number of queries to keep in the LRU cache
+    MAX_CACHE_SIZE = 500
+
     def __init__(self, node_id: str, llm=None):
         super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["critic", "evaluation", "halting"])
         self.llm = llm  # LLMInterface instance
         
-        # Cache the original queries so we can evaluate thoughts against them
-        self._query_cache: dict[str, str] = {}
+        # LRU cache for original queries (bounded to prevent memory leaks)
+        self._query_cache: OrderedDict[str, str] = OrderedDict()
 
     async def on_start(self) -> None:
         logger.info("Starting CriticNode")
@@ -47,6 +51,9 @@ class CriticNode(Node):
             text = message.payload.get("text", "")
             if text:
                 self._query_cache[message.correlation_id] = text
+                # Evict oldest entries if cache exceeds max size
+                while len(self._query_cache) > self.MAX_CACHE_SIZE:
+                    self._query_cache.popitem(last=False)
         return None
 
     async def evaluate_thought(self, message: Message) -> Message | None:
@@ -67,31 +74,41 @@ class CriticNode(Node):
         correlation_id = message.correlation_id or ""
         original_query = self._query_cache.get(correlation_id, "unknown query")
         
-        # LLM Self-Reflection Evaluation
-        evaluation = await self.llm.generate_json(
-            f"You are a strict QA evaluator for an AI system. Given the user's original query "
-            f"and a proposed response, determine if the response is:\n"
-            f"(a) Relevant to the query\n"
-            f"(b) Factually grounded (not hallucinated or fabricated)\n"
-            f"(c) Not deflecting with clichés like 'As an AI...'\n"
-            f"(d) Not attempting unsafe operations\n\n"
-            f"Original Query: \"{original_query}\"\n"
-            f"Proposed Response: \"{content[:500]}\"\n\n"
-            f"Output JSON: {{\"verdict\": \"PASS\" or \"FAIL\", \"reason\": \"brief explanation\"}}"
-        )
-        
-        status = evaluation.get("verdict", "PASS").upper()
-        reason = evaluation.get("reason", "")
-        
-        # Normalize the verdict
-        if status not in ("PASS", "FAIL"):
-            status = "PASS"  # Default to pass if LLM output is ambiguous
+        # LLM Self-Reflection Evaluation (fail-open: default to PASS on error)
+        status = "PASS"
+        reason = ""
+        try:
+            evaluation = await self.llm.generate_json(
+                f"You are a strict QA evaluator for an AI system. Given the user's original query "
+                f"and a proposed response, determine if the response is:\n"
+                f"(a) Relevant to the query\n"
+                f"(b) Factually grounded (not hallucinated or fabricated)\n"
+                f"(c) Not deflecting with clichés like 'As an AI...'\n"
+                f"(d) Not attempting unsafe operations\n\n"
+                f"Original Query: \"{original_query}\"\n"
+                f"Proposed Response: \"{content[:500]}\"\n\n"
+                f"Output JSON: {{\"verdict\": \"PASS\" or \"FAIL\", \"reason\": \"brief explanation\"}}"
+            )
+            
+            status = evaluation.get("verdict", "PASS").upper()
+            reason = evaluation.get("reason", "")
+            
+            # Normalize the verdict
+            if status not in ("PASS", "FAIL"):
+                status = "PASS"  # Default to pass if LLM output is ambiguous
+        except Exception as e:
+            logger.warning("[CriticNode] LLM evaluation failed, defaulting to PASS: %s", e)
+            status = "PASS"
+            reason = "Critic evaluation skipped due to LLM error"
         
         if status == "FAIL":
             logger.warning(
                 "[CriticNode] LLM evaluation FAILED thought from %s. Reason: %s", 
                 message.source_node_id, reason
             )
+        
+        # Clean up the query cache entry since this correlation is now evaluated
+        self._query_cache.pop(correlation_id, None)
         
         # Emit the evaluation back to the Workspace
         critique_msg = Message(

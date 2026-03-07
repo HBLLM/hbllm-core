@@ -31,6 +31,13 @@ class RouterNode(Node):
         self.topic_sub = "router.query"
         self.llm = llm  # LLMInterface instance
         
+        # Dynamic domain registry (updated by SpawnerNode when new modules are created)
+        self.known_domains: set[str] = {"general", "coding", "math", "planner", "api_synth", "fuzzy"}
+        self.known_intents: set[str] = {
+            "general_knowledge", "code_generation", "math_reasoning",
+            "complex_reasoning", "web_search", "tool_synthesis", "fuzzy_reasoning", "unknown_topic"
+        }
+        
         # Self-expansion tracking
         self.unknown_threshold = 0.3
         self.spawn_trigger_count = 2
@@ -68,23 +75,27 @@ class RouterNode(Node):
         intent = "general_knowledge"
 
         if self.llm:
-            classification = await self.llm.generate_json(
-                f"You are an intent classifier for a modular AI system. Classify the following "
-                f"query into exactly one domain and intent.\n\n"
-                f"Available domains: general, coding, math, planner, api_synth, fuzzy\n"
-                f"Available intents: general_knowledge, code_generation, math_reasoning, "
-                f"complex_reasoning, web_search, tool_synthesis, fuzzy_reasoning, unknown_topic\n\n"
-                f"Query: \"{text}\"\n\n"
-                f"Output JSON: {{\"domain\": \"...\", \"intent\": \"...\", \"confidence\": 0.0-1.0}}"
-            )
-            
-            if "error" not in classification:
-                target_domain = classification.get("domain", self.default_domain)
-                intent = classification.get("intent", "general_knowledge")
-                try:
-                    confidence = float(classification.get("confidence", 0.5))
-                except (ValueError, TypeError):
-                    confidence = 0.5
+            domains_str = ", ".join(sorted(self.known_domains))
+            intents_str = ", ".join(sorted(self.known_intents))
+            try:
+                classification = await self.llm.generate_json(
+                    f"You are an intent classifier for a modular AI system. Classify the following "
+                    f"query into exactly one domain and intent.\n\n"
+                    f"Available domains: {domains_str}\n"
+                    f"Available intents: {intents_str}\n\n"
+                    f"Query: \"{text}\"\n\n"
+                    f"Output JSON: {{\"domain\": \"...\", \"intent\": \"...\", \"confidence\": 0.0-1.0}}"
+                )
+                
+                if "error" not in classification:
+                    target_domain = classification.get("domain", self.default_domain)
+                    intent = classification.get("intent", "general_knowledge")
+                    try:
+                        confidence = float(classification.get("confidence", 0.5))
+                    except (ValueError, TypeError):
+                        confidence = 0.5
+            except Exception as e:
+                logger.warning("Router LLM classification failed, using defaults: %s", e)
 
         # 2. Self-Expansion Logic
         if confidence < self.unknown_threshold:

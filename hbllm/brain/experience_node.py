@@ -26,9 +26,12 @@ class ExperienceNode(Node):
         self.importance_threshold = 0.7
 
     async def on_start(self) -> None:
-        """Subscribe to all sensory outputs to record experiences."""
+        """Subscribe to all sensory outputs and key cognitive events to record experiences."""
         logger.info("Starting ExperienceNode (Recorder & Salience Detector)")
         await self.bus.subscribe("sensory.output", self.record_experience)
+        # Expanded observation scope: also monitor workspace thoughts and decision evaluations
+        await self.bus.subscribe("workspace.thought", self._record_cognitive_event)
+        await self.bus.subscribe("decision.evaluate", self._record_cognitive_event)
 
     async def on_stop(self) -> None:
         logger.info("Stopping ExperienceNode")
@@ -49,9 +52,23 @@ class ExperienceNode(Node):
 
         logger.info("[ExperienceNode] Recording experience for msg %s", corr_id)
 
-        # 1. Experience Recorder (Node H)
-        # In a real system, we would write to a persistent log/db here.
-        # For the prototype, we log to stdout.
+        # 1. Experience Recorder (Node H) — persist to memory
+        store_msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            tenant_id=message.tenant_id,
+            session_id=message.session_id,
+            topic="memory.store",
+            payload={
+                "session_id": message.session_id,
+                "role": "system",
+                "content": content[:1000],  # Trim to prevent huge logs
+                "domain": "experience",
+                "metadata": {"source": "experience_recorder"}
+            },
+            correlation_id=corr_id
+        )
+        await self.bus.publish("memory.store", store_msg)
         
         # 2. Salience Detector (Node I)
         score = await self._calculate_saliency(content, payload)
@@ -102,3 +119,21 @@ class ExperienceNode(Node):
                 logger.warning("LLM salience scoring failed: %s", e)
                 
         return min(max(score, 0.0), 1.0)
+
+    async def _record_cognitive_event(self, message: Message) -> None:
+        """
+        Record cognitive events (workspace thoughts, decisions) for richer learning signal.
+        Skip meta-events like critiques to avoid loops.
+        """
+        payload = message.payload
+        thought_type = payload.get("type", "")
+        
+        # Skip critiques and simulation results to avoid recursion
+        if thought_type in ("critique", "simulation_result"):
+            return
+        
+        content = payload.get("content", "")
+        if not content:
+            return
+        
+        logger.debug("[ExperienceNode] Recording cognitive event: %s", thought_type)

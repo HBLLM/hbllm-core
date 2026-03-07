@@ -8,6 +8,7 @@ messages on the bus, reading/writing to the local SQLite database.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -28,10 +29,14 @@ class MemoryNode(Node):
 
     def __init__(self, node_id: str, db_path: str | Path = "working_memory.db"):
         super().__init__(node_id=node_id, node_type=NodeType.MEMORY, capabilities=["episodic_storage", "semantic_retrieval", "procedural_skills", "value_tracking"])
+        # Ensure the memory directory exists
+        db_path = Path(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        
         self.db = EpisodicMemory(db_path)
         self.semantic_db = SemanticMemory()
-        self.procedural_db = ProceduralMemory(Path(db_path).parent / "procedural_memory.db")
-        self.value_db = ValueMemory(Path(db_path).parent / "value_memory.db")
+        self.procedural_db = ProceduralMemory(db_path.parent / "procedural_memory.db")
+        self.value_db = ValueMemory(db_path.parent / "value_memory.db")
 
     async def on_start(self) -> None:
         """Subscribe to memory lifecycle verbs."""
@@ -50,6 +55,16 @@ class MemoryNode(Node):
         """Clean up."""
         logger.info("Stopping MemoryNode")
 
+    @staticmethod
+    def _handle_background_task_result(task: asyncio.Task) -> None:
+        """Callback for fire-and-forget tasks to log errors instead of swallowing them."""
+        try:
+            exc = task.exception()
+            if exc is not None:
+                logger.error("Background semantic store task failed: %s", exc)
+        except asyncio.CancelledError:
+            pass
+
     async def handle_improvement(self, message: Message) -> None:
         """
         Listen for improvement/reflection signals (Node M) and extract patterns (Node N)
@@ -64,11 +79,9 @@ class MemoryNode(Node):
         
         logger.info("[MemoryNode] Extracting patterns from reflection on domain '%s' (Node N)", domain)
         
-        # In a real system, we'd process the dataset at `dataset_path` to extract new facts.
-        # For the prototype, we store a summary fact in Semantic Memory.
+        # Store a summary fact in Semantic Memory.
         pattern_content = f"Learned pattern in domain '{domain}': {reasoning}"
         
-        import asyncio
         await asyncio.to_thread(
             self.semantic_db.store, 
             pattern_content, 
@@ -90,7 +103,6 @@ class MemoryNode(Node):
         
         if is_priority and content:
             logger.info("[MemoryNode] Archiving high-salience experience to Priority Memory (Node K)")
-            import asyncio
             await asyncio.to_thread(
                 self.semantic_db.store, 
                 content, 
@@ -134,11 +146,11 @@ class MemoryNode(Node):
                 tenant_id=payload.get("tenant_id", message.tenant_id or "default"),
             )
             
-            # Submitting to Semantic DB could be offloaded to a thread to unblock the loop
-            import asyncio
-            asyncio.create_task(
+            # Offload semantic storage to a background thread with error handling
+            task = asyncio.create_task(
                 asyncio.to_thread(self.semantic_db.store, content, {"session_id": session_id, "role": role})
             )
+            task.add_done_callback(self._handle_background_task_result)
             
             # Fire and forget mostly, but we reply with success
             return message.create_response({"status": "stored", "turn_id": turn_id})
@@ -189,7 +201,6 @@ class MemoryNode(Node):
             if not query:
                 return message.create_error("Missing 'query_text'")
                 
-            import asyncio
             results = await asyncio.to_thread(self.semantic_db.search, query, limit)
             
             return message.create_response({

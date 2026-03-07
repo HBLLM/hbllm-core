@@ -33,15 +33,33 @@ class WorkspaceNode(Node):
         # In-memory "Blackboard" mapping conversation correlation_ids
         # to the array of proposed thoughts and their active deadlines.
         self.blackboards: Dict[str, Dict[str, Any]] = {}
+        self._sweeper_task: asyncio.Task | None = None
+        # Max age for any blackboard entry before forced cleanup (seconds)
+        self._max_board_age = 60.0
 
     async def on_start(self) -> None:
         """Subscribe to the blackboard topics."""
         logger.info("Starting Global WorkspaceNode")
         await self.bus.subscribe("workspace.update", self.handle_update)
         await self.bus.subscribe("workspace.thought", self.handle_thought)
+        # Start periodic sweeper to clean orphaned blackboards
+        self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
 
     async def on_stop(self) -> None:
+        """Gracefully shut down: notify users of active boards, cancel sweeper."""
         logger.info("Stopping Global WorkspaceNode")
+        # Cancel the sweeper
+        if self._sweeper_task and not self._sweeper_task.done():
+            self._sweeper_task.cancel()
+            try:
+                await self._sweeper_task
+            except asyncio.CancelledError:
+                pass
+        # Gracefully close any active blackboards
+        for corr_id in list(self.blackboards.keys()):
+            await self._send_error_fallback(
+                corr_id, "The system is shutting down. Please try again later."
+            )
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
@@ -297,7 +315,9 @@ class WorkspaceNode(Node):
                 correlation_id=corr_id
             )
             await self.bus.publish("workspace.simulate", sim_msg)
-            # Do NOT finalize. Wait for `handle_thought` to get the `simulation_result`.
+            # Do NOT finalize yet. Wait for `handle_thought` to get the `simulation_result`.
+            # But un-mark resolved so the board stays alive for the simulation callback.
+            board["resolved"] = False
             return
 
         # If it doesn't need simulation, commit immediately
@@ -353,3 +373,23 @@ class WorkspaceNode(Node):
             logger.exception("Failed to send error fallback for %s", corr_id)
         finally:
             self.blackboards.pop(corr_id, None)
+
+    async def _periodic_sweeper(self) -> None:
+        """Periodically clean up blackboard entries that have exceeded max age."""
+        while True:
+            try:
+                await asyncio.sleep(10.0)  # Check every 10 seconds
+                now = time.time()
+                stale_ids = [
+                    cid for cid, board in self.blackboards.items()
+                    if now - board.get("start_time", now) > self._max_board_age
+                ]
+                for cid in stale_ids:
+                    logger.warning("Sweeper cleaning stale blackboard: %s", cid)
+                    await self._send_error_fallback(
+                        cid, "Request timed out. Please try again."
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error in blackboard sweeper")

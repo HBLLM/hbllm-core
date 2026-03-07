@@ -17,6 +17,7 @@ Usage::
     # [{"content": "Python is a programming language", "score": 0.87, ...}]
 """
 
+import hashlib
 import logging
 import math
 import re
@@ -62,11 +63,14 @@ class _TfIdfEmbedder:
     def fit_token(self, text: str) -> None:
         """Update vocabulary and document frequencies with a new document."""
         tokens = self._tokenize(text)
+        old_vocab_size = len(self._vocab)
         self._update_vocab(tokens)
         unique_tokens = set(tokens)
         self._doc_freqs.update(unique_tokens)
         self._doc_count += 1
         self._compute_idf()
+        # Track whether vocabulary changed (new dimensions added)
+        self._vocab_changed = len(self._vocab) != old_vocab_size
     
     def encode(self, texts: list[str]) -> np.ndarray:
         """Encode texts into TF-IDF vectors."""
@@ -112,7 +116,10 @@ class SemanticMemory:
         self._use_tfidf = False
         self._tfidf = _TfIdfEmbedder()
         self.documents: list[dict[str, Any]] = []
-        self.vectors: np.ndarray | None = None
+        self._vector_list: list[np.ndarray] = []  # Accumulate vectors lazily
+        self._vectors_dirty = True  # Whether _vector_list needs stacking
+        self._vectors_cache: np.ndarray | None = None  # Stacked array cache
+        self._content_hashes: set[str] = set()  # Deduplication hashes
 
     @property
     def count(self) -> int:
@@ -139,6 +146,21 @@ class SemanticMemory:
             return self._tfidf.encode(texts)
         return self.model.encode(texts)
 
+    @property
+    def vectors(self) -> np.ndarray | None:
+        """Lazily stack vectors only when needed (e.g., for search)."""
+        if not self._vector_list:
+            return None
+        if self._vectors_dirty:
+            self._vectors_cache = np.vstack(self._vector_list)
+            self._vectors_dirty = False
+        return self._vectors_cache
+
+    @staticmethod
+    def _content_hash(content: str) -> str:
+        """Fast hash for deduplication."""
+        return hashlib.md5(content.encode()).hexdigest()
+
     def store(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> int:
         """
         Embed and store a document.
@@ -149,11 +171,18 @@ class SemanticMemory:
             is_priority: Whether this is a high-salience priority document.
             
         Returns:
-            Index of the stored document.
+            Index of the stored document, or -1 if skipped.
         """
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
             return -1
+        
+        # Deduplication: skip if this exact content was already stored
+        content_hash = self._content_hash(content)
+        if content_hash in self._content_hashes:
+            logger.debug("Duplicate content detected — skipping store")
+            return -1
+        self._content_hashes.add(content_hash)
         
         if self._use_tfidf or self.model is None:
             self._load_model()
@@ -165,23 +194,27 @@ class SemanticMemory:
         # For TF-IDF, update vocabulary first
         if self._use_tfidf:
             self._tfidf.fit_token(content)
-            # Re-encode ALL documents to get consistent dimensions
-            all_texts = [d["content"] for d in self.documents] + [content]
-            all_vectors = self._tfidf.encode(all_texts)
             
-            doc = {"content": content, "metadata": meta}
-            self.documents.append(doc)
-            self.vectors = all_vectors
+            if self._tfidf._vocab_changed:
+                # Vocabulary grew: must re-encode all docs for consistent dimensions
+                all_texts = [d["content"] for d in self.documents] + [content]
+                all_vectors = self._tfidf.encode(all_texts)
+                doc = {"content": content, "metadata": meta}
+                self.documents.append(doc)
+                self._vector_list = [all_vectors[i:i+1] for i in range(len(all_vectors))]
+            else:
+                # Vocabulary unchanged: only encode the new document
+                new_vec = self._tfidf.encode([content])
+                doc = {"content": content, "metadata": meta}
+                self.documents.append(doc)
+                self._vector_list.append(new_vec)
         else:
             embedding = self.model.encode([content])[0]
             doc = {"content": content, "metadata": meta}
             self.documents.append(doc)
-            
-            if self.vectors is None:
-                self.vectors = np.array([embedding])
-            else:
-                self.vectors = np.vstack((self.vectors, embedding))
-            
+            self._vector_list.append(np.array([embedding]))
+        
+        self._vectors_dirty = True
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return len(self.documents) - 1
 
@@ -240,12 +273,18 @@ class SemanticMemory:
         if index < 0 or index >= len(self.documents):
             return False
         
+        # Remove content hash
+        removed_doc = self.documents[index]
+        self._content_hashes.discard(self._content_hash(removed_doc["content"]))
+        
         self.documents.pop(index)
         
-        if self.vectors is not None and len(self.documents) > 0:
-            self.vectors = np.delete(self.vectors, index, axis=0)
+        if self._vector_list and len(self.documents) > 0:
+            self._vector_list.pop(index)
+            self._vectors_dirty = True
         else:
-            self.vectors = None
+            self._vector_list.clear()
+            self._vectors_cache = None
         
         return True
 
@@ -253,7 +292,10 @@ class SemanticMemory:
         """Clear all documents. Returns count of removed docs."""
         count = len(self.documents)
         self.documents.clear()
-        self.vectors = None
+        self._vector_list.clear()
+        self._vectors_cache = None
+        self._vectors_dirty = True
+        self._content_hashes.clear()
         return count
 
     def get_all(self) -> list[dict[str, Any]]:
