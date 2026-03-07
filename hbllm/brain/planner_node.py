@@ -12,8 +12,11 @@ Reference: "Graph of Thoughts: Solving Elaborate Problems with Large Language Mo
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -150,6 +153,9 @@ class PlannerNode(Node):
     a DAG of reasoning steps with branching, scoring, merging, and pruning.
     """
 
+    # Max cached prompt/response pairs
+    MAX_CACHE_SIZE = 200
+
     def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2):
         super().__init__(
             node_id=node_id,
@@ -158,6 +164,10 @@ class PlannerNode(Node):
         )
         self.branch_factor = branch_factor
         self.max_depth = max_depth
+        # LRU cache: hash(prompt) → response text
+        self._response_cache: OrderedDict[str, str] = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     async def on_start(self) -> None:
         """Subscribe to planning requests."""
@@ -181,6 +191,18 @@ class PlannerNode(Node):
             return None
 
         text = message.payload.get("text", "")
+        
+        # Check prompt cache for exact matches
+        cache_key = self._cache_key(text)
+        if cache_key in self._response_cache:
+            self._cache_hits += 1
+            cached = self._response_cache[cache_key]
+            # Move to end (most recently used)
+            self._response_cache.move_to_end(cache_key)
+            logger.info("[GoT] Cache HIT for query (hits=%d, misses=%d)", self._cache_hits, self._cache_misses)
+            return message.create_response({"text": cached, "domain": "planner", "cached": True})
+        
+        self._cache_misses += 1
         logger.info("[GoT] Starting Graph-of-Thoughts for: '%s...'", text[:40])
 
         graph = ThoughtGraph()
@@ -268,7 +290,24 @@ class PlannerNode(Node):
         )
         
         logger.info("[GoT] Selected path: %s (score=%.2f)", path_desc, final_node.score)
+        
+        # Cache the result
+        self._cache_response(cache_key, final_text)
+        
         return message.create_response({"text": final_text, "domain": "planner"})
+
+    # ── Cache helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _cache_key(text: str) -> str:
+        """Generate a cache key from prompt text."""
+        return hashlib.md5(text.strip().lower().encode()).hexdigest()
+
+    def _cache_response(self, key: str, response: str) -> None:
+        """Store a response in the LRU cache, evicting oldest if full."""
+        self._response_cache[key] = response
+        while len(self._response_cache) > self.MAX_CACHE_SIZE:
+            self._response_cache.popitem(last=False)
 
     # ── Private helpers ───────────────────────────────────────────────────
 
@@ -301,7 +340,6 @@ class PlannerNode(Node):
             resp = await self.request("domain.general.query", req, timeout=30.0)
             # Parse score from response or use heuristic
             resp_text = resp.payload.get("text", "")
-            import re
             match = re.search(r"(\d+\.?\d*)", resp_text)
             if match:
                 raw = float(match.group(1))

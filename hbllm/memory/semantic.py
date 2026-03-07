@@ -110,16 +110,26 @@ class SemanticMemory:
     which works without any ML dependencies (lower quality but functional).
     """
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", hybrid_alpha: float = 0.7):
+        """
+        Args:
+            model_name: Sentence-transformers model name for dense embeddings.
+            hybrid_alpha: Blending weight (0.0 = pure sparse/TF-IDF, 1.0 = pure dense).
+                          Only used when both dense + sparse indexes are available.
+        """
         self.model_name = model_name
         self.model = None
         self._use_tfidf = False
-        self._tfidf = _TfIdfEmbedder()
+        self._tfidf = _TfIdfEmbedder()  # Always maintained for hybrid sparse index
+        self.hybrid_alpha = max(0.0, min(1.0, hybrid_alpha))
         self.documents: list[dict[str, Any]] = []
-        self._vector_list: list[np.ndarray] = []  # Accumulate vectors lazily
-        self._vectors_dirty = True  # Whether _vector_list needs stacking
-        self._vectors_cache: np.ndarray | None = None  # Stacked array cache
-        self._content_hashes: set[str] = set()  # Deduplication hashes
+        self._vector_list: list[np.ndarray] = []  # Dense vectors (lazy stacking)
+        self._sparse_list: list[np.ndarray] = []  # Sparse TF-IDF vectors (lazy stacking)
+        self._vectors_dirty = True
+        self._vectors_cache: np.ndarray | None = None
+        self._sparse_dirty = True
+        self._sparse_cache: np.ndarray | None = None
+        self._content_hashes: set[str] = set()
 
     @property
     def count(self) -> int:
@@ -148,13 +158,23 @@ class SemanticMemory:
 
     @property
     def vectors(self) -> np.ndarray | None:
-        """Lazily stack vectors only when needed (e.g., for search)."""
+        """Lazily stack dense vectors only when needed."""
         if not self._vector_list:
             return None
         if self._vectors_dirty:
             self._vectors_cache = np.vstack(self._vector_list)
             self._vectors_dirty = False
         return self._vectors_cache
+
+    @property
+    def sparse_vectors(self) -> np.ndarray | None:
+        """Lazily stack sparse TF-IDF vectors only when needed."""
+        if not self._sparse_list:
+            return None
+        if self._sparse_dirty:
+            self._sparse_cache = np.vstack(self._sparse_list)
+            self._sparse_dirty = False
+        return self._sparse_cache
 
     @staticmethod
     def _content_hash(content: str) -> str:
@@ -191,40 +211,62 @@ class SemanticMemory:
         if is_priority:
             meta["is_priority"] = True
         
-        # For TF-IDF, update vocabulary first
+        # Always update TF-IDF vocabulary (needed for hybrid sparse index)
+        self._tfidf.fit_token(content)
+        
         if self._use_tfidf:
-            self._tfidf.fit_token(content)
-            
+            # TF-IDF only mode (no sentence-transformers)
             if self._tfidf._vocab_changed:
-                # Vocabulary grew: must re-encode all docs for consistent dimensions
                 all_texts = [d["content"] for d in self.documents] + [content]
                 all_vectors = self._tfidf.encode(all_texts)
                 doc = {"content": content, "metadata": meta}
                 self.documents.append(doc)
                 self._vector_list = [all_vectors[i:i+1] for i in range(len(all_vectors))]
             else:
-                # Vocabulary unchanged: only encode the new document
                 new_vec = self._tfidf.encode([content])
                 doc = {"content": content, "metadata": meta}
                 self.documents.append(doc)
                 self._vector_list.append(new_vec)
         else:
+            # Dense embeddings + sparse TF-IDF for hybrid search
             embedding = self.model.encode([content])[0]
             doc = {"content": content, "metadata": meta}
             self.documents.append(doc)
             self._vector_list.append(np.array([embedding]))
+            
+            # Also maintain sparse index for hybrid scoring
+            if self._tfidf._vocab_changed:
+                all_texts = [d["content"] for d in self.documents]
+                all_sparse = self._tfidf.encode(all_texts)
+                self._sparse_list = [all_sparse[i:i+1] for i in range(len(all_sparse))]
+            else:
+                sparse_vec = self._tfidf.encode([content])
+                self._sparse_list.append(sparse_vec)
+            self._sparse_dirty = True
         
         self._vectors_dirty = True
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return len(self.documents) - 1
 
-    def search(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 3,
+        reward_scores: dict[int, float] | None = None,
+        reward_boost: float = 0.1,
+    ) -> list[dict[str, Any]]:
         """
         Search for the most semantically similar documents to the query.
+        
+        Uses hybrid scoring (dense + sparse) when both indexes are available,
+        and optionally boosts results using reward scores from ValueMemory.
         
         Args:
             query: Search text.
             top_k: Number of results to return.
+            reward_scores: Optional dict mapping doc index → reward score.
+                           Positive rewards boost documents, negative ones penalize.
+            reward_boost: How much to weight reward scores (default 0.1).
             
         Returns:
             List of document dicts with "score" field, sorted by relevance.
@@ -234,28 +276,48 @@ class SemanticMemory:
         
         if not query or not query.strip():
             return []
-            
-        query_vec = self._encode([query])[0]
         
-        # Compute cosine similarity
+        # --- Compute dense similarity ---
+        query_vec = self._encode([query])[0]
         norms = np.linalg.norm(self.vectors, axis=1)
         query_norm = np.linalg.norm(query_vec)
         
         if query_norm == 0:
             return []
         
-        similarities = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
+        dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
+        
+        # --- Hybrid: blend with sparse TF-IDF scores if available ---
+        if not self._use_tfidf and self.sparse_vectors is not None and len(self._sparse_list) == len(self.documents):
+            sparse_query = self._tfidf.encode([query])[0]
+            sparse_norms = np.linalg.norm(self.sparse_vectors, axis=1)
+            sparse_query_norm = np.linalg.norm(sparse_query)
+            
+            if sparse_query_norm > 0:
+                sparse_scores = np.dot(self.sparse_vectors, sparse_query) / (sparse_norms * sparse_query_norm + 1e-9)
+                # Blend: alpha * dense + (1 - alpha) * sparse
+                final_scores = self.hybrid_alpha * dense_scores + (1 - self.hybrid_alpha) * sparse_scores
+            else:
+                final_scores = dense_scores
+        else:
+            final_scores = dense_scores
+        
+        # --- Reward boosting ---
+        if reward_scores:
+            for idx, reward in reward_scores.items():
+                if 0 <= idx < len(final_scores):
+                    final_scores[idx] += reward_boost * reward
         
         # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        top_indices = np.argsort(final_scores)[::-1][:top_k]
         
         results = []
         for idx in top_indices:
-            if similarities[idx] < 0.1:
+            if final_scores[idx] < 0.1:
                 continue
                 
             res = self.documents[idx].copy()
-            res["score"] = float(similarities[idx])
+            res["score"] = float(final_scores[idx])
             results.append(res)
             
         return results
@@ -295,6 +357,9 @@ class SemanticMemory:
         self._vector_list.clear()
         self._vectors_cache = None
         self._vectors_dirty = True
+        self._sparse_list.clear()
+        self._sparse_cache = None
+        self._sparse_dirty = True
         self._content_hashes.clear()
         return count
 
