@@ -124,9 +124,43 @@ class LocalProvider(LLMProvider):
         )
 
     async def stream(self, messages, max_tokens=1024, temperature=0.7, **kwargs):
-        # Local model doesn't support true streaming yet — yield full response
-        response = await self.generate(messages, max_tokens, temperature, **kwargs)
-        yield response.content
+        """Stream tokens from the local model one at a time."""
+        self._ensure_loaded()
+        import torch
+
+        prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+        input_ids = self._tokenizer.encode(prompt, add_bos=True)
+        input_tensor = torch.tensor([input_ids], dtype=torch.long)
+
+        if hasattr(self._model, "device"):
+            input_tensor = input_tensor.to(self._model.device)
+
+        top_p = kwargs.get("top_p", 0.9)
+        eos_id = self._tokenizer.eos_id
+
+        with torch.no_grad():
+            for _ in range(max_tokens):
+                output = self._model(input_tensor)
+                logits = output["logits"] if isinstance(output, dict) else output
+                next_logits = logits[:, -1, :] / max(temperature, 1e-7)
+
+                # Top-p (nucleus) sampling
+                sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
+                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                mask = cumulative_probs - torch.softmax(sorted_logits, dim=-1) >= top_p
+                sorted_logits[mask] = float("-inf")
+                probs = torch.softmax(sorted_logits, dim=-1)
+                next_index = torch.multinomial(probs, num_samples=1)
+                next_token = sorted_indices.gather(-1, next_index)
+
+                token_id = next_token.item()
+                if token_id == eos_id:
+                    break
+
+                token_text = self._tokenizer.decode([token_id])
+                yield token_text
+
+                input_tensor = torch.cat([input_tensor, next_token], dim=-1)
 
     @property
     def name(self) -> str:
@@ -318,9 +352,54 @@ class AnthropicProvider(LLMProvider):
         )
 
     async def stream(self, messages, max_tokens=1024, temperature=0.7, **kwargs):
-        # Simplified — yield full response
-        response = await self.generate(messages, max_tokens, temperature, **kwargs)
-        yield response.content
+        """Stream tokens from Anthropic's SSE API."""
+        import httpx
+
+        system = ""
+        user_messages = []
+        for m in messages:
+            if m["role"] == "system":
+                system = m["content"]
+            else:
+                user_messages.append(m)
+
+        headers = {
+            "x-api-key": self._api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+        payload = {
+            "model": self._model,
+            "messages": user_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if system:
+            payload["system"] = system
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=payload,
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = line[6:]
+                    try:
+                        data = json.loads(chunk)
+                        event_type = data.get("type", "")
+                        if event_type == "content_block_delta":
+                            text = data.get("delta", {}).get("text", "")
+                            if text:
+                                yield text
+                        elif event_type == "message_stop":
+                            break
+                    except (json.JSONDecodeError, KeyError):
+                        continue
 
     @property
     def name(self) -> str:
