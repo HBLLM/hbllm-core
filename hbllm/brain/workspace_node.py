@@ -277,12 +277,14 @@ class WorkspaceNode(Node):
         
         if not board["thoughts"]:
             logger.warning("Workspace deadline expired with ZERO thoughts generated.")
-            # Graceful fallback: send an honest "I couldn't reason about this" reply
             await self._send_error_fallback(
                 corr_id,
                 "I wasn't able to form a clear response to that. Could you rephrase your question?"
             )
             return
+        
+        # ── Inject memory context before consensus ──
+        await self._inject_memory_context(corr_id, board)
             
         # Select highest confidence thought
         best_thought = max(board["thoughts"], key=lambda t: t["confidence"])
@@ -322,6 +324,100 @@ class WorkspaceNode(Node):
 
         # If it doesn't need simulation, commit immediately
         await self._commit_to_decision(corr_id, best_thought)
+
+    async def _inject_memory_context(self, corr_id: str, board: dict[str, Any]) -> None:
+        """
+        Query semantic and procedural memory for relevant context before consensus.
+        Inject results as supplementary thoughts on the blackboard.
+        
+        Skips memory services that have no active subscribers to avoid hangs.
+        """
+        query_text = board["original_query"].get("text", "")
+        if not query_text:
+            return
+        
+        # Check which memory services are available by inspecting bus subscriptions
+        bus_subs = getattr(self.bus, '_subscriptions', {})
+        has_semantic = bool(bus_subs.get("memory.search"))
+        has_procedural = bool(bus_subs.get("memory.skill.find"))
+        
+        if not has_semantic and not has_procedural:
+            return  # No memory services available
+        
+        async def _try_semantic():
+            if not has_semantic:
+                return
+            try:
+                mem_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    tenant_id=board["tenant_id"],
+                    session_id=board["session_id"],
+                    topic="memory.search",
+                    payload={"query": query_text, "limit": 3},
+                    correlation_id=corr_id,
+                )
+                resp = await asyncio.wait_for(
+                    self.bus.request("memory.search", mem_msg, timeout=1.5),
+                    timeout=2.0,
+                )
+                results = resp.payload.get("results", [])
+                if results:
+                    memory_context = "\n".join(
+                        f"- {r.get('text', r.get('content', ''))[:200]}" for r in results[:3]
+                    )
+                    board["thoughts"].append({
+                        "node": "memory_retrieval",
+                        "type": "memory_context",
+                        "confidence": 0.3,
+                        "content": f"Relevant past context:\n{memory_context}",
+                    })
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception:
+                pass
+
+        async def _try_procedural():
+            if not has_procedural:
+                return
+            try:
+                skill_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    tenant_id=board["tenant_id"],
+                    topic="memory.skill.find",
+                    payload={"query": query_text, "limit": 2},
+                    correlation_id=corr_id,
+                )
+                resp = await asyncio.wait_for(
+                    self.bus.request("memory.skill.find", skill_msg, timeout=1.5),
+                    timeout=2.0,
+                )
+                skills = resp.payload.get("skills", [])
+                if skills:
+                    skill_text = "\n".join(
+                        f"- {s.get('name', 'unknown')}: {', '.join(s.get('steps', [])[:3])}"
+                        for s in skills[:2]
+                    )
+                    board["thoughts"].append({
+                        "node": "procedural_memory",
+                        "type": "skill_context",
+                        "confidence": 0.25,
+                        "content": f"Applicable learned skills:\n{skill_text}",
+                    })
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception:
+                pass
+
+        # Run both in parallel with a hard 2.5s ceiling
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(_try_semantic(), _try_procedural(), return_exceptions=True),
+                timeout=2.5,
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            logger.debug("Memory context injection timed out for %s", corr_id)
 
     async def _commit_to_decision(self, corr_id: str, best_thought: dict[str, Any]):
         """Helper to push the final approved thought to the physical Decision Engine."""

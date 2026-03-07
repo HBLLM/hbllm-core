@@ -47,9 +47,11 @@ class RouterNode(Node):
         self.last_activity_time = time.time()
 
     async def on_start(self) -> None:
-        """Subscribe to router queries."""
+        """Subscribe to router queries and feedback for adaptive routing."""
         logger.info("Starting RouterNode")
         await self.bus.subscribe(self.topic_sub, self.handle_message)
+        await self.bus.subscribe("system.feedback", self._handle_feedback)
+        await self.bus.subscribe("system.domain_registered", self._handle_domain_registered)
 
     async def on_stop(self) -> None:
         logger.info("Stopping RouterNode")
@@ -158,4 +160,37 @@ class RouterNode(Node):
         )
         await self.bus.publish("workspace.update", routed_query)
         
+        return None
+
+    async def _handle_feedback(self, message: Message) -> Message | None:
+        """
+        Adapt routing heuristics based on user feedback.
+        Positive feedback → lower unknown_threshold (more permissive).
+        Negative feedback → raise threshold (more cautious, trigger spawns sooner).
+        """
+        rating = message.payload.get("rating", 0)
+        domain = message.payload.get("domain", "")
+        
+        if rating > 0:
+            # Positive: routing was good, become slightly more permissive
+            self.unknown_threshold = max(0.15, self.unknown_threshold - 0.02)
+            if domain and domain not in self.known_domains:
+                self.known_domains.add(domain)
+                logger.info("RouterNode learned new domain from feedback: %s", domain)
+        elif rating < 0:
+            # Negative: routing may have been wrong, become slightly more cautious
+            self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
+        
+        logger.debug(
+            "RouterNode threshold adjusted to %.2f after feedback (rating=%d)",
+            self.unknown_threshold, rating,
+        )
+        return None
+
+    async def _handle_domain_registered(self, message: Message) -> Message | None:
+        """Auto-learn new domains when SpawnerNode creates them."""
+        domain = message.payload.get("domain", "")
+        if domain:
+            self.known_domains.add(domain)
+            logger.info("RouterNode registered new domain: %s", domain)
         return None

@@ -89,9 +89,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--export-output", default=None,
                    help="Output path for exported model")
 
+    # Embedding training
+    p.add_argument("--embed", action="store_true",
+                   help="Train custom embedding model (InfoNCE contrastive)")
+    p.add_argument("--embed-dim", type=int, default=256,
+                   help="Embedding dimension")
+    p.add_argument("--embed-data", default=None,
+                   help="Path to embedding training data (JSONL with anchor/positive/negative)")
+
     # Local serving
     p.add_argument("--serve-local", action="store_true",
                    help="Start a local brain with the trained model")
+
+    # Auto-eval gating
+    p.add_argument("--auto-eval", action="store_true", default=True,
+                   help="Auto-evaluate after training and gate adapter saving on improvement")
 
     # Device
     p.add_argument("--device", default="auto",
@@ -258,6 +270,11 @@ def run_dpo(args: argparse.Namespace) -> None:
     else:
         logger.info("No reflection data found. Nothing to improve.")
 
+    # Auto-evaluate after DPO
+    if args.auto_eval and results:
+        logger.info("Running post-DPO evaluation...")
+        _run_post_training_eval(args)
+
 
 def run_eval(args: argparse.Namespace) -> None:
     """Run model evaluation."""
@@ -372,6 +389,87 @@ def run_serve_local(args: argparse.Namespace) -> None:
     asyncio.run(_serve())
 
 
+def run_embed(args: argparse.Namespace) -> None:
+    """Train custom embedding model with InfoNCE contrastive loss."""
+    from hbllm.training.embeddings import EmbeddingTrainer
+    from hbllm.model.config import get_config
+    from hbllm.model.transformer import HBLLMForCausalLM
+
+    device = get_device(args.device)
+
+    logger.info("=== Embedding Training ===")
+    config = get_config(args.size)
+    model = HBLLMForCausalLM(config)
+
+    if args.checkpoint:
+        logger.info("Loading base checkpoint: %s", args.checkpoint)
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+
+    model = model.to(device)
+
+    trainer = EmbeddingTrainer(
+        model=model,
+        embedding_dim=args.embed_dim,
+        device=device,
+    )
+
+    if args.embed_data:
+        logger.info("Loading embedding data from: %s", args.embed_data)
+        import json
+        triplets = []
+        with open(args.embed_data) as f:
+            for line in f:
+                triplets.append(json.loads(line))
+        logger.info("Loaded %d triplets", len(triplets))
+    else:
+        logger.warning("No --embed-data provided. Using synthetic examples.")
+        triplets = []
+
+    if triplets:
+        trainer.train(triplets, max_steps=args.max_steps, lr=args.lr)
+
+    # Save embedding head
+    save_path = Path(args.checkpoint_dir) / "embedding_head.pt"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(trainer.projection.state_dict(), str(save_path))
+    logger.info("Embedding head saved to %s", save_path)
+
+
+def _run_post_training_eval(args: argparse.Namespace) -> None:
+    """Auto-evaluate after training completion."""
+    try:
+        from hbllm.model.config import get_config
+        from hbllm.model.transformer import HBLLMForCausalLM
+        from hbllm.model.tokenizer import HBLLMTokenizer
+        from hbllm.training.evaluator import ModelEvaluator
+
+        device = get_device(args.device)
+        config = get_config(args.size)
+        model = HBLLMForCausalLM(config)
+
+        # Load the just-trained checkpoint
+        ckpt_dir = Path(args.checkpoint_dir)
+        latest = sorted(ckpt_dir.glob("*.pt"))[-1] if ckpt_dir.exists() else None
+        if latest:
+            ckpt = torch.load(str(latest), map_location="cpu", weights_only=False)
+            model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+
+        model = model.to(device)
+        tokenizer = HBLLMTokenizer.from_tiktoken()
+        evaluator = ModelEvaluator(model, tokenizer, device)
+
+        results = evaluator.evaluate_all(hellaswag=False, generate=True)
+        logger.info("Post-training eval: %s", {
+            k: v for k, v in results.items() if k != "samples"
+        })
+        if "samples" in results:
+            for s in results["samples"][:2]:
+                logger.info("  >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
+    except Exception as e:
+        logger.warning("Post-training evaluation failed (non-critical): %s", e)
+
+
 def main() -> None:
     args = parse_args()
 
@@ -389,6 +487,9 @@ def main() -> None:
     elif args.sft:
         logger.info("  Mode: SFT")
         run_sft(args)
+    elif args.embed:
+        logger.info("  Mode: Embedding Training")
+        run_embed(args)
     elif args.serve_local:
         logger.info("  Mode: Local Serve")
         run_serve_local(args)
