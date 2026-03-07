@@ -74,7 +74,7 @@ async def test_factory_creates_brain():
     assert brain.registry is not None
     assert brain.pipeline is not None
     assert brain.llm is not None
-    assert len(brain.nodes) == 5  # Router, Planner, Critic, Decision, Workspace
+    assert len(brain.nodes) == 7  # Router, Planner, Critic, Decision, Workspace, Experience, Meta
 
     await brain.shutdown()
 

@@ -43,10 +43,60 @@ class MemoryNode(Node):
         await self.bus.subscribe("memory.skill.find", self.handle_skill_find)
         await self.bus.subscribe("memory.reward.record", self.handle_reward_record)
         await self.bus.subscribe("memory.reward.query", self.handle_reward_query)
+        await self.bus.subscribe("system.salience", self.handle_salience)
+        await self.bus.subscribe("system.improve", self.handle_improvement)
 
     async def on_stop(self) -> None:
         """Clean up."""
         logger.info("Stopping MemoryNode")
+
+    async def handle_improvement(self, message: Message) -> None:
+        """
+        Listen for improvement/reflection signals (Node M) and extract patterns (Node N)
+        into Semantic Memory (Node O).
+        """
+        if message.type != MessageType.SYSTEM_IMPROVE:
+            return
+
+        payload = message.payload
+        domain = payload.get("domain")
+        reasoning = payload.get("reasoning")
+        
+        logger.info("[MemoryNode] Extracting patterns from reflection on domain '%s' (Node N)", domain)
+        
+        # In a real system, we'd process the dataset at `dataset_path` to extract new facts.
+        # For the prototype, we store a summary fact in Semantic Memory.
+        pattern_content = f"Learned pattern in domain '{domain}': {reasoning}"
+        
+        import asyncio
+        await asyncio.to_thread(
+            self.semantic_db.store, 
+            pattern_content, 
+            {"source": "reflection_engine", "domain": domain},
+            is_priority=False  # Patterns grow general semantic memory
+        )
+
+    async def handle_salience(self, message: Message) -> None:
+        """
+        Handle salience scores. High-salience experiences are stored in 
+        priority semantic memory (Node K).
+        """
+        if message.type != MessageType.SALIENCE_SCORE:
+            return
+
+        payload = message.payload
+        is_priority = payload.get("is_priority", False)
+        content = payload.get("content", "")
+        
+        if is_priority and content:
+            logger.info("[MemoryNode] Archiving high-salience experience to Priority Memory (Node K)")
+            import asyncio
+            await asyncio.to_thread(
+                self.semantic_db.store, 
+                content, 
+                {"source": "salience_detector", "message_id": payload.get("message_id")},
+                is_priority=True
+            )
 
     async def handle_message(self, message: Message) -> Message | None:
         """

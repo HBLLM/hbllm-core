@@ -71,13 +71,14 @@ class WorkspaceNode(Node):
         
         # Broadcast the context to ALL subjective thinking modules simultaneously
         # (This avoids the Router playing isolated favorites).
+        # Phase 11 Supplement: Explicitly flag if this query should search priority memory
         broadcast_msg = Message(
             type=MessageType.EVENT,
             source_node_id=self.node_id,
             tenant_id=message.tenant_id,
             session_id=message.session_id,
             topic="module.evaluate",  # Intuition, Logic, and Fuzzy modules listen here
-            payload=payload,
+            payload={**payload, "search_priority_memory": True},
             correlation_id=correlation_id
         )
         await self.bus.publish("module.evaluate", broadcast_msg)

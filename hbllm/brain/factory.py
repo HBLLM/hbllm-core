@@ -154,6 +154,8 @@ class BrainFactory:
         from hbllm.brain.critic_node import CriticNode
         from hbllm.brain.decision_node import DecisionNode
         from hbllm.brain.workspace_node import WorkspaceNode
+        from hbllm.brain.experience_node import ExperienceNode
+        from hbllm.brain.meta_node import MetaReasoningNode
 
         nodes = [
             RouterNode(node_id="router", llm=llm),
@@ -165,6 +167,8 @@ class BrainFactory:
             CriticNode(node_id="critic", llm=llm),
             DecisionNode(node_id="decision", llm=llm),
             WorkspaceNode(node_id="workspace"),
+            ExperienceNode(node_id="experience", llm=llm),
+            MetaReasoningNode(node_id="meta"),
         ]
 
         # Inject LLM into planner

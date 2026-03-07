@@ -125,9 +125,9 @@ class SemanticMemory:
                 from sentence_transformers import SentenceTransformer
                 logger.info("Loading embedding model %s...", self.model_name)
                 self.model = SentenceTransformer(self.model_name)
-            except ImportError:
+            except Exception:
                 logger.info(
-                    "sentence-transformers not installed — using TF-IDF fallback. "
+                    "sentence-transformers unavailable — using TF-IDF fallback. "
                     "Install with: pip install sentence-transformers"
                 )
                 self._use_tfidf = True
@@ -139,13 +139,14 @@ class SemanticMemory:
             return self._tfidf.encode(texts)
         return self.model.encode(texts)
 
-    def store(self, content: str, metadata: dict[str, Any] | None = None) -> int:
+    def store(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> int:
         """
         Embed and store a document.
         
         Args:
             content: Text to embed and store.
             metadata: Optional metadata dict.
+            is_priority: Whether this is a high-salience priority document.
             
         Returns:
             Index of the stored document.
@@ -156,6 +157,10 @@ class SemanticMemory:
         
         if self._use_tfidf or self.model is None:
             self._load_model()
+            
+        meta = metadata or {}
+        if is_priority:
+            meta["is_priority"] = True
         
         # For TF-IDF, update vocabulary first
         if self._use_tfidf:
@@ -164,12 +169,12 @@ class SemanticMemory:
             all_texts = [d["content"] for d in self.documents] + [content]
             all_vectors = self._tfidf.encode(all_texts)
             
-            doc = {"content": content, "metadata": metadata or {}}
+            doc = {"content": content, "metadata": meta}
             self.documents.append(doc)
             self.vectors = all_vectors
         else:
             embedding = self.model.encode([content])[0]
-            doc = {"content": content, "metadata": metadata or {}}
+            doc = {"content": content, "metadata": meta}
             self.documents.append(doc)
             
             if self.vectors is None:
@@ -177,7 +182,7 @@ class SemanticMemory:
             else:
                 self.vectors = np.vstack((self.vectors, embedding))
             
-        logger.debug("Stored semantic document: %s...", content[:50])
+        logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return len(self.documents) - 1
 
     def search(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:

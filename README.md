@@ -199,13 +199,14 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 ║  │     │              🎓 Learner           🔍 Critic                  │   ║
 ║  │     │                  │                    │                       │   ║
 ║  │     │              🌍 World Model      🛡️ Identity (Ethics)       │   ║
-║  │     │                  │                                           │   ║
+║  │     │                  │                    │                       │   ║
 ║  │     │              🔭 Curiosity ──► 🧬 Spawner (Neurogenesis)     │   ║
 ║  │     │                                   │                          │   ║
 ║  │     │              🧠 Meta Reasoning    │ creates new zones        │   ║
 ║  │     │              📊 Collective        ▼ at runtime!              │   ║
 ║  │     │              💤 Sleep Cycle    [New Domain Experts...]        │   ║
 ║  │     │              📝 Workspace                                    │   ║
+║  │     │              🎥 Experience (Salience Detector)               │   ║
 ║  │     │                                                              │   ║
 ║  │     │  ┌── POLICY ENGINE (YAML governance rules) ──────────────┐   │   ║
 ║  │     └─►│ Safety constraints • Rate limits • Content filtering  │   │   ║
@@ -215,8 +216,8 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 ║          ▼                                                                ║
 ║  ┌─── MEMORY ─────────────────────────────────────────────────────────┐   ║
 ║  │                                                                    │   ║
-║  │  📖 Episodic     📚 Semantic    🔧 Procedural    ❤️ Value         │   ║
-║  │  (events)        (facts)        (skills)          (preferences)    │   ║
+║  │  📖 Episodic     📚 Semantic (Tiered) 🔧 Procedural  ❤️ Value      │   ║
+║  │  (events)        (facts/patterns)     (skills)       (preferences) │   ║
 ║  │                                                                    │   ║
 ║  └────────────────────────────────────────────────────────────────────┘   ║
 ║                                                                           ║
@@ -240,23 +241,24 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
-### 🧠 Brain Nodes (13 cognitive modules + growing)
+### 🧠 Brain Nodes (14 cognitive modules + growing)
 
-| Node               | Role                                       | Analog               |
-| ------------------ | ------------------------------------------ | -------------------- |
-| **Router**         | Routes inputs to the right cognitive path  | Thalamus             |
-| **Planner**        | Breaks goals into multi-step plans         | Prefrontal cortex    |
-| **Decision**       | Makes final decisions from evidence        | Executive function   |
-| **Critic**         | Self-evaluates quality and correctness     | Error monitoring     |
-| **Learner**        | Updates knowledge from outcomes            | Hippocampal learning |
-| **Curiosity**      | Explores novel situations proactively      | Dopaminergic system  |
-| **World Model**    | Builds internal model of the environment   | Predictive coding    |
-| **Identity**       | Maintains values, ethics, and personality  | Self-model           |
-| **Meta Reasoning** | Reasons about its own reasoning            | Metacognition        |
-| **Workspace**      | Shared cognitive workspace for integration | Global workspace     |
-| **Collective**     | Ensemble reasoning from multiple nodes     | Neural ensemble      |
-| **Sleep Cycle**    | Consolidates learning during idle time     | Memory consolidation |
-| **Spawner**        | Dynamically creates specialist sub-agents  | Neurogenesis         |
+| Node               | Role                                        | Analog               |
+| ------------------ | ------------------------------------------- | -------------------- |
+| **Router**         | Routes inputs to the right cognitive path   | Thalamus             |
+| **Planner**        | Breaks goals into multi-step plans          | Prefrontal cortex    |
+| **Decision**       | Makes final decisions from evidence         | Executive function   |
+| **Critic**         | Self-evaluates quality and correctness      | Error monitoring     |
+| **Learner**        | Updates knowledge from outcomes             | Hippocampal learning |
+| **Curiosity**      | Explores novel situations proactively       | Dopaminergic system  |
+| **World Model**    | Builds internal model of the environment    | Predictive coding    |
+| **Identity**       | Maintains values, ethics, and personality   | Self-model           |
+| **Meta Reasoning** | Reasons about reasoning (Reflection Engine) | Metacognition        |
+| **Workspace**      | Shared cognitive workspace for integration  | Global workspace     |
+| **Collective**     | Ensemble reasoning from multiple nodes      | Neural ensemble      |
+| **Sleep Cycle**    | Consolidates learning during idle time      | Memory consolidation |
+| **Spawner**        | Dynamically creates specialist sub-agents   | Neurogenesis         |
+| **Experience**     | Records experiences and detects salience    | Amygdala             |
 
 ### 👁️ Perception (3 input channels)
 
@@ -268,13 +270,13 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 
 ### 🧬 Memory Systems (5 types — like human memory)
 
-| Memory         | What It Stores            | Example                                     |
-| -------------- | ------------------------- | ------------------------------------------- |
-| **Episodic**   | Events and experiences    | "User came home at 6:30pm on Tuesday"       |
-| **Semantic**   | Facts and knowledge       | "Living room temperature preference = 23°C" |
-| **Procedural** | Skills and how-to         | "To make coffee: fill water → grind → brew" |
-| **Value**      | Preferences and judgments | "User prefers warm lighting over cool"      |
-| **Working**    | Current task context      | Active conversation state                   |
+| Memory         | What It Stores             | Example                                     |
+| -------------- | -------------------------- | ------------------------------------------- |
+| **Episodic**   | Events and experiences     | "User came home at 6:30pm on Tuesday"       |
+| **Semantic**   | Facts & extracted patterns | "Living room temp preference = 23°C"        |
+| **Procedural** | Skills and how-to          | "To make coffee: fill water → grind → brew" |
+| **Value**      | Preferences and judgments  | "User prefers warm lighting over cool"      |
+| **Working**    | Current task context       | Active conversation state                   |
 
 ### ⚡ Action Nodes (8 output channels)
 
