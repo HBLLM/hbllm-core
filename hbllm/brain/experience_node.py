@@ -22,32 +22,32 @@ _SALIENCE_KEYWORDS: dict[str, tuple[list[str], float]] = {
     "emergency": (
         ["critical", "crash", "shutdown", "panic", "security", "breach",
          "unauthorized", "fatal", "exception", "traceback"],
-        0.35,
+        0.70,
     ),
     "error": (
         ["error", "failure", "failed", "broken", "bug", "fix", "issue",
          "alert", "warning", "timeout"],
-        0.25,
+        0.50,
     ),
     "learning": (
         ["wrong", "incorrect", "mistake", "actually", "correction",
          "but i meant", "should have been", "not what i asked"],
-        0.20,
+        0.35,
     ),
     "preference": (
         ["prefer", "always", "never", "love", "hate", "favorite",
          "don't like", "please stop", "instead"],
-        0.15,
+        0.20,
     ),
     "task": (
         ["remember", "deadline", "schedule", "remind", "don't forget",
          "important", "urgent", "priority", "asap"],
-        0.20,
+        0.35,
     ),
     "sentiment_negative": (
         ["frustrated", "annoying", "terrible", "worst", "useless",
          "awful", "horrible", "disappointed", "confused"],
-        0.15,
+        0.20,
     ),
 }
 
@@ -164,24 +164,20 @@ class ExperienceNode(Node):
           3. Novelty (is this different from recent interactions?)
           4. LLM refinement (optional, if LLM available)
         """
-        signals: list[tuple[str, float]] = []
         content_lower = content.lower()
 
         # ── Signal 1: Keyword matching ───────────────────────────────────
         keyword_score = self._score_keywords(content_lower)
-        signals.append(("keywords", keyword_score))
 
         # ── Signal 2: Content complexity ─────────────────────────────────
         complexity_score = self._score_complexity(content)
-        signals.append(("complexity", complexity_score))
 
         # ── Signal 3: Novelty ────────────────────────────────────────────
         novelty_score = self._score_novelty(content)
-        signals.append(("novelty", novelty_score))
 
-        # Weighted combination
-        weights = {"keywords": 0.45, "complexity": 0.20, "novelty": 0.35}
-        score = sum(weights.get(name, 0) * val for name, val in signals)
+        # Additive combination with base — allows a single strong signal
+        # (like emergency keywords) to push above the 0.7 threshold
+        score = 0.15 + keyword_score * 0.50 + complexity_score * 0.15 + novelty_score * 0.20
 
         # ── Signal 4: LLM refinement (optional) ─────────────────────────
         if self.llm and score >= 0.5:
