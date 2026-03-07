@@ -16,6 +16,7 @@ from hbllm.memory.episodic import EpisodicMemory
 from hbllm.memory.semantic import SemanticMemory
 from hbllm.memory.procedural import ProceduralMemory
 from hbllm.memory.value_memory import ValueMemory
+from hbllm.memory.knowledge_graph import KnowledgeGraph
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
@@ -37,6 +38,7 @@ class MemoryNode(Node):
         self.semantic_db = SemanticMemory()
         self.procedural_db = ProceduralMemory(db_path.parent / "procedural_memory.db")
         self.value_db = ValueMemory(db_path.parent / "value_memory.db")
+        self.knowledge_graph = KnowledgeGraph()
 
     async def on_start(self) -> None:
         """Subscribe to memory lifecycle verbs."""
@@ -50,6 +52,8 @@ class MemoryNode(Node):
         await self.bus.subscribe("memory.reward.query", self.handle_reward_query)
         await self.bus.subscribe("system.salience", self.handle_salience)
         await self.bus.subscribe("system.improve", self.handle_improvement)
+        await self.bus.subscribe("system.reflection", self.handle_reflection)
+        await self.bus.subscribe("knowledge.query", self.handle_knowledge_query)
 
     async def on_stop(self) -> None:
         """Clean up."""
@@ -114,6 +118,114 @@ class MemoryNode(Node):
         """
         Generic handler fallback, but we register explicit topics in on_start.
         """
+        return None
+
+    async def handle_reflection(self, message: Message) -> Message | None:
+        """
+        Handle deep reflection events — ingest entities and relations
+        into the KnowledgeGraph.
+        """
+        payload = message.payload
+        content = payload.get("content", "")
+        entities = payload.get("entities", [])
+        rules = payload.get("rules", [])
+
+        # 1. Ingest entities from reflection
+        for entity_info in entities:
+            self.knowledge_graph.add_entity(
+                label=entity_info.get("label", ""),
+                entity_type=entity_info.get("type", "concept"),
+            )
+
+        # 2. Extract and add relations from the content text
+        if content:
+            self.knowledge_graph.ingest_text(
+                content, source=payload.get("category", "reflection")
+            )
+
+        # 3. Add rule-derived relations (condition → action)
+        for rule in rules:
+            condition = rule.get("condition", "")
+            action = rule.get("action", "")
+            if condition and action:
+                self.knowledge_graph.add_relation(
+                    source_label=condition,
+                    target_label=action,
+                    relation_type="leads_to",
+                    weight=rule.get("confidence", 0.5),
+                    metadata={"rule_id": rule.get("rule_id", ""), "category": rule.get("category", "")},
+                )
+
+        logger.info(
+            "[MemoryNode] KnowledgeGraph updated — %d entities, %d relations",
+            self.knowledge_graph.entity_count,
+            self.knowledge_graph.relation_count,
+        )
+        return None
+
+    async def handle_knowledge_query(self, message: Message) -> Message | None:
+        """
+        Handle knowledge graph queries.
+
+        Supported actions:
+          - neighbors: Get neighbors of an entity
+          - path: Find shortest path between two entities
+          - subgraph: Extract subgraph around an entity
+          - stats: Get graph statistics
+        """
+        payload = message.payload
+        action = payload.get("action", "neighbors")
+
+        if action == "neighbors":
+            label = payload.get("entity", "")
+            direction = payload.get("direction", "both")
+            rel_type = payload.get("relation_type")
+            results = self.knowledge_graph.neighbors(label, direction, rel_type)
+            return Message(
+                type=MessageType.RESPONSE,
+                source_node_id=self.node_id,
+                topic="knowledge.response",
+                payload={"neighbors": results, "entity": label},
+                correlation_id=message.id,
+            )
+
+        elif action == "path":
+            from_label = payload.get("from", "")
+            to_label = payload.get("to", "")
+            max_depth = payload.get("max_depth", 5)
+            path = self.knowledge_graph.shortest_path(from_label, to_label, max_depth)
+            return Message(
+                type=MessageType.RESPONSE,
+                source_node_id=self.node_id,
+                topic="knowledge.response",
+                payload={"path": path, "from": from_label, "to": to_label},
+                correlation_id=message.id,
+            )
+
+        elif action == "subgraph":
+            label = payload.get("entity", "")
+            depth = payload.get("depth", 2)
+            sg = self.knowledge_graph.subgraph(label, depth)
+            return Message(
+                type=MessageType.RESPONSE,
+                source_node_id=self.node_id,
+                topic="knowledge.response",
+                payload={"subgraph": sg, "entity": label},
+                correlation_id=message.id,
+            )
+
+        elif action == "stats":
+            return Message(
+                type=MessageType.RESPONSE,
+                source_node_id=self.node_id,
+                topic="knowledge.response",
+                payload={
+                    "entity_count": self.knowledge_graph.entity_count,
+                    "relation_count": self.knowledge_graph.relation_count,
+                },
+                correlation_id=message.id,
+            )
+
         return None
 
     # Specific topic handlers below:
