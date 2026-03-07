@@ -170,9 +170,11 @@ class PlannerNode(Node):
         self._cache_misses = 0
 
     async def on_start(self) -> None:
-        """Subscribe to planning requests."""
+        """Subscribe to planning requests and workspace updates."""
         logger.info("Starting PlannerNode (Graph-of-Thoughts)")
         await self.bus.subscribe("planner.decompose", self.handle_message)
+        # Also participate as a workspace thought contributor
+        await self.bus.subscribe("workspace.update", self._contribute_to_workspace)
 
     async def on_stop(self) -> None:
         logger.info("Stopping PlannerNode")
@@ -394,3 +396,62 @@ class PlannerNode(Node):
         except Exception as e:
             logger.warning("[GoT] Merge failed: %s", e)
             return ""
+
+    async def _contribute_to_workspace(self, message: Message) -> Message | None:
+        """
+        Participate in workspace deliberation by generating GoT thoughts.
+        
+        When a workspace.update arrives, runs a lightweight GoT process
+        and posts the best-path result as a workspace.thought.
+        """
+        text = message.payload.get("text", "")
+        if not text or len(text) < 10:
+            return None
+
+        # Check cache first
+        cache_key = self._cache_key(text)
+        if cache_key in self._response_cache:
+            cached_content = self._response_cache[cache_key]
+        else:
+            # Create a synthetic planning request
+            plan_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="planner.decompose",
+                payload={"text": text},
+                correlation_id=message.correlation_id or message.id,
+            )
+            
+            result = await self.handle_message(plan_msg)
+            if result is None:
+                return None
+            cached_content = result.payload.get("text", "")
+        
+        if not cached_content:
+            return None
+
+        # Post as a workspace thought
+        thought_msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            tenant_id=message.tenant_id,
+            session_id=message.session_id,
+            topic="workspace.thought",
+            payload={
+                "type": "graph_of_thoughts",
+                "confidence": 0.8,  # GoT thoughts get a confidence boost
+                "content": cached_content,
+                "metadata": {
+                    "source": "got_planner",
+                    "branch_factor": self.branch_factor,
+                    "max_depth": self.max_depth,
+                },
+            },
+            correlation_id=message.correlation_id or message.id,
+        )
+        await self.bus.publish("workspace.thought", thought_msg)
+        logger.debug("[GoT] Posted workspace thought for: %s", text[:60])
+        return None
+

@@ -32,11 +32,15 @@ class SleepCycleNode(Node):
         self.is_sleeping = False
         self._last_system_activity = time.time()
         self._monitor_task: asyncio.Task | None = None
+        self._pending_goals: list[str] = []
 
     async def on_start(self) -> None:
         logger.info("Starting SleepCycleNode (Idle timeout: %s seconds)", self.idle_timeout_seconds)
         # Listen to router queries to track user activity
         await self.bus.subscribe("router.query", self._check_activity)
+        
+        # Accumulate curiosity goals for processing during sleep
+        await self.bus.subscribe("system.sleep.goal", self._collect_goal)
         
         # Start the background idle monitor
         self._monitor_task = asyncio.create_task(self._idle_monitor_loop())
@@ -47,6 +51,14 @@ class SleepCycleNode(Node):
             self._monitor_task.cancel()
 
     async def handle_message(self, message: Message) -> Message | None:
+        return None
+
+    async def _collect_goal(self, message: Message) -> Message | None:
+        """Accumulate curiosity goals for processing during sleep."""
+        goal = message.payload.get("goal") or message.payload.get("text", "")
+        if goal and goal not in self._pending_goals:
+            self._pending_goals.append(goal)
+            logger.debug("[SleepNode] Queued curiosity goal: %s", goal[:80])
         return None
 
     async def _check_activity(self, message: Message) -> Message | None:
@@ -75,28 +87,44 @@ class SleepCycleNode(Node):
     async def _enter_sleep_cycle(self):
         """Perform offline memory consolidation and self-improvement training."""
         self.is_sleeping = True
+        cycle_start = time.time()
+        report = {"memories_consolidated": 0, "goals_replayed": 0, "training_ran": False}
         logger.info("[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...", self.idle_timeout_seconds)
         
         try:
             # ── Phase 1: Memory Consolidation ────────────────────────────
-            await self._consolidate_memory()
+            report["memories_consolidated"] = await self._consolidate_memory()
             
             # ── Phase 2: Self-Improvement Training ───────────────────────
             if not self.is_sleeping:
                 return  # User woke up during consolidation
-            await self._run_self_improvement()
+            report["training_ran"] = await self._run_self_improvement()
+
+            # ── Phase 3: Curiosity Goal Replay ───────────────────────────
+            if not self.is_sleeping:
+                return
+            report["goals_replayed"] = await self._replay_curiosity_goals()
 
         except TimeoutError:
              logger.warning("[SleepNode] Timeout during sleep cycle. Waking up.")
         except Exception as e:
             logger.error("[SleepNode] Sleep cycle interrupted by internal error: %s", e)
-            
+        
+        # Emit sleep report
+        report["duration_seconds"] = round(time.time() - cycle_start, 1)
+        await self.bus.publish("system.sleep.report", Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            topic="system.sleep.report",
+            payload=report,
+        ))
+
         # Reset activity timer so we don't immediately go back to sleep unless idle again
         self._last_system_activity = time.time()
         self.is_sleeping = False
 
-    async def _consolidate_memory(self):
-        """Phase 1: Compress short-term memory into long-term summaries."""
+    async def _consolidate_memory(self) -> int:
+        """Phase 1: Compress short-term memory into long-term summaries. Returns turns consolidated."""
         req_msg = Message(
             type=MessageType.QUERY,
             source_node_id=self.node_id,
@@ -108,13 +136,13 @@ class SleepCycleNode(Node):
             resp = await self.bus.request("memory.retrieve_recent", req_msg, timeout=5.0)
         except Exception:
             logger.warning("[SleepNode] Could not reach memory node for consolidation.")
-            return
+            return 0
 
         if resp.type == MessageType.ERROR:
             logger.error("[SleepNode] Failed to retrieve memory: %s", resp.payload.get("error"))
             self._last_system_activity = time.time()
             self.is_sleeping = False
-            return
+            return 0
 
         turns = resp.payload.get("turns", [])
         
@@ -133,10 +161,12 @@ class SleepCycleNode(Node):
             )
             await self.bus.publish("memory.store", store_msg)
             logger.info("[SleepNode] Memory consolidation complete.")
+            return len(turns)
         else:
             logger.info("[SleepNode] Not enough new memories to consolidate. Skipping.")
+            return 0
 
-    async def _run_self_improvement(self):
+    async def _run_self_improvement(self) -> bool:
         """Phase 2: Check for reflection data and trigger LoRA fine-tuning."""
         import asyncio
         
@@ -144,7 +174,7 @@ class SleepCycleNode(Node):
             from hbllm.serving.self_improve import run_improvement_cycle
         except ImportError:
             logger.debug("[SleepNode] self_improve module not available, skipping training.")
-            return
+            return False
 
         logger.info("[SleepNode] Checking for reflection datasets for self-improvement...")
         
@@ -167,9 +197,51 @@ class SleepCycleNode(Node):
                         )
                     elif isinstance(result, dict):
                         logger.warning("[SleepNode] Training failed for '%s': %s", domain, result.get("error"))
+                return True
             else:
                 logger.info("[SleepNode] No reflection data found. Model is up to date.")
+                return False
                 
         except Exception as e:
             logger.warning("[SleepNode] Self-improvement skipped: %s", e)
+            return False
 
+    async def _replay_curiosity_goals(self) -> int:
+        """
+        Phase 3: Replay accumulated curiosity goals during sleep.
+        
+        For each queued goal, publishes a research query to memory.store
+        so the system can explore and learn about curiosity-driven topics.
+        """
+        if not self._pending_goals:
+            logger.info("[SleepNode] No curiosity goals to replay.")
+            return 0
+
+        goals_to_process = self._pending_goals[:10]  # Cap at 10 per cycle
+        self._pending_goals = self._pending_goals[10:]
+        replayed = 0
+
+        for goal in goals_to_process:
+            if not self.is_sleeping:
+                break  # User woke up
+
+            logger.info("[SleepNode] Replaying curiosity goal: %s", goal[:80])
+
+            # Store the goal as a researched topic in memory
+            store_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="memory.store",
+                payload={
+                    "session_id": "sleep_curiosity",
+                    "role": "system",
+                    "content": f"[CURIOSITY RESEARCH] Goal: {goal}. Queued for deep exploration during next active session.",
+                    "domain": "curiosity",
+                },
+            )
+            await self.bus.publish("memory.store", store_msg)
+            replayed += 1
+            await asyncio.sleep(0.1)  # Small delay between goals
+
+        logger.info("[SleepNode] Replayed %d curiosity goals.", replayed)
+        return replayed

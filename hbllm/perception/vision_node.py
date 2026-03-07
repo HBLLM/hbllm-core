@@ -21,7 +21,7 @@ class VisionNode(Node):
     def __init__(self, node_id: str):
         super().__init__(
             node_id=node_id,
-            node_type=NodeType.DOMAIN,
+            node_type=NodeType.PERCEPTION,
             capabilities=["multimodal_processing", "image_captioning", "ocr"],
         )
         self.topic_sub = "vision.process"

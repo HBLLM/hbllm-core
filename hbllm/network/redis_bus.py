@@ -9,7 +9,9 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 import redis.asyncio as redis
@@ -17,6 +19,18 @@ from hbllm.network.bus import Subscription, MessageHandler, MessageBus
 from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BusMetrics:
+    """Operational metrics for the Redis bus."""
+    messages_published: int = 0
+    messages_received: int = 0
+    messages_dropped_ttl: int = 0
+    messages_dropped_auth: int = 0
+    reconnections: int = 0
+    handler_errors: int = 0
+
 
 class RedisBus(MessageBus):
     """
@@ -39,6 +53,7 @@ class RedisBus(MessageBus):
         self._running = False
         self._dispatch_task: asyncio.Task[None] | None = None
         self._sub_counter = 0
+        self.metrics = BusMetrics()
 
     def _sign(self, payload_json: str) -> str:
         """Compute HMAC-SHA256 signature for a message payload."""
@@ -103,6 +118,7 @@ class RedisBus(MessageBus):
             wire = payload_json
 
         await self.client.publish(topic, wire)
+        self.metrics.messages_published += 1
         
         # When a node fulfills a request locally, it calls bus.publish(response)
         # We intercept it right here if it happens to be our own local pending request,
@@ -151,6 +167,9 @@ class RedisBus(MessageBus):
         """Main loop: dequeue messages from Redis and dispatch locally."""
         if not self.pubsub:
             return
+        
+        backoff = 1.0
+        max_backoff = 30.0
             
         while self._running:
             try:
@@ -158,6 +177,9 @@ class RedisBus(MessageBus):
                 msg_dict = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
                 if msg_dict is None:
                     continue
+                
+                # Reset backoff on successful receive
+                backoff = 1.0
                     
                 if msg_dict["type"] in ("message", "pmessage"):
                     topic = msg_dict["channel"]
@@ -168,6 +190,7 @@ class RedisBus(MessageBus):
                         sig, payload_json = raw_data.split("|", 1)
                         if not self._verify(payload_json, sig):
                             logger.warning("Dropped message with invalid signature on topic '%s'", topic)
+                            self.metrics.messages_dropped_auth += 1
                             continue
                     else:
                         payload_json = raw_data
@@ -177,6 +200,16 @@ class RedisBus(MessageBus):
                     except Exception as e:
                         logger.error(f"Failed to parse Redis message: {e}")
                         continue
+
+                    # ── TTL enforcement ──
+                    if message.ttl_seconds is not None:
+                        age = (asyncio.get_event_loop().time() - message.timestamp.timestamp())
+                        if age > message.ttl_seconds:
+                            logger.debug("Dropped expired message %s (age=%.1fs, ttl=%ss)", message.id, age, message.ttl_seconds)
+                            self.metrics.messages_dropped_ttl += 1
+                            continue
+
+                    self.metrics.messages_received += 1
 
                     # Check if this is a response to a pending request initiated by THIS node
                     if message.correlation_id and message.correlation_id in self._pending_requests:
@@ -191,10 +224,40 @@ class RedisBus(MessageBus):
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 continue
             except redis.ConnectionError:
-                logger.error("Redis connection error in dispatch loop. Retrying...")
-                await asyncio.sleep(2)
+                self.metrics.reconnections += 1
+                logger.error("Redis connection lost. Reconnecting in %.1fs...", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
+                try:
+                    await self._reconnect()
+                except Exception:
+                    logger.error("Reconnection failed. Will retry.")
             except Exception as e:
                 logger.error(f"Error in Redis dispatch loop: {e}")
+
+    async def _reconnect(self) -> None:
+        """Reconnect to Redis after a connection loss."""
+        try:
+            if self.pubsub:
+                await self.pubsub.close()
+            if self.client:
+                await self.client.aclose()
+        except Exception:
+            pass
+
+        self.client = redis.from_url(self.redis_url, decode_responses=True)
+        self.pubsub = self.client.pubsub()
+        await self.pubsub.psubscribe("*")
+        logger.info("Reconnected to Redis at %s", self.redis_url)
+
+    async def ping(self) -> bool:
+        """Health check — ping Redis and return True if responsive."""
+        if not self.client:
+            return False
+        try:
+            return await self.client.ping()
+        except Exception:
+            return False
 
     async def _dispatch_to_subscribers(self, topic: str, message: Message) -> None:
         """Dispatch a message to all active local subscribers for a topic."""
