@@ -407,16 +407,75 @@ class KnowledgeGraph:
         """Serialize the graph to a dict."""
         return {
             "entities": [
-                {"id": e.id, "label": e.label, "type": e.entity_type, "attributes": e.attributes}
+                {
+                    "id": e.id, "label": e.label, "type": e.entity_type,
+                    "attributes": e.attributes, "created_at": e.created_at,
+                }
                 for e in self._entities.values()
             ],
             "relations": [
                 {
-                    "source": self._entities[r.source_id].label,
-                    "target": self._entities[r.target_id].label,
-                    "type": r.relation_type,
-                    "weight": r.weight,
+                    "source_id": r.source_id, "target_id": r.target_id,
+                    "type": r.relation_type, "weight": r.weight,
+                    "metadata": r.metadata, "created_at": r.created_at,
                 }
                 for r in self._relations.values()
             ],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KnowledgeGraph":
+        """Reconstruct a KnowledgeGraph from a dict."""
+        graph = cls()
+        for e_data in data.get("entities", []):
+            entity = Entity(
+                id=e_data["id"],
+                label=e_data["label"],
+                entity_type=e_data.get("type", "concept"),
+                attributes=e_data.get("attributes", {}),
+                created_at=e_data.get("created_at", time.time()),
+            )
+            graph._entities[entity.id] = entity
+
+        for r_data in data.get("relations", []):
+            rel = Relation(
+                source_id=r_data["source_id"],
+                target_id=r_data["target_id"],
+                relation_type=r_data["type"],
+                weight=r_data.get("weight", 1.0),
+                metadata=r_data.get("metadata", {}),
+                created_at=r_data.get("created_at", time.time()),
+            )
+            graph._relations[rel.key] = rel
+            graph._outgoing[rel.source_id].append(rel.key)
+            graph._incoming[rel.target_id].append(rel.key)
+
+        return graph
+
+    def save_to_disk(self, path: str | Path) -> None:
+        """Save the knowledge graph to a JSON file."""
+        import json
+        from pathlib import Path as _Path
+        save_path = _Path(path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, "w") as f:
+            json.dump(self.to_dict(), f)
+        logger.info("KnowledgeGraph saved to %s (%d entities, %d relations)",
+                     save_path, self.entity_count, self.relation_count)
+
+    @classmethod
+    def load_from_disk(cls, path: str | Path) -> "KnowledgeGraph":
+        """Load a knowledge graph from a JSON file."""
+        import json
+        from pathlib import Path as _Path
+        load_path = _Path(path)
+        if not load_path.exists():
+            logger.info("No KnowledgeGraph file at %s, starting empty", load_path)
+            return cls()
+        with open(load_path) as f:
+            data = json.load(f)
+        graph = cls.from_dict(data)
+        logger.info("KnowledgeGraph loaded from %s (%d entities, %d relations)",
+                     load_path, graph.entity_count, graph.relation_count)
+        return graph
+

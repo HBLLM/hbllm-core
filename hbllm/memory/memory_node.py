@@ -35,10 +35,17 @@ class MemoryNode(Node):
         db_path.parent.mkdir(parents=True, exist_ok=True)
         
         self.db = EpisodicMemory(db_path)
-        self.semantic_db = SemanticMemory()
         self.procedural_db = ProceduralMemory(db_path.parent / "procedural_memory.db")
         self.value_db = ValueMemory(db_path.parent / "value_memory.db")
-        self.knowledge_graph = KnowledgeGraph()
+
+        # Load SemanticMemory + KnowledgeGraph from disk if previously persisted
+        # Skip for in-memory db paths (e.g. ":memory:" used in tests)
+        self._persistence_dir = db_path.parent
+        _use_persistence = str(db_path) != ":memory:" and str(self._persistence_dir) != "."
+        semantic_dir = self._persistence_dir / "semantic"
+        kg_path = self._persistence_dir / "knowledge_graph.json"
+        self.semantic_db = SemanticMemory.load_from_disk(semantic_dir) if (_use_persistence and semantic_dir.exists()) else SemanticMemory()
+        self.knowledge_graph = KnowledgeGraph.load_from_disk(kg_path) if (_use_persistence and kg_path.exists()) else KnowledgeGraph()
 
     async def on_start(self) -> None:
         """Subscribe to memory lifecycle verbs."""
@@ -56,8 +63,13 @@ class MemoryNode(Node):
         await self.bus.subscribe("knowledge.query", self.handle_knowledge_query)
 
     async def on_stop(self) -> None:
-        """Clean up."""
-        logger.info("Stopping MemoryNode")
+        """Persist in-memory data to disk and clean up."""
+        logger.info("Stopping MemoryNode — persisting semantic memory and knowledge graph")
+        try:
+            self.semantic_db.save_to_disk(self._persistence_dir / "semantic")
+            self.knowledge_graph.save_to_disk(self._persistence_dir / "knowledge_graph.json")
+        except Exception as e:
+            logger.error("Failed to persist memory to disk: %s", e)
 
     @staticmethod
     def _handle_background_task_result(task: asyncio.Task) -> None:

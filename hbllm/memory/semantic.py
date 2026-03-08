@@ -22,6 +22,7 @@ import logging
 import math
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -366,3 +367,72 @@ class SemanticMemory:
     def get_all(self) -> list[dict[str, Any]]:
         """Return all stored documents (without vectors)."""
         return [doc.copy() for doc in self.documents]
+
+    def save_to_disk(self, path: str | Path) -> None:
+        """Save semantic memory to disk (metadata + vectors)."""
+        from pathlib import Path as _Path
+        save_dir = _Path(path)
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save document metadata
+        import json
+        meta_path = save_dir / "documents.json"
+        with open(meta_path, "w") as f:
+            json.dump(self.documents, f)
+
+        # Save dense vectors
+        if self._vector_list:
+            vectors = np.array(self._vector_list)
+            np.save(save_dir / "dense_vectors.npy", vectors)
+
+        # Save sparse vectors
+        if self._sparse_list:
+            sparse = np.array(self._sparse_list)
+            np.save(save_dir / "sparse_vectors.npy", sparse)
+
+        # Save content hashes
+        with open(save_dir / "hashes.json", "w") as f:
+            json.dump(list(self._content_hashes), f)
+
+        logger.info("SemanticMemory saved to %s (%d docs)", save_dir, len(self.documents))
+
+    @classmethod
+    def load_from_disk(cls, path: str | Path, **kwargs) -> "SemanticMemory":
+        """Load semantic memory from disk."""
+        from pathlib import Path as _Path
+        import json
+
+        load_dir = _Path(path)
+        if not load_dir.exists() or not (load_dir / "documents.json").exists():
+            logger.info("No SemanticMemory data at %s, starting empty", load_dir)
+            return cls(**kwargs)
+
+        mem = cls(**kwargs)
+
+        # Load documents
+        with open(load_dir / "documents.json") as f:
+            mem.documents = json.load(f)
+
+        # Load dense vectors
+        dense_path = load_dir / "dense_vectors.npy"
+        if dense_path.exists():
+            vectors = np.load(dense_path)
+            mem._vector_list = [vectors[i] for i in range(len(vectors))]
+            mem._vectors_dirty = True
+
+        # Load sparse vectors
+        sparse_path = load_dir / "sparse_vectors.npy"
+        if sparse_path.exists():
+            sparse = np.load(sparse_path)
+            mem._sparse_list = [sparse[i] for i in range(len(sparse))]
+            mem._sparse_dirty = True
+
+        # Load content hashes
+        hashes_path = load_dir / "hashes.json"
+        if hashes_path.exists():
+            with open(hashes_path) as f:
+                mem._content_hashes = set(json.load(f))
+
+        logger.info("SemanticMemory loaded from %s (%d docs)", load_dir, len(mem.documents))
+        return mem
+
