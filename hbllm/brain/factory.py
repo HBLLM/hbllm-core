@@ -45,6 +45,7 @@ class BrainConfig:
     inject_memory: bool = True
     inject_identity: bool = True
     inject_curiosity: bool = True
+    inject_perception: bool = False  # Audio/Vision nodes (require ML models)
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
@@ -330,6 +331,17 @@ class BrainFactory:
         # Optional nodes based on config
         if cfg.inject_identity:
             nodes.append(IdentityNode(node_id="identity"))
+
+        # Perception nodes (optional — require ML models to be downloaded)
+        if cfg.inject_perception:
+            from hbllm.perception.audio_in_node import AudioInputNode
+            from hbllm.perception.audio_out_node import AudioOutputNode
+            from hbllm.perception.vision_node import VisionNode
+            nodes.extend([
+                AudioInputNode(node_id="audio_in"),
+                AudioOutputNode(node_id="audio_out"),
+                VisionNode(node_id="vision"),
+            ])
 
         # Inject LLM into planner
         nodes[1].llm = llm

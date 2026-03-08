@@ -15,7 +15,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -92,6 +92,11 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
     from hbllm.brain.learner_node import LearnerNode
     from hbllm.brain.spawner_node import SpawnerNode
     from hbllm.brain.meta_node import MetaReasoningNode
+    from hbllm.brain.experience_node import ExperienceNode
+    from hbllm.brain.rule_extractor import RuleExtractorNode
+    from hbllm.brain.identity_node import IdentityNode
+    from hbllm.brain.curiosity_node import CuriosityNode
+    from hbllm.brain.collective_node import CollectiveNode
     from hbllm.memory.memory_node import MemoryNode
     from hbllm.modules.base_module import DomainModuleNode
     from hbllm.perception.vision_node import VisionNode
@@ -131,27 +136,47 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
     # 4. LLM Interface
     llm_interface = LLMInterface(model=model, tokenizer=vocab, device=device)
 
-    # 5. Nodes
+    # 5. Nodes — all cognitive, memory, perception, and action nodes
     nodes = [
+        # Memory + Knowledge Graph
         MemoryNode(node_id="memory_01", db_path="chat_memory.db"),
+
+        # Core cognitive pipeline
         RouterNode(node_id="router_01", llm=llm_interface),
         PlannerNode(node_id="planner_01"),
+        CriticNode(node_id="critic_01", llm=llm_interface),
+        DecisionNode(node_id="decision_01", llm=llm_interface),
+        WorkspaceNode(node_id="workspace_01"),
+
+        # Experience & meta-cognitive
+        ExperienceNode(node_id="experience_01", llm=llm_interface),
+        MetaReasoningNode(node_id="meta_01"),
+        RuleExtractorNode(node_id="rule_extractor_01"),
+        CuriosityNode(node_id="curiosity_01"),
+        IdentityNode(node_id="identity_01"),
+        CollectiveNode(node_id="collective_01"),
+
+        # Learning
         LearnerNode(node_id="learner_01"),
         SpawnerNode(node_id="spawner_01", model=model, tokenizer=vocab),
-        MetaReasoningNode(node_id="meta_01"),
+
+        # Perception
         VisionNode(node_id="vision_01"),
         AudioInputNode(node_id="audio_in_01", model_size="tiny"),
         AudioOutputNode(node_id="audio_out_01"),
+
+        # Simulation & actions
+        WorldModelNode(node_id="world_model_01"),
         ExecutionNode(node_id="exec_01"),
         BrowserNode(node_id="browser_01"),
         LogicNode(node_id="logic_01", llm=llm_interface),
         FuzzyNode(node_id="fuzzy_01", llm=llm_interface),
-        WorkspaceNode(node_id="workspace_01"),
-        WorldModelNode(node_id="world_model_01"),
-        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=60.0),
-        CriticNode(node_id="critic_01", llm=llm_interface),
-        DecisionNode(node_id="decision_01", llm=llm_interface),
         ApiNode(node_id="api_01", llm=llm_interface),
+
+        # Consolidation
+        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=60.0),
+
+        # Domain experts
         DomainModuleNode(node_id="domain_general", domain_name="general", model=model, tokenizer=vocab),
         DomainModuleNode(node_id="domain_coding", domain_name="coding", model=model, tokenizer=vocab),
         DomainModuleNode(node_id="domain_math", domain_name="math", model=model, tokenizer=vocab),
@@ -973,6 +998,259 @@ async def submit_feedback(request: FeedbackRequest):
         "message_id": request.message_id,
         "rating": request.rating,
     }
+
+
+# ─── Knowledge Graph Endpoints ────────────────────────────────────────────────
+
+@app.get("/v1/knowledge/{entity}")
+async def knowledge_neighbors(entity: str, direction: str = "both", relation_type: str | None = None):
+    """Query KnowledgeGraph neighbors for an entity."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    correlation_id = str(uuid.uuid4())
+    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+    async def handler(msg: Message):
+        if msg.correlation_id == correlation_id and not response_future.done():
+            response_future.set_result(msg)
+
+    await bus.subscribe("knowledge.response", handler)
+
+    query = Message(
+        type=MessageType.QUERY,
+        source_node_id="api_server",
+        topic="knowledge.query",
+        payload={"action": "neighbors", "entity": entity, "direction": direction, "relation_type": relation_type},
+        correlation_id=correlation_id,
+    )
+    await bus.publish("knowledge.query", query)
+
+    try:
+        result = await asyncio.wait_for(response_future, timeout=5.0)
+        return result.payload
+    except asyncio.TimeoutError:
+        return {"neighbors": [], "entity": entity}
+
+
+@app.get("/v1/knowledge/path")
+async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5):
+    """Find shortest path between two entities in the KnowledgeGraph."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    correlation_id = str(uuid.uuid4())
+    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+    async def handler(msg: Message):
+        if msg.correlation_id == correlation_id and not response_future.done():
+            response_future.set_result(msg)
+
+    await bus.subscribe("knowledge.response", handler)
+
+    query = Message(
+        type=MessageType.QUERY,
+        source_node_id="api_server",
+        topic="knowledge.query",
+        payload={"action": "path", "from": from_entity, "to": to_entity, "max_depth": max_depth},
+        correlation_id=correlation_id,
+    )
+    await bus.publish("knowledge.query", query)
+
+    try:
+        result = await asyncio.wait_for(response_future, timeout=5.0)
+        return result.payload
+    except asyncio.TimeoutError:
+        return {"path": None, "from": from_entity, "to": to_entity}
+
+
+@app.get("/v1/knowledge/subgraph/{entity}")
+async def knowledge_subgraph(entity: str, depth: int = 2):
+    """Extract a subgraph around an entity."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    correlation_id = str(uuid.uuid4())
+    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+    async def handler(msg: Message):
+        if msg.correlation_id == correlation_id and not response_future.done():
+            response_future.set_result(msg)
+
+    await bus.subscribe("knowledge.response", handler)
+
+    query = Message(
+        type=MessageType.QUERY,
+        source_node_id="api_server",
+        topic="knowledge.query",
+        payload={"action": "subgraph", "entity": entity, "depth": depth},
+        correlation_id=correlation_id,
+    )
+    await bus.publish("knowledge.query", query)
+
+    try:
+        result = await asyncio.wait_for(response_future, timeout=5.0)
+        return result.payload
+    except asyncio.TimeoutError:
+        return {"subgraph": {"entities": [], "relations": []}, "entity": entity}
+
+
+@app.get("/v1/knowledge/stats")
+async def knowledge_stats():
+    """Get KnowledgeGraph statistics."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    correlation_id = str(uuid.uuid4())
+    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+    async def handler(msg: Message):
+        if msg.correlation_id == correlation_id and not response_future.done():
+            response_future.set_result(msg)
+
+    await bus.subscribe("knowledge.response", handler)
+
+    query = Message(
+        type=MessageType.QUERY,
+        source_node_id="api_server",
+        topic="knowledge.query",
+        payload={"action": "stats"},
+        correlation_id=correlation_id,
+    )
+    await bus.publish("knowledge.query", query)
+
+    try:
+        result = await asyncio.wait_for(response_future, timeout=5.0)
+        return result.payload
+    except asyncio.TimeoutError:
+        return {"entity_count": 0, "relation_count": 0}
+
+
+# ─── Rules Endpoint ───────────────────────────────────────────────────────────
+
+@app.get("/v1/rules")
+async def list_rules():
+    """List extracted if→then rules from the RuleExtractorNode."""
+    # Find the rule extractor node in the running nodes
+    nodes = _state.get("nodes", [])
+    for node in nodes:
+        if hasattr(node, "rules"):
+            return {
+                "rules": [r.to_dict() for r in node.rules],
+                "total": len(node.rules),
+            }
+    return {"rules": [], "total": 0}
+
+
+# ─── WebSocket Streaming ─────────────────────────────────────────────────────
+
+@app.websocket("/v1/chat/ws")
+async def chat_websocket(ws: WebSocket):
+    """
+    Bidirectional WebSocket for real-time chat streaming.
+
+    Client sends:  {"tenant_id": "...", "text": "...", "session_id": "..."}
+    Server sends:  {"token": "...", "done": false}
+                   {"token": "", "done": true, "correlation_id": "..."}
+    """
+    await ws.accept()
+    import json as _json
+
+    bus = _state.get("bus")
+    if not bus:
+        await ws.send_json({"error": "Brain pipeline not initialized"})
+        await ws.close(code=1011)
+        return
+
+    try:
+        while True:
+            # Receive user message
+            raw = await ws.receive_text()
+            try:
+                data = _json.loads(raw)
+            except _json.JSONDecodeError:
+                await ws.send_json({"error": "Invalid JSON"})
+                continue
+
+            tenant_id = data.get("tenant_id", "default")
+            session_id = data.get("session_id", str(uuid.uuid4()))
+            text = data.get("text", "")
+
+            if not text:
+                await ws.send_json({"error": "Missing 'text' field"})
+                continue
+
+            correlation_id = str(uuid.uuid4())
+            response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+
+            async def output_handler(msg: Message):
+                if msg.correlation_id == correlation_id and not response_future.done():
+                    response_future.set_result(msg)
+
+            await bus.subscribe("sensory.output", output_handler)
+
+            # Store user message
+            memory_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id="api_server",
+                tenant_id=tenant_id,
+                session_id=session_id,
+                topic="memory.store",
+                payload={"session_id": session_id, "tenant_id": tenant_id, "role": "user", "content": text},
+            )
+            await bus.publish("memory.store", memory_msg)
+
+            # Route the query
+            query_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id="api_server",
+                tenant_id=tenant_id,
+                session_id=session_id,
+                topic="router.query",
+                payload=QueryPayload(text=text).model_dump(),
+                correlation_id=correlation_id,
+            )
+            await bus.publish("router.query", query_msg)
+
+            # Wait for response and stream it
+            try:
+                result_msg = await asyncio.wait_for(response_future, timeout=30.0)
+                response_text = result_msg.payload.get("text", "")
+
+                # Stream token-by-token for a natural feel
+                tokens = response_text.split(" ")
+                for i, token in enumerate(tokens):
+                    piece = token if i == 0 else " " + token
+                    await ws.send_json({"token": piece, "done": False})
+
+                await ws.send_json({"token": "", "done": True, "correlation_id": correlation_id})
+
+                # Store assistant response
+                store_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id="api_server",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="memory.store",
+                    payload={"session_id": session_id, "tenant_id": tenant_id, "role": "assistant", "content": response_text},
+                )
+                await bus.publish("memory.store", store_msg)
+
+            except asyncio.TimeoutError:
+                await ws.send_json({"token": "", "done": True, "error": "timeout"})
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    except Exception as e:
+        logger.error("WebSocket error: %s", e)
+        try:
+            await ws.close(code=1011)
+        except Exception:
+            pass
 
 
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────
