@@ -282,8 +282,17 @@ class BrainFactory:
         from hbllm.brain.workspace_node import WorkspaceNode
         from hbllm.brain.experience_node import ExperienceNode
         from hbllm.brain.meta_node import MetaReasoningNode
+        from hbllm.brain.identity_node import IdentityNode
+        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.rule_extractor import RuleExtractorNode
+        from hbllm.brain.curiosity_node import CuriosityNode
+        from hbllm.brain.collective_node import CollectiveNode
+        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.world_model_node import WorldModelNode
+        from hbllm.memory.memory_node import MemoryNode
 
         nodes = [
+            # Core cognitive pipeline
             RouterNode(node_id="router", llm=llm),
             PlannerNode(
                 node_id="planner",
@@ -293,9 +302,34 @@ class BrainFactory:
             CriticNode(node_id="critic", llm=llm),
             DecisionNode(node_id="decision", llm=llm),
             WorkspaceNode(node_id="workspace"),
+
+            # Memory (episodic + semantic + procedural + value + knowledge graph)
+            MemoryNode(node_id="memory"),
+
+            # Experience & meta-cognitive layer
             ExperienceNode(node_id="experience", llm=llm),
             MetaReasoningNode(node_id="meta"),
+            RuleExtractorNode(node_id="rule_extractor"),
+
+            # Curiosity-driven goal generation
+            CuriosityNode(node_id="curiosity"),
+
+            # Collective intelligence (multi-instance knowledge sharing)
+            CollectiveNode(node_id="collective"),
+
+            # Online learning from feedback (DPO)
+            LearnerNode(node_id="learner"),
+
+            # World model (code simulation & sandboxed execution)
+            WorldModelNode(node_id="world_model"),
+
+            # Memory consolidation during idle
+            SleepCycleNode(node_id="sleep"),
         ]
+
+        # Optional nodes based on config
+        if cfg.inject_identity:
+            nodes.append(IdentityNode(node_id="identity"))
 
         # Inject LLM into planner
         nodes[1].llm = llm
