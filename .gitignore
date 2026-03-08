@@ -57,3 +57,7 @@ wheels/
 *.gguf
 /hbllm/__pycache__
 workspace/reflection/
+
+# Memory persistence artifacts
+knowledge_graph.json
+semantic/
