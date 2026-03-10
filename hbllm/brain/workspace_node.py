@@ -33,15 +33,33 @@ class WorkspaceNode(Node):
         # In-memory "Blackboard" mapping conversation correlation_ids
         # to the array of proposed thoughts and their active deadlines.
         self.blackboards: Dict[str, Dict[str, Any]] = {}
+        self._sweeper_task: asyncio.Task | None = None
+        # Max age for any blackboard entry before forced cleanup (seconds)
+        self._max_board_age = 60.0
 
     async def on_start(self) -> None:
         """Subscribe to the blackboard topics."""
         logger.info("Starting Global WorkspaceNode")
         await self.bus.subscribe("workspace.update", self.handle_update)
         await self.bus.subscribe("workspace.thought", self.handle_thought)
+        # Start periodic sweeper to clean orphaned blackboards
+        self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
 
     async def on_stop(self) -> None:
+        """Gracefully shut down: notify users of active boards, cancel sweeper."""
         logger.info("Stopping Global WorkspaceNode")
+        # Cancel the sweeper
+        if self._sweeper_task and not self._sweeper_task.done():
+            self._sweeper_task.cancel()
+            try:
+                await self._sweeper_task
+            except asyncio.CancelledError:
+                pass
+        # Gracefully close any active blackboards
+        for corr_id in list(self.blackboards.keys()):
+            await self._send_error_fallback(
+                corr_id, "The system is shutting down. Please try again later."
+            )
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
@@ -71,13 +89,14 @@ class WorkspaceNode(Node):
         
         # Broadcast the context to ALL subjective thinking modules simultaneously
         # (This avoids the Router playing isolated favorites).
+        # Phase 11 Supplement: Explicitly flag if this query should search priority memory
         broadcast_msg = Message(
             type=MessageType.EVENT,
             source_node_id=self.node_id,
             tenant_id=message.tenant_id,
             session_id=message.session_id,
             topic="module.evaluate",  # Intuition, Logic, and Fuzzy modules listen here
-            payload=payload,
+            payload={**payload, "search_priority_memory": True},
             correlation_id=correlation_id
         )
         await self.bus.publish("module.evaluate", broadcast_msg)
@@ -258,12 +277,14 @@ class WorkspaceNode(Node):
         
         if not board["thoughts"]:
             logger.warning("Workspace deadline expired with ZERO thoughts generated.")
-            # Graceful fallback: send an honest "I couldn't reason about this" reply
             await self._send_error_fallback(
                 corr_id,
                 "I wasn't able to form a clear response to that. Could you rephrase your question?"
             )
             return
+        
+        # ── Inject memory context before consensus ──
+        await self._inject_memory_context(corr_id, board)
             
         # Select highest confidence thought
         best_thought = max(board["thoughts"], key=lambda t: t["confidence"])
@@ -296,11 +317,107 @@ class WorkspaceNode(Node):
                 correlation_id=corr_id
             )
             await self.bus.publish("workspace.simulate", sim_msg)
-            # Do NOT finalize. Wait for `handle_thought` to get the `simulation_result`.
+            # Do NOT finalize yet. Wait for `handle_thought` to get the `simulation_result`.
+            # But un-mark resolved so the board stays alive for the simulation callback.
+            board["resolved"] = False
             return
 
         # If it doesn't need simulation, commit immediately
         await self._commit_to_decision(corr_id, best_thought)
+
+    async def _inject_memory_context(self, corr_id: str, board: dict[str, Any]) -> None:
+        """
+        Query semantic and procedural memory for relevant context before consensus.
+        Inject results as supplementary thoughts on the blackboard.
+        
+        Skips memory services that have no active subscribers to avoid hangs.
+        """
+        query_text = board["original_query"].get("text", "")
+        if not query_text:
+            return
+        
+        # Check which memory services are available by inspecting bus subscriptions
+        bus_subs = getattr(self.bus, '_subscriptions', {})
+        has_semantic = bool(bus_subs.get("memory.search"))
+        has_procedural = bool(bus_subs.get("memory.skill.find"))
+        
+        if not has_semantic and not has_procedural:
+            return  # No memory services available
+        
+        async def _try_semantic():
+            if not has_semantic:
+                return
+            try:
+                mem_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    tenant_id=board["tenant_id"],
+                    session_id=board["session_id"],
+                    topic="memory.search",
+                    payload={"query": query_text, "limit": 3},
+                    correlation_id=corr_id,
+                )
+                resp = await asyncio.wait_for(
+                    self.bus.request("memory.search", mem_msg, timeout=1.5),
+                    timeout=2.0,
+                )
+                results = resp.payload.get("results", [])
+                if results:
+                    memory_context = "\n".join(
+                        f"- {r.get('text', r.get('content', ''))[:200]}" for r in results[:3]
+                    )
+                    board["thoughts"].append({
+                        "node": "memory_retrieval",
+                        "type": "memory_context",
+                        "confidence": 0.3,
+                        "content": f"Relevant past context:\n{memory_context}",
+                    })
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception:
+                pass
+
+        async def _try_procedural():
+            if not has_procedural:
+                return
+            try:
+                skill_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    tenant_id=board["tenant_id"],
+                    topic="memory.skill.find",
+                    payload={"query": query_text, "limit": 2},
+                    correlation_id=corr_id,
+                )
+                resp = await asyncio.wait_for(
+                    self.bus.request("memory.skill.find", skill_msg, timeout=1.5),
+                    timeout=2.0,
+                )
+                skills = resp.payload.get("skills", [])
+                if skills:
+                    skill_text = "\n".join(
+                        f"- {s.get('name', 'unknown')}: {', '.join(s.get('steps', [])[:3])}"
+                        for s in skills[:2]
+                    )
+                    board["thoughts"].append({
+                        "node": "procedural_memory",
+                        "type": "skill_context",
+                        "confidence": 0.25,
+                        "content": f"Applicable learned skills:\n{skill_text}",
+                    })
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception:
+                pass
+
+        # Run both in parallel with a hard 2.5s ceiling
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(_try_semantic(), _try_procedural(), return_exceptions=True),
+                timeout=2.5,
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            logger.debug("Memory context injection timed out for %s", corr_id)
 
     async def _commit_to_decision(self, corr_id: str, best_thought: dict[str, Any]):
         """Helper to push the final approved thought to the physical Decision Engine."""
@@ -352,3 +469,23 @@ class WorkspaceNode(Node):
             logger.exception("Failed to send error fallback for %s", corr_id)
         finally:
             self.blackboards.pop(corr_id, None)
+
+    async def _periodic_sweeper(self) -> None:
+        """Periodically clean up blackboard entries that have exceeded max age."""
+        while True:
+            try:
+                await asyncio.sleep(10.0)  # Check every 10 seconds
+                now = time.time()
+                stale_ids = [
+                    cid for cid, board in self.blackboards.items()
+                    if now - board.get("start_time", now) > self._max_board_age
+                ]
+                for cid in stale_ids:
+                    logger.warning("Sweeper cleaning stale blackboard: %s", cid)
+                    await self._send_error_fallback(
+                        cid, "Request timed out. Please try again."
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error in blackboard sweeper")

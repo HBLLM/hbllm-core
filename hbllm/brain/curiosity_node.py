@@ -133,6 +133,7 @@ class CuriosityNode(Node):
         logger.info("Starting CuriosityNode (threshold=%d)", self.uncertainty_threshold)
         await self.bus.subscribe("system.feedback", self._handle_feedback)
         await self.bus.subscribe("workspace.fallback", self._handle_fallback)
+        await self.bus.subscribe("workspace.thought", self._handle_low_confidence_thought)
         await self.bus.subscribe("curiosity.query", self._handle_query)
 
     async def on_stop(self) -> None:
@@ -172,6 +173,30 @@ class CuriosityNode(Node):
         await self._record_event(event)
         return None
 
+    async def _handle_low_confidence_thought(self, message: Message) -> Message | None:
+        """Detect low-confidence workspace thoughts as uncertainty signals."""
+        payload = message.payload
+        confidence = payload.get("confidence", 1.0)
+        thought_type = payload.get("type", "")
+        
+        # Ignore meta-thoughts (critiques, simulation results)
+        if thought_type in ("critique", "simulation_result", "curiosity_signal"):
+            return None
+        
+        # Only record if confidence is notably low
+        if confidence >= 0.4:
+            return None
+        
+        event = UncertaintyEvent(
+            topic=payload.get("domain", thought_type or "general"),
+            query=str(payload.get("content", ""))[:200],
+            reason="low_confidence",
+            confidence=confidence,
+            tenant_id=message.tenant_id,
+        )
+        await self._record_event(event)
+        return None
+
     async def _handle_query(self, message: Message) -> Message | None:
         """Return curiosity engine stats."""
         return message.create_response({
@@ -201,7 +226,7 @@ class CuriosityNode(Node):
             await self._maybe_dispatch()
 
     async def _maybe_dispatch(self) -> None:
-        """Dispatch the top pending goal if enough time has passed."""
+        """Dispatch the top pending goal to SpawnerNode and SleepNode."""
         now = time.monotonic()
         if now - self._last_dispatch < self.goal_dispatch_interval:
             return
@@ -211,18 +236,43 @@ class CuriosityNode(Node):
             return
 
         self._last_dispatch = now
+        goal_payload = {
+            "goal_topic": goal.topic,
+            "description": goal.description,
+            "priority": goal.priority,
+            "source_events": goal.source_events,
+        }
+        
+        # 1. Publish to curiosity.goal (general signal)
         await self.publish("curiosity.goal", Message(
             type=MessageType.EVENT,
             source_node_id=self.node_id,
             topic="curiosity.goal",
+            payload=goal_payload,
+        ))
+        
+        # 2. Dispatch to SpawnerNode for data synthesis + training
+        await self.publish("system.spawn", Message(
+            type=MessageType.SPAWN_REQUEST,
+            source_node_id=self.node_id,
+            topic="system.spawn",
             payload={
-                "goal_topic": goal.topic,
-                "description": goal.description,
-                "priority": goal.priority,
-                "source_events": goal.source_events,
+                "topic": goal.topic,
+                "trigger_query": goal.description,
+                "confidence_score": 0.0,
+                "from_curiosity": True,
             },
         ))
-        logger.info("Dispatched learning goal: %s", goal.description)
+        
+        # 3. Queue for SleepNode consolidation during idle time
+        await self.publish("system.sleep.goal", Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            topic="system.sleep.goal",
+            payload=goal_payload,
+        ))
+        
+        logger.info("Dispatched learning goal to spawn+sleep: %s", goal.description)
 
     def _get_top_gaps(self, top_k: int = 5) -> list[dict[str, Any]]:
         """Return the topics with the most uncertainty events."""

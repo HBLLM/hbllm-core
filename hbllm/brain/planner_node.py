@@ -12,8 +12,11 @@ Reference: "Graph of Thoughts: Solving Elaborate Problems with Large Language Mo
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -150,6 +153,9 @@ class PlannerNode(Node):
     a DAG of reasoning steps with branching, scoring, merging, and pruning.
     """
 
+    # Max cached prompt/response pairs
+    MAX_CACHE_SIZE = 200
+
     def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2):
         super().__init__(
             node_id=node_id,
@@ -158,11 +164,17 @@ class PlannerNode(Node):
         )
         self.branch_factor = branch_factor
         self.max_depth = max_depth
+        # LRU cache: hash(prompt) → response text
+        self._response_cache: OrderedDict[str, str] = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     async def on_start(self) -> None:
-        """Subscribe to planning requests."""
+        """Subscribe to planning requests and workspace updates."""
         logger.info("Starting PlannerNode (Graph-of-Thoughts)")
         await self.bus.subscribe("planner.decompose", self.handle_message)
+        # Also participate as a workspace thought contributor
+        await self.bus.subscribe("workspace.update", self._contribute_to_workspace)
 
     async def on_stop(self) -> None:
         logger.info("Stopping PlannerNode")
@@ -181,6 +193,18 @@ class PlannerNode(Node):
             return None
 
         text = message.payload.get("text", "")
+        
+        # Check prompt cache for exact matches
+        cache_key = self._cache_key(text)
+        if cache_key in self._response_cache:
+            self._cache_hits += 1
+            cached = self._response_cache[cache_key]
+            # Move to end (most recently used)
+            self._response_cache.move_to_end(cache_key)
+            logger.info("[GoT] Cache HIT for query (hits=%d, misses=%d)", self._cache_hits, self._cache_misses)
+            return message.create_response({"text": cached, "domain": "planner", "cached": True})
+        
+        self._cache_misses += 1
         logger.info("[GoT] Starting Graph-of-Thoughts for: '%s...'", text[:40])
 
         graph = ThoughtGraph()
@@ -268,7 +292,24 @@ class PlannerNode(Node):
         )
         
         logger.info("[GoT] Selected path: %s (score=%.2f)", path_desc, final_node.score)
+        
+        # Cache the result
+        self._cache_response(cache_key, final_text)
+        
         return message.create_response({"text": final_text, "domain": "planner"})
+
+    # ── Cache helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _cache_key(text: str) -> str:
+        """Generate a cache key from prompt text."""
+        return hashlib.md5(text.strip().lower().encode()).hexdigest()
+
+    def _cache_response(self, key: str, response: str) -> None:
+        """Store a response in the LRU cache, evicting oldest if full."""
+        self._response_cache[key] = response
+        while len(self._response_cache) > self.MAX_CACHE_SIZE:
+            self._response_cache.popitem(last=False)
 
     # ── Private helpers ───────────────────────────────────────────────────
 
@@ -301,7 +342,6 @@ class PlannerNode(Node):
             resp = await self.request("domain.general.query", req, timeout=30.0)
             # Parse score from response or use heuristic
             resp_text = resp.payload.get("text", "")
-            import re
             match = re.search(r"(\d+\.?\d*)", resp_text)
             if match:
                 raw = float(match.group(1))
@@ -356,3 +396,62 @@ class PlannerNode(Node):
         except Exception as e:
             logger.warning("[GoT] Merge failed: %s", e)
             return ""
+
+    async def _contribute_to_workspace(self, message: Message) -> Message | None:
+        """
+        Participate in workspace deliberation by generating GoT thoughts.
+        
+        When a workspace.update arrives, runs a lightweight GoT process
+        and posts the best-path result as a workspace.thought.
+        """
+        text = message.payload.get("text", "")
+        if not text or len(text) < 10:
+            return None
+
+        # Check cache first
+        cache_key = self._cache_key(text)
+        if cache_key in self._response_cache:
+            cached_content = self._response_cache[cache_key]
+        else:
+            # Create a synthetic planning request
+            plan_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="planner.decompose",
+                payload={"text": text},
+                correlation_id=message.correlation_id or message.id,
+            )
+            
+            result = await self.handle_message(plan_msg)
+            if result is None:
+                return None
+            cached_content = result.payload.get("text", "")
+        
+        if not cached_content:
+            return None
+
+        # Post as a workspace thought
+        thought_msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            tenant_id=message.tenant_id,
+            session_id=message.session_id,
+            topic="workspace.thought",
+            payload={
+                "type": "graph_of_thoughts",
+                "confidence": 0.8,  # GoT thoughts get a confidence boost
+                "content": cached_content,
+                "metadata": {
+                    "source": "got_planner",
+                    "branch_factor": self.branch_factor,
+                    "max_depth": self.max_depth,
+                },
+            },
+            correlation_id=message.correlation_id or message.id,
+        )
+        await self.bus.publish("workspace.thought", thought_msg)
+        logger.debug("[GoT] Posted workspace thought for: %s", text[:60])
+        return None
+

@@ -83,6 +83,7 @@ class CollectiveNode(Node):
         self.stats = {
             "broadcasts_sent": 0,
             "digests_received": 0,
+            "digests_integrated": 0,
             "duplicates_filtered": 0,
         }
 
@@ -94,9 +95,10 @@ class CollectiveNode(Node):
 
     async def on_stop(self) -> None:
         logger.info(
-            "Stopping CollectiveNode — sent=%d, received=%d, deduped=%d",
+            "Stopping CollectiveNode — sent=%d, received=%d, integrated=%d, deduped=%d",
             self.stats["broadcasts_sent"],
             self.stats["digests_received"],
+            self.stats["digests_integrated"],
             self.stats["duplicates_filtered"],
         )
 
@@ -148,7 +150,7 @@ class CollectiveNode(Node):
     async def _handle_sync(self, message: Message) -> Message | None:
         """
         Receive a knowledge digest from a peer instance.
-        Deduplicates by checksum and stores for later integration.
+        Deduplicates by checksum, stores, and integrates into the local brain.
         """
         payload = message.payload
         
@@ -188,7 +190,89 @@ class CollectiveNode(Node):
             "Received knowledge from instance %s: domain=%s capability=%s",
             source, digest.domain, digest.capability,
         )
+        
+        # ── Integrate the digest into the local brain ──
+        await self._integrate_digest(digest)
+        
         return None
+
+    async def _integrate_digest(self, digest: KnowledgeDigest) -> None:
+        """
+        Route a received digest to the appropriate local subsystem for
+        hot-loading into the running brain.
+        """
+        artifact_type = digest.artifact_type
+        data = digest.artifact_data
+        
+        try:
+            if artifact_type == "lora_weights":
+                # Trigger the spawner to load the new LoRA adapter
+                await self.publish("system.spawn", Message(
+                    type=MessageType.SPAWN_REQUEST,
+                    source_node_id=self.node_id,
+                    topic="system.spawn",
+                    payload={
+                        "topic": digest.domain,
+                        "trigger_query": f"Integrated from peer {digest.source_instance_id}",
+                        "confidence_score": 0.0,
+                        "adapter_path": data.get("adapter_path", ""),
+                        "from_collective": True,
+                    },
+                ))
+                
+            elif artifact_type == "skill":
+                # Store the skill in procedural memory
+                await self.publish("memory.skill.store", Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="memory.skill.store",
+                    payload={
+                        "name": digest.capability or digest.domain,
+                        "steps": data.get("steps", []),
+                        "domain": digest.domain,
+                        "from_collective": True,
+                    },
+                ))
+                
+            elif artifact_type == "semantic_fact":
+                # Store facts in semantic memory
+                await self.publish("memory.store", Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="memory.store",
+                    payload={
+                        "text": data.get("text", ""),
+                        "domain": digest.domain,
+                        "metadata": {"source": f"collective:{digest.source_instance_id}"},
+                        "from_collective": True,
+                    },
+                ))
+                
+            elif artifact_type == "identity_update":
+                # Forward identity updates for the relevant tenant
+                await self.publish("identity.update", Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="identity.update",
+                    payload=data,
+                ))
+            else:
+                logger.debug(
+                    "Unknown artifact type '%s' from peer %s — stored but not integrated",
+                    artifact_type, digest.source_instance_id,
+                )
+                return
+                
+            self.stats["digests_integrated"] += 1
+            logger.info(
+                "Integrated %s digest from peer %s (domain=%s)",
+                artifact_type, digest.source_instance_id, digest.domain,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to integrate digest %s from peer %s: %s",
+                digest.id, digest.source_instance_id, e,
+            )
 
     async def _handle_query(self, message: Message) -> Message | None:
         """Return collective intelligence stats and recent digests."""

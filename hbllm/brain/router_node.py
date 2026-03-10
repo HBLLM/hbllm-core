@@ -31,6 +31,13 @@ class RouterNode(Node):
         self.topic_sub = "router.query"
         self.llm = llm  # LLMInterface instance
         
+        # Dynamic domain registry (updated by SpawnerNode when new modules are created)
+        self.known_domains: set[str] = {"general", "coding", "math", "planner", "api_synth", "fuzzy"}
+        self.known_intents: set[str] = {
+            "general_knowledge", "code_generation", "math_reasoning",
+            "complex_reasoning", "web_search", "tool_synthesis", "fuzzy_reasoning", "unknown_topic"
+        }
+        
         # Self-expansion tracking
         self.unknown_threshold = 0.3
         self.spawn_trigger_count = 2
@@ -40,9 +47,11 @@ class RouterNode(Node):
         self.last_activity_time = time.time()
 
     async def on_start(self) -> None:
-        """Subscribe to router queries."""
+        """Subscribe to router queries and feedback for adaptive routing."""
         logger.info("Starting RouterNode")
         await self.bus.subscribe(self.topic_sub, self.handle_message)
+        await self.bus.subscribe("system.feedback", self._handle_feedback)
+        await self.bus.subscribe("system.domain_registered", self._handle_domain_registered)
 
     async def on_stop(self) -> None:
         logger.info("Stopping RouterNode")
@@ -68,23 +77,27 @@ class RouterNode(Node):
         intent = "general_knowledge"
 
         if self.llm:
-            classification = await self.llm.generate_json(
-                f"You are an intent classifier for a modular AI system. Classify the following "
-                f"query into exactly one domain and intent.\n\n"
-                f"Available domains: general, coding, math, planner, api_synth, fuzzy\n"
-                f"Available intents: general_knowledge, code_generation, math_reasoning, "
-                f"complex_reasoning, web_search, tool_synthesis, fuzzy_reasoning, unknown_topic\n\n"
-                f"Query: \"{text}\"\n\n"
-                f"Output JSON: {{\"domain\": \"...\", \"intent\": \"...\", \"confidence\": 0.0-1.0}}"
-            )
-            
-            if "error" not in classification:
-                target_domain = classification.get("domain", self.default_domain)
-                intent = classification.get("intent", "general_knowledge")
-                try:
-                    confidence = float(classification.get("confidence", 0.5))
-                except (ValueError, TypeError):
-                    confidence = 0.5
+            domains_str = ", ".join(sorted(self.known_domains))
+            intents_str = ", ".join(sorted(self.known_intents))
+            try:
+                classification = await self.llm.generate_json(
+                    f"You are an intent classifier for a modular AI system. Classify the following "
+                    f"query into exactly one domain and intent.\n\n"
+                    f"Available domains: {domains_str}\n"
+                    f"Available intents: {intents_str}\n\n"
+                    f"Query: \"{text}\"\n\n"
+                    f"Output JSON: {{\"domain\": \"...\", \"intent\": \"...\", \"confidence\": 0.0-1.0}}"
+                )
+                
+                if "error" not in classification:
+                    target_domain = classification.get("domain", self.default_domain)
+                    intent = classification.get("intent", "general_knowledge")
+                    try:
+                        confidence = float(classification.get("confidence", 0.5))
+                    except (ValueError, TypeError):
+                        confidence = 0.5
+            except Exception as e:
+                logger.warning("Router LLM classification failed, using defaults: %s", e)
 
         # 2. Self-Expansion Logic
         if confidence < self.unknown_threshold:
@@ -147,4 +160,37 @@ class RouterNode(Node):
         )
         await self.bus.publish("workspace.update", routed_query)
         
+        return None
+
+    async def _handle_feedback(self, message: Message) -> Message | None:
+        """
+        Adapt routing heuristics based on user feedback.
+        Positive feedback → lower unknown_threshold (more permissive).
+        Negative feedback → raise threshold (more cautious, trigger spawns sooner).
+        """
+        rating = message.payload.get("rating", 0)
+        domain = message.payload.get("domain", "")
+        
+        if rating > 0:
+            # Positive: routing was good, become slightly more permissive
+            self.unknown_threshold = max(0.15, self.unknown_threshold - 0.02)
+            if domain and domain not in self.known_domains:
+                self.known_domains.add(domain)
+                logger.info("RouterNode learned new domain from feedback: %s", domain)
+        elif rating < 0:
+            # Negative: routing may have been wrong, become slightly more cautious
+            self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
+        
+        logger.debug(
+            "RouterNode threshold adjusted to %.2f after feedback (rating=%d)",
+            self.unknown_threshold, rating,
+        )
+        return None
+
+    async def _handle_domain_registered(self, message: Message) -> Message | None:
+        """Auto-learn new domains when SpawnerNode creates them."""
+        domain = message.payload.get("domain", "")
+        if domain:
+            self.known_domains.add(domain)
+            logger.info("RouterNode registered new domain: %s", domain)
         return None

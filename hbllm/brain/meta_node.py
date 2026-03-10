@@ -33,13 +33,29 @@ class MetaReasoningNode(Node):
         os.makedirs(self.reflection_dir, exist_ok=True)
 
     async def on_start(self) -> None:
-        """Subscribe to feedback broadcasts to monitor system health."""
+        """Subscribe to feedback and salience broadcasts."""
         logger.info("Starting MetaReasoningNode '%s' Supervisor", self.node_id)
         await self.bus.subscribe("system.feedback", self.handle_message)
+        await self.bus.subscribe("system.salience", self.handle_salience)
 
     async def on_stop(self) -> None:
         """Clean up."""
         logger.info("Stopping MetaReasoningNode")
+
+    async def handle_salience(self, message: Message) -> None:
+        """Handle high-salience events for reflection."""
+        if message.type != MessageType.SALIENCE_SCORE:
+            return
+
+        payload = message.payload
+        if payload.get("is_priority"):
+            logger.info("MetaReasoningNode detected high-salience event. Triggering priority reflection.")
+            # Map salience to the reflection engine (Node M)
+            await self._trigger_reflection(
+                domain="high_salience",
+                reason=f"High saliency score detected: {payload.get('score')}",
+                content=payload.get("content")
+            )
 
     async def handle_message(self, message: Message) -> Message | None:
         """Process incoming feedback silently to monitor health."""
@@ -73,24 +89,26 @@ class MetaReasoningNode(Node):
 
         return None
 
-    async def _trigger_reflection(self, domain: str) -> None:
+    async def _trigger_reflection(self, domain: str, reason: str | None = None, content: str | None = None) -> None:
         """Creates a reflection dataset and triggers the self-improvement loop."""
-        logger.critical("--- SYSTEMIC WEAKNESS DETECTED IN DOMAIN '%s' ---", domain.upper())
+        logger.critical("--- REFLECTION INITIATED FOR DOMAIN '%s' ---", domain.upper())
         logger.info("MetaReasoningNode is initiating a self-improvement loop.")
         
         # 1. Dump dataset to disk
-        filename = f"weakness_{domain}_{uuid.uuid4().hex[:8]}.jsonl"
+        filename = f"reflection_{domain}_{uuid.uuid4().hex[:8]}.jsonl"
         filepath = os.path.join(self.reflection_dir, filename)
         
         dataset = self.negative_feedback_buffer[domain]
+        if not dataset and content:
+            dataset = [{"content": content, "domain": domain}]
         
+        reason = reason or f"Accumulated {self.weakness_threshold} negative feedback events recently."
+
         try:
             # Thread file IO
             def _write():
                 with open(filepath, "w") as f:
                     for item in dataset:
-                        # In a real system, you might generate preferred responses here 
-                        # using a stronger teacher model or search. For now we just isolate the failures.
                         f.write(json.dumps(item) + "\n")
             
             await asyncio.to_thread(_write)
@@ -108,7 +126,7 @@ class MetaReasoningNode(Node):
             topic="system.improve",
             payload=SystemImprovePayload(
                 domain=domain,
-                reasoning=f"Accumulated {self.weakness_threshold} negative feedback events recently.",
+                reasoning=reason,
                 dataset_path=filepath
             ).model_dump()
         )
