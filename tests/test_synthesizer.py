@@ -5,7 +5,8 @@ import pytest
 from hbllm.data.synthesizer import DataSynthesizer
 
 def test_data_synthesizer_generation(tmp_path):
-    # Dummy model and tokenizer for test
+    # Dummy model and tokenizer — LLMInterface won't initialize (no .parameters()),
+    # so the synthesizer falls back to template-based generation.
     class DummyModel:
         pass
     class DummyTokenizer:
@@ -34,4 +35,8 @@ def test_data_synthesizer_generation(tmp_path):
     # Check that topic was injected
     assert topic in dataset[0]["instruction"]
     assert dataset[0]["topic"] == topic
-    assert "[Synthetic Data Fragment" in dataset[0]["response"]
+    # Template fallback marks source as "template"
+    assert dataset[0]["source"] == "template"
+    # Response should contain topic-related content
+    assert topic in dataset[0]["response"]
+

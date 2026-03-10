@@ -265,6 +265,8 @@ class TestPolicyEngine:
 
     def test_load_real_policies_yaml(self):
         engine = PolicyEngine()
+        if not os.path.exists("config/policies.yaml"):
+            pytest.skip("config/policies.yaml not found — skipping real file test")
         loaded = engine.load_from_yaml("config/policies.yaml")
         assert loaded > 0
 

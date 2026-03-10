@@ -183,7 +183,12 @@ async def test_concurrent_message_flood():
         tasks.append(bus.publish("flood.test", msg))
 
     await asyncio.gather(*tasks)
-    await asyncio.sleep(0.5)
+    
+    # Wait dynamically for messages rather than fixed sleep
+    for _ in range(20):
+        if len(received) == 1000:
+            break
+        await asyncio.sleep(0.1)
 
     assert len(received) == 1000
 
