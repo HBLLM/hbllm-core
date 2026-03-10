@@ -56,3 +56,6 @@ wheels/
 *.onnx
 *.gguf
 /hbllm/__pycache__
+/workspace
+/semantic/
+/knowledge_graph.json
