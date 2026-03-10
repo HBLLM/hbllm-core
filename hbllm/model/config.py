@@ -123,6 +123,24 @@ CONFIGS = {
         intermediate_size=8192,
         max_position_embeddings=4096,
     ),
+    "7b": ModelConfig(
+        name="hbllm-7b",
+        hidden_size=4096,
+        num_layers=32,
+        num_attention_heads=32,
+        num_kv_heads=8,
+        intermediate_size=11008,
+        max_position_embeddings=8192,
+    ),
+    "13b": ModelConfig(
+        name="hbllm-13b",
+        hidden_size=5120,
+        num_layers=40,
+        num_attention_heads=40,
+        num_kv_heads=8,
+        intermediate_size=13824,
+        max_position_embeddings=8192,
+    ),
 }
 
 

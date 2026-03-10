@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from typing import Any, Callable, Coroutine, Protocol, runtime_checkable
+
+from datetime import timezone
 
 from hbllm.network.messages import Message
 from hbllm.network.tracing import BusMetrics, trace_span
@@ -84,11 +87,15 @@ class InProcessBus:
     def __init__(self, queue_size: int = 1000):
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
-        self._queue: asyncio.Queue[tuple[str, Message]] = asyncio.Queue(maxsize=queue_size)
+        self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = asyncio.PriorityQueue(maxsize=queue_size)
+        self._queue_size = queue_size
         self._running = False
         self._dispatch_task: asyncio.Task[None] | None = None
         self._sub_counter = 0
+        self._msg_counter = 0  # Tiebreaker for priority queue ordering
         self.metrics = BusMetrics()
+        # Backpressure monitoring
+        self._backpressure_warning_threshold = 0.8  # Warn at 80% full
 
     async def start(self) -> None:
         """Start the message dispatch loop."""
@@ -117,14 +124,26 @@ class InProcessBus:
         logger.info("InProcessBus stopped")
 
     async def publish(self, topic: str, message: Message) -> None:
-        """Publish a message to all subscribers of a topic."""
+        """Publish a message to all subscribers of a topic, respecting priority."""
         if not self._running:
             self.metrics.record_drop(topic)
             logger.warning("Bus is not running, message dropped: %s", message.id)
             return
 
+        # Backpressure monitoring
+        queue_fullness = self._queue.qsize() / self._queue_size
+        if queue_fullness >= self._backpressure_warning_threshold:
+            logger.warning(
+                "Bus queue at %.0f%% capacity (%d/%d)",
+                queue_fullness * 100, self._queue.qsize(), self._queue_size
+            )
+
         self.metrics.record_publish(topic)
-        await self._queue.put((topic, message))
+        # Priority queue: lower number = higher priority. Negate message priority value.
+        # Use a monotonic counter as tiebreaker to preserve FIFO order within same priority.
+        self._msg_counter += 1
+        priority_key = -message.priority.value  # CRITICAL=3 → -3 (highest)
+        await self._queue.put((priority_key, self._msg_counter, topic, message))
 
     async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
@@ -164,12 +183,22 @@ class InProcessBus:
         logger.debug("Unsubscribed '%s' from '%s'", subscription.id, subscription.topic)
 
     async def _dispatch_loop(self) -> None:
-        """Main loop: dequeue messages and dispatch to subscribers."""
+        """Main loop: dequeue messages by priority and dispatch to subscribers."""
         while self._running:
             try:
-                topic, message = await asyncio.wait_for(self._queue.get(), timeout=0.1)
+                priority_key, _counter, topic, message = await asyncio.wait_for(
+                    self._queue.get(), timeout=0.1
+                )
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 continue
+
+            # TTL enforcement: drop expired messages
+            if message.ttl_seconds is not None:
+                age = (time.time() - message.timestamp.replace(tzinfo=timezone.utc).timestamp())
+                if age > message.ttl_seconds:
+                    self.metrics.record_drop(topic)
+                    logger.debug("Dropped expired message %s (age=%.1fs, ttl=%.1fs)", message.id, age, message.ttl_seconds)
+                    continue
 
             # Check if this is a response to a pending request
             if message.correlation_id and message.correlation_id in self._pending_requests:
@@ -191,11 +220,11 @@ class InProcessBus:
                 if not sub.active:
                     continue
                 async def _run_handler(s=sub, t=topic, m=message):
-                    _start = __import__('time').monotonic()
+                    _start = time.monotonic()
                     try:
                         with trace_span(f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}):
                             response = await s.handler(m)
-                        latency = (__import__('time').monotonic() - _start) * 1000
+                        latency = (time.monotonic() - _start) * 1000
                         self.metrics.record_delivery(t, latency)
                         # If handler returns a response, route it back
                         if response is not None:

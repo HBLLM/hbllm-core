@@ -53,6 +53,7 @@ class MessageType(str, Enum):
     
     # AGI / Self-Improvement
     SYSTEM_IMPROVE = "system_improve"
+    SALIENCE_SCORE = "salience_score"
 
 
 class Priority(int, Enum):

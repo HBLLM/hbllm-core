@@ -31,6 +31,7 @@ class NodeType(str, Enum):
     DETECTOR = "detector"
     SPAWNER = "spawner"
     META = "meta"
+    PERCEPTION = "perception"
 
 
 class HealthStatus(str, Enum):
