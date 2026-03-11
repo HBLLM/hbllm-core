@@ -137,6 +137,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
     logger.info("=== Step 1: Data Pipeline ===")
     data_dir = Path(args.data_dir)
     shard_dir = data_dir / "shards"
+    tiktoken_mode = False
 
     if not list(shard_dir.glob("shard_*.bin")) if shard_dir.exists() else True:
         logger.info("No shards found. Running data pipeline...")
@@ -147,16 +148,25 @@ def run_pretrain(args: argparse.Namespace) -> None:
                 dataset_name=args.data,
                 max_samples=args.max_samples,
             )
-        except RuntimeError as e:
-            logger.error("Data pipeline failed: %s", e)
-            logger.info("Tip: Install Rust extensions or provide pre-tokenized shards in %s", shard_dir)
-            sys.exit(1)
+        except RuntimeError:
+            logger.info("Rust extensions not available. Using Pure-Python pipeline (tiktoken)...")
+            from hbllm.data.pipeline import PurePythonPipeline
+            pipeline = PurePythonPipeline(data_dir)
+            pipeline.run_all(
+                dataset_name=args.data,
+                max_samples=args.max_samples,
+            )
+            tiktoken_mode = True
     else:
         logger.info("Using existing shards in %s", shard_dir)
 
     # 2. Create model
     logger.info("=== Step 2: Model (%s) ===", args.size)
     config = get_config(args.size)
+    if tiktoken_mode:
+        # Override vocab size for tiktoken cl100k_base
+        config.vocab_size = 100277
+        logger.info("Using tiktoken vocab_size=%d", config.vocab_size)
     model = HBLLMForCausalLM(config)
     param_count = sum(p.numel() for p in model.parameters())
     logger.info("Parameters: %s", f"{param_count:,}")
@@ -173,7 +183,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
     train_config = TrainingConfig(
         learning_rate=args.lr,
         max_steps=args.max_steps,
-        batch_size=args.batch_size,
+        micro_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         checkpoint_dir=args.checkpoint_dir,
         eval_interval_steps=args.eval_interval,
