@@ -11,6 +11,9 @@ from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
 
+# Force each test to get its own event loop to prevent hangs
+pytestmark = pytest.mark.asyncio
+
 
 class MockBusWithRequest(InProcessBus):
     """InProcessBus extended with request-response support for multimodal tests."""
