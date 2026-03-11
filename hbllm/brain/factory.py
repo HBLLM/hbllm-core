@@ -36,6 +36,22 @@ from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
 from hbllm.serving.provider import LLMProvider, get_provider
 
+# New cognitive modules
+from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.goal_manager import GoalManager
+from hbllm.brain.self_model import SelfModel
+from hbllm.brain.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.brain.revision_node import RevisionNode
+from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.actions.tool_memory import ToolMemory
+from hbllm.memory.concept_extractor import ConceptExtractor
+from hbllm.network.cognition_router import CognitionRouter
+from hbllm.serving.token_optimizer import TokenOptimizer
+from hbllm.training.reward_model import RewardModel
+from hbllm.training.policy_optimizer import PolicyOptimizer
+from hbllm.data.interaction_miner import InteractionMiner
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,9 +62,15 @@ class BrainConfig:
     inject_identity: bool = True
     inject_curiosity: bool = True
     inject_perception: bool = False  # Audio/Vision nodes (require ML models)
+    inject_revision: bool = True     # Self-critique loop
+    inject_goals: bool = True        # Autonomous goal system
+    inject_self_model: bool = True   # Capability tracking
+    inject_metrics: bool = True      # Live cognitive metrics
+    inject_cost_optimizer: bool = True  # Token optimization
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
+    data_dir: str = "data"
     system_prompt: str = "You are a helpful AI assistant."
 
 
@@ -76,6 +98,22 @@ class Brain:
         self.nodes = nodes
         self.provider = provider
 
+        # Cognitive subsystems (initialized by factory)
+        self.skill_registry: SkillRegistry | None = None
+        self.goal_manager: GoalManager | None = None
+        self.self_model: SelfModel | None = None
+        self.cognitive_metrics: CognitiveMetrics | None = None
+        self.world_simulator: WorldSimulator | None = None
+        self.revision_node: RevisionNode | None = None
+        self.confidence_estimator: ConfidenceEstimator | None = None
+        self.tool_memory: ToolMemory | None = None
+        self.concept_extractor: ConceptExtractor | None = None
+        self.cognition_router: CognitionRouter | None = None
+        self.token_optimizer: TokenOptimizer | None = None
+        self.reward_model: RewardModel | None = None
+        self.policy_optimizer: PolicyOptimizer | None = None
+        self.interaction_miner: InteractionMiner | None = None
+
     async def process(
         self,
         text: str,
@@ -83,11 +121,44 @@ class Brain:
         session_id: str = "default",
     ) -> PipelineResult:
         """Send a query through the full cognitive pipeline."""
-        return await self.pipeline.process(
+        import time as _time
+        _start = _time.monotonic()
+
+        # Token optimization (pre-process)
+        recommended_model = None
+        if self.token_optimizer:
+            opt_result = self.token_optimizer.optimize(text)
+            recommended_model = opt_result.recommended_model
+
+        result = await self.pipeline.process(
             text=text,
             tenant_id=tenant_id,
             session_id=session_id,
         )
+
+        _elapsed = (_time.monotonic() - _start) * 1000
+
+        # Post-process: record cognitive metrics
+        if self.cognitive_metrics:
+            self.cognitive_metrics.record_latency(_elapsed, "pipeline")
+            self.cognitive_metrics.record_reasoning(result.confidence)
+
+        # Post-process: self-model tracking
+        if self.self_model:
+            domain = result.metadata.get("domain_hint", "general")
+            self.self_model.record_outcome(
+                domain, success=not result.error, confidence=result.confidence,
+                latency_ms=_elapsed,
+            )
+
+        # Post-process: interaction mining
+        if self.interaction_miner and not result.error:
+            self.interaction_miner.record_interaction(
+                query=text, response=result.text,
+                reward=result.confidence, tenant_id=tenant_id,
+            )
+
+        return result
 
     async def shutdown(self) -> None:
         """Stop all nodes, pipeline, and bus."""
@@ -105,6 +176,25 @@ class Brain:
     def usage(self) -> dict[str, int]:
         """Accumulated LLM usage statistics."""
         return self.llm.usage
+
+    def cognitive_stats(self) -> dict:
+        """Get stats from all cognitive subsystems."""
+        stats = {}
+        if self.cognitive_metrics:
+            stats["metrics"] = self.cognitive_metrics.get_dashboard_metrics()
+        if self.self_model:
+            stats["self_model"] = self.self_model.get_metrics()
+        if self.skill_registry:
+            stats["skills"] = self.skill_registry.stats()
+        if self.goal_manager:
+            stats["goals"] = self.goal_manager.stats()
+        if self.tool_memory:
+            stats["tool_memory"] = self.tool_memory.stats()
+        if self.token_optimizer:
+            stats["token_optimizer"] = self.token_optimizer.stats()
+        if self.reward_model:
+            stats["rewards"] = self.reward_model.stats()
+        return stats
 
 
 class BrainFactory:
@@ -380,7 +470,7 @@ class BrainFactory:
             len(nodes),
         )
 
-        return Brain(
+        brain = Brain(
             bus=message_bus,
             registry=registry,
             pipeline=pipeline,
@@ -388,4 +478,38 @@ class BrainFactory:
             nodes=nodes,
             provider=llm_provider,
         )
+
+        # 6. Wire cognitive subsystems
+        data_dir = cfg.data_dir
+
+        # Always-on subsystems
+        brain.skill_registry = SkillRegistry(data_dir=data_dir)
+        brain.tool_memory = ToolMemory(data_dir=data_dir)
+        brain.concept_extractor = ConceptExtractor()
+        brain.world_simulator = WorldSimulator()
+        brain.cognition_router = CognitionRouter()
+        brain.reward_model = RewardModel(data_dir=data_dir)
+        brain.policy_optimizer = PolicyOptimizer()
+        brain.interaction_miner = InteractionMiner(data_dir=data_dir)
+
+        # Configurable subsystems
+        if cfg.inject_revision:
+            brain.confidence_estimator = ConfidenceEstimator()
+            brain.revision_node = RevisionNode()
+
+        if cfg.inject_goals:
+            brain.goal_manager = GoalManager(data_dir=data_dir)
+
+        if cfg.inject_self_model:
+            brain.self_model = SelfModel(data_dir=data_dir)
+
+        if cfg.inject_metrics:
+            brain.cognitive_metrics = CognitiveMetrics(data_dir=data_dir)
+
+        if cfg.inject_cost_optimizer:
+            brain.token_optimizer = TokenOptimizer()
+
+        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools")
+
+        return brain
 
