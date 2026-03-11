@@ -171,11 +171,12 @@ def run_pretrain(args: argparse.Namespace) -> None:
     param_count = sum(p.numel() for p in model.parameters())
     logger.info("Parameters: %s", f"{param_count:,}")
 
-    # 3. Create dataloader
+    # 3. Create dataloader (num_workers=0 to avoid multiprocessing spawn issues)
     train_loader = create_dataloader(
         shard_dir=shard_dir,
         sequence_length=config.max_position_embeddings,
         batch_size=args.batch_size,
+        num_workers=0,
     )
 
     # 4. Train
