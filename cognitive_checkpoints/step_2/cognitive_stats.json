@@ -1,0 +1,55 @@
+{
+  "training": {
+    "total_steps": 2,
+    "cognitive_steps": 2,
+    "elapsed_seconds": 943.6,
+    "lora_enabled": true
+  },
+  "knowledge_graph": {
+    "total_entities": 0,
+    "total_edges": 0,
+    "documents_processed": 4,
+    "entity_types": {},
+    "top_entities": []
+  },
+  "training_memory": {
+    "total_records": 4,
+    "domains": {
+      "creative": {
+        "docs": 2,
+        "avg_loss": 10.4491,
+        "mastery": 0.0,
+        "min_loss": 10.4434,
+        "max_loss": 10.4547
+      },
+      "reasoning": {
+        "docs": 2,
+        "avg_loss": 10.4547,
+        "mastery": 0.0,
+        "min_loss": 10.4547,
+        "max_loss": 10.4547
+      }
+    },
+    "mastered_domains": [],
+    "weak_domains": []
+  },
+  "skills": {
+    "total_skills": 0,
+    "categories": 0,
+    "avg_success_rate": 0
+  },
+  "domain_learning_curves": {
+    "creative": {
+      "samples": 1,
+      "avg_loss": 10.4434,
+      "recent_loss": null,
+      "improving": null
+    },
+    "reasoning": {
+      "samples": 1,
+      "avg_loss": 10.4547,
+      "recent_loss": null,
+      "improving": null
+    }
+  }
+}

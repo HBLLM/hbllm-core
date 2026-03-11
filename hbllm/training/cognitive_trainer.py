@@ -178,8 +178,12 @@ class CognitiveTrainer:
         # 1. Standard forward + backward
         metrics = self.trainer.train_step(batch)
 
-        # 2. Cognitive processing (every N steps, with raw text)
-        if raw_texts and self._step_count % self.cognitive_config.cognitive_interval == 0:
+        # 2. Cognitive processing (every N steps OR on step 1, with raw text)
+        should_process = (
+            self._step_count == 1 or  # always process first step
+            self._step_count % self.cognitive_config.cognitive_interval == 0
+        )
+        if raw_texts and should_process:
             self._cognitive_step_count += 1
             cognitive_metrics = self._cognitive_process(raw_texts, metrics["loss"])
             metrics.update(cognitive_metrics)
@@ -247,6 +251,15 @@ class CognitiveTrainer:
         """
         ckpt_dir = self.output_dir / f"step_{self._step_count}"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+        # Flush any buffered texts through cognitive subsystems
+        if self._raw_text_buffer and (self.knowledge_graph or self.training_memory):
+            unprocessed = self._raw_text_buffer
+            if self.knowledge_graph:
+                self.knowledge_graph.add_from_batch(unprocessed, self._step_count)
+            if self.training_memory:
+                for text in unprocessed:
+                    self.training_memory.record(text, loss, self._step_count)
 
         logger.info("=" * 60)
         logger.info("Saving cognitive checkpoint to %s", ckpt_dir)

@@ -317,6 +317,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
 
 def run_cognitive_pretrain(args: argparse.Namespace) -> None:
     """Run cognitive pre-training: base model + knowledge graph + skills + memory + LoRA."""
+    import os
     import time as _time
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
