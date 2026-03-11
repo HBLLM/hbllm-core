@@ -196,31 +196,85 @@ def run_pretrain(args: argparse.Namespace) -> None:
         if ckpt:
             trainer.load_checkpoint(ckpt)
 
-    # Training loop
+    # Training loop with verbose logging
+    import time as _time
+
+    logger.info("=" * 60)
+    logger.info("Starting training loop")
+    logger.info("  Steps       : %d", args.max_steps)
+    logger.info("  Batch size  : %d micro x %d accum = %d effective",
+                args.batch_size, args.grad_accum, args.batch_size * args.grad_accum)
+    logger.info("  Seq length  : %d", config.max_position_embeddings)
+    logger.info("  Device      : %s", device)
+    logger.info("  Precision   : %s", train_config.precision)
+    logger.info("=" * 60)
+
     data_iter = iter(train_loader)
+    train_start = _time.time()
+    step_start = _time.time()
+    total_tokens_processed = 0
+    running_loss = 0.0
+    loss_count = 0
+
     for step in range(trainer.global_step, args.max_steps):
+        # Load batch
         try:
             batch = next(data_iter)
         except StopIteration:
+            logger.info("  [Epoch boundary] Restarting data iterator...")
             data_iter = iter(train_loader)
             batch = next(data_iter)
 
+        # Track tokens
+        batch_tokens = batch["input_ids"].numel()
+        total_tokens_processed += batch_tokens
+
+        # Forward + backward
+        logger.info("  Step %d/%d: forward+backward pass (%d tokens)...",
+                     step + 1, args.max_steps, batch_tokens)
         metrics = trainer.train_step(batch)
+        running_loss += metrics["loss"]
+        loss_count += 1
 
         if (step + 1) % trainer.config.gradient_accumulation_steps == 0:
             step_metrics = trainer.step()
 
-            if (step + 1) % train_config.log_interval_steps == 0:
-                logger.info(
-                    "Step %d | loss=%.4f lr=%.2e grad_norm=%.2f",
-                    step + 1,
-                    metrics["loss"],
-                    step_metrics["lr"],
-                    step_metrics["grad_norm"],
-                )
+            # Timing
+            step_elapsed = _time.time() - step_start
+            total_elapsed = _time.time() - train_start
+            steps_done = step + 1
+            steps_remaining = args.max_steps - steps_done
+            avg_step_time = total_elapsed / max(1, steps_done)
+            eta_seconds = steps_remaining * avg_step_time
+            tok_per_sec = total_tokens_processed / max(1, total_elapsed)
 
+            # ETA formatting
+            if eta_seconds < 60:
+                eta_str = f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                eta_str = f"{eta_seconds / 60:.1f}min"
+            else:
+                eta_str = f"{eta_seconds / 3600:.1f}hr"
+
+            avg_loss = running_loss / max(1, loss_count)
+
+            logger.info(
+                "  ✓ Step %d/%d | loss=%.4f (avg=%.4f) | lr=%.2e | "
+                "grad_norm=%.2f | %.1f tok/s | %.1fs/step | ETA: %s",
+                steps_done, args.max_steps,
+                metrics["loss"], avg_loss,
+                step_metrics["lr"],
+                step_metrics["grad_norm"],
+                tok_per_sec,
+                step_elapsed,
+                eta_str,
+            )
+
+            step_start = _time.time()
+
+            # Eval
             if (step + 1) % train_config.eval_interval_steps == 0 and not args.no_eval:
-                logger.info("Running evaluation...")
+                logger.info("  [Eval] Running evaluation at step %d...", steps_done)
                 from hbllm.training.evaluator import ModelEvaluator
                 tokenizer = HBLLMTokenizer.from_tiktoken()
                 evaluator = ModelEvaluator(model, tokenizer, device)
@@ -230,14 +284,27 @@ def run_pretrain(args: argparse.Namespace) -> None:
                 )
                 if "samples" in eval_results:
                     for s in eval_results["samples"][:2]:
-                        logger.info("  >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
+                        logger.info("    >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
 
+            # Checkpoint
             if (step + 1) % (train_config.eval_interval_steps * 2) == 0:
+                logger.info("  [Checkpoint] Saving at step %d...", steps_done)
                 trainer.save_checkpoint(loss=metrics["loss"])
+                logger.info("  [Checkpoint] Saved!")
 
     # Final save
+    total_elapsed = _time.time() - train_start
+    logger.info("=" * 60)
+    logger.info("Training complete!")
+    logger.info("  Total steps  : %d", args.max_steps)
+    logger.info("  Total tokens : %d", total_tokens_processed)
+    logger.info("  Final loss   : %.4f", metrics.get("loss", 0))
+    logger.info("  Avg loss     : %.4f", running_loss / max(1, loss_count))
+    logger.info("  Total time   : %.1fs", total_elapsed)
+    logger.info("  Avg tok/s    : %.0f", total_tokens_processed / max(1, total_elapsed))
+    logger.info("=" * 60)
     trainer.save_checkpoint(loss=metrics.get("loss", 0))
-    logger.info("Training complete! Checkpoint saved to %s", args.checkpoint_dir)
+    logger.info("Final checkpoint saved to %s", args.checkpoint_dir)
 
 
 def run_sft(args: argparse.Namespace) -> None:
