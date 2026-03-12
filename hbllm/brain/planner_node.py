@@ -156,7 +156,7 @@ class PlannerNode(Node):
     # Max cached prompt/response pairs
     MAX_CACHE_SIZE = 200
 
-    def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2):
+    def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2, policy_engine=None):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PLANNER,
@@ -164,6 +164,7 @@ class PlannerNode(Node):
         )
         self.branch_factor = branch_factor
         self.max_depth = max_depth
+        self.policy_engine = policy_engine  # PolicyEngine for plan validation
         # LRU cache: hash(prompt) → response text
         self._response_cache: OrderedDict[str, str] = OrderedDict()
         self._cache_hits = 0
@@ -223,12 +224,35 @@ class PlannerNode(Node):
         if not root_nodes:
             return message.create_error("GoT: All initial branches failed.")
 
-        # ── Step 2: Score — Evaluate initial thoughts ─────────────────────
-        await asyncio.gather(
-            *[self._score_thought(graph, node) for node in root_nodes]
-        )
+        # ── Step 2: Policy gate — validate thoughts against governance ──
+        if self.policy_engine:
+            tenant_id = message.tenant_id or "default"
+            for node in root_nodes:
+                result = self.policy_engine.evaluate(
+                    text=node.content,
+                    tenant_id=tenant_id,
+                    context=message.payload.get("context", {}),
+                )
+                if not result.passed:
+                    # Mark blocked thoughts with 0 score and annotate
+                    node.score = 0.0
+                    node.metadata["policy_blocked"] = True
+                    node.metadata["violations"] = result.violations
+                    node.content = (
+                        f"[BLOCKED by policy: {'; '.join(result.violations)}] "
+                        f"Constraint: this approach violates governance rules. "
+                        f"Original: {node.content[:200]}"
+                    )
+                    logger.info("[GoT] Thought blocked by policy: %s", result.violations)
 
-        # ── Step 3: Prune — Remove weak initial thoughts ──────────────────
+        # ── Step 3: Score — Evaluate initial thoughts ─────────────────────
+        unblocked_roots = [n for n in root_nodes if not n.metadata.get("policy_blocked")]
+        if unblocked_roots:
+            await asyncio.gather(
+                *[self._score_thought(graph, node) for node in unblocked_roots]
+            )
+
+        # ── Step 4: Prune — Remove weak initial thoughts ──────────────────
         pruned = graph.prune(min_score=0.3)
         logger.info("[GoT] Pruned %d weak initial thoughts", pruned)
 

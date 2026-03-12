@@ -71,6 +71,7 @@ class BrainConfig:
     inject_cost_optimizer: bool = True  # Token optimization
     inject_policy_engine: bool = True   # Governance policy enforcement
     inject_owner_rules: bool = True     # Owner-defined behavioral rules
+    inject_sentinel: bool = True        # Proactive governance monitoring
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
@@ -119,6 +120,7 @@ class Brain:
         self.interaction_miner: InteractionMiner | None = None
         self.policy_engine: PolicyEngine | None = None
         self.owner_rules: OwnerRuleStore | None = None
+        self.sentinel = None  # SentinelNode reference
 
     async def process(
         self,
@@ -386,6 +388,7 @@ class BrainFactory:
         from hbllm.brain.collective_node import CollectiveNode
         from hbllm.brain.learner_node import LearnerNode
         from hbllm.brain.world_model_node import WorldModelNode
+        from hbllm.brain.sentinel_node import SentinelNode
         from hbllm.memory.memory_node import MemoryNode
 
         # Create PolicyEngine for governance
@@ -401,6 +404,7 @@ class BrainFactory:
                 node_id="planner",
                 branch_factor=cfg.planner_branch_factor,
                 max_depth=cfg.planner_max_depth,
+                policy_engine=policy_engine,
             ),
             CriticNode(node_id="critic", llm=llm),
             DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
@@ -429,6 +433,15 @@ class BrainFactory:
             # Memory consolidation during idle
             SleepCycleNode(node_id="sleep"),
         ]
+
+        # Proactive governance sentinel
+        sentinel_node = None
+        if cfg.inject_sentinel and policy_engine:
+            sentinel_node = SentinelNode(
+                node_id="sentinel",
+                policy_engine=policy_engine,
+            )
+            nodes.append(sentinel_node)
 
         # Optional nodes based on config
         if cfg.inject_identity:
@@ -529,7 +542,10 @@ class BrainFactory:
                 db_path=str(Path(data_dir) / "owner_rules.db")
             )
 
-        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules")
+        if cfg.inject_sentinel and sentinel_node:
+            brain.sentinel = sentinel_node
+
+        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules, sentinel")
 
         return brain
 
