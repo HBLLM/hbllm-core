@@ -375,7 +375,7 @@ class WorkspaceNode(Node):
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
-                pass
+                logger.debug("Semantic memory retrieval failed", exc_info=True)
 
         async def _try_procedural():
             if not has_procedural:
@@ -408,7 +408,7 @@ class WorkspaceNode(Node):
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
-                pass
+                logger.debug("Procedural memory retrieval failed", exc_info=True)
 
         # Run both in parallel with a hard 2.5s ceiling
         try:

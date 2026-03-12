@@ -167,7 +167,7 @@ class Brain:
             try:
                 await node.stop()
             except Exception:
-                pass
+                logger.debug("Error stopping node %s during shutdown", node.node_id, exc_info=True)
         await self.registry.stop()
         await self.bus.stop()
         logger.info("Brain shutdown complete")

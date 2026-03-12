@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
                         "Mix with +: --data fineweb+starcoderdata+openwebmath")
     p.add_argument("--max-samples", type=int, default=100_000,
                    help="Max training samples to download")
+    p.add_argument("--data-weights", default=None,
+                   help="Proportional weights for each dataset when mixing. "
+                        "Comma-separated floats matching --data order. "
+                        "E.g.: --data fineweb+starcoderdata --data-weights 0.7,0.3. "
+                        "Defaults to equal weights.")
     p.add_argument("--data-dir", default="./data/training",
                    help="Working directory for data pipeline")
 
@@ -119,7 +124,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default="auto",
                    help="Device: auto, cpu, cuda, mps")
 
-    return p.parse_args()
+    args = p.parse_args()
+
+    # Validate --data dataset names against registry
+    from hbllm.data.downloader import PREDEFINED_SOURCES
+    dataset_names = [n.strip() for n in args.data.split("+") if n.strip()]
+    unknown = [n for n in dataset_names if n not in PREDEFINED_SOURCES]
+    if unknown:
+        available = ", ".join(sorted(PREDEFINED_SOURCES.keys()))
+        p.error(
+            f"Unknown dataset(s): {', '.join(unknown)}\n"
+            f"Available: {available}\n"
+            f"Mix with +: --data fineweb+starcoderdata+openwebmath"
+        )
+
+    return args
 
 
 def get_device(name: str) -> torch.device:

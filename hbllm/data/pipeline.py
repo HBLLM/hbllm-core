@@ -54,14 +54,20 @@ class DataPipeline:
         max_samples: int = 100_000,
         vocab_size: int = 32768,
         sequence_length: int = 2048,
+        data_weights: list[float] | None = None,
     ) -> None:
         logger.info("Starting Rust-accelerated Data Pipeline in %s", self.work_dir)
         start = time.time()
         # Parse multi-dataset names (+ separated)
         dataset_names = [d.strip() for d in dataset_name.replace(',', '+').split('+') if d.strip()]
-        samples_per = max_samples // len(dataset_names)
-        for ds_name in dataset_names:
-            self._step_download(ds_name, samples_per)
+        # Calculate per-dataset samples using weights or equal split
+        if data_weights and len(data_weights) == len(dataset_names):
+            total_w = sum(data_weights)
+            samples_list = [int(max_samples * w / total_w) for w in data_weights]
+        else:
+            samples_list = [max_samples // len(dataset_names)] * len(dataset_names)
+        for ds_name, ds_samples in zip(dataset_names, samples_list):
+            self._step_download(ds_name, ds_samples)
         clean_docs = []
         for ds_name in dataset_names:
             clean_docs.extend(self._step_clean_and_dedup(ds_name))
@@ -156,6 +162,7 @@ class PurePythonPipeline:
         sequence_length: int = 2048,
         min_doc_tokens: int = 64,
         shard_size_mb: int = 64,
+        data_weights: list[float] | None = None,
     ) -> dict:
         """
         Run the full pipeline: stream -> clean -> tokenize -> shard.
@@ -163,7 +170,7 @@ class PurePythonPipeline:
         Supports multi-dataset mixing via '+' separator:
             dataset_name="fineweb+starcoderdata+openwebmath"
 
-        Samples are split evenly across datasets.
+        Samples are split by weights (if provided) or evenly.
         Returns dict with pipeline statistics.
         """
         import tiktoken
@@ -171,10 +178,19 @@ class PurePythonPipeline:
         # Parse multi-dataset names
         dataset_names = [d.strip() for d in dataset_name.replace(',', '+').split('+') if d.strip()]
 
+        # Calculate per-dataset samples using weights or equal split
+        if data_weights and len(data_weights) == len(dataset_names):
+            total_w = sum(data_weights)
+            samples_list = [int(max_samples * w / total_w) for w in data_weights]
+        else:
+            samples_list = [max_samples // len(dataset_names)] * len(dataset_names)
+
         logger.info("=" * 60)
         logger.info("HBLLM Pure-Python Data Pipeline")
         logger.info("  Dataset(s) : %s", ' + '.join(dataset_names))
         logger.info("  Max samples: %d (total)", max_samples)
+        if data_weights:
+            logger.info("  Weights    : %s", ', '.join(f'{w:.2f}' for w in data_weights))
         logger.info("  Seq length : %d", sequence_length)
         logger.info("  Shard dir  : %s", self.shard_dir)
         logger.info("=" * 60)
@@ -194,11 +210,10 @@ class PurePythonPipeline:
 
         # Stream and tokenize
         downloader = DatasetDownloader(self.work_dir / "raw")
-        samples_per_dataset = max_samples // len(dataset_names)
-        for ds_name in dataset_names:
+        for ds_name, ds_samples in zip(dataset_names, samples_list):
             try:
-                downloader.add_predefined(ds_name, max_samples=samples_per_dataset)
-                logger.info("  Added dataset: %s (%d max samples)", ds_name, samples_per_dataset)
+                downloader.add_predefined(ds_name, max_samples=ds_samples)
+                logger.info("  Added dataset: %s (%d max samples)", ds_name, ds_samples)
             except ValueError as e:
                 logger.warning("  Skipping unknown dataset '%s': %s", ds_name, e)
 

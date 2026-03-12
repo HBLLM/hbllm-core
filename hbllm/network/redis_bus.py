@@ -243,7 +243,7 @@ class RedisBus(MessageBus):
             if self.client:
                 await self.client.aclose()
         except Exception:
-            pass
+            logger.debug("Error closing connection during reconnect", exc_info=True)
 
         self.client = redis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()

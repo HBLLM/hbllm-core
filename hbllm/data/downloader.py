@@ -176,7 +176,11 @@ class DatasetDownloader:
         Handles special formats:
         - conversations: list of {"from": role, "value": text} dicts
         - query+response: MetaMath-style Q&A pairs
+
+        Retries on network errors with exponential backoff.
         """
+        import time as _time
+
         logger.info("Streaming from %s (%s)", source.name, source.dataset_id)
 
         kwargs: dict[str, Any] = {
@@ -187,11 +191,33 @@ class DatasetDownloader:
         if source.config:
             kwargs["name"] = source.config
 
-        ds = load_dataset(**kwargs)
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                ds = load_dataset(**kwargs)
+                break
+            except (ConnectionError, TimeoutError, OSError) as e:
+                if attempt < max_retries:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        "  %s: load failed (attempt %d/%d): %s — retrying in %ds",
+                        source.name, attempt + 1, max_retries, e, wait,
+                    )
+                    _time.sleep(wait)
+                else:
+                    logger.error("  %s: load failed after %d retries: %s", source.name, max_retries, e)
+                    raise
+            except Exception:
+                raise  # Don't retry on non-network errors
 
         count = 0
         for sample in ds:
-            text = self._extract_text(sample, source)
+            try:
+                text = self._extract_text(sample, source)
+            except Exception as e:
+                logger.debug("  %s: skipping bad sample: %s", source.name, e)
+                continue
+
             if not text or not isinstance(text, str) or len(text.strip()) < 10:
                 continue
 
@@ -221,8 +247,11 @@ class DatasetDownloader:
                     if isinstance(turn, dict):
                         role = turn.get("from", turn.get("role", ""))
                         value = turn.get("value", turn.get("content", ""))
-                        if value:
-                            parts.append(f"{role}: {value}")
+                        if not role or not value:
+                            continue  # Skip malformed turns
+                        parts.append(f"{role}: {value}")
+                if not parts:
+                    return ""  # Skip empty conversations
                 return "\n".join(parts)
             return ""
 

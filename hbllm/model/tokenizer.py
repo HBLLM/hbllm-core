@@ -56,11 +56,17 @@ class HBLLMTokenizer:
             self._special_ids[token] = base + i
         logger.info('Tokenizer loaded from Rust Vocab (%d tokens)', self.vocab_size)
 
+    # Class-level tiktoken cache to avoid re-initialization
+    _tiktoken_cache: dict[str, Any] = {}
+
     def _init_fallback(self) -> None:
-        """Fallback: use tiktoken for encoding."""
+        """Fallback: use tiktoken for encoding (cached)."""
         try:
             import tiktoken
-            self._tiktoken = tiktoken.get_encoding('cl100k_base')
+            cache_key = 'cl100k_base'
+            if cache_key not in HBLLMTokenizer._tiktoken_cache:
+                HBLLMTokenizer._tiktoken_cache[cache_key] = tiktoken.get_encoding(cache_key)
+            self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
             self.vocab_size = self._tiktoken.n_vocab
             logger.info('Tokenizer fallback: tiktoken cl100k_base (%d tokens)', self.vocab_size)
         except ImportError:
