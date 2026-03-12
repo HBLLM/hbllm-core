@@ -35,8 +35,10 @@ def parse_args() -> argparse.Namespace:
 
     # Data
     p.add_argument("--data", default="fineweb",
-                   choices=["fineweb", "wikipedia", "the_stack_v2"],
-                   help="Dataset to use")
+                   help="Dataset(s) to use. Available: fineweb, wikipedia, "
+                        "the_stack_v2, starcoderdata, codeparrot, openwebmath, "
+                        "metamath, pes2o, openhermes, slimorca. "
+                        "Mix with +: --data fineweb+starcoderdata+openwebmath")
     p.add_argument("--max-samples", type=int, default=100_000,
                    help="Max training samples to download")
     p.add_argument("--data-dir", default="./data/training",

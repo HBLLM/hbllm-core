@@ -57,8 +57,14 @@ class DataPipeline:
     ) -> None:
         logger.info("Starting Rust-accelerated Data Pipeline in %s", self.work_dir)
         start = time.time()
-        self._step_download(dataset_name, max_samples)
-        clean_docs = self._step_clean_and_dedup(dataset_name)
+        # Parse multi-dataset names (+ separated)
+        dataset_names = [d.strip() for d in dataset_name.replace(',', '+').split('+') if d.strip()]
+        samples_per = max_samples // len(dataset_names)
+        for ds_name in dataset_names:
+            self._step_download(ds_name, samples_per)
+        clean_docs = []
+        for ds_name in dataset_names:
+            clean_docs.extend(self._step_clean_and_dedup(ds_name))
         vocab = self._step_train_tokenizer(clean_docs, vocab_size)
         self._step_shard(clean_docs, vocab, sequence_length)
         logger.info("Pipeline completed in %.2fs!", time.time() - start)
@@ -154,14 +160,21 @@ class PurePythonPipeline:
         """
         Run the full pipeline: stream -> clean -> tokenize -> shard.
 
+        Supports multi-dataset mixing via '+' separator:
+            dataset_name="fineweb+starcoderdata+openwebmath"
+
+        Samples are split evenly across datasets.
         Returns dict with pipeline statistics.
         """
         import tiktoken
 
+        # Parse multi-dataset names
+        dataset_names = [d.strip() for d in dataset_name.replace(',', '+').split('+') if d.strip()]
+
         logger.info("=" * 60)
         logger.info("HBLLM Pure-Python Data Pipeline")
-        logger.info("  Dataset    : %s", dataset_name)
-        logger.info("  Max samples: %d", max_samples)
+        logger.info("  Dataset(s) : %s", ' + '.join(dataset_names))
+        logger.info("  Max samples: %d (total)", max_samples)
         logger.info("  Seq length : %d", sequence_length)
         logger.info("  Shard dir  : %s", self.shard_dir)
         logger.info("=" * 60)
@@ -181,7 +194,13 @@ class PurePythonPipeline:
 
         # Stream and tokenize
         downloader = DatasetDownloader(self.work_dir / "raw")
-        downloader.add_predefined(dataset_name, max_samples=max_samples)
+        samples_per_dataset = max_samples // len(dataset_names)
+        for ds_name in dataset_names:
+            try:
+                downloader.add_predefined(ds_name, max_samples=samples_per_dataset)
+                logger.info("  Added dataset: %s (%d max samples)", ds_name, samples_per_dataset)
+            except ValueError as e:
+                logger.warning("  Skipping unknown dataset '%s': %s", ds_name, e)
 
         total_docs = 0
         total_tokens = 0
