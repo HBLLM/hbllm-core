@@ -10,20 +10,89 @@ Policy types:
   TRANSFORM — modify responses (e.g., add disclaimers)
   SCOPE     — restrict which domains/tools a tenant can access
   RATE      — per-tenant limits on specific capabilities
+
+Context-aware conditions:
+  Policies can have runtime conditions that check against a context dict
+  (e.g., time_hour >= 21, baby_sleeping == True, person_type != "family").
+  Policies whose conditions don't match the current context are skipped.
 """
 
 from __future__ import annotations
 
 import logging
+import operator
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+# ── Context Provider ─────────────────────────────────────────────────────────
+
+@runtime_checkable
+class ContextProvider(Protocol):
+    """Interface for providing runtime context (time, sensors, etc.)."""
+    def get_context(self) -> dict[str, Any]: ...
+
+
+class DefaultContextProvider:
+    """Provides basic time-based context."""
+    def get_context(self) -> dict[str, Any]:
+        now = datetime.now()
+        return {
+            "time_hour": now.hour,
+            "time_minute": now.minute,
+            "day_of_week": now.strftime("%A").lower(),
+            "is_weekend": now.weekday() >= 5,
+        }
+
+
+# ── Policy Condition ─────────────────────────────────────────────────────────
+
+_OPERATORS: dict[str, Any] = {
+    "eq": operator.eq,
+    "neq": operator.ne,
+    "gt": operator.gt,
+    "lt": operator.lt,
+    "gte": operator.ge,
+    "lte": operator.le,
+    "in": lambda a, b: a in b,
+    "not_in": lambda a, b: a not in b,
+}
+
+
+@dataclass
+class PolicyCondition:
+    """A runtime condition that must be true for a policy to activate."""
+    key: str          # e.g. "time_hour", "baby_sleeping", "person_type"
+    operator: str     # "eq", "neq", "gt", "lt", "gte", "lte", "in", "not_in"
+    value: Any        # e.g. 21, True, "stranger"
+
+    def evaluate(self, context: dict[str, Any]) -> bool:
+        """Check if this condition is met given the current context."""
+        if self.key not in context:
+            return False  # Unknown context key → condition not met
+        op_fn = _OPERATORS.get(self.operator)
+        if not op_fn:
+            logger.warning("Unknown operator '%s' in condition", self.operator)
+            return False
+        try:
+            return op_fn(context[self.key], self.value)
+        except (TypeError, ValueError):
+            return False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"key": self.key, "operator": self.operator, "value": self.value}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PolicyCondition:
+        return cls(key=d["key"], operator=d["operator"], value=d["value"])
 
 
 class PolicyType(str, Enum):
@@ -57,10 +126,18 @@ class Policy:
     priority: int = 0          # Higher = evaluated first
     enabled: bool = True
     severity: str = "medium"   # low, medium, high, critical
+    conditions: list[PolicyCondition] = field(default_factory=list)  # Runtime conditions
+    source: str = ""           # "owner", "system", "auto" (from rule extraction)
 
     def applies_to(self, tenant_id: str) -> bool:
         """Check if this policy applies to a given tenant."""
         return "*" in self.tenant_ids or tenant_id in self.tenant_ids
+
+    def conditions_met(self, context: dict[str, Any]) -> bool:
+        """Check if ALL runtime conditions are satisfied."""
+        if not self.conditions:
+            return True  # No conditions = always active
+        return all(c.evaluate(context) for c in self.conditions)
 
 
 @dataclass
@@ -94,8 +171,9 @@ class PolicyEngine:
             # Response was blocked
     """
 
-    def __init__(self) -> None:
+    def __init__(self, context_provider: ContextProvider | None = None) -> None:
         self._policies: list[Policy] = []
+        self._context_provider = context_provider or DefaultContextProvider()
 
     @property
     def policy_count(self) -> int:
@@ -164,6 +242,7 @@ class PolicyEngine:
         text: str,
         tenant_id: str = "default",
         domain: str = "",
+        context: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> PolicyResult:
         """
@@ -173,11 +252,17 @@ class PolicyEngine:
             text: The response text to evaluate
             tenant_id: Tenant for scope filtering
             domain: Domain the response was generated from
+            context: Runtime context dict (time, sensors, etc.)
             metadata: Additional context
 
         Returns:
             PolicyResult with pass/fail, modified text, and violation details.
         """
+        # Build context from provider + explicit overrides
+        ctx = self._context_provider.get_context() if self._context_provider else {}
+        if context:
+            ctx.update(context)
+
         result = PolicyResult(
             passed=True,
             original_text=text,
@@ -188,6 +273,8 @@ class PolicyEngine:
             if not policy.enabled:
                 continue
             if not policy.applies_to(tenant_id):
+                continue
+            if not policy.conditions_met(ctx):
                 continue
 
             if policy.type == PolicyType.DENY:

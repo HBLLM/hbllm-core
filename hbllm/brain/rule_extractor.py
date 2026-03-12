@@ -118,6 +118,8 @@ class RuleExtractorNode(Node):
         node_id: str,
         extraction_interval: float = 30.0,
         min_events_for_extraction: int = 3,
+        promotion_confidence: float = 0.85,
+        promotion_occurrences: int = 5,
     ):
         super().__init__(
             node_id=node_id,
@@ -126,9 +128,12 @@ class RuleExtractorNode(Node):
         )
         self.extraction_interval = extraction_interval
         self.min_events_for_extraction = min_events_for_extraction
+        self.promotion_confidence = promotion_confidence
+        self.promotion_occurrences = promotion_occurrences
 
         self._priority_buffer: list[dict[str, Any]] = []
         self._rules: dict[str, ExtractedRule] = {}
+        self._promoted: set[str] = set()  # Rule IDs already promoted
         self._extraction_task: asyncio.Task | None = None
 
     @property
@@ -223,6 +228,31 @@ class RuleExtractorNode(Node):
                         existing.confidence + 0.05, 0.99
                     )
                     existing.source_events.append(event.get("message_id", ""))
+
+                    # Auto-promote if threshold reached
+                    if (
+                        existing.confidence >= self.promotion_confidence
+                        and existing.occurrences >= self.promotion_occurrences
+                        and rid not in self._promoted
+                    ):
+                        self._promoted.add(rid)
+                        await self.bus.publish(
+                            "owner.rules.suggest",
+                            Message(
+                                type=MessageType.EVENT,
+                                source_node_id=self.node_id,
+                                topic="owner.rules.suggest",
+                                payload={
+                                    "rule": existing.to_dict(),
+                                    "suggested_text": f"When {existing.condition}, then {existing.action}",
+                                    "source": "auto",
+                                },
+                            ),
+                        )
+                        logger.info(
+                            "[RuleExtractor] Promoting rule %s (confidence=%.2f, occurrences=%d)",
+                            rid, existing.confidence, existing.occurrences,
+                        )
                 else:
                     # New rule
                     rule = ExtractedRule(

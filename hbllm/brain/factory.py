@@ -44,6 +44,8 @@ from hbllm.brain.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.world_simulator import WorldSimulator
 from hbllm.brain.revision_node import RevisionNode
 from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.policy_engine import PolicyEngine
+from hbllm.brain.owner_rules import OwnerRuleStore
 from hbllm.actions.tool_memory import ToolMemory
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
@@ -67,6 +69,8 @@ class BrainConfig:
     inject_self_model: bool = True   # Capability tracking
     inject_metrics: bool = True      # Live cognitive metrics
     inject_cost_optimizer: bool = True  # Token optimization
+    inject_policy_engine: bool = True   # Governance policy enforcement
+    inject_owner_rules: bool = True     # Owner-defined behavioral rules
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
@@ -113,6 +117,8 @@ class Brain:
         self.reward_model: RewardModel | None = None
         self.policy_optimizer: PolicyOptimizer | None = None
         self.interaction_miner: InteractionMiner | None = None
+        self.policy_engine: PolicyEngine | None = None
+        self.owner_rules: OwnerRuleStore | None = None
 
     async def process(
         self,
@@ -382,6 +388,12 @@ class BrainFactory:
         from hbllm.brain.world_model_node import WorldModelNode
         from hbllm.memory.memory_node import MemoryNode
 
+        # Create PolicyEngine for governance
+        policy_engine = None
+        if cfg.inject_policy_engine:
+            policy_engine = PolicyEngine()
+            logger.info("PolicyEngine created for governance")
+
         nodes = [
             # Core cognitive pipeline
             RouterNode(node_id="router", llm=llm),
@@ -391,7 +403,7 @@ class BrainFactory:
                 max_depth=cfg.planner_max_depth,
             ),
             CriticNode(node_id="critic", llm=llm),
-            DecisionNode(node_id="decision", llm=llm),
+            DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
             WorkspaceNode(node_id="workspace"),
 
             # Memory (episodic + semantic + procedural + value + knowledge graph)
@@ -509,7 +521,15 @@ class BrainFactory:
         if cfg.inject_cost_optimizer:
             brain.token_optimizer = TokenOptimizer()
 
-        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools")
+        if cfg.inject_policy_engine:
+            brain.policy_engine = policy_engine
+
+        if cfg.inject_owner_rules:
+            brain.owner_rules = OwnerRuleStore(
+                db_path=str(Path(data_dir) / "owner_rules.db")
+            )
+
+        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules")
 
         return brain
 
