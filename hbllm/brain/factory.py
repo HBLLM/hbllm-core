@@ -72,6 +72,8 @@ class BrainConfig:
     inject_policy_engine: bool = True   # Governance policy enforcement
     inject_owner_rules: bool = True     # Owner-defined behavioral rules
     inject_sentinel: bool = True        # Proactive governance monitoring
+    inject_fuzzy_logic: bool = False    # Fuzzy reasoning (requires scikit-fuzzy)
+    inject_symbolic_logic: bool = False # Z3 theorem prover (requires z3-solver)
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
@@ -457,6 +459,17 @@ class BrainFactory:
                 AudioOutputNode(node_id="audio_out"),
                 VisionNode(node_id="vision"),
             ])
+
+        # Reasoning nodes (optional — require extra dependencies)
+        if cfg.inject_fuzzy_logic:
+            from hbllm.actions.fuzzy_node import FuzzyNode
+            nodes.append(FuzzyNode(node_id="fuzzy", llm=llm))
+            logger.info("FuzzyNode wired (scikit-fuzzy reasoning)")
+
+        if cfg.inject_symbolic_logic:
+            from hbllm.actions.logic_node import LogicNode
+            nodes.append(LogicNode(node_id="logic", llm=llm))
+            logger.info("LogicNode wired (Z3 theorem prover)")
 
         # Inject LLM into planner
         nodes[1].llm = llm
