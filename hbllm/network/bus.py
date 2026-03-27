@@ -96,6 +96,8 @@ class InProcessBus:
         self.metrics = BusMetrics()
         # Backpressure monitoring
         self._backpressure_warning_threshold = 0.8  # Warn at 80% full
+        # Track active handler tasks to prevent unbounded memory growth
+        self._active_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
         """Start the message dispatch loop."""
@@ -148,7 +150,7 @@ class InProcessBus:
     async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         # Create a future for the response
-        future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
 
         # Publish the request
@@ -239,7 +241,9 @@ class InProcessBus:
                             m.id,
                         )
                         
-                asyncio.create_task(_run_handler())
+                task = asyncio.create_task(_run_handler())
+                self._active_tasks.add(task)
+                task.add_done_callback(self._active_tasks.discard)
 
     def _get_matching_topics(self, topic: str) -> list[str]:
         """Get all registered topics that match (exact + wildcard)."""

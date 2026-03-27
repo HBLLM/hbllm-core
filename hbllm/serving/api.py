@@ -765,13 +765,13 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     bus = _state["bus"]
     correlation_id = str(uuid.uuid4())
 
-    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+    response_future: asyncio.Future = asyncio.get_running_loop().create_future()
 
     async def output_handler(msg: Message):
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
-    await bus.subscribe("sensory.output", output_handler)
+    sub = await bus.subscribe("sensory.output", output_handler)
 
     # Store user message in memory
     memory_msg = Message(
@@ -831,6 +831,9 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Pipeline timed out (30s)")
+    finally:
+        # Always clean up subscription to prevent memory leak
+        await bus.unsubscribe(sub)
 
 
 @app.post("/v1/chat", response_model=ChatResponse)

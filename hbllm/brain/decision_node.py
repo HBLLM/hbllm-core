@@ -28,7 +28,7 @@ class DecisionNode(Node):
     """
 
     def __init__(self, node_id: str, llm=None, policy_engine=None):
-        super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
+        super().__init__(node_id=node_id, node_type=NodeType.CORE)
         self.llm = llm  # LLMInterface instance
         self.policy_engine = policy_engine  # PolicyEngine instance
 

@@ -107,8 +107,8 @@ class CriticNode(Node):
                 message.source_node_id, reason
             )
         
-        # Clean up the query cache entry since this correlation is now evaluated
-        self._query_cache.pop(correlation_id, None)
+        # Note: Do NOT pop the cache here — multiple thoughts may share
+        # the same correlation_id. LRU eviction handles cleanup.
         
         # Emit the evaluation back to the Workspace
         critique_msg = Message(

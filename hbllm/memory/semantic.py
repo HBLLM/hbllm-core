@@ -217,16 +217,17 @@ class SemanticMemory:
         
         if self._use_tfidf:
             # TF-IDF only mode (no sentence-transformers)
+            # Must re-encode all documents when vocab changes since vector dimensions change.
+            # Once vocabulary stabilizes (after initial ramp-up), this path is rarely hit.
+            doc = {"content": content, "metadata": meta}
+            self.documents.append(doc)
+            
             if self._tfidf._vocab_changed:
-                all_texts = [d["content"] for d in self.documents] + [content]
+                all_texts = [d["content"] for d in self.documents]
                 all_vectors = self._tfidf.encode(all_texts)
-                doc = {"content": content, "metadata": meta}
-                self.documents.append(doc)
                 self._vector_list = [all_vectors[i:i+1] for i in range(len(all_vectors))]
             else:
                 new_vec = self._tfidf.encode([content])
-                doc = {"content": content, "metadata": meta}
-                self.documents.append(doc)
                 self._vector_list.append(new_vec)
         else:
             # Dense embeddings + sparse TF-IDF for hybrid search

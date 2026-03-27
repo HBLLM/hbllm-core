@@ -103,6 +103,11 @@ class BusMetrics:
         self.messages_dropped: int = 0
         self.handler_errors: int = 0
         self.active_subscriptions: int = 0
+        # Redis-specific counters (also used by RedisBus)
+        self.messages_received: int = 0
+        self.messages_dropped_ttl: int = 0
+        self.messages_dropped_auth: int = 0
+        self.reconnections: int = 0
         self._latency_samples: list[float] = []
         self._max_samples = 1000  # Rolling window
     
@@ -146,8 +151,12 @@ class BusMetrics:
         return {
             "messages_published": self.messages_published,
             "messages_delivered": self.messages_delivered,
+            "messages_received": self.messages_received,
             "messages_dropped": self.messages_dropped,
+            "messages_dropped_ttl": self.messages_dropped_ttl,
+            "messages_dropped_auth": self.messages_dropped_auth,
             "handler_errors": self.handler_errors,
+            "reconnections": self.reconnections,
             "active_subscriptions": self.active_subscriptions,
             "avg_latency_ms": round(self.avg_latency_ms, 3),
             "p99_latency_ms": round(self.p99_latency_ms, 3),

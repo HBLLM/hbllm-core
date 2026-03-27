@@ -67,24 +67,28 @@ async def test_multimodal_image_caption_injected():
             "source_node": "router",
             "confidence": 0.9,
         })
-        await bus.publish("sensory.output", response)
+        await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
 
     pipeline = CognitivePipeline(bus=bus)
     await pipeline.start()
 
-    # Process with an image
-    fake_image = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
-    result = await pipeline.process_multimodal(
-        text="What do you see?",
-        images=[fake_image],
-        tenant_id="test",
-        session_id="s1",
-    )
+    try:
+        # Process with an image
+        fake_image = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
+        result = await pipeline.process_multimodal(
+            text="What do you see?",
+            images=[fake_image],
+            tenant_id="test",
+            session_id="s1",
+        )
 
-    # The result should contain the image caption as context
-    assert "[Image 1]:" in result.text or "cat" in result.text.lower() or result.text
+        # The result should contain the image caption as context
+        assert "[Image 1]:" in result.text or "cat" in result.text.lower() or result.text
+    finally:
+        await pipeline.stop()
+        await bus.stop()
 
 
 @pytest.mark.asyncio
@@ -106,22 +110,26 @@ async def test_multimodal_audio_transcript_injected():
             "text": f"Processed: {text}",
             "source_node": "router",
         })
-        await bus.publish("sensory.output", response)
+        await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
 
     pipeline = CognitivePipeline(bus=bus)
     await pipeline.start()
 
-    # Process with audio
-    fake_audio = b'\x00' * 200
-    result = await pipeline.process_multimodal(
-        audio=fake_audio,
-        tenant_id="test",
-        session_id="s2",
-    )
+    try:
+        # Process with audio
+        fake_audio = b'\x00' * 200
+        result = await pipeline.process_multimodal(
+            audio=fake_audio,
+            tenant_id="test",
+            session_id="s2",
+        )
 
-    assert "[Audio transcript]:" in result.text or "Hello" in result.text or result.text
+        assert "[Audio transcript]:" in result.text or "Hello" in result.text or result.text
+    finally:
+        await pipeline.stop()
+        await bus.stop()
 
 
 @pytest.mark.asyncio
@@ -145,50 +153,60 @@ async def test_multimodal_combined_image_audio_text():
             "text": text,
             "source_node": "router",
         })
-        await bus.publish("sensory.output", response)
+        await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
 
     pipeline = CognitivePipeline(bus=bus)
     await pipeline.start()
 
-    result = await pipeline.process_multimodal(
-        text="What is happening here?",
-        images=[b'\x89PNG' + b'\x00' * 50],
-        audio=b'\x00' * 100,
-    )
+    try:
+        result = await pipeline.process_multimodal(
+            text="What is happening here?",
+            images=[b'\x89PNG' + b'\x00' * 50],
+            audio=b'\x00' * 100,
+        )
 
-    # Result should have all 3 components
-    assert result.text  # Got a response
-    assert not result.error
+        # Result should have all 3 components
+        assert result.text  # Got a response
+        assert not result.error
+    finally:
+        await pipeline.stop()
+        await bus.stop()
 
 
 @pytest.mark.asyncio
 async def test_multimodal_handles_vision_timeout():
     """Pipeline handles vision timeout gracefully."""
     bus = MockBusWithRequest()
-    await bus.start()
+    
+    try:
+        await bus.start()
 
-    # No vision handler registered → will timeout
+        # No vision handler registered → will timeout
 
-    async def mock_router(msg: Message):
-        text = msg.payload.get("text", "")
-        response = msg.create_response({"text": text, "source_node": "router"})
-        await bus.publish("sensory.output", response)
+        async def mock_router(msg: Message):
+            text = msg.payload.get("text", "")
+            response = msg.create_response({"text": text, "source_node": "router"})
+            await bus.publish("decision.output", response)
 
-    await bus.subscribe("router.query", mock_router)
+        await bus.subscribe("router.query", mock_router)
 
-    pipeline = CognitivePipeline(bus=bus, config=PipelineConfig(timeout=5.0))
-    await pipeline.start()
+        pipeline = CognitivePipeline(bus=bus, config=PipelineConfig(total_timeout=5.0))
+        await pipeline.start()
 
-    result = await pipeline.process_multimodal(
-        text="Describe the image",
-        images=[b'\x00' * 50],
-    )
+        result = await pipeline.process_multimodal(
+            text="Describe the image",
+            images=[b'\x00' * 50],
+        )
 
-    # Should still get a response (with fallback context)
-    assert result.text
-    assert "(could not process)" in result.text or result.text
+        # Should still get a response (with fallback context)
+        assert result.text
+        assert "(could not process)" in result.text or result.text
+    finally:
+        if 'pipeline' in locals():
+            await pipeline.stop()
+        await bus.stop()
 
 
 @pytest.mark.asyncio
@@ -200,14 +218,18 @@ async def test_multimodal_text_only_passthrough():
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
         response = msg.create_response({"text": f"Echo: {text}", "source_node": "router"})
-        await bus.publish("sensory.output", response)
+        await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
 
     pipeline = CognitivePipeline(bus=bus)
     await pipeline.start()
 
-    result = await pipeline.process_multimodal(text="Plain text query")
+    try:
+        result = await pipeline.process_multimodal(text="Plain text query")
 
-    assert "Plain text query" in result.text
-    assert not result.error
+        assert "Plain text query" in result.text
+        assert not result.error
+    finally:
+        await pipeline.stop()
+        await bus.stop()

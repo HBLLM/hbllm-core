@@ -24,6 +24,7 @@ class NodeType(str, Enum):
     """Types of nodes in the HBLLM network."""
 
     ROUTER = "router"
+    CORE = "core"
     DOMAIN_MODULE = "domain_module"
     MEMORY = "memory"
     PLANNER = "planner"

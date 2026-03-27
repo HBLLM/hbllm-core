@@ -294,7 +294,7 @@ class CognitivePipeline:
         Send query to the router and wait for the decision output.
         """
         # Create a future for the final decision output
-        future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._response_futures[correlation_id] = future
 
         # Build the router message with enriched context

@@ -27,8 +27,8 @@ class WorkspaceNode(Node):
     efforts and aggregates competing or collaborating thoughts.
     """
 
-    def __init__(self, node_id: str):
-        super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
+    def __init__(self, node_id: str, thinking_deadline: float = 4.0, max_concurrent_boards: int = 100):
+        super().__init__(node_id=node_id, node_type=NodeType.CORE)
         
         # In-memory "Blackboard" mapping conversation correlation_ids
         # to the array of proposed thoughts and their active deadlines.
@@ -36,6 +36,10 @@ class WorkspaceNode(Node):
         self._sweeper_task: asyncio.Task | None = None
         # Max age for any blackboard entry before forced cleanup (seconds)
         self._max_board_age = 60.0
+        # Configurable thinking deadline (seconds for cognitive modules to respond)
+        self._thinking_deadline = thinking_deadline
+        # Max concurrent blackboards to prevent unbounded memory growth
+        self._max_concurrent_boards = max_concurrent_boards
 
     async def on_start(self) -> None:
         """Subscribe to the blackboard topics."""
@@ -73,6 +77,16 @@ class WorkspaceNode(Node):
         
         logger.info("Workspace received new Problem State: %s...", str(payload.get("text", ""))[:40])
         
+        # Guard: evict oldest boards if capacity exceeded
+        if len(self.blackboards) >= self._max_concurrent_boards:
+            oldest_ids = sorted(
+                self.blackboards,
+                key=lambda cid: self.blackboards[cid].get("start_time", 0),
+            )[:10]
+            for cid in oldest_ids:
+                logger.warning("Workspace capacity exceeded, evicting stale board: %s", cid)
+                await self._send_error_fallback(cid, "System overloaded. Please try again.")
+        
         # Initialize a new Blackboard session for this specific User Query
         self.blackboards[correlation_id] = {
             "tenant_id": message.tenant_id,
@@ -80,8 +94,8 @@ class WorkspaceNode(Node):
             "original_query": payload,
             "thoughts": [],
             "start_time": time.time(),
-            # We give the cognitive modules 4 seconds to think and post proposals
-            "deadline": time.time() + 4.0, 
+            # Configurable deadline for cognitive modules to think and post proposals
+            "deadline": time.time() + self._thinking_deadline, 
             "resolved": False,
             "turn_count": 1,  # Track internal monologue turns
             "absolute_deadline": time.time() + 30.0,  # Hard cap: 30s max monologue time
@@ -147,7 +161,7 @@ class WorkspaceNode(Node):
                 
                 board["turn_count"] += 1
                 # Extend deadline to allow Intuition node to read the proof and generate text
-                board["deadline"] = time.time() + 4.0
+                board["deadline"] = time.time() + self._thinking_deadline
                 
                 # Re-publish as context update for the Intuition Engine
                 broadcast_msg = Message(
@@ -182,7 +196,7 @@ class WorkspaceNode(Node):
                 
                 board["turn_count"] += 1
                 board["resolved"] = False # Un-resolve it so thinking continues
-                board["deadline"] = time.time() + 4.0
+                board["deadline"] = time.time() + self._thinking_deadline
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
@@ -225,7 +239,7 @@ class WorkspaceNode(Node):
                 new_payload["text"] = f"CRITICAL FEEDBACK: Your previous thought '{content_failed}' was evaluated by the Critic and FAILED for the following reason: '{reason}'. Please try a completely different approach to answer the user."
                 
                 board["turn_count"] += 1
-                board["deadline"] = time.time() + 4.0 # Give them time to redo it
+                board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
