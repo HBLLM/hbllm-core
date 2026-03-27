@@ -60,7 +60,7 @@ async def test_learner_accepts_feedback(tmp_ckpt_dir):
     await bus.publish("system.feedback", fb_msg)
     await asyncio.sleep(0.2)
 
-    assert len(learner.feedback_buffer) >= 1
+    assert "What is Python?" in learner.pending_pairs
 
     await learner.stop()
     await bus.stop()
@@ -84,7 +84,7 @@ async def test_learner_ignores_non_feedback():
     await bus.publish("system.feedback", query_msg)
     await asyncio.sleep(0.2)
 
-    assert len(learner.feedback_buffer) == 0
+    assert len(learner.pending_pairs) == 0
 
     await learner.stop()
     await bus.stop()
@@ -173,4 +173,5 @@ def test_learner_config_defaults():
     assert learner.lora_r == 8
     assert learner._lora_injected is False
     assert learner._training_steps == 0
-    assert learner.feedback_buffer == []
+    assert learner.pending_pairs == {}
+    assert learner.paired_buffer == []
