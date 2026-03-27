@@ -354,7 +354,34 @@ class PlannerNode(Node):
             return ""
 
     async def _score_thought(self, graph: ThoughtGraph, node: ThoughtNode) -> None:
-        """Score a thought node by querying the evaluation domain."""
+        """Score a thought node by querying the evaluation domain or ExecutionNode."""
+        # 1. Deterministic verification for Python code
+        match = re.search(r"```python\n(.*?)```", node.content, re.DOTALL | re.IGNORECASE)
+        if match:
+            code = match.group(1).strip()
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="action.execute_code",
+                payload={"code": code},
+            )
+            try:
+                resp = await self.request("action.execute_code", req, timeout=5.0)
+                status = resp.payload.get("status")
+                if status == "SUCCESS":
+                    node.score = 1.0
+                    node.metadata["execution_output"] = resp.payload.get("output", "")
+                else:
+                    node.score = 0.1
+                    err = resp.payload.get("error", "Unknown execution error")
+                    node.metadata["execution_error"] = err
+                    node.content += f"\n\n[EXECUTION FAILED]\n{err}"
+                return
+            except Exception as e:
+                logger.warning("[GoT] Execution verification failed/timed out: %s", e)
+                # Fall through to LLM scoring if execution bus falls over
+
+        # 2. Fallback to LLM zero-shot self-scoring
         prompt = f"Rate the quality and correctness of this reasoning approach on a 0-1 scale: {node.content[:300]}"
         req = Message(
             type=MessageType.QUERY,

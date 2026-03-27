@@ -308,14 +308,67 @@ class WorkspaceNode(Node):
         )
 
         content = best_thought.get("content", "")
-        # Very simple heuristic to check if the LLM output wants to execute python
-        # (Assuming the LLM was prompted to output <execute_python> tags)
+        import re
+        match = re.search(r"```python\n(.*?)```", str(content), re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            logger.info("Workspace detected python code in winning thought. Verifying via ExecutionNode...")
+            code_to_exec = match.group(1).strip()
+            
+            exec_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                tenant_id=board["tenant_id"],
+                session_id=board["session_id"],
+                topic="action.execute_code",
+                payload={"code": code_to_exec},
+                correlation_id=corr_id
+            )
+            
+            try:
+                resp = await self.request("action.execute_code", exec_msg, timeout=6.0)
+                status = resp.payload.get("status")
+                
+                if status == "SUCCESS":
+                    logger.info("Workspace verification passed.")
+                    best_thought["execution_output"] = resp.payload.get("output", "")
+                    await self._commit_to_decision(corr_id, best_thought)
+                else:
+                    err = resp.payload.get("error", "Unknown execution error")
+                    logger.warning("Workspace code execution failed: %s", err)
+                    
+                    # Remove the failing thought so it isn't picked again
+                    board["thoughts"] = [t for t in board["thoughts"] if t["content"] != content]
+                    
+                    # Force internal monologue to fix the code
+                    new_payload = board["original_query"].copy()
+                    new_payload["text"] = f"CRITICAL SYSTEM ERROR: The code approach you provided failed with the following traceback:\n```\n{err}\n```\n\nPlease analyze the traceback and formulate a corrected approach."
+                    
+                    board["turn_count"] += 1
+                    board["resolved"] = False
+                    board["deadline"] = time.time() + self._thinking_deadline
+                    
+                    broadcast_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        tenant_id=board["tenant_id"],
+                        session_id=board["session_id"],
+                        topic="module.evaluate",
+                        payload=new_payload,
+                        correlation_id=corr_id
+                    )
+                    await self.bus.publish("module.evaluate", broadcast_msg)
+            except Exception as e:
+                logger.warning("Execution verification timed out: %s. Accepting thought with warning.", e)
+                best_thought["execution_warning"] = "Verification timed out"
+                await self._commit_to_decision(corr_id, best_thought)
+            return
+
+        # Legacy simulation heuristic
         if "execute_python" in best_thought["type"] or "<execute_python>" in str(content):
             logger.info("Workspace detected an executable action. Pushing to WorldModel for simulation...")
             board["simulating_thought"] = best_thought
             
-            # Extract just the code if possible, for prototype we assume the whole content is code
-            # or wrapped tightly. In a real prompt, we'd regex out the python block.
             code_to_sim = str(content)
             
             sim_msg = Message(
@@ -331,8 +384,6 @@ class WorkspaceNode(Node):
                 correlation_id=corr_id
             )
             await self.bus.publish("workspace.simulate", sim_msg)
-            # Do NOT finalize yet. Wait for `handle_thought` to get the `simulation_result`.
-            # But un-mark resolved so the board stays alive for the simulation callback.
             board["resolved"] = False
             return
 
