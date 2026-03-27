@@ -6,7 +6,7 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-603%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-965%2B%20passing-brightgreen.svg)](#)
   [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
@@ -16,7 +16,7 @@
 
 **Standard LLMs** are monolithic transformers: prompt → model → response. One path, one perspective, stateless.
 
-**HBLLM Core** is a **modular cognitive architecture** with 25 specialized brain nodes that communicate over an asynchronous message bus — like a real brain:
+**HBLLM Core** is a **modular cognitive architecture** with 25+ specialized brain nodes that communicate over an asynchronous message bus — like a real brain:
 
 ```
                         ┌─────────────────────────────────────────┐
@@ -275,24 +275,35 @@ flowchart TB
     SPAWNER -->|"new zones"| ZONING
 ```
 
-### 🧠 Brain Nodes (14 cognitive modules + growing)
+### 🧠 Brain Nodes (25+ cognitive modules — growing)
 
-| Node               | Role                                        | Analog               |
-| ------------------ | ------------------------------------------- | -------------------- |
-| **Router**         | Routes inputs to the right cognitive path   | Thalamus             |
-| **Planner**        | Breaks goals into multi-step plans          | Prefrontal cortex    |
-| **Decision**       | Makes final decisions from evidence         | Executive function   |
-| **Critic**         | Self-evaluates quality and correctness      | Error monitoring     |
-| **Learner**        | Updates knowledge from outcomes             | Hippocampal learning |
-| **Curiosity**      | Explores novel situations proactively       | Dopaminergic system  |
-| **World Model**    | Builds internal model of the environment    | Predictive coding    |
-| **Identity**       | Maintains values, ethics, and personality   | Self-model           |
-| **Meta Reasoning** | Reasons about reasoning (Reflection Engine) | Metacognition        |
-| **Workspace**      | Shared cognitive workspace for integration  | Global workspace     |
-| **Collective**     | Ensemble reasoning from multiple nodes      | Neural ensemble      |
-| **Sleep Cycle**    | Consolidates learning during idle time      | Memory consolidation |
-| **Spawner**        | Dynamically creates specialist sub-agents   | Neurogenesis         |
-| **Experience**     | Records experiences and detects salience    | Amygdala             |
+| Node                     | Role                                          | Analog               |
+| ------------------------ | --------------------------------------------- | -------------------- |
+| **Router**               | Routes inputs to the right cognitive path     | Thalamus             |
+| **Planner**              | Breaks goals into multi-step plans (GoT DAG)  | Prefrontal cortex    |
+| **Decision**             | Makes final decisions from evidence           | Executive function   |
+| **Critic**               | Self-evaluates quality and correctness        | Error monitoring     |
+| **Learner**              | Updates knowledge from outcomes               | Hippocampal learning |
+| **Curiosity**            | Explores novel situations proactively         | Dopaminergic system  |
+| **World Model**          | Builds internal model of the environment      | Predictive coding    |
+| **World Simulator**      | Simulates outcomes before committing actions  | Mental rehearsal     |
+| **Identity**             | Maintains values, ethics, and personality     | Self-model           |
+| **Meta Reasoning**       | Reasons about reasoning (Reflection Engine)   | Metacognition        |
+| **Workspace**            | Shared cognitive workspace for integration    | Global workspace     |
+| **Collective**           | Ensemble reasoning from multiple nodes        | Neural ensemble      |
+| **Sleep Cycle**          | Consolidates learning during idle time        | Memory consolidation |
+| **Spawner**              | Dynamically creates specialist sub-agents     | Neurogenesis         |
+| **Experience**           | Records experiences and detects salience      | Amygdala             |
+| **Rule Extractor**       | Mines if→then behavioral rules from events    | Pattern recognition  |
+| **Revision Node**        | Self-critique and iterative refinement loop   | Error correction     |
+| **Sentinel Node**        | Proactive governance monitoring               | Immune system        |
+| **Confidence Estimator** | Scores response reliability                   | Uncertainty modeling |
+| **Goal Manager**         | Tracks and prioritizes autonomous goals       | Motivational system  |
+| **Self Model**           | Tracks own capabilities and performance       | Self-awareness       |
+| **Cognitive Metrics**    | Live dashboard of reasoning performance       | Interoception        |
+| **Skill Registry**       | Manages learned procedural skills             | Motor cortex         |
+| **Owner Rules**          | Enforces owner-defined behavioral constraints | Superego             |
+| **Context Window**       | Manages attention and context allocation      | Working memory       |
 
 ### 👁️ Perception (3 input channels)
 
@@ -302,15 +313,17 @@ flowchart TB
 | **Audio Input**  | Speech recognition and sound analysis     |
 | **Audio Output** | Speech synthesis and audio generation     |
 
-### 🧬 Memory Systems (5 types — like human memory)
+### 🧬 Memory Systems (5 types + knowledge graph — like human memory)
 
-| Memory         | What It Stores             | Example                                     |
-| -------------- | -------------------------- | ------------------------------------------- |
-| **Episodic**   | Events and experiences     | "User came home at 6:30pm on Tuesday"       |
-| **Semantic**   | Facts & extracted patterns | "Living room temp preference = 23°C"        |
-| **Procedural** | Skills and how-to          | "To make coffee: fill water → grind → brew" |
-| **Value**      | Preferences and judgments  | "User prefers warm lighting over cool"      |
-| **Working**    | Current task context       | Active conversation state                   |
+| Memory              | What It Stores             | Example                                     |
+| ------------------- | -------------------------- | ------------------------------------------- |
+| **Episodic**        | Events and experiences     | "User came home at 6:30pm on Tuesday"       |
+| **Semantic**        | Facts & extracted patterns | "Living room temp preference = 23°C"        |
+| **Procedural**      | Skills and how-to          | "To make coffee: fill water → grind → brew" |
+| **Value**           | Preferences and judgments  | "User prefers warm lighting over cool"      |
+| **Working**         | Current task context       | Active conversation state                   |
+| **Knowledge Graph** | Entity-relation network    | Concepts, relationships, and ontologies     |
+| **Tool Memory**     | Tool usage patterns        | Which tools work best for which tasks       |
 
 ### ⚡ Action Nodes (8 output channels)
 
@@ -327,14 +340,19 @@ flowchart TB
 
 ### 🔌 Infrastructure
 
-| Component            | Purpose                                       |
-| -------------------- | --------------------------------------------- |
-| **MessageBus**       | Async pub/sub communication between all nodes |
-| **Service Registry** | Dynamic node discovery and routing            |
-| **Circuit Breaker**  | Fault tolerance and graceful degradation      |
-| **Load Balancer**    | Distribute work across node replicas          |
-| **Policy Engine**    | YAML-based governance rules                   |
-| **Tracing**          | Full observability of cognitive processing    |
+| Component              | Purpose                                       |
+| ---------------------- | --------------------------------------------- |
+| **MessageBus**         | Async pub/sub communication between all nodes |
+| **RedisBus**           | Distributed bus with HMAC auth & TTL          |
+| **DurableBus**         | Persistent message queuing                    |
+| **Service Registry**   | Dynamic node discovery and routing            |
+| **Circuit Breaker**    | Fault tolerance and graceful degradation      |
+| **Load Balancer**      | Distribute work across node replicas          |
+| **Policy Engine**      | YAML-based governance rules                   |
+| **Cognition Router**   | Smart routing across cognitive subsystems     |
+| **Token Optimizer**    | LLM cost optimization and model selection     |
+| **Tracing**            | Full observability of cognitive processing    |
+| **Plugin Manager**     | Dynamic plugin loading and management         |
 
 ---
 
@@ -534,63 +552,111 @@ asyncio.run(main())
 ```
 hbllm-core/
 ├── hbllm/                    # Python cognitive architecture
-│   ├── brain/                # 13 cognitive nodes
+│   ├── brain/                # 25+ cognitive nodes
 │   │   ├── router_node.py    #   Input routing (thalamus)
-│   │   ├── planner_node.py   #   Multi-step planning
+│   │   ├── planner_node.py   #   Graph-of-Thoughts planning
 │   │   ├── decision_node.py  #   Final decision making
 │   │   ├── critic_node.py    #   Self-evaluation
 │   │   ├── learner_node.py   #   Learning from outcomes
 │   │   ├── curiosity_node.py #   Exploration drive
 │   │   ├── world_model_node.py # Environment modeling
+│   │   ├── world_simulator.py#   Action outcome simulation
 │   │   ├── identity_node.py  #   Values and ethics
 │   │   ├── meta_node.py      #   Meta-reasoning
-│   │   ├── workspace_node.py #   Cognitive workspace
+│   │   ├── workspace_node.py #   Cognitive workspace (blackboard)
 │   │   ├── collective_node.py#   Ensemble reasoning
 │   │   ├── sleep_node.py     #   Memory consolidation
 │   │   ├── spawner_node.py   #   Dynamic agent creation
+│   │   ├── experience_node.py#   Salience detection
+│   │   ├── rule_extractor.py #   Behavioral rule mining
+│   │   ├── revision_node.py  #   Self-critique loop
+│   │   ├── sentinel_node.py  #   Proactive governance
+│   │   ├── confidence_estimator.py # Response reliability
+│   │   ├── goal_manager.py   #   Autonomous goal tracking
+│   │   ├── self_model.py     #   Capability self-tracking
+│   │   ├── cognitive_metrics.py #  Live performance dashboard
+│   │   ├── skill_registry.py #   Skill management
+│   │   ├── owner_rules.py    #   Owner behavioral rules
+│   │   ├── context_window.py #   Context/attention management
 │   │   ├── policy_engine.py  #   Governance rules
 │   │   ├── llm_interface.py  #   Local model interface
-│   │   ├── provider_adapter.py # LLM provider adapter (OpenAI/Anthropic/Local)
+│   │   ├── provider_adapter.py # LLM provider adapter
 │   │   └── factory.py        #   One-line brain setup (BrainFactory)
-│   ├── memory/               # 5 memory systems
+│   ├── memory/               # 5 memory systems + knowledge graph
 │   │   ├── episodic.py       #   Event memory
-│   │   ├── semantic.py       #   Fact memory
+│   │   ├── semantic.py       #   Fact memory (hybrid search)
 │   │   ├── procedural.py     #   Skill memory
-│   │   └── value_memory.py   #   Preference memory
+│   │   ├── value_memory.py   #   Preference memory
+│   │   ├── knowledge_graph.py#   Entity-relation graph
+│   │   ├── concept_extractor.py # Concept extraction
+│   │   └── memory_node.py    #   Unified memory interface
 │   ├── perception/           # Input channels
-│   │   ├── vision_node.py
-│   │   ├── audio_in_node.py
-│   │   └── audio_out_node.py
+│   │   ├── vision_node.py    #   Image + OCR
+│   │   ├── audio_in_node.py  #   STT + streaming
+│   │   └── audio_out_node.py #   TTS + per-tenant voice
 │   ├── actions/              # Output channels
-│   │   ├── execution_node.py
+│   │   ├── execution_node.py #   Sandboxed code execution
 │   │   ├── api_node.py
 │   │   ├── browser_node.py
-│   │   ├── logic_node.py
-│   │   ├── fuzzy_node.py
+│   │   ├── logic_node.py     #   Z3 theorem prover
+│   │   ├── fuzzy_node.py     #   Fuzzy reasoning
 │   │   ├── mcp_client_node.py
-│   │   ├── iot_mqtt_node.py  #   Home automation (optional paho-mqtt)
-│   │   └── ros2_node.py      #   Robotics (optional rclpy)
+│   │   ├── tool_memory.py    #   Tool usage memory
+│   │   ├── iot_mqtt_node.py  #   Home automation (paho-mqtt)
+│   │   └── ros2_node.py      #   Robotics (rclpy)
 │   ├── network/              # Communication infrastructure
-│   │   ├── bus.py            #   Message bus (pub/sub)
+│   │   ├── bus.py            #   InProcessBus (pub/sub)
+│   │   ├── redis_bus.py      #   Distributed bus (HMAC + TTL)
+│   │   ├── durable_bus.py    #   Persistent message queue
 │   │   ├── node.py           #   Base node abstraction
 │   │   ├── registry.py       #   Service discovery
 │   │   ├── circuit_breaker.py#   Fault tolerance
+│   │   ├── cognition_router.py #  Cognitive routing
+│   │   ├── load_balancer.py  #   Node load distribution
+│   │   ├── plugin_manager.py #   Dynamic plugin loading
+│   │   ├── tracing.py        #   Full observability
 │   │   └── ...
-│   ├── model/                # Transformer model
-│   ├── training/             # SFT, DPO, evaluation
+│   ├── model/                # Transformer model (GQA + SwiGLU + RoPE + MoE)
+│   ├── data/                 # Data pipeline & interaction mining
+│   ├── training/             # SFT, DPO, cognitive training, reward model
+│   │   ├── cognitive_trainer.py # Knowledge graph + skills during training
+│   │   ├── reward_model.py   #   Reward modeling
+│   │   └── ...               #   SFT, DPO, evaluation, embeddings
 │   ├── benchmarks/           # Cognitive arch vs monolithic benchmarks
 │   │   └── runner.py         #   4 suites: latency, memory, routing, MT
-│   └── serving/              # FastAPI server
+│   └── serving/              # FastAPI server + MCP server
+│       ├── token_optimizer.py#   LLM cost optimization
+│       ├── mcp_server.py     #   Model Context Protocol server
+│       └── ...               #   API, pipeline, providers
 ├── rust/                     # Rust accelerators
 │   ├── tokenizer/            #   High-performance tokenizer
 │   └── data_tools/           #   Data cleaning & dedup
-├── tests/                    # 603+ tests
+├── tests/                    # 965+ tests
 └── pyproject.toml
 ```
 
 ---
 
-## Recent Additions (Phase 2)
+## Recent Additions
+
+### Phase 3 — Cognitive Training & Governance
+
+| Feature                     | Description                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Cognitive Trainer**       | Knowledge graph building, skill detection, and memory formation during training via `CognitiveTrainer`               |
+| **Policy Engine**           | YAML-based governance with `PolicyEngine` enforcing safety, rate limits, and content rules                           |
+| **Owner Rules**             | `OwnerRuleStore` for user-defined behavioral constraints persisted in SQLite                                          |
+| **Sentinel Node**           | Proactive governance monitoring — scans bus traffic and flags policy violations                                       |
+| **Rule Extractor**          | Mines if→then behavioral rules from high-salience events with auto-promotion to owner rules                          |
+| **Revision Node**           | Self-critique loop with `ConfidenceEstimator` for iterative response refinement                                      |
+| **Goal Manager**            | Autonomous goal tracking with priority scoring and progress monitoring                                               |
+| **Self Model**              | Tracks per-domain capabilities, success rates, and latency for self-awareness                                        |
+| **Cognitive Metrics**       | Live dashboard metrics: reasoning quality, latency, confidence distributions                                         |
+| **Token Optimizer**         | LLM cost optimization — routes to cheapest capable model per query complexity                                        |
+| **Reward Model**            | Reward scoring for interaction quality, feeds into DPO training loop                                                 |
+| **Interaction Miner**       | Records query-response pairs with rewards for continuous self-improvement                                            |
+
+### Phase 2 — Infrastructure & Perception
 
 | Feature                    | Description                                                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
