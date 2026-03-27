@@ -137,3 +137,60 @@ def test_prune_doesnt_remove_roots():
     
     assert pruned == 0
     assert root.id in g.nodes
+
+def test_thought_graph_mcts_stats():
+    """Verify backpropagate correctly updates visits and cumulative_reward."""
+    g = ThoughtGraph()
+    root = g.add_root("Root Phase 2")
+    
+    child1 = g.branch(root.id, "Branch 1")
+    g.backpropagate(child1.id, 1.0)
+    
+    assert child1.visits == 1
+    assert child1.cumulative_reward == 1.0
+    assert child1.q_value == 1.0
+    
+    assert root.visits == 1
+    assert root.cumulative_reward == 1.0
+    assert root.q_value == 1.0
+    
+    child2 = g.branch(root.id, "Branch 2")
+    g.backpropagate(child2.id, 0.0)
+    
+    assert child2.visits == 1
+    assert child2.q_value == 0.0
+    
+    assert root.visits == 2
+    assert root.cumulative_reward == 1.0
+    assert root.q_value == 0.5
+
+def test_thought_graph_uct_selection():
+    """Verify UCT selects unvisited nodes first, then balances Q-value and exploration."""
+    g = ThoughtGraph()
+    root = g.add_root("Root")
+    
+    c1 = g.branch(root.id, "C1")
+    c2 = g.branch(root.id, "C2")
+    c3 = g.branch(root.id, "C3")
+    
+    # Selection should prioritize unvisited nodes
+    first_sel = g.select_leaf_uct(root.id)
+    assert first_sel.visits == 0
+    assert first_sel.id in [c1.id, c2.id, c3.id]
+    
+    # Manually visit all children with different rewards
+    g.backpropagate(c1.id, 1.0) # q=1.0
+    g.backpropagate(c2.id, 0.5) # q=0.5
+    g.backpropagate(c3.id, 0.0) # q=0.0
+    
+    # C1 has highest Q, should be selected next (exploration term is equal for all)
+    next_sel = g.select_leaf_uct(root.id)
+    assert next_sel.id == c1.id
+    
+    # Visit C1 a lot with 0 reward to drop its Q heavily and increase its N
+    for _ in range(5):
+        g.backpropagate(c1.id, 0.0)
+        
+    # Now C2 should be favored due to higher Q (0.5 vs ~0.16) and higher exploration boost
+    third_sel = g.select_leaf_uct(root.id)
+    assert third_sel.id != c1.id

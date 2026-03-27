@@ -39,6 +39,15 @@ class ThoughtNode:
     is_merged: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     
+    # MCTS Tracking
+    visits: int = 0
+    cumulative_reward: float = 0.0
+    
+    @property
+    def q_value(self) -> float:
+        """Average reward (exploitation term)"""
+        return self.cumulative_reward / self.visits if self.visits > 0 else 0.0
+    
     @property
     def is_leaf(self) -> bool:
         return len(self.children_ids) == 0
@@ -94,27 +103,74 @@ class ThoughtGraph:
         return merged
     
     def best_path(self) -> list[ThoughtNode]:
-        """Find the highest-scoring path from any root to any leaf."""
+        """Find the path from root to a leaf with the highest visit count / Q-value."""
         leaves = [n for n in self.nodes.values() if n.is_leaf]
         if not leaves:
             return []
         
-        best_leaf = max(leaves, key=lambda n: n.score)
+        # In MCTS, the best action after the budget is spent is typically
+        # the child with the highest visit count or highest Q-value.
+        # We'll use visits as primary, Q-value as secondary tie-breaker.
+        best_leaf = max(leaves, key=lambda n: (n.visits, n.q_value))
         
         # Trace back to root
         path = [best_leaf]
         current = best_leaf
         while current.parent_ids:
-            # Pick the highest-scoring parent
+            # Pick the highest-scoring parent (using Q-value/visits)
             best_parent = max(
                 (self.nodes[pid] for pid in current.parent_ids),
-                key=lambda n: n.score
+                key=lambda n: (n.visits, n.q_value)
             )
             path.append(best_parent)
             current = best_parent
         
         path.reverse()
         return path
+    
+    def select_leaf_uct(self, root_id: str, c_param: float = 1.414) -> ThoughtNode:
+        import math
+        """Select a leaf node to expand using the UCT formula."""
+        current = self.nodes[root_id]
+        
+        while not current.is_leaf:
+            # If any child is completely unexplored, return it instantly
+            unvisited = [self.nodes[cid] for cid in current.children_ids if self.nodes[cid].visits == 0]
+            if unvisited:
+                return unvisited[0]
+            
+            # UCT Selection
+            best_score = -float('inf')
+            best_child = None
+            parent_visits = current.visits
+            
+            for child_id in current.children_ids:
+                child = self.nodes[child_id]
+                exploitation = child.q_value
+                # UCT term: Q(s,a) + c * sqrt(ln(N) / n)
+                exploration = c_param * math.sqrt(math.log(parent_visits) / child.visits)
+                score = exploitation + exploration
+                
+                if score > best_score:
+                    best_score = score
+                    best_child = child
+                    
+            if not best_child:
+                break
+            current = best_child
+            
+        return current
+
+    def backpropagate(self, leaf_id: str, reward: float) -> None:
+        """Propagate reward up the tree to the root."""
+        current = self.nodes[leaf_id]
+        while True:
+            current.visits += 1
+            current.cumulative_reward += reward
+            # Backprop up the first primary parent chain (classic MCTS treats state as a tree)
+            if not current.parent_ids:
+                break
+            current = self.nodes[current.parent_ids[0]]
     
     def prune(self, min_score: float = 0.3) -> int:
         """Remove leaf nodes below the score threshold. Returns count removed."""
@@ -210,80 +266,95 @@ class PlannerNode(Node):
 
         graph = ThoughtGraph()
 
-        # ── Step 1: Branch — Generate initial diverse thoughts ────────────
+        # ── Step 1: Root Node & Initial Plausible Branches ────────────────
+        import time
+        root_node = graph.add_root("Root Query: " + text[:50], score=0.5)
+        
         initial_thoughts = await asyncio.gather(
             *[self._generate_thought(text, i + 1) for i in range(self.branch_factor)]
         )
         
-        root_nodes = []
-        for i, thought_text in enumerate(initial_thoughts):
+        branch_nodes = []
+        for thought_text in initial_thoughts:
             if thought_text:
-                node = graph.add_root(thought_text)
-                root_nodes.append(node)
+                child = graph.branch(root_node.id, thought_text)
+                branch_nodes.append(child)
 
-        if not root_nodes:
-            return message.create_error("GoT: All initial branches failed.")
+        if not branch_nodes:
+            return message.create_error("MCTS: All initial branches failed.")
 
-        # ── Step 2: Policy gate — validate thoughts against governance ──
+        # ── Step 2: Policy gate ── validate initial thoughts against gov ──
         if self.policy_engine:
             tenant_id = message.tenant_id or "default"
-            for node in root_nodes:
+            for node in branch_nodes:
                 result = self.policy_engine.evaluate(
                     text=node.content,
                     tenant_id=tenant_id,
                     context=message.payload.get("context", {}),
                 )
                 if not result.passed:
-                    # Mark blocked thoughts with 0 score and annotate
                     node.score = 0.0
                     node.metadata["policy_blocked"] = True
                     node.metadata["violations"] = result.violations
                     node.content = (
                         f"[BLOCKED by policy: {'; '.join(result.violations)}] "
-                        f"Constraint: this approach violates governance rules. "
                         f"Original: {node.content[:200]}"
                     )
-                    logger.info("[GoT] Thought blocked by policy: %s", result.violations)
+                    logger.info("[MCTS] Thought blocked by policy: %s", result.violations)
 
-        # ── Step 3: Score — Evaluate initial thoughts ─────────────────────
-        unblocked_roots = [n for n in root_nodes if not n.metadata.get("policy_blocked")]
-        if unblocked_roots:
+        # Score the initial unblocked roots
+        unblocked_branches = [n for n in branch_nodes if not n.metadata.get("policy_blocked")]
+        if unblocked_branches:
             await asyncio.gather(
-                *[self._score_thought(graph, node) for node in unblocked_roots]
+                *[self._score_thought(graph, node) for node in unblocked_branches]
             )
+            # Backpropagate initial scores
+            for node in unblocked_branches:
+                graph.backpropagate(node.id, node.score)
 
-        # ── Step 4: Prune — Remove weak initial thoughts ──────────────────
-        pruned = graph.prune(min_score=0.3)
-        logger.info("[GoT] Pruned %d weak initial thoughts", pruned)
-
-        # ── Step 4: Refine — Branch from surviving thoughts ───────────────
-        survivors = [n for n in graph.nodes.values() if n.is_leaf and n.depth < self.max_depth]
+        # ── Step 3: MCTS Compute Loop (Infinite Test-Time Compute) ────────
+        # Run until depth budget or time budget exhausted
+        import time
+        deadline = time.time() + 15.0  # 15 seconds thinking budget per query
+        max_iterations = 20
+        iteration = 0
         
-        refinement_tasks = []
-        for parent in survivors:
-            for j in range(2):  # 2 refinements per surviving thought
-                refinement_tasks.append(
-                    self._refine_thought(graph, parent, text, j + 1)
-                )
-        
-        if refinement_tasks:
-            await asyncio.gather(*refinement_tasks)
+        while time.time() < deadline and iteration < max_iterations:
+            # 1. Selection
+            leaf = graph.select_leaf_uct(root_node.id, c_param=1.414)
+            
+            # 2. Expansion (only expand if we've already scored it and haven't hit max depth)
+            if leaf.visits > 0 and leaf.depth < self.max_depth:
+                await self._refine_thought(graph, leaf, text, iteration)
+                
+                # Pick one of the newly expanded children to simulate
+                unvisited = [graph.nodes[cid] for cid in leaf.children_ids if graph.nodes[cid].visits == 0]
+                if unvisited:
+                    leaf = unvisited[0]
+            
+            # 3. Simulation & Scoring
+            if leaf.visits == 0:
+                await self._score_thought(graph, leaf)
+                reward = leaf.score
+            else:
+                # If we selected a terminal node that can't expand, re-simulate or just use existing score
+                reward = leaf.score
+                
+            # 4. Backpropagation
+            graph.backpropagate(leaf.id, reward)
+            
+            iteration += 1
 
-        # ── Step 5: Score refinements ─────────────────────────────────────
-        new_leaves = [n for n in graph.nodes.values() if n.is_leaf and n.score == 0.0]
-        if new_leaves:
-            await asyncio.gather(
-                *[self._score_thought(graph, node) for node in new_leaves]
-            )
+        logger.info("[MCTS] Completed %d iterations before budget exhaustion.", iteration)
 
-        # ── Step 6: Merge — Combine complementary top thoughts ────────────
+        # ── Step 4: Optional Merge — Combine complementary top thoughts ───
         top_leaves = sorted(
-            [n for n in graph.nodes.values() if n.is_leaf],
-            key=lambda n: n.score,
+            [n for n in graph.nodes.values() if n.is_leaf and n.visits > 0 and not n.metadata.get("policy_blocked")],
+            key=lambda n: n.q_value,
             reverse=True
         )[:2]
         
-        if len(top_leaves) >= 2:
+        if len(top_leaves) >= 2 and top_leaves[0].q_value > 0.5:
             merged_content = await self._merge_thoughts(
                 text, top_leaves[0].content, top_leaves[1].content
             )
@@ -292,6 +363,7 @@ class PlannerNode(Node):
                     [n.id for n in top_leaves], merged_content
                 )
                 await self._score_thought(graph, merged_node)
+                graph.backpropagate(merged_node.id, merged_node.score)
 
         # ── Step 7: Select best path ──────────────────────────────────────
         best_path = graph.best_path()
@@ -303,11 +375,11 @@ class PlannerNode(Node):
         final_node = best_path[-1]
         
         path_desc = " → ".join(
-            f"[D{n.depth}:{n.score:.2f}]" for n in best_path
+            f"[D{n.depth}: Q={n.q_value:.2f}, N={n.visits}]" for n in best_path
         )
         
         final_text = (
-            f"[GoT Planner] Explored {graph_stats['total_nodes']} thoughts "
+            f"[MCTS Planner] Explored {graph_stats['total_nodes']} thoughts "
             f"across {graph_stats['max_depth']+1} depths "
             f"({graph_stats['merged_count']} merged, "
             f"avg score: {graph_stats['avg_score']:.2f}).\n"
@@ -315,7 +387,7 @@ class PlannerNode(Node):
             f"{final_node.content}"
         )
         
-        logger.info("[GoT] Selected path: %s (score=%.2f)", path_desc, final_node.score)
+        logger.info("[MCTS] Selected path: %s (Q=%.2f, N=%d)", path_desc, final_node.q_value, final_node.visits)
         
         # Cache the result
         self._cache_response(cache_key, final_text)
