@@ -222,6 +222,7 @@ class McpClientNode(Node):
         for tool_name in self._tools:
             topic = f"mcp.{self.node_id}.{tool_name}"
             await self.bus.subscribe(topic, self.handle_message)
+            await self.bus.subscribe(f"action.tool.{tool_name}", self.handle_message)
             logger.debug("Subscribed to bus topic: %s", topic)
 
         # Generic topic for any tool on this bridge

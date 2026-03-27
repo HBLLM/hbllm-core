@@ -42,6 +42,7 @@ class ThoughtNode:
     # MCTS Tracking
     visits: int = 0
     cumulative_reward: float = 0.0
+    trajectory_history: list[str] = field(default_factory=list)
     
     @property
     def q_value(self) -> float:
@@ -74,7 +75,7 @@ class ThoughtGraph:
         self.root_ids.append(node.id)
         return node
     
-    def branch(self, parent_id: str, content: str, score: float = 0.0) -> ThoughtNode:
+    def branch(self, parent_id: str, content: str, score: float = 0.0, is_observation: bool = False) -> ThoughtNode:
         """Create a child thought branching from a parent."""
         parent = self.nodes[parent_id]
         child = ThoughtNode(
@@ -82,7 +83,10 @@ class ThoughtGraph:
             score=score,
             depth=parent.depth + 1,
             parent_ids=[parent_id],
+            trajectory_history=parent.trajectory_history + [parent.content]
         )
+        if is_observation:
+            child.metadata["is_observation"] = True
         parent.children_ids.append(child.id)
         self.nodes[child.id] = child
         return child
@@ -426,7 +430,12 @@ class PlannerNode(Node):
             return ""
 
     async def _score_thought(self, graph: ThoughtGraph, node: ThoughtNode) -> None:
-        """Score a thought node by querying the evaluation domain or ExecutionNode."""
+        """Score a thought node by querying the evaluation domain or ExecutionNode/ToolRouter."""
+
+        if node.metadata.get("is_observation"):
+            node.score = 1.0 # Observations are always factual steps
+            return
+
         # 1. Deterministic verification for Python code
         match = re.search(r"```python\n(.*?)```", node.content, re.DOTALL | re.IGNORECASE)
         if match:
@@ -453,6 +462,36 @@ class PlannerNode(Node):
                 logger.warning("[GoT] Execution verification failed/timed out: %s", e)
                 # Fall through to LLM scoring if execution bus falls over
 
+        # 1.5. Tool Call Interception
+        tool_match = re.search(r"<tool_call\s+name=[\"'](.*?)[\"']>(.*?)</tool_call>", node.content, re.DOTALL | re.IGNORECASE)
+        if tool_match:
+            tool_name = tool_match.group(1).strip()
+            tool_args_str = tool_match.group(2).strip()
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="action.tool_call",
+                payload={"tool_name": tool_name, "arguments": tool_args_str},
+            )
+            try:
+                resp = await self.request("action.tool_call", req, timeout=30.0)
+                if resp.type == MessageType.ERROR:
+                    err = resp.payload.get("error", "Unknown tool error")
+                    obs_content = f"Observation: Error: {err}"
+                else:
+                    obs_content = f"Observation:\n{resp.payload}"
+                
+                # Expand the tree deterministically with the observation
+                graph.branch(node.id, obs_content, score=1.0, is_observation=True)
+                node.score = 1.0 # Reward emitting a valid tool call
+                return
+            except Exception as e:
+                logger.warning("[GoT] Tool execution failed/timed out: %s", e)
+                obs_content = f"Observation: Execution failed: {str(e)}"
+                graph.branch(node.id, obs_content, score=0.1, is_observation=True)
+                node.score = 0.5
+                return
+
         # 2. Use Process Reward Model (PRM) network via event bus
         req = Message(
             type=MessageType.QUERY,
@@ -473,11 +512,15 @@ class PlannerNode(Node):
         self, graph: ThoughtGraph, parent: ThoughtNode, query: str, refinement_id: int
     ) -> None:
         """Refine a thought by branching deeper."""
+        trajectory = parent.trajectory_history + [parent.content]
+        history_text = "\n\n".join([f"Step {i+1}: {txt}" for i, txt in enumerate(trajectory)])
+        
         prompt = (
-            f"Refine and improve this reasoning (attempt {refinement_id}):\n"
+            f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"
             f"Original query: {query}\n"
-            f"Current approach: {parent.content[:300]}\n"
-            f"Provide a more detailed and accurate solution."
+            f"Trajectory:\n{history_text}\n\n"
+            f"If you need to use a tool to continue reasoning, output exactly <tool_call name=\"tool_name\">{{\"arg\":\"val\"}}</tool_call>.\n"
+            f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
         req = Message(
             type=MessageType.QUERY,
