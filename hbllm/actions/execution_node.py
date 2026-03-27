@@ -54,13 +54,14 @@ class ExecutionNode(Node):
         return message.create_response(result)
         
     async def _execute_python(self, code: str) -> dict[str, Any]:
-        """Write to temp file and run."""
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=True) as temp_script:
+        """Write to temp file and run in isolated subprocess."""
+        import os
+        temp_script = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
+        try:
             temp_script.write(code)
-            temp_script.flush()
+            temp_script.close()  # Close so subprocess can read it
             
             try:
-                # Run the script with asyncio.create_subprocess_exec
                 proc = await asyncio.create_subprocess_exec(
                     sys.executable, temp_script.name,
                     stdout=asyncio.subprocess.PIPE,
@@ -80,7 +81,6 @@ class ExecutionNode(Node):
                 
                 output = stdout.decode().strip()
                 error = stderr.decode().strip()
-                await proc.wait()  # Ensure process transport closes cleanly
                 
                 if proc.returncode == 0:
                     return {
@@ -100,3 +100,5 @@ class ExecutionNode(Node):
                     "output": "",
                     "error": str(e)
                 }
+        finally:
+            os.unlink(temp_script.name)

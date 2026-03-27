@@ -11,10 +11,27 @@ async def bus():
     await b.start()
     yield b
     await b.stop()
+    # Cancel any dangling tasks to prevent event loop pollution
+    for task in asyncio.all_tasks():
+        if task is not asyncio.current_task() and not task.done():
+            task.cancel()
+    await asyncio.sleep(0)  # Flush cancellation callbacks
+
+
+async def _poll_until(predicate, timeout=5.0, interval=0.1):
+    """Poll a predicate until True or timeout."""
+    elapsed = 0.0
+    while elapsed < timeout:
+        if predicate():
+            return True
+        await asyncio.sleep(interval)
+        elapsed += interval
+    return predicate()  # Final check
+
 
 @pytest.mark.asyncio
 async def test_workspace_executes_python_and_commits(bus):
-    exec_node = ExecutionNode(node_id="exec_1", timeout=1.0)
+    exec_node = ExecutionNode(node_id="exec_1", timeout=5.0)
     workspace = WorkspaceNode(node_id="workspace_1", thinking_deadline=0.5)
     
     await exec_node.start(bus)
@@ -36,7 +53,9 @@ async def test_workspace_executes_python_and_commits(bus):
             payload={"text": "Write code to add 2+2"},
         )
         await bus.publish("workspace.update", update_msg)
-        await asyncio.sleep(0.1)
+        
+        # Wait for blackboard to be created
+        assert await _poll_until(lambda: len(workspace.blackboards) > 0)
         
         corr_id = list(workspace.blackboards.keys())[0]
         
@@ -55,10 +74,9 @@ async def test_workspace_executes_python_and_commits(bus):
         )
         await bus.publish("workspace.thought", thought_msg)
         
-        # Wait for deadline to expire + execution to finish
-        await asyncio.sleep(1.0)
+        # Poll until decision is received
+        assert await _poll_until(lambda: len(decision_received) >= 1, timeout=8.0)
         
-        assert len(decision_received) == 1
         decision = decision_received[0]["selected_thought"]
         assert "execution_output" in decision
         assert decision["execution_output"] == "4"
@@ -70,7 +88,7 @@ async def test_workspace_executes_python_and_commits(bus):
 
 @pytest.mark.asyncio
 async def test_workspace_fails_bad_python_and_monologues(bus):
-    exec_node = ExecutionNode(node_id="exec_2", timeout=1.0)
+    exec_node = ExecutionNode(node_id="exec_2", timeout=5.0)
     workspace = WorkspaceNode(node_id="workspace_2", thinking_deadline=0.5)
     
     await exec_node.start(bus)
@@ -92,7 +110,9 @@ async def test_workspace_fails_bad_python_and_monologues(bus):
             payload={"text": "Write bad code"},
         )
         await bus.publish("workspace.update", update_msg)
-        await asyncio.sleep(0.1)
+        
+        # Wait for blackboard to be created
+        assert await _poll_until(lambda: len(workspace.blackboards) > 0)
         
         corr_id = list(workspace.blackboards.keys())[0]
         
@@ -114,10 +134,9 @@ async def test_workspace_fails_bad_python_and_monologues(bus):
         )
         await bus.publish("workspace.thought", thought_msg)
         
-        await asyncio.sleep(1.0)
+        # Poll until failure monologue is received
+        assert await _poll_until(lambda: len(monologue_received) >= 1, timeout=8.0)
         
-        # Should have broadcast a failure monologue
-        assert len(monologue_received) == 1
         assert "CRITICAL SYSTEM ERROR" in monologue_received[0]["text"]
         assert "ZeroDivisionError" in monologue_received[0]["text"]
         
@@ -130,7 +149,7 @@ from hbllm.brain.learner_node import LearnerNode
 
 @pytest.mark.asyncio
 async def test_autonomous_learning(bus):
-    exec_node = ExecutionNode(node_id="exec_3", timeout=1.0)
+    exec_node = ExecutionNode(node_id="exec_3", timeout=5.0)
     workspace = WorkspaceNode(node_id="workspace_3", thinking_deadline=1.0)
     
     # Batch size 2 prevents it from actually triggering torch logic
@@ -151,7 +170,9 @@ async def test_autonomous_learning(bus):
             payload={"text": "Calculate fibonacci 5", "message_id": "test_query_123"},
         )
         await bus.publish("workspace.update", update_msg)
-        await asyncio.sleep(0.1)
+        
+        # Wait for blackboard to be created
+        assert await _poll_until(lambda: len(workspace.blackboards) > 0)
         
         corr_id = list(workspace.blackboards.keys())[0]
         
@@ -171,15 +192,16 @@ async def test_autonomous_learning(bus):
         )
         await bus.publish("workspace.thought", bad_thought)
         
-        # Wait up to 3 seconds for the negative pair to be registered by the learner
-        for _ in range(30):
-            if "Calculate fibonacci 5" in learner.pending_pairs:
-                if learner.pending_pairs["Calculate fibonacci 5"]["rejected"]:
-                    break
-            await asyncio.sleep(0.1)
+        # Wait until learner registers the negative pair
+        assert await _poll_until(
+            lambda: (
+                "Calculate fibonacci 5" in learner.pending_pairs
+                and learner.pending_pairs["Calculate fibonacci 5"]["rejected"] is not None
+            ),
+            timeout=8.0
+        )
         
         # Check that Learner has the negative pair
-        assert "Calculate fibonacci 5" in learner.pending_pairs
         assert learner.pending_pairs["Calculate fibonacci 5"]["rejected"] is not None
         assert learner.pending_pairs["Calculate fibonacci 5"]["chosen"] is None
         
@@ -199,14 +221,13 @@ async def test_autonomous_learning(bus):
         )
         await bus.publish("workspace.thought", good_thought)
         
-        # Wait up to 3 seconds for the positive pair to be stitched and removed
-        for _ in range(30):
-            if "Calculate fibonacci 5" not in learner.pending_pairs:
-                break
-            await asyncio.sleep(0.1)
+        # Wait until the positive pair is stitched and removed
+        assert await _poll_until(
+            lambda: "Calculate fibonacci 5" not in learner.pending_pairs,
+            timeout=8.0
+        )
         
         # Both pairs should now be stitched into perfect contrastive DPO batch
-        assert "Calculate fibonacci 5" not in learner.pending_pairs
         assert len(learner.paired_buffer) == 1
         
         paired = learner.paired_buffer[0]

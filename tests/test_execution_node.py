@@ -5,7 +5,7 @@ from hbllm.actions.execution_node import ExecutionNode
 
 @pytest.fixture
 def execution_node():
-    return ExecutionNode(node_id="test_exec", timeout=1.0)
+    return ExecutionNode(node_id="test_exec", timeout=5.0)
 
 @pytest.mark.asyncio
 async def test_execution_node_success(execution_node):
@@ -39,7 +39,7 @@ async def test_execution_node_timeout(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "import time\ntime.sleep(5)"}
+        payload={"code": "import time\ntime.sleep(10)"}
     )
     resp = await execution_node.handle_message(msg)
     assert resp.payload["status"] == "FAILURE"

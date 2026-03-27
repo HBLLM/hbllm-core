@@ -34,6 +34,7 @@ class WorkspaceNode(Node):
         # to the array of proposed thoughts and their active deadlines.
         self.blackboards: Dict[str, Dict[str, Any]] = {}
         self._sweeper_task: asyncio.Task | None = None
+        self._watcher_tasks: set[asyncio.Task] = set()
         # Max age for any blackboard entry before forced cleanup (seconds)
         self._max_board_age = 60.0
         # Configurable thinking deadline (seconds for cognitive modules to respond)
@@ -50,7 +51,7 @@ class WorkspaceNode(Node):
         self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
 
     async def on_stop(self) -> None:
-        """Gracefully shut down: notify users of active boards, cancel sweeper."""
+        """Gracefully shut down: cancel watchers, notify users of active boards, cancel sweeper."""
         logger.info("Stopping Global WorkspaceNode")
         # Cancel the sweeper
         if self._sweeper_task and not self._sweeper_task.done():
@@ -59,6 +60,13 @@ class WorkspaceNode(Node):
                 await self._sweeper_task
             except asyncio.CancelledError:
                 pass
+        # Cancel all consensus watcher tasks
+        for task in self._watcher_tasks:
+            if not task.done():
+                task.cancel()
+        if self._watcher_tasks:
+            await asyncio.gather(*self._watcher_tasks, return_exceptions=True)
+        self._watcher_tasks.clear()
         # Gracefully close any active blackboards
         for corr_id in list(self.blackboards.keys()):
             await self._send_error_fallback(
@@ -116,7 +124,7 @@ class WorkspaceNode(Node):
         await self.bus.publish("module.evaluate", broadcast_msg)
         
         # Spawn an async watcher to wait for the deadline or consensus
-        asyncio.create_task(self._consensus_watcher(correlation_id))
+        self._spawn_watcher(correlation_id)
         
         return None
         
@@ -198,7 +206,7 @@ class WorkspaceNode(Node):
                 board["resolved"] = False # Un-resolve it so thinking continues
                 board["deadline"] = time.time() + self._thinking_deadline
                 
-                asyncio.create_task(self._consensus_watcher(corr_id))
+                self._spawn_watcher(corr_id)
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
@@ -244,7 +252,7 @@ class WorkspaceNode(Node):
                 board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it
                 board["resolved"] = False  # Make sure it's unresolved
                 
-                asyncio.create_task(self._consensus_watcher(corr_id))
+                self._spawn_watcher(corr_id)
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
@@ -259,6 +267,12 @@ class WorkspaceNode(Node):
             return None
             
         return None
+
+    def _spawn_watcher(self, corr_id: str) -> None:
+        """Create a tracked consensus watcher task with automatic cleanup."""
+        task = asyncio.create_task(self._consensus_watcher(corr_id))
+        self._watcher_tasks.add(task)
+        task.add_done_callback(self._watcher_tasks.discard)
         
     async def _consensus_watcher(self, corr_id: str):
         """Wait until deadline expires, then finalize. Hard 30s absolute cap."""
@@ -357,7 +371,7 @@ class WorkspaceNode(Node):
                     board["resolved"] = False
                     board["deadline"] = time.time() + self._thinking_deadline
                     
-                    asyncio.create_task(self._consensus_watcher(corr_id))
+                    self._spawn_watcher(corr_id)
                     
                     broadcast_msg = Message(
                         type=MessageType.EVENT,
