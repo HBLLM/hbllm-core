@@ -541,3 +541,65 @@ class TestHBLLMForCausalLM:
             )
             
         assert torch.equal(auto_output, spec_output)
+
+    def test_adaptive_gamma_increases_on_high_acceptance(self):
+        """Verify AdaptiveGammaController ramps gamma up with full acceptance."""
+        ctrl = HBLLMForCausalLM.AdaptiveGammaController(gamma_min=1, gamma_max=8, ewma_alpha=0.5)
+        
+        # Simulate 5 rounds of 100% acceptance (accepted == total)
+        gammas = []
+        for _ in range(5):
+            g = ctrl.step(accepted=4, total=4)
+            gammas.append(g)
+        
+        # After 5 rounds of 100% acceptance, gamma should converge toward gamma_max
+        assert gammas[-1] >= 6, f"Expected gamma >= 6 after full acceptance, got {gammas[-1]}"
+        assert gammas[-1] <= 8
+        # Should be monotonically non-decreasing
+        for i in range(1, len(gammas)):
+            assert gammas[i] >= gammas[i - 1], "Gamma should not decrease with perfect acceptance"
+
+    def test_adaptive_gamma_decreases_on_rejection(self):
+        """Verify AdaptiveGammaController pulls gamma down on consecutive rejections."""
+        ctrl = HBLLMForCausalLM.AdaptiveGammaController(gamma_min=1, gamma_max=8, ewma_alpha=0.5)
+        
+        # Start with high acceptance to bring gamma up
+        for _ in range(5):
+            ctrl.step(accepted=4, total=4)
+        
+        high_gamma = ctrl.step(accepted=4, total=4)
+        
+        # Now simulate 5 rounds of 0% acceptance
+        gammas = [high_gamma]
+        for _ in range(5):
+            g = ctrl.step(accepted=0, total=4)
+            gammas.append(g)
+        
+        # Gamma should decrease
+        assert gammas[-1] < gammas[0], f"Expected gamma to decrease, got {gammas}"
+        assert gammas[-1] >= 1, "Gamma should not go below gamma_min"
+
+    def test_adaptive_gamma_output_equivalence(self):
+        """Verify adaptive gamma produces the same greedy output as standard generation."""
+        target_model = self._small_model()
+        
+        config_draft = ModelConfig(
+            num_layers=1, hidden_size=64, num_attention_heads=2,
+            num_kv_heads=1, intermediate_size=128, vocab_size=256
+        )
+        draft_model = HBLLMForCausalLM(config_draft)
+
+        ids = torch.randint(0, 256, (1, 5))
+        
+        with torch.no_grad():
+            auto_output = target_model.generate(
+                ids.clone(), max_new_tokens=15, temperature=1.0, top_k=1, top_p=1.0
+            )
+
+            adaptive_output = target_model.generate_speculative(
+                ids.clone(), draft_model=draft_model, max_new_tokens=15,
+                temperature=1.0, top_k=1, top_p=1.0,
+                adaptive_gamma=True, gamma_min=1, gamma_max=6, ewma_alpha=0.4
+            )
+            
+        assert torch.equal(auto_output, adaptive_output), "Adaptive gamma output differs from standard output"

@@ -392,6 +392,24 @@ class HBLLMForCausalLM(nn.Module):
         probs = F.softmax(logits, dim=-1)
         return torch.multinomial(probs, num_samples=1)
 
+    class AdaptiveGammaController:
+        """EWMA-based controller that dynamically adjusts draft depth (gamma)."""
+
+        def __init__(self, gamma_min: int = 1, gamma_max: int = 8, ewma_alpha: float = 0.3):
+            self.gamma_min = gamma_min
+            self.gamma_max = gamma_max
+            self.ewma_alpha = ewma_alpha
+            self.acceptance_rate: float = 0.5  # initial estimate
+
+        def step(self, accepted: int, total: int) -> int:
+            """Update EWMA and return the next gamma value."""
+            if total > 0:
+                batch_rate = accepted / total
+                self.acceptance_rate = (
+                    self.ewma_alpha * batch_rate + (1 - self.ewma_alpha) * self.acceptance_rate
+                )
+            return max(self.gamma_min, min(self.gamma_max, round(self.acceptance_rate * self.gamma_max)))
+
     @torch.no_grad()
     def generate_speculative(
         self,
@@ -403,6 +421,10 @@ class HBLLMForCausalLM(nn.Module):
         top_k: int = 50,
         top_p: float = 0.9,
         eos_token_id: int | None = None,
+        adaptive_gamma: bool = False,
+        gamma_min: int = 1,
+        gamma_max: int = 8,
+        ewma_alpha: float = 0.3,
     ) -> torch.Tensor:
         """
         Accelerated autoregressive generation using speculative decoding.
@@ -410,12 +432,16 @@ class HBLLMForCausalLM(nn.Module):
         Args:
             input_ids: [batch_size, prompt_len] initial token IDs
             draft_model: Smaller HBLLMForCausalLM instance for drafting
-            gamma: Number of tokens the draft model predicts per step
+            gamma: Number of tokens the draft model predicts per step (static mode)
             max_new_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             top_k: Top-k filtering
             top_p: Nucleus sampling threshold
             eos_token_id: Stop generation at this token
+            adaptive_gamma: If True, dynamically adjust gamma based on acceptance rate
+            gamma_min: Minimum gamma when adaptive (floor)
+            gamma_max: Maximum gamma when adaptive (ceiling)
+            ewma_alpha: EWMA smoothing factor for acceptance rate tracking
 
         Returns:
             [batch_size, prompt_len + generated_len] full sequence
@@ -423,16 +449,24 @@ class HBLLMForCausalLM(nn.Module):
         self.eval()
         draft_model.eval()
 
+        controller = None
+        if adaptive_gamma:
+            controller = self.AdaptiveGammaController(
+                gamma_min=gamma_min, gamma_max=gamma_max, ewma_alpha=ewma_alpha
+            )
+            gamma = controller.step(0, 0)  # initial gamma from default acceptance_rate
+
         target_past_key_values = None
         draft_past_key_values = None
         
         n_generated = 0
         while n_generated < max_new_tokens:
+            current_gamma = gamma
             # --- Drafting Phase ---
             draft_input_ids = input_ids
             draft_tokens = []
             
-            for _ in range(gamma):
+            for _ in range(current_gamma):
                 if draft_past_key_values is not None:
                     model_input_draft = draft_input_ids[:, -1:]
                 else:
@@ -450,11 +484,11 @@ class HBLLMForCausalLM(nn.Module):
                 draft_tokens.append(next_draft_token)
                 draft_input_ids = torch.cat([draft_input_ids, next_draft_token], dim=1)
             
-            draft_tokens_tensor = torch.cat(draft_tokens, dim=1) # [batch_size, gamma]
+            draft_tokens_tensor = torch.cat(draft_tokens, dim=1) # [batch_size, current_gamma]
 
             # --- Verification Phase ---
             if target_past_key_values is not None:
-                # Target model digests the last accepted token + the new gamma draft tokens
+                # Target model digests the last accepted token + the new draft tokens
                 target_input = torch.cat([input_ids[:, -1:], draft_tokens_tensor], dim=1)
             else:
                 target_input = torch.cat([input_ids, draft_tokens_tensor], dim=1)
@@ -467,11 +501,11 @@ class HBLLMForCausalLM(nn.Module):
             target_past_key_values = target_outputs.get("past_key_values")
             
             # Extract logits predicting the draft tokens and the bonus token
-            eval_logits = target_outputs["logits"][:, -(gamma + 1):, :] # [batch_size, gamma + 1, vocab]
+            eval_logits = target_outputs["logits"][:, -(current_gamma + 1):, :] # [batch_size, current_gamma + 1, vocab]
             
             # --- Rejection/Acceptance ---
             accepted_count = 0
-            for i in range(gamma):
+            for i in range(current_gamma):
                 target_token = self._sample_logits(eval_logits[:, i, :], temperature, top_k, top_p)
                 
                 # Check for exact match across batches
@@ -491,7 +525,7 @@ class HBLLMForCausalLM(nn.Module):
                     break
             else:
                 # If all draft tokens were accepted, we get a bonus token from the last logit
-                bonus_token = self._sample_logits(eval_logits[:, gamma, :], temperature, top_k, top_p)
+                bonus_token = self._sample_logits(eval_logits[:, current_gamma, :], temperature, top_k, top_p)
                 input_ids = torch.cat([input_ids, bonus_token], dim=1)
                 n_generated += 1
                 accepted_count += 1
@@ -518,6 +552,10 @@ class HBLLMForCausalLM(nn.Module):
 
             target_past_key_values = truncate_kv_cache(target_past_key_values, cache_keep_len)
             draft_past_key_values = truncate_kv_cache(draft_past_key_values, cache_keep_len)
+
+            # --- Adaptive Gamma Update ---
+            if controller is not None:
+                gamma = controller.step(accepted_count, current_gamma)
 
         return input_ids
 
