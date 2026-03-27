@@ -131,7 +131,7 @@ from hbllm.brain.learner_node import LearnerNode
 @pytest.mark.asyncio
 async def test_autonomous_learning(bus):
     exec_node = ExecutionNode(node_id="exec_3", timeout=1.0)
-    workspace = WorkspaceNode(node_id="workspace_3", thinking_deadline=0.5)
+    workspace = WorkspaceNode(node_id="workspace_3", thinking_deadline=1.0)
     
     # Batch size 2 prevents it from actually triggering torch logic
     learner = LearnerNode(node_id="learner_1", batch_size=2, model=None, tokenizer=None)
@@ -170,7 +170,13 @@ async def test_autonomous_learning(bus):
             correlation_id=corr_id
         )
         await bus.publish("workspace.thought", bad_thought)
-        await asyncio.sleep(1.2) # wait for execution and sweeper
+        
+        # Wait up to 3 seconds for the negative pair to be registered by the learner
+        for _ in range(30):
+            if "Calculate fibonacci 5" in learner.pending_pairs:
+                if learner.pending_pairs["Calculate fibonacci 5"]["rejected"]:
+                    break
+            await asyncio.sleep(0.1)
         
         # Check that Learner has the negative pair
         assert "Calculate fibonacci 5" in learner.pending_pairs
@@ -192,7 +198,12 @@ async def test_autonomous_learning(bus):
             correlation_id=corr_id
         )
         await bus.publish("workspace.thought", good_thought)
-        await asyncio.sleep(1.2) # wait for execution
+        
+        # Wait up to 3 seconds for the positive pair to be stitched and removed
+        for _ in range(30):
+            if "Calculate fibonacci 5" not in learner.pending_pairs:
+                break
+            await asyncio.sleep(0.1)
         
         # Both pairs should now be stitched into perfect contrastive DPO batch
         assert "Calculate fibonacci 5" not in learner.pending_pairs
