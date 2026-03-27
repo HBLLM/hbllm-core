@@ -32,17 +32,18 @@ def test_feedback_request_rating_bounds():
 
 @pytest.mark.asyncio
 async def test_learner_node_receives_feedback():
-    """Verify LearnerNode accumulates feedback from the bus."""
+    """Verify LearnerNode accumulates feedback and stitches DPO pairs."""
     bus = InProcessBus()
     await bus.start()
     
-    learner = LearnerNode(node_id="learner_test")
+    learner = LearnerNode(node_id="learner_test", batch_size=2)
     await learner.start(bus)
     
-    assert len(learner.feedback_buffer) == 0
+    assert len(learner.pending_pairs) == 0
+    assert len(learner.paired_buffer) == 0
     
-    # Send a feedback message
-    feedback_msg = Message(
+    # Send a positive feedback message
+    feedback_pos = Message(
         type=MessageType.FEEDBACK,
         source_node_id="api_server",
         tenant_id="t1",
@@ -52,15 +53,36 @@ async def test_learner_node_receives_feedback():
             "rating": 1,
             "prompt": "Hello",
             "response": "Hi there!",
-            "comment": "Great response",
         },
     )
-    await bus.publish("system.feedback", feedback_msg)
-    await asyncio.sleep(0.2)
+    await bus.publish("system.feedback", feedback_pos)
+    await asyncio.sleep(0.1)
     
-    assert len(learner.feedback_buffer) == 1
-    assert learner.feedback_buffer[0].rating == 1
-    assert learner.feedback_buffer[0].prompt == "Hello"
+    assert "Hello" in learner.pending_pairs
+    assert learner.pending_pairs["Hello"]["chosen"] == "Hi there!"
+    assert learner.pending_pairs["Hello"]["rejected"] is None
+    assert len(learner.paired_buffer) == 0
+    
+    # Send a negative feedback message for the same prompt
+    feedback_neg = Message(
+        type=MessageType.FEEDBACK,
+        source_node_id="api_server",
+        tenant_id="t1",
+        topic="system.feedback",
+        payload={
+            "message_id": "msg_002",
+            "rating": -1,
+            "prompt": "Hello",
+            "response": "Crash",
+        },
+    )
+    await bus.publish("system.feedback", feedback_neg)
+    await asyncio.sleep(0.1)
+    
+    # It should stitch them and move to paired_buffer
+    assert "Hello" not in learner.pending_pairs
+    assert len(learner.paired_buffer) == 1
+    assert learner.paired_buffer[0] == ("Hello", "Hi there!", "Crash")
     
     await learner.stop()
     await bus.stop()
@@ -68,35 +90,39 @@ async def test_learner_node_receives_feedback():
 
 @pytest.mark.asyncio
 async def test_learner_node_triggers_dpo_at_batch_size():
-    """LearnerNode should trigger DPO training when batch_size feedbacks arrive."""
+    """LearnerNode should trigger DPO training when batch_size pairs arrive."""
     bus = InProcessBus()
     await bus.start()
     
-    learner = LearnerNode(node_id="learner_test")
+    learner = LearnerNode(node_id="learner_test", batch_size=2, model=None, tokenizer=None)
     await learner.start(bus)
     
-    # Send batch_size feedbacks to trigger training
+    # Send batch_size pairs to trigger training
     for i in range(learner.batch_size):
-        msg = Message(
+        # Positive
+        msg_pos = Message(
             type=MessageType.FEEDBACK,
             source_node_id="api_server",
-            tenant_id="t1",
             topic="system.feedback",
-            payload={
-                "message_id": f"msg_{i}",
-                "rating": 1 if i % 2 == 0 else -1,
-                "prompt": f"Question {i}",
-                "response": f"Answer {i}",
-            },
+            payload={"message_id": f"msg_p_{i}", "rating": 1, "prompt": f"Q{i}", "response": f"Good {i}"},
         )
-        await bus.publish("system.feedback", msg)
+        await bus.publish("system.feedback", msg_pos)
+        
+        # Negative
+        msg_neg = Message(
+            type=MessageType.FEEDBACK,
+            source_node_id="api_server",
+            topic="system.feedback",
+            payload={"message_id": f"msg_n_{i}", "rating": -1, "prompt": f"Q{i}", "response": f"Bad {i}"},
+        )
+        await bus.publish("system.feedback", msg_neg)
         await asyncio.sleep(0.1)
     
-    # Wait for DPO training to complete (simulated 1s)
-    await asyncio.sleep(2.0)
+    # Wait for DPO training trigger (1s)
+    await asyncio.sleep(0.5)
     
-    # Buffer should be drained after training
-    assert len(learner.feedback_buffer) == 0
+    # Buffer should be drained after training trigger
+    assert len(learner.paired_buffer) == 0
     # Training task should have run
     assert learner.training_task is not None
     
