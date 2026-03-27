@@ -453,26 +453,21 @@ class PlannerNode(Node):
                 logger.warning("[GoT] Execution verification failed/timed out: %s", e)
                 # Fall through to LLM scoring if execution bus falls over
 
-        # 2. Fallback to LLM zero-shot self-scoring
-        prompt = f"Rate the quality and correctness of this reasoning approach on a 0-1 scale: {node.content[:300]}"
+        # 2. Use Process Reward Model (PRM) network via event bus
         req = Message(
             type=MessageType.QUERY,
             source_node_id=self.node_id,
-            topic="domain.general.query",
-            payload={"text": prompt},
+            topic="action.score_thought",
+            payload={"content": node.content},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=30.0)
-            # Parse score from response or use heuristic
-            resp_text = resp.payload.get("text", "")
-            match = re.search(r"(\d+\.?\d*)", resp_text)
-            if match:
-                raw = float(match.group(1))
-                node.score = min(1.0, raw if raw <= 1.0 else raw / 10.0)
-            else:
-                node.score = 0.5  # Default if unparseable
-        except Exception:
-            node.score = 0.3
+            # PRM scoring is extremely fast (single forward pass)
+            resp = await self.request("action.score_thought", req, timeout=5.0)
+            score = resp.payload.get("score", 0.5)
+            node.score = min(max(float(score), 0.0), 1.0)
+        except Exception as e:
+            logger.warning("[GoT] PRM evaluation failed/timed out, defaulting to 0.5: %s", e)
+            node.score = 0.5
 
     async def _refine_thought(
         self, graph: ThoughtGraph, parent: ThoughtNode, query: str, refinement_id: int

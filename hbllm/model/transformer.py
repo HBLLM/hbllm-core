@@ -385,3 +385,99 @@ class HBLLMForCausalLM(nn.Module):
                 break
 
         return input_ids
+
+class HBLLMForProcessReward(nn.Module):
+    """
+    HBLLM with a sequence classification head for Process Reward Modeling.
+    
+    Scores an entire reasoning step. By default, it takes the representation of
+    the last non-padding token and projects it to a continuous scalar.
+    Used for step-level MCTS UCT scoring (0.0 means incorrect, 1.0 means correct).
+    """
+
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.config = config
+        self.model = HBLLMModel(config)
+        
+        # Single logit output for binary correctness estimation
+        self.score = nn.Linear(config.hidden_size, 1, bias=False)
+        
+        # Initialize weights
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, module: nn.Module) -> None:
+        """Initialize weights using small init."""
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        labels: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Forward pass for the Process Reward Model.
+        
+        Args:
+            input_ids: [batch_size, seq_len]
+            labels: [batch_size] continuous labels in [0.0, 1.0] to compute BCE loss
+            
+        Returns:
+            Dict with 'logits', 'scores' (sigmoid of logits), optionally 'loss'
+        """
+        batch_size = input_ids.shape[0]
+        
+        # Run base transformer
+        hidden_states, _, lb_loss = self.model(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            use_cache=False,
+        )
+        
+        # If user provides a 2D mask (1=valid, 0=pad), we extract the last valid token representation
+        # Otherwise, default to the last token sequence index
+        if attention_mask is not None and attention_mask.dim() == 2:
+            sequence_lengths = attention_mask.sum(dim=1).long() - 1
+            pooled_hidden_states = hidden_states[torch.arange(batch_size, device=hidden_states.device), sequence_lengths]
+        else:
+            pooled_hidden_states = hidden_states[:, -1, :]
+            
+        # Linear projection to single logit
+        logits = self.score(pooled_hidden_states)
+        
+        # Map logit to [0, 1] probability
+        scores = torch.sigmoid(logits)
+        
+        result = {
+            "logits": logits,
+            "scores": scores,
+        }
+        
+        # Compute BCE loss if labels are provided
+        if labels is not None:
+            # labels shape: [batch_size], logits shape: [batch_size, 1]
+            loss_fct = nn.BCEWithLogitsLoss()
+            
+            # Ensure proper dtypes and shapes
+            if labels.dim() == 1:
+                labels = labels.unsqueeze(-1)
+                
+            bce_loss = loss_fct(logits.float(), labels.float())
+            
+            # Add MoE auxiliary loss if present
+            loss = bce_loss + (0.01 * lb_loss)
+            
+            result["loss"] = loss
+            result["bce_loss"] = bce_loss
+            result["lb_loss"] = lb_loss
+            
+        return result
+
