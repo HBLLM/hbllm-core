@@ -6,7 +6,7 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-558%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-603%2B%20passing-brightgreen.svg)](#)
   [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
@@ -173,126 +173,90 @@ This means a 1.5B MoE model has the **capacity of a much larger model** but the 
 
 ### Full System Overview
 
-```mermaid
-flowchart TB
-    subgraph PERCEPTION["👁️ Perception Layer"]
-        direction LR
-        VIS["�️ Vision\n(Caption + OCR)"]
-        AIN["� Audio In\n(STT + Streaming)"]
-        AOUT["🔊 Audio Out\n(TTS + Per-Tenant Voice)"]
-    end
-
-    subgraph BUS["⚡ Message Bus (Async Pub/Sub)"]
-        direction LR
-        INPROC["InProcessBus\n(single server)"]
-        REDIS["RedisBus\n(distributed)"]
-        REG["Service Registry"]
-        CB["Circuit Breaker"]
-    end
-
-    subgraph BRAIN["🧠 Cognitive Core"]
-        direction TB
-        ROUTER["🔀 Router\n(intent + domain)"]
-        PLANNER["📋 GoT Planner\n(DAG reasoning)"]
-        WORKSPACE["📝 Workspace\n(blackboard consensus)"]
-        CRITIC["🔍 Critic\n(self-evaluation)"]
-        DECISION["⚖️ Decision\n(final output)"]
-        
-        ROUTER --> PLANNER
-        ROUTER --> WORKSPACE
-        PLANNER -->|"GoT thoughts"| WORKSPACE
-        WORKSPACE --> CRITIC
-        CRITIC --> DECISION
-    end
-
-    subgraph META["🧬 Meta-Cognitive Layer"]
-        direction LR
-        LEARN["🎓 Learner"]
-        CURIOSITY["🔭 Curiosity"]
-        SPAWNER["🧬 Spawner\n(neurogenesis)"]
-        METAREASON["🧠 Meta\nReasoning"]
-        EXPERIENCE["🎥 Experience\n(salience)"]
-        IDENTITY["�️ Identity\n(ethics)"]
-        SLEEP["💤 Sleep Cycle\n(3-phase consolidation)"]
-        COLLECTIVE["📊 Collective"]
-        WORLD["🌍 World Model"]
-    end
-
-    subgraph MEMORY["💾 Memory Systems (5 types)"]
-        direction LR
-        EPISODIC["📖 Episodic\n(events)"]
-        SEMANTIC["📚 Semantic\n(hybrid search)"]
-        PROCEDURAL["🔧 Procedural\n(skills)"]
-        VALUE["❤️ Value\n(preferences)"]
-        WORKING["📋 Working\n(context)"]
-    end
-
-    subgraph ACTIONS["⚡ Action Layer"]
-        direction LR
-        EXEC["🖥️ Execution\n(sandboxed)"]
-        API["🌐 API"]
-        BROWSER["🌍 Browser"]
-        LOGIC["🔧 Z3 Logic"]
-        FUZZY["🌀 Fuzzy"]
-        MCP["🔌 MCP"]
-        IOT["📡 IoT/MQTT"]
-        ROS["🤖 ROS2"]
-    end
-
-    subgraph ZONING["🧪 Zoning Model (Self-Expanding)"]
-        direction LR
-        BASE["Shared Base\n125M / 500M / 1.5B"]
-        GEN["General LoRA\n~2MB"]
-        CODE["Coding LoRA\n~2MB"]
-        MATH["Math LoRA\n~2MB"]
-        NEW["??? LoRA\n(auto-spawned)"]
-        BASE --- GEN
-        BASE --- CODE
-        BASE --- MATH
-        BASE -.->|"SpawnerNode"| NEW
-    end
-
-    subgraph PROVIDERS["🔗 LLM Providers"]
-        direction LR
-        OPENAI["OpenAI"]
-        ANTHROPIC["Anthropic"]
-        LOCAL["Local HBLLM"]
-        OLLAMA["Ollama"]
-    end
-
-    PERCEPTION ==> BUS
-    BUS ==> BRAIN
-    BRAIN ==> BUS
-    BUS ==> ACTIONS
-    BUS <--> MEMORY
-    BUS <--> META
-    ZONING -.-> BRAIN
-    PROVIDERS -.-> BRAIN
-    CURIOSITY -->|"goals"| SLEEP
-    SLEEP -->|"consolidation"| MEMORY
-    EXPERIENCE -->|"salience"| METAREASON
-    METAREASON -->|"improve"| LEARN
-    SPAWNER -->|"new zones"| ZONING
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                            HBLLM CORE BRAIN                                ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  ┌─── PERCEPTION ──────────────────────────────────────── ACTIONS ───────┐  ║
+║  │                                                                      │  ║
+║  │  👁️ Vision    🎤 Audio In    🔊 Audio Out    ⚡ Execution  🌐 API   │  ║
+║  │                                               🖥️ Browser  🔧 Logic  │  ║
+║  │                                               🌀 Fuzzy    🔌 MCP    │  ║
+║  └──────────┬───────────────────────────────────────────────┬───────────┘  ║
+║             │                                               │              ║
+║             ▼                                               ▲              ║
+║  ╔══════════════════════════════════════════════════════════════════════╗   ║
+║  ║                     ⚡ MESSAGE BUS (Async Pub/Sub)                  ║   ║
+║  ║              Service Registry │ Circuit Breaker │ Tracing           ║   ║
+║  ╚═══════╤═══════════╤════════╤══════════╤════════════╤═══════════════╝   ║
+║          │           │        │          │            │                    ║
+║          ▼           ▼        ▼          ▼            ▼                    ║
+║  ┌─── BRAIN ──────────────────────────────────────────────────────────┐   ║
+║  │                                                                    │   ║
+║  │  🔀 Router ──────► 📋 Planner ──────► ⚖️ Decision                 │   ║
+║  │     │                  │                    │                       │   ║
+║  │     │              🎓 Learner           🔍 Critic                  │   ║
+║  │     │                  │                    │                       │   ║
+║  │     │              🌍 World Model      🛡️ Identity (Ethics)       │   ║
+║  │     │                  │                                           │   ║
+║  │     │              🔭 Curiosity ──► 🧬 Spawner (Neurogenesis)     │   ║
+║  │     │                                   │                          │   ║
+║  │     │              🧠 Meta Reasoning    │ creates new zones        │   ║
+║  │     │              📊 Collective        ▼ at runtime!              │   ║
+║  │     │              💤 Sleep Cycle    [New Domain Experts...]        │   ║
+║  │     │              📝 Workspace                                    │   ║
+║  │     │                                                              │   ║
+║  │     │  ┌── POLICY ENGINE (YAML governance rules) ──────────────┐   │   ║
+║  │     └─►│ Safety constraints • Rate limits • Content filtering  │   │   ║
+║  │        └───────────────────────────────────────────────────────┘   │   ║
+║  └────────────────────────────────────────────────────────────────────┘   ║
+║          │                                                                ║
+║          ▼                                                                ║
+║  ┌─── MEMORY ─────────────────────────────────────────────────────────┐   ║
+║  │                                                                    │   ║
+║  │  📖 Episodic     📚 Semantic    🔧 Procedural    ❤️ Value         │   ║
+║  │  (events)        (facts)        (skills)          (preferences)    │   ║
+║  │                                                                    │   ║
+║  └────────────────────────────────────────────────────────────────────┘   ║
+║                                                                           ║
+║  ┌─── ZONING MODEL ──────────────────────────────────────────────────┐   ║
+║  │                                                                    │   ║
+║  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌───────┐  │   ║
+║  │  │ General │  │ Coding  │  │  Math   │  │  ???    │  │  ...  │  │   ║
+║  │  │  LoRA   │  │  LoRA   │  │  LoRA   │  │  LoRA   │  │ LoRA  │  │   ║
+║  │  │  ~2MB   │  │  ~2MB   │  │  ~2MB   │  │  ~2MB   │  │ ~2MB  │  │   ║
+║  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘  └──┬────┘  │   ║
+║  │       └────────────┴────────────┴────────────┴───────────┘       │   ║
+║  │                             │                                     │   ║
+║  │                  ┌──────────┴──────────┐                          │   ║
+║  │                  │  Shared Base Model  │                          │   ║
+║  │                  │  125M / 500M / 1.5B │                          │   ║
+║  │                  │  GQA + SwiGLU + RoPE│                          │   ║
+║  │                  └─────────────────────┘                          │   ║
+║  │       ▲ starter zones        ▲ spawned dynamically               │   ║
+║  └────────────────────────────────────────────────────────────────────┘   ║
+║                                                                           ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
-### 🧠 Brain Nodes (14 cognitive modules + growing)
+### 🧠 Brain Nodes (13 cognitive modules + growing)
 
-| Node               | Role                                        | Analog               |
-| ------------------ | ------------------------------------------- | -------------------- |
-| **Router**         | Routes inputs to the right cognitive path   | Thalamus             |
-| **Planner**        | Breaks goals into multi-step plans          | Prefrontal cortex    |
-| **Decision**       | Makes final decisions from evidence         | Executive function   |
-| **Critic**         | Self-evaluates quality and correctness      | Error monitoring     |
-| **Learner**        | Updates knowledge from outcomes             | Hippocampal learning |
-| **Curiosity**      | Explores novel situations proactively       | Dopaminergic system  |
-| **World Model**    | Builds internal model of the environment    | Predictive coding    |
-| **Identity**       | Maintains values, ethics, and personality   | Self-model           |
-| **Meta Reasoning** | Reasons about reasoning (Reflection Engine) | Metacognition        |
-| **Workspace**      | Shared cognitive workspace for integration  | Global workspace     |
-| **Collective**     | Ensemble reasoning from multiple nodes      | Neural ensemble      |
-| **Sleep Cycle**    | Consolidates learning during idle time      | Memory consolidation |
-| **Spawner**        | Dynamically creates specialist sub-agents   | Neurogenesis         |
-| **Experience**     | Records experiences and detects salience    | Amygdala             |
+| Node               | Role                                       | Analog               |
+| ------------------ | ------------------------------------------ | -------------------- |
+| **Router**         | Routes inputs to the right cognitive path  | Thalamus             |
+| **Planner**        | Breaks goals into multi-step plans         | Prefrontal cortex    |
+| **Decision**       | Makes final decisions from evidence        | Executive function   |
+| **Critic**         | Self-evaluates quality and correctness     | Error monitoring     |
+| **Learner**        | Updates knowledge from outcomes            | Hippocampal learning |
+| **Curiosity**      | Explores novel situations proactively      | Dopaminergic system  |
+| **World Model**    | Builds internal model of the environment   | Predictive coding    |
+| **Identity**       | Maintains values, ethics, and personality  | Self-model           |
+| **Meta Reasoning** | Reasons about its own reasoning            | Metacognition        |
+| **Workspace**      | Shared cognitive workspace for integration | Global workspace     |
+| **Collective**     | Ensemble reasoning from multiple nodes     | Neural ensemble      |
+| **Sleep Cycle**    | Consolidates learning during idle time     | Memory consolidation |
+| **Spawner**        | Dynamically creates specialist sub-agents  | Neurogenesis         |
 
 ### 👁️ Perception (3 input channels)
 
@@ -304,13 +268,13 @@ flowchart TB
 
 ### 🧬 Memory Systems (5 types — like human memory)
 
-| Memory         | What It Stores             | Example                                     |
-| -------------- | -------------------------- | ------------------------------------------- |
-| **Episodic**   | Events and experiences     | "User came home at 6:30pm on Tuesday"       |
-| **Semantic**   | Facts & extracted patterns | "Living room temp preference = 23°C"        |
-| **Procedural** | Skills and how-to          | "To make coffee: fill water → grind → brew" |
-| **Value**      | Preferences and judgments  | "User prefers warm lighting over cool"      |
-| **Working**    | Current task context       | Active conversation state                   |
+| Memory         | What It Stores            | Example                                     |
+| -------------- | ------------------------- | ------------------------------------------- |
+| **Episodic**   | Events and experiences    | "User came home at 6:30pm on Tuesday"       |
+| **Semantic**   | Facts and knowledge       | "Living room temperature preference = 23°C" |
+| **Procedural** | Skills and how-to         | "To make coffee: fill water → grind → brew" |
+| **Value**      | Preferences and judgments | "User prefers warm lighting over cool"      |
+| **Working**    | Current task context      | Active conversation state                   |
 
 ### ⚡ Action Nodes (8 output channels)
 
@@ -584,26 +548,9 @@ hbllm-core/
 ├── rust/                     # Rust accelerators
 │   ├── tokenizer/            #   High-performance tokenizer
 │   └── data_tools/           #   Data cleaning & dedup
-├── tests/                    # 558+ tests
+├── tests/                    # 603+ tests
 └── pyproject.toml
 ```
-
----
-
-## Recent Additions (Phase 2)
-
-| Feature                    | Description                                                                                                                       |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Distributed Bus**        | `RedisBus` hardened with exponential backoff reconnection, TTL enforcement, HMAC auth, and `BusMetrics`                           |
-| **LLM Provider Adapter**   | Unified `LLMProvider` abstraction with `OpenAIProvider`, `AnthropicProvider`, `LocalProvider` + `ProviderLLM` adapter             |
-| **SleepNode Phase 3**      | Curiosity goal replay during idle — accumulates goals from `system.sleep.goal`, replays during sleep, emits `system.sleep.report` |
-| **GoT → Workspace Wiring** | `PlannerNode` now participates in workspace deliberation, posting GoT thoughts with graph metadata                                |
-| **Audio Streaming**        | `AudioInputNode` supports real-time hex-encoded PCM streaming with session buffering and silence detection                        |
-| **Per-Tenant Voice**       | `AudioOutputNode` supports custom voice embeddings per tenant and text chunking for long inputs                                   |
-| **OCR Integration**        | `VisionNode` supports OCR via EasyOCR with pytesseract fallback                                                                   |
-| **Structured Logging**     | JSON-formatted logs with correlation IDs, per-module levels, and context vars                                                     |
-| **Sandboxed Execution**    | `ExecutionNode` runs code in isolated environment with memory/CPU limits and output truncation                                    |
-| **E2E Cognitive Test**     | Full pipeline test with real nodes + MockLLM covering query flow, salience, memory, feedback loops                                |
 
 ---
 
