@@ -24,7 +24,7 @@ class TestConfidenceEstimator:
         assert relevant > irrelevant
 
     def test_hedging_lowers_confidence(self, estimator):
-        confident = estimator.score("What is 2+2?", "The answer is 4.")
+        confident = estimator.score("What is 2+2?", "The correct answer to your equation is 4.")
         hedging = estimator.score("What is 2+2?", "I think maybe the answer might be 4, possibly.")
         assert confident > hedging
 

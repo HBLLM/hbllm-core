@@ -102,12 +102,17 @@ class ConfidenceEstimator:
         flags = []
         if factuality_risk > self.hallucination_threshold:
             flags.append("high_hallucination_risk")
+            overall *= 0.8
         if uncertainty > 0.6:
             flags.append("high_uncertainty")
         if relevance < 0.3:
             flags.append("low_relevance")
+            overall *= 0.8
         if len(response.split()) < 5:
             flags.append("too_brief")
+            overall *= 0.8
+            
+        overall = max(0.0, min(1.0, overall))
 
         return ConfidenceReport(
             overall=round(max(0.0, min(1.0, overall)), 3),
@@ -127,8 +132,8 @@ class ConfidenceEstimator:
 
     def _score_relevance(self, query: str, response: str) -> float:
         """Query-response relevance via lexical overlap."""
-        q_words = set(query.lower().split())
-        r_words = set(response.lower().split())
+        q_words = set(re.findall(r'\b\w+\b', query.lower()))
+        r_words = set(re.findall(r'\b\w+\b', response.lower()))
         stopwords = {"the", "a", "an", "is", "are", "was", "were", "and", "or",
                      "to", "in", "of", "for", "on", "with", "it", "this", "that"}
         q_words -= stopwords
