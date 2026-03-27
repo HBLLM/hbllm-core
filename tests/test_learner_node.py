@@ -25,7 +25,7 @@ def _make_feedback(rating=1, prompt="What is AI?", response="AI is..."):
 
 @pytest.mark.asyncio
 async def test_accepts_valid_feedback():
-    """Valid feedback should be added to the buffer."""
+    """Valid feedback should be added to pending_pairs."""
     from hbllm.brain.learner_node import LearnerNode
 
     bus = InProcessBus()
@@ -36,7 +36,8 @@ async def test_accepts_valid_feedback():
 
     msg = _make_feedback(rating=1)
     await node.handle_message(msg)
-    assert len(node.feedback_buffer) == 1
+    assert "What is AI?" in node.pending_pairs
+    assert node.pending_pairs["What is AI?"]["chosen"] == "AI is..."
 
     await node.stop()
     await bus.stop()
@@ -61,7 +62,7 @@ async def test_ignores_non_feedback_messages():
     )
     result = await node.handle_message(msg)
     assert result is None
-    assert len(node.feedback_buffer) == 0
+    assert len(node.pending_pairs) == 0
 
     await node.stop()
     await bus.stop()
@@ -90,7 +91,7 @@ async def test_ignores_feedback_without_prompt():
         },
     )
     await node.handle_message(msg)
-    assert len(node.feedback_buffer) == 0
+    assert len(node.pending_pairs) == 0
 
     await node.stop()
     await bus.stop()
@@ -100,19 +101,22 @@ async def test_ignores_feedback_without_prompt():
 
 @pytest.mark.asyncio
 async def test_training_triggers_at_batch_size():
-    """Training should trigger when batch_size feedbacks are collected."""
+    """Training should trigger when batch_size contrastive pairs are collected."""
     from hbllm.brain.learner_node import LearnerNode
 
     bus = InProcessBus()
     await bus.start()
 
-    node = LearnerNode(node_id="learner_batch")
+    node = LearnerNode(node_id="learner_batch", model=None, tokenizer=None)
     node.batch_size = 3
     await node.start(bus)
 
+    # Build 3 contrastive pairs
     for i in range(3):
-        msg = _make_feedback(rating=1, prompt=f"Prompt {i}", response=f"Response {i}")
-        await node.handle_message(msg)
+        pos = _make_feedback(rating=1, prompt=f"Prompt {i}", response=f"Good {i}")
+        await node.handle_message(pos)
+        neg = _make_feedback(rating=-1, prompt=f"Prompt {i}", response=f"Bad {i}")
+        await node.handle_message(neg)
 
     # Give the async task a moment to start
     await asyncio.sleep(0.1)
@@ -130,7 +134,7 @@ async def test_training_completes_and_broadcasts():
     bus = InProcessBus()
     await bus.start()
 
-    node = LearnerNode(node_id="learner_broadcast")
+    node = LearnerNode(node_id="learner_broadcast", model=None, tokenizer=None)
     node.batch_size = 2
     await node.start(bus)
 
@@ -138,10 +142,12 @@ async def test_training_completes_and_broadcasts():
     await bus.subscribe("system.learning_update", lambda msg: updates.append(msg))
 
     for i in range(2):
-        msg = _make_feedback(rating=1, prompt=f"P{i}", response=f"R{i}")
-        await node.handle_message(msg)
+        pos = _make_feedback(rating=1, prompt=f"P{i}", response=f"Good {i}")
+        await node.handle_message(pos)
+        neg = _make_feedback(rating=-1, prompt=f"P{i}", response=f"Bad {i}")
+        await node.handle_message(neg)
 
-    # Wait for the background training to complete (simulated 1s sleep)
+    # Wait for the background training to complete
     await asyncio.sleep(1.5)
 
     assert len(updates) == 1
@@ -153,21 +159,23 @@ async def test_training_completes_and_broadcasts():
 
 @pytest.mark.asyncio
 async def test_buffer_drains_after_batch():
-    """Buffer should be drained after a batch is consumed."""
+    """Paired buffer should be drained after a batch is consumed."""
     from hbllm.brain.learner_node import LearnerNode
 
     bus = InProcessBus()
     await bus.start()
 
-    node = LearnerNode(node_id="learner_drain")
+    node = LearnerNode(node_id="learner_drain", model=None, tokenizer=None)
     node.batch_size = 2
     await node.start(bus)
 
     for i in range(3):
-        msg = _make_feedback(rating=1, prompt=f"P{i}", response=f"R{i}")
-        await node.handle_message(msg)
+        pos = _make_feedback(rating=1, prompt=f"P{i}", response=f"Good {i}")
+        await node.handle_message(pos)
+        neg = _make_feedback(rating=-1, prompt=f"P{i}", response=f"Bad {i}")
+        await node.handle_message(neg)
 
-    assert len(node.feedback_buffer) == 1  # 3 - 2 = 1 remaining
+    assert len(node.paired_buffer) == 1  # 3 - 2 = 1 remaining
 
     await node.stop()
     await bus.stop()
