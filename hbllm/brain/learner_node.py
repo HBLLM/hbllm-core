@@ -35,7 +35,11 @@ class LearnerNode(Node):
         self.node_type = NodeType.MEMORY
         self.model = model
         self.tokenizer = tokenizer
-        self.feedback_buffer: list[FeedbackPayload] = []
+        
+        # MCTS Autonomous DPO pairing
+        self.pending_pairs: dict[str, dict[str, str | None]] = {}
+        self.paired_buffer: list[tuple[str, str, str]] = []  # (prompt, chosen, rejected)
+        
         self.batch_size = batch_size
         self.lr = lr
         self.dpo_beta = dpo_beta
@@ -69,13 +73,28 @@ class LearnerNode(Node):
 
         logger.info("Learner '%s' received feedback for msg %s: %d", self.node_id, payload.message_id, payload.rating)
 
-        if payload.prompt and payload.response:
-            self.feedback_buffer.append(payload)
+        prompt = payload.prompt
+        response = payload.response
+        if prompt and response:
+            if prompt not in self.pending_pairs:
+                self.pending_pairs[prompt] = {"chosen": None, "rejected": None}
+                
+            if payload.rating == 1:
+                self.pending_pairs[prompt]["chosen"] = response
+            elif payload.rating == -1:
+                self.pending_pairs[prompt]["rejected"] = response
+                
+            pair = self.pending_pairs[prompt]
+            if pair["chosen"] and pair["rejected"]:
+                # Construct a perfect contrastive pairing for the exact same prompt
+                self.paired_buffer.append((prompt, pair["chosen"], pair["rejected"]))
+                del self.pending_pairs[prompt]
+                logger.info("LearnerNode stitched perfect contrastive DPO pair for prompt: %s...", prompt[:30])
 
         # Trigger background training if batch size is met
-        if len(self.feedback_buffer) >= self.batch_size:
-            batch = self.feedback_buffer[:self.batch_size]
-            self.feedback_buffer = self.feedback_buffer[self.batch_size:]
+        if len(self.paired_buffer) >= self.batch_size:
+            batch = self.paired_buffer[:self.batch_size]
+            self.paired_buffer = self.paired_buffer[self.batch_size:]
             
             if self.training_task and not self.training_task.done():
                 logger.warning("Training already in progress. Queuing batch.")
@@ -84,9 +103,9 @@ class LearnerNode(Node):
 
         return None
 
-    async def _run_dpo_training(self, batch: list[FeedbackPayload]) -> None:
+    async def _run_dpo_training(self, batch: list[tuple[str, str, str]]) -> None:
         """Execute DPO training in a background thread."""
-        logger.info("LearnerNode starting DPO training on %d samples...", len(batch))
+        logger.info("LearnerNode starting DPO training on %d perfect pairs...", len(batch))
 
         def _train():
             if self.model is None or self.tokenizer is None:
@@ -102,9 +121,9 @@ class LearnerNode(Node):
             self.model.train()
 
             # Build DPO pairs from feedback
-            for fb in batch:
+            for prompt_text, chosen_text, rejected_text in batch:
                 try:
-                    pair = self._build_dpo_pair(fb, device)
+                    pair = self._build_dpo_pair(prompt_text, chosen_text, rejected_text, device)
                     if pair is None:
                         continue
 
@@ -172,50 +191,28 @@ class LearnerNode(Node):
             logger.error("LearnerNode DPO training failed: %s", e)
 
     def _build_dpo_pair(
-        self, fb: FeedbackPayload, device: torch.device,
+        self, prompt_text: str, chosen_text: str, rejected_text: str, device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Build a chosen/rejected pair from feedback."""
-        prompt_text = fb.prompt or ""
-        response_text = fb.response or ""
-
-        if not prompt_text or not response_text:
+        """Build a chosen/rejected tensor pair."""
+        if not prompt_text or not chosen_text or not rejected_text:
             return None
 
         try:
-            # Tokenize combined prompt+response
-            full_text = f"{prompt_text}\n{response_text}"
-            ids = self.tokenizer.encode(full_text)
-            ids = ids[:512]  # Truncate to max length
+            # Tokenize combined prompt+response for chosen
+            full_chosen = f"{prompt_text}\n{chosen_text}"
+            c_ids = self.tokenizer.encode(full_chosen)[:512]
+            chosen_tensor = torch.tensor([c_ids], dtype=torch.long, device=device)
 
-            full_tensor = torch.tensor([ids], dtype=torch.long, device=device)
+            # Tokenize combined prompt+response for rejected
+            full_rejected = f"{prompt_text}\n{rejected_text}"
+            r_ids = self.tokenizer.encode(full_rejected)[:512]
+            rejected_tensor = torch.tensor([r_ids], dtype=torch.long, device=device)
 
-            if fb.rating == 1:
-                # Positive feedback: response is chosen, corrupted version is rejected
-                corrupted = self._corrupt_response(response_text)
-                corrupted_text = f"{prompt_text}\n{corrupted}"
-                c_ids = self.tokenizer.encode(corrupted_text)[:512]
-                corrupted_tensor = torch.tensor([c_ids], dtype=torch.long, device=device)
-                return full_tensor, corrupted_tensor
-            elif fb.rating == -1:
-                # Negative feedback: construct a minimal "better" response
-                better = f"I understand your question about {prompt_text[:50]}. Let me provide a more helpful answer."
-                better_text = f"{prompt_text}\n{better}"
-                b_ids = self.tokenizer.encode(better_text)[:512]
-                better_tensor = torch.tensor([b_ids], dtype=torch.long, device=device)
-                return better_tensor, full_tensor
+            return chosen_tensor, rejected_tensor
         except Exception as e:
             logger.debug("Failed to build DPO pair: %s", e)
 
         return None
-
-    @staticmethod
-    def _corrupt_response(response: str) -> str:
-        """Create a corrupted version of a response for negative examples."""
-        words = response.split()
-        if len(words) > 4:
-            # Truncate to create a worse response
-            return " ".join(words[:len(words) // 2]) + "..."
-        return "I don't know."
 
     def _ensure_lora(self) -> None:
         """Inject LoRA if not already done."""

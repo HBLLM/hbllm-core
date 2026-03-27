@@ -198,6 +198,8 @@ class WorkspaceNode(Node):
                 board["resolved"] = False # Un-resolve it so thinking continues
                 board["deadline"] = time.time() + self._thinking_deadline
                 
+                asyncio.create_task(self._consensus_watcher(corr_id))
+                
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
                     source_node_id=self.node_id,
@@ -240,6 +242,9 @@ class WorkspaceNode(Node):
                 
                 board["turn_count"] += 1
                 board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it
+                board["resolved"] = False  # Make sure it's unresolved
+                
+                asyncio.create_task(self._consensus_watcher(corr_id))
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
@@ -333,9 +338,13 @@ class WorkspaceNode(Node):
                     logger.info("Workspace verification passed.")
                     best_thought["execution_output"] = resp.payload.get("output", "")
                     await self._commit_to_decision(corr_id, best_thought)
+                    # Autonomous DPO signal (Success)
+                    await self._emit_training_feedback(board, best_thought, rating=1)
                 else:
                     err = resp.payload.get("error", "Unknown execution error")
                     logger.warning("Workspace code execution failed: %s", err)
+                    # Phase 3: Autonomous DPO signal (Failure)
+                    await self._emit_training_feedback(board, best_thought, rating=-1)
                     
                     # Remove the failing thought so it isn't picked again
                     board["thoughts"] = [t for t in board["thoughts"] if t["content"] != content]
@@ -347,6 +356,8 @@ class WorkspaceNode(Node):
                     board["turn_count"] += 1
                     board["resolved"] = False
                     board["deadline"] = time.time() + self._thinking_deadline
+                    
+                    asyncio.create_task(self._consensus_watcher(corr_id))
                     
                     broadcast_msg = Message(
                         type=MessageType.EVENT,
@@ -534,6 +545,33 @@ class WorkspaceNode(Node):
             logger.exception("Failed to send error fallback for %s", corr_id)
         finally:
             self.blackboards.pop(corr_id, None)
+
+    async def _emit_training_feedback(self, board: dict[str, Any], thought: dict[str, Any], rating: int) -> None:
+        """Phase 3: Autonomous Neural-Symbolic Training Feedback."""
+        try:
+            prompt = board["original_query"].get("text", "")
+            response = thought.get("content", "")
+            
+            # Use original_query ID or session to correlate
+            message_id = board["original_query"].get("message_id", "auto_" + str(time.time()))
+            
+            feedback_msg = Message(
+                type=MessageType.FEEDBACK,
+                source_node_id=self.node_id,
+                tenant_id=board.get("tenant_id", "default"),
+                session_id=board.get("session_id", "default"),
+                topic="system.feedback",
+                payload={
+                    "message_id": message_id,
+                    "rating": rating,
+                    "prompt": prompt,
+                    "response": response,
+                }
+            )
+            await self.bus.publish("system.feedback", feedback_msg)
+            logger.info("Emitted autonomous training feedback (rating=%d) for auto-training loop", rating)
+        except Exception as e:
+            logger.warning("Failed to emit autonomous training feedback: %s", e)
 
     async def _periodic_sweeper(self) -> None:
         """Periodically clean up blackboard entries that have exceeded max age."""
