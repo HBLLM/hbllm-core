@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 from typing import Any
 
@@ -20,7 +21,7 @@ class SpawnerNode(Node):
     """
 
     def __init__(self, node_id: str, model: Any, tokenizer: Any):
-        super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
+        super().__init__(node_id=node_id, node_type=NodeType.SPAWNER)
         self.model = model
         self.tokenizer = tokenizer
         self.synthesizer = DataSynthesizer(model=model, tokenizer=tokenizer)
@@ -138,13 +139,15 @@ class SpawnerNode(Node):
                     dataset, batch_size=2, shuffle=True, collate_fn=collate_sft,
                 )
 
-                # Inject LoRA into a copy of attention layers
-                injected = LoRAManager.inject(self.model, r=8)
-                logger.info("Injected LoRA into %d modules", len(injected))
+                # Inject LoRA into a deep copy to avoid mutating the shared model
+                import torch
+                train_model = copy.deepcopy(self.model)
+                injected = LoRAManager.inject(train_model, r=8)
+                logger.info("Injected LoRA into %d modules (on isolated copy)", len(injected))
 
                 # Optimizer targeting only LoRA parameters
                 lora_params = [
-                    p for n, p in self.model.named_parameters()
+                    p for n, p in train_model.named_parameters()
                     if "lora_" in n and p.requires_grad
                 ]
                 if not lora_params:
@@ -152,8 +155,8 @@ class SpawnerNode(Node):
                     return None
 
                 optimizer = torch.optim.AdamW(lora_params, lr=1e-4, weight_decay=0.01)
-                device = next(self.model.parameters()).device
-                self.model.train()
+                device = next(train_model.parameters()).device
+                train_model.train()
 
                 max_steps = min(20, len(loader) * 2)  # Quick training for domain bootstrap
                 step = 0
@@ -166,7 +169,7 @@ class SpawnerNode(Node):
                         input_ids = batch["input_ids"].to(device)
                         labels = batch["labels"].to(device)
 
-                        output = self.model(input_ids)
+                        output = train_model(input_ids)
                         logits = output["logits"] if isinstance(output, dict) else output
 
                         loss = torch.nn.functional.cross_entropy(
@@ -188,7 +191,7 @@ class SpawnerNode(Node):
                             )
 
                 # Extract LoRA state dict
-                adapter_state = LoRAManager.get_lora_state_dict(self.model)
+                adapter_state = LoRAManager.get_lora_state_dict(train_model)
 
                 # Save adapter
                 from pathlib import Path

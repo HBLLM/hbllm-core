@@ -146,7 +146,29 @@ class LogicNode(Node):
                 sandbox_globals[name] = getattr(z3, name)
         
         try:
-            exec(z3_code, sandbox_globals, sandbox_locals)
+            # ── AST validation: reject dangerous patterns ──
+            import ast as _ast
+            try:
+                tree = _ast.parse(z3_code)
+            except SyntaxError as se:
+                logger.error("[LogicNode] Z3 code has syntax errors: %s", se)
+                return None
+
+            _BLOCKED = (
+                _ast.Import, _ast.ImportFrom,   # no imports
+                _ast.FunctionDef, _ast.AsyncFunctionDef,  # no function defs
+                _ast.ClassDef,                  # no class defs
+            )
+            for node in _ast.walk(tree):
+                if isinstance(node, _BLOCKED):
+                    logger.error("[LogicNode] Blocked AST node: %s", type(node).__name__)
+                    return None
+                # Block attribute access to dunder methods
+                if isinstance(node, _ast.Attribute) and node.attr.startswith("__"):
+                    logger.error("[LogicNode] Blocked dunder access: %s", node.attr)
+                    return None
+
+            exec(z3_code, sandbox_globals, sandbox_locals)  # noqa: S102 — sandboxed
             result = sandbox_locals.get("result")
             if result is not None:
                 return str(result)

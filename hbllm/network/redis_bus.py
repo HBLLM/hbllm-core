@@ -11,25 +11,16 @@ import hmac
 import logging
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
 from typing import Any
 
 import redis.asyncio as redis
 from hbllm.network.bus import Subscription, MessageHandler, MessageBus
 from hbllm.network.messages import Message
+from hbllm.network.tracing import BusMetrics
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class BusMetrics:
-    """Operational metrics for the Redis bus."""
-    messages_published: int = 0
-    messages_received: int = 0
-    messages_dropped_ttl: int = 0
-    messages_dropped_auth: int = 0
-    reconnections: int = 0
-    handler_errors: int = 0
 
 
 class RedisBus(MessageBus):
@@ -54,6 +45,8 @@ class RedisBus(MessageBus):
         self._dispatch_task: asyncio.Task[None] | None = None
         self._sub_counter = 0
         self.metrics = BusMetrics()
+        # Track active handler tasks to prevent unbounded memory growth
+        self._active_tasks: set[asyncio.Task] = set()
 
     def _sign(self, payload_json: str) -> str:
         """Compute HMAC-SHA256 signature for a message payload."""
@@ -75,7 +68,7 @@ class RedisBus(MessageBus):
         
         self._running = True
         self._dispatch_task = asyncio.create_task(self._dispatch_loop())
-        logger.info(f"RedisBus started connected to {self.redis_url}")
+        logger.info("RedisBus started connected to %s", self.redis_url)
 
     async def stop(self) -> None:
         """Stop the bus and clean up."""
@@ -132,7 +125,7 @@ class RedisBus(MessageBus):
     async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         # Create a future for the response
-        future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
 
         # Publish the request
@@ -198,12 +191,13 @@ class RedisBus(MessageBus):
                     try:
                         message = Message.model_validate_json(payload_json)
                     except Exception as e:
-                        logger.error(f"Failed to parse Redis message: {e}")
+                        logger.error("Failed to parse Redis message: %s", e)
                         continue
 
                     # ── TTL enforcement ──
                     if message.ttl_seconds is not None:
-                        age = (asyncio.get_event_loop().time() - message.timestamp.timestamp())
+                        from datetime import timezone
+                        age = (time.time() - message.timestamp.replace(tzinfo=timezone.utc).timestamp())
                         if age > message.ttl_seconds:
                             logger.debug("Dropped expired message %s (age=%.1fs, ttl=%ss)", message.id, age, message.ttl_seconds)
                             self.metrics.messages_dropped_ttl += 1
@@ -233,7 +227,7 @@ class RedisBus(MessageBus):
                 except Exception:
                     logger.error("Reconnection failed. Will retry.")
             except Exception as e:
-                logger.error(f"Error in Redis dispatch loop: {e}")
+                logger.error("Error in Redis dispatch loop: %s", e)
 
     async def _reconnect(self) -> None:
         """Reconnect to Redis after a connection loss."""
@@ -243,7 +237,7 @@ class RedisBus(MessageBus):
             if self.client:
                 await self.client.aclose()
         except Exception:
-            pass
+            logger.debug("Error closing connection during reconnect", exc_info=True)
 
         self.client = redis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()
@@ -278,8 +272,11 @@ class RedisBus(MessageBus):
                             await self.publish(response.topic, response)
                     except Exception:
                         logger.exception("Error in handler for topic '%s', message %s", t, m.id)
+                        self.metrics.handler_errors += 1
                         
-                asyncio.create_task(_run_handler())
+                task = asyncio.create_task(_run_handler())
+                self._active_tasks.add(task)
+                task.add_done_callback(self._active_tasks.discard)
 
     def _get_matching_topics(self, topic: str) -> list[str]:
         """Get all registered topics that match (exact + wildcard)."""

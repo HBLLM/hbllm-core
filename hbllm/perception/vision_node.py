@@ -49,7 +49,7 @@ class VisionNode(Node):
                 device = "mps" 
             self.pipeline = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base", device=device)
         except Exception as e:
-            logger.error(f"Failed to load vision model: {e}")
+            logger.error("Failed to load vision model: %s", e)
 
     async def on_stop(self) -> None:
         logger.info("Stopping VisionNode")

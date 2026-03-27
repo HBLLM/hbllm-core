@@ -45,6 +45,7 @@ class DatasetSource:
 
 # Pre-configured sources for HBLLM training
 PREDEFINED_SOURCES = {
+    # ── General ────────────────────────────────────────────────────────
     "fineweb": DatasetSource(
         name="fineweb",
         dataset_id="HuggingFaceFW/fineweb",
@@ -58,12 +59,78 @@ PREDEFINED_SOURCES = {
         text_column="text",
         streaming=True,
     ),
+
+    # ── Code ──────────────────────────────────────────────────────────
     "the_stack_v2": DatasetSource(
         name="the_stack_v2",
         dataset_id="bigcode/the-stack-v2-dedup",
         text_column="content",
         streaming=True,
     ),
+    "starcoderdata": DatasetSource(
+        name="starcoderdata",
+        dataset_id="bigcode/starcoderdata",
+        text_column="content",
+        streaming=True,
+    ),
+    "codeparrot": DatasetSource(
+        name="codeparrot",
+        dataset_id="codeparrot/codeparrot-clean",
+        text_column="content",
+        streaming=True,
+    ),
+
+    # ── Math & Reasoning ──────────────────────────────────────────────
+    "openwebmath": DatasetSource(
+        name="openwebmath",
+        dataset_id="open-web-math/open-web-math",
+        text_column="text",
+        streaming=True,
+    ),
+    "metamath": DatasetSource(
+        name="metamath",
+        dataset_id="meta-math/MetaMathQA",
+        text_column="query",     # concatenated with response in stream
+        streaming=True,
+    ),
+
+    # ── Science ───────────────────────────────────────────────────────
+    "pes2o": DatasetSource(
+        name="pes2o",
+        dataset_id="allenai/peS2o",
+        config="v2",
+        text_column="text",
+        streaming=True,
+    ),
+
+    # ── Instruction / Chat (for SFT or cognitive pre-training) ────────
+    "openhermes": DatasetSource(
+        name="openhermes",
+        dataset_id="teknium/OpenHermes-2.5",
+        text_column="conversations",  # needs special handling
+        streaming=True,
+    ),
+    "slimorca": DatasetSource(
+        name="slimorca",
+        dataset_id="Open-Orca/SlimOrca",
+        text_column="conversations",  # needs special handling
+        streaming=True,
+    ),
+}
+
+
+# Domain tags — used by cognitive training to label data provenance
+DATASET_DOMAINS = {
+    "fineweb": "general",
+    "wikipedia": "factual",
+    "the_stack_v2": "code",
+    "starcoderdata": "code",
+    "codeparrot": "code",
+    "openwebmath": "math",
+    "metamath": "math",
+    "pes2o": "science",
+    "openhermes": "reasoning",
+    "slimorca": "reasoning",
 }
 
 
@@ -105,7 +172,15 @@ class DatasetDownloader:
 
         Yields one document (string) at a time, never loading the full
         dataset into memory.
+
+        Handles special formats:
+        - conversations: list of {"from": role, "value": text} dicts
+        - query+response: MetaMath-style Q&A pairs
+
+        Retries on network errors with exponential backoff.
         """
+        import time as _time
+
         logger.info("Streaming from %s (%s)", source.name, source.dataset_id)
 
         kwargs: dict[str, Any] = {
@@ -116,12 +191,34 @@ class DatasetDownloader:
         if source.config:
             kwargs["name"] = source.config
 
-        ds = load_dataset(**kwargs)
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                ds = load_dataset(**kwargs)
+                break
+            except (ConnectionError, TimeoutError, OSError) as e:
+                if attempt < max_retries:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    logger.warning(
+                        "  %s: load failed (attempt %d/%d): %s — retrying in %ds",
+                        source.name, attempt + 1, max_retries, e, wait,
+                    )
+                    _time.sleep(wait)
+                else:
+                    logger.error("  %s: load failed after %d retries: %s", source.name, max_retries, e)
+                    raise
+            except Exception:
+                raise  # Don't retry on non-network errors
 
         count = 0
         for sample in ds:
-            text = sample.get(source.text_column, "")
-            if not text or not isinstance(text, str):
+            try:
+                text = self._extract_text(sample, source)
+            except Exception as e:
+                logger.debug("  %s: skipping bad sample: %s", source.name, e)
+                continue
+
+            if not text or not isinstance(text, str) or len(text.strip()) < 10:
                 continue
 
             yield text
@@ -135,6 +232,37 @@ class DatasetDownloader:
                 break
 
         logger.info("  %s: finished with %d documents", source.name, count)
+
+    @staticmethod
+    def _extract_text(sample: dict, source: DatasetSource) -> str:
+        """Extract text from a sample, handling special column formats."""
+        col = source.text_column
+
+        # Conversation format (openhermes, slimorca, sharegpt)
+        if col == "conversations":
+            convos = sample.get("conversations", [])
+            if isinstance(convos, list):
+                parts = []
+                for turn in convos:
+                    if isinstance(turn, dict):
+                        role = turn.get("from", turn.get("role", ""))
+                        value = turn.get("value", turn.get("content", ""))
+                        if not role or not value:
+                            continue  # Skip malformed turns
+                        parts.append(f"{role}: {value}")
+                if not parts:
+                    return ""  # Skip empty conversations
+                return "\n".join(parts)
+            return ""
+
+        # Query+response format (MetaMath)
+        if col == "query" and "response" in sample:
+            query = sample.get("query", "")
+            response = sample.get("response", "")
+            return f"Question: {query}\nAnswer: {response}" if query else ""
+
+        # Standard text column
+        return sample.get(col, "")
 
     def stream_all(self) -> Generator[str, None, None]:
         """Stream texts from all configured sources."""

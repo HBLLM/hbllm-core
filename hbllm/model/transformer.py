@@ -353,31 +353,8 @@ class HBLLMForCausalLM(nn.Module):
             logits = outputs["logits"][:, -1, :]  # Last token logits
             past_key_values = outputs.get("past_key_values")
 
-            # Temperature scaling
-            if temperature != 1.0:
-                logits = logits / temperature
-
-            # Top-k filtering
-            if top_k > 0:
-                indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-                logits[indices_to_remove] = float("-inf")
-
-            # Top-p (nucleus) filtering
-            if top_p < 1.0:
-                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                indices_to_remove = sorted_indices_to_remove.scatter(
-                    1, sorted_indices, sorted_indices_to_remove
-                )
-                logits[indices_to_remove] = float("-inf")
-
-            # Sample
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-
+            # Sample using helper
+            next_token = self._sample_logits(logits, temperature, top_k, top_p)
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
             # Stop at EOS
@@ -385,3 +362,295 @@ class HBLLMForCausalLM(nn.Module):
                 break
 
         return input_ids
+
+    def _sample_logits(
+        self,
+        logits: torch.Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> torch.Tensor:
+        """Helper to sample a single token from logits."""
+        if temperature != 1.0:
+            logits = logits / max(temperature, 1e-7)
+
+        if top_k > 0:
+            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+            logits[indices_to_remove] = float("-inf")
+
+        if top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 0] = 0
+            indices_to_remove = sorted_indices_to_remove.scatter(
+                1, sorted_indices, sorted_indices_to_remove
+            )
+            logits[indices_to_remove] = float("-inf")
+
+        probs = F.softmax(logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
+
+    class AdaptiveGammaController:
+        """EWMA-based controller that dynamically adjusts draft depth (gamma)."""
+
+        def __init__(self, gamma_min: int = 1, gamma_max: int = 8, ewma_alpha: float = 0.3):
+            self.gamma_min = gamma_min
+            self.gamma_max = gamma_max
+            self.ewma_alpha = ewma_alpha
+            self.acceptance_rate: float = 0.5  # initial estimate
+
+        def step(self, accepted: int, total: int) -> int:
+            """Update EWMA and return the next gamma value."""
+            if total > 0:
+                batch_rate = accepted / total
+                self.acceptance_rate = (
+                    self.ewma_alpha * batch_rate + (1 - self.ewma_alpha) * self.acceptance_rate
+                )
+            return max(self.gamma_min, min(self.gamma_max, round(self.acceptance_rate * self.gamma_max)))
+
+    @torch.no_grad()
+    def generate_speculative(
+        self,
+        input_ids: torch.Tensor,
+        draft_model: HBLLMForCausalLM,
+        gamma: int = 4,
+        max_new_tokens: int = 100,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 0.9,
+        eos_token_id: int | None = None,
+        adaptive_gamma: bool = False,
+        gamma_min: int = 1,
+        gamma_max: int = 8,
+        ewma_alpha: float = 0.3,
+    ) -> torch.Tensor:
+        """
+        Accelerated autoregressive generation using speculative decoding.
+        
+        Args:
+            input_ids: [batch_size, prompt_len] initial token IDs
+            draft_model: Smaller HBLLMForCausalLM instance for drafting
+            gamma: Number of tokens the draft model predicts per step (static mode)
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_k: Top-k filtering
+            top_p: Nucleus sampling threshold
+            eos_token_id: Stop generation at this token
+            adaptive_gamma: If True, dynamically adjust gamma based on acceptance rate
+            gamma_min: Minimum gamma when adaptive (floor)
+            gamma_max: Maximum gamma when adaptive (ceiling)
+            ewma_alpha: EWMA smoothing factor for acceptance rate tracking
+
+        Returns:
+            [batch_size, prompt_len + generated_len] full sequence
+        """
+        self.eval()
+        draft_model.eval()
+
+        controller = None
+        if adaptive_gamma:
+            controller = self.AdaptiveGammaController(
+                gamma_min=gamma_min, gamma_max=gamma_max, ewma_alpha=ewma_alpha
+            )
+            gamma = controller.step(0, 0)  # initial gamma from default acceptance_rate
+
+        target_past_key_values = None
+        draft_past_key_values = None
+        
+        n_generated = 0
+        while n_generated < max_new_tokens:
+            current_gamma = gamma
+            # --- Drafting Phase ---
+            draft_input_ids = input_ids
+            draft_tokens = []
+            
+            for _ in range(current_gamma):
+                if draft_past_key_values is not None:
+                    model_input_draft = draft_input_ids[:, -1:]
+                else:
+                    model_input_draft = draft_input_ids
+
+                draft_outputs = draft_model(
+                    input_ids=model_input_draft,
+                    past_key_values=draft_past_key_values,
+                    use_cache=True,
+                )
+                draft_logits = draft_outputs["logits"][:, -1, :]
+                draft_past_key_values = draft_outputs.get("past_key_values")
+                
+                next_draft_token = self._sample_logits(draft_logits, temperature, top_k, top_p)
+                draft_tokens.append(next_draft_token)
+                draft_input_ids = torch.cat([draft_input_ids, next_draft_token], dim=1)
+            
+            draft_tokens_tensor = torch.cat(draft_tokens, dim=1) # [batch_size, current_gamma]
+
+            # --- Verification Phase ---
+            if target_past_key_values is not None:
+                # Target model digests the last accepted token + the new draft tokens
+                target_input = torch.cat([input_ids[:, -1:], draft_tokens_tensor], dim=1)
+            else:
+                target_input = torch.cat([input_ids, draft_tokens_tensor], dim=1)
+            
+            target_outputs = self.forward(
+                input_ids=target_input,
+                past_key_values=target_past_key_values,
+                use_cache=True,
+            )
+            target_past_key_values = target_outputs.get("past_key_values")
+            
+            # Extract logits predicting the draft tokens and the bonus token
+            eval_logits = target_outputs["logits"][:, -(current_gamma + 1):, :] # [batch_size, current_gamma + 1, vocab]
+            
+            # --- Rejection/Acceptance ---
+            accepted_count = 0
+            for i in range(current_gamma):
+                target_token = self._sample_logits(eval_logits[:, i, :], temperature, top_k, top_p)
+                
+                # Check for exact match across batches
+                if (target_token == draft_tokens_tensor[:, i:i+1]).all():
+                    accepted_count += 1
+                    input_ids = torch.cat([input_ids, target_token], dim=1)
+                    n_generated += 1
+                    if eos_token_id is not None and (target_token == eos_token_id).all():
+                        return input_ids
+                    if n_generated >= max_new_tokens:
+                        return input_ids
+                else:
+                    # Mismatch! Reject this and all following draft tokens
+                    # Append the correct target token
+                    input_ids = torch.cat([input_ids, target_token], dim=1)
+                    n_generated += 1
+                    break
+            else:
+                # If all draft tokens were accepted, we get a bonus token from the last logit
+                bonus_token = self._sample_logits(eval_logits[:, current_gamma, :], temperature, top_k, top_p)
+                input_ids = torch.cat([input_ids, bonus_token], dim=1)
+                n_generated += 1
+                accepted_count += 1
+                
+            if eos_token_id is not None and (input_ids[:, -1:] == eos_token_id).all():
+                return input_ids
+                
+            if n_generated >= max_new_tokens:
+                return input_ids
+
+            # --- KV Cache Synchronization ---
+            # Truncate both caches to the correctly accepted length before the bonus/reject token
+            # Since input_ids was extended by (accepted_count + 1) tokens, the accepted sequence 
+            # (excluding the final newly appended token to be processed next) has length:
+            cache_keep_len = input_ids.shape[1] - 1
+            
+            def truncate_kv_cache(pkv, keep_len):
+                if pkv is None: return None
+                new_pkv = []
+                for layer_idx in range(len(pkv)):
+                    k, v = pkv[layer_idx]
+                    new_pkv.append((k[:, :, :keep_len, :], v[:, :, :keep_len, :]))
+                return new_pkv
+
+            target_past_key_values = truncate_kv_cache(target_past_key_values, cache_keep_len)
+            draft_past_key_values = truncate_kv_cache(draft_past_key_values, cache_keep_len)
+
+            # --- Adaptive Gamma Update ---
+            if controller is not None:
+                gamma = controller.step(accepted_count, current_gamma)
+
+        return input_ids
+
+class HBLLMForProcessReward(nn.Module):
+    """
+    HBLLM with a sequence classification head for Process Reward Modeling.
+    
+    Scores an entire reasoning step. By default, it takes the representation of
+    the last non-padding token and projects it to a continuous scalar.
+    Used for step-level MCTS UCT scoring (0.0 means incorrect, 1.0 means correct).
+    """
+
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.config = config
+        self.model = HBLLMModel(config)
+        
+        # Single logit output for binary correctness estimation
+        self.score = nn.Linear(config.hidden_size, 1, bias=False)
+        
+        # Initialize weights
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, module: nn.Module) -> None:
+        """Initialize weights using small init."""
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        labels: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Forward pass for the Process Reward Model.
+        
+        Args:
+            input_ids: [batch_size, seq_len]
+            labels: [batch_size] continuous labels in [0.0, 1.0] to compute BCE loss
+            
+        Returns:
+            Dict with 'logits', 'scores' (sigmoid of logits), optionally 'loss'
+        """
+        batch_size = input_ids.shape[0]
+        
+        # Run base transformer
+        hidden_states, _, lb_loss = self.model(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            use_cache=False,
+        )
+        
+        # If user provides a 2D mask (1=valid, 0=pad), we extract the last valid token representation
+        # Otherwise, default to the last token sequence index
+        if attention_mask is not None and attention_mask.dim() == 2:
+            sequence_lengths = attention_mask.sum(dim=1).long() - 1
+            pooled_hidden_states = hidden_states[torch.arange(batch_size, device=hidden_states.device), sequence_lengths]
+        else:
+            pooled_hidden_states = hidden_states[:, -1, :]
+            
+        # Linear projection to single logit
+        logits = self.score(pooled_hidden_states)
+        
+        # Map logit to [0, 1] probability
+        scores = torch.sigmoid(logits)
+        
+        result = {
+            "logits": logits,
+            "scores": scores,
+        }
+        
+        # Compute BCE loss if labels are provided
+        if labels is not None:
+            # labels shape: [batch_size], logits shape: [batch_size, 1]
+            loss_fct = nn.BCEWithLogitsLoss()
+            
+            # Ensure proper dtypes and shapes
+            if labels.dim() == 1:
+                labels = labels.unsqueeze(-1)
+                
+            bce_loss = loss_fct(logits.float(), labels.float())
+            
+            # Add MoE auxiliary loss if present
+            loss = bce_loss + (0.01 * lb_loss)
+            
+            result["loss"] = loss
+            result["bce_loss"] = bce_loss
+            result["lb_loss"] = lb_loss
+            
+        return result
+

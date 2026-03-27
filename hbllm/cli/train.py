@@ -35,10 +35,17 @@ def parse_args() -> argparse.Namespace:
 
     # Data
     p.add_argument("--data", default="fineweb",
-                   choices=["fineweb", "wikipedia", "the_stack_v2"],
-                   help="Dataset to use")
+                   help="Dataset(s) to use. Available: fineweb, wikipedia, "
+                        "the_stack_v2, starcoderdata, codeparrot, openwebmath, "
+                        "metamath, pes2o, openhermes, slimorca. "
+                        "Mix with +: --data fineweb+starcoderdata+openwebmath")
     p.add_argument("--max-samples", type=int, default=100_000,
                    help="Max training samples to download")
+    p.add_argument("--data-weights", default=None,
+                   help="Proportional weights for each dataset when mixing. "
+                        "Comma-separated floats matching --data order. "
+                        "E.g.: --data fineweb+starcoderdata --data-weights 0.7,0.3. "
+                        "Defaults to equal weights.")
     p.add_argument("--data-dir", default="./data/training",
                    help="Working directory for data pipeline")
 
@@ -97,6 +104,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--embed-data", default=None,
                    help="Path to embedding training data (JSONL with anchor/positive/negative)")
 
+    # Cognitive training
+    p.add_argument("--cognitive", action="store_true",
+                   help="Enable cognitive training (build knowledge graph, skills, memory during training)")
+    p.add_argument("--cognitive-interval", type=int, default=10,
+                   help="Run cognitive processing every N steps")
+    p.add_argument("--cognitive-dir", default="./cognitive_checkpoints",
+                   help="Output directory for cognitive artifacts")
+
     # Local serving
     p.add_argument("--serve-local", action="store_true",
                    help="Start a local brain with the trained model")
@@ -109,7 +124,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default="auto",
                    help="Device: auto, cpu, cuda, mps")
 
-    return p.parse_args()
+    args = p.parse_args()
+
+    # Validate --data dataset names against registry
+    from hbllm.data.downloader import PREDEFINED_SOURCES
+    dataset_names = [n.strip() for n in args.data.split("+") if n.strip()]
+    unknown = [n for n in dataset_names if n not in PREDEFINED_SOURCES]
+    if unknown:
+        available = ", ".join(sorted(PREDEFINED_SOURCES.keys()))
+        p.error(
+            f"Unknown dataset(s): {', '.join(unknown)}\n"
+            f"Available: {available}\n"
+            f"Mix with +: --data fineweb+starcoderdata+openwebmath"
+        )
+
+    return args
 
 
 def get_device(name: str) -> torch.device:
@@ -137,6 +166,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
     logger.info("=== Step 1: Data Pipeline ===")
     data_dir = Path(args.data_dir)
     shard_dir = data_dir / "shards"
+    tiktoken_mode = False
 
     if not list(shard_dir.glob("shard_*.bin")) if shard_dir.exists() else True:
         logger.info("No shards found. Running data pipeline...")
@@ -147,25 +177,35 @@ def run_pretrain(args: argparse.Namespace) -> None:
                 dataset_name=args.data,
                 max_samples=args.max_samples,
             )
-        except RuntimeError as e:
-            logger.error("Data pipeline failed: %s", e)
-            logger.info("Tip: Install Rust extensions or provide pre-tokenized shards in %s", shard_dir)
-            sys.exit(1)
+        except RuntimeError:
+            logger.info("Rust extensions not available. Using Pure-Python pipeline (tiktoken)...")
+            from hbllm.data.pipeline import PurePythonPipeline
+            pipeline = PurePythonPipeline(data_dir)
+            pipeline.run_all(
+                dataset_name=args.data,
+                max_samples=args.max_samples,
+            )
+            tiktoken_mode = True
     else:
         logger.info("Using existing shards in %s", shard_dir)
 
     # 2. Create model
     logger.info("=== Step 2: Model (%s) ===", args.size)
     config = get_config(args.size)
+    if tiktoken_mode:
+        # Override vocab size for tiktoken cl100k_base
+        config.vocab_size = 100277
+        logger.info("Using tiktoken vocab_size=%d", config.vocab_size)
     model = HBLLMForCausalLM(config)
     param_count = sum(p.numel() for p in model.parameters())
     logger.info("Parameters: %s", f"{param_count:,}")
 
-    # 3. Create dataloader
+    # 3. Create dataloader (num_workers=0 to avoid multiprocessing spawn issues)
     train_loader = create_dataloader(
         shard_dir=shard_dir,
         sequence_length=config.max_position_embeddings,
         batch_size=args.batch_size,
+        num_workers=0,
     )
 
     # 4. Train
@@ -173,7 +213,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
     train_config = TrainingConfig(
         learning_rate=args.lr,
         max_steps=args.max_steps,
-        batch_size=args.batch_size,
+        micro_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         checkpoint_dir=args.checkpoint_dir,
         eval_interval_steps=args.eval_interval,
@@ -185,31 +225,85 @@ def run_pretrain(args: argparse.Namespace) -> None:
         if ckpt:
             trainer.load_checkpoint(ckpt)
 
-    # Training loop
+    # Training loop with verbose logging
+    import time as _time
+
+    logger.info("=" * 60)
+    logger.info("Starting training loop")
+    logger.info("  Steps       : %d", args.max_steps)
+    logger.info("  Batch size  : %d micro x %d accum = %d effective",
+                args.batch_size, args.grad_accum, args.batch_size * args.grad_accum)
+    logger.info("  Seq length  : %d", config.max_position_embeddings)
+    logger.info("  Device      : %s", device)
+    logger.info("  Precision   : %s", train_config.precision)
+    logger.info("=" * 60)
+
     data_iter = iter(train_loader)
+    train_start = _time.time()
+    step_start = _time.time()
+    total_tokens_processed = 0
+    running_loss = 0.0
+    loss_count = 0
+
     for step in range(trainer.global_step, args.max_steps):
+        # Load batch
         try:
             batch = next(data_iter)
         except StopIteration:
+            logger.info("  [Epoch boundary] Restarting data iterator...")
             data_iter = iter(train_loader)
             batch = next(data_iter)
 
+        # Track tokens
+        batch_tokens = batch["input_ids"].numel()
+        total_tokens_processed += batch_tokens
+
+        # Forward + backward
+        logger.info("  Step %d/%d: forward+backward pass (%d tokens)...",
+                     step + 1, args.max_steps, batch_tokens)
         metrics = trainer.train_step(batch)
+        running_loss += metrics["loss"]
+        loss_count += 1
 
         if (step + 1) % trainer.config.gradient_accumulation_steps == 0:
             step_metrics = trainer.step()
 
-            if (step + 1) % train_config.log_interval_steps == 0:
-                logger.info(
-                    "Step %d | loss=%.4f lr=%.2e grad_norm=%.2f",
-                    step + 1,
-                    metrics["loss"],
-                    step_metrics["lr"],
-                    step_metrics["grad_norm"],
-                )
+            # Timing
+            step_elapsed = _time.time() - step_start
+            total_elapsed = _time.time() - train_start
+            steps_done = step + 1
+            steps_remaining = args.max_steps - steps_done
+            avg_step_time = total_elapsed / max(1, steps_done)
+            eta_seconds = steps_remaining * avg_step_time
+            tok_per_sec = total_tokens_processed / max(1, total_elapsed)
 
+            # ETA formatting
+            if eta_seconds < 60:
+                eta_str = f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                eta_str = f"{eta_seconds / 60:.1f}min"
+            else:
+                eta_str = f"{eta_seconds / 3600:.1f}hr"
+
+            avg_loss = running_loss / max(1, loss_count)
+
+            logger.info(
+                "  ✓ Step %d/%d | loss=%.4f (avg=%.4f) | lr=%.2e | "
+                "grad_norm=%.2f | %.1f tok/s | %.1fs/step | ETA: %s",
+                steps_done, args.max_steps,
+                metrics["loss"], avg_loss,
+                step_metrics["lr"],
+                step_metrics["grad_norm"],
+                tok_per_sec,
+                step_elapsed,
+                eta_str,
+            )
+
+            step_start = _time.time()
+
+            # Eval
             if (step + 1) % train_config.eval_interval_steps == 0 and not args.no_eval:
-                logger.info("Running evaluation...")
+                logger.info("  [Eval] Running evaluation at step %d...", steps_done)
                 from hbllm.training.evaluator import ModelEvaluator
                 tokenizer = HBLLMTokenizer.from_tiktoken()
                 evaluator = ModelEvaluator(model, tokenizer, device)
@@ -219,14 +313,256 @@ def run_pretrain(args: argparse.Namespace) -> None:
                 )
                 if "samples" in eval_results:
                     for s in eval_results["samples"][:2]:
-                        logger.info("  >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
+                        logger.info("    >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
 
+            # Checkpoint
             if (step + 1) % (train_config.eval_interval_steps * 2) == 0:
+                logger.info("  [Checkpoint] Saving at step %d...", steps_done)
                 trainer.save_checkpoint(loss=metrics["loss"])
+                logger.info("  [Checkpoint] Saved!")
 
     # Final save
+    total_elapsed = _time.time() - train_start
+    logger.info("=" * 60)
+    logger.info("Training complete!")
+    logger.info("  Total steps  : %d", args.max_steps)
+    logger.info("  Total tokens : %d", total_tokens_processed)
+    logger.info("  Final loss   : %.4f", metrics.get("loss", 0))
+    logger.info("  Avg loss     : %.4f", running_loss / max(1, loss_count))
+    logger.info("  Total time   : %.1fs", total_elapsed)
+    logger.info("  Avg tok/s    : %.0f", total_tokens_processed / max(1, total_elapsed))
+    logger.info("=" * 60)
     trainer.save_checkpoint(loss=metrics.get("loss", 0))
-    logger.info("Training complete! Checkpoint saved to %s", args.checkpoint_dir)
+    logger.info("Final checkpoint saved to %s", args.checkpoint_dir)
+
+
+def run_cognitive_pretrain(args: argparse.Namespace) -> None:
+    """Run cognitive pre-training: base model + knowledge graph + skills + memory + LoRA."""
+    import os
+    import time as _time
+    from hbllm.model.config import get_config
+    from hbllm.model.transformer import HBLLMForCausalLM
+    from hbllm.data.dataloader import create_dataloader
+    from hbllm.training.trainer import TrainingConfig
+    from hbllm.training.cognitive_trainer import CognitiveTrainer, CognitiveConfig
+
+    device = get_device(args.device)
+
+    # 1. Data pipeline (reuse standard pipeline)
+    logger.info("=== Step 1: Data Pipeline ===")
+    shard_dir = os.path.join(args.data_dir, "shards")
+    raw_dir = os.path.join(args.data_dir, "raw")
+
+    tiktoken_mode = False
+    if not os.path.exists(shard_dir) or not os.listdir(shard_dir):
+        logger.info("No shards found. Running data pipeline...")
+        try:
+            from hbllm.data.pipeline import DataPipeline
+            pipeline = DataPipeline(args.data_dir)
+            pipeline.run(args.data, max_samples=args.max_samples)
+        except RuntimeError:
+            logger.info("Rust pipeline unavailable, using PurePythonPipeline...")
+            from hbllm.data.pipeline import PurePythonPipeline
+            pipeline = PurePythonPipeline(args.data_dir)
+            pipeline.run(args.data, max_samples=args.max_samples)
+            tiktoken_mode = True
+    else:
+        logger.info("Using existing shards in %s", shard_dir)
+
+    # 2. Create model
+    logger.info("=== Step 2: Model (%s) ===", args.size)
+    config = get_config(args.size)
+    if tiktoken_mode:
+        config.vocab_size = 100277
+        logger.info("Using tiktoken vocab_size=%d", config.vocab_size)
+    model = HBLLMForCausalLM(config)
+    param_count = sum(p.numel() for p in model.parameters())
+    logger.info("Parameters: %s", f"{param_count:,}")
+
+    # 3. Create dataloader
+    train_loader = create_dataloader(
+        shard_dir=shard_dir,
+        sequence_length=config.max_position_embeddings,
+        batch_size=args.batch_size,
+        num_workers=0,
+    )
+
+    # 4. Load raw texts for cognitive processing
+    raw_texts_cache: list[str] = []
+    try:
+        import glob
+        raw_files = sorted(glob.glob(os.path.join(raw_dir, "**", "*.jsonl"), recursive=True))
+        if raw_files:
+            import json as _json
+            for rf in raw_files:
+                with open(rf) as f:
+                    for line in f:
+                        try:
+                            doc = _json.loads(line)
+                            text = doc.get("text", doc.get("content", ""))
+                            if text:
+                                raw_texts_cache.append(text)
+                        except _json.JSONDecodeError:
+                            continue
+                        if len(raw_texts_cache) >= args.max_samples:
+                            break
+            logger.info("Loaded %d raw texts for cognitive processing", len(raw_texts_cache))
+    except Exception as e:
+        logger.warning("Could not load raw texts: %s (cognitive processing will be limited)", e)
+
+    # 5. Configure and create CognitiveTrainer
+    logger.info("=== Step 3: Cognitive Training ===")
+    train_config = TrainingConfig(
+        learning_rate=args.lr,
+        max_steps=args.max_steps,
+        micro_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum,
+        checkpoint_dir=args.checkpoint_dir,
+        eval_interval_steps=getattr(args, 'eval_interval', 500),
+    )
+    cognitive_config = CognitiveConfig(
+        output_dir=getattr(args, 'cognitive_dir', './cognitive_checkpoints'),
+        cognitive_interval=getattr(args, 'cognitive_interval', 10),
+        use_lora=args.lora,
+        lora_r=args.lora_r,
+        build_knowledge_graph=True,
+        track_training_memory=True,
+        detect_skills=True,
+        extract_concepts=True,
+    )
+    cog_trainer = CognitiveTrainer(model, train_config, cognitive_config, device)
+
+    logger.info("="  * 60)
+    logger.info("Starting COGNITIVE training loop")
+    logger.info("  Steps        : %d", args.max_steps)
+    logger.info("  Batch size   : %d micro x %d accum = %d effective",
+                args.batch_size, args.grad_accum, args.batch_size * args.grad_accum)
+    logger.info("  Seq length   : %d", config.max_position_embeddings)
+    logger.info("  Device       : %s", device)
+    logger.info("  LoRA         : %s (r=%d)", "ON" if args.lora else "OFF", args.lora_r)
+    logger.info("  Knowledge Graph : ON")
+    logger.info("  Training Memory : ON")
+    logger.info("  Skill Detection : ON")
+    logger.info("  Cognitive interval: every %d steps", cognitive_config.cognitive_interval)
+    logger.info("  Raw texts    : %d available", len(raw_texts_cache))
+    logger.info("=" * 60)
+
+    # 6. Training loop
+    data_iter = iter(train_loader)
+    train_start = _time.time()
+    step_start = _time.time()
+    total_tokens_processed = 0
+    running_loss = 0.0
+    loss_count = 0
+    raw_text_idx = 0
+
+    for step in range(cog_trainer.global_step, args.max_steps):
+        try:
+            batch = next(data_iter)
+        except StopIteration:
+            logger.info("  [Epoch boundary] Restarting data iterator...")
+            data_iter = iter(train_loader)
+            batch = next(data_iter)
+
+        batch_tokens = batch["input_ids"].numel()
+        total_tokens_processed += batch_tokens
+
+        # Get raw texts for this batch (if available)
+        batch_raw_texts = None
+        if raw_texts_cache:
+            batch_raw_texts = []
+            for _ in range(args.batch_size):
+                if raw_text_idx < len(raw_texts_cache):
+                    batch_raw_texts.append(raw_texts_cache[raw_text_idx])
+                    raw_text_idx += 1
+                else:
+                    raw_text_idx = 0
+                    batch_raw_texts.append(raw_texts_cache[raw_text_idx])
+                    raw_text_idx += 1
+
+        logger.info("  Step %d/%d: forward+backward (%d tokens)...",
+                     step + 1, args.max_steps, batch_tokens)
+
+        metrics = cog_trainer.cognitive_train_step(batch, batch_raw_texts)
+        running_loss += metrics["loss"]
+        loss_count += 1
+
+        if (step + 1) % cog_trainer.config.gradient_accumulation_steps == 0:
+            step_metrics = cog_trainer.step()
+
+            step_elapsed = _time.time() - step_start
+            total_elapsed = _time.time() - train_start
+            steps_done = step + 1
+            steps_remaining = args.max_steps - steps_done
+            avg_step_time = total_elapsed / max(1, steps_done)
+            eta_seconds = steps_remaining * avg_step_time
+            tok_per_sec = total_tokens_processed / max(1, total_elapsed)
+
+            if eta_seconds < 60:
+                eta_str = f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                eta_str = f"{eta_seconds / 60:.1f}min"
+            else:
+                eta_str = f"{eta_seconds / 3600:.1f}hr"
+
+            avg_loss = running_loss / max(1, loss_count)
+
+            # Core training metrics
+            log_parts = [
+                f"  ✓ Step {steps_done}/{args.max_steps}",
+                f"loss={metrics['loss']:.4f} (avg={avg_loss:.4f})",
+                f"lr={step_metrics['lr']:.2e}",
+                f"grad_norm={step_metrics['grad_norm']:.2f}",
+                f"{tok_per_sec:.0f} tok/s",
+                f"{step_elapsed:.1f}s/step",
+                f"ETA: {eta_str}",
+            ]
+            logger.info(" | ".join(log_parts))
+
+            # Cognitive metrics (if processed this step)
+            if "kg_total_entities" in metrics:
+                logger.info("    🧠 KG: %d entities | Memory: %d records | Domains: %d",
+                            metrics.get("kg_total_entities", 0),
+                            metrics.get("memory_records", 0),
+                            metrics.get("domains_seen", 0))
+
+            step_start = _time.time()
+
+            # Periodic cognitive status
+            if steps_done % 50 == 0:
+                cog_trainer.log_cognitive_status()
+
+            # Eval
+            if (step + 1) % train_config.eval_interval_steps == 0 and not args.no_eval:
+                logger.info("  [Eval] Running evaluation at step %d...", steps_done)
+                from hbllm.training.evaluator import ModelEvaluator
+                from hbllm.model.tokenizer import HBLLMTokenizer
+                tokenizer = HBLLMTokenizer.from_tiktoken()
+                evaluator = ModelEvaluator(model, tokenizer, device)
+                eval_results = evaluator.evaluate_all(hellaswag=False, generate=True)
+                if "samples" in eval_results:
+                    for s in eval_results["samples"][:2]:
+                        logger.info("    >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
+
+            # Checkpoint
+            if (step + 1) % (train_config.eval_interval_steps * 2) == 0:
+                logger.info("  [Cognitive Checkpoint] Saving at step %d...", steps_done)
+                cog_trainer.save_cognitive_checkpoint(loss=metrics["loss"])
+
+    # Final save
+    total_elapsed = _time.time() - train_start
+    logger.info("=" * 60)
+    logger.info("Cognitive training complete!")
+    logger.info("  Total steps  : %d", args.max_steps)
+    logger.info("  Total tokens : %d", total_tokens_processed)
+    logger.info("  Final loss   : %.4f", metrics.get("loss", 0))
+    logger.info("  Avg loss     : %.4f", running_loss / max(1, loss_count))
+    logger.info("  Total time   : %.1fs", total_elapsed)
+    logger.info("  Avg tok/s    : %.0f", total_tokens_processed / max(1, total_elapsed))
+    logger.info("=" * 60)
+
+    ckpt_dir = cog_trainer.save_cognitive_checkpoint(loss=metrics.get("loss", 0))
+    logger.info("Cognitive checkpoint saved to %s", ckpt_dir)
 
 
 def run_sft(args: argparse.Namespace) -> None:
@@ -493,6 +829,9 @@ def main() -> None:
     elif args.serve_local:
         logger.info("  Mode: Local Serve")
         run_serve_local(args)
+    elif getattr(args, 'cognitive', False):
+        logger.info("  Mode: Cognitive Pre-training")
+        run_cognitive_pretrain(args)
     else:
         logger.info("  Mode: Pre-training")
         run_pretrain(args)

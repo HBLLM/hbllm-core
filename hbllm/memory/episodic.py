@@ -26,36 +26,51 @@ class EpisodicMemory:
 
     def __init__(self, db_path: str | Path = "working_memory.db"):
         self.db_path = Path(db_path)
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Return the persistent connection, creating it if needed."""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+        return self._conn
 
     def _init_db(self) -> None:
         """Create the necessary tables if they don't exist."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS turns (
-                    id TEXT PRIMARY KEY,
-                    tenant_id TEXT NOT NULL DEFAULT 'default',
-                    session_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    domain TEXT,
-                    timestamp_iso TEXT NOT NULL,
-                    metadata TEXT
-                )
-            ''')
-            # Index for fast retrieval of latest turns per tenant+session
-            cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_tenant_session_time 
-                ON turns(tenant_id, session_id, timestamp_iso DESC)
-            ''')
-            # Migrate: add tenant_id column if upgrading from old schema
-            try:
-                cursor.execute('SELECT tenant_id FROM turns LIMIT 1')
-            except sqlite3.OperationalError:
-                cursor.execute("ALTER TABLE turns ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
-            conn.commit()
-            logger.debug("Initialized EpisodicMemory at %s", self.db_path)
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS turns (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL DEFAULT 'default',
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                domain TEXT,
+                timestamp_iso TEXT NOT NULL,
+                metadata TEXT
+            )
+        ''')
+        # Index for fast retrieval of latest turns per tenant+session
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_tenant_session_time 
+            ON turns(tenant_id, session_id, timestamp_iso DESC)
+        ''')
+        # Migrate: add tenant_id column if upgrading from old schema
+        try:
+            cursor.execute('SELECT tenant_id FROM turns LIMIT 1')
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE turns ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
+        conn.commit()
+        logger.debug("Initialized EpisodicMemory at %s", self.db_path)
+
+    def close(self) -> None:
+        """Close the persistent database connection."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
 
     def store_turn(
         self,
@@ -84,13 +99,13 @@ class EpisodicMemory:
         now_iso = datetime.now(timezone.utc).isoformat()
         meta_str = json.dumps(metadata) if metadata else "{}"
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO turns (id, tenant_id, session_id, role, content, domain, timestamp_iso, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (turn_id, tenant_id, session_id, role, content, domain, now_iso, meta_str))
-            conn.commit()
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO turns (id, tenant_id, session_id, role, content, domain, timestamp_iso, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (turn_id, tenant_id, session_id, role, content, domain, now_iso, meta_str))
+        conn.commit()
             
         return turn_id
 
@@ -100,18 +115,19 @@ class EpisodicMemory:
         
         Returns a list of dicts ordered chronologically (oldest first).
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT * FROM turns 
-                WHERE tenant_id = ? AND session_id = ? 
-                ORDER BY timestamp_iso DESC 
-                LIMIT ?
-            ''', (tenant_id, session_id, limit))
-            
-            rows = cursor.fetchall()
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM turns 
+            WHERE tenant_id = ? AND session_id = ? 
+            ORDER BY timestamp_iso DESC 
+            LIMIT ?
+        ''', (tenant_id, session_id, limit))
+        
+        rows = cursor.fetchall()
+        conn.row_factory = None  # Reset for other methods
 
         results = []
         for row in reversed(rows):
@@ -129,11 +145,11 @@ class EpisodicMemory:
 
     def clear_session(self, session_id: str, tenant_id: str = "default") -> int:
         """Delete all turns for a tenant's session. Returns deleted count."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM turns WHERE tenant_id = ? AND session_id = ?', (tenant_id, session_id))
-            deleted = cursor.rowcount
-            conn.commit()
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM turns WHERE tenant_id = ? AND session_id = ?', (tenant_id, session_id))
+        deleted = cursor.rowcount
+        conn.commit()
         return deleted
 
     def search_by_content(
@@ -150,15 +166,16 @@ class EpisodicMemory:
         Returns:
             List of matching turn dicts ordered by recency.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """SELECT * FROM turns
-                   WHERE tenant_id = ? AND content LIKE ?
-                   ORDER BY timestamp_iso DESC
-                   LIMIT ?""",
-                (tenant_id, f"%{query}%", limit),
-            ).fetchall()
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM turns
+               WHERE tenant_id = ? AND content LIKE ?
+               ORDER BY timestamp_iso DESC
+               LIMIT ?""",
+            (tenant_id, f"%{query}%", limit),
+        ).fetchall()
+        conn.row_factory = None  # Reset for other methods
 
         return [
             {
@@ -182,15 +199,16 @@ class EpisodicMemory:
         Useful for cross-session context — e.g. recalling all "coding"
         conversations regardless of session.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """SELECT * FROM turns
-                   WHERE tenant_id = ? AND domain = ?
-                   ORDER BY timestamp_iso DESC
-                   LIMIT ?""",
-                (tenant_id, domain, limit),
-            ).fetchall()
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM turns
+               WHERE tenant_id = ? AND domain = ?
+               ORDER BY timestamp_iso DESC
+               LIMIT ?""",
+            (tenant_id, domain, limit),
+        ).fetchall()
+        conn.row_factory = None  # Reset for other methods
 
         return [
             {
@@ -219,37 +237,37 @@ class EpisodicMemory:
         from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
-            if tenant_id:
-                cursor = conn.execute(
-                    "DELETE FROM turns WHERE tenant_id = ? AND timestamp_iso < ?",
-                    (tenant_id, cutoff),
-                )
-            else:
-                cursor = conn.execute(
-                    "DELETE FROM turns WHERE timestamp_iso < ?",
-                    (cutoff,),
-                )
-            deleted = cursor.rowcount
-            conn.commit()
+        conn = self._get_conn()
+        if tenant_id:
+            cursor = conn.execute(
+                "DELETE FROM turns WHERE tenant_id = ? AND timestamp_iso < ?",
+                (tenant_id, cutoff),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM turns WHERE timestamp_iso < ?",
+                (cutoff,),
+            )
+        deleted = cursor.rowcount
+        conn.commit()
 
         logger.info("Cleaned up %d turns older than %d days", deleted, days)
         return deleted
 
     def get_session_count(self, tenant_id: str = "default") -> int:
         """Count distinct sessions for a tenant."""
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT COUNT(DISTINCT session_id) FROM turns WHERE tenant_id = ?",
-                (tenant_id,),
-            ).fetchone()
-            return row[0] if row else 0
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT session_id) FROM turns WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+        return row[0] if row else 0
 
     def get_turn_count(self, tenant_id: str = "default") -> int:
         """Count total turns for a tenant."""
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM turns WHERE tenant_id = ?",
-                (tenant_id,),
-            ).fetchone()
-            return row[0] if row else 0
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM turns WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()
+        return row[0] if row else 0

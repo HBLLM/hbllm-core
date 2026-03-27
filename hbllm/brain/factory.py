@@ -36,6 +36,24 @@ from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
 from hbllm.serving.provider import LLMProvider, get_provider
 
+# New cognitive modules
+from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.goal_manager import GoalManager
+from hbllm.brain.self_model import SelfModel
+from hbllm.brain.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.brain.revision_node import RevisionNode
+from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.policy_engine import PolicyEngine
+from hbllm.brain.owner_rules import OwnerRuleStore
+from hbllm.actions.tool_memory import ToolMemory
+from hbllm.memory.concept_extractor import ConceptExtractor
+from hbllm.network.cognition_router import CognitionRouter
+from hbllm.serving.token_optimizer import TokenOptimizer
+from hbllm.training.reward_model import RewardModel
+from hbllm.training.policy_optimizer import PolicyOptimizer
+from hbllm.data.interaction_miner import InteractionMiner
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,9 +64,20 @@ class BrainConfig:
     inject_identity: bool = True
     inject_curiosity: bool = True
     inject_perception: bool = False  # Audio/Vision nodes (require ML models)
+    inject_revision: bool = True     # Self-critique loop
+    inject_goals: bool = True        # Autonomous goal system
+    inject_self_model: bool = True   # Capability tracking
+    inject_metrics: bool = True      # Live cognitive metrics
+    inject_cost_optimizer: bool = True  # Token optimization
+    inject_policy_engine: bool = True   # Governance policy enforcement
+    inject_owner_rules: bool = True     # Owner-defined behavioral rules
+    inject_sentinel: bool = True        # Proactive governance monitoring
+    inject_fuzzy_logic: bool = False    # Fuzzy reasoning (requires scikit-fuzzy)
+    inject_symbolic_logic: bool = False # Z3 theorem prover (requires z3-solver)
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
+    data_dir: str = "data"
     system_prompt: str = "You are a helpful AI assistant."
 
 
@@ -76,6 +105,25 @@ class Brain:
         self.nodes = nodes
         self.provider = provider
 
+        # Cognitive subsystems (initialized by factory)
+        self.skill_registry: SkillRegistry | None = None
+        self.goal_manager: GoalManager | None = None
+        self.self_model: SelfModel | None = None
+        self.cognitive_metrics: CognitiveMetrics | None = None
+        self.world_simulator: WorldSimulator | None = None
+        self.revision_node: RevisionNode | None = None
+        self.confidence_estimator: ConfidenceEstimator | None = None
+        self.tool_memory: ToolMemory | None = None
+        self.concept_extractor: ConceptExtractor | None = None
+        self.cognition_router: CognitionRouter | None = None
+        self.token_optimizer: TokenOptimizer | None = None
+        self.reward_model: RewardModel | None = None
+        self.policy_optimizer: PolicyOptimizer | None = None
+        self.interaction_miner: InteractionMiner | None = None
+        self.policy_engine: PolicyEngine | None = None
+        self.owner_rules: OwnerRuleStore | None = None
+        self.sentinel = None  # SentinelNode reference
+
     async def process(
         self,
         text: str,
@@ -83,11 +131,44 @@ class Brain:
         session_id: str = "default",
     ) -> PipelineResult:
         """Send a query through the full cognitive pipeline."""
-        return await self.pipeline.process(
+        import time as _time
+        _start = _time.monotonic()
+
+        # Token optimization (pre-process)
+        recommended_model = None
+        if self.token_optimizer:
+            opt_result = self.token_optimizer.optimize(text)
+            recommended_model = opt_result.recommended_model
+
+        result = await self.pipeline.process(
             text=text,
             tenant_id=tenant_id,
             session_id=session_id,
         )
+
+        _elapsed = (_time.monotonic() - _start) * 1000
+
+        # Post-process: record cognitive metrics
+        if self.cognitive_metrics:
+            self.cognitive_metrics.record_latency(_elapsed, "pipeline")
+            self.cognitive_metrics.record_reasoning(result.confidence)
+
+        # Post-process: self-model tracking
+        if self.self_model:
+            domain = result.metadata.get("domain_hint", "general")
+            self.self_model.record_outcome(
+                domain, success=not result.error, confidence=result.confidence,
+                latency_ms=_elapsed,
+            )
+
+        # Post-process: interaction mining
+        if self.interaction_miner and not result.error:
+            self.interaction_miner.record_interaction(
+                query=text, response=result.text,
+                reward=result.confidence, tenant_id=tenant_id,
+            )
+
+        return result
 
     async def shutdown(self) -> None:
         """Stop all nodes, pipeline, and bus."""
@@ -96,7 +177,7 @@ class Brain:
             try:
                 await node.stop()
             except Exception:
-                pass
+                logger.debug("Error stopping node %s during shutdown", node.node_id, exc_info=True)
         await self.registry.stop()
         await self.bus.stop()
         logger.info("Brain shutdown complete")
@@ -105,6 +186,25 @@ class Brain:
     def usage(self) -> dict[str, int]:
         """Accumulated LLM usage statistics."""
         return self.llm.usage
+
+    def cognitive_stats(self) -> dict:
+        """Get stats from all cognitive subsystems."""
+        stats = {}
+        if self.cognitive_metrics:
+            stats["metrics"] = self.cognitive_metrics.get_dashboard_metrics()
+        if self.self_model:
+            stats["self_model"] = self.self_model.get_metrics()
+        if self.skill_registry:
+            stats["skills"] = self.skill_registry.stats()
+        if self.goal_manager:
+            stats["goals"] = self.goal_manager.stats()
+        if self.tool_memory:
+            stats["tool_memory"] = self.tool_memory.stats()
+        if self.token_optimizer:
+            stats["token_optimizer"] = self.token_optimizer.stats()
+        if self.reward_model:
+            stats["rewards"] = self.reward_model.stats()
+        return stats
 
 
 class BrainFactory:
@@ -290,7 +390,14 @@ class BrainFactory:
         from hbllm.brain.collective_node import CollectiveNode
         from hbllm.brain.learner_node import LearnerNode
         from hbllm.brain.world_model_node import WorldModelNode
+        from hbllm.brain.sentinel_node import SentinelNode
         from hbllm.memory.memory_node import MemoryNode
+
+        # Create PolicyEngine for governance
+        policy_engine = None
+        if cfg.inject_policy_engine:
+            policy_engine = PolicyEngine()
+            logger.info("PolicyEngine created for governance")
 
         nodes = [
             # Core cognitive pipeline
@@ -299,9 +406,10 @@ class BrainFactory:
                 node_id="planner",
                 branch_factor=cfg.planner_branch_factor,
                 max_depth=cfg.planner_max_depth,
+                policy_engine=policy_engine,
             ),
             CriticNode(node_id="critic", llm=llm),
-            DecisionNode(node_id="decision", llm=llm),
+            DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
             WorkspaceNode(node_id="workspace"),
 
             # Memory (episodic + semantic + procedural + value + knowledge graph)
@@ -328,6 +436,15 @@ class BrainFactory:
             SleepCycleNode(node_id="sleep"),
         ]
 
+        # Proactive governance sentinel
+        sentinel_node = None
+        if cfg.inject_sentinel and policy_engine:
+            sentinel_node = SentinelNode(
+                node_id="sentinel",
+                policy_engine=policy_engine,
+            )
+            nodes.append(sentinel_node)
+
         # Optional nodes based on config
         if cfg.inject_identity:
             nodes.append(IdentityNode(node_id="identity"))
@@ -342,6 +459,17 @@ class BrainFactory:
                 AudioOutputNode(node_id="audio_out"),
                 VisionNode(node_id="vision"),
             ])
+
+        # Reasoning nodes (optional — require extra dependencies)
+        if cfg.inject_fuzzy_logic:
+            from hbllm.actions.fuzzy_node import FuzzyNode
+            nodes.append(FuzzyNode(node_id="fuzzy", llm=llm))
+            logger.info("FuzzyNode wired (scikit-fuzzy reasoning)")
+
+        if cfg.inject_symbolic_logic:
+            from hbllm.actions.logic_node import LogicNode
+            nodes.append(LogicNode(node_id="logic", llm=llm))
+            logger.info("LogicNode wired (Z3 theorem prover)")
 
         # Inject LLM into planner
         nodes[1].llm = llm
@@ -380,7 +508,7 @@ class BrainFactory:
             len(nodes),
         )
 
-        return Brain(
+        brain = Brain(
             bus=message_bus,
             registry=registry,
             pipeline=pipeline,
@@ -388,4 +516,49 @@ class BrainFactory:
             nodes=nodes,
             provider=llm_provider,
         )
+
+        # 6. Wire cognitive subsystems
+        data_dir = cfg.data_dir
+
+        # Always-on subsystems
+        brain.skill_registry = SkillRegistry(data_dir=data_dir)
+        brain.tool_memory = ToolMemory(data_dir=data_dir)
+        brain.concept_extractor = ConceptExtractor()
+        brain.world_simulator = WorldSimulator()
+        brain.cognition_router = CognitionRouter()
+        brain.reward_model = RewardModel(data_dir=data_dir)
+        brain.policy_optimizer = PolicyOptimizer()
+        brain.interaction_miner = InteractionMiner(data_dir=data_dir)
+
+        # Configurable subsystems
+        if cfg.inject_revision:
+            brain.confidence_estimator = ConfidenceEstimator()
+            brain.revision_node = RevisionNode()
+
+        if cfg.inject_goals:
+            brain.goal_manager = GoalManager(data_dir=data_dir)
+
+        if cfg.inject_self_model:
+            brain.self_model = SelfModel(data_dir=data_dir)
+
+        if cfg.inject_metrics:
+            brain.cognitive_metrics = CognitiveMetrics(data_dir=data_dir)
+
+        if cfg.inject_cost_optimizer:
+            brain.token_optimizer = TokenOptimizer()
+
+        if cfg.inject_policy_engine:
+            brain.policy_engine = policy_engine
+
+        if cfg.inject_owner_rules:
+            brain.owner_rules = OwnerRuleStore(
+                db_path=str(Path(data_dir) / "owner_rules.db")
+            )
+
+        if cfg.inject_sentinel and sentinel_node:
+            brain.sentinel = sentinel_node
+
+        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules, sentinel")
+
+        return brain
 

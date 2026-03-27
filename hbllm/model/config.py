@@ -144,8 +144,11 @@ CONFIGS = {
 }
 
 
+import copy
+
 def get_config(size: str = "125m") -> ModelConfig:
     """Get a preset model config by size."""
     if size not in CONFIGS:
         raise ValueError(f"Unknown model size: {size}. Available: {list(CONFIGS.keys())}")
-    return CONFIGS[size]
+    # Return a deep copy to prevent global preset mutation during tests
+    return copy.deepcopy(CONFIGS[size])

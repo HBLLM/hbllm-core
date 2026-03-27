@@ -27,15 +27,20 @@ class WorkspaceNode(Node):
     efforts and aggregates competing or collaborating thoughts.
     """
 
-    def __init__(self, node_id: str):
-        super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
+    def __init__(self, node_id: str, thinking_deadline: float = 4.0, max_concurrent_boards: int = 100):
+        super().__init__(node_id=node_id, node_type=NodeType.CORE)
         
         # In-memory "Blackboard" mapping conversation correlation_ids
         # to the array of proposed thoughts and their active deadlines.
         self.blackboards: Dict[str, Dict[str, Any]] = {}
         self._sweeper_task: asyncio.Task | None = None
+        self._watcher_tasks: set[asyncio.Task] = set()
         # Max age for any blackboard entry before forced cleanup (seconds)
         self._max_board_age = 60.0
+        # Configurable thinking deadline (seconds for cognitive modules to respond)
+        self._thinking_deadline = thinking_deadline
+        # Max concurrent blackboards to prevent unbounded memory growth
+        self._max_concurrent_boards = max_concurrent_boards
 
     async def on_start(self) -> None:
         """Subscribe to the blackboard topics."""
@@ -46,7 +51,7 @@ class WorkspaceNode(Node):
         self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
 
     async def on_stop(self) -> None:
-        """Gracefully shut down: notify users of active boards, cancel sweeper."""
+        """Gracefully shut down: cancel watchers, notify users of active boards, cancel sweeper."""
         logger.info("Stopping Global WorkspaceNode")
         # Cancel the sweeper
         if self._sweeper_task and not self._sweeper_task.done():
@@ -55,6 +60,13 @@ class WorkspaceNode(Node):
                 await self._sweeper_task
             except asyncio.CancelledError:
                 pass
+        # Cancel all consensus watcher tasks
+        for task in self._watcher_tasks:
+            if not task.done():
+                task.cancel()
+        if self._watcher_tasks:
+            await asyncio.gather(*self._watcher_tasks, return_exceptions=True)
+        self._watcher_tasks.clear()
         # Gracefully close any active blackboards
         for corr_id in list(self.blackboards.keys()):
             await self._send_error_fallback(
@@ -73,6 +85,16 @@ class WorkspaceNode(Node):
         
         logger.info("Workspace received new Problem State: %s...", str(payload.get("text", ""))[:40])
         
+        # Guard: evict oldest boards if capacity exceeded
+        if len(self.blackboards) >= self._max_concurrent_boards:
+            oldest_ids = sorted(
+                self.blackboards,
+                key=lambda cid: self.blackboards[cid].get("start_time", 0),
+            )[:10]
+            for cid in oldest_ids:
+                logger.warning("Workspace capacity exceeded, evicting stale board: %s", cid)
+                await self._send_error_fallback(cid, "System overloaded. Please try again.")
+        
         # Initialize a new Blackboard session for this specific User Query
         self.blackboards[correlation_id] = {
             "tenant_id": message.tenant_id,
@@ -80,8 +102,8 @@ class WorkspaceNode(Node):
             "original_query": payload,
             "thoughts": [],
             "start_time": time.time(),
-            # We give the cognitive modules 4 seconds to think and post proposals
-            "deadline": time.time() + 4.0, 
+            # Configurable deadline for cognitive modules to think and post proposals
+            "deadline": time.time() + self._thinking_deadline, 
             "resolved": False,
             "turn_count": 1,  # Track internal monologue turns
             "absolute_deadline": time.time() + 30.0,  # Hard cap: 30s max monologue time
@@ -102,7 +124,7 @@ class WorkspaceNode(Node):
         await self.bus.publish("module.evaluate", broadcast_msg)
         
         # Spawn an async watcher to wait for the deadline or consensus
-        asyncio.create_task(self._consensus_watcher(correlation_id))
+        self._spawn_watcher(correlation_id)
         
         return None
         
@@ -147,7 +169,7 @@ class WorkspaceNode(Node):
                 
                 board["turn_count"] += 1
                 # Extend deadline to allow Intuition node to read the proof and generate text
-                board["deadline"] = time.time() + 4.0
+                board["deadline"] = time.time() + self._thinking_deadline
                 
                 # Re-publish as context update for the Intuition Engine
                 broadcast_msg = Message(
@@ -182,7 +204,9 @@ class WorkspaceNode(Node):
                 
                 board["turn_count"] += 1
                 board["resolved"] = False # Un-resolve it so thinking continues
-                board["deadline"] = time.time() + 4.0
+                board["deadline"] = time.time() + self._thinking_deadline
+                
+                self._spawn_watcher(corr_id)
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
@@ -225,7 +249,10 @@ class WorkspaceNode(Node):
                 new_payload["text"] = f"CRITICAL FEEDBACK: Your previous thought '{content_failed}' was evaluated by the Critic and FAILED for the following reason: '{reason}'. Please try a completely different approach to answer the user."
                 
                 board["turn_count"] += 1
-                board["deadline"] = time.time() + 4.0 # Give them time to redo it
+                board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it
+                board["resolved"] = False  # Make sure it's unresolved
+                
+                self._spawn_watcher(corr_id)
                 
                 broadcast_msg = Message(
                     type=MessageType.EVENT,
@@ -240,6 +267,12 @@ class WorkspaceNode(Node):
             return None
             
         return None
+
+    def _spawn_watcher(self, corr_id: str) -> None:
+        """Create a tracked consensus watcher task with automatic cleanup."""
+        task = asyncio.create_task(self._consensus_watcher(corr_id))
+        self._watcher_tasks.add(task)
+        task.add_done_callback(self._watcher_tasks.discard)
         
     async def _consensus_watcher(self, corr_id: str):
         """Wait until deadline expires, then finalize. Hard 30s absolute cap."""
@@ -294,14 +327,73 @@ class WorkspaceNode(Node):
         )
 
         content = best_thought.get("content", "")
-        # Very simple heuristic to check if the LLM output wants to execute python
-        # (Assuming the LLM was prompted to output <execute_python> tags)
+        import re
+        match = re.search(r"```python\n(.*?)```", str(content), re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            logger.info("Workspace detected python code in winning thought. Verifying via ExecutionNode...")
+            code_to_exec = match.group(1).strip()
+            
+            exec_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                tenant_id=board["tenant_id"],
+                session_id=board["session_id"],
+                topic="action.execute_code",
+                payload={"code": code_to_exec},
+                correlation_id=corr_id
+            )
+            
+            try:
+                resp = await self.request("action.execute_code", exec_msg, timeout=6.0)
+                status = resp.payload.get("status")
+                
+                if status == "SUCCESS":
+                    logger.info("Workspace verification passed.")
+                    best_thought["execution_output"] = resp.payload.get("output", "")
+                    await self._commit_to_decision(corr_id, best_thought)
+                    # Autonomous DPO signal (Success)
+                    await self._emit_training_feedback(board, best_thought, rating=1)
+                else:
+                    err = resp.payload.get("error", "Unknown execution error")
+                    logger.warning("Workspace code execution failed: %s", err)
+                    # Phase 3: Autonomous DPO signal (Failure)
+                    await self._emit_training_feedback(board, best_thought, rating=-1)
+                    
+                    # Remove the failing thought so it isn't picked again
+                    board["thoughts"] = [t for t in board["thoughts"] if t["content"] != content]
+                    
+                    # Force internal monologue to fix the code
+                    new_payload = board["original_query"].copy()
+                    new_payload["text"] = f"CRITICAL SYSTEM ERROR: The code approach you provided failed with the following traceback:\n```\n{err}\n```\n\nPlease analyze the traceback and formulate a corrected approach."
+                    
+                    board["turn_count"] += 1
+                    board["resolved"] = False
+                    board["deadline"] = time.time() + self._thinking_deadline
+                    
+                    self._spawn_watcher(corr_id)
+                    
+                    broadcast_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        tenant_id=board["tenant_id"],
+                        session_id=board["session_id"],
+                        topic="module.evaluate",
+                        payload=new_payload,
+                        correlation_id=corr_id
+                    )
+                    await self.bus.publish("module.evaluate", broadcast_msg)
+            except Exception as e:
+                logger.warning("Execution verification timed out: %s. Accepting thought with warning.", e)
+                best_thought["execution_warning"] = "Verification timed out"
+                await self._commit_to_decision(corr_id, best_thought)
+            return
+
+        # Legacy simulation heuristic
         if "execute_python" in best_thought["type"] or "<execute_python>" in str(content):
             logger.info("Workspace detected an executable action. Pushing to WorldModel for simulation...")
             board["simulating_thought"] = best_thought
             
-            # Extract just the code if possible, for prototype we assume the whole content is code
-            # or wrapped tightly. In a real prompt, we'd regex out the python block.
             code_to_sim = str(content)
             
             sim_msg = Message(
@@ -317,8 +409,6 @@ class WorkspaceNode(Node):
                 correlation_id=corr_id
             )
             await self.bus.publish("workspace.simulate", sim_msg)
-            # Do NOT finalize yet. Wait for `handle_thought` to get the `simulation_result`.
-            # But un-mark resolved so the board stays alive for the simulation callback.
             board["resolved"] = False
             return
 
@@ -375,7 +465,7 @@ class WorkspaceNode(Node):
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
-                pass
+                logger.debug("Semantic memory retrieval failed", exc_info=True)
 
         async def _try_procedural():
             if not has_procedural:
@@ -408,7 +498,7 @@ class WorkspaceNode(Node):
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
-                pass
+                logger.debug("Procedural memory retrieval failed", exc_info=True)
 
         # Run both in parallel with a hard 2.5s ceiling
         try:
@@ -469,6 +559,46 @@ class WorkspaceNode(Node):
             logger.exception("Failed to send error fallback for %s", corr_id)
         finally:
             self.blackboards.pop(corr_id, None)
+
+    def _compress_text(self, text: str, max_chars: int = 4000) -> str:
+        """Middle-out truncation for excessively long strings to protect Learner context."""
+        if len(text) <= max_chars:
+            return text
+        half = max_chars // 2
+        head = text[:half]
+        tail = text[-half:]
+        omitted = len(text) - max_chars
+        return f"{head}\n\n[... {omitted} characters dynamically omitted to preserve context bounds ...]\n\n{tail}"
+
+    async def _emit_training_feedback(self, board: dict[str, Any], thought: dict[str, Any], rating: int) -> None:
+        """Phase 3: Autonomous Neural-Symbolic Training Feedback."""
+        try:
+            prompt = board["original_query"].get("text", "")
+            
+            # Compress response to prevent DPO context window exhaustion
+            raw_response = thought.get("content", "")
+            response = self._compress_text(raw_response, max_chars=4000)
+            
+            # Use original_query ID or session to correlate
+            message_id = board["original_query"].get("message_id", "auto_" + str(time.time()))
+            
+            feedback_msg = Message(
+                type=MessageType.FEEDBACK,
+                source_node_id=self.node_id,
+                tenant_id=board.get("tenant_id", "default"),
+                session_id=board.get("session_id", "default"),
+                topic="system.feedback",
+                payload={
+                    "message_id": message_id,
+                    "rating": rating,
+                    "prompt": prompt,
+                    "response": response,
+                }
+            )
+            await self.bus.publish("system.feedback", feedback_msg)
+            logger.info("Emitted autonomous training feedback (rating=%d) for auto-training loop", rating)
+        except Exception as e:
+            logger.warning("Failed to emit autonomous training feedback: %s", e)
 
     async def _periodic_sweeper(self) -> None:
         """Periodically clean up blackboard entries that have exceeded max age."""
