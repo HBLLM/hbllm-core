@@ -353,36 +353,171 @@ class HBLLMForCausalLM(nn.Module):
             logits = outputs["logits"][:, -1, :]  # Last token logits
             past_key_values = outputs.get("past_key_values")
 
-            # Temperature scaling
-            if temperature != 1.0:
-                logits = logits / temperature
-
-            # Top-k filtering
-            if top_k > 0:
-                indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
-                logits[indices_to_remove] = float("-inf")
-
-            # Top-p (nucleus) filtering
-            if top_p < 1.0:
-                sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                indices_to_remove = sorted_indices_to_remove.scatter(
-                    1, sorted_indices, sorted_indices_to_remove
-                )
-                logits[indices_to_remove] = float("-inf")
-
-            # Sample
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-
+            # Sample using helper
+            next_token = self._sample_logits(logits, temperature, top_k, top_p)
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
             # Stop at EOS
             if eos_token_id is not None and (next_token == eos_token_id).all():
                 break
+
+        return input_ids
+
+    def _sample_logits(
+        self,
+        logits: torch.Tensor,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> torch.Tensor:
+        """Helper to sample a single token from logits."""
+        if temperature != 1.0:
+            logits = logits / max(temperature, 1e-7)
+
+        if top_k > 0:
+            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+            logits[indices_to_remove] = float("-inf")
+
+        if top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 0] = 0
+            indices_to_remove = sorted_indices_to_remove.scatter(
+                1, sorted_indices, sorted_indices_to_remove
+            )
+            logits[indices_to_remove] = float("-inf")
+
+        probs = F.softmax(logits, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
+
+    @torch.no_grad()
+    def generate_speculative(
+        self,
+        input_ids: torch.Tensor,
+        draft_model: HBLLMForCausalLM,
+        gamma: int = 4,
+        max_new_tokens: int = 100,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 0.9,
+        eos_token_id: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Accelerated autoregressive generation using speculative decoding.
+        
+        Args:
+            input_ids: [batch_size, prompt_len] initial token IDs
+            draft_model: Smaller HBLLMForCausalLM instance for drafting
+            gamma: Number of tokens the draft model predicts per step
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_k: Top-k filtering
+            top_p: Nucleus sampling threshold
+            eos_token_id: Stop generation at this token
+
+        Returns:
+            [batch_size, prompt_len + generated_len] full sequence
+        """
+        self.eval()
+        draft_model.eval()
+
+        target_past_key_values = None
+        draft_past_key_values = None
+        
+        n_generated = 0
+        while n_generated < max_new_tokens:
+            # --- Drafting Phase ---
+            draft_input_ids = input_ids
+            draft_tokens = []
+            
+            for _ in range(gamma):
+                if draft_past_key_values is not None:
+                    model_input_draft = draft_input_ids[:, -1:]
+                else:
+                    model_input_draft = draft_input_ids
+
+                draft_outputs = draft_model(
+                    input_ids=model_input_draft,
+                    past_key_values=draft_past_key_values,
+                    use_cache=True,
+                )
+                draft_logits = draft_outputs["logits"][:, -1, :]
+                draft_past_key_values = draft_outputs.get("past_key_values")
+                
+                next_draft_token = self._sample_logits(draft_logits, temperature, top_k, top_p)
+                draft_tokens.append(next_draft_token)
+                draft_input_ids = torch.cat([draft_input_ids, next_draft_token], dim=1)
+            
+            draft_tokens_tensor = torch.cat(draft_tokens, dim=1) # [batch_size, gamma]
+
+            # --- Verification Phase ---
+            if target_past_key_values is not None:
+                # Target model digests the last accepted token + the new gamma draft tokens
+                target_input = torch.cat([input_ids[:, -1:], draft_tokens_tensor], dim=1)
+            else:
+                target_input = torch.cat([input_ids, draft_tokens_tensor], dim=1)
+            
+            target_outputs = self.forward(
+                input_ids=target_input,
+                past_key_values=target_past_key_values,
+                use_cache=True,
+            )
+            target_past_key_values = target_outputs.get("past_key_values")
+            
+            # Extract logits predicting the draft tokens and the bonus token
+            eval_logits = target_outputs["logits"][:, -(gamma + 1):, :] # [batch_size, gamma + 1, vocab]
+            
+            # --- Rejection/Acceptance ---
+            accepted_count = 0
+            for i in range(gamma):
+                target_token = self._sample_logits(eval_logits[:, i, :], temperature, top_k, top_p)
+                
+                # Check for exact match across batches
+                if (target_token == draft_tokens_tensor[:, i:i+1]).all():
+                    accepted_count += 1
+                    input_ids = torch.cat([input_ids, target_token], dim=1)
+                    n_generated += 1
+                    if eos_token_id is not None and (target_token == eos_token_id).all():
+                        return input_ids
+                    if n_generated >= max_new_tokens:
+                        return input_ids
+                else:
+                    # Mismatch! Reject this and all following draft tokens
+                    # Append the correct target token
+                    input_ids = torch.cat([input_ids, target_token], dim=1)
+                    n_generated += 1
+                    break
+            else:
+                # If all draft tokens were accepted, we get a bonus token from the last logit
+                bonus_token = self._sample_logits(eval_logits[:, gamma, :], temperature, top_k, top_p)
+                input_ids = torch.cat([input_ids, bonus_token], dim=1)
+                n_generated += 1
+                accepted_count += 1
+                
+            if eos_token_id is not None and (input_ids[:, -1:] == eos_token_id).all():
+                return input_ids
+                
+            if n_generated >= max_new_tokens:
+                return input_ids
+
+            # --- KV Cache Synchronization ---
+            # Truncate both caches to the correctly accepted length before the bonus/reject token
+            # Since input_ids was extended by (accepted_count + 1) tokens, the accepted sequence 
+            # (excluding the final newly appended token to be processed next) has length:
+            cache_keep_len = input_ids.shape[1] - 1
+            
+            def truncate_kv_cache(pkv, keep_len):
+                if pkv is None: return None
+                new_pkv = []
+                for layer_idx in range(len(pkv)):
+                    k, v = pkv[layer_idx]
+                    new_pkv.append((k[:, :, :keep_len, :], v[:, :, :keep_len, :]))
+                return new_pkv
+
+            target_past_key_values = truncate_kv_cache(target_past_key_values, cache_keep_len)
+            draft_past_key_values = truncate_kv_cache(draft_past_key_values, cache_keep_len)
 
         return input_ids
 

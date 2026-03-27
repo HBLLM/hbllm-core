@@ -546,11 +546,24 @@ class WorkspaceNode(Node):
         finally:
             self.blackboards.pop(corr_id, None)
 
+    def _compress_text(self, text: str, max_chars: int = 4000) -> str:
+        """Middle-out truncation for excessively long strings to protect Learner context."""
+        if len(text) <= max_chars:
+            return text
+        half = max_chars // 2
+        head = text[:half]
+        tail = text[-half:]
+        omitted = len(text) - max_chars
+        return f"{head}\n\n[... {omitted} characters dynamically omitted to preserve context bounds ...]\n\n{tail}"
+
     async def _emit_training_feedback(self, board: dict[str, Any], thought: dict[str, Any], rating: int) -> None:
         """Phase 3: Autonomous Neural-Symbolic Training Feedback."""
         try:
             prompt = board["original_query"].get("text", "")
-            response = thought.get("content", "")
+            
+            # Compress response to prevent DPO context window exhaustion
+            raw_response = thought.get("content", "")
+            response = self._compress_text(raw_response, max_chars=4000)
             
             # Use original_query ID or session to correlate
             message_id = board["original_query"].get("message_id", "auto_" + str(time.time()))

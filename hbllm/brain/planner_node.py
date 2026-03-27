@@ -508,12 +508,40 @@ class PlannerNode(Node):
             logger.warning("[GoT] PRM evaluation failed/timed out, defaulting to 0.5: %s", e)
             node.score = 0.5
 
+    def _compress_text(self, text: str, max_chars: int = 2000) -> str:
+        """Middle-out truncation for excessively long strings."""
+        if len(text) <= max_chars:
+            return text
+        half = max_chars // 2
+        head = text[:half]
+        tail = text[-half:]
+        omitted = len(text) - max_chars
+        return f"{head}\n\n[... {omitted} characters dynamically omitted to preserve context bounds ...]\n\n{tail}"
+
     async def _refine_thought(
         self, graph: ThoughtGraph, parent: ThoughtNode, query: str, refinement_id: int
     ) -> None:
-        """Refine a thought by branching deeper."""
+        """Refine a thought by branching deeper with an adaptive context window."""
         trajectory = parent.trajectory_history + [parent.content]
-        history_text = "\n\n".join([f"Step {i+1}: {txt}" for i, txt in enumerate(trajectory)])
+        compressed_traj = [self._compress_text(txt) for txt in trajectory]
+        
+        MAX_CONTEXT_STEPS = 6
+        if len(compressed_traj) > MAX_CONTEXT_STEPS:
+            omitted_count = len(compressed_traj) - MAX_CONTEXT_STEPS
+            head_step = f"Step 1: {compressed_traj[0]}"
+            
+            tail_steps = compressed_traj[-(MAX_CONTEXT_STEPS - 1):]
+            start_num = len(compressed_traj) - (MAX_CONTEXT_STEPS - 1) + 1
+            
+            tail_text = "\n\n".join([f"Step {start_num + i}: {txt}" for i, txt in enumerate(tail_steps)])
+            
+            history_text = (
+                f"{head_step}\n\n"
+                f"[... {omitted_count} intermediate logic steps dynamically omitted to preserve context bounds ...]\n\n"
+                f"{tail_text}"
+            )
+        else:
+            history_text = "\n\n".join([f"Step {i+1}: {txt}" for i, txt in enumerate(compressed_traj)])
         
         prompt = (
             f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"
