@@ -252,6 +252,47 @@ class HBLLMForCausalLM(nn.Module):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
 
+    def load_lora_adapter(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        r: int = 8,
+        lora_alpha: float = 16.0,
+        lora_dropout: float = 0.05,
+        target_modules: list[str] | None = None,
+    ) -> None:
+        """
+        Dynamically injects a LoRA adapter into the model and loads weights.
+        
+        Args:
+            state_dict: The LoRA Weights
+            r: LoRA rank
+            lora_alpha: LoRA scaling factor
+            lora_dropout: Dropout probability
+            target_modules: List of module name suffixes to apply LoRA (e.g. ['q_proj', 'v_proj']).
+                            If None, targets self-attention and FFN.
+        """
+        from hbllm.modules.lora import LoRAManager
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check if LoRA is already injected; if not, inject it.
+        # This assumes we swap standard Linear with LoRALinear.
+        has_lora = any("lora_A" in name for name, _ in self.named_parameters())
+        if not has_lora:
+            logger.info("Injecting new LoRA adapters (r=%d)...", r)
+            LoRAManager.inject(
+                self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, target_modules=target_modules
+            )
+            
+        # Load the state
+        logger.info("Loading LoRA state dict...")
+        LoRAManager.load_lora_state_dict(self, state_dict)
+        
+    def set_lora_active(self, active: bool = True) -> None:
+        """Toggle LoRA adapters on or off for inference."""
+        from hbllm.modules.lora import LoRAManager
+        LoRAManager.set_active(self, active)
+
     def forward(
         self,
         input_ids: torch.Tensor,

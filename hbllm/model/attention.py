@@ -106,20 +106,23 @@ class GroupedQueryAttention(nn.Module):
         key_states = self._repeat_kv(key_states)
         value_states = self._repeat_kv(value_states)
 
-        # Scaled dot-product attention
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))
-        attn_weights = attn_weights / math.sqrt(self.head_dim)
+        # Use PyTorch's native SDPA — auto-dispatches to FlashAttention-2,
+        # memory-efficient attention, or math fallback depending on hardware.
+        # This avoids materializing the full [batch, heads, seq, seq] matrix,
+        # reducing memory from O(n²) to O(n) for long sequences.
+        dropout_p = self.config.attention_dropout if self.training else 0.0
 
-        # Apply causal mask
-        if attention_mask is not None:
-            attn_weights = attn_weights + attention_mask
+        # Convert additive mask to the format SDPA expects
+        attn_mask = attention_mask  # [batch, 1, seq_len, kv_seq_len] additive mask or None
 
-        # Softmax + dropout
-        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_weights = self.attention_dropout(attn_weights)
-
-        # Weighted sum of values
-        attn_output = torch.matmul(attn_weights, value_states)
+        attn_output = F.scaled_dot_product_attention(
+            query_states,
+            key_states,
+            value_states,
+            attn_mask=attn_mask,
+            dropout_p=dropout_p,
+            is_causal=(attn_mask is None and past_key_value is None),
+        )
 
         # Reshape back to [batch, seq_len, hidden_size]
         attn_output = attn_output.transpose(1, 2).contiguous()
