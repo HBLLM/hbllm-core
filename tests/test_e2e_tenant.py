@@ -153,8 +153,8 @@ class TestKnowledgeBase:
         """Test that duplicate content is not stored twice."""
         idx1 = self.sm.store("Duplicate content test.")
         idx2 = self.sm.store("Duplicate content test.")
-        assert idx1 >= 0
-        assert idx2 == -1  # Duplicate should be rejected
+        assert idx1 is not None
+        assert idx2 is None  # Duplicate should be rejected
         assert self.sm.count == 1
 
     def test_priority_flag(self):
@@ -165,11 +165,11 @@ class TestKnowledgeBase:
 
     def test_delete_and_clear(self):
         """Test document deletion and clearing."""
-        self.sm.store("Doc A")
+        idx = self.sm.store("Doc A")
         self.sm.store("Doc B")
         assert self.sm.count == 2
 
-        self.sm.delete(0)
+        self.sm.delete(idx)
         assert self.sm.count == 1
 
         cleared = self.sm.clear()

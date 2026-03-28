@@ -246,7 +246,7 @@ class PlannerNode(Node):
     # Max cached prompt/response pairs
     MAX_CACHE_SIZE = 200
 
-    def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2, policy_engine=None):
+    def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2, policy_engine=None, cache_ttl_seconds: float = 3600.0):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PLANNER,
@@ -255,8 +255,9 @@ class PlannerNode(Node):
         self.branch_factor = branch_factor
         self.max_depth = max_depth
         self.policy_engine = policy_engine  # PolicyEngine for plan validation
-        # LRU cache: hash(prompt) → response text
-        self._response_cache: OrderedDict[str, str] = OrderedDict()
+        self.cache_ttl_seconds = cache_ttl_seconds
+        # LRU cache: hash(prompt) → (response text, timestamp)
+        self._response_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -288,12 +289,18 @@ class PlannerNode(Node):
         # Check prompt cache for exact matches
         cache_key = self._cache_key(text)
         if cache_key in self._response_cache:
-            self._cache_hits += 1
-            cached = self._response_cache[cache_key]
-            # Move to end (most recently used)
-            self._response_cache.move_to_end(cache_key)
-            logger.info("[GoT] Cache HIT for query (hits=%d, misses=%d)", self._cache_hits, self._cache_misses)
-            return message.create_response({"text": cached, "domain": "planner", "cached": True})
+            import time
+            cached, timestamp = self._response_cache[cache_key]
+            if time.time() - timestamp <= self.cache_ttl_seconds:
+                self._cache_hits += 1
+                # Move to end (most recently used)
+                self._response_cache.move_to_end(cache_key)
+                logger.info("[GoT] Cache HIT for query (hits=%d, misses=%d)", self._cache_hits, self._cache_misses)
+                return message.create_response({"text": cached, "domain": "planner", "cached": True})
+            else:
+                # Evict expired entry
+                self._response_cache.pop(cache_key, None)
+                logger.debug("[GoT] Cache EXPIRED for query")
         
         self._cache_misses += 1
         logger.info("[GoT] Starting Graph-of-Thoughts for: '%s...'", text[:40])
@@ -437,7 +444,8 @@ class PlannerNode(Node):
 
     def _cache_response(self, key: str, response: str) -> None:
         """Store a response in the LRU cache, evicting oldest if full."""
-        self._response_cache[key] = response
+        import time
+        self._response_cache[key] = (response, time.time())
         while len(self._response_cache) > self.MAX_CACHE_SIZE:
             self._response_cache.popitem(last=False)
 
@@ -629,9 +637,16 @@ class PlannerNode(Node):
 
         # Check cache first
         cache_key = self._cache_key(text)
+        cached_content = None
         if cache_key in self._response_cache:
-            cached_content = self._response_cache[cache_key]
-        else:
+            import time
+            cached, timestamp = self._response_cache[cache_key]
+            if time.time() - timestamp <= self.cache_ttl_seconds:
+                cached_content = cached
+            else:
+                self._response_cache.pop(cache_key, None)
+
+        if cached_content is None:
             # Create a synthetic planning request
             plan_msg = Message(
                 type=MessageType.QUERY,

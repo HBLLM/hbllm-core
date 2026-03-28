@@ -139,6 +139,23 @@ class LocalProvider(LLMProvider):
         eos_id = self._tokenizer.eos_id
 
         past_key_values = None
+        if hasattr(self._model, "config"):
+            from hbllm.serving.kv_cache import KVCache
+            cfg = self._model.config
+            budget = input_tensor.shape[1] + max_tokens
+            # Initialize array of KVCaches (one per layer) if safe memory budget
+            if budget <= getattr(cfg, "max_position_embeddings", 8192):
+                past_key_values = [
+                    KVCache(
+                        batch_size=1,
+                        max_seq_len=budget,
+                        num_kv_heads=cfg.num_kv_heads,
+                        head_dim=cfg.hidden_size // cfg.num_heads,
+                        dtype=next(self._model.parameters()).dtype,
+                        device=input_tensor.device,
+                    )
+                    for _ in range(cfg.num_hidden_layers)
+                ]
 
         with torch.no_grad():
             for step in range(max_tokens):

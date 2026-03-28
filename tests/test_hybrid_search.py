@@ -197,4 +197,4 @@ class TestPlannerCache:
         
         node._cache_response("test_key", "test_response")
         assert "test_key" in node._response_cache
-        assert node._response_cache["test_key"] == "test_response"
+        assert node._response_cache["test_key"][0] == "test_response"

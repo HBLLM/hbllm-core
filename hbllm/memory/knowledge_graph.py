@@ -13,7 +13,7 @@ import hashlib
 import logging
 import re
 import time
-from collections import defaultdict, deque
+from collections import defaultdict, deque, OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -124,11 +124,37 @@ class KnowledgeGraph:
     - Text ingestion via regex-based entity extraction
     """
 
-    def __init__(self):
-        self._entities: dict[str, Entity] = {}
+    def __init__(self, max_entities: int = 5000):
+        self.max_entities = max_entities
+        self._entities: OrderedDict[str, Entity] = OrderedDict()
         self._relations: dict[str, Relation] = {}  # key = Relation.key
         self._outgoing: dict[str, list[str]] = defaultdict(list)  # entity_id → [relation_keys]
         self._incoming: dict[str, list[str]] = defaultdict(list)  # entity_id → [relation_keys]
+
+    def _evict_lru(self) -> None:
+        """Evict the oldest entities and their relations until under max_entities."""
+        while len(self._entities) > self.max_entities:
+            # Pop oldest item (FIFO order for LRU tracking)
+            eid, _ = self._entities.popitem(last=False)
+            
+            # Remove all incoming/outgoing relations
+            out_rels = self._outgoing.pop(eid, [])
+            for rel_key in out_rels:
+                rel = self._relations.pop(rel_key, None)
+                if rel:
+                    try:
+                        self._incoming[rel.target_id].remove(rel_key)
+                    except ValueError:
+                        pass
+                        
+            in_rels = self._incoming.pop(eid, [])
+            for rel_key in in_rels:
+                rel = self._relations.pop(rel_key, None)
+                if rel:
+                    try:
+                        self._outgoing[rel.source_id].remove(rel_key)
+                    except ValueError:
+                        pass
 
     # ── Core operations ──────────────────────────────────────────────────
 
@@ -153,6 +179,7 @@ class KnowledgeGraph:
             existing = self._entities[eid]
             if attributes:
                 existing.attributes.update(attributes)
+            self._entities.move_to_end(eid) # Update LRU
             return existing
 
         entity = Entity(
@@ -162,11 +189,16 @@ class KnowledgeGraph:
             attributes=attributes or {},
         )
         self._entities[eid] = entity
+        self._evict_lru() # Check bounds
         return entity
 
     def get_entity(self, label: str) -> Entity | None:
         """Get entity by label."""
-        return self._entities.get(_entity_id(label))
+        eid = _entity_id(label)
+        if eid in self._entities:
+            self._entities.move_to_end(eid) # Update LRU
+            return self._entities[eid]
+        return None
 
     def add_relation(
         self,

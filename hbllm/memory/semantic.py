@@ -21,6 +21,7 @@ import hashlib
 import logging
 import math
 import re
+import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -124,7 +125,8 @@ class SemanticMemory:
         self._use_tfidf = False
         self._tfidf = _TfIdfEmbedder()  # Always maintained for hybrid sparse index
         self.hybrid_alpha = max(0.0, min(1.0, hybrid_alpha))
-        self.documents: list[dict[str, Any]] = []
+        self.documents: dict[str, dict[str, Any]] = {}
+        self.ids: list[str] = []
         self._vector_list: list[np.ndarray] = []  # Dense vectors (lazy stacking)
         self._sparse_list: list[np.ndarray] = []  # Sparse TF-IDF vectors (lazy stacking)
         self._vectors_dirty = True
@@ -133,11 +135,12 @@ class SemanticMemory:
         self._sparse_cache: np.ndarray | None = None
         self._content_hashes: set[str] = set()
         self._lock = threading.Lock()
+        self._tfidf_timer: threading.Timer | None = None
 
     @property
     def count(self) -> int:
         """Number of stored documents."""
-        return len(self.documents)
+        return len(self.ids)
 
     def _load_model(self) -> None:
         if self.model is None and not self._use_tfidf:
@@ -162,6 +165,7 @@ class SemanticMemory:
     @property
     def vectors(self) -> np.ndarray | None:
         """Lazily stack dense vectors only when needed."""
+        self._flush_tfidf()
         if not self._vector_list:
             return None
         if self._vectors_dirty:
@@ -172,6 +176,7 @@ class SemanticMemory:
     @property
     def sparse_vectors(self) -> np.ndarray | None:
         """Lazily stack sparse TF-IDF vectors only when needed."""
+        self._flush_tfidf()
         if not self._sparse_list:
             return None
         if self._sparse_dirty:
@@ -179,12 +184,20 @@ class SemanticMemory:
             self._sparse_dirty = False
         return self._sparse_cache
 
+    def _flush_tfidf(self) -> None:
+        """Forces pending TF-IDF encodes to complete synchronously."""
+        if self._tfidf_timer is not None:
+            self._tfidf_timer.cancel()
+            func = self._tfidf_timer.function
+            self._tfidf_timer = None
+            func()
+
     @staticmethod
     def _content_hash(content: str) -> str:
         """Fast hash for deduplication."""
         return hashlib.md5(content.encode()).hexdigest()
 
-    def store(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> int:
+    def store(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> str | None:
         """
         Embed and store a document.
         
@@ -194,21 +207,21 @@ class SemanticMemory:
             is_priority: Whether this is a high-salience priority document.
             
         Returns:
-            Index of the stored document, or -1 if skipped.
+            UUID of the stored document, or None if skipped.
         """
         with self._lock:
             return self._store_unsafe(content, metadata, is_priority)
 
-    def _store_unsafe(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> int:
+    def _store_unsafe(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> str | None:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
-            return -1
+            return None
         
         # Deduplication: skip if this exact content was already stored
         content_hash = self._content_hash(content)
         if content_hash in self._content_hashes:
             logger.debug("Duplicate content detected — skipping store")
-            return -1
+            return None
         self._content_hashes.add(content_hash)
         
         if self._use_tfidf or self.model is None:
@@ -217,50 +230,65 @@ class SemanticMemory:
         meta = metadata or {}
         if is_priority:
             meta["is_priority"] = True
+            
+        doc_id = str(uuid.uuid4())
+        doc = {"id": doc_id, "content": content, "metadata": meta}
         
         # Always update TF-IDF vocabulary (needed for hybrid sparse index)
         self._tfidf.fit_token(content)
         
         if self._use_tfidf:
             # TF-IDF only mode (no sentence-transformers)
-            # Must re-encode all documents when vocab changes since vector dimensions change.
-            # Once vocabulary stabilizes (after initial ramp-up), this path is rarely hit.
-            doc = {"content": content, "metadata": meta}
-            self.documents.append(doc)
-            
-            if self._tfidf._vocab_changed:
-                all_texts = [d["content"] for d in self.documents]
-                all_vectors = self._tfidf.encode(all_texts)
-                self._vector_list = [all_vectors[i:i+1] for i in range(len(all_vectors))]
-            else:
-                new_vec = self._tfidf.encode([content])
-                self._vector_list.append(new_vec)
+            self.documents[doc_id] = doc
+            self.ids.append(doc_id)
+            self._schedule_tfidf_encode()
         else:
             # Dense embeddings + sparse TF-IDF for hybrid search
             embedding = self.model.encode([content])[0]
-            doc = {"content": content, "metadata": meta}
-            self.documents.append(doc)
+            self.documents[doc_id] = doc
+            self.ids.append(doc_id)
             self._vector_list.append(np.array([embedding]))
             
-            # Also maintain sparse index for hybrid scoring
+            # Submits TF-IDF to background queue if vocab changed, 
+            # otherwise just appends to sparse index
             if self._tfidf._vocab_changed:
-                all_texts = [d["content"] for d in self.documents]
-                all_sparse = self._tfidf.encode(all_texts)
-                self._sparse_list = [all_sparse[i:i+1] for i in range(len(all_sparse))]
+                self._schedule_tfidf_encode()
             else:
                 sparse_vec = self._tfidf.encode([content])
                 self._sparse_list.append(sparse_vec)
-            self._sparse_dirty = True
+                self._sparse_dirty = True
         
         self._vectors_dirty = True
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
-        return len(self.documents) - 1
+        return doc_id
+
+    def _schedule_tfidf_encode(self):
+        """Debounces and schedules a full TF-IDF re-encoding."""
+        if self._tfidf_timer is not None:
+            self._tfidf_timer.cancel()
+        
+        def _do_encode():
+            with self._lock:
+                if not self.ids:
+                    return
+                all_texts = [self.documents[doc_id]["content"] for doc_id in self.ids]
+                all_sparse = self._tfidf.encode(all_texts)
+                if self._use_tfidf:
+                    self._vector_list = [all_sparse[i:i+1] for i in range(len(all_sparse))]
+                    self._vectors_dirty = True
+                else:
+                    self._sparse_list = [all_sparse[i:i+1] for i in range(len(all_sparse))]
+                    self._sparse_dirty = True
+
+        # Debounce for 2 seconds to coalesce rapid document insertions
+        self._tfidf_timer = threading.Timer(2.0, _do_encode)
+        self._tfidf_timer.start()
 
     def search(
         self,
         query: str,
         top_k: int = 3,
-        reward_scores: dict[int, float] | None = None,
+        reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
     ) -> list[dict[str, Any]]:
         """
@@ -272,7 +300,7 @@ class SemanticMemory:
         Args:
             query: Search text.
             top_k: Number of results to return.
-            reward_scores: Optional dict mapping doc index → reward score.
+            reward_scores: Optional dict mapping doc UUID → reward score.
                            Positive rewards boost documents, negative ones penalize.
             reward_boost: How much to weight reward scores (default 0.1).
             
@@ -312,9 +340,9 @@ class SemanticMemory:
         
         # --- Reward boosting ---
         if reward_scores:
-            for idx, reward in reward_scores.items():
-                if 0 <= idx < len(final_scores):
-                    final_scores[idx] += reward_boost * reward
+            for idx, doc_id in enumerate(self.ids):
+                if doc_id in reward_scores:
+                    final_scores[idx] += reward_boost * reward_scores[doc_id]
         
         # Get top-k indices
         top_indices = np.argsort(final_scores)[::-1][:top_k]
@@ -324,56 +352,71 @@ class SemanticMemory:
             if final_scores[idx] < 0.1:
                 continue
                 
-            res = self.documents[idx].copy()
+            doc_id = self.ids[idx]
+            res = self.documents[doc_id].copy()
             res["score"] = float(final_scores[idx])
             results.append(res)
             
         return results
 
-    def delete(self, index: int) -> bool:
+    def delete(self, doc_id: str) -> bool:
         """
-        Delete a document by index.
+        Delete a document by UUID.
         
         Args:
-            index: Index of the document to remove.
+            doc_id: UUID of the document to remove.
             
         Returns:
-            True if deleted, False if index out of range.
+            True if deleted, False if not found.
         """
-        if index < 0 or index >= len(self.documents):
-            return False
-        
-        # Remove content hash
-        removed_doc = self.documents[index]
-        self._content_hashes.discard(self._content_hash(removed_doc["content"]))
-        
-        self.documents.pop(index)
-        
-        if self._vector_list and len(self.documents) > 0:
-            self._vector_list.pop(index)
-            self._vectors_dirty = True
-        else:
-            self._vector_list.clear()
-            self._vectors_cache = None
-        
-        return True
+        with self._lock:
+            if doc_id not in self.documents:
+                return False
+            
+            # Remove content hash
+            removed_doc = self.documents[doc_id]
+            self._content_hashes.discard(self._content_hash(removed_doc["content"]))
+            
+            index = self.ids.index(doc_id)
+            self.ids.pop(index)
+            del self.documents[doc_id]
+            
+            if self._vector_list and len(self.ids) > 0:
+                self._vector_list.pop(index)
+                self._vectors_dirty = True
+            else:
+                self._vector_list.clear()
+                self._vectors_cache = None
+                
+            if self._sparse_list and len(self.ids) > 0:
+                self._sparse_list.pop(index)
+                self._sparse_dirty = True
+            else:
+                self._sparse_list.clear()
+                self._sparse_cache = None
+            
+            return True
 
     def clear(self) -> int:
         """Clear all documents. Returns count of removed docs."""
-        count = len(self.documents)
-        self.documents.clear()
-        self._vector_list.clear()
-        self._vectors_cache = None
-        self._vectors_dirty = True
-        self._sparse_list.clear()
-        self._sparse_cache = None
-        self._sparse_dirty = True
-        self._content_hashes.clear()
-        return count
+        with self._lock:
+            count = len(self.ids)
+            self.documents.clear()
+            self.ids.clear()
+            self._vector_list.clear()
+            self._vectors_cache = None
+            self._vectors_dirty = True
+            self._sparse_list.clear()
+            self._sparse_cache = None
+            self._sparse_dirty = True
+            self._content_hashes.clear()
+            if self._tfidf_timer is not None:
+                self._tfidf_timer.cancel()
+            return count
 
     def get_all(self) -> list[dict[str, Any]]:
         """Return all stored documents (without vectors)."""
-        return [doc.copy() for doc in self.documents]
+        return [self.documents[doc_id].copy() for doc_id in self.ids]
 
     def save_to_disk(self, path: str | Path) -> None:
         """Save semantic memory to disk (metadata + vectors)."""
@@ -381,27 +424,29 @@ class SemanticMemory:
         save_dir = _Path(path)
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save document metadata
-        import json
-        meta_path = save_dir / "documents.json"
-        with open(meta_path, "w") as f:
-            json.dump(self.documents, f)
+        self._flush_tfidf()
+        with self._lock:
+            # Save document metadata
+            import json
+            meta_path = save_dir / "documents.json"
+            with open(meta_path, "w") as f:
+                json.dump({"documents": self.documents, "ids": self.ids}, f)
 
-        # Save dense vectors
-        if self._vector_list:
-            vectors = np.array(self._vector_list)
-            np.save(save_dir / "dense_vectors.npy", vectors)
+            # Save dense vectors
+            if self._vector_list:
+                vectors = np.array(self._vector_list)
+                np.save(save_dir / "dense_vectors.npy", vectors)
 
-        # Save sparse vectors
-        if self._sparse_list:
-            sparse = np.array(self._sparse_list)
-            np.save(save_dir / "sparse_vectors.npy", sparse)
+            # Save sparse vectors
+            if self._sparse_list:
+                sparse = np.array(self._sparse_list)
+                np.save(save_dir / "sparse_vectors.npy", sparse)
 
-        # Save content hashes
-        with open(save_dir / "hashes.json", "w") as f:
-            json.dump(list(self._content_hashes), f)
+            # Save content hashes
+            with open(save_dir / "hashes.json", "w") as f:
+                json.dump(list(self._content_hashes), f)
 
-        logger.info("SemanticMemory saved to %s (%d docs)", save_dir, len(self.documents))
+            logger.info("SemanticMemory saved to %s (%d docs)", save_dir, len(self.ids))
 
     @classmethod
     def load_from_disk(cls, path: str | Path, **kwargs) -> "SemanticMemory":
@@ -418,7 +463,19 @@ class SemanticMemory:
 
         # Load documents
         with open(load_dir / "documents.json") as f:
-            mem.documents = json.load(f)
+            data = json.load(f)
+            if isinstance(data, dict) and "documents" in data and "ids" in data:
+                mem.documents = data["documents"]
+                mem.ids = data["ids"]
+            elif isinstance(data, list):
+                # Backwards compatibility migration
+                mem.documents = {}
+                mem.ids = []
+                for doc in data:
+                    doc_id = str(uuid.uuid4())
+                    doc["id"] = doc_id
+                    mem.documents[doc_id] = doc
+                    mem.ids.append(doc_id)
 
         # Load dense vectors
         dense_path = load_dir / "dense_vectors.npy"
@@ -440,6 +497,5 @@ class SemanticMemory:
             with open(hashes_path) as f:
                 mem._content_hashes = set(json.load(f))
 
-        logger.info("SemanticMemory loaded from %s (%d docs)", load_dir, len(mem.documents))
+        logger.info("SemanticMemory loaded from %s (%d docs)", load_dir, len(mem.ids))
         return mem
-

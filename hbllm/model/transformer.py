@@ -153,16 +153,30 @@ class HBLLMModel(nn.Module):
 
         # Position IDs
         if position_ids is None:
-            past_len = past_key_values[0][0].shape[2] if past_key_values else 0
+            if past_key_values:
+                if hasattr(past_key_values[0], "seq_len"):
+                    past_len = past_key_values[0].seq_len
+                else:
+                    past_len = past_key_values[0][0].shape[2]
+            else:
+                past_len = 0
+                
             position_ids = torch.arange(
                 past_len, past_len + seq_len, device=input_ids.device
             ).unsqueeze(0).expand(batch_size, -1)
 
         # Build causal attention mask
         if attention_mask is None:
-            attention_mask = self._build_causal_mask(seq_len, hidden_states.device, hidden_states.dtype)
+            past_len = 0
             if past_key_values is not None:
-                past_len = past_key_values[0][0].shape[2]
+                if hasattr(past_key_values[0], "seq_len"):
+                    past_len = past_key_values[0].seq_len
+                else:
+                    past_len = past_key_values[0][0].shape[2]
+                    
+            if past_len == 0:
+                attention_mask = self._build_causal_mask(seq_len, hidden_states.device, hidden_states.dtype)
+            else:
                 attention_mask = self._build_causal_mask(
                     seq_len, hidden_states.device, hidden_states.dtype,
                     past_key_values_length=past_len,
