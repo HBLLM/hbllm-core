@@ -143,7 +143,7 @@ class TestSemanticMemoryPersistence:
         mem = SemanticMemory()
         mem.store("Hello world")
         idx2 = mem.store("Hello world")  # Duplicate
-        assert idx2 == -1  # Skipped
+        assert idx2 is None  # Skipped
 
         save_dir = Path(tmp_dir) / "semantic"
         mem.save_to_disk(save_dir)
@@ -151,7 +151,7 @@ class TestSemanticMemoryPersistence:
         mem2 = SemanticMemory.load_from_disk(save_dir)
         assert mem2.count == 1
         idx3 = mem2.store("Hello world")
-        assert idx3 == -1  # Still dedup'd
+        assert idx3 is None  # Still dedup'd
 
     def test_search_after_reload(self, tmp_dir):
         """Documents and vectors survive reload — search uses available vectors."""

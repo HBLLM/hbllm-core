@@ -41,11 +41,11 @@ def test_store_and_count(sem_mem):
 def test_store_empty_string(sem_mem):
     """Empty strings should be rejected."""
     idx = sem_mem.store("")
-    assert idx == -1
+    assert idx is None
     assert sem_mem.count == 0
 
     idx2 = sem_mem.store("   ")
-    assert idx2 == -1
+    assert idx2 is None
 
 
 def test_search_basic(sem_mem):
@@ -70,20 +70,19 @@ def test_search_empty_db(sem_mem):
 
 
 def test_delete(sem_mem):
-    sem_mem.store("First doc")
-    sem_mem.store("Second doc")
+    idx1 = sem_mem.store("First doc")
+    idx2 = sem_mem.store("Second doc")
     assert sem_mem.count == 2
 
-    deleted = sem_mem.delete(0)
+    deleted = sem_mem.delete(idx1)
     assert deleted is True
     assert sem_mem.count == 1
-    assert sem_mem.documents[0]["content"] == "Second doc"
+    assert sem_mem.get_all()[0]["content"] == "Second doc"
 
 
 def test_delete_invalid_index(sem_mem):
     sem_mem.store("Only doc")
-    assert sem_mem.delete(-1) is False
-    assert sem_mem.delete(5) is False
+    assert sem_mem.delete("nonexistent-uuid") is False
     assert sem_mem.count == 1
 
 

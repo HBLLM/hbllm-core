@@ -97,10 +97,18 @@ class GroupedQueryAttention(nn.Module):
 
         # Handle KV cache for autoregressive generation
         if past_key_value is not None:
-            key_states = torch.cat([past_key_value[0], key_states], dim=2)
-            value_states = torch.cat([past_key_value[1], value_states], dim=2)
-
-        new_past_key_value = (key_states, value_states) if use_cache else None
+            if hasattr(past_key_value, "update"):
+                # Pre-allocated O(1) buffer object (KVCache)
+                seq_offset = position_ids[0, 0].item()
+                key_states, value_states = past_key_value.update(key_states, value_states, seq_offset)
+                new_past_key_value = past_key_value if use_cache else None
+            else:
+                # Legacy O(N) tuple concatenation
+                key_states = torch.cat([past_key_value[0], key_states], dim=2)
+                value_states = torch.cat([past_key_value[1], value_states], dim=2)
+                new_past_key_value = (key_states, value_states) if use_cache else None
+        else:
+            new_past_key_value = (key_states, value_states) if use_cache else None
 
         # Expand KV heads to match query heads (GQA)
         key_states = self._repeat_kv(key_states)
