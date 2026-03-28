@@ -92,7 +92,20 @@ class ThoughtGraph:
         return child
     
     def merge(self, parent_ids: list[str], content: str, score: float = 0.0) -> ThoughtNode:
-        """Merge multiple parent thoughts into a synthesis node."""
+        """Merge multiple parent thoughts into a synthesis node.
+        
+        Raises ValueError if the merge would create a cycle in the DAG.
+        """
+        # Cycle detection: ensure no parent is a descendant of another parent
+        # (which would create a cycle when they share a child)
+        for pid in parent_ids:
+            ancestors = self._get_ancestors(pid)
+            for other_pid in parent_ids:
+                if other_pid != pid and other_pid in ancestors:
+                    raise ValueError(
+                        f"Merge would create cycle: '{other_pid}' is an ancestor of '{pid}'"
+                    )
+
         max_depth = max(self.nodes[pid].depth for pid in parent_ids)
         merged = ThoughtNode(
             content=content,
@@ -105,6 +118,17 @@ class ThoughtGraph:
             self.nodes[pid].children_ids.append(merged.id)
         self.nodes[merged.id] = merged
         return merged
+
+    def _get_ancestors(self, node_id: str) -> set[str]:
+        """Get all ancestor node IDs for cycle detection."""
+        ancestors: set[str] = set()
+        stack = list(self.nodes[node_id].parent_ids)
+        while stack:
+            current = stack.pop()
+            if current not in ancestors:
+                ancestors.add(current)
+                stack.extend(self.nodes[current].parent_ids)
+        return ancestors
     
     def best_path(self) -> list[ThoughtNode]:
         """Find the path from root to a leaf with the highest visit count / Q-value."""

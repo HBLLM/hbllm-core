@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +31,27 @@ class ContextBlock:
     label: str = ""
     token_estimate: int = 0
 
+    # Optional tokenizer encode function for accurate counting
+    _tokenizer_encode: Optional[Callable[[str], list]] = field(default=None, repr=False)
+
     def __post_init__(self):
         if self.token_estimate == 0:
-            self.token_estimate = estimate_tokens(self.content)
+            self.token_estimate = estimate_tokens(self.content, self._tokenizer_encode)
 
 
-def estimate_tokens(text: str) -> int:
-    """Estimate token count from text. Uses char-based heuristic."""
+def estimate_tokens(text: str, tokenizer_encode: Optional[Callable[[str], list]] = None) -> int:
+    """Estimate token count from text.
+    
+    Uses actual tokenizer if provided, otherwise falls back to
+    char-based heuristic (~4 chars/token for English text).
+    """
     if not text:
         return 0
+    if tokenizer_encode is not None:
+        try:
+            return max(1, len(tokenizer_encode(text)))
+        except Exception:
+            pass  # Fall back to heuristic
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 
@@ -59,10 +71,15 @@ class ContextWindowManager:
         # result.text is the fitted context, result.used_tokens <= 2048
     """
 
-    def __init__(self, max_tokens: int = 2048, reserve_for_output: int = 256):
+    def __init__(self, max_tokens: int = 2048, reserve_for_output: int = 256, tokenizer=None):
         self.max_tokens = max_tokens
         self.reserve_for_output = reserve_for_output
         self._blocks: list[ContextBlock] = []
+        # Optional tokenizer for accurate token counting
+        # Accepts any object with an .encode(text) -> list method
+        self._tokenizer_encode: Optional[Callable[[str], list]] = None
+        if tokenizer is not None and hasattr(tokenizer, 'encode'):
+            self._tokenizer_encode = tokenizer.encode
 
     @property
     def available_tokens(self) -> int:
@@ -90,6 +107,7 @@ class ContextWindowManager:
             content=content.strip(),
             priority=priority,
             label=label,
+            _tokenizer_encode=self._tokenizer_encode,
         )
         self._blocks.append(block)
 

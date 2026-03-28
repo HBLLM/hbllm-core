@@ -27,7 +27,7 @@ class WorkspaceNode(Node):
     efforts and aggregates competing or collaborating thoughts.
     """
 
-    def __init__(self, node_id: str, thinking_deadline: float = 4.0, max_concurrent_boards: int = 100):
+    def __init__(self, node_id: str, thinking_deadline: float = 4.0, max_concurrent_boards: int = 100, max_board_age: float = 300.0):
         super().__init__(node_id=node_id, node_type=NodeType.CORE)
         
         # In-memory "Blackboard" mapping conversation correlation_ids
@@ -36,7 +36,7 @@ class WorkspaceNode(Node):
         self._sweeper_task: asyncio.Task | None = None
         self._watcher_tasks: set[asyncio.Task] = set()
         # Max age for any blackboard entry before forced cleanup (seconds)
-        self._max_board_age = 60.0
+        self._max_board_age = max_board_age
         # Configurable thinking deadline (seconds for cognitive modules to respond)
         self._thinking_deadline = thinking_deadline
         # Max concurrent blackboards to prevent unbounded memory growth

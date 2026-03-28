@@ -17,7 +17,7 @@ import os
 import re
 import time
 import threading
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -157,16 +157,20 @@ class RateLimiter:
     Per-tenant rate limiting using token bucket algorithm.
 
     Default: 60 requests/minute per tenant.
+    Uses LRU eviction to prevent unbounded bucket growth from DDoS
+    with random tenant IDs.
     """
 
     def __init__(
         self,
         requests_per_minute: float = 60.0,
         burst_size: float = 10.0,
+        max_tenants: int = 10000,
     ):
         self.requests_per_minute = requests_per_minute
         self.burst_size = burst_size
-        self._buckets: dict[str, TokenBucket] = {}
+        self.max_tenants = max_tenants
+        self._buckets: OrderedDict[str, TokenBucket] = OrderedDict()
         self._lock = threading.Lock()
         self._enabled = True
 
@@ -182,11 +186,18 @@ class RateLimiter:
 
         with self._lock:
             if tenant_id not in self._buckets:
+                # Evict oldest bucket if at capacity
+                if len(self._buckets) >= self.max_tenants:
+                    self._buckets.popitem(last=False)  # Remove LRU entry
+
                 self._buckets[tenant_id] = TokenBucket(
                     capacity=self.burst_size,
                     refill_rate=self.requests_per_minute / 60.0,
                     tokens=self.burst_size,
                 )
+            else:
+                # Move to end (most recently used)
+                self._buckets.move_to_end(tenant_id)
 
             bucket = self._buckets[tenant_id]
             allowed = bucket.consume()

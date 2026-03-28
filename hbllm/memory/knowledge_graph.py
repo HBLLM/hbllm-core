@@ -13,7 +13,7 @@ import hashlib
 import logging
 import re
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -279,12 +279,12 @@ class KnowledgeGraph:
         if start == end:
             return [self._entities[start].label]
 
-        # BFS
+        # BFS using deque for O(1) popleft (list.pop(0) is O(n))
         visited = {start}
-        queue: list[tuple[str, list[str]]] = [(start, [self._entities[start].label])]
+        queue = deque([(start, [self._entities[start].label])])
 
         while queue:
-            current, path = queue.pop(0)
+            current, path = queue.popleft()
 
             if len(path) > max_depth:
                 continue

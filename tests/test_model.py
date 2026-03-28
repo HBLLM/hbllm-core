@@ -215,14 +215,14 @@ class TestSwiGLUFFN:
         assert out.shape == (2, 10, 768)
 
     def test_different_input_different_output(self):
-        config = ModelConfig(hidden_size=64, intermediate_size=128)
+        config = ModelConfig(hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2)
         ffn = SwiGLUFFN(config)
         x1 = torch.randn(1, 5, 64)
         x2 = torch.randn(1, 5, 64)
         assert not torch.equal(ffn(x1), ffn(x2))
 
     def test_gradient_flow(self):
-        config = ModelConfig(hidden_size=64, intermediate_size=128)
+        config = ModelConfig(hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2)
         ffn = SwiGLUFFN(config)
         x = torch.randn(1, 5, 64, requires_grad=True)
         out = ffn(x)
@@ -230,7 +230,7 @@ class TestSwiGLUFFN:
         assert x.grad is not None
 
     def test_deterministic(self):
-        config = ModelConfig(hidden_size=64, intermediate_size=128)
+        config = ModelConfig(hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2)
         ffn = SwiGLUFFN(config)
         ffn.eval()
         x = torch.randn(1, 5, 64)

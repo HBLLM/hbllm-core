@@ -50,6 +50,19 @@ class ModelConfig:
     num_active_experts: int = 2
     use_shared_expert: bool = True
 
+    def __post_init__(self) -> None:
+        """Validate architectural constraints to catch misconfigurations early."""
+        if self.hidden_size % self.num_attention_heads != 0:
+            raise ValueError(
+                f"hidden_size ({self.hidden_size}) must be divisible by "
+                f"num_attention_heads ({self.num_attention_heads})"
+            )
+        if self.num_attention_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_attention_heads ({self.num_attention_heads}) must be divisible by "
+                f"num_kv_heads ({self.num_kv_heads}) for GQA"
+            )
+
     @property
     def head_dim(self) -> int:
         """Dimension per attention head."""

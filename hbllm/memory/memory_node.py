@@ -46,6 +46,8 @@ class MemoryNode(Node):
         kg_path = self._persistence_dir / "knowledge_graph.json"
         self.semantic_db = SemanticMemory.load_from_disk(semantic_dir) if (_use_persistence and semantic_dir.exists()) else SemanticMemory()
         self.knowledge_graph = KnowledgeGraph.load_from_disk(kg_path) if (_use_persistence and kg_path.exists()) else KnowledgeGraph()
+        # Track background tasks for graceful shutdown
+        self._pending_tasks: set[asyncio.Task] = set()
 
     async def on_start(self) -> None:
         """Subscribe to memory lifecycle verbs."""
@@ -64,6 +66,12 @@ class MemoryNode(Node):
 
     async def on_stop(self) -> None:
         """Persist in-memory data to disk and clean up."""
+        # Await any in-flight background storage tasks before persisting
+        if self._pending_tasks:
+            logger.info("Awaiting %d pending background tasks before shutdown", len(self._pending_tasks))
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+            self._pending_tasks.clear()
+
         logger.info("Stopping MemoryNode — persisting semantic memory and knowledge graph")
         try:
             self.semantic_db.save_to_disk(self._persistence_dir / "semantic")
@@ -275,6 +283,9 @@ class MemoryNode(Node):
                 asyncio.to_thread(self.semantic_db.store, content, {"session_id": session_id, "role": role})
             )
             task.add_done_callback(self._handle_background_task_result)
+            # Track for graceful shutdown
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._pending_tasks.discard)
             
             # Fire and forget mostly, but we reply with success
             return message.create_response({"status": "stored", "turn_id": turn_id})

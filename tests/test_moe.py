@@ -10,6 +10,8 @@ def config():
     cfg = ModelConfig(
         hidden_size=64,
         intermediate_size=128,
+        num_attention_heads=4,
+        num_kv_heads=2,
         num_experts=4,
         num_active_experts=2,
         use_moe=True,
