@@ -246,7 +246,7 @@ class WorkspaceNode(Node):
                 
                 # Trigger a forced backtrack via Internal Monologue
                 new_payload = board["original_query"].copy()
-                new_payload["text"] = f"CRITICAL FEEDBACK: Your previous thought '{content_failed}' was evaluated by the Critic and FAILED for the following reason: '{reason}'. Please try a completely different approach to answer the user."
+                new_payload["text"] = f"CONSTITUTIONAL VIOLATION: Your previous thought '{content_failed}' was reviewed by the Critic Node and violated core system principles: '{reason}'. Please revise your response to strictly comply with all safety and logic principles."
                 
                 board["turn_count"] += 1
                 board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it

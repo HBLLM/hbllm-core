@@ -98,14 +98,14 @@ class MockLLM:
             }
         
         # Critic evaluation — inspect ONLY the Proposed Response, not the full prompt
-        if "qa evaluator" in prompt_lower:
+        if "constitutional ai evaluator" in prompt_lower:
             import re
             response_match = re.search(r'proposed response:\s*"([^"]+)"', prompt_lower)
             if response_match:
                 response_text = response_match.group(1)
                 if "as an ai" in response_text or "i don't know" in response_text:
-                    return {"verdict": "FAIL", "reason": "AI disclaimer deflection"}
-            return {"verdict": "PASS", "reason": "Response is relevant and grounded"}
+                    return {"violations": ["Helpfulness"], "rationale": "AI disclaimer deflection"}
+            return {"violations": [], "rationale": "Response is relevant and grounded"}
         
         # Safety classification
         if "safety classifier" in prompt_lower:
