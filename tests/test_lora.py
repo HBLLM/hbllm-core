@@ -23,8 +23,8 @@ def test_lora_linear_forward():
     lora = LoRALinear(base, r=4, lora_alpha=8.0, lora_dropout=0.0)
     
     # Check dimensions
-    assert lora.lora_A.shape == (4, in_dim)
-    assert lora.lora_B.shape == (out_dim, 4)
+    assert lora.lora_A["default"].shape == (4, in_dim)
+    assert lora.lora_B["default"].shape == (out_dim, 4)
     assert lora.scaling == 2.0  # 8.0 / 4
     
     # Since B is initialized to 0, initial forward should equal base_out
@@ -34,14 +34,14 @@ def test_lora_linear_forward():
     assert torch.allclose(base_out, lora_out, atol=1e-6)
     
     # Modify B to ensure LoRA path takes effect
-    nn.init.ones_(lora.lora_B)
+    nn.init.ones_(lora.lora_B["default"])
     with torch.no_grad():
         lora_out_modified = lora(x)
         
     assert not torch.allclose(base_out, lora_out_modified)
     
     # Test disable
-    lora.active = False
+    lora.active_adapter = None
     with torch.no_grad():
         lora_out_disabled = lora(x)
         

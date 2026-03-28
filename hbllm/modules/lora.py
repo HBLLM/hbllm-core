@@ -25,7 +25,8 @@ class LoRALinear(nn.Module):
 
     y = Wx + (B @ A)x * scaling
 
-    The base weight is kept frozen. Only A and B are learned/swapped.
+    Supports multiple adapter weights held in memory simultaneously, 
+    selectable via `active_adapter`. The base weight is kept frozen.
     """
 
     def __init__(
@@ -49,32 +50,38 @@ class LoRALinear(nn.Module):
         self.in_features = self.base_layer.in_features
         self.out_features = self.base_layer.out_features
 
-        # LoRA Matrices
-        self.lora_A = nn.Parameter(torch.zeros((r, self.in_features)))
-        self.lora_B = nn.Parameter(torch.zeros((self.out_features, r)))
+        # Multi-LoRA Matrices
+        self.lora_A = nn.ParameterDict()
+        self.lora_B = nn.ParameterDict()
         self.dropout = nn.Dropout(p=lora_dropout) if lora_dropout > 0.0 else nn.Identity()
 
-        self.reset_parameters()
+        # Flag to enable/disable specific adapter during forward pass
+        self.active_adapter: str | None = "default"
+        
+        # Initialize default adapter for backward compatibility
+        self.add_adapter("default")
 
-        # Flag to enable/disable adapter during forward pass
-        self.active = True
-
-    def reset_parameters(self) -> None:
-        """Initialize A with Kaiming uniform and B with zeros."""
-        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_B)
+    def add_adapter(self, adapter_name: str) -> None:
+        """Initialize and register a new parameter set for this adapter."""
+        if adapter_name not in self.lora_A:
+            self.lora_A[adapter_name] = nn.Parameter(torch.zeros((self.r, self.in_features)))
+            self.lora_B[adapter_name] = nn.Parameter(torch.zeros((self.out_features, self.r)))
+            
+            # Kaiming uniform for A, Zeros for B
+            nn.init.kaiming_uniform_(self.lora_A[adapter_name], a=math.sqrt(5))
+            nn.init.zeros_(self.lora_B[adapter_name])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Compute base output + LoRA output."""
         result = self.base_layer(x)
 
-        if not self.active or self.r == 0:
+        if not self.active_adapter or self.r == 0 or self.active_adapter not in self.lora_A:
             return result
 
         # LoRA path: dropout -> A -> B -> scaling
         lora_x = self.dropout(x)
-        lora_h = F.linear(lora_x, self.lora_A)
-        lora_out = F.linear(lora_h, self.lora_B)
+        lora_h = F.linear(lora_x, self.lora_A[self.active_adapter])
+        lora_out = F.linear(lora_h, self.lora_B[self.active_adapter])
 
         return result + (lora_out * self.scaling)
 
@@ -94,7 +101,6 @@ class LoRAManager:
     ) -> list[str]:
         """
         Recursively replaces matching Linear layers with LoRALinear.
-        If target_modules is None, targets attention q/k/v/o and ffn gate/up/down.
         """
         if target_modules is None:
             target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
@@ -121,27 +127,62 @@ class LoRAManager:
 
         logger.info("Injected LoRA (r=%d) into %d modules", r, len(injected))
         return injected
-
+        
     @staticmethod
-    def set_active(model: nn.Module, active: bool = True) -> None:
-        """Enable or disable all injected LoRA adapters in the model."""
+    def add_adapter(model: nn.Module, adapter_name: str, state_dict: Dict[str, torch.Tensor] | None = None) -> None:
+        """Create a new adapter inside all injected LoRALinear layers and optionally load its weights."""
         count = 0
         for module in model.modules():
             if isinstance(module, LoRALinear):
-                module.active = active
+                module.add_adapter(adapter_name)
                 count += 1
-        logger.debug("Set %d LoRA adapters active=%s", count, active)
+                
+        if state_dict is not None:
+            LoRAManager.load_lora_state_dict(model, state_dict, adapter_name=adapter_name)
+            logger.info("Added and loaded LoRA adapter '%s' across %d layers.", adapter_name, count)
+        else:
+            logger.debug("Added empty LoRA adapter '%s' across %d layers.", adapter_name, count)
 
     @staticmethod
-    def get_lora_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
-        """Extract only the LoRA adapter parameters for saving."""
+    def set_active(model: nn.Module, active: bool = True) -> None:
+        """Legacy method to toggle the default adapter active/inactive."""
+        LoRAManager.set_active_adapter(model, "default" if active else None)
+
+    @staticmethod
+    def set_active_adapter(model: nn.Module, adapter_name: str | None) -> None:
+        """O(1) fast pointer swap for the active evaluation adapter."""
+        count = 0
+        for module in model.modules():
+            if isinstance(module, LoRALinear):
+                module.active_adapter = adapter_name
+                count += 1
+        logger.debug("Set %d LoRA adapters active_adapter=%s", count, adapter_name)
+
+    @staticmethod
+    def get_lora_state_dict(model: nn.Module, adapter_name: str = "default") -> Dict[str, torch.Tensor]:
+        """Extract only the specified LoRA adapter parameters, formatted as legacy flat tensors."""
         lora_state: Dict[str, torch.Tensor] = {}
         for name, param in model.named_parameters():
-            if "lora_A" in name or "lora_B" in name:
-                lora_state[name] = param.data.cpu()
+            if f"lora_A.{adapter_name}" in name or f"lora_B.{adapter_name}" in name:
+                # Strip the adapter_name mapping from the key to maintain legacy disk format mapping
+                legacy_name = name.replace(f".{adapter_name}", "")
+                lora_state[legacy_name] = param.data.cpu()
         return lora_state
 
     @staticmethod
-    def load_lora_state_dict(model: nn.Module, state_dict: Dict[str, torch.Tensor]) -> None:
-        """Load adapter parameters previously saved via get_lora_state_dict."""
-        model.load_state_dict(state_dict, strict=False)
+    def load_lora_state_dict(model: nn.Module, state_dict: Dict[str, torch.Tensor], adapter_name: str = "default") -> None:
+        """
+        Loads a flat legacy state dict (lora_A, lora_B) into a specific adapter's ParameterDict scope.
+        Remaps keys on the fly so it maps specifically to the ParameterDict indexing.
+        """
+        mapped_dict = {}
+        for k, v in state_dict.items():
+            if "lora_A" in k and f"lora_A.{adapter_name}" not in k:
+                mapped_dict[k.replace("lora_A", f"lora_A.{adapter_name}")] = v
+            elif "lora_B" in k and f"lora_B.{adapter_name}" not in k:
+                mapped_dict[k.replace("lora_B", f"lora_B.{adapter_name}")] = v
+            else:
+                mapped_dict[k] = v
+                
+        # Must load in 'strict=False' because the full model will have lots of other components
+        model.load_state_dict(mapped_dict, strict=False)

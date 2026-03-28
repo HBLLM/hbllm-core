@@ -8,6 +8,7 @@ before generating text.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -18,6 +19,10 @@ from hbllm.network.messages import Message, MessageType, QueryPayload
 from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
+
+# Global lock to prevent concurrent async generations from cross-contaminating 
+# the active_adapter pointer on the shared base model.
+_INFERENCE_LOCK = asyncio.Lock()
 
 
 class DomainModuleNode(Node):
@@ -42,8 +47,12 @@ class DomainModuleNode(Node):
         self.domain_name = domain_name
         self.model = model
         self.tokenizer = tokenizer
-        self.lora_state_dict = lora_state_dict
         
+        self.has_lora = lora_state_dict is not None
+        if self.has_lora:
+            logger.info("DomainModuleNode '%s' registering LoRA adapter...", self.domain_name)
+            LoRAManager.add_adapter(self.model, self.domain_name, lora_state_dict)
+            
         self.topic_sub = "module.evaluate"
 
     async def on_start(self) -> None:
@@ -75,76 +84,73 @@ class DomainModuleNode(Node):
 
         logger.info("Domain '%s' generating response for prompt: %s...", self.domain_name, prompt[:30])
 
-        # 1. Hot-swap the LoRA adapter
-        # In a real multi-threaded environment where the base model is shared, 
-        # this would need a strict lock. For prototype async queues, this is safe.
-        if self.lora_state_dict is not None:
-            LoRAManager.load_lora_state_dict(self.model, self.lora_state_dict)
-            LoRAManager.set_active(self.model, True)
-        else:
-            # If no LoRA (e.g. baseline General model), deactivate adapter path
-            LoRAManager.set_active(self.model, False)
+        # We must acquire the inference lock to ensure no other domain swap happens during generation
+        async with _INFERENCE_LOCK:
+            # 1. Pointer-swap the LoRA adapter (O(1) time complexity)
+            if self.has_lora:
+                LoRAManager.set_active_adapter(self.model, self.domain_name)
+            else:
+                # If no LoRA (e.g. baseline General model), deactivate adapter path
+                LoRAManager.set_active_adapter(self.model, None)
 
-        # 2. Tokenize and Generate
-        # We simulate a continuous batching queue by leveraging PyTorch KV caching
-        # incrementally, yielding early rather than blocking.
-        try:
-            import asyncio
-            device = next(self.model.parameters()).device
-            
-            async def _generate_async() -> str:
-                enc = self.tokenizer.encode(prompt)
-                input_ids = torch.tensor([enc], dtype=torch.long).to(device)
+            # 2. Tokenize and Generate
+            try:
+                device = next(self.model.parameters()).device
                 
-                self.model.eval()
-                out_tokens = input_ids[0].tolist()
-                past_key_values = None
-                
-                with torch.no_grad():
-                    # Generate 30 tokens using cached autoregressive steps
-                    for _ in range(30):
-                        # Only pass the last decoded token to the model if caching
-                        model_input = input_ids[:, -1:] if past_key_values else input_ids
-                        
-                        outputs = self.model(
-                            model_input,
-                            past_key_values=past_key_values,
-                            use_cache=True
-                        )
-                        
-                        logits = outputs["logits"][:, -1, :]
-                        past_key_values = outputs.get("past_key_values")
-                        
-                        next_token = logits.argmax().item()
-                        out_tokens.append(next_token)
-                        input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
-                        
-                        # Yield to the asyncio event loop to allow other requests to be processed
-                        # in a true vLLM setup, this would schedule the next batch sequence
-                        await asyncio.sleep(0.001) 
-                
-                return self.tokenizer.decode_to_string(out_tokens)
+                async def _generate_async() -> str:
+                    enc = self.tokenizer.encode(prompt)
+                    input_ids = torch.tensor([enc], dtype=torch.long).to(device)
+                    
+                    self.model.eval()
+                    out_tokens = input_ids[0].tolist()
+                    past_key_values = None
+                    
+                    with torch.no_grad():
+                        # Generate 30 tokens using cached autoregressive steps
+                        for _ in range(30):
+                            # Only pass the last decoded token to the model if caching
+                            model_input = input_ids[:, -1:] if past_key_values else input_ids
+                            
+                            outputs = self.model(
+                                model_input,
+                                past_key_values=past_key_values,
+                                use_cache=True
+                            )
+                            
+                            logits = outputs["logits"][:, -1, :]
+                            past_key_values = outputs.get("past_key_values")
+                            
+                            next_token = logits.argmax().item()
+                            out_tokens.append(next_token)
+                            input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
+                            
+                            # Yield to the asyncio event loop to allow other requests to be processed
+                            # Since we hold _INFERENCE_LOCK, only non-LLM tasks will execute 
+                            # safely while we pseudo-batch
+                            await asyncio.sleep(0.001) 
+                    
+                    return self.tokenizer.decode_to_string(out_tokens)
 
-            response_text = await _generate_async()
-            logger.info("Domain '%s' finished generating.", self.domain_name)
-            
-            # 3. Propose thought to Blackboard instead of creating a synchronous response
-            thought_msg = Message(
-                type=MessageType.EVENT,
-                source_node_id=self.node_id,
-                tenant_id=message.tenant_id,
-                session_id=message.session_id,
-                topic="workspace.thought",
-                payload={
-                    "type": f"intuition_{self.domain_name}",
-                    "confidence": 0.8, # Base LLM confidence
-                    "content": response_text
-                },
-                correlation_id=message.correlation_id
-            )
-            await self.bus.publish("workspace.thought", thought_msg)
-            return None
-            
-        except Exception as e:
-            logger.error("Generation failed: %s", e)
-            return None
+                response_text = await _generate_async()
+                logger.info("Domain '%s' finished generating.", self.domain_name)
+                
+                # 3. Propose thought to Blackboard instead of creating a synchronous response
+                thought_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    tenant_id=message.tenant_id,
+                    session_id=message.session_id,
+                    topic="workspace.thought",
+                    payload={
+                        "type": f"intuition_{self.domain_name}",
+                        "confidence": 0.8, # Base LLM confidence
+                        "content": response_text
+                    },
+                    correlation_id=message.correlation_id
+                )
+                await self.bus.publish("workspace.thought", thought_msg)
+                return None
+                
+            except Exception as e:
+                logger.error("Generation failed: %s", e)
+                return None

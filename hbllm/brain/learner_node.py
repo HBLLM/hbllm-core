@@ -134,7 +134,7 @@ class LearnerNode(Node):
                     # reference model's log-probabilities. This ensures the
                     # DPO loss produces a non-zero gradient signal.
                     from hbllm.modules.lora import LoRAManager
-                    LoRAManager.set_active(self.model, active=False)
+                    LoRAManager.set_active_adapter(self.model, None)
 
                     with torch.no_grad():
                         ref_chosen_out = self.model(chosen_ids)
@@ -144,7 +144,7 @@ class LearnerNode(Node):
                         ref_chosen_logps = get_batch_logps(ref_chosen_logits, chosen_ids)
                         ref_rejected_logps = get_batch_logps(ref_rejected_logits, rejected_ids)
 
-                    LoRAManager.set_active(self.model, active=True)
+                    LoRAManager.set_active_adapter(self.model, "default")
 
                     # ── Policy log-probs: model with LoRA active ──
                     # Forward pass — policy model

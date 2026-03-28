@@ -298,14 +298,14 @@ class HBLLMForCausalLM(nn.Module):
                 self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, target_modules=target_modules
             )
             
-        # Load the state
-        logger.info("Loading LoRA state dict...")
-        LoRAManager.load_lora_state_dict(self, state_dict)
+        # Load the state into the 'default' adapter slot so the LocalProvider can trigger it globally
+        logger.info("Loading LoRA state dict into default Multi-LoRA slot...")
+        LoRAManager.add_adapter(self, adapter_name="default", state_dict=state_dict)
         
     def set_lora_active(self, active: bool = True) -> None:
         """Toggle LoRA adapters on or off for inference."""
         from hbllm.modules.lora import LoRAManager
-        LoRAManager.set_active(self, active)
+        LoRAManager.set_active_adapter(self, "default" if active else None)
 
     def forward(
         self,
