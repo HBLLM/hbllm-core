@@ -167,44 +167,42 @@ class SleepCycleNode(Node):
             return 0
 
     async def _run_self_improvement(self) -> bool:
-        """Phase 2: Check for reflection data and trigger LoRA fine-tuning."""
+        """Phase 2: Trigger Lifelong Continuous DPO overnight."""
         import asyncio
         
-        try:
-            from hbllm.serving.self_improve import run_improvement_cycle
-        except ImportError:
-            logger.debug("[SleepNode] self_improve module not available, skipping training.")
-            return False
+        logger.info("[SleepNode] Initiating Phase 2: Autonomous Continuous DPO...")
 
-        logger.info("[SleepNode] Checking for reflection datasets for self-improvement...")
+        # Create an event to wait for the learner node to respond
+        training_complete_event = asyncio.Event()
         
-        try:
-            # Run training in a thread to avoid blocking the event loop
-            results = await asyncio.to_thread(
-                run_improvement_cycle,
-                reflection_dir="workspace/reflection",
-                model_size="125m",
-                max_steps=50,  # Short training during sleep
-            )
+        async def _on_learning_update(msg: Message):
+            training_complete_event.set()
             
-            if results:
-                for domain, result in results.items():
-                    if isinstance(result, dict) and "error" not in result:
-                        logger.info(
-                            "[SleepNode] Self-improvement complete for domain '%s': "
-                            "%d steps, avg_loss=%.4f",
-                            domain, result.get("steps", 0), result.get("avg_loss", 0),
-                        )
-                    elif isinstance(result, dict):
-                        logger.warning("[SleepNode] Training failed for '%s': %s", domain, result.get("error"))
-                return True
-            else:
-                logger.info("[SleepNode] No reflection data found. Model is up to date.")
-                return False
-                
+        await self.bus.subscribe("system.learning_update", _on_learning_update)
+
+        try:
+            # Emit the trigger to wake up LearnerNode
+            trigger_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="system.sleep.dpo_trigger",
+                payload={"mode": "overnight_continuous"}
+            )
+            await self.bus.publish("system.sleep.dpo_trigger", trigger_msg)
+            
+            # Wait for learner to process. If it's empty, it returns immediately.
+            # If it's a huge batch, give it 15 minutes max during 'sleep'.
+            await asyncio.wait_for(training_complete_event.wait(), timeout=900.0)
+            logger.info("[SleepNode] Continuous DPO phase completed successfully.")
+            return True
+        except TimeoutError:
+             logger.warning("[SleepNode] DPO training timed out after 15 minutes.")
+             return False
         except Exception as e:
-            logger.warning("[SleepNode] Self-improvement skipped: %s", e)
+            logger.warning("[SleepNode] Self-improvement skipped/failed: %s", e)
             return False
+        finally:
+            await self.bus.unsubscribe("system.learning_update", _on_learning_update)
 
     async def _replay_curiosity_goals(self) -> int:
         """

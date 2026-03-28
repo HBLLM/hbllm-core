@@ -39,8 +39,14 @@ async def test_learner_node_receives_feedback():
     learner = LearnerNode(node_id="learner_test", batch_size=2)
     await learner.start(bus)
     
+    # Make sure we clean up any previous runs
+    import os, json
+    queue_path = "workspace/reflection/dpo_queue.json"
+    if os.path.exists(queue_path):
+        os.remove(queue_path)
+        
     assert len(learner.pending_pairs) == 0
-    assert len(learner.paired_buffer) == 0
+    assert not os.path.exists(queue_path)
     
     # Send a positive feedback message
     feedback_pos = Message(
@@ -61,7 +67,7 @@ async def test_learner_node_receives_feedback():
     assert "Hello" in learner.pending_pairs
     assert learner.pending_pairs["Hello"]["chosen"] == "Hi there!"
     assert learner.pending_pairs["Hello"]["rejected"] is None
-    assert len(learner.paired_buffer) == 0
+    assert not os.path.exists(queue_path)
     
     # Send a negative feedback message for the same prompt
     feedback_neg = Message(
@@ -79,25 +85,36 @@ async def test_learner_node_receives_feedback():
     await bus.publish("system.feedback", feedback_neg)
     await asyncio.sleep(0.1)
     
-    # It should stitch them and move to paired_buffer
+    # It should stitch them and move to the persistent queue
     assert "Hello" not in learner.pending_pairs
-    assert len(learner.paired_buffer) == 1
-    assert learner.paired_buffer[0] == ("Hello", "Hi there!", "Crash")
+    assert os.path.exists(queue_path)
+    with open(queue_path, "r") as f:
+        queue = json.load(f)
+    assert len(queue) == 1
+    assert queue[0] == ["Hello", "Hi there!", "Crash"]
     
     await learner.stop()
     await bus.stop()
 
+    if os.path.exists(queue_path):
+        os.remove(queue_path)
+
 
 @pytest.mark.asyncio
-async def test_learner_node_triggers_dpo_at_batch_size():
-    """LearnerNode should trigger DPO training when batch_size pairs arrive."""
+async def test_learner_node_triggers_dpo_at_sleep():
+    """LearnerNode should trigger DPO training only when sleep triggers."""
+    import os, json
+    queue_path = "workspace/reflection/dpo_queue.json"
+    if os.path.exists(queue_path):
+        os.remove(queue_path)
+
     bus = InProcessBus()
     await bus.start()
     
     learner = LearnerNode(node_id="learner_test", batch_size=2, model=None, tokenizer=None)
     await learner.start(bus)
     
-    # Send batch_size pairs to trigger training
+    # Send batch_size pairs to queue them up
     for i in range(learner.batch_size):
         # Positive
         msg_pos = Message(
@@ -118,11 +135,18 @@ async def test_learner_node_triggers_dpo_at_batch_size():
         await bus.publish("system.feedback", msg_neg)
         await asyncio.sleep(0.1)
     
+    # Verify training has NOT started
+    assert learner.training_task is None
+    
+    # Trigger Sleep
+    sleep_trigger = Message(type=MessageType.EVENT, source_node_id="test", topic="system.sleep.dpo_trigger", payload={})
+    await bus.publish("system.sleep.dpo_trigger", sleep_trigger)
+
     # Wait for DPO training trigger (1s)
     await asyncio.sleep(0.5)
     
-    # Buffer should be drained after training trigger
-    assert len(learner.paired_buffer) == 0
+    # Queue should be drained during training
+    assert not os.path.exists(queue_path)
     # Training task should have run
     assert learner.training_task is not None
     

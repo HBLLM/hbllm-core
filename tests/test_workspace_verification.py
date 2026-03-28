@@ -149,6 +149,11 @@ from hbllm.brain.learner_node import LearnerNode
 
 @pytest.mark.asyncio
 async def test_autonomous_learning(bus):
+    import os
+    queue_path = "workspace/reflection/dpo_queue.json"
+    if os.path.exists(queue_path):
+        os.remove(queue_path)
+
     exec_node = ExecutionNode(node_id="exec_3", timeout=5.0)
     workspace = WorkspaceNode(node_id="workspace_3", thinking_deadline=1.0)
     
@@ -228,12 +233,22 @@ async def test_autonomous_learning(bus):
         )
         
         # Both pairs should now be stitched into perfect contrastive DPO batch
-        assert len(learner.paired_buffer) == 1
+        import os, json
+        queue_path = "workspace/reflection/dpo_queue.json"
+        assert os.path.exists(queue_path)
         
-        paired = learner.paired_buffer[0]
+        with open(queue_path, "r") as f:
+            queue = json.load(f)
+            
+        assert len(queue) == 1
+        
+        paired = queue[0]
         assert paired[0] == "Calculate fibonacci 5"
         assert "print(5)" in paired[1] # Chosen
         assert "print(1/0)" in paired[2] # Rejected
+        
+        # Cleanup
+        os.remove(queue_path)
         
     finally:
         await exec_node.stop()
