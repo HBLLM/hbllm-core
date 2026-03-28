@@ -104,7 +104,7 @@ class LoRAManager:
         # Recursively patch modules
         for name, module in list(model.named_modules()):
             for target in target_modules:
-                if name.endswith(target) and isinstance(module, nn.Linear):
+                if name.endswith(target) and isinstance(module, nn.Linear) and not isinstance(module, LoRALinear):
                     parent_name = name.rsplit(".", 1)[0] if "." in name else ""
                     child_name = name.rsplit(".", 1)[-1] if "." in name else name
 

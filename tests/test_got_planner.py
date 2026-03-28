@@ -151,8 +151,8 @@ def test_thought_graph_mcts_stats():
     assert child1.q_value == 1.0
     
     assert root.visits == 1
-    assert root.cumulative_reward == 1.0
-    assert root.q_value == 1.0
+    assert root.cumulative_reward == pytest.approx(0.95)  # 1.0 * decay(0.95)
+    assert root.q_value == pytest.approx(0.95)
     
     child2 = g.branch(root.id, "Branch 2")
     g.backpropagate(child2.id, 0.0)
@@ -161,8 +161,8 @@ def test_thought_graph_mcts_stats():
     assert child2.q_value == 0.0
     
     assert root.visits == 2
-    assert root.cumulative_reward == 1.0
-    assert root.q_value == 0.5
+    assert root.cumulative_reward == pytest.approx(0.95)  # 0.95 + 0.0*0.95
+    assert root.q_value == pytest.approx(0.475)  # 0.95 / 2
 
 def test_thought_graph_uct_selection():
     """Verify UCT selects unvisited nodes first, then balances Q-value and exploration."""

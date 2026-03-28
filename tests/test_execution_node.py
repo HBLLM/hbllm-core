@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from hbllm.network.messages import Message, MessageType
-from hbllm.actions.execution_node import ExecutionNode
+from hbllm.actions.execution_node import ExecutionNode, validate_code
 
 @pytest.fixture
 def execution_node():
@@ -23,6 +23,7 @@ async def test_execution_node_success(execution_node):
 
 @pytest.mark.asyncio
 async def test_execution_node_syntax_error(execution_node):
+    """Syntax errors are now caught by AST validation before execution."""
     msg = Message(
         type=MessageType.QUERY,
         source_node_id="test",
@@ -30,11 +31,13 @@ async def test_execution_node_syntax_error(execution_node):
         payload={"code": "print('missing paren"}
     )
     resp = await execution_node.handle_message(msg)
-    assert resp.payload["status"] == "FAILURE"
-    assert "SyntaxError" in resp.payload["error"]
+    assert resp is not None
+    assert resp.type == MessageType.ERROR
+    assert "Syntax error" in resp.payload["error"]
 
 @pytest.mark.asyncio
 async def test_execution_node_timeout(execution_node):
+    # time module is not blocked — only dangerous system modules are
     msg = Message(
         type=MessageType.QUERY,
         source_node_id="test",
@@ -57,3 +60,102 @@ async def test_execution_node_extraction(execution_node):
     resp = await execution_node.handle_message(msg)
     assert resp.payload["status"] == "SUCCESS"
     assert resp.payload["output"] == "20"
+
+
+# ── Sandbox security tests ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_execution_node_blocks_os_import(execution_node):
+    """AST validator should reject 'import os'."""
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="test",
+        topic="action.execute_code",
+        payload={"code": "import os\nprint(os.listdir('.'))"}
+    )
+    resp = await execution_node.handle_message(msg)
+    assert resp.type == MessageType.ERROR
+    assert "security policy" in resp.payload["error"]
+
+@pytest.mark.asyncio
+async def test_execution_node_blocks_subprocess(execution_node):
+    """AST validator should reject 'import subprocess'."""
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="test",
+        topic="action.execute_code",
+        payload={"code": "import subprocess\nsubprocess.run(['ls'])"}
+    )
+    resp = await execution_node.handle_message(msg)
+    assert resp.type == MessageType.ERROR
+    assert "security policy" in resp.payload["error"]
+
+@pytest.mark.asyncio
+async def test_execution_node_blocks_eval(execution_node):
+    """AST validator should reject calls to 'eval()'."""
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="test",
+        topic="action.execute_code",
+        payload={"code": "result = eval('1+1')\nprint(result)"}
+    )
+    resp = await execution_node.handle_message(msg)
+    assert resp.type == MessageType.ERROR
+    assert "security policy" in resp.payload["error"]
+
+@pytest.mark.asyncio
+async def test_execution_node_blocks_open(execution_node):
+    """AST validator should reject calls to 'open()'."""
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="test",
+        topic="action.execute_code",
+        payload={"code": "f = open('/etc/passwd')\nprint(f.read())"}
+    )
+    resp = await execution_node.handle_message(msg)
+    assert resp.type == MessageType.ERROR
+    assert "security policy" in resp.payload["error"]
+
+@pytest.mark.asyncio
+async def test_execution_node_blocks_dunder(execution_node):
+    """AST validator should reject dunder attribute access."""
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="test",
+        topic="action.execute_code",
+        payload={"code": "x = ''.__class__.__subclasses__()"}
+    )
+    resp = await execution_node.handle_message(msg)
+    assert resp.type == MessageType.ERROR
+    assert "security policy" in resp.payload["error"]
+
+@pytest.mark.asyncio
+async def test_execution_node_blocks_from_import(execution_node):
+    """AST validator should reject 'from os import ...'."""
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="test",
+        topic="action.execute_code",
+        payload={"code": "from os.path import join\nprint(join('a', 'b'))"}
+    )
+    resp = await execution_node.handle_message(msg)
+    assert resp.type == MessageType.ERROR
+    assert "security policy" in resp.payload["error"]
+
+
+# ── validate_code unit tests ────────────────────────────────────────────────
+
+def test_validate_code_safe():
+    """Pure math code should pass validation."""
+    violations = validate_code("x = 1 + 2\nprint(x)")
+    assert violations == []
+
+def test_validate_code_blocked_import():
+    violations = validate_code("import sys")
+    assert len(violations) == 1
+    assert "sys" in violations[0]
+
+def test_validate_code_multiple_violations():
+    code = "import os\nimport subprocess\nresult = eval('1+1')"
+    violations = validate_code(code)
+    assert len(violations) == 3

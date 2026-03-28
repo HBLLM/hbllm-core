@@ -92,7 +92,20 @@ class ThoughtGraph:
         return child
     
     def merge(self, parent_ids: list[str], content: str, score: float = 0.0) -> ThoughtNode:
-        """Merge multiple parent thoughts into a synthesis node."""
+        """Merge multiple parent thoughts into a synthesis node.
+        
+        Raises ValueError if the merge would create a cycle in the DAG.
+        """
+        # Cycle detection: ensure no parent is a descendant of another parent
+        # (which would create a cycle when they share a child)
+        for pid in parent_ids:
+            ancestors = self._get_ancestors(pid)
+            for other_pid in parent_ids:
+                if other_pid != pid and other_pid in ancestors:
+                    raise ValueError(
+                        f"Merge would create cycle: '{other_pid}' is an ancestor of '{pid}'"
+                    )
+
         max_depth = max(self.nodes[pid].depth for pid in parent_ids)
         merged = ThoughtNode(
             content=content,
@@ -105,6 +118,17 @@ class ThoughtGraph:
             self.nodes[pid].children_ids.append(merged.id)
         self.nodes[merged.id] = merged
         return merged
+
+    def _get_ancestors(self, node_id: str) -> set[str]:
+        """Get all ancestor node IDs for cycle detection."""
+        ancestors: set[str] = set()
+        stack = list(self.nodes[node_id].parent_ids)
+        while stack:
+            current = stack.pop()
+            if current not in ancestors:
+                ancestors.add(current)
+                stack.extend(self.nodes[current].parent_ids)
+        return ancestors
     
     def best_path(self) -> list[ThoughtNode]:
         """Find the path from root to a leaf with the highest visit count / Q-value."""
@@ -132,9 +156,9 @@ class ThoughtGraph:
         path.reverse()
         return path
     
-    def select_leaf_uct(self, root_id: str, c_param: float = 1.414) -> ThoughtNode:
+    def select_leaf_uct(self, root_id: str, c_param: float = 1.414, prm_weight: float = 0.5) -> ThoughtNode:
         import math
-        """Select a leaf node to expand using the UCT formula."""
+        """Select a leaf node to expand using the UCT formula, blended with PRM scores."""
         current = self.nodes[root_id]
         
         while not current.is_leaf:
@@ -143,17 +167,21 @@ class ThoughtGraph:
             if unvisited:
                 return unvisited[0]
             
-            # UCT Selection
+            # UCT Selection (blending standard MCTS Q-value with immediate PRM score)
             best_score = -float('inf')
             best_child = None
             parent_visits = current.visits
             
             for child_id in current.children_ids:
                 child = self.nodes[child_id]
-                exploitation = child.q_value
-                # UCT term: Q(s,a) + c * sqrt(ln(N) / n)
+                
+                # Blend the long-term Q-value with the immediate step score (PRM)
+                blended_q = (1.0 - prm_weight) * child.q_value + prm_weight * child.score
+                
+                # Exploration term: c * sqrt(ln(N) / n)
                 exploration = c_param * math.sqrt(math.log(parent_visits) / child.visits)
-                score = exploitation + exploration
+                
+                score = blended_q + exploration
                 
                 if score > best_score:
                     best_score = score
@@ -165,16 +193,18 @@ class ThoughtGraph:
             
         return current
 
-    def backpropagate(self, leaf_id: str, reward: float) -> None:
-        """Propagate reward up the tree to the root."""
+    def backpropagate(self, leaf_id: str, reward: float, decay: float = 0.95) -> None:
+        """Propagate reward up the tree to the root with optional decay."""
         current = self.nodes[leaf_id]
+        current_reward = reward
         while True:
             current.visits += 1
-            current.cumulative_reward += reward
-            # Backprop up the first primary parent chain (classic MCTS treats state as a tree)
+            current.cumulative_reward += current_reward
+            # Backprop up the first primary parent chain
             if not current.parent_ids:
                 break
             current = self.nodes[current.parent_ids[0]]
+            current_reward *= decay # Discount future rewards
     
     def prune(self, min_score: float = 0.3) -> int:
         """Remove leaf nodes below the score threshold. Returns count removed."""

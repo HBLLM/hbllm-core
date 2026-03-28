@@ -129,6 +129,24 @@ class LearnerNode(Node):
 
                     chosen_ids, rejected_ids = pair
 
+                    # ── Reference log-probs: base model with LoRA disabled ──
+                    # Temporarily disable LoRA adapters to get the frozen
+                    # reference model's log-probabilities. This ensures the
+                    # DPO loss produces a non-zero gradient signal.
+                    from hbllm.modules.lora import LoRAManager
+                    LoRAManager.set_active(self.model, active=False)
+
+                    with torch.no_grad():
+                        ref_chosen_out = self.model(chosen_ids)
+                        ref_rejected_out = self.model(rejected_ids)
+                        ref_chosen_logits = ref_chosen_out["logits"] if isinstance(ref_chosen_out, dict) else ref_chosen_out
+                        ref_rejected_logits = ref_rejected_out["logits"] if isinstance(ref_rejected_out, dict) else ref_rejected_out
+                        ref_chosen_logps = get_batch_logps(ref_chosen_logits, chosen_ids)
+                        ref_rejected_logps = get_batch_logps(ref_rejected_logits, rejected_ids)
+
+                    LoRAManager.set_active(self.model, active=True)
+
+                    # ── Policy log-probs: model with LoRA active ──
                     # Forward pass — policy model
                     chosen_out = self.model(chosen_ids)
                     rejected_out = self.model(rejected_ids)
@@ -138,11 +156,6 @@ class LearnerNode(Node):
 
                     policy_chosen_logps = get_batch_logps(chosen_logits, chosen_ids)
                     policy_rejected_logps = get_batch_logps(rejected_logits, rejected_ids)
-
-                    # Reference log probs: use detached model (frozen copy approximation)
-                    with torch.no_grad():
-                        ref_chosen_logps = policy_chosen_logps.detach()
-                        ref_rejected_logps = policy_rejected_logps.detach()
 
                     losses, chosen_rewards, rejected_rewards = compute_dpo_loss(
                         policy_chosen_logps=policy_chosen_logps,

@@ -138,10 +138,28 @@ class LocalProvider(LLMProvider):
         top_p = kwargs.get("top_p", 0.9)
         eos_id = self._tokenizer.eos_id
 
+        past_key_values = None
+
         with torch.no_grad():
-            for _ in range(max_tokens):
-                output = self._model(input_tensor)
-                logits = output["logits"] if isinstance(output, dict) else output
+            for step in range(max_tokens):
+                # On step 0, process the full prompt; afterwards only the new token
+                if step == 0:
+                    model_input = input_tensor
+                else:
+                    model_input = next_token  # [1, 1] — single new token
+
+                output = self._model(
+                    model_input,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                )
+
+                if isinstance(output, dict):
+                    logits = output["logits"]
+                    past_key_values = output.get("past_key_values", past_key_values)
+                else:
+                    logits = output
+
                 next_logits = logits[:, -1, :] / max(temperature, 1e-7)
 
                 # Top-p (nucleus) sampling
@@ -160,11 +178,44 @@ class LocalProvider(LLMProvider):
                 token_text = self._tokenizer.decode([token_id])
                 yield token_text
 
-                input_tensor = torch.cat([input_tensor, next_token], dim=-1)
-
     @property
     def name(self) -> str:
         return "local"
+
+    def load_lora_from_disk(
+        self,
+        lora_path: str,
+        r: int = 8,
+        lora_alpha: float = 16.0,
+        lora_dropout: float = 0.05,
+    ) -> None:
+        """Dynamically load and activate a LoRA adapter from disk."""
+        self._ensure_loaded()
+        import torch
+        import os
+        
+        if not os.path.exists(lora_path):
+            raise FileNotFoundError(f"LoRA adapter not found at {lora_path}")
+            
+        logger.info("Loading LoRA adapter from %s", lora_path)
+        state_dict = torch.load(lora_path, map_location=self._device, weights_only=True)
+        
+        # Dispatch to the model
+        if hasattr(self._model, "load_lora_adapter"):
+            self._model.load_lora_adapter(
+                state_dict, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
+            )
+            # Ensure it's active
+            self._model.set_lora_active(True)
+        else:
+            raise NotImplementedError("Model does not support load_lora_adapter")
+            
+    def set_lora_active(self, active: bool = True) -> None:
+        """Toggle LoRA active state without unloading weights."""
+        self._ensure_loaded()
+        if hasattr(self._model, "set_lora_active"):
+            self._model.set_lora_active(active)
+            logger.info("LocalProvider LoRA active=%s", active)
 
 
 # ─── OpenAI Provider ─────────────────────────────────────────────────────────

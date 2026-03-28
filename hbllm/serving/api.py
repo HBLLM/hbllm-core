@@ -631,9 +631,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = os.environ.get(
+    "HBLLM_CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _cors_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

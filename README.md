@@ -6,7 +6,7 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-965%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-993%20passing-brightgreen.svg)](#)
   [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
@@ -281,6 +281,8 @@ flowchart TB
 | ------------------------ | --------------------------------------------- | -------------------- |
 | **Router**               | Routes inputs to the right cognitive path     | Thalamus             |
 | **Planner**              | Breaks goals into multi-step plans (GoT DAG)  | Prefrontal cortex    |
+| **Process Reward**       | Continuous scoring of reasoning steps         | Value function       |
+| **Tool Router**          | Multiplexes external agentic tool calls       | Basal ganglia        |
 | **Decision**             | Makes final decisions from evidence           | Executive function   |
 | **Critic**               | Self-evaluates quality and correctness        | Error monitoring     |
 | **Learner**              | Updates knowledge from outcomes               | Hippocampal learning |
@@ -638,6 +640,16 @@ hbllm-core/
 ---
 
 ## Recent Additions
+
+### Phase 4 — Agentic Capabilities & Performance
+
+| Feature                     | Description                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Speculative Decoding**    | High-performance inference dual-model loop with **Adaptive Gamma** depth scaling                                     |
+| **Process Reward Model**    | `ProcessRewardNode` (PRM) for continuous neural scoring [0-1] of intermediate reasoning steps                        |
+| **Tool Router**             | `ToolRouterNode` provides generic XML-based tool call multiplexing for multi-step agentic chains                     |
+| **Adaptive Context Window** | Middle-out truncation to manage huge GoT/MCTS reasoning trajectories without OOM                                     |
+| **Workspace Stability**     | Tracked async lifecycles and strict race condition elimination for 100% stable, cross-test clean state execution     |
 
 ### Phase 3 — Cognitive Training & Governance
 

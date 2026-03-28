@@ -84,7 +84,7 @@ class InProcessBus:
     This is the default for Phase 1-2. In Phase 3+, swap to GrpcBus/NatsBus.
     """
 
-    def __init__(self, queue_size: int = 1000):
+    def __init__(self, queue_size: int = 1000, max_concurrent_handlers: int = 1000):
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
         self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = asyncio.PriorityQueue(maxsize=queue_size)
@@ -96,7 +96,9 @@ class InProcessBus:
         self.metrics = BusMetrics()
         # Backpressure monitoring
         self._backpressure_warning_threshold = 0.8  # Warn at 80% full
-        # Track active handler tasks to prevent unbounded memory growth
+        # Concurrency control: limit simultaneous handler tasks to prevent OOM
+        self._handler_semaphore = asyncio.Semaphore(max_concurrent_handlers)
+        # Track active handler tasks for graceful shutdown
         self._active_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
@@ -222,24 +224,25 @@ class InProcessBus:
                 if not sub.active:
                     continue
                 async def _run_handler(s=sub, t=topic, m=message):
-                    _start = time.monotonic()
-                    try:
-                        with trace_span(f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}):
-                            response = await s.handler(m)
-                        latency = (time.monotonic() - _start) * 1000
-                        self.metrics.record_delivery(t, latency)
-                        # If handler returns a response, route it back
-                        if response is not None:
-                            if response.correlation_id is None:
-                                response.correlation_id = m.id
-                            await self.publish(response.topic, response)
-                    except Exception:
-                        self.metrics.record_error(t)
-                        logger.exception(
-                            "Error in handler for topic '%s', message %s",
-                            t,
-                            m.id,
-                        )
+                    async with self._handler_semaphore:
+                        _start = time.monotonic()
+                        try:
+                            with trace_span(f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}):
+                                response = await s.handler(m)
+                            latency = (time.monotonic() - _start) * 1000
+                            self.metrics.record_delivery(t, latency)
+                            # If handler returns a response, route it back
+                            if response is not None:
+                                if response.correlation_id is None:
+                                    response.correlation_id = m.id
+                                await self.publish(response.topic, response)
+                        except Exception:
+                            self.metrics.record_error(t)
+                            logger.exception(
+                                "Error in handler for topic '%s', message %s",
+                                t,
+                                m.id,
+                            )
                         
                 task = asyncio.create_task(_run_handler())
                 self._active_tasks.add(task)
