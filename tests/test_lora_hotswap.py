@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from hbllm.model.config import ModelConfig
 from hbllm.model.transformer import HBLLMForCausalLM
-from hbllm.modules.lora import LoRAManager
+from hbllm.modules.lora import LoRAManager, ACTIVE_ADAPTER
 
 @pytest.fixture
 def mock_config():
@@ -41,14 +41,15 @@ def test_lora_injection_and_unloading(mock_config):
             nn.init.normal_(param.data, mean=1.0, std=0.1)
     
     # 3. LoRA active forward pass
+    ACTIVE_ADAPTER.set("default")
     with torch.no_grad():
         lora_active_logits = model(input_ids)["logits"]
         
     # Activs logits should differ from base
     assert not torch.allclose(base_logits, lora_active_logits, atol=1e-4)
     
-    # 4. Deactivate LoRA
-    model.set_lora_active(False)
+    # 4. Deactivate LoRA context
+    ACTIVE_ADAPTER.set(None)
     with torch.no_grad():
         lora_inactive_logits = model(input_ids)["logits"]
         

@@ -21,7 +21,7 @@ class MockIntuitionNode:
         self.evals_received.append(msg)
         
         text = msg.payload.get("text", "")
-        if "CRITICAL FEEDBACK" in text:
+        if "CONSTITUTIONAL VIOLATION" in text:
             await self.propose("I am a helpful assistant and the sky is blue.", msg.correlation_id)
         else:
             await self.propose("As an AI language model, I don't know the answer.", msg.correlation_id)
@@ -82,10 +82,11 @@ async def test_critic_active_halting_and_backtracking(critic_env):
     second_eval = intuition.evals_received[1]
     
     # The second eval must contain the critic's backtracking context
-    assert "CRITICAL FEEDBACK" in second_eval.payload.get("text", "")
+    assert "CONSTITUTIONAL VIOLATION" in second_eval.payload.get("text", "")
     
     # Assert the flawed thought was removed from the blackboard
     board = workspace.blackboards.get("test_halt_001")
     if board:
         for t in board["thoughts"]:
-            assert "As an AI language model" not in t["content"]
+            if t.get("content"):
+                assert "As an AI language model" not in t["content"]

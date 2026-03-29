@@ -123,8 +123,8 @@ class LocalProvider(LLMProvider):
             },
         )
 
-    async def stream(self, messages, max_tokens=1024, temperature=0.7, **kwargs):
-        """Stream tokens from the local model one at a time."""
+    def stream(self, messages, max_tokens=1024, temperature=0.7, **kwargs):
+        """Stream tokens from the local model one at a time, using Speculative Decoding if configured."""
         self._ensure_loaded()
         import torch
 
@@ -138,62 +138,93 @@ class LocalProvider(LLMProvider):
         top_p = kwargs.get("top_p", 0.9)
         eos_id = self._tokenizer.eos_id
 
-        past_key_values = None
-        if hasattr(self._model, "config"):
-            from hbllm.serving.kv_cache import KVCache
-            cfg = self._model.config
-            budget = input_tensor.shape[1] + max_tokens
-            # Initialize array of KVCaches (one per layer) if safe memory budget
-            if budget <= getattr(cfg, "max_position_embeddings", 8192):
-                past_key_values = [
-                    KVCache(
-                        batch_size=1,
-                        max_seq_len=budget,
-                        num_kv_heads=cfg.num_kv_heads,
-                        head_dim=cfg.hidden_size // cfg.num_heads,
-                        dtype=next(self._model.parameters()).dtype,
-                        device=input_tensor.device,
-                    )
-                    for _ in range(cfg.num_hidden_layers)
-                ]
+        # Phase 4: Speculative Decoding Integration
+        has_draft_model = hasattr(self, "_draft_model") and self._draft_model is not None
 
-        with torch.no_grad():
-            for step in range(max_tokens):
-                # On step 0, process the full prompt; afterwards only the new token
-                if step == 0:
-                    model_input = input_tensor
-                else:
-                    model_input = next_token  # [1, 1] — single new token
-
-                output = self._model(
-                    model_input,
-                    past_key_values=past_key_values,
-                    use_cache=True,
+        if has_draft_model:
+            from hbllm.model.speculative import speculate_step
+            K = kwargs.get("speculative_k", 4)
+            current_input = input_tensor
+            
+            tokens_generated = 0
+            while tokens_generated < max_tokens:
+                accepted_tokens = speculate_step(
+                    main_model=self._model,
+                    draft_model=self._draft_model,
+                    draft_input_ids=current_input,
+                    main_input_ids=current_input,
+                    K=K,
+                    temperature=temperature,
+                    top_p=top_p
                 )
+                
+                # Yield newly accepted tokens as chunks
+                for token_id in accepted_tokens[0].tolist():
+                    if token_id == eos_id:
+                        return
+                    yield self._tokenizer.decode([token_id])
+                    tokens_generated += 1
+                    
+                current_input = torch.cat([current_input, accepted_tokens.to(current_input.device)], dim=1)
 
-                if isinstance(output, dict):
-                    logits = output["logits"]
-                    past_key_values = output.get("past_key_values", past_key_values)
-                else:
-                    logits = output
-
-                next_logits = logits[:, -1, :] / max(temperature, 1e-7)
-
-                # Top-p (nucleus) sampling
-                sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
-                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                mask = cumulative_probs - torch.softmax(sorted_logits, dim=-1) >= top_p
-                sorted_logits[mask] = float("-inf")
-                probs = torch.softmax(sorted_logits, dim=-1)
-                next_index = torch.multinomial(probs, num_samples=1)
-                next_token = sorted_indices.gather(-1, next_index)
-
-                token_id = next_token.item()
-                if token_id == eos_id:
-                    break
-
-                token_text = self._tokenizer.decode([token_id])
-                yield token_text
+        else:
+            # Traditional Autoregressive Loop (with KV Cache)
+            past_key_values = None
+            if hasattr(self._model, "config"):
+                from hbllm.serving.kv_cache import KVCache
+                cfg = self._model.config
+                budget = input_tensor.shape[1] + max_tokens
+                # Initialize array of KVCaches (one per layer) if safe memory budget
+                if budget <= getattr(cfg, "max_position_embeddings", 8192):
+                    past_key_values = [
+                        KVCache(
+                            batch_size=1,
+                            max_seq_len=budget,
+                            num_kv_heads=cfg.num_kv_heads,
+                            head_dim=cfg.hidden_size // cfg.num_heads,
+                            dtype=next(self._model.parameters()).dtype,
+                            device=input_tensor.device,
+                        )
+                        for _ in range(cfg.num_hidden_layers)
+                    ]
+    
+            with torch.no_grad():
+                for step in range(max_tokens):
+                    # On step 0, process the full prompt; afterwards only the new token
+                    if step == 0:
+                        model_input = input_tensor
+                    else:
+                        model_input = next_token  # [1, 1] — single new token
+    
+                    output = self._model(
+                        model_input,
+                        past_key_values=past_key_values,
+                        use_cache=True,
+                    )
+    
+                    if isinstance(output, dict):
+                        logits = output["logits"]
+                        past_key_values = output.get("past_key_values", past_key_values)
+                    else:
+                        logits = output
+    
+                    next_logits = logits[:, -1, :] / max(temperature, 1e-7)
+    
+                    # Top-p (nucleus) sampling
+                    sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
+                    cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                    mask = cumulative_probs - torch.softmax(sorted_logits, dim=-1) >= top_p
+                    sorted_logits[mask] = float("-inf")
+                    probs = torch.softmax(sorted_logits, dim=-1)
+                    next_index = torch.multinomial(probs, num_samples=1)
+                    next_token = sorted_indices.gather(-1, next_index)
+    
+                    token_id = next_token.item()
+                    if token_id == eos_id:
+                        break
+    
+                    token_text = self._tokenizer.decode([token_id])
+                    yield token_text
 
     @property
     def name(self) -> str:

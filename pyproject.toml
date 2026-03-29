@@ -16,6 +16,8 @@ dependencies = [
     # Core ML
     "torch>=2.2.0",
     "transformers>=4.40.0",
+    "onnxruntime>=1.17.0",
+    "huggingface-hub>=0.22.0",
     "datasets>=2.18.0",
     "tokenizers>=0.15.0",
     "sentencepiece>=0.2.0",

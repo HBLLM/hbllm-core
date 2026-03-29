@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Dict
+import contextvars
+from typing import Dict, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
+
+# Lock-Free Concurrency Context
+ACTIVE_ADAPTER = contextvars.ContextVar('active_adapter', default=None)
 
 
 class LoRALinear(nn.Module):
@@ -54,9 +58,6 @@ class LoRALinear(nn.Module):
         self.lora_A = nn.ParameterDict()
         self.lora_B = nn.ParameterDict()
         self.dropout = nn.Dropout(p=lora_dropout) if lora_dropout > 0.0 else nn.Identity()
-
-        # Flag to enable/disable specific adapter during forward pass
-        self.active_adapter: str | None = "default"
         
         # Initialize default adapter for backward compatibility
         self.add_adapter("default")
@@ -64,24 +65,56 @@ class LoRALinear(nn.Module):
     def add_adapter(self, adapter_name: str) -> None:
         """Initialize and register a new parameter set for this adapter."""
         if adapter_name not in self.lora_A:
-            self.lora_A[adapter_name] = nn.Parameter(torch.zeros((self.r, self.in_features)))
-            self.lora_B[adapter_name] = nn.Parameter(torch.zeros((self.out_features, self.r)))
+            # Create on CPU and pin memory for fast paginated transfers later
+            param_A = torch.zeros((self.r, self.in_features), device="cpu")
+            param_B = torch.zeros((self.out_features, self.r), device="cpu")
+            if torch.cuda.is_available() or torch.backends.mps.is_available():
+                param_A = param_A.pin_memory()
+                param_B = param_B.pin_memory()
+                
+            self.lora_A[adapter_name] = nn.Parameter(param_A)
+            self.lora_B[adapter_name] = nn.Parameter(param_B)
             
             # Kaiming uniform for A, Zeros for B
             nn.init.kaiming_uniform_(self.lora_A[adapter_name], a=math.sqrt(5))
             nn.init.zeros_(self.lora_B[adapter_name])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute base output + LoRA output."""
+        """Compute base output + LoRA output with MoE support."""
         result = self.base_layer(x)
+        
+        active_adapter = ACTIVE_ADAPTER.get()
 
-        if not self.active_adapter or self.r == 0 or self.active_adapter not in self.lora_A:
+        if not active_adapter or self.r == 0:
             return result
 
-        # LoRA path: dropout -> A -> B -> scaling
+        lora_out = 0.0
         lora_x = self.dropout(x)
-        lora_h = F.linear(lora_x, self.lora_A[self.active_adapter])
-        lora_out = F.linear(lora_h, self.lora_B[self.active_adapter])
+        
+        if isinstance(active_adapter, dict):
+            # Dynamic Mixture-of-Experts blending mapping: {adapter_name: weight}
+            for adapt, weight in active_adapter.items():
+                if adapt in self.lora_A:
+                    A_w = self.lora_A[adapt]
+                    B_w = self.lora_B[adapt]
+                    # Ensure they are on exactly the same device as x (handles paging errors gracefully)
+                    if A_w.device != x.device:
+                        A_w = A_w.to(x.device)
+                        B_w = B_w.to(x.device)
+                    h = F.linear(lora_x, A_w)
+                    out = F.linear(h, B_w)
+                    lora_out += weight * out
+        elif isinstance(active_adapter, str) and active_adapter in self.lora_A:
+            # Single adapter fast path
+            A_w = self.lora_A[active_adapter]
+            B_w = self.lora_B[active_adapter]
+            if A_w.device != x.device:
+                A_w = A_w.to(x.device)
+                B_w = B_w.to(x.device)
+            h = F.linear(lora_x, A_w)
+            lora_out = F.linear(h, B_w)
+        else:
+            return result
 
         return result + (lora_out * self.scaling)
 
@@ -149,14 +182,62 @@ class LoRAManager:
         LoRAManager.set_active_adapter(model, "default" if active else None)
 
     @staticmethod
-    def set_active_adapter(model: nn.Module, adapter_name: str | None) -> None:
-        """O(1) fast pointer swap for the active evaluation adapter."""
+    def set_active_adapter(model: nn.Module, adapter_name: Union[str, Dict[str, float], None]) -> None:
+        """ContextVar-safe fast pointer matching for the active evaluation adapter."""
+        ACTIVE_ADAPTER.set(adapter_name)
+        logger.debug("Set ContextVar ACTIVE_ADAPTER=%s", adapter_name)
+
+    @staticmethod
+    def page_in(model: nn.Module, adapters: Union[str, list[str], Dict[str, float]]):
+        """Asynchronously stream LoRA weights to GPU."""
+        if isinstance(adapters, str):
+            adapters = [adapters]
+        elif isinstance(adapters, dict):
+            adapters = list(adapters.keys())
+            
+        device = next(model.parameters()).device
+        if device.type == "cpu":
+            return
+            
         count = 0
         for module in model.modules():
             if isinstance(module, LoRALinear):
-                module.active_adapter = adapter_name
-                count += 1
-        logger.debug("Set %d LoRA adapters active_adapter=%s", count, adapter_name)
+                for adapt in adapters:
+                    if adapt in module.lora_A and module.lora_A[adapt].device != device:
+                        # Non-blocking transfer from pinned memory
+                        module.lora_A[adapt].data = module.lora_A[adapt].data.to(device, non_blocking=True)
+                        module.lora_B[adapt].data = module.lora_B[adapt].data.to(device, non_blocking=True)
+                        count += 1
+        if count > 0:
+            logger.debug("Paged IN %d LoRA matrices to %s", count, device)
+
+    @staticmethod
+    def page_out(model: nn.Module, adapters: Union[str, list[str], Dict[str, float]]):
+        """Stream LoRA weights back to CPU pinned memory to free VRAM."""
+        if isinstance(adapters, str):
+            adapters = [adapters]
+        elif isinstance(adapters, dict):
+            adapters = list(adapters.keys())
+            
+        device = next(model.parameters()).device
+        if device.type == "cpu":
+            return
+            
+        count = 0
+        for module in model.modules():
+            if isinstance(module, LoRALinear):
+                for adapt in adapters:
+                    if adapt in module.lora_A and module.lora_A[adapt].device != torch.device("cpu"):
+                        cpu_data_A = module.lora_A[adapt].data.to("cpu", non_blocking=True)
+                        cpu_data_B = module.lora_B[adapt].data.to("cpu", non_blocking=True)
+                        if torch.cuda.is_available() or torch.backends.mps.is_available():
+                            cpu_data_A = cpu_data_A.pin_memory()
+                            cpu_data_B = cpu_data_B.pin_memory()
+                        module.lora_A[adapt].data = cpu_data_A
+                        module.lora_B[adapt].data = cpu_data_B
+                        count += 1
+        if count > 0:
+            logger.debug("Paged OUT %d LoRA matrices back to CPU", count)
 
     @staticmethod
     def get_lora_state_dict(model: nn.Module, adapter_name: str = "default") -> Dict[str, torch.Tensor]:

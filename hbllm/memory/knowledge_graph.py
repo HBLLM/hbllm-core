@@ -233,6 +233,35 @@ class KnowledgeGraph:
         self._incoming[target.id].append(rel.key)
         return rel
 
+    def add_community(
+        self,
+        community_label: str,
+        member_labels: list[str],
+        summary: str = "",
+    ) -> Entity:
+        """
+        Phase 11: GraphRAG Hierarchical Communities.
+        Add a macro-entity (Community) and link multiple existing/new leaf entities
+        to it via 'member_of' relationships.
+        """
+        community = self.add_entity(
+            label=community_label,
+            entity_type="community",
+            attributes={"summary": summary, "is_macro_node": True}
+        )
+        
+        for leaf in member_labels:
+            # Point leaf node UP to the macro community node
+            self.add_relation(
+                source_label=leaf,
+                target_label=community_label,
+                relation_type="member_of",
+                weight=2.0, # Macro ties are strong
+                metadata={"auto_generated": "graphrag"}
+            )
+            
+        return community
+
     # ── Query operations ─────────────────────────────────────────────────
 
     def neighbors(

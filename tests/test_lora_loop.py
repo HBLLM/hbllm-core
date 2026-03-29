@@ -174,4 +174,3 @@ def test_learner_config_defaults():
     assert learner._lora_injected is False
     assert learner._training_steps == 0
     assert learner.pending_pairs == {}
-    assert learner.paired_buffer == []

@@ -45,7 +45,7 @@ async def mt_env():
     await workspace.start(bus)
     
     mock_llm = MockLLM()
-    router = RouterNode("router_01", llm=mock_llm)
+    router = RouterNode("router_01", llm=mock_llm, use_vectors=False)
     await router.start(bus)
     
     domain = MockDomainNode(bus)

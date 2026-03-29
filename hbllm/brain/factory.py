@@ -433,7 +433,7 @@ class BrainFactory:
             WorldModelNode(node_id="world_model"),
 
             # Memory consolidation during idle
-            SleepCycleNode(node_id="sleep"),
+            SleepCycleNode(node_id="sleep", llm=llm),
         ]
 
         # Proactive governance sentinel

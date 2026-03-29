@@ -192,6 +192,8 @@ class MemoryNode(Node):
           - path: Find shortest path between two entities
           - subgraph: Extract subgraph around an entity
           - stats: Get graph statistics
+          - all_entities: Get list of active entities for GraphRAG
+          - add_community: Inject a hierarchical community node
         """
         payload = message.payload
         action = payload.get("action", "neighbors")
@@ -201,50 +203,42 @@ class MemoryNode(Node):
             direction = payload.get("direction", "both")
             rel_type = payload.get("relation_type")
             results = self.knowledge_graph.neighbors(label, direction, rel_type)
-            return Message(
-                type=MessageType.RESPONSE,
-                source_node_id=self.node_id,
-                topic="knowledge.response",
-                payload={"neighbors": results, "entity": label},
-                correlation_id=message.id,
-            )
+            return message.create_response({"neighbors": results, "entity": label})
 
         elif action == "path":
             from_label = payload.get("from", "")
             to_label = payload.get("to", "")
             max_depth = payload.get("max_depth", 5)
             path = self.knowledge_graph.shortest_path(from_label, to_label, max_depth)
-            return Message(
-                type=MessageType.RESPONSE,
-                source_node_id=self.node_id,
-                topic="knowledge.response",
-                payload={"path": path, "from": from_label, "to": to_label},
-                correlation_id=message.id,
-            )
+            return message.create_response({"path": path, "from": from_label, "to": to_label})
 
         elif action == "subgraph":
             label = payload.get("entity", "")
             depth = payload.get("depth", 2)
             sg = self.knowledge_graph.subgraph(label, depth)
-            return Message(
-                type=MessageType.RESPONSE,
-                source_node_id=self.node_id,
-                topic="knowledge.response",
-                payload={"subgraph": sg, "entity": label},
-                correlation_id=message.id,
-            )
+            return message.create_response({"subgraph": sg, "entity": label})
 
         elif action == "stats":
-            return Message(
-                type=MessageType.RESPONSE,
-                source_node_id=self.node_id,
-                topic="knowledge.response",
-                payload={
-                    "entity_count": self.knowledge_graph.entity_count,
-                    "relation_count": self.knowledge_graph.relation_count,
-                },
-                correlation_id=message.id,
-            )
+            return message.create_response({
+                "entity_count": self.knowledge_graph.entity_count,
+                "relation_count": self.knowledge_graph.relation_count,
+            })
+            
+        elif action == "all_entities":
+            limit = payload.get("limit", 100)
+            entities = [
+                {"id": e.id, "label": e.label, "type": e.entity_type}
+                for e in list(self.knowledge_graph._entities.values())[-limit:]
+            ]
+            return message.create_response({"entities": entities})
+            
+        elif action == "add_community":
+            community_label = payload.get("community_label")
+            member_labels = payload.get("member_labels", [])
+            summary = payload.get("summary", "")
+            if community_label and member_labels:
+                self.knowledge_graph.add_community(community_label, member_labels, summary)
+            return message.create_response({"status": "success"})
 
         return None
 

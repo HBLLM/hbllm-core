@@ -25,7 +25,7 @@ class LearnerNode(Node):
         node_id: str,
         model: torch.nn.Module | None = None,
         tokenizer: Any = None,
-        batch_size: int = 4,
+        batch_size: int = 4, # Used as limit per sleep cycle now
         lr: float = 1e-5,
         dpo_beta: float = 0.1,
         lora_r: int = 8,
@@ -36,9 +36,11 @@ class LearnerNode(Node):
         self.model = model
         self.tokenizer = tokenizer
         
-        # MCTS Autonomous DPO pairing
+        # Continuous Lifelong DPO: persistent queue
         self.pending_pairs: dict[str, dict[str, str | None]] = {}
-        self.paired_buffer: list[tuple[str, str, str]] = []  # (prompt, chosen, rejected)
+        self.queue_path = "workspace/reflection/dpo_queue.json"
+        import os
+        os.makedirs(os.path.dirname(self.queue_path), exist_ok=True)
         
         self.batch_size = batch_size
         self.lr = lr
@@ -51,9 +53,10 @@ class LearnerNode(Node):
         self._training_steps = 0
 
     async def on_start(self) -> None:
-        """Subscribe to feedback messages."""
-        logger.info("Starting LearnerNode '%s'", self.node_id)
+        """Subscribe to feedback messages and sleep triggers."""
+        logger.info("Starting LearnerNode '%s' in Continuous Overnight Mode", self.node_id)
         await self.bus.subscribe("system.feedback", self.handle_message)
+        await self.bus.subscribe("system.sleep.dpo_trigger", self.handle_sleep_trigger)
 
     async def on_stop(self) -> None:
         """Clean up."""
@@ -86,21 +89,61 @@ class LearnerNode(Node):
                 
             pair = self.pending_pairs[prompt]
             if pair["chosen"] and pair["rejected"]:
-                # Construct a perfect contrastive pairing for the exact same prompt
-                self.paired_buffer.append((prompt, pair["chosen"], pair["rejected"]))
+                import json, os
+                
+                # Append to persistent JSON array
+                queue = []
+                if os.path.exists(self.queue_path):
+                    with open(self.queue_path, "r") as f:
+                        try:
+                            queue = json.load(f)
+                        except json.JSONDecodeError:
+                            queue = []
+                            
+                queue.append((prompt, pair["chosen"], pair["rejected"]))
+                
+                with open(self.queue_path, "w") as f:
+                    json.dump(queue, f)
+                    
                 del self.pending_pairs[prompt]
-                logger.info("LearnerNode stitched perfect contrastive DPO pair for prompt: %s...", prompt[:30])
+                logger.info("LearnerNode queued contrastive DPO pair persistently for overnight training.")
 
-        # Trigger background training if batch size is met
-        if len(self.paired_buffer) >= self.batch_size:
-            batch = self.paired_buffer[:self.batch_size]
-            self.paired_buffer = self.paired_buffer[self.batch_size:]
+        return None
+        
+    async def handle_sleep_trigger(self, message: Message) -> Message | None:
+        """Triggered by SleepNode when user is idle for background DPO processing."""
+        import json, os
+        
+        if not os.path.exists(self.queue_path):
+            await self._broadcast_complete()
+            return None
             
-            if self.training_task and not self.training_task.done():
-                logger.warning("Training already in progress. Queuing batch.")
-            else:
-                self.training_task = asyncio.create_task(self._run_dpo_training(batch))
-
+        with open(self.queue_path, "r") as f:
+            try:
+                batch = json.load(f)
+            except json.JSONDecodeError:
+                batch = []
+                
+        if not batch:
+            await self._broadcast_complete()
+            return None
+            
+        # Empty the queue so we don't double train if it crashes midway
+        os.remove(self.queue_path)
+            
+        if self.training_task and not self.training_task.done():
+            logger.warning("[LearnerNode] DPO already running.")
+            return None
+            
+        # Cap batch to self.batch_size to prevent memory explosion
+        target_batch = batch[:self.batch_size]
+        re_queue = batch[self.batch_size:]
+        
+        if re_queue:
+            with open(self.queue_path, "w") as f:
+                json.dump(re_queue, f)
+            
+        self.training_task = asyncio.create_task(self._run_dpo_training(target_batch))
         return None
 
     async def _run_dpo_training(self, batch: list[tuple[str, str, str]]) -> None:
@@ -190,18 +233,21 @@ class LearnerNode(Node):
         try:
             await asyncio.to_thread(_train)
             logger.info("LearnerNode DPO training complete (%d total steps). Broadcasting update...", self._training_steps)
-            
-            update_msg = Message(
-                type=MessageType.LEARNING_UPDATE,
-                source_node_id=self.node_id,
-                target_node_id="",
-                topic="system.learning_update",
-                payload={"status": "weights_updated", "steps": self._training_steps}
-            )
-            await self.bus.publish("system.learning_update", update_msg)
+            await self._broadcast_complete()
             
         except Exception as e:
-            logger.error("LearnerNode DPO training failed: %s", e)
+            logger.error("LearnerNode background DPO task failed: %s", e)
+            await self._broadcast_complete()
+
+    async def _broadcast_complete(self):
+        update_msg = Message(
+            type=MessageType.LEARNING_UPDATE,
+            source_node_id=self.node_id,
+            target_node_id="",
+            topic="system.learning_update",
+            payload={"status": "weights_updated", "steps": getattr(self, "_training_steps", 0)}
+        )
+        await self.bus.publish("system.learning_update", update_msg)
 
     def _build_dpo_pair(
         self, prompt_text: str, chosen_text: str, rejected_text: str, device: torch.device,

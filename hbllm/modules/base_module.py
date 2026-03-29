@@ -20,10 +20,6 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
-# Global lock to prevent concurrent async generations from cross-contaminating 
-# the active_adapter pointer on the shared base model.
-_INFERENCE_LOCK = asyncio.Lock()
-
 
 class DomainModuleNode(Node):
     """
@@ -78,79 +74,92 @@ class DomainModuleNode(Node):
         prompt = payload.get("text", "")
 
         domain_hint = payload.get("domain_hint", "general")
-        if domain_hint != self.domain_name and self.domain_name != "general":
-            # To save compute, only the targeted expert or the general fallback thinks about this.
+        
+        # Domain eligibility check
+        is_targeted = False
+        if isinstance(domain_hint, dict):
+            # For MoE blends, the domain with the highest weight is elected to run the blended inference
+            # to prevent multiple nodes computing the exact same sequence.
+            highest_domain = max(domain_hint.items(), key=lambda x: x[1])[0]
+            if self.domain_name == highest_domain:
+                is_targeted = True
+                logger.info("Domain '%s' elected to process MoE Hybrid %s", self.domain_name, domain_hint)
+        elif domain_hint == self.domain_name or self.domain_name == "general":
+            is_targeted = True
+            
+        if not is_targeted:
             return None
 
         logger.info("Domain '%s' generating response for prompt: %s...", self.domain_name, prompt[:30])
 
-        # We must acquire the inference lock to ensure no other domain swap happens during generation
-        async with _INFERENCE_LOCK:
-            # 1. Pointer-swap the LoRA adapter (O(1) time complexity)
+        try:
+            # 1. Page in LoRA (Asynchronous PCIe VRAM transfer) and set ContextVar (O(1) Lock-Free mapping)
             if self.has_lora:
-                LoRAManager.set_active_adapter(self.model, self.domain_name)
+                LoRAManager.page_in(self.model, domain_hint)
+                LoRAManager.set_active_adapter(self.model, domain_hint)
             else:
-                # If no LoRA (e.g. baseline General model), deactivate adapter path
                 LoRAManager.set_active_adapter(self.model, None)
 
             # 2. Tokenize and Generate
-            try:
-                device = next(self.model.parameters()).device
+            device = next(self.model.parameters()).device
+            
+            async def _generate_async() -> str:
+                enc = self.tokenizer.encode(prompt)
+                input_ids = torch.tensor([enc], dtype=torch.long).to(device)
                 
-                async def _generate_async() -> str:
-                    enc = self.tokenizer.encode(prompt)
-                    input_ids = torch.tensor([enc], dtype=torch.long).to(device)
-                    
-                    self.model.eval()
-                    out_tokens = input_ids[0].tolist()
-                    past_key_values = None
+                self.model.eval()
+                out_tokens = input_ids[0].tolist()
+                past_key_values = None
+                
+                # with torch.no_grad() is thread-local. Awaiting inside it leaks the context to other coroutines!
+                # Generate 30 tokens using cached autoregressive steps
+                for _ in range(30):
+                    # Only pass the last decoded token to the model if caching
+                    model_input = input_ids[:, -1:] if past_key_values else input_ids
                     
                     with torch.no_grad():
-                        # Generate 30 tokens using cached autoregressive steps
-                        for _ in range(30):
-                            # Only pass the last decoded token to the model if caching
-                            model_input = input_ids[:, -1:] if past_key_values else input_ids
-                            
-                            outputs = self.model(
-                                model_input,
-                                past_key_values=past_key_values,
-                                use_cache=True
-                            )
-                            
-                            logits = outputs["logits"][:, -1, :]
-                            past_key_values = outputs.get("past_key_values")
-                            
-                            next_token = logits.argmax().item()
-                            out_tokens.append(next_token)
-                            input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
-                            
-                            # Yield to the asyncio event loop to allow other requests to be processed
-                            # Since we hold _INFERENCE_LOCK, only non-LLM tasks will execute 
-                            # safely while we pseudo-batch
-                            await asyncio.sleep(0.001) 
+                        outputs = self.model(
+                            model_input,
+                            past_key_values=past_key_values,
+                            use_cache=True
+                        )
                     
-                    return self.tokenizer.decode_to_string(out_tokens)
+                    logits = outputs["logits"][:, -1, :]
+                    past_key_values = outputs.get("past_key_values")
+                    
+                    next_token = logits.argmax().item()
+                    out_tokens.append(next_token)
+                    input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
+                    
+                    # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
+                    await asyncio.sleep(0.001) 
+                
+                return self.tokenizer.decode_to_string(out_tokens)
 
-                response_text = await _generate_async()
-                logger.info("Domain '%s' finished generating.", self.domain_name)
-                
-                # 3. Propose thought to Blackboard instead of creating a synchronous response
-                thought_msg = Message(
-                    type=MessageType.EVENT,
-                    source_node_id=self.node_id,
-                    tenant_id=message.tenant_id,
-                    session_id=message.session_id,
-                    topic="workspace.thought",
-                    payload={
-                        "type": f"intuition_{self.domain_name}",
-                        "confidence": 0.8, # Base LLM confidence
-                        "content": response_text
-                    },
-                    correlation_id=message.correlation_id
-                )
-                await self.bus.publish("workspace.thought", thought_msg)
-                return None
-                
-            except Exception as e:
-                logger.error("Generation failed: %s", e)
-                return None
+            response_text = await _generate_async()
+            logger.info("Domain '%s' finished generating.", self.domain_name)
+            
+            # 3. Propose thought to Blackboard instead of creating a synchronous response
+            thought_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="workspace.thought",
+                payload={
+                    "type": f"intuition_{self.domain_name}",
+                    "confidence": 0.8, # Base LLM confidence
+                    "content": response_text
+                },
+                correlation_id=message.correlation_id
+            )
+            await self.bus.publish("workspace.thought", thought_msg)
+            return None
+            
+        except Exception as e:
+            logger.error("Generation failed: %s", e)
+            return None
+            
+        finally:
+            if self.has_lora:
+                LoRAManager.page_out(self.model, domain_hint)

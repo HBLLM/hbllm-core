@@ -119,6 +119,7 @@ class TestRMSNorm:
         assert torch.allclose(out1, out2, atol=1e-4)
 
     def test_gradient_flow(self):
+        print(f"DEBUG: grad enabled? {torch.is_grad_enabled()}")
         norm = RMSNorm(64)
         x = torch.randn(1, 5, 64, requires_grad=True)
         out = norm(x)

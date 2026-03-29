@@ -81,7 +81,7 @@ class WorkspaceNode(Node):
         Triggered when Router identifies context and drops it on the Blackboard.
         """
         payload = message.payload
-        correlation_id = message.id
+        correlation_id = message.correlation_id or message.id
         
         logger.info("Workspace received new Problem State: %s...", str(payload.get("text", ""))[:40])
         
@@ -246,7 +246,7 @@ class WorkspaceNode(Node):
                 
                 # Trigger a forced backtrack via Internal Monologue
                 new_payload = board["original_query"].copy()
-                new_payload["text"] = f"CRITICAL FEEDBACK: Your previous thought '{content_failed}' was evaluated by the Critic and FAILED for the following reason: '{reason}'. Please try a completely different approach to answer the user."
+                new_payload["text"] = f"CONSTITUTIONAL VIOLATION: Your previous thought '{content_failed}' was reviewed by the Critic Node and violated core system principles: '{reason}'. Please revise your response to strictly comply with all safety and logic principles."
                 
                 board["turn_count"] += 1
                 board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it
@@ -327,6 +327,31 @@ class WorkspaceNode(Node):
         )
 
         content = best_thought.get("content", "")
+        
+        # Phase 12: Swarm Handoff Integration
+        if best_thought["type"] == "swarm_transfer":
+            target_specialty = content.strip().lower()
+            logger.info("Workspace initiating Native Swarm Transfer to specialty: '%s'", target_specialty)
+            
+            # Repackage the blackboard state so the new specialist has full context
+            transfer_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=board["tenant_id"],
+                session_id=board["session_id"],
+                topic="system.swarm.transfer",
+                payload={
+                    "target_domain": target_specialty,
+                    "original_query": board["original_query"],
+                    "history": board["thoughts"]
+                },
+                correlation_id=corr_id
+            )
+            await self.bus.publish("system.swarm.transfer", transfer_msg)
+            # Cleanup the local blackboard as it's no longer our responsibility
+            self.blackboards.pop(corr_id, None)
+            return
+            
         import re
         match = re.search(r"```python\n(.*?)```", str(content), re.DOTALL | re.IGNORECASE)
         

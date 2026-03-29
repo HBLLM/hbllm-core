@@ -78,26 +78,37 @@ class CriticNode(Node):
         status = "PASS"
         reason = ""
         try:
+            from hbllm.brain.constitutional_principles import get_principles, format_principles_for_prompt
+            
+            principles = get_principles()
+            principles_str = format_principles_for_prompt(principles)
+            
             evaluation = await self.llm.generate_json(
-                f"You are a strict QA evaluator for an AI system. Given the user's original query "
-                f"and a proposed response, determine if the response is:\n"
-                f"(a) Relevant to the query\n"
-                f"(b) Factually grounded (not hallucinated or fabricated)\n"
-                f"(c) Not deflecting with clichés like 'As an AI...'\n"
-                f"(d) Not attempting unsafe operations\n\n"
+                f"You are a strict Constitutional AI Evaluator. Given the user's original query "
+                f"and a proposed response, determine if the response violates ANY of the following principles:\n\n"
+                f"{principles_str}\n\n"
                 f"Original Query: \"{original_query}\"\n"
-                f"Proposed Response: \"{content[:500]}\"\n\n"
-                f"Output JSON: {{\"verdict\": \"PASS\" or \"FAIL\", \"reason\": \"brief explanation\"}}"
+                f"Proposed Response: \"{content[:1000]}\"\n\n"
+                f"Output JSON:\n"
+                f"{{\n"
+                f"  \"violations\": [\"name_of_failed_principle_1\", ...],\n"
+                f"  \"rationale\": \"brief explanation of why the violation occurred, or 'All clear' if none\"\n"
+                f"}}"
             )
             
-            status = evaluation.get("verdict", "PASS").upper()
-            reason = evaluation.get("reason", "")
+            violations = evaluation.get("violations", [])
+            reason = evaluation.get("rationale", "")
             
-            # Normalize the verdict
-            if status not in ("PASS", "FAIL"):
-                status = "PASS"  # Default to pass if LLM output is ambiguous
+            if violations and isinstance(violations, list) and len(violations) > 0:
+                status = "FAIL"
+                reason = f"Violated principles: {', '.join(str(v) for v in violations)}. Details: {reason}"
+            else:
+                status = "PASS"
+                if not reason:
+                    reason = "Passed all constitutional principles."
+                    
         except Exception as e:
-            logger.warning("[CriticNode] LLM evaluation failed, defaulting to PASS: %s", e)
+            logger.warning("[CriticNode] LLM constitutional evaluation failed, defaulting to PASS: %s", e)
             status = "PASS"
             reason = "Critic evaluation skipped due to LLM error"
         
