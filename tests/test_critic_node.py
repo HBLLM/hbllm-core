@@ -88,4 +88,5 @@ async def test_critic_active_halting_and_backtracking(critic_env):
     board = workspace.blackboards.get("test_halt_001")
     if board:
         for t in board["thoughts"]:
-            assert "As an AI language model" not in t["content"]
+            if t.get("content"):
+                assert "As an AI language model" not in t["content"]

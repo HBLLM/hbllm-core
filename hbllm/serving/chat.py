@@ -108,7 +108,7 @@ async def async_main(args: argparse.Namespace) -> None:
         FuzzyNode(node_id="fuzzy_01", llm=llm_interface),
         WorkspaceNode(node_id="workspace_01"),
         WorldModelNode(node_id="world_model_01"),
-        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=20.0),
+        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=20.0, llm=llm_interface),
         CriticNode(node_id="critic_01", llm=llm_interface),
         DecisionNode(node_id="decision_01", llm=llm_interface),
         ApiNode(node_id="api_01", llm=llm_interface),

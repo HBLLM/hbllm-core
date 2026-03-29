@@ -52,6 +52,8 @@ class RouterNode(Node):
         await self.bus.subscribe(self.topic_sub, self.handle_message)
         await self.bus.subscribe("system.feedback", self._handle_feedback)
         await self.bus.subscribe("system.domain_registered", self._handle_domain_registered)
+        # Phase 12: Swarm integration
+        await self.bus.subscribe("system.swarm.transfer", self._handle_swarm_transfer)
 
     async def on_stop(self) -> None:
         logger.info("Stopping RouterNode")
@@ -156,7 +158,7 @@ class RouterNode(Node):
             session_id=message.session_id,
             topic="workspace.update",
             payload=workspace_payload,
-            correlation_id=message.id
+            correlation_id=message.correlation_id or message.id
         )
         await self.bus.publish("workspace.update", routed_query)
         
@@ -193,4 +195,42 @@ class RouterNode(Node):
         if domain:
             self.known_domains.add(domain)
             logger.info("RouterNode registered new domain: %s", domain)
+        return None
+
+    async def _handle_swarm_transfer(self, message: Message) -> Message | None:
+        """
+        Phase 12: Intercept autonomous multi-agent Swarm Transfers.
+        Receive historical context, update target domain, and republish to the Workspace
+        under the same correlation_id so the user session never drops.
+        """
+        target_domain = message.payload.get("target_domain", self.default_domain)
+        original_query = message.payload.get("original_query", {})
+        history = message.payload.get("history", [])
+        
+        logger.info(
+            "Router executing Swarm Handoff. Bouncing session %s from Workspace back to domain '%s'", 
+            message.correlation_id, target_domain
+        )
+        
+        # We rewrite the query payload to include the historical work of the previous agents!
+        workspace_payload = original_query.copy()
+        workspace_payload["domain_hint"] = target_domain
+        workspace_payload["intent"] = "complex_reasoning"
+        workspace_payload["swarm_history"] = history
+        
+        # Inject context directly into the text for the next agent to read
+        history_text = "\n".join([f"- [{h['node']}]: {h['type']} (confidence: {h['confidence']})" for h in history])
+        workspace_payload["text"] = f"[SWARM TRANSFER] The previous agent transferred this to you ({target_domain}).\n\nPrevious Agent Work:\n{history_text}\n\nOriginal Request:\n{original_query.get('text', '')}"
+        
+        routed_query = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            tenant_id=message.tenant_id,
+            session_id=message.session_id,
+            topic="workspace.update",
+            payload=workspace_payload,
+            correlation_id=message.correlation_id
+        )
+        await self.bus.publish("workspace.update", routed_query)
+        
         return None
