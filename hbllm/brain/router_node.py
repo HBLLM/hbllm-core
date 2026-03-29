@@ -25,7 +25,7 @@ class RouterNode(Node):
     traffic to the correct specialized experts via the Global Workspace.
     """
 
-    def __init__(self, node_id: str, default_domain: str = "general", llm=None):
+    def __init__(self, node_id: str, default_domain: str = "general", llm=None, use_vectors: bool = True):
         super().__init__(node_id=node_id, node_type=NodeType.ROUTER, capabilities=["routing", "intent_classification"])
         self.default_domain = default_domain
         self.topic_sub = "router.query"
@@ -47,19 +47,37 @@ class RouterNode(Node):
         self.last_activity_time = time.time()
         
         # Vector Routing Setup
-        self.use_vectors = False
+        self.use_vectors = use_vectors
         self.domain_centroids = {}
-        try:
-            from sentence_transformers import SentenceTransformer
-            self.encoder = SentenceTransformer("all-MiniLM-L6-v2")
-            self.use_vectors = True
-            self._bootstrap_centroids()
-        except ImportError:
-            logger.warning("sentence-transformers not installed. Vector Routing disabled.")
-            self.encoder = None
+        self.encoder = None
 
     def _bootstrap_centroids(self):
         """Bootstrap default domain embeddings to initialize the vector space."""
+        if not self.use_vectors:
+            return
+            
+        if self.encoder is None:
+            import os
+            import numpy as np
+            import logging
+            from huggingface_hub import hf_hub_download
+            import onnxruntime as ort
+            from tokenizers import Tokenizer
+            
+            logger.info("Initializing ONNX Edge Vector Model (paraphrase-MiniLM-L3-v2)")
+            
+            # Using INT8 quantized model for extreme low-memory footprint (~15MB RAM)
+            model_path = hf_hub_download(repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx")
+            tokenizer_path = hf_hub_download(repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json")
+            
+            self._tokenizer = Tokenizer.from_file(tokenizer_path)
+            self._tokenizer.enable_truncation(max_length=128)
+            self._tokenizer.enable_padding(length=128)
+            
+            # Start strict C++ CPU Execution Provider
+            self.encoder = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+            self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
+            
         for d in self.known_domains:
             # Synthetic query generation
             if d == "general":
@@ -75,8 +93,36 @@ class RouterNode(Node):
             else:
                 text_repr = f"I have a specific query regarding {d} topics."
                 
-            emb = self.encoder.encode(text_repr)
+            emb = self._encode_text(text_repr)
             self.domain_centroids[d] = emb
+            
+    def _encode_text(self, text: str):
+        """Encodes text using the ONNX lightweight CPU architecture natively."""
+        import numpy as np
+        
+        enc = self._tokenizer.encode(text)
+        ort_inputs = {
+            "input_ids": np.array([enc.ids], dtype=np.int64),
+            "attention_mask": np.array([enc.attention_mask], dtype=np.int64),
+        }
+        
+        if "token_type_ids" in self._onnx_inputs:
+            ort_inputs["token_type_ids"] = np.array([enc.type_ids], dtype=np.int64)
+            
+        outputs = self.encoder.run(None, ort_inputs)
+        last_hidden_state = outputs[0]
+        
+        # Mean Pooling
+        attention_mask = ort_inputs["attention_mask"].astype(np.float32)
+        expanded_mask = np.expand_dims(attention_mask, axis=-1)
+        
+        sum_embeddings = np.sum(last_hidden_state * expanded_mask, axis=1)
+        sum_mask = np.clip(np.sum(expanded_mask, axis=1), a_min=1e-9, a_max=None)
+        
+        sentence_emb = sum_embeddings / sum_mask
+        # L2 Normalize
+        sentence_emb = sentence_emb / np.linalg.norm(sentence_emb, axis=1, keepdims=True)
+        return sentence_emb[0]
 
     async def on_start(self) -> None:
         """Subscribe to router queries and feedback for adaptive routing."""
@@ -111,8 +157,11 @@ class RouterNode(Node):
         intent = "general_knowledge"
 
         if self.use_vectors:
+            if not self.domain_centroids:
+                self._bootstrap_centroids()
+                
             import numpy as np
-            query_emb = self.encoder.encode(text)
+            query_emb = self._encode_text(text)
             
             scores = {}
             for domain, centroid in self.domain_centroids.items():
@@ -224,6 +273,7 @@ class RouterNode(Node):
         workspace_payload = message.payload.copy()
         workspace_payload["intent"] = intent
         workspace_payload["domain_hint"] = target_domain
+        workspace_payload["confidence"] = confidence
         
         routed_query = Message(
             type=MessageType.EVENT,
@@ -251,7 +301,7 @@ class RouterNode(Node):
         # Self-Learning Embedding Update
         if self.use_vectors and domain in self.domain_centroids and prompt:
             import numpy as np
-            query_emb = self.encoder.encode(prompt)
+            query_emb = self._encode_text(prompt)
             current_centroid = self.domain_centroids[domain]
             
             # EMA alpha: how aggressively a single piece of feedback shifts the centroid
@@ -282,7 +332,7 @@ class RouterNode(Node):
                 self.known_domains.add(domain)
                 logger.info("RouterNode learned new domain from feedback: %s", domain)
                 if self.use_vectors:
-                    self.domain_centroids[domain] = self.encoder.encode(f"Topics relating to {domain}")
+                    self.domain_centroids[domain] = self._encode_text(f"Topics relating to {domain}")
         elif rating < 0:
             # Negative: routing may have been wrong, become slightly more cautious
             self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
@@ -300,7 +350,7 @@ class RouterNode(Node):
             self.known_domains.add(domain)
             logger.info("RouterNode registered new domain: %s", domain)
             if self.use_vectors:
-                self.domain_centroids[domain] = self.encoder.encode(f"Topics relating to {domain}")
+                self.domain_centroids[domain] = self._encode_text(f"Topics relating to {domain}")
         return None
 
     async def _handle_swarm_transfer(self, message: Message) -> Message | None:

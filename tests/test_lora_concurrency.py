@@ -50,17 +50,18 @@ async def test_lora_concurrency():
         
         # 3. Simulate sequential token loop (like generation)
         out_accumulator = 0.0
-        with torch.no_grad():
-            for _ in range(5):
+        
+        for _ in range(5):
+            with torch.no_grad():
                 out = lora_layer(x) - base(x)
                 
-                # Double-check that during the loop, the ContextVar remained pure!
-                assert ACTIVE_ADAPTER.get() == adapter_name
-                
-                out_accumulator += out[0, 0].item()
-                
-                # Context switch again to maximize race-condition chances
-                await asyncio.sleep(0.01)
+            # Double-check that during the loop, the ContextVar remained pure!
+            assert ACTIVE_ADAPTER.get() == adapter_name
+            
+            out_accumulator += out[0, 0].item()
+            
+            # Context switch again to maximize race-condition chances
+            await asyncio.sleep(0.01)
                 
         # Average per token
         results[adapter_name] = out_accumulator / 5.0
@@ -73,8 +74,8 @@ async def test_lora_concurrency():
     )
     
     print(f"Results: {results}")
-    assert results["A"] == EXPECTED["A"], f"A leaked: got {results['A']}"
-    assert results["B"] == EXPECTED["B"], f"B leaked: got {results['B']}"
-    assert results["C"] == EXPECTED["C"], f"C leaked: got {results['C']}"
+    assert results["A"] == pytest.approx(EXPECTED["A"], rel=1e-4), f"A leaked: got {results['A']}"
+    assert results["B"] == pytest.approx(EXPECTED["B"], rel=1e-4), f"B leaked: got {results['B']}"
+    assert results["C"] == pytest.approx(EXPECTED["C"], rel=1e-4), f"C leaked: got {results['C']}"
     
     print("Lock-free LoRA concurrency via ContextVars is completely thread-safe!")

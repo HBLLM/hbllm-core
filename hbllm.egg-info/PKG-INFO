@@ -5,8 +5,11 @@ Summary: HBLLM Core — Hierarchical Brain LLM cognitive architecture
 Author: HBLLM Team
 License: MIT
 Requires-Python: >=3.11
+License-File: LICENSE
 Requires-Dist: torch>=2.2.0
 Requires-Dist: transformers>=4.40.0
+Requires-Dist: onnxruntime>=1.17.0
+Requires-Dist: huggingface-hub>=0.22.0
 Requires-Dist: datasets>=2.18.0
 Requires-Dist: tokenizers>=0.15.0
 Requires-Dist: sentencepiece>=0.2.0
@@ -37,3 +40,4 @@ Requires-Dist: pytest>=8.0.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
 Requires-Dist: ruff>=0.3.0; extra == "dev"
 Requires-Dist: mypy>=1.8.0; extra == "dev"
+Dynamic: license-file

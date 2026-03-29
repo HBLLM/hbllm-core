@@ -13,7 +13,7 @@ async def test_router_unknown_topic():
     await bus.start()
     
     mock_llm = MockLLM()
-    router = RouterNode(node_id="test_router", llm=mock_llm)
+    router = RouterNode(node_id="test_router", llm=mock_llm, use_vectors=False)
     router.spawn_trigger_count = 2
     
     await router.start(bus)

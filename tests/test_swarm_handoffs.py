@@ -28,7 +28,7 @@ async def test_native_swarm_transfer():
     await bus.start()
     
     workspace = WorkspaceNode(node_id="workspace_swarm", thinking_deadline=1.0)
-    router = RouterNode(node_id="router_swarm", default_domain="general", llm=None)
+    router = RouterNode(node_id="router_swarm", default_domain="general", llm=None, use_vectors=False)
     
     await workspace.start(bus)
     await router.start(bus)

@@ -111,27 +111,28 @@ class DomainModuleNode(Node):
                 out_tokens = input_ids[0].tolist()
                 past_key_values = None
                 
-                with torch.no_grad():
-                    # Generate 30 tokens using cached autoregressive steps
-                    for _ in range(30):
-                        # Only pass the last decoded token to the model if caching
-                        model_input = input_ids[:, -1:] if past_key_values else input_ids
-                        
+                # with torch.no_grad() is thread-local. Awaiting inside it leaks the context to other coroutines!
+                # Generate 30 tokens using cached autoregressive steps
+                for _ in range(30):
+                    # Only pass the last decoded token to the model if caching
+                    model_input = input_ids[:, -1:] if past_key_values else input_ids
+                    
+                    with torch.no_grad():
                         outputs = self.model(
                             model_input,
                             past_key_values=past_key_values,
                             use_cache=True
                         )
-                        
-                        logits = outputs["logits"][:, -1, :]
-                        past_key_values = outputs.get("past_key_values")
-                        
-                        next_token = logits.argmax().item()
-                        out_tokens.append(next_token)
-                        input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
-                        
-                        # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
-                        await asyncio.sleep(0.001) 
+                    
+                    logits = outputs["logits"][:, -1, :]
+                    past_key_values = outputs.get("past_key_values")
+                    
+                    next_token = logits.argmax().item()
+                    out_tokens.append(next_token)
+                    input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
+                    
+                    # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
+                    await asyncio.sleep(0.001) 
                 
                 return self.tokenizer.decode_to_string(out_tokens)
 

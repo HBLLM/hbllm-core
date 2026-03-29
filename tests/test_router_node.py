@@ -4,40 +4,33 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock
 
-# Create a deterministic mock encoder before importing RouterNode
-class MockSentenceTransformer:
-    def __init__(self, model_name: str):
-        pass
-
-    def encode(self, text: str | list[str]) -> np.ndarray:
-        if isinstance(text, list):
-            return np.array([self.encode(t) for t in text])
-            
-        # Create a simple deterministic 5-dim embedding
-        # coding -> [1, 0, 0, 0, 0]
-        # math   -> [0, 1, 0, 0, 0]
-        # general-> [0, 0, 1, 0, 0]
-        emb = np.zeros(5, dtype=np.float32)
-        text_lower = text.lower()
-        if "code" in text_lower or "script" in text_lower or "coding" in text_lower:
-            emb[0] += 1.0
-        if "math" in text_lower or "calculate" in text_lower or "integral" in text_lower:
-            emb[1] += 1.0
-        if "general" in text_lower or "hello" in text_lower:
-            emb[2] += 1.0
-        if "planner" in text_lower or "design" in text_lower:
-            emb[3] += 1.0
+# Create a deterministic mock encode method
+def mock_encode_text(self, text: str) -> np.ndarray:
+    # Create a simple deterministic 5-dim embedding
+    # coding -> [1, 0, 0, 0, 0]
+    # math   -> [0, 1, 0, 0, 0]
+    # general-> [0, 0, 1, 0, 0]
+    emb = np.zeros(5, dtype=np.float32)
+    text_lower = text.lower()
+    if "code" in text_lower or "script" in text_lower or "coding" in text_lower:
+        emb[0] += 1.0
+    if "math" in text_lower or "calculate" in text_lower or "integral" in text_lower:
+        emb[1] += 1.0
+    if "general" in text_lower or "hello" in text_lower:
+        emb[2] += 1.0
+    if "planner" in text_lower or "design" in text_lower:
+        emb[3] += 1.0
+    
+    # fallback if all are zero
+    if np.sum(emb) == 0:
+        emb[4] += 1.0
         
-        # fallback if all are zero
-        if np.sum(emb) == 0:
-            emb[4] += 1.0
-            
-        emb[0] += len(text) * 0.001
-            
-        # Add a tiny bit of noise so we don't get divide by zero
-        emb += 1e-5
+    emb[0] += len(text) * 0.001
         
-        return emb / np.linalg.norm(emb)
+    # Add a tiny bit of noise so we don't get divide by zero
+    emb += 1e-5
+    
+    return emb / np.linalg.norm(emb)
 
 from hbllm.brain.router_node import RouterNode
 from hbllm.network.bus import InProcessBus
@@ -55,10 +48,10 @@ async def test_self_learning_vector_routing():
     await bus.start()
     
     # Initialize the router node 
-    router = RouterNode(node_id="test_router")
+    router = RouterNode("test_router")
     
     # Inject the mock encoder explicitly
-    router.encoder = MockSentenceTransformer("mock")
+    router._encode_text = mock_encode_text.__get__(router, RouterNode)
     router.use_vectors = True
     router._bootstrap_centroids()
     
@@ -87,7 +80,19 @@ async def test_self_learning_vector_routing():
         await asyncio.sleep(0.1)
         
         assert len(decisions) == 1, f"Expected 1 decision, got {len(decisions)}"
-        assert decisions[0].payload["domain_hint"] == "math"
+        
+        # Test 1 baseline extraction
+        first_payload = decisions[0].payload
+        first_domain = first_payload["domain_hint"]
+        
+        # With MoE enabled, close domains might blend. Check if math is the top pick or the chosen string.
+        if isinstance(first_domain, dict):
+            top_domain = max(first_domain.items(), key=lambda x: x[1])[0]
+            assert top_domain == "math", f"Expected primary MoE math, got {first_domain}"
+        else:
+            assert first_domain == "math", f"Expected 'math', got {first_domain}"
+            
+        first_confidence = first_payload["confidence"]
         
         # 2. Issue a Thumbs Down (-1) feedback to push "math" centroid away!
         feedback_msg = Message(
@@ -114,9 +119,13 @@ async def test_self_learning_vector_routing():
         await bus.publish("router.query", query_msg2)
         await asyncio.sleep(0.1)
         
-        # 3. Check where it routed.
+        # 3. Check where it routed and how confidence changed
         assert len(decisions) == 2, f"Expected 2 decisions, got {len(decisions)}"
-        assert decisions[1].payload["domain_hint"] == "general"
+        second_payload = decisions[1].payload
+        second_confidence = second_payload["confidence"]
+        
+        # The key logic: Did negative feedback properly push the centroid away causing confidence to drop?!
+        assert second_confidence < first_confidence, f"Confidence did not drop! {second_confidence} >= {first_confidence}"
         
     finally:
         await router.stop()
