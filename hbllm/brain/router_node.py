@@ -45,6 +45,38 @@ class RouterNode(Node):
         
         # Idle tracking for SleepNode
         self.last_activity_time = time.time()
+        
+        # Vector Routing Setup
+        self.use_vectors = False
+        self.domain_centroids = {}
+        try:
+            from sentence_transformers import SentenceTransformer
+            self.encoder = SentenceTransformer("all-MiniLM-L6-v2")
+            self.use_vectors = True
+            self._bootstrap_centroids()
+        except ImportError:
+            logger.warning("sentence-transformers not installed. Vector Routing disabled.")
+            self.encoder = None
+
+    def _bootstrap_centroids(self):
+        """Bootstrap default domain embeddings to initialize the vector space."""
+        for d in self.known_domains:
+            # Synthetic query generation
+            if d == "general":
+                text_repr = "Hello, can you help me with a general question about daily life, chatting, or common facts?"
+            elif d == "coding":
+                text_repr = "Write a python script, fix this bug, create an HTML React component, explain this logic error."
+            elif d == "math":
+                text_repr = "Calculate the integral, solve this equation, what is the square root, number theory."
+            elif d == "planner":
+                text_repr = "Can you design a multi-step plan, architect a system layout, or outline the workflow?"
+            elif d == "api_synth":
+                text_repr = "Make a POST request, fetch data from the REST backend, build an endpoint payload."
+            else:
+                text_repr = f"I have a specific query regarding {d} topics."
+                
+            emb = self.encoder.encode(text_repr)
+            self.domain_centroids[d] = emb
 
     async def on_start(self) -> None:
         """Subscribe to router queries and feedback for adaptive routing."""
@@ -73,12 +105,36 @@ class RouterNode(Node):
         
         self.last_activity_time = time.time()
 
-        # 1. LLM-Based Intent Classification
+        # 1. Similarity-Based Classification
         target_domain = self.default_domain
         confidence = 0.5
         intent = "general_knowledge"
 
-        if self.llm:
+        if self.use_vectors:
+            import numpy as np
+            query_emb = self.encoder.encode(text)
+            
+            best_score = -1.0
+            best_domain = self.default_domain
+            
+            for domain, centroid in self.domain_centroids.items():
+                norm_q = np.linalg.norm(query_emb)
+                norm_c = np.linalg.norm(centroid)
+                if norm_q > 0 and norm_c > 0:
+                    score = np.dot(query_emb, centroid) / (norm_q * norm_c)
+                    if score > best_score:
+                        best_score = float(score)
+                        best_domain = domain
+                        
+            confidence = best_score
+            if best_score > self.unknown_threshold:
+                target_domain = best_domain
+            else:
+                target_domain = "general"
+                
+            logger.debug("Vector Router chose domain '%s' with confidence %.3f", target_domain, confidence)
+        elif self.llm:
+            # Fallback to LLM if vector encoder isn't available
             domains_str = ", ".join(sorted(self.known_domains))
             intents_str = ", ".join(sorted(self.known_intents))
             try:
@@ -172,13 +228,43 @@ class RouterNode(Node):
         """
         rating = message.payload.get("rating", 0)
         domain = message.payload.get("domain", "")
+        prompt = message.payload.get("prompt", "")
         
+        # Self-Learning Embedding Update
+        if self.use_vectors and domain in self.domain_centroids and prompt:
+            import numpy as np
+            query_emb = self.encoder.encode(prompt)
+            current_centroid = self.domain_centroids[domain]
+            
+            # EMA alpha: how aggressively a single piece of feedback shifts the centroid
+            alpha = 0.1
+            
+            if rating > 0:
+                # Pull centroid towards the successful query
+                new_centroid = (1 - alpha) * current_centroid + alpha * query_emb
+                logger.info("RouterNode pulled centroid for domain '%s' towards query (Positive Rating)", domain)
+            elif rating < 0:
+                # Push centroid away from the unsuccessful query
+                new_centroid = current_centroid - (alpha * query_emb)
+                logger.info("RouterNode pushed centroid for domain '%s' away from query (Negative Rating)", domain)
+            else:
+                new_centroid = current_centroid
+                
+            # Normalize vector
+            norm = np.linalg.norm(new_centroid)
+            if norm > 0:
+                new_centroid = new_centroid / norm
+            self.domain_centroids[domain] = new_centroid
+            
+        # Threshold logic
         if rating > 0:
             # Positive: routing was good, become slightly more permissive
             self.unknown_threshold = max(0.15, self.unknown_threshold - 0.02)
             if domain and domain not in self.known_domains:
                 self.known_domains.add(domain)
                 logger.info("RouterNode learned new domain from feedback: %s", domain)
+                if self.use_vectors:
+                    self.domain_centroids[domain] = self.encoder.encode(f"Topics relating to {domain}")
         elif rating < 0:
             # Negative: routing may have been wrong, become slightly more cautious
             self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
@@ -192,9 +278,11 @@ class RouterNode(Node):
     async def _handle_domain_registered(self, message: Message) -> Message | None:
         """Auto-learn new domains when SpawnerNode creates them."""
         domain = message.payload.get("domain", "")
-        if domain:
+        if domain and domain not in self.known_domains:
             self.known_domains.add(domain)
             logger.info("RouterNode registered new domain: %s", domain)
+            if self.use_vectors:
+                self.domain_centroids[domain] = self.encoder.encode(f"Topics relating to {domain}")
         return None
 
     async def _handle_swarm_transfer(self, message: Message) -> Message | None:
