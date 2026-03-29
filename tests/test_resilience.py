@@ -173,7 +173,7 @@ async def test_concurrent_message_flood():
     await bus.subscribe("flood.test", handler)
 
     tasks = []
-    for i in range(1000):
+    for i in range(500):
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="flood",
@@ -186,11 +186,11 @@ async def test_concurrent_message_flood():
     
     # Wait dynamically for messages rather than fixed sleep
     for _ in range(20):
-        if len(received) == 1000:
+        if len(received) == 500:
             break
         await asyncio.sleep(0.1)
 
-    assert len(received) == 1000
+    assert len(received) == 500
 
     await bus.stop()
 

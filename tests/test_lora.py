@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from hbllm.modules.lora import LoRALinear, LoRAManager
+from hbllm.modules.lora import LoRALinear, LoRAManager, ACTIVE_ADAPTER
 
 
 def test_lora_linear_forward():
@@ -33,15 +33,16 @@ def test_lora_linear_forward():
         
     assert torch.allclose(base_out, lora_out, atol=1e-6)
     
-    # Modify B to ensure LoRA path takes effect
+    # Modify B to ensure LoRA path takes effect and explicitly activate adapter
     nn.init.ones_(lora.lora_B["default"])
+    ACTIVE_ADAPTER.set("default")
     with torch.no_grad():
         lora_out_modified = lora(x)
         
     assert not torch.allclose(base_out, lora_out_modified)
     
     # Test disable
-    lora.active_adapter = None
+    ACTIVE_ADAPTER.set(None)
     with torch.no_grad():
         lora_out_disabled = lora(x)
         

@@ -114,24 +114,42 @@ class RouterNode(Node):
             import numpy as np
             query_emb = self.encoder.encode(text)
             
-            best_score = -1.0
-            best_domain = self.default_domain
-            
+            scores = {}
             for domain, centroid in self.domain_centroids.items():
                 norm_q = np.linalg.norm(query_emb)
                 norm_c = np.linalg.norm(centroid)
                 if norm_q > 0 and norm_c > 0:
-                    score = np.dot(query_emb, centroid) / (norm_q * norm_c)
-                    if score > best_score:
-                        best_score = float(score)
-                        best_domain = domain
-                        
-            confidence = best_score
-            if best_score > self.unknown_threshold:
-                target_domain = best_domain
-            else:
+                    scores[domain] = float(np.dot(query_emb, centroid) / (norm_q * norm_c))
+            
+            # Sort domains by score
+            sorted_domains = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            
+            if not sorted_domains:
                 target_domain = "general"
+                confidence = 0.5
+            else:
+                top_domain, top_score = sorted_domains[0]
+                confidence = top_score
                 
+                if top_score > self.unknown_threshold:
+                    # Check if second place is close enough for MoE blending
+                    if len(sorted_domains) > 1:
+                        second_domain, second_score = sorted_domains[1]
+                        # Only blend if second score is also very high and relatively close
+                        if second_score > self.unknown_threshold and (top_score - second_score) < 0.15:
+                            total = top_score + second_score
+                            target_domain = {
+                                top_domain: round(top_score / total, 3),
+                                second_domain: round(second_score / total, 3)
+                            }
+                            logger.info("Vector Router triggered MoE Hybrid mapping: %s", target_domain)
+                        else:
+                            target_domain = top_domain
+                    else:
+                        target_domain = top_domain
+                else:
+                    target_domain = "general"
+                    
             logger.debug("Vector Router chose domain '%s' with confidence %.3f", target_domain, confidence)
         elif self.llm:
             # Fallback to LLM if vector encoder isn't available
