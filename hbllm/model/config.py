@@ -29,6 +29,10 @@ class ModelConfig:
     num_kv_heads: int = 4  # For Grouped Query Attention
     intermediate_size: int = 3072  # SwiGLU FFN dimension
     max_position_embeddings: int = 2048
+    
+    # Efficiency / Long Context (SWA)
+    sliding_window: Optional[int] = None
+    attention_sinks: int = 4
 
     # Normalization
     rms_norm_eps: float = 1e-5
@@ -143,7 +147,8 @@ CONFIGS = {
         num_attention_heads=32,
         num_kv_heads=8,
         intermediate_size=11008,
-        max_position_embeddings=8192,
+        max_position_embeddings=1048576,
+        sliding_window=4096,
     ),
     "13b": ModelConfig(
         name="hbllm-13b",
@@ -152,7 +157,8 @@ CONFIGS = {
         num_attention_heads=40,
         num_kv_heads=8,
         intermediate_size=13824,
-        max_position_embeddings=8192,
+        max_position_embeddings=1048576,
+        sliding_window=4096,
     ),
 }
 

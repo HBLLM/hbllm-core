@@ -106,6 +106,32 @@ class GroupedQueryAttention(nn.Module):
                 # Legacy O(N) tuple concatenation
                 key_states = torch.cat([past_key_value[0], key_states], dim=2)
                 value_states = torch.cat([past_key_value[1], value_states], dim=2)
+                
+                # Apply sliding window if configured
+                if self.config.sliding_window:
+                    window_size = self.config.sliding_window
+                    sink_size = self.config.attention_sinks
+                    current_len = key_states.shape[2]
+                    
+                    if current_len > window_size:
+                        # Keep first 'sink_size' tokens + the most recent 'window_size - sink_size' tokens
+                        recent_len = window_size - sink_size
+                        
+                        sink_keys = key_states[:, :, :sink_size, :]
+                        sink_values = value_states[:, :, :sink_size, :]
+                        
+                        recent_keys = key_states[:, :, -recent_len:, :]
+                        recent_values = value_states[:, :, -recent_len:, :]
+                        
+                        key_states = torch.cat([sink_keys, recent_keys], dim=2)
+                        value_states = torch.cat([sink_values, recent_values], dim=2)
+
+                        # Truncate mask if present to match the new cache size
+                        if attention_mask is not None:
+                            sink_mask = attention_mask[..., :sink_size]
+                            recent_mask = attention_mask[..., -recent_len:]
+                            attention_mask = torch.cat([sink_mask, recent_mask], dim=-1)
+                
                 new_past_key_value = (key_states, value_states) if use_cache else None
         else:
             new_past_key_value = (key_states, value_states) if use_cache else None

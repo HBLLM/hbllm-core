@@ -59,7 +59,7 @@ class PipelineConfig:
     workspace_timeout: float = 30.0
     decision_timeout: float = 30.0
     total_timeout: float = 60.0
-    max_context_tokens: int = 2048
+    max_context_tokens: int = 131072  # 128k context support via SWA + Cognitive RAG
     inject_memory: bool = True
     inject_identity: bool = True
     inject_curiosity: bool = True
@@ -226,7 +226,7 @@ class CognitivePipeline:
                     topic="memory.search",
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    payload={"query": text, "limit": 5},
+                    payload={"query": text, "limit": 20},
                 )
                 mem_resp = await asyncio.wait_for(
                     self.bus.request("memory.search", mem_msg, timeout=5.0),

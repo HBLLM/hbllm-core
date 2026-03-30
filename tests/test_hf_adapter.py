@@ -27,7 +27,8 @@ class TestConfigPresets:
         assert config.num_attention_heads == 32
         assert config.num_kv_heads == 8
         assert config.intermediate_size == 11008
-        assert config.max_position_embeddings == 8192
+        assert config.max_position_embeddings == 1048576
+        assert config.sliding_window == 4096
 
     def test_13b_config_exists(self):
         config = get_config("13b")
@@ -36,6 +37,8 @@ class TestConfigPresets:
         assert config.num_layers == 40
         assert config.num_attention_heads == 40
         assert config.intermediate_size == 13824
+        assert config.max_position_embeddings == 1048576
+        assert config.sliding_window == 4096
 
     def test_7b_param_estimate(self):
         config = get_config("7b")
