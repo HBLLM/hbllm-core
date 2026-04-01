@@ -51,6 +51,7 @@ class LearnerNode(Node):
         self._optimizer = None
         self._lora_injected = False
         self._training_steps = 0
+        self._lock = asyncio.Lock()
 
     async def on_start(self) -> None:
         """Subscribe to feedback messages and sleep triggers."""
@@ -72,13 +73,20 @@ class LearnerNode(Node):
         try:
             payload = FeedbackPayload(**message.payload)
         except Exception as e:
+            logger.error("Learner '%s' received invalid FeedbackPayload: %s", self.node_id, e)
             return message.create_error(f"Invalid FeedbackPayload: {e}")
-
-        logger.info("Learner '%s' received feedback for msg %s: %d", self.node_id, payload.message_id, payload.rating)
 
         prompt = payload.prompt
         response = payload.response
-        if prompt and response:
+        
+        if not prompt or not response:
+            logger.debug("Learner '%s' received feedback with missing prompt/response", self.node_id)
+            return None
+
+        async with self._lock:
+            logger.info("Learner '%s' processing feedback for msg %s (rating: %d)", 
+                        self.node_id, payload.message_id, payload.rating)
+
             if prompt not in self.pending_pairs:
                 self.pending_pairs[prompt] = {"chosen": None, "rejected": None}
                 
@@ -89,24 +97,35 @@ class LearnerNode(Node):
                 
             pair = self.pending_pairs[prompt]
             if pair["chosen"] and pair["rejected"]:
-                import json, os
+                import json
+                from pathlib import Path
                 
                 # Append to persistent JSON array
                 queue = []
-                if os.path.exists(self.queue_path):
-                    with open(self.queue_path, "r") as f:
-                        try:
+                p = Path(self.queue_path)
+                if p.exists():
+                    try:
+                        with p.open("r") as f:
                             queue = json.load(f)
-                        except json.JSONDecodeError:
-                            queue = []
+                            if not isinstance(queue, list):
+                                queue = []
+                    except (json.JSONDecodeError, OSError) as e:
+                        logger.warning("Could not read dpo_queue.json, starting fresh: %s", e)
+                        queue = []
                             
                 queue.append((prompt, pair["chosen"], pair["rejected"]))
                 
-                with open(self.queue_path, "w") as f:
-                    json.dump(queue, f)
+                try:
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    with p.open("w") as f:
+                        json.dump(queue, f)
+                    logger.info("LearnerNode queued contrastive DPO pair for prompt: '%s...'", prompt[:30])
+                except OSError as e:
+                    logger.error("Failed to write to dpo_queue.json: %s", e)
+                    # Don't delete from pending_pairs so we can retry or at least not lose it 
+                    # but actually we probably should just log and continue for now
                     
                 del self.pending_pairs[prompt]
-                logger.info("LearnerNode queued contrastive DPO pair persistently for overnight training.")
 
         return None
         

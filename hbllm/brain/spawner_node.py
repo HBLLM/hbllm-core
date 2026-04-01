@@ -20,12 +20,13 @@ class SpawnerNode(Node):
     a new DomainModuleNode on the live bus.
     """
 
-    def __init__(self, node_id: str, model: Any, tokenizer: Any):
+    def __init__(self, node_id: str, model: Any, tokenizer: Any, adapter_registry: Any | None = None):
         super().__init__(node_id=node_id, node_type=NodeType.SPAWNER)
         self.model = model
         self.tokenizer = tokenizer
         self.synthesizer = DataSynthesizer(model=model, tokenizer=tokenizer)
         self.spawning_tasks = set()
+        self.adapter_registry = adapter_registry
 
     async def on_start(self) -> None:
         """Subscribe to spawn requests."""
@@ -58,26 +59,39 @@ class SpawnerNode(Node):
         return None
 
     async def _spawn_new_module(self, topic: str) -> None:
-        """The core expansion logic: synthesize data → train LoRA → register module."""
+        """The core expansion logic: resolve adapter → (or synthesize + train) → register module."""
         domain_name = topic.replace(" ", "_").lower()
         new_node_id = f"domain_{domain_name}"
         
         logger.info("--- Self-Expansion Initiated for '%s' ---", domain_name)
-        
-        # 1. Generate Synthetic Data
-        try:
-            dataset_path = await asyncio.to_thread(
-                self.synthesizer.generate_dataset,
-                topic=topic,
-                num_samples=10
-            )
-            logger.info("Generated synthetic data at: %s", dataset_path)
-        except Exception as e:
-            logger.error("Data synthesis failed for %s: %s", domain_name, e)
-            return
-            
-        # 2. Train LoRA Adapter on Synthetic Data
-        lora_state_dict = await self._train_lora_adapter(domain_name, dataset_path)
+
+        # Step 1: Try to resolve a pre-trained adapter from the registry
+        lora_state_dict = None
+        if self.adapter_registry and self.adapter_registry.enabled:
+            try:
+                lora_state_dict = await self.adapter_registry.resolve(domain_name)
+                if lora_state_dict:
+                    logger.info(
+                        "Resolved pre-trained adapter for '%s' from registry, skipping training",
+                        domain_name,
+                    )
+            except Exception as e:
+                logger.warning("Adapter registry lookup failed for '%s': %s", domain_name, e)
+
+        # Step 2: Fall back to synthesize + train if no adapter was found
+        if lora_state_dict is None:
+            try:
+                dataset_path = await asyncio.to_thread(
+                    self.synthesizer.generate_dataset,
+                    topic=topic,
+                    num_samples=10
+                )
+                logger.info("Generated synthetic data at: %s", dataset_path)
+            except Exception as e:
+                logger.error("Data synthesis failed for %s: %s", domain_name, e)
+                return
+
+            lora_state_dict = await self._train_lora_adapter(domain_name, dataset_path)
         
         # 3. Create and Register the New Node
         try:

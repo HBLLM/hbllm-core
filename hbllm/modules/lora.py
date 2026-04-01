@@ -267,3 +267,54 @@ class LoRAManager:
                 
         # Must load in 'strict=False' because the full model will have lots of other components
         model.load_state_dict(mapped_dict, strict=False)
+
+    @staticmethod
+    def save_adapter(
+        model: nn.Module,
+        adapter_name: str,
+        path: Union[str, Path],
+        domain: str | None = None,
+        rank: int = 8,
+        source_repo: str = "local",
+    ) -> str:
+        """
+        Extracts, wraps with metadata, saves, and computes SHA-256 for an adapter.
+        """
+        from hbllm.modules.adapter_registry import AdapterRegistry
+        state_dict = LoRAManager.get_lora_state_dict(model, adapter_name=adapter_name)
+        return AdapterRegistry.save_adapter(
+            state_dict,
+            Path(path),
+            domain=domain or adapter_name,
+            rank=rank,
+            source_repo=source_repo,
+        )
+
+    @staticmethod
+    def load_adapter(
+        model: nn.Module,
+        path: Union[str, Path],
+        adapter_name: str | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Safely loads a metadata-wrapped adapter into the model.
+        """
+        from hbllm.modules.adapter_registry import AdapterRegistry
+        path = Path(path)
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        
+        metadata = {}
+        if isinstance(payload, dict) and "__hbllm_adapter_metadata__" in payload:
+            metadata = payload["__hbllm_adapter_metadata__"]
+            state_dict = payload["state_dict"]
+        else:
+            state_dict = payload
+
+        target_name = adapter_name or metadata.get("domain", "default")
+        
+        # Ensure the adapter exist in the ParameterDicts first
+        LoRAManager.add_adapter(model, target_name)
+        LoRAManager.load_lora_state_dict(model, state_dict, adapter_name=target_name)
+        
+        logger.info("Loaded LoRA adapter '%s' from %s", target_name, path)
+        return metadata

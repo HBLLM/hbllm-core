@@ -59,11 +59,12 @@ HBLLM uses **one highly-optimized base model** (e.g., 125M, 500M, or 1.5B parame
 
 ### 🧬 Artificial Neurogenesis (Self-Expanding Zones)
 
-HBLLM ships with 3 starter zones, but the **SpawnerNode** automatically creates new specialist zones when you enter an unfamiliar domain. 
+HBLLM ships with 3 starter zones, but the **SpawnerNode** automatically creates new specialist zones when you enter an unfamiliar domain.
 When encountering a completely new domain (e.g., "Gardening"), the system:
-1. Generates synthetic training data for "gardening".
-2. Trains a new 2MB LoRA adapter in the background.
-3. Spawns a new `DomainModuleNode` wired to the Message Bus.
+1. **Registry Resolution**: Checks the `AdapterRegistry` for pre-trained "gardening" adapters on the HuggingFace Hub or local cache.
+2. **Security Audit**: If found, verifies the adapter's SHA-256 integrity and converts it from PEFT format to the internal HBLLM `state_dict`.
+3. **Fallback Training**: If no adapter exists, generates synthetic training data and trains a new 2MB LoRA adapter in the background.
+4. **Activation**: Spawns a new `DomainModuleNode` and hot-swaps the weights into the shared transformer backbone.
 **The brain literally grows a new region at runtime.**
 
 ---
@@ -178,11 +179,11 @@ HBLLM Core isn't just a wrapper; it's a deeply engineered cognitive backend capa
 
 ### 🧠 Agentic Reasoning & Evaluation
 - **Lock-Free LoRA Concurrency:** Isolated `ContextVars` allow asynchronous domain modules to share a single GPU lock-free, streaming tiny ~2MB adapters strictly during forward passes over the PCIe bus without blocking other cognitive nodes.
+- **Secure Adapter Registry**: A hardened runtime system for resolving and downloading domain-specific LoRA adapters from the HuggingFace Hub with mandatory SHA-256 integrity checks and `weights_only=True` loading.
+- **Continuous Lifetime Learning:** The `LearnerNode` implements contrastive DPO (Direct Preference Optimization) using a persistent, atomic JSON queue. It "sleeps" to consolidate feedback into permanent model updates without interrupting the main serving loop.
 - **Dynamic MoE Blending:** Queries overlapping multiple domains (e.g., Coding + Math) mathematically synthesize custom blend-weights at runtime, forming custom experts out of base adapters globally across all layers.
 - **Graph-of-Thoughts (GoT) Planning:** The `PlannerNode` breaks complex goals into dynamic, directed acyclic graphs of reasoning steps.
 - **Process Reward Models (PRM):** The `ProcessRewardNode` provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.
-- **Reflection & Revision:** A `RevisionNode` and `CriticNode` form a self-critique loop accompanied by a `ConfidenceEstimator` to iteratively refine responses.
-- **Speculative Decoding:** Accelerated generation loops utilizing Adaptive Gamma depth scaling for bleeding-edge local inference speed.
 
 ### 💾 Multi-Tiered Memory Systems
 HBLLM operates **5 distinct memory types** mirroring human cognitive psychology:
