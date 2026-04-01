@@ -73,6 +73,7 @@ class AdapterSource(BaseModel):
     sha256: Optional[str] = None
     rank: int = 8
     peft_format: bool = False  # If True, treats as PEFT-compatible repo
+    revision: Optional[str] = None  # Git tag, branch, or commit SHA
 
     @property
     def effective_filename(self) -> str:
@@ -181,6 +182,7 @@ class AdapterRegistry:
             result.append({
                 "domain": source.domain,
                 "repo_id": source.repo_id,
+                "revision": source.revision or "main",
                 "cached": source.domain.lower() in cached_domains,
                 "has_sha256": bool(source.sha256),
             })
@@ -264,10 +266,11 @@ class AdapterRegistry:
         try:
             # Check PEFT format auto-detection
             if not source.peft_format:
-                is_peft = await self._is_hf_repo_peft(source.repo_id)
+                is_peft = await self._is_hf_repo_peft(source.repo_id, revision=source.revision)
                 if is_peft:
                     source.peft_format = True
-                    logger.info("Detected PEFT format for '%s'", source.repo_id)
+                    logger.info("Detected PEFT format for '%s' (revision: %s)", 
+                                source.repo_id, source.revision or "main")
 
             if source.peft_format:
                 # PEFT format requires multiple files (config + weights)
@@ -276,7 +279,8 @@ class AdapterRegistry:
             # HBLLM Native Format (Single PT file)
             download_path = await self._hf_download(
                 source.repo_id, 
-                source.effective_filename
+                source.effective_filename,
+                revision=source.revision
             )
             
             if not download_path:
@@ -315,12 +319,12 @@ class AdapterRegistry:
 
     # --- PEFT Conversion Helpers ---
 
-    async def _is_hf_repo_peft(self, repo_id: str) -> bool:
+    async def _is_hf_repo_peft(self, repo_id: str, revision: Optional[str] = None) -> bool:
         """Check if an HF repo contains a PEFT config file."""
         from huggingface_hub import HfApi
         try:
             api = HfApi()
-            files = api.list_repo_files(repo_id)
+            files = api.list_repo_files(repo_id, revision=revision)
             return PEFT_CONFIG_FILE in files
         except Exception:
             return False
@@ -338,6 +342,7 @@ class AdapterRegistry:
             path = await asyncio.to_thread(
                 snapshot_download,
                 repo_id=source.repo_id,
+                revision=source.revision,
                 local_dir=str(temp_dir),
                 allow_patterns=[PEFT_CONFIG_FILE, PEFT_WEIGHTS_BIN, PEFT_WEIGHTS_SAFE]
             )
@@ -402,7 +407,7 @@ class AdapterRegistry:
 
     # --- External Interaction ---
 
-    async def _hf_download(self, repo_id: str, filename: str) -> Optional[str]:
+    async def _hf_download(self, repo_id: str, filename: str, revision: Optional[str] = None) -> Optional[str]:
         """Wraps hf_hub_download to work with asyncio."""
         from huggingface_hub import hf_hub_download
         try:
@@ -410,7 +415,8 @@ class AdapterRegistry:
            path = await asyncio.to_thread(
                hf_hub_download,
                repo_id=repo_id,
-               filename=filename
+               filename=filename,
+               revision=revision
            )
            return path
         except Exception as e:

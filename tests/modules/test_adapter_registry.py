@@ -176,6 +176,14 @@ class TestAdapterSource:
         src_peft = AdapterSource(domain="coding", repo_id="org/repo", peft_format=True)
         assert src_peft.peft_format is True
 
+    def test_revision_support(self):
+        """Should support pinning to a specific Git revision."""
+        src = AdapterSource(domain="coding", repo_id="org/repo", revision="v1.0")
+        assert src.revision == "v1.0"
+        
+        src_sha = AdapterSource(domain="coding", repo_id="org/repo", revision="8f32a4b")
+        assert src_sha.revision == "8f32a4b"
+
 
 class TestAdapterRegistryConfig:
     def test_defaults(self):
@@ -506,3 +514,37 @@ class TestListConfigured:
         assert listed[0]["domain"] == "coding"
         assert listed[0]["has_sha256"] is True
         assert listed[1]["has_sha256"] is False
+
+    def test_list_configured_with_revision(self, tmp_cache):
+        """Should include revision in listed sources."""
+        config = AdapterRegistryConfig(
+            enabled=True,
+            cache_dir=str(tmp_cache),
+            sources=[
+                {"domain": "coding", "repo_id": "org/coding", "revision": "v2.0"},
+            ],
+        )
+        reg = AdapterRegistry(config)
+        listed = reg.list_configured()
+        assert listed[0]["revision"] == "v2.0"
+
+
+class TestDownloadPropagation:
+    @pytest.mark.asyncio
+    @patch("huggingface_hub.hf_hub_download")
+    async def test_revision_propagated_to_hf_download(self, mock_hf, registry, tmp_path):
+        """Registry._hf_download should pass revision to hf_hub_download."""
+        mock_hf.return_value = str(tmp_path / "fake.pt")
+        Path(mock_hf.return_value).touch()
+        
+        await registry._hf_download(
+            repo_id="test/repo", 
+            filename="file.pt", 
+            revision="v1.1"
+        )
+        
+        mock_hf.assert_called_once_with(
+            repo_id="test/repo",
+            filename="file.pt",
+            revision="v1.1"
+        )
