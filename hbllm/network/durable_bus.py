@@ -25,6 +25,8 @@ from enum import Enum
 
 class StrEnum(str, Enum):
     pass
+
+
 from typing import Any
 
 from hbllm.network.bus import InProcessBus, MessageBus

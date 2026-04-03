@@ -14,6 +14,8 @@ from enum import Enum
 
 class StrEnum(str, Enum):
     pass
+
+
 from typing import Any
 
 from pydantic import BaseModel, Field

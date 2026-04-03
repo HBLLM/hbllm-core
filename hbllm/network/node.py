@@ -14,6 +14,8 @@ from enum import Enum
 
 class StrEnum(str, Enum):
     pass
+
+
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel

@@ -29,6 +29,8 @@ from enum import Enum
 
 class StrEnum(str, Enum):
     pass
+
+
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
