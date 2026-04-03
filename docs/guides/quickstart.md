@@ -42,10 +42,10 @@ hbllm info
 Expected output:
 ```
 🧠 HBLLM Core v0.1.0
-Nodes: 25 loaded
-Memory: Episodic, Semantic, Procedural, Value, KnowledgeGraph
-Bus: InProcessBus (local)
-Zones: General, Coding, Math
+Nodes:   23 specialized brain nodes
+Memory:  5 systems (Episodic, Semantic, Procedural, Value, Working)
+Model:   Zoning — shared base + LoRA domain adapters
+Sizes:   125M / 500M / 1.5B parameters
 ```
 
 ## Start the API Server
@@ -87,11 +87,12 @@ async def main():
     
     # Process a complex query
     result = await brain.process(
-        "Analyze our server logs and design a firewall rule."
+        "Analyze our server logs and design a firewall rule.",
+        tenant_id="tenant-001",
     )
     
     print(f"Decision: {result.text}")
-    print(f"Nodes Activated: {result.path}")
+    print(f"Confidence: {result.confidence:.2f}")
     print(f"Latency: {result.latency_ms:.0f}ms")
     
     await brain.shutdown()
@@ -105,8 +106,8 @@ asyncio.run(main())
 hbllm info                # View active brain architecture
 hbllm nodes               # List all loaded cognitive nodes
 hbllm serve --port 8000   # Start FastAPI + MCP Server
-hbllm train --size 125m   # Start local reinforcement training
-hbllm export-dpo          # Export DPO training data
+hbllm train --model-size 125m  # Start local pre-training loop
+hbllm data --dataset fineweb   # Run data preparation pipeline
 ```
 
 ## Next Steps

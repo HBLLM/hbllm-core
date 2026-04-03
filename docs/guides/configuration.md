@@ -37,15 +37,48 @@ HBLLM_BUS_TYPE=redis
 HBLLM_REDIS_URL=redis://localhost:6379
 ```
 
-## Multi-Tenant Configuration
+## YAML Configuration
 
-Each tenant is isolated by default. Tenant-specific settings are managed via the API:
+HBLLM loads its system configuration from `hbllm.yaml` (or the path in `HBLLM_CONFIG_PATH`):
+
+```yaml
+env: production
+
+cluster:
+  node_id: "brain-01"
+  
+adapters:
+  enabled: true
+  cache_dir: "./checkpoints/adapters"
+  auto_download: true
+  require_sha256: true
+  sources:
+    - domain: coding
+      repo_id: hbllm/coding-lora-v2
+      revision: v2.1.0
+
+checkpoints_dir: ./checkpoints
+data_dir: ./data
+```
 
 ```python
-# Tenant memory is automatically isolated
-brain = await BrainFactory.create(
-    "openai/gpt-4o",
+from hbllm.config import HBLLMCoreConfig
+
+# Load from hbllm.yaml (auto-discovered) or explicit path
+config = HBLLMCoreConfig.load("hbllm.yaml")
+```
+
+## Multi-Tenant Configuration
+
+Each tenant is isolated at the `brain.process()` level. Memory is automatically partitioned per tenant:
+
+```python
+brain = await BrainFactory.create("openai/gpt-4o")
+
+# Tenant isolation happens at query time
+result = await brain.process(
+    "Summarize our Q3 earnings",
     tenant_id="tenant-001",
-    memory_dir="/data/tenants/001"
+    session_id="session-abc",
 )
 ```

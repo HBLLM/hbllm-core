@@ -26,24 +26,28 @@ class WeatherNode(Node):
         )
         self.api_key = api_key
 
-    async def on_start(self, bus):
-        """Called when the node joins the bus."""
-        await bus.subscribe("query.weather", self.handle_weather_query)
+    async def on_start(self) -> None:
+        """Called when the node joins the bus. Set up subscriptions."""
+        await self.bus.subscribe("query.weather", self._on_weather_query)
 
-    async def handle_weather_query(self, topic: str, message: Message):
-        """Respond to weather queries."""
+    async def on_stop(self) -> None:
+        """Called when the node is stopping. Clean up resources."""
+        pass
+
+    async def handle_message(self, message: Message) -> Message | None:
+        """Handle an incoming message."""
+        if message.type == MessageType.QUERY:
+            return await self._process_query(message)
+        return None
+
+    async def _on_weather_query(self, topic: str, message: Message):
+        """Respond to weather queries from the bus."""
         city = message.payload.get("city", "London")
-        
-        # Fetch weather data (your logic here)
         weather = await self._fetch_weather(city)
         
-        # Publish response back to the bus
-        await self.publish("response.weather", Message(
-            type=MessageType.RESPONSE,
-            source_node_id=self.node_id,
-            payload=weather,
-            correlation_id=message.correlation_id,
-        ))
+        # Create a correlated response
+        response = message.create_response(payload=weather)
+        await self.publish("response.weather", response)
 ```
 
 ## Node Types

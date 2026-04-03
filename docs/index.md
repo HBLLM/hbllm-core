@@ -202,10 +202,11 @@ export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics (requires rclpy)
 ### CLI Utilities
 
 ```bash
-hbllm info               # View active brain architecture
-hbllm nodes              # List 25+ loaded cognitive nodes
-hbllm serve --port 8000  # Start the FastAPI + MCP Server
-hbllm train --size 125m  # Kickoff local reinforcement loops
+hbllm info                         # View active brain architecture
+hbllm nodes                        # List all loaded cognitive nodes
+hbllm serve --port 8000            # Start the FastAPI + MCP Server
+hbllm train --model-size 125m      # Start local pre-training loop
+hbllm data --dataset fineweb       # Run data preparation pipeline
 ```
 
 ### Python API
@@ -218,11 +219,13 @@ async def main():
     brain = await BrainFactory.create("openai/gpt-4o")
     
     result = await brain.process(
-        "Analyze our server logs and design a firewall rule."
+        "Analyze our server logs and design a firewall rule.",
+        tenant_id="tenant-001",
     )
     
     print(f"Decision: {result.text}")
-    print(f"Nodes Activated: {result.path}")
+    print(f"Stages: {result.stages_completed}")
+    print(f"Confidence: {result.confidence:.2f}")
     print(f"Latency: {result.latency_ms:.0f}ms")
     
     await brain.shutdown()
