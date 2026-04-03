@@ -4,9 +4,9 @@ site_description: >-
   Graph-of-Thoughts planning, and Rust-accelerated hybrid quantization.
   Deploy autonomous agents that think, learn, and adapt on edge devices.
 site_author: HBLLM Team
-site_url: https://dumithsalinda.github.io/HBLLM/
-repo_url: https://github.com/DumithSalinda/HBLLM
-repo_name: DumithSalinda/HBLLM
+site_url: https://hbllm.github.io/hbllm-core/
+repo_url: https://github.com/hbllm/hbllm-core
+repo_name: hbllm/hbllm-core
 edit_uri: edit/master/core/docs/
 
 copyright: Copyright &copy; 2024–2026 HBLLM Team — MIT License
@@ -99,7 +99,7 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/DumithSalinda/HBLLM
+      link: https://github.com/hbllm/hbllm-core
       name: HBLLM on GitHub
   generator: false
 

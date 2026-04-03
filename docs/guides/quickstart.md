@@ -18,7 +18,7 @@ Get HBLLM Core running in under 5 minutes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/DumithSalinda/HBLLM.git
+git clone https://github.com/hbllm/hbllm-core.git
 cd HBLLM/core
 
 # Install in development mode

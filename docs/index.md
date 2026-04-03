@@ -14,7 +14,7 @@ description: "An advanced AGI-oriented multi-agent ecosystem with 25+ brain node
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-1099%20passing-brightgreen.svg)](#)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/DumithSalinda/HBLLM/blob/master/LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE)
 
 </div>
 
@@ -190,7 +190,7 @@ HBLLM ships with 3 starter zones, but the **SpawnerNode** automatically creates 
 ### Installation
 
 ```bash
-git clone https://github.com/DumithSalinda/HBLLM.git
+git clone https://github.com/hbllm/hbllm-core.git
 cd HBLLM/core
 pip install -e .
 
@@ -337,5 +337,5 @@ HBLLM Core is released under the **MIT License** — free for personal, commerci
 
 <div style="text-align: center; margin-top: 3rem;">
   <p><strong>HBLLM Core</strong> — Autonomous Agent AI that thinks, not just responds.</p>
-  <p>⭐ <a href="https://github.com/DumithSalinda/HBLLM">Star this project on GitHub</a> to support open-source cognitive architectures!</p>
+  <p>⭐ <a href="https://github.com/hbllm/hbllm-core">Star this project on GitHub</a> to support open-source cognitive architectures!</p>
 </div>
