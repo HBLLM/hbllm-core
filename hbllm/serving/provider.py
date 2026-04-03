@@ -22,6 +22,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
+from hbllm.network.tracing import trace_span
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,25 +152,26 @@ class LocalProvider(LLMProvider):
         self._ensure_loaded()
         import torch
 
-        prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-        input_ids = self._tokenizer.encode(prompt, add_bos=True)
-        input_tensor = torch.tensor([input_ids], dtype=torch.long)
+        with trace_span("llm.generate", {"provider": "local", "model": "hbllm-local", "max_tokens": str(max_tokens)}):
+            prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+            input_ids = self._tokenizer.encode(prompt, add_bos=True)
+            input_tensor = torch.tensor([input_ids], dtype=torch.long)
 
-        if hasattr(self._model, "device"):
-            input_tensor = input_tensor.to(self._model.device)
+            if hasattr(self._model, "device"):
+                input_tensor = input_tensor.to(self._model.device)
 
-        with torch.no_grad():
-            output = self._model.generate(
-                input_ids=input_tensor,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                eos_token_id=self._tokenizer.eos_id,
-            )
+            with torch.no_grad():
+                output = self._model.generate(
+                    input_ids=input_tensor,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    eos_token_id=self._tokenizer.eos_id,
+                )
 
-        # Decode only new tokens
-        new_tokens = output[0][len(input_ids):].tolist()
-        content = self._tokenizer.decode(new_tokens)
+            # Decode only new tokens
+            new_tokens = output[0][len(input_ids):].tolist()
+            content = self._tokenizer.decode(new_tokens)
 
         return LLMResponse(
             content=content,
@@ -353,29 +356,30 @@ class OpenAIProvider(LLMProvider):
     ) -> LLMResponse:
         import httpx
 
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-        }
+        with trace_span("llm.generate", {"provider": "openai", "model": self._model, "max_tokens": str(max_tokens)}):
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": self._model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+            }
 
-        async def _do_request():
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    f"{self._base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                return resp.json()
+            async def _do_request():
+                async with httpx.AsyncClient(timeout=60) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
 
-        data = await _retry_api_call(_do_request)
+            data = await _retry_api_call(_do_request)
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
@@ -465,40 +469,41 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         import httpx
 
-        # Anthropic separates system message
-        system = ""
-        user_messages = []
-        for m in messages:
-            if m["role"] == "system":
-                system = m["content"]
-            else:
-                user_messages.append(m)
+        with trace_span("llm.generate", {"provider": "anthropic", "model": self._model, "max_tokens": str(max_tokens)}):
+            # Anthropic separates system message
+            system = ""
+            user_messages = []
+            for m in messages:
+                if m["role"] == "system":
+                    system = m["content"]
+                else:
+                    user_messages.append(m)
 
-        headers = {
-            "x-api-key": self._api_key,
-            "Content-Type": "application/json",
-            "anthropic-version": "2023-06-01",
-        }
-        payload = {
-            "model": self._model,
-            "messages": user_messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        if system:
-            payload["system"] = system
+            headers = {
+                "x-api-key": self._api_key,
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }
+            payload = {
+                "model": self._model,
+                "messages": user_messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            if system:
+                payload["system"] = system
 
-        async def _do_request():
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                return resp.json()
+            async def _do_request():
+                async with httpx.AsyncClient(timeout=60) as client:
+                    resp = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers=headers,
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
 
-        data = await _retry_api_call(_do_request)
+            data = await _retry_api_call(_do_request)
 
         content = data["content"][0]["text"] if data.get("content") else ""
         usage = data.get("usage", {})
