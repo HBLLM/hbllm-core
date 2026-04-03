@@ -1,20 +1,20 @@
 :root {
-  --md-primary-fg-color: #7c3aed;
+  --md-primary-fg-color: #3f51b5;
   --md-primary-bg-color: #ffffff;
-  --md-accent-fg-color: #f59e0b;
+  --md-accent-fg-color: #009688;
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #a78bfa;
-  --md-default-bg-color: #0f0a1a;
-  --md-code-bg-color: #1a1028;
+  --md-primary-fg-color: #7986cb;
+  --md-default-bg-color: #0a0f1a;
+  --md-code-bg-color: #101828;
 }
 
 /* Hero section styling */
 .md-typeset .hero-title {
   font-size: 2.4rem;
   font-weight: 800;
-  background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 50%, #f59e0b 100%);
+  background: linear-gradient(135deg, #3f51b5 0%, #7986cb 50%, #009688 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -54,7 +54,7 @@
 
 .md-typeset .feature-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.15);
+  box-shadow: 0 8px 24px rgba(63, 81, 181, 0.15);
 }
 
 .md-typeset .feature-card h3 {

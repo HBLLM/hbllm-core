@@ -8,7 +8,7 @@ description: "An advanced AGI-oriented multi-agent ecosystem with 25+ brain node
 <div class="hero-title">🧠 HBLLM Core</div>
 <div class="hero-subtitle">A Human-Brain Inspired Cognitive Architecture for Autonomous AI Agents</div>
 
-<div class="badges">
+<div class="badges" markdown>
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
@@ -313,6 +313,7 @@ class TemperatureSensorNode(Node):
         await self.publish("perception.temperature", Message(
             type=MessageType.EVENT,
             source_node_id=self.node_id,
+            topic="perception.temperature",
             payload={"celsius": temp},
         ))
 ```
