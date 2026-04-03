@@ -79,4 +79,3 @@ class QualityScorer:
 
     def setup_finditer(self, text: str) -> list[str]:
         return self.symbol_re.findall(text)
-

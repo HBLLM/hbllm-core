@@ -11,6 +11,8 @@ from __future__ import annotations
 import contextvars
 import logging
 import math
+from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -19,7 +21,7 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 # Lock-Free Concurrency Context
-ACTIVE_ADAPTER = contextvars.ContextVar('active_adapter', default=None)
+ACTIVE_ADAPTER = contextvars.ContextVar("active_adapter", default=None)
 
 
 def is_quantization_enabled() -> bool:
@@ -53,9 +55,9 @@ class LoRALinear(nn.Module):
 
         # Freeze base layer — handle both nn.Linear (.weight) and
         # QuantizedLinear (.weight_shards buffer, already frozen)
-        if hasattr(self.base_layer, 'weight') and self.base_layer.weight is not None:
+        if hasattr(self.base_layer, "weight") and self.base_layer.weight is not None:
             self.base_layer.weight.requires_grad = False
-        if hasattr(self.base_layer, 'bias') and self.base_layer.bias is not None:
+        if hasattr(self.base_layer, "bias") and self.base_layer.bias is not None:
             self.base_layer.bias.requires_grad = False
 
         self.in_features = self.base_layer.in_features
@@ -146,14 +148,26 @@ class LoRAManager:
         from hbllm.model.quantization import HybridLinear, QuantizedLinear
 
         if target_modules is None:
-            target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+            target_modules = [
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ]
 
         injected = []
 
         # Recursively patch modules
         for name, module in list(model.named_modules()):
             for target in target_modules:
-                if name.endswith(target) and isinstance(module, nn.Linear) and not isinstance(module, (LoRALinear, HybridLinear)):
+                if (
+                    name.endswith(target)
+                    and isinstance(module, nn.Linear)
+                    and not isinstance(module, (LoRALinear, HybridLinear))
+                ):
                     parent_name = name.rsplit(".", 1)[0] if "." in name else ""
                     child_name = name.rsplit(".", 1)[-1] if "." in name else name
 
@@ -165,14 +179,19 @@ class LoRAManager:
                             module.in_features,
                             module.out_features,
                             bits=quantization_level,
-                            bias=module.bias is not None
+                            bias=module.bias is not None,
                         )
                         # Copy optional bias from original linear
                         if module.bias is not None and base_quant.bias_param is not None:
                             base_quant.bias_param.data.copy_(module.bias.data)
 
                         lora_layer = HybridLinear(base_layer=base_quant, r=r)
-                        logger.info("Injected HybridLinear (r=%d, bits=%d) into %s", r, quantization_level, name)
+                        logger.info(
+                            "Injected HybridLinear (r=%d, bits=%d) into %s",
+                            r,
+                            quantization_level,
+                            name,
+                        )
                     else:
                         # Standard LoRA
                         lora_layer = LoRALinear(
@@ -190,7 +209,9 @@ class LoRAManager:
         return injected
 
     @staticmethod
-    def add_adapter(model: nn.Module, adapter_name: str, state_dict: dict[str, torch.Tensor] | None = None) -> None:
+    def add_adapter(
+        model: nn.Module, adapter_name: str, state_dict: dict[str, torch.Tensor] | None = None
+    ) -> None:
         """Create a new adapter inside all injected LoRALinear layers and optionally load its weights."""
         count = 0
         for module in model.modules():
@@ -233,8 +254,12 @@ class LoRAManager:
                 for adapt in adapters:
                     if adapt in module.lora_A and module.lora_A[adapt].device != device:
                         # Non-blocking transfer from pinned memory
-                        module.lora_A[adapt].data = module.lora_A[adapt].data.to(device, non_blocking=True)
-                        module.lora_B[adapt].data = module.lora_B[adapt].data.to(device, non_blocking=True)
+                        module.lora_A[adapt].data = module.lora_A[adapt].data.to(
+                            device, non_blocking=True
+                        )
+                        module.lora_B[adapt].data = module.lora_B[adapt].data.to(
+                            device, non_blocking=True
+                        )
                         count += 1
         if count > 0:
             logger.debug("Paged IN %d LoRA matrices to %s", count, device)
@@ -255,7 +280,9 @@ class LoRAManager:
         for module in model.modules():
             if isinstance(module, LoRALinear):
                 for adapt in adapters:
-                    if adapt in module.lora_A and module.lora_A[adapt].device != torch.device("cpu"):
+                    if adapt in module.lora_A and module.lora_A[adapt].device != torch.device(
+                        "cpu"
+                    ):
                         cpu_data_A = module.lora_A[adapt].data.to("cpu", non_blocking=True)
                         cpu_data_B = module.lora_B[adapt].data.to("cpu", non_blocking=True)
                         if torch.cuda.is_available() or torch.backends.mps.is_available():
@@ -268,7 +295,9 @@ class LoRAManager:
             logger.debug("Paged OUT %d LoRA matrices back to CPU", count)
 
     @staticmethod
-    def get_lora_state_dict(model: nn.Module, adapter_name: str = "default") -> dict[str, torch.Tensor]:
+    def get_lora_state_dict(
+        model: nn.Module, adapter_name: str = "default"
+    ) -> dict[str, torch.Tensor]:
         """Extract only the specified LoRA adapter parameters, formatted as legacy flat tensors."""
         lora_state: dict[str, torch.Tensor] = {}
         for name, param in model.named_parameters():
@@ -279,7 +308,9 @@ class LoRAManager:
         return lora_state
 
     @staticmethod
-    def load_lora_state_dict(model: nn.Module, state_dict: dict[str, torch.Tensor], adapter_name: str = "default") -> None:
+    def load_lora_state_dict(
+        model: nn.Module, state_dict: dict[str, torch.Tensor], adapter_name: str = "default"
+    ) -> None:
         """
         Loads a flat legacy state dict (lora_A, lora_B) into a specific adapter's ParameterDict scope.
         Remaps keys on the fly so it maps specifically to the ParameterDict indexing.
@@ -309,6 +340,7 @@ class LoRAManager:
         Extracts, wraps with metadata, saves, and computes SHA-256 for an adapter.
         """
         from hbllm.modules.adapter_registry import AdapterRegistry
+
         state_dict = LoRAManager.get_lora_state_dict(model, adapter_name=adapter_name)
         return AdapterRegistry.save_adapter(
             state_dict,

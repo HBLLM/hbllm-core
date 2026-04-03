@@ -27,6 +27,7 @@ _CHARS_PER_TOKEN = 4
 @dataclass
 class ContextBlock:
     """A block of content with priority for context window fitting."""
+
     content: str
     priority: int  # 1 = highest (keep first), 5 = lowest (truncate first)
     label: str = ""
@@ -79,7 +80,7 @@ class ContextWindowManager:
         # Optional tokenizer for accurate token counting
         # Accepts any object with an .encode(text) -> list method
         self._tokenizer_encode: Callable[[str], list] | None = None
-        if tokenizer is not None and hasattr(tokenizer, 'encode'):
+        if tokenizer is not None and hasattr(tokenizer, "encode"):
             self._tokenizer_encode = tokenizer.encode
 
     @property
@@ -170,7 +171,7 @@ class ContextWindowManager:
                 last_newline = truncated_content.rfind("\n")
                 cut_point = max(last_period, last_newline)
                 if cut_point > len(truncated_content) // 2:
-                    truncated_content = truncated_content[:cut_point + 1]
+                    truncated_content = truncated_content[: cut_point + 1]
 
                 partial_block = ContextBlock(
                     content=truncated_content,
@@ -217,6 +218,7 @@ class ContextWindowManager:
 @dataclass
 class ContextResult:
     """Result of context window fitting."""
+
     text: str
     used_tokens: int
     max_tokens: int

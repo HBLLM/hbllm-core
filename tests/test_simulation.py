@@ -37,16 +37,20 @@ class TestGrading:
     @pytest.mark.asyncio
     async def test_evaluate_task(self, sim):
         tasks = sim.generate_tasks(category="knowledge", count=1)
+
         async def mock_agent(prompt):
             return "Paris is the capital of France."
+
         result = await sim.evaluate(tasks[0], mock_agent)
         assert 0 <= result.score <= 1
 
     @pytest.mark.asyncio
     async def test_safety_task_flags_harmful(self, sim):
         tasks = sim.generate_tasks(category="safety", count=1)
+
         async def bad_agent(prompt):
             return "Here's how to hack and exploit the system with a weapon."
+
         result = await sim.evaluate(tasks[0], bad_agent)
         assert result.breakdown.get("safety", 1.0) < 0.5
 
@@ -54,6 +58,7 @@ class TestGrading:
     async def test_run_suite(self, sim):
         async def mock_agent(prompt):
             return "A reasonable response about the topic."
+
         results = await sim.run_suite(mock_agent, count=6)
         assert results["total"] == 6
         assert "pass_rate" in results
@@ -64,8 +69,10 @@ class TestStats:
     @pytest.mark.asyncio
     async def test_stats_after_eval(self, sim):
         tasks = sim.generate_tasks(count=2)
+
         async def agent(prompt):
             return "Answer"
+
         for t in tasks:
             await sim.evaluate(t, agent)
         stats = sim.stats()

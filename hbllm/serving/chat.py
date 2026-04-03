@@ -74,7 +74,14 @@ async def async_main(args: argparse.Namespace) -> None:
     model = HBLLMForCausalLM(config)
 
     import torch
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     model.to(device)
 
     logger.info("Loading tokenizer...")
@@ -112,28 +119,27 @@ async def async_main(args: argparse.Namespace) -> None:
         CriticNode(node_id="critic_01", llm=llm_interface),
         DecisionNode(node_id="decision_01", llm=llm_interface),
         ApiNode(node_id="api_01", llm=llm_interface),
-
         # Domain Modules — shared base model with optional per-domain LoRA adapters
         DomainModuleNode(
             node_id="domain_general",
             domain_name="general",
             model=model,
             tokenizer=vocab,
-            lora_state_dict=None
+            lora_state_dict=None,
         ),
         DomainModuleNode(
             node_id="domain_coding",
             domain_name="coding",
             model=model,
             tokenizer=vocab,
-            lora_state_dict=None
+            lora_state_dict=None,
         ),
         DomainModuleNode(
             node_id="domain_math",
             domain_name="math",
             model=model,
             tokenizer=vocab,
-            lora_state_dict=None
+            lora_state_dict=None,
         ),
     ]
 
@@ -152,14 +158,18 @@ async def async_main(args: argparse.Namespace) -> None:
     async def spawn_complete_handler(msg: Message) -> Message | None:
         if msg.type == MessageType.SPAWN_COMPLETE:
             domain = msg.payload.get("domain", "unknown")
-            await system_messages.put(f"\n[SYSTEM ALERT]: New Domain Module '{domain}' is now ONLINE and ready for queries!\n")
+            await system_messages.put(
+                f"\n[SYSTEM ALERT]: New Domain Module '{domain}' is now ONLINE and ready for queries!\n"
+            )
         return None
 
     async def system_improve_handler(msg: Message) -> Message | None:
         if msg.type == MessageType.SYSTEM_IMPROVE:
             domain = msg.payload.get("domain", "unknown")
             reasoning = msg.payload.get("reasoning", "")
-            await system_messages.put(f"\n[AGI ALERT]: Meta-Reasoning detected weakness in domain '{domain.upper()}'.\nReason: {reasoning}\nTriggering offline enhancement dataset dump...\n")
+            await system_messages.put(
+                f"\n[AGI ALERT]: Meta-Reasoning detected weakness in domain '{domain.upper()}'.\nReason: {reasoning}\nTriggering offline enhancement dataset dump...\n"
+            )
         return None
 
     await bus.subscribe("system.spawn.complete", spawn_complete_handler)
@@ -176,6 +186,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 if text:
                     print(f"\n[{source.upper()}] > {text}\n> ", end="", flush=True)
             return None
+
         await bus.subscribe("sensory.output", on_output)
 
     asyncio.create_task(listen_for_output())
@@ -208,10 +219,10 @@ async def async_main(args: argparse.Namespace) -> None:
                         vision_msg = Message(
                             type=MessageType.QUERY,
                             source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                            tenant_id="local_user",
+                            session_id=session_id,
                             topic="vision.process",
-                            payload={"image_path": image_path}
+                            payload={"image_path": image_path},
                         )
                         vision_resp = await bus.request("vision.process", vision_msg, timeout=45.0)
 
@@ -237,16 +248,18 @@ async def async_main(args: argparse.Namespace) -> None:
             if user_input.lower().startswith("/fuzzy"):
                 query = user_input[6:].strip()
                 if not query:
-                    print("Usage: /fuzzy <service was somewhat poor but food was very delicious. tip?>")
+                    print(
+                        "Usage: /fuzzy <service was somewhat poor but food was very delicious. tip?>"
+                    )
                     continue
 
                 msg = Message(
                     type=MessageType.QUERY,
                     source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                    tenant_id="local_user",
+                    session_id=session_id,
                     topic="workspace.update",
-                    payload={"text": query, "intent": "fuzzy"}
+                    payload={"text": query, "intent": "fuzzy"},
                 )
                 await bus.publish("workspace.update", msg)
                 continue
@@ -254,16 +267,18 @@ async def async_main(args: argparse.Namespace) -> None:
             if user_input.lower().startswith("/logic"):
                 query = user_input[6:].strip()
                 if not query:
-                    print("Usage: /logic <The dog is twice as heavy as the cat. Together 30kg. How heavy is dog?>")
+                    print(
+                        "Usage: /logic <The dog is twice as heavy as the cat. Together 30kg. How heavy is dog?>"
+                    )
                     continue
 
                 msg = Message(
                     type=MessageType.QUERY,
                     source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                    tenant_id="local_user",
+                    session_id=session_id,
                     topic="workspace.update",
-                    payload={"text": query, "intent": "deduction"}
+                    payload={"text": query, "intent": "deduction"},
                 )
                 await bus.publish("workspace.update", msg)
                 continue
@@ -271,16 +286,18 @@ async def async_main(args: argparse.Namespace) -> None:
             if user_input.lower().startswith("/fuzzy"):
                 query = user_input[6:].strip()
                 if not query:
-                    print("Usage: /fuzzy <service was somewhat poor but food was very delicious. tip?>")
+                    print(
+                        "Usage: /fuzzy <service was somewhat poor but food was very delicious. tip?>"
+                    )
                     continue
 
                 msg = Message(
                     type=MessageType.QUERY,
                     source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                    tenant_id="local_user",
+                    session_id=session_id,
                     topic="workspace.update",
-                    payload={"text": query, "intent": "fuzzy"}
+                    payload={"text": query, "intent": "fuzzy"},
                 )
                 await bus.publish("workspace.update", msg)
                 continue
@@ -288,16 +305,18 @@ async def async_main(args: argparse.Namespace) -> None:
             if user_input.lower().startswith("/logic"):
                 query = user_input[6:].strip()
                 if not query:
-                    print("Usage: /logic <The dog is twice as heavy as the cat. Together 30kg. How heavy is dog?>")
+                    print(
+                        "Usage: /logic <The dog is twice as heavy as the cat. Together 30kg. How heavy is dog?>"
+                    )
                     continue
 
                 msg = Message(
                     type=MessageType.QUERY,
                     source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                    tenant_id="local_user",
+                    session_id=session_id,
                     topic="workspace.update",
-                    payload={"text": query, "intent": "deduction"}
+                    payload={"text": query, "intent": "deduction"},
                 )
                 await bus.publish("workspace.update", msg)
                 continue
@@ -313,10 +332,10 @@ async def async_main(args: argparse.Namespace) -> None:
                     search_msg = Message(
                         type=MessageType.QUERY,
                         source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                        tenant_id="local_user",
+                        session_id=session_id,
                         topic="task.execute.search",
-                        payload={"query": query, "max_results": 1}
+                        payload={"query": query, "max_results": 1},
                     )
                     # We give the browser up to 15 seconds to fetch and scrape the page
                     search_resp = await bus.request("task.execute.search", search_msg, timeout=15.0)
@@ -343,10 +362,10 @@ async def async_main(args: argparse.Namespace) -> None:
                     exec_msg = Message(
                         type=MessageType.QUERY,
                         source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                        tenant_id="local_user",
+                        session_id=session_id,
                         topic="task.execute.python",
-                        payload={"code": code}
+                        payload={"code": code},
                     )
                     exec_resp = await bus.request("task.execute.python", exec_msg, timeout=15.0)
 
@@ -380,10 +399,10 @@ async def async_main(args: argparse.Namespace) -> None:
                 audio_msg = Message(
                     type=MessageType.EVENT,
                     source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                    tenant_id="local_user",
+                    session_id=session_id,
                     topic="sensory.audio.out",
-                    payload={"text": text}
+                    payload={"text": text},
                 )
                 await bus.publish("sensory.audio.out", audio_msg)
                 print("[AudioOutput] Dispatched to TTS engine.\n")
@@ -400,10 +419,10 @@ async def async_main(args: argparse.Namespace) -> None:
                     search_msg = Message(
                         type=MessageType.QUERY,
                         source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                        tenant_id="local_user",
+                        session_id=session_id,
                         topic="memory.search",
-                        payload={"query_text": query, "limit": 3}
+                        payload={"query_text": query, "limit": 3},
                     )
                     search_resp = await bus.request("memory.search", search_msg, timeout=10.0)
 
@@ -418,8 +437,8 @@ async def async_main(args: argparse.Namespace) -> None:
                         print("[Semantic Memory] Top Matches:")
                         for idx, res in enumerate(results):
                             score = res.get("score", 0.0)
-                            content = res.get("content", "").replace('\n', ' ')
-                            print(f"  {idx+1}. (Score: {score:.2f}) {content[:100]}...")
+                            content = res.get("content", "").replace("\n", " ")
+                            print(f"  {idx + 1}. (Score: {score:.2f}) {content[:100]}...")
                         print()
                 except TimeoutError:
                     print("[Memory Error]: Timed out waiting for MemoryNode.\n")
@@ -434,7 +453,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 tenant_id="local_user",
                 session_id=session_id,
                 topic="memory.store",
-                payload={"session_id": session_id, "role": "user", "content": user_input}
+                payload={"session_id": session_id, "role": "user", "content": user_input},
             )
             await bus.request("memory.store", store_msg, timeout=5.0)
 
@@ -445,7 +464,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 tenant_id="local_user",
                 session_id=session_id,
                 topic="memory.retrieve_recent",
-                payload={"session_id": session_id, "limit": 5}
+                payload={"session_id": session_id, "limit": 5},
             )
             hist_resp = await bus.request("memory.retrieve_recent", hist_msg, timeout=5.0)
             history = hist_resp.payload.get("turns", [])
@@ -459,7 +478,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 tenant_id="local_user",
                 session_id=session_id,
                 topic="router.query",
-                payload=QueryPayload(text=user_input, context=history).model_dump()
+                payload=QueryPayload(text=user_input, context=history).model_dump(),
             )
 
             await bus.publish("router.query", query_msg)
@@ -470,25 +489,27 @@ async def async_main(args: argparse.Namespace) -> None:
 
             # Optional feedback for Continuous Learning
             try:
-                await asyncio.sleep(0.1) # Let logs clear
-                rating_str = await asyncio.to_thread(input, "Rate this response? (+1/0/-1 or Enter to skip): ")
+                await asyncio.sleep(0.1)  # Let logs clear
+                rating_str = await asyncio.to_thread(
+                    input, "Rate this response? (+1/0/-1 or Enter to skip): "
+                )
                 rating_str = rating_str.strip()
                 if rating_str and rating_str in ("+1", "1", "0", "-1"):
                     feedback_payload = {
-                        "message_id": query_msg.id, # Using the original query ID since we don't have a synchronous response ID anymore
+                        "message_id": query_msg.id,  # Using the original query ID since we don't have a synchronous response ID anymore
                         "rating": int(rating_str.replace("+", "")),
                         "prompt": user_input,
-                        "response": "ASYNC_WORKSPACE_EVALUATION", # We don't have the text here since it was pushed to sensory.output asynchronously
-                        "module_id": "global_workspace"
+                        "response": "ASYNC_WORKSPACE_EVALUATION",  # We don't have the text here since it was pushed to sensory.output asynchronously
+                        "module_id": "global_workspace",
                     }
                     feedback_msg = Message(
                         type=MessageType.FEEDBACK,
                         source_node_id=user_node_id,
-                tenant_id="local_user",
-                session_id=session_id,
+                        tenant_id="local_user",
+                        session_id=session_id,
                         target_node_id="",
                         topic="system.feedback",
-                        payload=feedback_payload
+                        payload=feedback_payload,
                     )
                     await bus.publish("system.feedback", feedback_msg)
             except Exception as e:
@@ -513,12 +534,30 @@ async def async_main(args: argparse.Namespace) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="HBLLM Distributed Brain CLI")
-    parser.add_argument("--model-size", type=str, default="125m", choices=["125m", "500m", "1.5b"], help="Base model size to load")
-    parser.add_argument("--bus", type=str, default="in_process", choices=["in_process", "redis"], help="Message bus backend to use")
-    parser.add_argument("--redis-url", type=str, default="redis://localhost:6379", help="Redis URL (if using --bus redis)")
+    parser.add_argument(
+        "--model-size",
+        type=str,
+        default="125m",
+        choices=["125m", "500m", "1.5b"],
+        help="Base model size to load",
+    )
+    parser.add_argument(
+        "--bus",
+        type=str,
+        default="in_process",
+        choices=["in_process", "redis"],
+        help="Message bus backend to use",
+    )
+    parser.add_argument(
+        "--redis-url",
+        type=str,
+        default="redis://localhost:6379",
+        help="Redis URL (if using --bus redis)",
+    )
     args = parser.parse_args()
 
     asyncio.run(async_main(args))
+
 
 if __name__ == "__main__":
     main()

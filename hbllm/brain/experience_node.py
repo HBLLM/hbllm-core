@@ -22,33 +22,88 @@ logger = logging.getLogger(__name__)
 
 _SALIENCE_KEYWORDS: dict[str, tuple[list[str], float]] = {
     "emergency": (
-        ["critical", "crash", "shutdown", "panic", "security", "breach",
-         "unauthorized", "fatal", "exception", "traceback"],
+        [
+            "critical",
+            "crash",
+            "shutdown",
+            "panic",
+            "security",
+            "breach",
+            "unauthorized",
+            "fatal",
+            "exception",
+            "traceback",
+        ],
         0.70,
     ),
     "error": (
-        ["error", "failure", "failed", "broken", "bug", "fix", "issue",
-         "alert", "warning", "timeout"],
+        [
+            "error",
+            "failure",
+            "failed",
+            "broken",
+            "bug",
+            "fix",
+            "issue",
+            "alert",
+            "warning",
+            "timeout",
+        ],
         0.50,
     ),
     "learning": (
-        ["wrong", "incorrect", "mistake", "actually", "correction",
-         "but i meant", "should have been", "not what i asked"],
+        [
+            "wrong",
+            "incorrect",
+            "mistake",
+            "actually",
+            "correction",
+            "but i meant",
+            "should have been",
+            "not what i asked",
+        ],
         0.35,
     ),
     "preference": (
-        ["prefer", "always", "never", "love", "hate", "favorite",
-         "don't like", "please stop", "instead"],
+        [
+            "prefer",
+            "always",
+            "never",
+            "love",
+            "hate",
+            "favorite",
+            "don't like",
+            "please stop",
+            "instead",
+        ],
         0.20,
     ),
     "task": (
-        ["remember", "deadline", "schedule", "remind", "don't forget",
-         "important", "urgent", "priority", "asap"],
+        [
+            "remember",
+            "deadline",
+            "schedule",
+            "remind",
+            "don't forget",
+            "important",
+            "urgent",
+            "priority",
+            "asap",
+        ],
         0.35,
     ),
     "sentiment_negative": (
-        ["frustrated", "annoying", "terrible", "worst", "useless",
-         "awful", "horrible", "disappointed", "confused"],
+        [
+            "frustrated",
+            "annoying",
+            "terrible",
+            "worst",
+            "useless",
+            "awful",
+            "horrible",
+            "disappointed",
+            "confused",
+        ],
         0.20,
     ),
 }
@@ -138,9 +193,7 @@ class ExperienceNode(Node):
         if is_priority:
             is_priority = self._check_suppression(content)
 
-        logger.info(
-            "[ExperienceNode] Salience=%.2f priority=%s", score, is_priority
-        )
+        logger.info("[ExperienceNode] Salience=%.2f priority=%s", score, is_priority)
 
         # Publish for downstream consumers (MemoryNode, MetaReasoningNode)
         salience_msg = Message(
@@ -287,7 +340,9 @@ class ExperienceNode(Node):
         now = time.time()
 
         # Clean expired entries
-        expired = [k for k, v in self._priority_cooldowns.items() if now - v > self._suppression_ttl]
+        expired = [
+            k for k, v in self._priority_cooldowns.items() if now - v > self._suppression_ttl
+        ]
         for k in expired:
             del self._priority_cooldowns[k]
 
@@ -368,7 +423,9 @@ class ExperienceNode(Node):
 
         # ── Layer 1: Event categorization ────────────────────────────────
         category = self._categorize_event(content_lower)
-        severity = "critical" if salience_score >= 0.9 else "high" if salience_score >= 0.7 else "medium"
+        severity = (
+            "critical" if salience_score >= 0.9 else "high" if salience_score >= 0.7 else "medium"
+        )
 
         # ── Layer 2: Causal analysis ─────────────────────────────────────
         if self.llm:
@@ -406,7 +463,14 @@ class ExperienceNode(Node):
     def _categorize_event(self, content_lower: str) -> str:
         """Categorize the event based on content analysis."""
         category_signals = {
-            "security": ["security", "breach", "unauthorized", "attack", "vulnerability", "exploit"],
+            "security": [
+                "security",
+                "breach",
+                "unauthorized",
+                "attack",
+                "vulnerability",
+                "exploit",
+            ],
             "error": ["error", "exception", "crash", "failed", "traceback", "bug"],
             "performance": ["slow", "timeout", "latency", "memory", "leak", "bottleneck"],
             "learning": ["learned", "discovered", "pattern", "insight", "understand"],
@@ -440,14 +504,14 @@ class ExperienceNode(Node):
             for marker in causal_markers:
                 if marker in s_lower:
                     idx = s_lower.index(marker)
-                    cause = sentence[idx + len(marker):].strip()
+                    cause = sentence[idx + len(marker) :].strip()
                     if len(cause) > 10:
                         causes.append(cause[:200])
                     break
             for marker in effect_markers:
                 if marker in s_lower:
                     idx = s_lower.index(marker)
-                    effect = sentence[idx + len(marker):].strip()
+                    effect = sentence[idx + len(marker) :].strip()
                     if len(effect) > 10:
                         effects.append(effect[:200])
                     break
@@ -492,20 +556,20 @@ class ExperienceNode(Node):
 
         chosen_templates = {
             "security": f"I've detected a potential security concern: {prompt[:200]}. "
-                        f"Immediate steps: 1) Isolate the affected component, "
-                        f"2) Review access logs, 3) Apply appropriate patches or mitigations.",
+            f"Immediate steps: 1) Isolate the affected component, "
+            f"2) Review access logs, 3) Apply appropriate patches or mitigations.",
             "error": f"An error has occurred: {prompt[:200]}. "
-                     f"Analysis: Let me examine the stack trace and identify the root cause. "
-                     f"I'll check for recent changes that may have triggered this.",
+            f"Analysis: Let me examine the stack trace and identify the root cause. "
+            f"I'll check for recent changes that may have triggered this.",
             "performance": f"Performance issue detected: {prompt[:200]}. "
-                          f"I'll profile the affected pathway, check resource utilization, "
-                          f"and identify optimization opportunities.",
+            f"I'll profile the affected pathway, check resource utilization, "
+            f"and identify optimization opportunities.",
             "user_preference": f"Noted preference: {prompt[:200]}. "
-                              f"I'll remember this preference and apply it consistently "
-                              f"in future interactions of this type.",
+            f"I'll remember this preference and apply it consistently "
+            f"in future interactions of this type.",
             "learning": f"New insight captured: {prompt[:200]}. "
-                       f"I'll integrate this into my knowledge base and apply it "
-                       f"to related scenarios.",
+            f"I'll integrate this into my knowledge base and apply it "
+            f"to related scenarios.",
         }
 
         rejected_templates = {
@@ -519,12 +583,9 @@ class ExperienceNode(Node):
         chosen = chosen_templates.get(
             category,
             f"I'll analyze this carefully: {prompt[:200]}. "
-            f"Let me examine the context and determine the best course of action."
+            f"Let me examine the context and determine the best course of action.",
         )
-        rejected = rejected_templates.get(
-            category,
-            "I'll note that."
-        )
+        rejected = rejected_templates.get(category, "I'll note that.")
 
         return {
             "prompt": prompt,
@@ -570,7 +631,9 @@ class ExperienceNode(Node):
                 seen.add(entity.lower())
 
         # Pattern 2: Technical terms (camelCase, snake_case, ALL_CAPS)
-        for match in _re.finditer(r"\b([a-z]+(?:[A-Z][a-z]+)+|[a-z_]+_[a-z_]+|[A-Z]{2,}[A-Z_]*)\b", content):
+        for match in _re.finditer(
+            r"\b([a-z]+(?:[A-Z][a-z]+)+|[a-z_]+_[a-z_]+|[A-Z]{2,}[A-Z_]*)\b", content
+        ):
             term = match.group(1).strip()
             if term.lower() not in seen and len(term) > 3:
                 entities.append({"label": term, "type": "technical_term"})
@@ -585,9 +648,23 @@ class ExperienceNode(Node):
 
         # Pattern 4: Domain-specific keywords
         domain_terms = {
-            "model", "dataset", "training", "inference", "embedding", "token",
-            "pipeline", "node", "bus", "message", "tenant", "session",
-            "memory", "adapter", "checkpoint", "gradient", "loss",
+            "model",
+            "dataset",
+            "training",
+            "inference",
+            "embedding",
+            "token",
+            "pipeline",
+            "node",
+            "bus",
+            "message",
+            "tenant",
+            "session",
+            "memory",
+            "adapter",
+            "checkpoint",
+            "gradient",
+            "loss",
         }
         words = set(content.lower().split())
         for term in domain_terms & words:
@@ -612,17 +689,28 @@ class ExperienceNode(Node):
 
         # Pattern-based rule extraction
         rule_patterns = [
-            (r"(?:when|whenever|if)\s+(.{10,100}?),?\s+(?:then|should|must|always)\s+(.{10,100}?)(?:\.|$)", 0.7),
+            (
+                r"(?:when|whenever|if)\s+(.{10,100}?),?\s+(?:then|should|must|always)\s+(.{10,100}?)(?:\.|$)",
+                0.7,
+            ),
             (r"(.{10,80}?)\s+(?:always|usually|typically)\s+(.{10,100}?)(?:\.|$)", 0.5),
-            (r"(?:user|they|system)\s+(?:prefers?|wants?|needs?)\s+(.{10,100}?)(?:\s+(?:when|for)\s+(.{10,100}?))?(?:\.|$)", 0.6),
-            (r"(?:never|avoid|don't)\s+(.{10,80}?)\s+(?:because|since|as)\s+(.{10,100}?)(?:\.|$)", 0.65),
+            (
+                r"(?:user|they|system)\s+(?:prefers?|wants?|needs?)\s+(.{10,100}?)(?:\s+(?:when|for)\s+(.{10,100}?))?(?:\.|$)",
+                0.6,
+            ),
+            (
+                r"(?:never|avoid|don't)\s+(.{10,80}?)\s+(?:because|since|as)\s+(.{10,100}?)(?:\.|$)",
+                0.65,
+            ),
             (r"(.{10,80}?)\s+(?:leads to|results in|causes)\s+(.{10,100}?)(?:\.|$)", 0.55),
         ]
 
         for pattern, base_confidence in rule_patterns:
             for match in _re.finditer(pattern, content_lower, _re.IGNORECASE):
                 condition = match.group(1).strip()
-                action = match.group(2).strip() if match.lastindex >= 2 else "take appropriate action"
+                action = (
+                    match.group(2).strip() if match.lastindex >= 2 else "take appropriate action"
+                )
 
                 if len(condition) < 8 or len(action) < 8:
                     continue
@@ -632,17 +720,17 @@ class ExperienceNode(Node):
                 if category in ("security", "error"):
                     confidence += 0.1
 
-                rule_id = hashlib.md5(
-                    f"{condition}|{action}".encode()
-                ).hexdigest()[:12]
+                rule_id = hashlib.md5(f"{condition}|{action}".encode()).hexdigest()[:12]
 
-                rules.append({
-                    "rule_id": rule_id,
-                    "condition": condition[:200],
-                    "action": action[:200],
-                    "confidence": round(min(confidence, 0.95), 2),
-                    "category": category,
-                })
+                rules.append(
+                    {
+                        "rule_id": rule_id,
+                        "condition": condition[:200],
+                        "action": action[:200],
+                        "confidence": round(min(confidence, 0.95), 2),
+                        "category": category,
+                    }
+                )
 
         return rules[:10]  # Cap at 10 rules per reflection
 
@@ -686,4 +774,3 @@ class ExperienceNode(Node):
                 correlation_id=message.correlation_id,
             )
             await self.bus.publish("system.salience", salience_msg)
-

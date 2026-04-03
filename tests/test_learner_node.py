@@ -24,6 +24,7 @@ def _make_feedback(rating=1, prompt="What is AI?", response="AI is..."):
         },
     )
 
+
 @pytest.fixture
 def clean_queue():
     path = "workspace/reflection/dpo_queue.json"
@@ -33,7 +34,9 @@ def clean_queue():
     if os.path.exists(path):
         os.remove(path)
 
+
 # ── Feedback Collection Tests ────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_accepts_valid_feedback_and_queues(clean_queue):
@@ -65,6 +68,7 @@ async def test_accepts_valid_feedback_and_queues(clean_queue):
 
 
 # ── Sleep Trigger Tests (Overnight Learning) ─────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_training_triggers_ONLY_on_sleep(clean_queue):
@@ -120,7 +124,9 @@ async def test_training_completes_and_broadcasts(clean_queue):
     await node.handle_message(neg)
 
     # Trigger Sleep
-    sleep_trigger = Message(type=MessageType.EVENT, source_node_id="test", topic="system.sleep.dpo_trigger", payload={})
+    sleep_trigger = Message(
+        type=MessageType.EVENT, source_node_id="test", topic="system.sleep.dpo_trigger", payload={}
+    )
     await bus.publish("system.sleep.dpo_trigger", sleep_trigger)
 
     # Wait for the background training to complete

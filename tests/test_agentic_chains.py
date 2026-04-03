@@ -20,6 +20,7 @@ from hbllm.network.messages import Message, MessageType
 
 # ─── Unit Tests: ThoughtNode trajectory_history ──────────────────────────────
 
+
 def test_thought_node_has_trajectory_history():
     """ThoughtNode should initialize with an empty trajectory_history."""
     node = ThoughtNode()
@@ -70,6 +71,7 @@ def test_observation_node_does_not_propagate_flag():
 
 
 # ─── Unit Tests: ToolRouterNode ──────────────────────────────────────────────
+
 
 @pytest.fixture
 async def bus():
@@ -172,6 +174,7 @@ async def test_tool_router_handles_invalid_json(bus):
 
 # ─── Integration Tests: PlannerNode tool call interception ───────────────────
 
+
 @pytest.mark.asyncio
 async def test_score_thought_intercepts_tool_call(bus):
     """_score_thought should detect <tool_call> XML, route via bus, and create observation child."""
@@ -192,7 +195,7 @@ async def test_score_thought_intercepts_tool_call(bus):
         root = graph.add_root("Query: what is the answer?")
         tool_node = graph.branch(
             root.id,
-            'I need to look this up. <tool_call name="lookup">{"query": "answer"}</tool_call>'
+            'I need to look this up. <tool_call name="lookup">{"query": "answer"}</tool_call>',
         )
 
         # Before scoring, tool_node should be a leaf

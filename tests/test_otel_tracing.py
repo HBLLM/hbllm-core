@@ -137,6 +137,7 @@ class TestBusMetrics:
     def test_snapshot_serializable(self, metrics):
         """Snapshot should be JSON-serializable."""
         import json
+
         metrics.record_delivery("t", 3.14)
         snap = metrics.snapshot()
         serialized = json.dumps(snap)
@@ -149,6 +150,7 @@ class TestProviderTracing:
     def test_trace_span_import(self):
         """Provider module should import trace_span without errors."""
         from hbllm.serving.provider import trace_span as provider_trace
+
         assert provider_trace is trace_span
 
     def test_openai_provider_has_tracing(self):
@@ -156,6 +158,7 @@ class TestProviderTracing:
         import inspect
 
         from hbllm.serving.provider import OpenAIProvider
+
         source = inspect.getsource(OpenAIProvider.generate)
         assert "trace_span" in source
 
@@ -164,6 +167,7 @@ class TestProviderTracing:
         import inspect
 
         from hbllm.serving.provider import AnthropicProvider
+
         source = inspect.getsource(AnthropicProvider.generate)
         assert "trace_span" in source
 
@@ -172,5 +176,6 @@ class TestProviderTracing:
         import inspect
 
         from hbllm.serving.provider import LocalProvider
+
         source = inspect.getsource(LocalProvider.generate)
         assert "trace_span" in source

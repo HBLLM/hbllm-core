@@ -22,8 +22,6 @@ from hbllm.network.tracing import BusMetrics
 logger = logging.getLogger(__name__)
 
 
-
-
 class RedisBus(MessageBus):
     """
     Distributed MessageBus using Redis Pub/Sub.
@@ -168,7 +166,9 @@ class RedisBus(MessageBus):
         while self._running:
             try:
                 # get_message is non-blocking technically, but with timeout it yields
-                msg_dict = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+                msg_dict = await self.pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=0.1
+                )
                 if msg_dict is None:
                     continue
 
@@ -183,7 +183,9 @@ class RedisBus(MessageBus):
                     if self.auth_secret and "|" in raw_data:
                         sig, payload_json = raw_data.split("|", 1)
                         if not self._verify(payload_json, sig):
-                            logger.warning("Dropped message with invalid signature on topic '%s'", topic)
+                            logger.warning(
+                                "Dropped message with invalid signature on topic '%s'", topic
+                            )
                             self.metrics.messages_dropped_auth += 1
                             continue
                     else:
@@ -197,9 +199,14 @@ class RedisBus(MessageBus):
 
                     # ── TTL enforcement ──
                     if message.ttl_seconds is not None:
-                        age = (time.time() - message.timestamp.replace(tzinfo=UTC).timestamp())
+                        age = time.time() - message.timestamp.replace(tzinfo=UTC).timestamp()
                         if age > message.ttl_seconds:
-                            logger.debug("Dropped expired message %s (age=%.1fs, ttl=%ss)", message.id, age, message.ttl_seconds)
+                            logger.debug(
+                                "Dropped expired message %s (age=%.1fs, ttl=%ss)",
+                                message.id,
+                                age,
+                                message.ttl_seconds,
+                            )
                             self.metrics.messages_dropped_ttl += 1
                             continue
 

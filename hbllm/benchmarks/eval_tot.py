@@ -20,6 +20,7 @@ async def run_tot_benchmark() -> dict[str, Any]:
     # Mock models for speed
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForProcessReward
+
     config = get_config("125m")
     config.vocab_size = 65536
     config.hidden_size = 32
@@ -34,9 +35,15 @@ async def run_tot_benchmark() -> dict[str, Any]:
     class MockProvider:
         def __init__(self):
             self.name = "local"
+
         async def generate(self, messages, **kwargs):
             from hbllm.serving.provider import LLMResponse
-            return LLMResponse(content="Action: <tool_call><name>math</name><args>{'expr':'2+2'}</args></tool_call>", model="mock", usage={})
+
+            return LLMResponse(
+                content="Action: <tool_call><name>math</name><args>{'expr':'2+2'}</args></tool_call>",
+                model="mock",
+                usage={},
+            )
 
     planner.provider = MockProvider()
 
@@ -71,8 +78,9 @@ async def run_tot_benchmark() -> dict[str, Any]:
     return {
         "mcts_nodes_expanded": total_nodes,
         "nodes_per_sec": total_nodes / latency if latency > 0 else 0,
-        "total_latency_sec": latency
+        "total_latency_sec": latency,
     }
+
 
 if __name__ == "__main__":
     results = asyncio.run(run_tot_benchmark())

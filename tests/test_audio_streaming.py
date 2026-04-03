@@ -60,8 +60,10 @@ async def test_stream_multiple_chunks(audio_node):
 
     for i in range(5):
         msg = Message(
-            type=MessageType.EVENT, source_node_id="test",
-            session_id="sess_2", topic="sensory.audio.stream",
+            type=MessageType.EVENT,
+            source_node_id="test",
+            session_id="sess_2",
+            topic="sensory.audio.stream",
             payload={"chunk": f"0{i}" * 4},
         )
         await bus.publish("sensory.audio.stream", msg)
@@ -82,19 +84,29 @@ async def test_stream_is_final_flushes(audio_node):
     node._flush_stream_buffer = AsyncMock()
 
     # Send chunk
-    await bus.publish("sensory.audio.stream", Message(
-        type=MessageType.EVENT, source_node_id="test",
-        session_id="sess_3", topic="sensory.audio.stream",
-        payload={"chunk": "aabbccdd"},
-    ))
+    await bus.publish(
+        "sensory.audio.stream",
+        Message(
+            type=MessageType.EVENT,
+            source_node_id="test",
+            session_id="sess_3",
+            topic="sensory.audio.stream",
+            payload={"chunk": "aabbccdd"},
+        ),
+    )
     await asyncio.sleep(0.3)
 
     # Send is_final
-    await bus.publish("sensory.audio.stream", Message(
-        type=MessageType.EVENT, source_node_id="test",
-        session_id="sess_3", topic="sensory.audio.stream",
-        payload={"is_final": True},
-    ))
+    await bus.publish(
+        "sensory.audio.stream",
+        Message(
+            type=MessageType.EVENT,
+            source_node_id="test",
+            session_id="sess_3",
+            topic="sensory.audio.stream",
+            payload={"is_final": True},
+        ),
+    )
     await asyncio.sleep(0.3)
 
     node._flush_stream_buffer.assert_called_once()
@@ -108,8 +120,10 @@ async def test_stream_invalid_hex_returns_error(audio_node):
     node, bus = audio_node
 
     msg = Message(
-        type=MessageType.EVENT, source_node_id="test",
-        session_id="sess_4", topic="sensory.audio.stream",
+        type=MessageType.EVENT,
+        source_node_id="test",
+        session_id="sess_4",
+        topic="sensory.audio.stream",
         payload={"chunk": "not_valid_hex"},
     )
 
@@ -126,8 +140,10 @@ async def test_stream_empty_no_action(audio_node):
     node, bus = audio_node
 
     msg = Message(
-        type=MessageType.EVENT, source_node_id="test",
-        session_id="sess_5", topic="sensory.audio.stream",
+        type=MessageType.EVENT,
+        source_node_id="test",
+        session_id="sess_5",
+        topic="sensory.audio.stream",
         payload={"chunk": ""},
     )
     result = await node.handle_stream(msg)
@@ -143,11 +159,16 @@ async def test_stream_separate_sessions(audio_node):
 
     hex_data = {"s_a": "aabb", "s_b": "ccdd"}
     for sess in ["s_a", "s_b"]:
-        await bus.publish("sensory.audio.stream", Message(
-            type=MessageType.EVENT, source_node_id="test",
-            session_id=sess, topic="sensory.audio.stream",
-            payload={"chunk": hex_data[sess]},
-        ))
+        await bus.publish(
+            "sensory.audio.stream",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id="test",
+                session_id=sess,
+                topic="sensory.audio.stream",
+                payload={"chunk": hex_data[sess]},
+            ),
+        )
 
     await asyncio.sleep(0.3)
 

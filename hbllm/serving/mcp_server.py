@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # ─── JSON-RPC Helpers ─────────────────────────────────────────────────────────
 
+
 def _jsonrpc_response(id: Any, result: Any) -> dict:
     return {"jsonrpc": "2.0", "id": id, "result": result}
 
@@ -55,8 +56,16 @@ HBLLM_TOOLS = [
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "The user query to process"},
-                "tenant_id": {"type": "string", "description": "Tenant ID for multi-tenant isolation", "default": "default"},
-                "session_id": {"type": "string", "description": "Session ID for conversation continuity", "default": "default"},
+                "tenant_id": {
+                    "type": "string",
+                    "description": "Tenant ID for multi-tenant isolation",
+                    "default": "default",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID for conversation continuity",
+                    "default": "default",
+                },
             },
             "required": ["text"],
         },
@@ -68,7 +77,11 @@ HBLLM_TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query for memory retrieval"},
-                "memory_type": {"type": "string", "enum": ["episodic", "semantic", "procedural", "all"], "default": "all"},
+                "memory_type": {
+                    "type": "string",
+                    "enum": ["episodic", "semantic", "procedural", "all"],
+                    "default": "all",
+                },
                 "tenant_id": {"type": "string", "default": "default"},
                 "limit": {"type": "integer", "default": 10},
             },
@@ -82,7 +95,11 @@ HBLLM_TOOLS = [
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "Content to store"},
-                "memory_type": {"type": "string", "enum": ["episodic", "semantic", "skill"], "default": "semantic"},
+                "memory_type": {
+                    "type": "string",
+                    "enum": ["episodic", "semantic", "skill"],
+                    "default": "semantic",
+                },
                 "tenant_id": {"type": "string", "default": "default"},
                 "metadata": {"type": "object", "description": "Additional metadata", "default": {}},
             },
@@ -108,8 +125,16 @@ HBLLM_TOOLS = [
                 "tenant_id": {"type": "string", "default": "default"},
                 "persona_name": {"type": "string", "description": "Name of the persona"},
                 "system_prompt": {"type": "string", "description": "System prompt for the persona"},
-                "goals": {"type": "array", "items": {"type": "string"}, "description": "Persona goals"},
-                "constraints": {"type": "array", "items": {"type": "string"}, "description": "Persona constraints"},
+                "goals": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Persona goals",
+                },
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Persona constraints",
+                },
             },
         },
     },
@@ -132,9 +157,17 @@ HBLLM_TOOLS = [
             "type": "object",
             "properties": {
                 "message_id": {"type": "string", "description": "ID of the message to rate"},
-                "rating": {"type": "integer", "enum": [-1, 0, 1], "description": "-1=bad, 0=neutral, 1=good"},
+                "rating": {
+                    "type": "integer",
+                    "enum": [-1, 0, 1],
+                    "description": "-1=bad, 0=neutral, 1=good",
+                },
                 "tenant_id": {"type": "string", "default": "default"},
-                "comment": {"type": "string", "description": "Optional feedback comment", "default": ""},
+                "comment": {
+                    "type": "string",
+                    "description": "Optional feedback comment",
+                    "default": "",
+                },
             },
             "required": ["message_id", "rating"],
         },
@@ -151,6 +184,7 @@ HBLLM_TOOLS = [
 
 
 # ─── MCP Server ───────────────────────────────────────────────────────────────
+
 
 class HBLLMMcpServer:
     """
@@ -390,6 +424,7 @@ class HBLLMMcpServer:
 
 # ─── Stdio Transport ──────────────────────────────────────────────────────────
 
+
 async def run_stdio(server: HBLLMMcpServer) -> None:
     """Run the MCP server over stdio (stdin/stdout JSON-RPC)."""
     logger.info("HBLLM MCP server starting on stdio")
@@ -401,7 +436,9 @@ async def run_stdio(server: HBLLMMcpServer) -> None:
     writer_transport, writer_protocol = await asyncio.get_event_loop().connect_write_pipe(
         asyncio.streams.FlowControlMixin, sys.stdout
     )
-    writer = asyncio.StreamWriter(writer_transport, writer_protocol, reader, asyncio.get_event_loop())
+    writer = asyncio.StreamWriter(
+        writer_transport, writer_protocol, reader, asyncio.get_event_loop()
+    )
 
     while True:
         try:
@@ -441,6 +478,7 @@ async def run_stdio(server: HBLLMMcpServer) -> None:
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="HBLLM MCP Server")

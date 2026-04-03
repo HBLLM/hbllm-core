@@ -41,7 +41,9 @@ class PretrainingDataset(Dataset):
         self.sequence_length = sequence_length if sequence_length else self.reader.sequence_length
 
         # Override reader seq len if needed for num_sequences
-        self._len = max(0, (self.reader.total_tokens - self.sequence_length) // self.sequence_length)
+        self._len = max(
+            0, (self.reader.total_tokens - self.sequence_length) // self.sequence_length
+        )
 
         logger.info(
             "PretrainingDataset: %d tokens, %d sequences of length %d",
@@ -111,7 +113,11 @@ class StreamingPretrainingDataset(IterableDataset):
             # Multi-worker: each worker handles a subset of shards
             per_worker = len(shard_paths) // worker_info.num_workers
             start = worker_info.id * per_worker
-            end = start + per_worker if worker_info.id < worker_info.num_workers - 1 else len(shard_paths)
+            end = (
+                start + per_worker
+                if worker_info.id < worker_info.num_workers - 1
+                else len(shard_paths)
+            )
             shard_paths = shard_paths[start:end]
 
         # Stream sequences from assigned shards

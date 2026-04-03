@@ -24,9 +24,11 @@ logger = logging.getLogger(__name__)
 
 # ── Rule data structure ──────────────────────────────────────────────────────
 
+
 @dataclass
 class ExtractedRule:
     """An if→then rule mined from experience data."""
+
     rule_id: str
     condition: str
     action: str
@@ -51,11 +53,20 @@ class ExtractedRule:
 _RULE_PATTERNS: list[tuple[str, str, str]] = [
     # (regex_pattern, condition_group, action_group)
     (r"(?:when|whenever|if)\s+(.+?),?\s+(?:then|should|must|always)\s+(.+?)(?:\.|$)", "1", "2"),
-    (r"(.+?)\s+(?:always|usually|typically)\s+(?:leads to|results in|causes)\s+(.+?)(?:\.|$)", "1", "2"),
-    (r"(?:user|they|he|she)\s+(?:prefers?|likes?|wants?)\s+(.+?)\s+(?:when|over|instead of)\s+(.+?)(?:\.|$)", "1", "2"),
+    (
+        r"(.+?)\s+(?:always|usually|typically)\s+(?:leads to|results in|causes)\s+(.+?)(?:\.|$)",
+        "1",
+        "2",
+    ),
+    (
+        r"(?:user|they|he|she)\s+(?:prefers?|likes?|wants?)\s+(.+?)\s+(?:when|over|instead of)\s+(.+?)(?:\.|$)",
+        "1",
+        "2",
+    ),
     (r"(?:every time|each time)\s+(.+?),?\s+(.+?)(?:\.|$)", "1", "2"),
     (r"(.+?)\s+(?:requires|needs|demands)\s+(.+?)(?:\.|$)", "1", "2"),
 ]
+
 
 def _rule_id(condition: str, action: str) -> str:
     """Deterministic rule ID."""
@@ -96,6 +107,7 @@ def extract_rules_from_text(text: str) -> list[tuple[str, str, float]]:
 
 
 # ── Rule Extractor Node ──────────────────────────────────────────────────────
+
 
 class RuleExtractorNode(Node):
     """
@@ -181,12 +193,14 @@ class RuleExtractorNode(Node):
         if not payload.get("is_priority", False):
             return None
 
-        self._priority_buffer.append({
-            "content": payload.get("content", ""),
-            "score": payload.get("score", 0),
-            "message_id": payload.get("message_id", ""),
-            "timestamp": time.time(),
-        })
+        self._priority_buffer.append(
+            {
+                "content": payload.get("content", ""),
+                "score": payload.get("score", 0),
+                "message_id": payload.get("message_id", ""),
+                "timestamp": time.time(),
+            }
+        )
         logger.debug(
             "[RuleExtractor] Buffered priority event (total=%d)",
             len(self._priority_buffer),
@@ -223,9 +237,7 @@ class RuleExtractorNode(Node):
                     # Existing rule — boost confidence
                     existing = self._rules[rid]
                     existing.occurrences += 1
-                    existing.confidence = min(
-                        existing.confidence + 0.05, 0.99
-                    )
+                    existing.confidence = min(existing.confidence + 0.05, 0.99)
                     existing.source_events.append(event.get("message_id", ""))
 
                     # Auto-promote if threshold reached
@@ -250,7 +262,9 @@ class RuleExtractorNode(Node):
                         )
                         logger.info(
                             "[RuleExtractor] Promoting rule %s (confidence=%.2f, occurrences=%d)",
-                            rid, existing.confidence, existing.occurrences,
+                            rid,
+                            existing.confidence,
+                            existing.occurrences,
                         )
                 else:
                     # New rule
@@ -278,7 +292,8 @@ class RuleExtractorNode(Node):
         if new_rules:
             logger.info(
                 "[RuleExtractor] Extracted %d new rules (total=%d)",
-                new_rules, len(self._rules),
+                new_rules,
+                len(self._rules),
             )
 
         return new_rules

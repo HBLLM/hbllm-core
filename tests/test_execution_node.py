@@ -1,4 +1,3 @@
-
 import pytest
 
 from hbllm.actions.execution_node import ExecutionNode, validate_code
@@ -9,19 +8,21 @@ from hbllm.network.messages import Message, MessageType
 def execution_node():
     return ExecutionNode(node_id="test_exec", timeout=5.0)
 
+
 @pytest.mark.asyncio
 async def test_execution_node_success(execution_node):
     msg = Message(
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "print('hello world'); print(2+2)"}
+        payload={"code": "print('hello world'); print(2+2)"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp is not None
     assert resp.payload["status"] == "SUCCESS"
     assert "hello world" in resp.payload["output"]
     assert "4" in resp.payload["output"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_syntax_error(execution_node):
@@ -30,12 +31,13 @@ async def test_execution_node_syntax_error(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "print('missing paren"}
+        payload={"code": "print('missing paren"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp is not None
     assert resp.type == MessageType.ERROR
     assert "Syntax error" in resp.payload["error"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_timeout(execution_node):
@@ -44,11 +46,12 @@ async def test_execution_node_timeout(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "import time\ntime.sleep(10)"}
+        payload={"code": "import time\ntime.sleep(10)"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.payload["status"] == "FAILURE"
     assert "timed out" in resp.payload["output"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_extraction(execution_node):
@@ -57,7 +60,7 @@ async def test_execution_node_extraction(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"text": text}
+        payload={"text": text},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.payload["status"] == "SUCCESS"
@@ -66,6 +69,7 @@ async def test_execution_node_extraction(execution_node):
 
 # ── Sandbox security tests ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_execution_node_blocks_os_import(execution_node):
     """AST validator should reject 'import os'."""
@@ -73,11 +77,12 @@ async def test_execution_node_blocks_os_import(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "import os\nprint(os.listdir('.'))"}
+        payload={"code": "import os\nprint(os.listdir('.'))"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.type == MessageType.ERROR
     assert "security policy" in resp.payload["error"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_blocks_subprocess(execution_node):
@@ -86,11 +91,12 @@ async def test_execution_node_blocks_subprocess(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "import subprocess\nsubprocess.run(['ls'])"}
+        payload={"code": "import subprocess\nsubprocess.run(['ls'])"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.type == MessageType.ERROR
     assert "security policy" in resp.payload["error"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_blocks_eval(execution_node):
@@ -99,11 +105,12 @@ async def test_execution_node_blocks_eval(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "result = eval('1+1')\nprint(result)"}
+        payload={"code": "result = eval('1+1')\nprint(result)"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.type == MessageType.ERROR
     assert "security policy" in resp.payload["error"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_blocks_open(execution_node):
@@ -112,11 +119,12 @@ async def test_execution_node_blocks_open(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "f = open('/etc/passwd')\nprint(f.read())"}
+        payload={"code": "f = open('/etc/passwd')\nprint(f.read())"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.type == MessageType.ERROR
     assert "security policy" in resp.payload["error"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_blocks_dunder(execution_node):
@@ -125,11 +133,12 @@ async def test_execution_node_blocks_dunder(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "x = ''.__class__.__subclasses__()"}
+        payload={"code": "x = ''.__class__.__subclasses__()"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.type == MessageType.ERROR
     assert "security policy" in resp.payload["error"]
+
 
 @pytest.mark.asyncio
 async def test_execution_node_blocks_from_import(execution_node):
@@ -138,7 +147,7 @@ async def test_execution_node_blocks_from_import(execution_node):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.execute_code",
-        payload={"code": "from os.path import join\nprint(join('a', 'b'))"}
+        payload={"code": "from os.path import join\nprint(join('a', 'b'))"},
     )
     resp = await execution_node.handle_message(msg)
     assert resp.type == MessageType.ERROR
@@ -147,15 +156,18 @@ async def test_execution_node_blocks_from_import(execution_node):
 
 # ── validate_code unit tests ────────────────────────────────────────────────
 
+
 def test_validate_code_safe():
     """Pure math code should pass validation."""
     violations = validate_code("x = 1 + 2\nprint(x)")
     assert violations == []
 
+
 def test_validate_code_blocked_import():
     violations = validate_code("import sys")
     assert len(violations) == 1
     assert "sys" in violations[0]
+
 
 def test_validate_code_multiple_violations():
     code = "import os\nimport subprocess\nresult = eval('1+1')"

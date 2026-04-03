@@ -123,10 +123,11 @@ class HBLLMModel(nn.Module):
         # Automatic Hybrid Quantization Injection (Phase 4)
         if getattr(config, "quantization_level", 16) in [4, 8]:
             from hbllm.modules.lora import LoRAManager
+
             LoRAManager.inject(
                 self,
                 quantization_level=config.quantization_level,
-                r=getattr(config, "lora_rank", 8)
+                r=getattr(config, "lora_rank", 8),
             )
 
         # Final normalization
@@ -168,9 +169,11 @@ class HBLLMModel(nn.Module):
             else:
                 past_len = 0
 
-            position_ids = torch.arange(
-                past_len, past_len + seq_len, device=input_ids.device
-            ).unsqueeze(0).expand(batch_size, -1)
+            position_ids = (
+                torch.arange(past_len, past_len + seq_len, device=input_ids.device)
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )
 
         # Build causal attention mask
         if attention_mask is None:
@@ -182,10 +185,14 @@ class HBLLMModel(nn.Module):
                     past_len = past_key_values[0][0].shape[2]
 
             if past_len == 0:
-                attention_mask = self._build_causal_mask(seq_len, hidden_states.device, hidden_states.dtype)
+                attention_mask = self._build_causal_mask(
+                    seq_len, hidden_states.device, hidden_states.dtype
+                )
             else:
                 attention_mask = self._build_causal_mask(
-                    seq_len, hidden_states.device, hidden_states.dtype,
+                    seq_len,
+                    hidden_states.device,
+                    hidden_states.dtype,
                     past_key_values_length=past_len,
                 )
 
@@ -295,6 +302,7 @@ class HBLLMForCausalLM(nn.Module):
         import logging
 
         from hbllm.modules.lora import LoRAManager
+
         logger = logging.getLogger(__name__)
 
         # Check if LoRA is already injected; if not, inject it.
@@ -303,7 +311,11 @@ class HBLLMForCausalLM(nn.Module):
         if not has_lora:
             logger.info("Injecting new LoRA adapters (r=%d)...", r)
             LoRAManager.inject(
-                self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, target_modules=target_modules
+                self,
+                r=r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                target_modules=target_modules,
             )
 
         # Load the state into the 'default' adapter slot so the LocalProvider can trigger it globally
@@ -313,6 +325,7 @@ class HBLLMForCausalLM(nn.Module):
     def set_lora_active(self, active: bool = True) -> None:
         """Toggle LoRA adapters on or off for inference."""
         from hbllm.modules.lora import LoRAManager
+
         LoRAManager.set_active_adapter(self, "default" if active else None)
 
     def forward(
@@ -471,7 +484,9 @@ class HBLLMForCausalLM(nn.Module):
                 self.acceptance_rate = (
                     self.ewma_alpha * batch_rate + (1 - self.ewma_alpha) * self.acceptance_rate
                 )
-            return max(self.gamma_min, min(self.gamma_max, round(self.acceptance_rate * self.gamma_max)))
+            return max(
+                self.gamma_min, min(self.gamma_max, round(self.acceptance_rate * self.gamma_max))
+            )
 
     @torch.no_grad()
     def generate_speculative(
@@ -547,7 +562,7 @@ class HBLLMForCausalLM(nn.Module):
                 draft_tokens.append(next_draft_token)
                 draft_input_ids = torch.cat([draft_input_ids, next_draft_token], dim=1)
 
-            draft_tokens_tensor = torch.cat(draft_tokens, dim=1) # [batch_size, current_gamma]
+            draft_tokens_tensor = torch.cat(draft_tokens, dim=1)  # [batch_size, current_gamma]
 
             # --- Verification Phase ---
             if target_past_key_values is not None:
@@ -564,7 +579,9 @@ class HBLLMForCausalLM(nn.Module):
             target_past_key_values = target_outputs.get("past_key_values")
 
             # Extract logits predicting the draft tokens and the bonus token
-            eval_logits = target_outputs["logits"][:, -(current_gamma + 1):, :] # [batch_size, current_gamma + 1, vocab]
+            eval_logits = target_outputs["logits"][
+                :, -(current_gamma + 1) :, :
+            ]  # [batch_size, current_gamma + 1, vocab]
 
             # --- Rejection/Acceptance ---
             accepted_count = 0
@@ -572,7 +589,7 @@ class HBLLMForCausalLM(nn.Module):
                 target_token = self._sample_logits(eval_logits[:, i, :], temperature, top_k, top_p)
 
                 # Check for exact match across batches
-                if (target_token == draft_tokens_tensor[:, i:i+1]).all():
+                if (target_token == draft_tokens_tensor[:, i : i + 1]).all():
                     accepted_count += 1
                     input_ids = torch.cat([input_ids, target_token], dim=1)
                     n_generated += 1
@@ -588,7 +605,9 @@ class HBLLMForCausalLM(nn.Module):
                     break
             else:
                 # If all draft tokens were accepted, we get a bonus token from the last logit
-                bonus_token = self._sample_logits(eval_logits[:, current_gamma, :], temperature, top_k, top_p)
+                bonus_token = self._sample_logits(
+                    eval_logits[:, current_gamma, :], temperature, top_k, top_p
+                )
                 input_ids = torch.cat([input_ids, bonus_token], dim=1)
                 n_generated += 1
                 accepted_count += 1
@@ -606,7 +625,8 @@ class HBLLMForCausalLM(nn.Module):
             cache_keep_len = input_ids.shape[1] - 1
 
             def truncate_kv_cache(pkv, keep_len):
-                if pkv is None: return None
+                if pkv is None:
+                    return None
                 new_pkv = []
                 for layer_idx in range(len(pkv)):
                     k, v = pkv[layer_idx]
@@ -621,6 +641,7 @@ class HBLLMForCausalLM(nn.Module):
                 gamma = controller.step(accepted_count, current_gamma)
 
         return input_ids
+
 
 class HBLLMForProcessReward(nn.Module):
     """
@@ -682,7 +703,9 @@ class HBLLMForProcessReward(nn.Module):
         # Otherwise, default to the last token sequence index
         if attention_mask is not None and attention_mask.dim() == 2:
             sequence_lengths = attention_mask.sum(dim=1).long() - 1
-            pooled_hidden_states = hidden_states[torch.arange(batch_size, device=hidden_states.device), sequence_lengths]
+            pooled_hidden_states = hidden_states[
+                torch.arange(batch_size, device=hidden_states.device), sequence_lengths
+            ]
         else:
             pooled_hidden_states = hidden_states[:, -1, :]
 
@@ -716,4 +739,3 @@ class HBLLMForProcessReward(nn.Module):
             result["lb_loss"] = lb_loss
 
         return result
-

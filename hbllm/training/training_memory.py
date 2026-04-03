@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DocumentRecord:
     """A training document's learning record."""
+
     doc_hash: int
     loss: float
     step: int
@@ -34,6 +35,7 @@ class DocumentRecord:
 @dataclass
 class DomainStats:
     """Aggregated statistics for a domain/topic."""
+
     domain: str
     total_docs: int = 0
     total_loss: float = 0.0
@@ -55,18 +57,81 @@ class DomainStats:
 
 # Domain detection keywords
 DOMAIN_KEYWORDS = {
-    "code": ["def ", "class ", "function ", "import ", "const ", "var ", "return ",
-             "if (", "for (", "while ", "print(", "console.log", "async ", "await "],
-    "math": ["equation", "theorem", "proof", "integral", "derivative", "matrix",
-             "probability", "statistical", "variance", "polynomial", "algebra"],
-    "science": ["experiment", "hypothesis", "molecule", "electron", "genome",
-                "neuron", "quantum", "relativity", "thermodynamic", "ecosystem"],
-    "reasoning": ["therefore", "consequently", "because", "although", "however",
-                  "furthermore", "in conclusion", "on the other hand", "implies"],
-    "factual": ["born in", "founded in", "located in", "capital of", "invented",
-                "discovered", "according to", "published in", "established"],
-    "creative": ["once upon", "she said", "he whispered", "the sky", "beautiful",
-                 "imagine", "story", "poem", "character", "narrative"],
+    "code": [
+        "def ",
+        "class ",
+        "function ",
+        "import ",
+        "const ",
+        "var ",
+        "return ",
+        "if (",
+        "for (",
+        "while ",
+        "print(",
+        "console.log",
+        "async ",
+        "await ",
+    ],
+    "math": [
+        "equation",
+        "theorem",
+        "proof",
+        "integral",
+        "derivative",
+        "matrix",
+        "probability",
+        "statistical",
+        "variance",
+        "polynomial",
+        "algebra",
+    ],
+    "science": [
+        "experiment",
+        "hypothesis",
+        "molecule",
+        "electron",
+        "genome",
+        "neuron",
+        "quantum",
+        "relativity",
+        "thermodynamic",
+        "ecosystem",
+    ],
+    "reasoning": [
+        "therefore",
+        "consequently",
+        "because",
+        "although",
+        "however",
+        "furthermore",
+        "in conclusion",
+        "on the other hand",
+        "implies",
+    ],
+    "factual": [
+        "born in",
+        "founded in",
+        "located in",
+        "capital of",
+        "invented",
+        "discovered",
+        "according to",
+        "published in",
+        "established",
+    ],
+    "creative": [
+        "once upon",
+        "she said",
+        "he whispered",
+        "the sky",
+        "beautiful",
+        "imagine",
+        "story",
+        "poem",
+        "character",
+        "narrative",
+    ],
 }
 
 
@@ -126,7 +191,7 @@ class TrainingMemory:
         if len(self.records) >= self._max_records:
             # Keep high-loss records (more interesting) and evict low-loss ones
             self.records.sort(key=lambda r: r.loss)
-            self.records = self.records[len(self.records) // 4:]  # Remove bottom 25%
+            self.records = self.records[len(self.records) // 4 :]  # Remove bottom 25%
 
         self.records.append(rec)
 
@@ -165,14 +230,16 @@ class TrainingMemory:
     def get_mastered_domains(self, threshold: float = 0.7) -> list[str]:
         """Get domains with mastery score above threshold."""
         return [
-            d.domain for d in self.domain_stats.values()
+            d.domain
+            for d in self.domain_stats.values()
             if d.mastery_score >= threshold and d.total_docs >= 10
         ]
 
     def get_weak_domains(self, threshold: float = 0.3) -> list[str]:
         """Get domains with mastery score below threshold."""
         return [
-            d.domain for d in self.domain_stats.values()
+            d.domain
+            for d in self.domain_stats.values()
             if d.mastery_score < threshold and d.total_docs >= 10
         ]
 
@@ -235,17 +302,18 @@ class TrainingMemory:
                 }
                 for r in self.get_hard_documents(50)
             ],
-            "loss_trajectory": [
-                {"step": s, "loss": round(l, 4)}
-                for s, l in self._step_losses
-            ],
+            "loss_trajectory": [{"step": s, "loss": round(l, 4)} for s, l in self._step_losses],
         }
 
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
-        logger.info("Training memory saved: %d records, %d domains → %s",
-                     len(self.records), len(self.domain_stats), path)
+        logger.info(
+            "Training memory saved: %d records, %d domains → %s",
+            len(self.records),
+            len(self.domain_stats),
+            path,
+        )
 
     @classmethod
     def load(cls, path: str | Path) -> TrainingMemory:
@@ -267,8 +335,7 @@ class TrainingMemory:
             )
 
         mem._step_losses = [
-            (entry["step"], entry["loss"])
-            for entry in data.get("loss_trajectory", [])
+            (entry["step"], entry["loss"]) for entry in data.get("loss_trajectory", [])
         ]
 
         logger.info("Loaded training memory: %d domains", len(mem.domain_stats))

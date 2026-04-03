@@ -3,7 +3,6 @@ Multi-Modal Pipeline Tests — verifies image captioning and audio
 transcription are injected as context before cognitive routing.
 """
 
-
 import pytest
 
 from hbllm.network.bus import InProcessBus
@@ -12,7 +11,6 @@ from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
 
 # Force each test to get its own event loop to prevent hangs
 pytestmark = pytest.mark.asyncio
-
 
 
 class MockBusWithRequest(InProcessBus):
@@ -61,11 +59,13 @@ async def test_multimodal_image_caption_injected():
     # Create a mock router that echoes the input text
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
-        response = msg.create_response({
-            "text": f"I see: {text}",
-            "source_node": "router",
-            "confidence": 0.9,
-        })
+        response = msg.create_response(
+            {
+                "text": f"I see: {text}",
+                "source_node": "router",
+                "confidence": 0.9,
+            }
+        )
         await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
@@ -75,7 +75,7 @@ async def test_multimodal_image_caption_injected():
 
     try:
         # Process with an image
-        fake_image = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
+        fake_image = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
         result = await pipeline.process_multimodal(
             text="What do you see?",
             images=[fake_image],
@@ -105,10 +105,12 @@ async def test_multimodal_audio_transcript_injected():
     # Register mock router
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
-        response = msg.create_response({
-            "text": f"Processed: {text}",
-            "source_node": "router",
-        })
+        response = msg.create_response(
+            {
+                "text": f"Processed: {text}",
+                "source_node": "router",
+            }
+        )
         await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
@@ -118,7 +120,7 @@ async def test_multimodal_audio_transcript_injected():
 
     try:
         # Process with audio
-        fake_audio = b'\x00' * 200
+        fake_audio = b"\x00" * 200
         result = await pipeline.process_multimodal(
             audio=fake_audio,
             tenant_id="test",
@@ -148,10 +150,12 @@ async def test_multimodal_combined_image_audio_text():
 
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
-        response = msg.create_response({
-            "text": text,
-            "source_node": "router",
-        })
+        response = msg.create_response(
+            {
+                "text": text,
+                "source_node": "router",
+            }
+        )
         await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
@@ -162,8 +166,8 @@ async def test_multimodal_combined_image_audio_text():
     try:
         result = await pipeline.process_multimodal(
             text="What is happening here?",
-            images=[b'\x89PNG' + b'\x00' * 50],
-            audio=b'\x00' * 100,
+            images=[b"\x89PNG" + b"\x00" * 50],
+            audio=b"\x00" * 100,
         )
 
         # Result should have all 3 components
@@ -196,14 +200,14 @@ async def test_multimodal_handles_vision_timeout():
 
         result = await pipeline.process_multimodal(
             text="Describe the image",
-            images=[b'\x00' * 50],
+            images=[b"\x00" * 50],
         )
 
         # Should still get a response (with fallback context)
         assert result.text
         assert "(could not process)" in result.text or result.text
     finally:
-        if 'pipeline' in locals():
+        if "pipeline" in locals():
             await pipeline.stop()
         await bus.stop()
 

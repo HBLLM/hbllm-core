@@ -76,14 +76,26 @@ def load_model(
     # Check if it's a local path
     if Path(source).is_dir():
         return _load_huggingface(
-            source, device, dtype, load_in_8bit, load_in_4bit,
-            trust_remote_code, max_memory, attn_implementation
+            source,
+            device,
+            dtype,
+            load_in_8bit,
+            load_in_4bit,
+            trust_remote_code,
+            max_memory,
+            attn_implementation,
         )
 
     # Assume it's a HuggingFace model name
     return _load_huggingface(
-        source, device, dtype, load_in_8bit, load_in_4bit,
-        trust_remote_code, max_memory, attn_implementation
+        source,
+        device,
+        dtype,
+        load_in_8bit,
+        load_in_4bit,
+        trust_remote_code,
+        max_memory,
+        attn_implementation,
     )
 
 

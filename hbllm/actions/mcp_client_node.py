@@ -94,7 +94,9 @@ class McpClientNode(Node):
             await self._subscribe_to_bus()
             logger.info(
                 "McpClientNode '%s' started with %d tools from '%s'",
-                self.node_id, len(self._tools), self.server_command,
+                self.node_id,
+                len(self._tools),
+                self.server_command,
             )
         except Exception as e:
             logger.error("McpClientNode '%s' failed to start: %s", self.node_id, e)
@@ -144,6 +146,7 @@ class McpClientNode(Node):
         env = None
         if self.server_env:
             import os
+
             env = {**os.environ, **self.server_env}
 
         self._process = await asyncio.create_subprocess_exec(
@@ -166,14 +169,17 @@ class McpClientNode(Node):
 
     async def _initialize(self) -> None:
         """Send MCP initialize handshake."""
-        result = await self._send_request("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {
-                "name": f"hbllm-{self.node_id}",
-                "version": "1.0.0",
+        result = await self._send_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": f"hbllm-{self.node_id}",
+                    "version": "1.0.0",
+                },
             },
-        })
+        )
         logger.debug("MCP initialize response: %s", result)
 
         # Send initialized notification
@@ -198,10 +204,13 @@ class McpClientNode(Node):
     async def _call_tool(self, tool_name: str, arguments: dict) -> dict:
         """Call a tool on the external MCP server."""
         try:
-            result = await self._send_request("tools/call", {
-                "name": tool_name,
-                "arguments": arguments,
-            })
+            result = await self._send_request(
+                "tools/call",
+                {
+                    "name": tool_name,
+                    "arguments": arguments,
+                },
+            )
             return {
                 "tool": tool_name,
                 "content": result.get("content", []),

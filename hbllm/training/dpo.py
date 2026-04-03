@@ -47,10 +47,9 @@ def compute_dpo_loss(
 
     return losses, chosen_rewards, rejected_rewards
 
+
 def get_batch_logps(
-    logits: torch.Tensor,
-    labels: torch.Tensor,
-    ignore_index: int = -100
+    logits: torch.Tensor, labels: torch.Tensor, ignore_index: int = -100
 ) -> torch.Tensor:
     """
     Compute log probabilities of the given labels under the logits.

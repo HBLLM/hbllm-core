@@ -1,6 +1,7 @@
 """
 Tests for hbllm.model.tokenizer — unified tokenizer with chat templates.
 """
+
 from hbllm.model.tokenizer import (
     ASSISTANT,
     BOS,

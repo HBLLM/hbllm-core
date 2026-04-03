@@ -29,104 +29,125 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="HBLLM Training & Tools")
 
     # Model
-    p.add_argument("--size", default="125m", choices=["125m", "500m", "1.5b"],
-                   help="Model size preset")
+    p.add_argument(
+        "--size", default="125m", choices=["125m", "500m", "1.5b"], help="Model size preset"
+    )
 
     # Data
-    p.add_argument("--data", default="fineweb",
-                   help="Dataset(s) to use. Available: fineweb, wikipedia, "
-                        "the_stack_v2, starcoderdata, codeparrot, openwebmath, "
-                        "metamath, pes2o, openhermes, slimorca. "
-                        "Mix with +: --data fineweb+starcoderdata+openwebmath")
-    p.add_argument("--max-samples", type=int, default=100_000,
-                   help="Max training samples to download")
-    p.add_argument("--data-weights", default=None,
-                   help="Proportional weights for each dataset when mixing. "
-                        "Comma-separated floats matching --data order. "
-                        "E.g.: --data fineweb+starcoderdata --data-weights 0.7,0.3. "
-                        "Defaults to equal weights.")
-    p.add_argument("--data-dir", default="./data/training",
-                   help="Working directory for data pipeline")
+    p.add_argument(
+        "--data",
+        default="fineweb",
+        help="Dataset(s) to use. Available: fineweb, wikipedia, "
+        "the_stack_v2, starcoderdata, codeparrot, openwebmath, "
+        "metamath, pes2o, openhermes, slimorca. "
+        "Mix with +: --data fineweb+starcoderdata+openwebmath",
+    )
+    p.add_argument(
+        "--max-samples", type=int, default=100_000, help="Max training samples to download"
+    )
+    p.add_argument(
+        "--data-weights",
+        default=None,
+        help="Proportional weights for each dataset when mixing. "
+        "Comma-separated floats matching --data order. "
+        "E.g.: --data fineweb+starcoderdata --data-weights 0.7,0.3. "
+        "Defaults to equal weights.",
+    )
+    p.add_argument(
+        "--data-dir", default="./data/training", help="Working directory for data pipeline"
+    )
 
     # Training
-    p.add_argument("--max-steps", type=int, default=10_000,
-                   help="Max training steps")
-    p.add_argument("--batch-size", type=int, default=8,
-                   help="Micro batch size")
-    p.add_argument("--lr", type=float, default=3e-4,
-                   help="Learning rate")
-    p.add_argument("--grad-accum", type=int, default=4,
-                   help="Gradient accumulation steps")
-    p.add_argument("--checkpoint-dir", default="./checkpoints",
-                   help="Checkpoint save directory")
-    p.add_argument("--checkpoint", default=None,
-                   help="Path to a specific checkpoint .pt file")
-    p.add_argument("--resume", default=None,
-                   help="Resume from checkpoint directory")
+    p.add_argument("--max-steps", type=int, default=10_000, help="Max training steps")
+    p.add_argument("--batch-size", type=int, default=8, help="Micro batch size")
+    p.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    p.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
+    p.add_argument("--checkpoint-dir", default="./checkpoints", help="Checkpoint save directory")
+    p.add_argument("--checkpoint", default=None, help="Path to a specific checkpoint .pt file")
+    p.add_argument("--resume", default=None, help="Resume from checkpoint directory")
 
     # SFT / LoRA
-    p.add_argument("--sft", action="store_true",
-                   help="Run supervised fine-tuning instead of pre-training")
-    p.add_argument("--sft-data", default="alpaca",
-                   help="SFT dataset name")
-    p.add_argument("--lora", action="store_true",
-                   help="Use LoRA for fine-tuning")
-    p.add_argument("--lora-r", type=int, default=8,
-                   help="LoRA rank")
+    p.add_argument(
+        "--sft", action="store_true", help="Run supervised fine-tuning instead of pre-training"
+    )
+    p.add_argument("--sft-data", default="alpaca", help="SFT dataset name")
+    p.add_argument("--lora", action="store_true", help="Use LoRA for fine-tuning")
+    p.add_argument("--lora-r", type=int, default=8, help="LoRA rank")
 
     # DPO (self-improvement)
-    p.add_argument("--dpo", action="store_true",
-                   help="Run DPO self-improvement on reflection data")
-    p.add_argument("--reflection-dir", default="workspace/reflection",
-                   help="Directory with reflection JSONL datasets")
+    p.add_argument("--dpo", action="store_true", help="Run DPO self-improvement on reflection data")
+    p.add_argument(
+        "--reflection-dir",
+        default="workspace/reflection",
+        help="Directory with reflection JSONL datasets",
+    )
 
     # Evaluation
-    p.add_argument("--eval", action="store_true", dest="run_eval",
-                   help="Run model evaluation (perplexity, HellaSwag, samples)")
-    p.add_argument("--eval-interval", type=int, default=500,
-                   help="Steps between evaluations")
-    p.add_argument("--no-eval", action="store_true",
-                   help="Skip evaluation during training")
+    p.add_argument(
+        "--eval",
+        action="store_true",
+        dest="run_eval",
+        help="Run model evaluation (perplexity, HellaSwag, samples)",
+    )
+    p.add_argument("--eval-interval", type=int, default=500, help="Steps between evaluations")
+    p.add_argument("--no-eval", action="store_true", help="Skip evaluation during training")
 
     # Export
-    p.add_argument("--export", default=None,
-                   choices=["onnx", "gguf", "fp16", "int8"],
-                   help="Export trained model to specified format")
-    p.add_argument("--export-output", default=None,
-                   help="Output path for exported model")
+    p.add_argument(
+        "--export",
+        default=None,
+        choices=["onnx", "gguf", "fp16", "int8"],
+        help="Export trained model to specified format",
+    )
+    p.add_argument("--export-output", default=None, help="Output path for exported model")
 
     # Embedding training
-    p.add_argument("--embed", action="store_true",
-                   help="Train custom embedding model (InfoNCE contrastive)")
-    p.add_argument("--embed-dim", type=int, default=256,
-                   help="Embedding dimension")
-    p.add_argument("--embed-data", default=None,
-                   help="Path to embedding training data (JSONL with anchor/positive/negative)")
+    p.add_argument(
+        "--embed", action="store_true", help="Train custom embedding model (InfoNCE contrastive)"
+    )
+    p.add_argument("--embed-dim", type=int, default=256, help="Embedding dimension")
+    p.add_argument(
+        "--embed-data",
+        default=None,
+        help="Path to embedding training data (JSONL with anchor/positive/negative)",
+    )
 
     # Cognitive training
-    p.add_argument("--cognitive", action="store_true",
-                   help="Enable cognitive training (build knowledge graph, skills, memory during training)")
-    p.add_argument("--cognitive-interval", type=int, default=10,
-                   help="Run cognitive processing every N steps")
-    p.add_argument("--cognitive-dir", default="./cognitive_checkpoints",
-                   help="Output directory for cognitive artifacts")
+    p.add_argument(
+        "--cognitive",
+        action="store_true",
+        help="Enable cognitive training (build knowledge graph, skills, memory during training)",
+    )
+    p.add_argument(
+        "--cognitive-interval", type=int, default=10, help="Run cognitive processing every N steps"
+    )
+    p.add_argument(
+        "--cognitive-dir",
+        default="./cognitive_checkpoints",
+        help="Output directory for cognitive artifacts",
+    )
 
     # Local serving
-    p.add_argument("--serve-local", action="store_true",
-                   help="Start a local brain with the trained model")
+    p.add_argument(
+        "--serve-local", action="store_true", help="Start a local brain with the trained model"
+    )
 
     # Auto-eval gating
-    p.add_argument("--auto-eval", action="store_true", default=True,
-                   help="Auto-evaluate after training and gate adapter saving on improvement")
+    p.add_argument(
+        "--auto-eval",
+        action="store_true",
+        default=True,
+        help="Auto-evaluate after training and gate adapter saving on improvement",
+    )
 
     # Device
-    p.add_argument("--device", default="auto",
-                   help="Device: auto, cpu, cuda, mps")
+    p.add_argument("--device", default="auto", help="Device: auto, cpu, cuda, mps")
 
     args = p.parse_args()
 
     # Validate --data dataset names against registry
     from hbllm.data.downloader import PREDEFINED_SOURCES
+
     dataset_names = [n.strip() for n in args.data.split("+") if n.strip()]
     unknown = [n for n in dataset_names if n not in PREDEFINED_SOURCES]
     if unknown:
@@ -171,6 +192,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
         logger.info("No shards found. Running data pipeline...")
         try:
             from hbllm.data.pipeline import DataPipeline
+
             pipeline = DataPipeline(data_dir)
             pipeline.run_all(
                 dataset_name=args.data,
@@ -179,6 +201,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
         except RuntimeError:
             logger.info("Rust extensions not available. Using Pure-Python pipeline (tiktoken)...")
             from hbllm.data.pipeline import PurePythonPipeline
+
             pipeline = PurePythonPipeline(data_dir)
             pipeline.run_all(
                 dataset_name=args.data,
@@ -230,8 +253,12 @@ def run_pretrain(args: argparse.Namespace) -> None:
     logger.info("=" * 60)
     logger.info("Starting training loop")
     logger.info("  Steps       : %d", args.max_steps)
-    logger.info("  Batch size  : %d micro x %d accum = %d effective",
-                args.batch_size, args.grad_accum, args.batch_size * args.grad_accum)
+    logger.info(
+        "  Batch size  : %d micro x %d accum = %d effective",
+        args.batch_size,
+        args.grad_accum,
+        args.batch_size * args.grad_accum,
+    )
     logger.info("  Seq length  : %d", config.max_position_embeddings)
     logger.info("  Device      : %s", device)
     logger.info("  Precision   : %s", train_config.precision)
@@ -258,8 +285,12 @@ def run_pretrain(args: argparse.Namespace) -> None:
         total_tokens_processed += batch_tokens
 
         # Forward + backward
-        logger.info("  Step %d/%d: forward+backward pass (%d tokens)...",
-                     step + 1, args.max_steps, batch_tokens)
+        logger.info(
+            "  Step %d/%d: forward+backward pass (%d tokens)...",
+            step + 1,
+            args.max_steps,
+            batch_tokens,
+        )
         metrics = trainer.train_step(batch)
         running_loss += metrics["loss"]
         loss_count += 1
@@ -289,8 +320,10 @@ def run_pretrain(args: argparse.Namespace) -> None:
             logger.info(
                 "  ✓ Step %d/%d | loss=%.4f (avg=%.4f) | lr=%.2e | "
                 "grad_norm=%.2f | %.1f tok/s | %.1fs/step | ETA: %s",
-                steps_done, args.max_steps,
-                metrics["loss"], avg_loss,
+                steps_done,
+                args.max_steps,
+                metrics["loss"],
+                avg_loss,
                 step_metrics["lr"],
                 step_metrics["grad_norm"],
                 tok_per_sec,
@@ -304,6 +337,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
             if (step + 1) % train_config.eval_interval_steps == 0 and not args.no_eval:
                 logger.info("  [Eval] Running evaluation at step %d...", steps_done)
                 from hbllm.training.evaluator import ModelEvaluator
+
                 tokenizer = HBLLMTokenizer.from_tiktoken()
                 evaluator = ModelEvaluator(model, tokenizer, device)
                 eval_results = evaluator.evaluate_all(
@@ -358,11 +392,13 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
         logger.info("No shards found. Running data pipeline...")
         try:
             from hbllm.data.pipeline import DataPipeline
+
             pipeline = DataPipeline(args.data_dir)
             pipeline.run(args.data, max_samples=args.max_samples)
         except RuntimeError:
             logger.info("Rust pipeline unavailable, using PurePythonPipeline...")
             from hbllm.data.pipeline import PurePythonPipeline
+
             pipeline = PurePythonPipeline(args.data_dir)
             pipeline.run(args.data, max_samples=args.max_samples)
             tiktoken_mode = True
@@ -391,9 +427,11 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
     raw_texts_cache: list[str] = []
     try:
         import glob
+
         raw_files = sorted(glob.glob(os.path.join(raw_dir, "**", "*.jsonl"), recursive=True))
         if raw_files:
             import json as _json
+
             for rf in raw_files:
                 with open(rf) as f:
                     for line in f:
@@ -418,11 +456,11 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
         micro_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         checkpoint_dir=args.checkpoint_dir,
-        eval_interval_steps=getattr(args, 'eval_interval', 500),
+        eval_interval_steps=getattr(args, "eval_interval", 500),
     )
     cognitive_config = CognitiveConfig(
-        output_dir=getattr(args, 'cognitive_dir', './cognitive_checkpoints'),
-        cognitive_interval=getattr(args, 'cognitive_interval', 10),
+        output_dir=getattr(args, "cognitive_dir", "./cognitive_checkpoints"),
+        cognitive_interval=getattr(args, "cognitive_interval", 10),
         use_lora=args.lora,
         lora_r=args.lora_r,
         build_knowledge_graph=True,
@@ -432,11 +470,15 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
     )
     cog_trainer = CognitiveTrainer(model, train_config, cognitive_config, device)
 
-    logger.info("="  * 60)
+    logger.info("=" * 60)
     logger.info("Starting COGNITIVE training loop")
     logger.info("  Steps        : %d", args.max_steps)
-    logger.info("  Batch size   : %d micro x %d accum = %d effective",
-                args.batch_size, args.grad_accum, args.batch_size * args.grad_accum)
+    logger.info(
+        "  Batch size   : %d micro x %d accum = %d effective",
+        args.batch_size,
+        args.grad_accum,
+        args.batch_size * args.grad_accum,
+    )
     logger.info("  Seq length   : %d", config.max_position_embeddings)
     logger.info("  Device       : %s", device)
     logger.info("  LoRA         : %s (r=%d)", "ON" if args.lora else "OFF", args.lora_r)
@@ -480,8 +522,9 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
                     batch_raw_texts.append(raw_texts_cache[raw_text_idx])
                     raw_text_idx += 1
 
-        logger.info("  Step %d/%d: forward+backward (%d tokens)...",
-                     step + 1, args.max_steps, batch_tokens)
+        logger.info(
+            "  Step %d/%d: forward+backward (%d tokens)...", step + 1, args.max_steps, batch_tokens
+        )
 
         metrics = cog_trainer.cognitive_train_step(batch, batch_raw_texts)
         running_loss += metrics["loss"]
@@ -521,10 +564,12 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
 
             # Cognitive metrics (if processed this step)
             if "kg_total_entities" in metrics:
-                logger.info("    🧠 KG: %d entities | Memory: %d records | Domains: %d",
-                            metrics.get("kg_total_entities", 0),
-                            metrics.get("memory_records", 0),
-                            metrics.get("domains_seen", 0))
+                logger.info(
+                    "    🧠 KG: %d entities | Memory: %d records | Domains: %d",
+                    metrics.get("kg_total_entities", 0),
+                    metrics.get("memory_records", 0),
+                    metrics.get("domains_seen", 0),
+                )
 
             step_start = _time.time()
 
@@ -537,6 +582,7 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
                 logger.info("  [Eval] Running evaluation at step %d...", steps_done)
                 from hbllm.model.tokenizer import HBLLMTokenizer
                 from hbllm.training.evaluator import ModelEvaluator
+
                 tokenizer = HBLLMTokenizer.from_tiktoken()
                 evaluator = ModelEvaluator(model, tokenizer, device)
                 eval_results = evaluator.evaluate_all(hellaswag=False, generate=True)
@@ -568,6 +614,7 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
 def run_sft(args: argparse.Namespace) -> None:
     """Run supervised fine-tuning."""
     from hbllm.training.sft import run_sft_training
+
     device = get_device(args.device)
     run_sft_training(
         model_size=args.size,
@@ -629,6 +676,7 @@ def run_eval(args: argparse.Namespace) -> None:
     if args.checkpoint:
         logger.info("Loading checkpoint: %s", args.checkpoint)
         from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
         ckpt = load_checkpoint(args.checkpoint)
         model.load_state_dict(extract_model_state(ckpt), strict=False)
     else:
@@ -668,6 +716,7 @@ def run_export(args: argparse.Namespace) -> None:
     if args.checkpoint:
         logger.info("Loading checkpoint: %s", args.checkpoint)
         from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
         ckpt = load_checkpoint(args.checkpoint)
         model.load_state_dict(extract_model_state(ckpt), strict=False)
     else:
@@ -679,8 +728,12 @@ def run_export(args: argparse.Namespace) -> None:
     # Print summary
     summary = exporter.summary()
     logger.info("Model: %s (%s params)", summary["model_name"], f"{summary['total_params']:,}")
-    logger.info("Est. sizes: FP32=%.1f MB, FP16=%.1f MB, INT8=%.1f MB",
-                summary["estimated_fp32_mb"], summary["estimated_fp16_mb"], summary["estimated_int8_mb"])
+    logger.info(
+        "Est. sizes: FP32=%.1f MB, FP16=%.1f MB, INT8=%.1f MB",
+        summary["estimated_fp32_mb"],
+        summary["estimated_fp16_mb"],
+        summary["estimated_int8_mb"],
+    )
 
     # Default output paths
     export_dir = Path("./exports")
@@ -706,6 +759,7 @@ def run_serve_local(args: argparse.Namespace) -> None:
 
     async def _serve():
         from hbllm.brain.factory import BrainFactory
+
         brain = await BrainFactory.create_local(
             checkpoint_path=args.checkpoint,
             model_size=args.size,
@@ -742,6 +796,7 @@ def run_embed(args: argparse.Namespace) -> None:
     if args.checkpoint:
         logger.info("Loading base checkpoint: %s", args.checkpoint)
         from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
         ckpt = load_checkpoint(args.checkpoint)
         model.load_state_dict(extract_model_state(ckpt), strict=False)
 
@@ -756,6 +811,7 @@ def run_embed(args: argparse.Namespace) -> None:
     if args.embed_data:
         logger.info("Loading embedding data from: %s", args.embed_data)
         import json
+
         triplets = []
         with open(args.embed_data) as f:
             for line in f:
@@ -792,6 +848,7 @@ def _run_post_training_eval(args: argparse.Namespace) -> None:
         latest = sorted(ckpt_dir.glob("*.pt"))[-1] if ckpt_dir.exists() else None
         if latest:
             from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
             ckpt = load_checkpoint(str(latest))
             model.load_state_dict(extract_model_state(ckpt), strict=False)
 
@@ -800,9 +857,7 @@ def _run_post_training_eval(args: argparse.Namespace) -> None:
         evaluator = ModelEvaluator(model, tokenizer, device)
 
         results = evaluator.evaluate_all(hellaswag=False, generate=True)
-        logger.info("Post-training eval: %s", {
-            k: v for k, v in results.items() if k != "samples"
-        })
+        logger.info("Post-training eval: %s", {k: v for k, v in results.items() if k != "samples"})
         if "samples" in results:
             for s in results["samples"][:2]:
                 logger.info("  >> %s... -> %s...", s["prompt"][:30], s["generated"][:60])
@@ -833,7 +888,7 @@ def main() -> None:
     elif args.serve_local:
         logger.info("  Mode: Local Serve")
         run_serve_local(args)
-    elif getattr(args, 'cognitive', False):
+    elif getattr(args, "cognitive", False):
         logger.info("  Mode: Cognitive Pre-training")
         run_cognitive_pretrain(args)
     else:

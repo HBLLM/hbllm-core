@@ -29,6 +29,7 @@ from hbllm.data.sharder import (
 # Downloader / JSONL tests
 # ──────────────────────────────────────────────
 
+
 class TestDatasetSource:
     def test_creation(self):
         src = DatasetSource(name="test", dataset_id="org/dataset", text_column="text")
@@ -96,6 +97,7 @@ class TestJsonlIO:
 # Sharder tests
 # ──────────────────────────────────────────────
 
+
 class TestShardWriter:
     def test_write_single_shard(self, tmp_path: Path):
         writer = ShardWriter(tmp_path, shard_size_mb=1, sequence_length=32)
@@ -152,7 +154,9 @@ class TestShardWriter:
 
 
 class TestShardReader:
-    def _create_test_shards(self, tmp_path: Path, tokens: list[int], shard_size: int = 10000) -> Path:
+    def _create_test_shards(
+        self, tmp_path: Path, tokens: list[int], shard_size: int = 10000
+    ) -> Path:
         """Helper: create shards with known tokens."""
         writer = ShardWriter(tmp_path, shard_size_mb=1, sequence_length=32)
         writer.shard_size_bytes = shard_size * 2  # uint16 = 2 bytes
@@ -225,6 +229,7 @@ class TestShardReader:
 # ──────────────────────────────────────────────
 # DataLoader tests
 # ──────────────────────────────────────────────
+
 
 class TestPretrainingDataset:
     def _make_shards(self, tmp_path: Path) -> Path:

@@ -15,6 +15,7 @@ from hbllm.network.cluster_config import (
 
 # ─── Env Var Interpolation ────────────────────────────────────────────────────
 
+
 def test_interpolate_env_simple(monkeypatch):
     monkeypatch.setenv("MY_VAR", "hello")
     assert _interpolate_env("${MY_VAR}") == "hello"
@@ -47,6 +48,7 @@ def test_interpolate_env_list(monkeypatch):
 
 
 # ─── ClusterConfig Model ─────────────────────────────────────────────────────
+
 
 def test_default_cluster_config():
     config = ClusterConfig()
@@ -107,6 +109,7 @@ def test_get_server_for_node():
 
 # ─── Topology Validation ─────────────────────────────────────────────────────
 
+
 def test_validate_duplicate_nodes():
     config = ClusterConfig(
         servers={
@@ -119,9 +122,7 @@ def test_validate_duplicate_nodes():
 
 
 def test_validate_empty_server():
-    config = ClusterConfig(
-        servers={"empty": ServerConfig(nodes=[])}
-    )
+    config = ClusterConfig(servers={"empty": ServerConfig(nodes=[])})
     warnings = config.validate_topology()
     assert any("no nodes" in w for w in warnings)
 
@@ -148,6 +149,7 @@ def test_validate_clean():
 
 
 # ─── YAML Loading ─────────────────────────────────────────────────────────────
+
 
 def test_load_from_yaml():
     yaml_content = """

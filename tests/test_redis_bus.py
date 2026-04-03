@@ -25,6 +25,7 @@ async def redis_bus():
     yield bus
     await bus.stop()
 
+
 @pytest.mark.asyncio
 async def test_redis_bus_pubsub(redis_bus: RedisBus):
     received = []
@@ -39,16 +40,17 @@ async def test_redis_bus_pubsub(redis_bus: RedisBus):
         type=MessageType.QUERY,
         source_node_id="test_node",
         topic="test.topic",
-        payload=QueryPayload(text="Hello Redis!").model_dump()
+        payload=QueryPayload(text="Hello Redis!").model_dump(),
     )
 
     await redis_bus.publish("test.topic", msg)
-    await asyncio.sleep(0.1) # Wait for network dispatch
+    await asyncio.sleep(0.1)  # Wait for network dispatch
 
     assert len(received) == 1
     assert received[0].payload["text"] == "Hello Redis!"
 
     await redis_bus.unsubscribe(sub)
+
 
 @pytest.mark.asyncio
 async def test_redis_bus_request_response(redis_bus: RedisBus):
@@ -62,7 +64,7 @@ async def test_redis_bus_request_response(redis_bus: RedisBus):
         type=MessageType.QUERY,
         source_node_id="client_node",
         topic="test.echo",
-        payload=QueryPayload(text="Ping").model_dump()
+        payload=QueryPayload(text="Ping").model_dump(),
     )
 
     response = await redis_bus.request("test.echo", req, timeout=2.0)

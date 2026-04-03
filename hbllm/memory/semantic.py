@@ -40,11 +40,13 @@ logger = logging.getLogger(__name__)
 try:
     from qdrant_client import QdrantClient
     from qdrant_client.models import Distance, PointStruct, VectorParams
+
     _HAS_QDRANT = True
 except ImportError:
     _HAS_QDRANT = False
 
 # ── Fallback Embedder (TF-IDF) ──────────────────────────────────────────────
+
 
 class _TfIdfEmbedder:
     """
@@ -63,7 +65,7 @@ class _TfIdfEmbedder:
     @staticmethod
     def _tokenize(text: str) -> list[str]:
         """Simple whitespace + punctuation tokenizer."""
-        return re.findall(r'\b\w+\b', text.lower())
+        return re.findall(r"\b\w+\b", text.lower())
 
     def _update_vocab(self, tokens: list[str]) -> None:
         """Add new tokens to vocabulary."""
@@ -182,6 +184,7 @@ class SemanticMemory:
         if self.model is None and not self._use_tfidf:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 logger.info("Loading embedding model %s...", self.model_name)
                 self.model = SentenceTransformer(self.model_name)
             except Exception:
@@ -252,7 +255,9 @@ class SemanticMemory:
         """Fast hash for deduplication."""
         return hashlib.md5(content.encode()).hexdigest()
 
-    def store(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> str | None:
+    def store(
+        self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False
+    ) -> str | None:
         """
         Embed and store a document.
 
@@ -267,7 +272,9 @@ class SemanticMemory:
         with self._lock:
             return self._store_unsafe(content, metadata, is_priority)
 
-    def _store_unsafe(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> str | None:
+    def _store_unsafe(
+        self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False
+    ) -> str | None:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
             return None
@@ -319,11 +326,13 @@ class SemanticMemory:
                     self._ensure_qdrant_collection()
                     self._qdrant.upsert(
                         collection_name=self._qdrant_collection,
-                        points=[PointStruct(
-                            id=doc_id,
-                            vector=embedding.tolist(),
-                            payload=doc,
-                        )],
+                        points=[
+                            PointStruct(
+                                id=doc_id,
+                                vector=embedding.tolist(),
+                                payload=doc,
+                            )
+                        ],
                     )
                 except Exception as e:
                     logger.warning("Qdrant upsert failed (falling back to NumPy): %s", e)
@@ -344,10 +353,10 @@ class SemanticMemory:
                 all_texts = [self.documents[doc_id]["content"] for doc_id in self.ids]
                 all_sparse = self._tfidf.encode(all_texts)
                 if self._use_tfidf:
-                    self._vector_list = [all_sparse[i:i+1] for i in range(len(all_sparse))]
+                    self._vector_list = [all_sparse[i : i + 1] for i in range(len(all_sparse))]
                     self._vectors_dirty = True
                 else:
-                    self._sparse_list = [all_sparse[i:i+1] for i in range(len(all_sparse))]
+                    self._sparse_list = [all_sparse[i : i + 1] for i in range(len(all_sparse))]
                     self._sparse_dirty = True
 
         # Debounce for 2 seconds to coalesce rapid document insertions
@@ -394,15 +403,23 @@ class SemanticMemory:
         dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
 
         # --- Hybrid: blend with sparse TF-IDF scores if available ---
-        if not self._use_tfidf and self.sparse_vectors is not None and len(self._sparse_list) == len(self.documents):
+        if (
+            not self._use_tfidf
+            and self.sparse_vectors is not None
+            and len(self._sparse_list) == len(self.documents)
+        ):
             sparse_query = self._tfidf.encode([query])[0]
             sparse_norms = np.linalg.norm(self.sparse_vectors, axis=1)
             sparse_query_norm = np.linalg.norm(sparse_query)
 
             if sparse_query_norm > 0:
-                sparse_scores = np.dot(self.sparse_vectors, sparse_query) / (sparse_norms * sparse_query_norm + 1e-9)
+                sparse_scores = np.dot(self.sparse_vectors, sparse_query) / (
+                    sparse_norms * sparse_query_norm + 1e-9
+                )
                 # Blend: alpha * dense + (1 - alpha) * sparse
-                final_scores = self.hybrid_alpha * dense_scores + (1 - self.hybrid_alpha) * sparse_scores
+                final_scores = (
+                    self.hybrid_alpha * dense_scores + (1 - self.hybrid_alpha) * sparse_scores
+                )
             else:
                 final_scores = dense_scores
         else:
@@ -510,6 +527,7 @@ class SemanticMemory:
     def save_to_disk(self, path: str | Path) -> None:
         """Save semantic memory to disk (metadata + vectors)."""
         from pathlib import Path as _Path
+
         save_dir = _Path(path)
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -517,6 +535,7 @@ class SemanticMemory:
         with self._lock:
             # Save document metadata
             import json
+
             meta_path = save_dir / "documents.json"
             with open(meta_path, "w") as f:
                 json.dump({"documents": self.documents, "ids": self.ids}, f)

@@ -9,6 +9,7 @@ def test_data_synthesizer_generation(tmp_path):
     # so the synthesizer falls back to template-based generation.
     class DummyModel:
         pass
+
     class DummyTokenizer:
         pass
 
@@ -19,7 +20,9 @@ def test_data_synthesizer_generation(tmp_path):
 
     # Use pytest tmp_path for output
     output_dir = str(tmp_path / "synthetic")
-    filepath = synthesizer.generate_dataset(topic=topic, num_samples=num_samples, output_dir=output_dir)
+    filepath = synthesizer.generate_dataset(
+        topic=topic, num_samples=num_samples, output_dir=output_dir
+    )
 
     # Verify file was created
     assert os.path.exists(filepath)
@@ -39,4 +42,3 @@ def test_data_synthesizer_generation(tmp_path):
     assert dataset[0]["source"] == "template"
     # Response should contain topic-related content
     assert topic in dataset[0]["response"]
-

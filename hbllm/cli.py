@@ -39,7 +39,11 @@ def run_train(args):
     model_config = get_config(args.model_size)
     train_config = TrainingConfig(wandb_project=args.wandb_project)
 
-    logging.info("Initializing %s model with %d parameters...", args.model_size, model_config.num_params_estimate)
+    logging.info(
+        "Initializing %s model with %d parameters...",
+        args.model_size,
+        model_config.num_params_estimate,
+    )
     model = HBLLMForCausalLM(model_config)
 
     trainer = Trainer(model, train_config)
@@ -47,9 +51,11 @@ def run_train(args):
     shard_dir = Path(args.work_dir) / "shards"
     dataloader = create_dataloader(
         shard_dir,
-        sequence_length=train_config.sequence_length if hasattr(train_config, 'sequence_length') else 2048,
+        sequence_length=train_config.sequence_length
+        if hasattr(train_config, "sequence_length")
+        else 2048,
         batch_size=train_config.micro_batch_size,
-        num_workers=0
+        num_workers=0,
     )
 
     logging.info("Starting training loop...")
@@ -83,6 +89,7 @@ def run_serve(args):
     logging.info("Starting HBLLM server on %s:%d...", args.host, args.port)
     try:
         import uvicorn
+
         uvicorn.run(
             "hbllm.serving.api:app",
             host=args.host,
@@ -97,6 +104,7 @@ def run_serve(args):
 def run_info(args):
     """Show system architecture info."""
     from hbllm import __version__
+
     print(f"""
 🧠 HBLLM Core v{__version__}
 {"=" * 50}
@@ -180,7 +188,9 @@ def main():
     # Training
     train_parser = subparsers.add_parser("train", help="Run pre-training loop")
     train_parser.add_argument("--work-dir", type=str, default="./workspace")
-    train_parser.add_argument("--model-size", type=str, default="125m", choices=["125m", "500m", "1.5b"])
+    train_parser.add_argument(
+        "--model-size", type=str, default="125m", choices=["125m", "500m", "1.5b"]
+    )
     train_parser.add_argument("--wandb-project", type=str, default=None)
 
     # Serve
@@ -207,4 +217,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

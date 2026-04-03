@@ -20,6 +20,7 @@ def mock_config():
         max_position_embeddings=512,
     )
 
+
 def test_lora_injection_and_unloading(mock_config):
     model = HBLLMForCausalLM(mock_config)
 
@@ -58,6 +59,7 @@ def test_lora_injection_and_unloading(mock_config):
     # Inactive logits should exactly match original base logits
     assert torch.allclose(base_logits, lora_inactive_logits, atol=1e-4)
 
+
 def test_lora_adapter_load_method(mock_config):
     torch.manual_seed(42)
     model1 = HBLLMForCausalLM(mock_config)
@@ -86,7 +88,7 @@ def test_lora_adapter_load_method(mock_config):
 
     # Model 2: Should use the newly added method
     model2.load_lora_adapter(lora_state, r=4)
-    model2.eval() # ensure eval
+    model2.eval()  # ensure eval
 
     with torch.no_grad():
         model2(input_ids)["logits"]

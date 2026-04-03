@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CognitiveSnapshot:
     """Point-in-time cognitive performance snapshot."""
+
     timestamp: float
     reasoning_score: float
     hallucination_rate: float
@@ -149,11 +150,13 @@ class CognitiveMetrics:
                     (metric, start, end),
                 ).fetchall()
             values = [r[0] for r in rows]
-            trend.append({
-                "period": i,
-                "avg": round(sum(values) / len(values), 4) if values else 0,
-                "count": len(values),
-            })
+            trend.append(
+                {
+                    "period": i,
+                    "avg": round(sum(values) / len(values), 4) if values else 0,
+                    "count": len(values),
+                }
+            )
         trend.reverse()
         return trend
 

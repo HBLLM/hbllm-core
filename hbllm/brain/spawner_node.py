@@ -10,6 +10,7 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
 class SpawnerNode(Node):
     """
     Self-Expansion Engine.
@@ -20,7 +21,9 @@ class SpawnerNode(Node):
     a new DomainModuleNode on the live bus.
     """
 
-    def __init__(self, node_id: str, model: Any, tokenizer: Any, adapter_registry: Any | None = None):
+    def __init__(
+        self, node_id: str, model: Any, tokenizer: Any, adapter_registry: Any | None = None
+    ):
         super().__init__(node_id=node_id, node_type=NodeType.SPAWNER)
         self.model = model
         self.tokenizer = tokenizer
@@ -82,9 +85,7 @@ class SpawnerNode(Node):
         if lora_state_dict is None:
             try:
                 dataset_path = await asyncio.to_thread(
-                    self.synthesizer.generate_dataset,
-                    topic=topic,
-                    num_samples=10
+                    self.synthesizer.generate_dataset, topic=topic, num_samples=10
                 )
                 logger.info("Generated synthetic data at: %s", dataset_path)
             except Exception as e:
@@ -119,16 +120,14 @@ class SpawnerNode(Node):
                     "domain": domain_name,
                     "status": "active",
                     "has_lora": lora_state_dict is not None,
-                }
+                },
             )
             await self.bus.publish("system.spawn.complete", completion_msg)
 
         except Exception as e:
-             logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
+            logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
 
-    async def _train_lora_adapter(
-        self, domain_name: str, dataset_path: str
-    ) -> dict | None:
+    async def _train_lora_adapter(self, domain_name: str, dataset_path: str) -> dict | None:
         """Train a LoRA adapter on the synthetic dataset."""
         logger.info("Training LoRA adapter for domain '%s'...", domain_name)
 
@@ -151,19 +150,22 @@ class SpawnerNode(Node):
                     return None
 
                 loader = torch.utils.data.DataLoader(
-                    dataset, batch_size=2, shuffle=True, collate_fn=collate_sft,
+                    dataset,
+                    batch_size=2,
+                    shuffle=True,
+                    collate_fn=collate_sft,
                 )
 
                 # Inject LoRA into a deep copy to avoid mutating the shared model
                 import torch
+
                 train_model = copy.deepcopy(self.model)
                 injected = LoRAManager.inject(train_model, r=8)
                 logger.info("Injected LoRA into %d modules (on isolated copy)", len(injected))
 
                 # Optimizer targeting only LoRA parameters
                 lora_params = [
-                    p for n, p in train_model.named_parameters()
-                    if "lora_" in n and p.requires_grad
+                    p for n, p in train_model.named_parameters() if "lora_" in n and p.requires_grad
                 ]
                 if not lora_params:
                     logger.warning("No LoRA parameters found. Skipping training.")
@@ -202,7 +204,10 @@ class SpawnerNode(Node):
                         if step % 5 == 0:
                             logger.info(
                                 "  [Spawner] %s step %d/%d loss=%.4f",
-                                domain_name, step, max_steps, loss.item(),
+                                domain_name,
+                                step,
+                                max_steps,
+                                loss.item(),
                             )
 
                 # Extract LoRA state dict
@@ -210,6 +215,7 @@ class SpawnerNode(Node):
 
                 # Save adapter
                 from pathlib import Path
+
                 save_dir = Path(f"./checkpoints/domains/{domain_name}")
                 save_dir.mkdir(parents=True, exist_ok=True)
                 save_path = save_dir / "lora_adapter.pt"
@@ -227,4 +233,3 @@ class SpawnerNode(Node):
         except Exception as e:
             logger.warning("LoRA training thread failed: %s", e)
             return None
-

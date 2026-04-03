@@ -105,6 +105,7 @@ class TestModelLoader:
 
 class MockHFOutput:
     """Mock HuggingFace model output."""
+
     def __init__(self, logits, loss=None, past_key_values=None):
         self.logits = logits
         self.loss = loss
@@ -116,17 +117,21 @@ class MockHFModel(nn.Module):
 
     def __init__(self, vocab_size=100, hidden_size=64, num_layers=2):
         super().__init__()
-        self.config = type("Config", (), {
-            "vocab_size": vocab_size,
-            "hidden_size": hidden_size,
-            "num_hidden_layers": num_layers,
-            "num_attention_heads": 4,
-            "num_key_value_heads": 4,
-            "intermediate_size": 128,
-            "max_position_embeddings": 512,
-            "rms_norm_eps": 1e-5,
-            "_name_or_path": "mock-model",
-        })()
+        self.config = type(
+            "Config",
+            (),
+            {
+                "vocab_size": vocab_size,
+                "hidden_size": hidden_size,
+                "num_hidden_layers": num_layers,
+                "num_attention_heads": 4,
+                "num_key_value_heads": 4,
+                "intermediate_size": 128,
+                "max_position_embeddings": 512,
+                "rms_norm_eps": 1e-5,
+                "_name_or_path": "mock-model",
+            },
+        )()
         self.embed = nn.Embedding(vocab_size, hidden_size)
         self.head = nn.Linear(hidden_size, vocab_size, bias=False)
 
@@ -156,6 +161,7 @@ class TestHFAdapterInterface:
     @pytest.fixture
     def adapter(self):
         from hbllm.model.hf_adapter import HuggingFaceModelAdapter
+
         mock_model = MockHFModel(vocab_size=100, hidden_size=64, num_layers=2)
         return HuggingFaceModelAdapter(_hf_model=mock_model, _hf_tokenizer=None)
 
@@ -211,7 +217,8 @@ class TestHFAdapterInterface:
     def test_lora_compatible(self, adapter):
         """Adapter's linear layers can receive LoRA injection."""
         linear_modules = [
-            (name, mod) for name, mod in adapter._model.named_modules()
+            (name, mod)
+            for name, mod in adapter._model.named_modules()
             if isinstance(mod, nn.Linear)
         ]
         assert len(linear_modules) > 0, "No nn.Linear modules found for LoRA"

@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CognitiveConfig:
     """Configuration for cognitive training."""
+
     output_dir: str = "./cognitive_checkpoints"
 
     # How often to run cognitive processing (every N steps)
@@ -93,6 +94,7 @@ class CognitiveTrainer:
         self.lora_injected = False
         if cognitive_config.use_lora:
             from hbllm.modules.lora import LoRAManager
+
             self.lora_manager = LoRAManager()
             injected = self.lora_manager.inject(
                 model,
@@ -101,13 +103,19 @@ class CognitiveTrainer:
                 lora_dropout=cognitive_config.lora_dropout,
             )
             self.lora_injected = True
-            logger.info("LoRA injected into %d layers (r=%d)", len(injected), cognitive_config.lora_r)
+            logger.info(
+                "LoRA injected into %d layers (r=%d)", len(injected), cognitive_config.lora_r
+            )
 
             # Log trainable vs total params
             total = sum(p.numel() for p in model.parameters())
             trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-            logger.info("Parameters: %s total, %s trainable (%.1f%%)",
-                        f"{total:,}", f"{trainable:,}", trainable / total * 100)
+            logger.info(
+                "Parameters: %s total, %s trainable (%.1f%%)",
+                f"{total:,}",
+                f"{trainable:,}",
+                trainable / total * 100,
+            )
 
         # ─── Standard trainer ─────────────────────────────────────────
         self.trainer = Trainer(model, train_config, device=device)
@@ -180,8 +188,8 @@ class CognitiveTrainer:
 
         # 2. Cognitive processing (every N steps OR on step 1, with raw text)
         should_process = (
-            self._step_count == 1 or  # always process first step
-            self._step_count % self.cognitive_config.cognitive_interval == 0
+            self._step_count == 1  # always process first step
+            or self._step_count % self.cognitive_config.cognitive_interval == 0
         )
         if raw_texts and should_process:
             self._cognitive_step_count += 1
@@ -231,7 +239,9 @@ class CognitiveTrainer:
                 if domain != "general":
                     self.skill_registry.extract_and_store(
                         task_description=f"Learn {domain} patterns from training data",
-                        execution_trace=[{"action": f"Processed {domain} document at step {self._step_count}"}],
+                        execution_trace=[
+                            {"action": f"Processed {domain} document at step {self._step_count}"}
+                        ],
                         tools_used=["pre-training"],
                         success=loss < 8.0,  # reasonable threshold
                         category=domain,
@@ -271,11 +281,15 @@ class CognitiveTrainer:
         # 2. LoRA adapters
         if self.lora_injected:
             from hbllm.modules.lora import LoRAManager
+
             lora_dir = ckpt_dir / "lora_adapters"
             lora_dir.mkdir(exist_ok=True)
             lora_state = LoRAManager.get_lora_state_dict(self.model)
             torch.save(lora_state, lora_dir / "lora_adapter.pt")
-            logger.info("  [2/5] LoRA adapters saved (%d params)", sum(v.numel() for v in lora_state.values()))
+            logger.info(
+                "  [2/5] LoRA adapters saved (%d params)",
+                sum(v.numel() for v in lora_state.values()),
+            )
         else:
             logger.info("  [2/5] LoRA adapters — skipped (not enabled)")
 
@@ -284,8 +298,11 @@ class CognitiveTrainer:
             kg_path = ckpt_dir / "knowledge_graph.json"
             self.knowledge_graph.save(kg_path)
             kg_stats = self.knowledge_graph.stats()
-            logger.info("  [3/5] Knowledge graph: %d entities, %d edges",
-                        kg_stats["total_entities"], kg_stats.get("total_edges", 0))
+            logger.info(
+                "  [3/5] Knowledge graph: %d entities, %d edges",
+                kg_stats["total_entities"],
+                kg_stats.get("total_edges", 0),
+            )
         else:
             logger.info("  [3/5] Knowledge graph — skipped")
 
@@ -294,8 +311,11 @@ class CognitiveTrainer:
             mem_path = ckpt_dir / "training_memory.json"
             self.training_memory.save(mem_path)
             mem_stats = self.training_memory.stats()
-            logger.info("  [4/5] Training memory: %d records, %d domains",
-                        mem_stats["total_records"], len(mem_stats["domains"]))
+            logger.info(
+                "  [4/5] Training memory: %d records, %d domains",
+                mem_stats["total_records"],
+                len(mem_stats["domains"]),
+            )
             if mem_stats["mastered_domains"]:
                 logger.info("         Mastered: %s", ", ".join(mem_stats["mastered_domains"]))
             if mem_stats["weak_domains"]:
@@ -362,11 +382,15 @@ class CognitiveTrainer:
                 domain: {
                     "samples": len(losses),
                     "avg_loss": round(sum(losses) / len(losses), 4),
-                    "recent_loss": round(sum(losses[-10:]) / len(losses[-10:]), 4) if len(losses) >= 10 else None,
+                    "recent_loss": round(sum(losses[-10:]) / len(losses[-10:]), 4)
+                    if len(losses) >= 10
+                    else None,
                     "improving": (
-                        sum(losses[-10:]) / len(losses[-10:]) <
-                        sum(losses[:10]) / max(1, len(losses[:10]))
-                    ) if len(losses) >= 20 else None,
+                        sum(losses[-10:]) / len(losses[-10:])
+                        < sum(losses[:10]) / max(1, len(losses[:10]))
+                    )
+                    if len(losses) >= 20
+                    else None,
                 }
                 for domain, losses in self._domain_losses.items()
             }
@@ -377,19 +401,23 @@ class CognitiveTrainer:
         """Log a summary of cognitive processing state."""
         if self.knowledge_graph:
             kg = self.knowledge_graph.stats()
-            logger.info("  [KG] %d entities | top: %s",
-                        kg["total_entities"],
-                        ", ".join(e["name"] for e in kg["top_entities"][:5]))
+            logger.info(
+                "  [KG] %d entities | top: %s",
+                kg["total_entities"],
+                ", ".join(e["name"] for e in kg["top_entities"][:5]),
+            )
 
         if self.training_memory:
             mem = self.training_memory.stats()
             domains_str = " | ".join(
-                f"{name}:{info['mastery']:.0%}"
-                for name, info in list(mem["domains"].items())[:5]
+                f"{name}:{info['mastery']:.0%}" for name, info in list(mem["domains"].items())[:5]
             )
             logger.info("  [Memory] %d records | %s", mem["total_records"], domains_str)
 
         if self.skill_registry:
             skills = self.skill_registry.stats()
-            logger.info("  [Skills] %d skills across %d categories",
-                        skills["total_skills"], skills["categories"])
+            logger.info(
+                "  [Skills] %d skills across %d categories",
+                skills["total_skills"],
+                skills["categories"],
+            )

@@ -126,13 +126,9 @@ def speculate_step(
     # ─── 1. Autoregressive Draft Generation (Fast) ────────────────────────
     with torch.no_grad():
         for _ in range(K):
-            logits, curr_draft_kv = _model_forward(
-                draft_model, curr_input, curr_draft_kv
-            )
+            logits, curr_draft_kv = _model_forward(draft_model, curr_input, curr_draft_kv)
 
-            next_token, probs = sample(
-                logits[:, -1, :], temperature=temperature, top_p=top_p
-            )
+            next_token, probs = sample(logits[:, -1, :], temperature=temperature, top_p=top_p)
             draft_tokens.append(next_token)
             draft_probs_list.append(probs)
 
@@ -147,12 +143,10 @@ def speculate_step(
     verify_input = torch.cat([main_input_ids, draft_tensor], dim=1)
 
     with torch.no_grad():
-        main_logits, updated_main_kv = _model_forward(
-            main_model, verify_input, main_past_kv
-        )
+        main_logits, updated_main_kv = _model_forward(main_model, verify_input, main_past_kv)
 
     # Extract logits for the K draft positions + 1 bonus position
-    target_logits = main_logits[:, -(K + 1):, :]
+    target_logits = main_logits[:, -(K + 1) :, :]
 
     # ─── 3. Acceptance / Rejection Sampling ───────────────────────────────
     accepted_tokens = []
@@ -163,9 +157,7 @@ def speculate_step(
         p = draft_probs_list[i][0, draft_tensor[0, i]].item()
 
         # Main model true probability for the same token
-        q_probs_all = F.softmax(
-            target_logits[:, i, :] / max(temperature, 1e-7), dim=-1
-        )
+        q_probs_all = F.softmax(target_logits[:, i, :] / max(temperature, 1e-7), dim=-1)
         q = q_probs_all[0, draft_tensor[0, i]].item()
 
         # Speculative random gate
@@ -191,9 +183,7 @@ def speculate_step(
             break
     else:
         # All K tokens accepted — we earn one bonus token from the main model
-        bonus_token, _ = sample(
-            target_logits[:, -1, :], temperature=temperature, top_p=top_p
-        )
+        bonus_token, _ = sample(target_logits[:, -1, :], temperature=temperature, top_p=top_p)
         accepted_tokens.append(bonus_token)
         accepted_count += 1
 
@@ -208,10 +198,12 @@ def speculate_step(
         for layer_kv in curr_draft_kv:
             if isinstance(layer_kv, (tuple, list)) and len(layer_kv) == 2:
                 k, v = layer_kv
-                trimmed_draft_kv.append((
-                    k[:, :, :-trim_amount, :],
-                    v[:, :, :-trim_amount, :],
-                ))
+                trimmed_draft_kv.append(
+                    (
+                        k[:, :, :-trim_amount, :],
+                        v[:, :, :-trim_amount, :],
+                    )
+                )
             else:
                 trimmed_draft_kv.append(layer_kv)
         curr_draft_kv = trimmed_draft_kv
@@ -223,10 +215,12 @@ def speculate_step(
         for layer_kv in updated_main_kv:
             if isinstance(layer_kv, (tuple, list)) and len(layer_kv) == 2:
                 k, v = layer_kv
-                trimmed_main_kv.append((
-                    k[:, :, :-trim_amount, :],
-                    v[:, :, :-trim_amount, :],
-                ))
+                trimmed_main_kv.append(
+                    (
+                        k[:, :, :-trim_amount, :],
+                        v[:, :, :-trim_amount, :],
+                    )
+                )
             else:
                 trimmed_main_kv.append(layer_kv)
         updated_main_kv = trimmed_main_kv
@@ -235,7 +229,9 @@ def speculate_step(
 
     logger.debug(
         "Speculative step: proposed %d, accepted %d (%.0f%% hit rate)",
-        K, accepted_count, 100 * accepted_count / K,
+        K,
+        accepted_count,
+        100 * accepted_count / K,
     )
 
     return result_tokens, curr_draft_kv, updated_main_kv

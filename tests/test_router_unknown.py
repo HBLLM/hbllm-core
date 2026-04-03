@@ -33,7 +33,7 @@ async def test_router_unknown_topic():
         type=MessageType.QUERY,
         source_node_id="user",
         topic="router.query",
-        payload=QueryPayload(text="Hello world").model_dump()
+        payload=QueryPayload(text="Hello world").model_dump(),
     )
     resp1 = await router.handle_message(msg1)
     assert resp1 is None
@@ -44,7 +44,7 @@ async def test_router_unknown_topic():
         type=MessageType.QUERY,
         source_node_id="user",
         topic="router.query",
-        payload=QueryPayload(text="Tell me about marine biology.").model_dump()
+        payload=QueryPayload(text="Tell me about marine biology.").model_dump(),
     )
     resp2 = await router.handle_message(msg2)
     assert resp2 is None
@@ -56,7 +56,7 @@ async def test_router_unknown_topic():
         type=MessageType.QUERY,
         source_node_id="user",
         topic="router.query",
-        payload=QueryPayload(text="Explain quantum biology to me.").model_dump()
+        payload=QueryPayload(text="Explain quantum biology to me.").model_dump(),
     )
     resp3 = await router.handle_message(msg3)
 

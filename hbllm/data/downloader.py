@@ -59,7 +59,6 @@ PREDEFINED_SOURCES = {
         text_column="text",
         streaming=True,
     ),
-
     # ── Code ──────────────────────────────────────────────────────────
     "the_stack_v2": DatasetSource(
         name="the_stack_v2",
@@ -79,7 +78,6 @@ PREDEFINED_SOURCES = {
         text_column="content",
         streaming=True,
     ),
-
     # ── Math & Reasoning ──────────────────────────────────────────────
     "openwebmath": DatasetSource(
         name="openwebmath",
@@ -90,10 +88,9 @@ PREDEFINED_SOURCES = {
     "metamath": DatasetSource(
         name="metamath",
         dataset_id="meta-math/MetaMathQA",
-        text_column="query",     # concatenated with response in stream
+        text_column="query",  # concatenated with response in stream
         streaming=True,
     ),
-
     # ── Science ───────────────────────────────────────────────────────
     "pes2o": DatasetSource(
         name="pes2o",
@@ -102,7 +99,6 @@ PREDEFINED_SOURCES = {
         text_column="text",
         streaming=True,
     ),
-
     # ── Instruction / Chat (for SFT or cognitive pre-training) ────────
     "openhermes": DatasetSource(
         name="openhermes",
@@ -198,14 +194,20 @@ class DatasetDownloader:
                 break
             except (ConnectionError, TimeoutError, OSError) as e:
                 if attempt < max_retries:
-                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    wait = 2**attempt  # 1s, 2s, 4s
                     logger.warning(
                         "  %s: load failed (attempt %d/%d): %s — retrying in %ds",
-                        source.name, attempt + 1, max_retries, e, wait,
+                        source.name,
+                        attempt + 1,
+                        max_retries,
+                        e,
+                        wait,
                     )
                     _time.sleep(wait)
                 else:
-                    logger.error("  %s: load failed after %d retries: %s", source.name, max_retries, e)
+                    logger.error(
+                        "  %s: load failed after %d retries: %s", source.name, max_retries, e
+                    )
                     raise
             except Exception:
                 raise  # Don't retry on non-network errors

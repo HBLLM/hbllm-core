@@ -24,7 +24,9 @@ class BrowserNode(Node):
     """
 
     def __init__(self, node_id: str):
-        super().__init__(node_id=node_id, node_type=NodeType.ACTION, capabilities=["web_search", "web_scrape"])
+        super().__init__(
+            node_id=node_id, node_type=NodeType.ACTION, capabilities=["web_search", "web_scrape"]
+        )
 
     async def on_start(self) -> None:
         """Subscribe to search execution topics."""
@@ -86,32 +88,36 @@ class BrowserNode(Node):
                             for script in soup(["script", "style", "nav", "footer", "header"]):
                                 script.extract()
 
-                            text = soup.get_text(separator=' ')
+                            text = soup.get_text(separator=" ")
 
                             # Clean whitespace
-                            text = re.sub(r'\s+', ' ', text).strip()
+                            text = re.sub(r"\s+", " ", text).strip()
 
                             # Truncate to save context window (roughly 1000 words max)
                             words = text.split()
                             if len(words) > 1000:
                                 text = " ".join(words[:1000]) + "... [TRUNCATED]"
 
-                            results.append({
-                                "title": title,
-                                "url": url,
-                                "search_snippet": snippet,
-                                "page_content": text
-                            })
+                            results.append(
+                                {
+                                    "title": title,
+                                    "url": url,
+                                    "search_snippet": snippet,
+                                    "page_content": text,
+                                }
+                            )
 
                         except Exception as e:
                             logger.warning("Failed to scrape %s: %s", url, e)
                             # Fallback to just the snippet
-                            results.append({
-                                "title": title,
-                                "url": url,
-                                "search_snippet": snippet,
-                                "page_content": f"[Could not scrape full text: {e}]"
-                            })
+                            results.append(
+                                {
+                                    "title": title,
+                                    "url": url,
+                                    "search_snippet": snippet,
+                                    "page_content": f"[Could not scrape full text: {e}]",
+                                }
+                            )
 
                 return results
 
@@ -126,15 +132,15 @@ class BrowserNode(Node):
             for r in search_results:
                 formatted_text += f"---\n🌐 **{r['title']}**\nURL: {r['url']}\nSummary: {r['search_snippet']}\n\nContent:\n{r['page_content']}\n\n"
 
-            return message.create_response({
-                "results": search_results,
-                "text": formatted_text,
-                "domain": "browser"
-            })
+            return message.create_response(
+                {"results": search_results, "text": formatted_text, "domain": "browser"}
+            )
 
         except ImportError as ie:
             logger.error("Missing dependency: %s", ie)
-            return message.create_error("Missing dependencies. Please run: pip install duckduckgo-search beautifulsoup4 requests")
+            return message.create_error(
+                "Missing dependencies. Please run: pip install duckduckgo-search beautifulsoup4 requests"
+            )
         except Exception as e:
             logger.error("Web search failed: %s", e)
             return message.create_error(str(e))

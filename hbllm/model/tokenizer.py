@@ -14,12 +14,12 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Special token strings
-BOS = chr(60) + '|bos|' + chr(62)
-EOS = chr(60) + '|eos|' + chr(62)
-PAD = chr(60) + '|pad|' + chr(62)
-SYSTEM = chr(60) + '|system|' + chr(62)
-USER = chr(60) + '|user|' + chr(62)
-ASSISTANT = chr(60) + '|assistant|' + chr(62)
+BOS = chr(60) + "|bos|" + chr(62)
+EOS = chr(60) + "|eos|" + chr(62)
+PAD = chr(60) + "|pad|" + chr(62)
+SYSTEM = chr(60) + "|system|" + chr(62)
+USER = chr(60) + "|user|" + chr(62)
+ASSISTANT = chr(60) + "|assistant|" + chr(62)
 
 SPECIAL_TOKENS = [BOS, EOS, PAD, SYSTEM, USER, ASSISTANT]
 
@@ -53,7 +53,7 @@ class HBLLMTokenizer:
         base = self.vocab_size - len(SPECIAL_TOKENS)
         for i, token in enumerate(SPECIAL_TOKENS):
             self._special_ids[token] = base + i
-        logger.info('Tokenizer loaded from Rust Vocab (%d tokens)', self.vocab_size)
+        logger.info("Tokenizer loaded from Rust Vocab (%d tokens)", self.vocab_size)
 
     # Class-level tiktoken cache to avoid re-initialization
     _tiktoken_cache: dict[str, Any] = {}
@@ -62,14 +62,15 @@ class HBLLMTokenizer:
         """Fallback: use tiktoken for encoding (cached)."""
         try:
             import tiktoken
-            cache_key = 'cl100k_base'
+
+            cache_key = "cl100k_base"
             if cache_key not in HBLLMTokenizer._tiktoken_cache:
                 HBLLMTokenizer._tiktoken_cache[cache_key] = tiktoken.get_encoding(cache_key)
             self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
             self.vocab_size = self._tiktoken.n_vocab
-            logger.info('Tokenizer fallback: tiktoken cl100k_base (%d tokens)', self.vocab_size)
+            logger.info("Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size)
         except ImportError:
-            logger.warning('No tokenizer backend available. Encode/decode will fail.')
+            logger.warning("No tokenizer backend available. Encode/decode will fail.")
 
         # Reserve special IDs at end
         base = self.vocab_size
@@ -82,10 +83,11 @@ class HBLLMTokenizer:
         """Load from a Rust vocab JSON file."""
         try:
             from hbllm_tokenizer_rs import Vocab
+
             vocab = Vocab.load(str(path))
             return cls(vocab=vocab)
         except ImportError:
-            logger.warning('Rust tokenizer not available, using tiktoken fallback')
+            logger.warning("Rust tokenizer not available, using tiktoken fallback")
             return cls()
 
     @classmethod
@@ -107,7 +109,7 @@ class HBLLMTokenizer:
         elif self._tiktoken is not None:
             ids.extend(self._tiktoken.encode(text))
         else:
-            raise RuntimeError('No tokenizer backend available')
+            raise RuntimeError("No tokenizer backend available")
 
         if add_eos:
             ids.append(self.eos_id)
@@ -124,7 +126,7 @@ class HBLLMTokenizer:
         elif self._tiktoken is not None:
             return self._tiktoken.decode(filtered)
         else:
-            raise RuntimeError('No tokenizer backend available')
+            raise RuntimeError("No tokenizer backend available")
 
     # ─── Special Token IDs ───────────────────────────────────────────
 
@@ -160,13 +162,13 @@ class HBLLMTokenizer:
         parts = []
         nl = "\n"
         for msg in messages:
-            role = msg['role']
-            content = msg['content']
-            if role == 'system':
+            role = msg["role"]
+            content = msg["content"]
+            if role == "system":
                 parts.append(SYSTEM + nl + content + EOS)
-            elif role == 'user':
+            elif role == "user":
                 parts.append(USER + nl + content + EOS)
-            elif role == 'assistant':
+            elif role == "assistant":
                 parts.append(ASSISTANT + nl + content + EOS)
 
         if add_generation_prompt:
@@ -187,5 +189,5 @@ class HBLLMTokenizer:
         return self.vocab_size
 
     def __repr__(self) -> str:
-        backend = 'rust' if self._vocab else 'tiktoken' if self._tiktoken else 'none'
-        return f'HBLLMTokenizer(vocab_size={self.vocab_size}, backend={backend})'
+        backend = "rust" if self._vocab else "tiktoken" if self._tiktoken else "none"
+        return f"HBLLMTokenizer(vocab_size={self.vocab_size}, backend={backend})"

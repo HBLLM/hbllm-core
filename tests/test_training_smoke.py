@@ -17,6 +17,7 @@ from hbllm.training.trainer import CheckpointManager, Trainer, TrainingConfig
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def tiny_model():
     """Create a tiny model for fast CPU testing."""
@@ -34,6 +35,7 @@ def tmp_checkpoint_dir():
 
 
 # ── DPO Loss Tests ───────────────────────────────────────────────────────────
+
 
 class TestDPOLoss:
     def test_basic_dpo_loss(self):
@@ -120,6 +122,7 @@ class TestDPOLoss:
 
 # ── Trainer Tests ────────────────────────────────────────────────────────────
 
+
 class TestTrainer:
     def test_trainer_initialization(self, tiny_model):
         """Trainer initializes on CPU without errors."""
@@ -169,6 +172,7 @@ class TestTrainer:
 
 # ── Checkpoint Tests ─────────────────────────────────────────────────────────
 
+
 class TestCheckpoint:
     def test_save_load_round_trip(self, tiny_model, tmp_checkpoint_dir):
         """Checkpoint save + load should preserve model state."""
@@ -205,6 +209,7 @@ class TestCheckpoint:
         assert (ckpt_dir / "training_state.json").exists()
 
         import json
+
         with open(ckpt_dir / "training_state.json") as f:
             state = json.load(f)
         assert state["step"] == 1
@@ -231,6 +236,7 @@ class TestCheckpoint:
 
 
 # ── SFT Smoke Test ───────────────────────────────────────────────────────────
+
 
 class TestSFTSmoke:
     def test_sft_forward_pass(self, tiny_model):

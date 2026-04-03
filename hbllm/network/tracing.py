@@ -28,6 +28,7 @@ _OTEL_ENABLED = os.environ.get("OTEL_ENABLED", "0") == "1"
 _tracer = None
 _meter = None
 
+
 def _init_otel():
     """Lazily initialize OpenTelemetry SDK."""
     global _tracer, _meter
@@ -41,10 +42,12 @@ def _init_otel():
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        resource = Resource.create({
-            "service.name": os.environ.get("OTEL_SERVICE_NAME", "hbllm"),
-            "service.version": "1.0.0",
-        })
+        resource = Resource.create(
+            {
+                "service.name": os.environ.get("OTEL_SERVICE_NAME", "hbllm"),
+                "service.version": "1.0.0",
+            }
+        )
 
         # Trace provider
         tracer_provider = TracerProvider(resource=resource)
@@ -52,9 +55,11 @@ def _init_otel():
         # Try OTLP exporter, fall back to console
         try:
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
             exporter = OTLPSpanExporter()
         except ImportError:
             from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+
             exporter = ConsoleSpanExporter()
 
         tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
@@ -89,6 +94,7 @@ def get_meter():
 
 # ── Lightweight Metrics (always active, zero-dep) ────────────────────────────
 
+
 class BusMetrics:
     """
     Lightweight, always-on metrics for the MessageBus.
@@ -118,7 +124,7 @@ class BusMetrics:
         self.messages_delivered += 1
         self._latency_samples.append(latency_ms)
         if len(self._latency_samples) > self._max_samples:
-            self._latency_samples = self._latency_samples[-self._max_samples:]
+            self._latency_samples = self._latency_samples[-self._max_samples :]
 
     def record_drop(self, topic: str) -> None:
         self.messages_dropped += 1

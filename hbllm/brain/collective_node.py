@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class KnowledgeDigest:
     """A shareable knowledge artifact from one instance."""
+
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     source_instance_id: str = ""
     domain: str = ""
@@ -134,16 +135,21 @@ class CollectiveNode(Node):
         self.stats["broadcasts_sent"] += 1
 
         # Broadcast to peers
-        await self.publish("collective.broadcast", Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            topic="collective.broadcast",
-            payload=digest.to_dict(),
-        ))
+        await self.publish(
+            "collective.broadcast",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="collective.broadcast",
+                payload=digest.to_dict(),
+            ),
+        )
 
         logger.info(
             "Broadcast knowledge digest: domain=%s capability=%s checksum=%s",
-            digest.domain, digest.capability, digest.checksum,
+            digest.domain,
+            digest.capability,
+            digest.checksum,
         )
         return None
 
@@ -188,7 +194,9 @@ class CollectiveNode(Node):
 
         logger.info(
             "Received knowledge from instance %s: domain=%s capability=%s",
-            source, digest.domain, digest.capability,
+            source,
+            digest.domain,
+            digest.capability,
         )
 
         # ── Integrate the digest into the local brain ──
@@ -207,71 +215,88 @@ class CollectiveNode(Node):
         try:
             if artifact_type == "lora_weights":
                 # Trigger the spawner to load the new LoRA adapter
-                await self.publish("system.spawn", Message(
-                    type=MessageType.SPAWN_REQUEST,
-                    source_node_id=self.node_id,
-                    topic="system.spawn",
-                    payload={
-                        "topic": digest.domain,
-                        "trigger_query": f"Integrated from peer {digest.source_instance_id}",
-                        "confidence_score": 0.0,
-                        "adapter_path": data.get("adapter_path", ""),
-                        "from_collective": True,
-                    },
-                ))
+                await self.publish(
+                    "system.spawn",
+                    Message(
+                        type=MessageType.SPAWN_REQUEST,
+                        source_node_id=self.node_id,
+                        topic="system.spawn",
+                        payload={
+                            "topic": digest.domain,
+                            "trigger_query": f"Integrated from peer {digest.source_instance_id}",
+                            "confidence_score": 0.0,
+                            "adapter_path": data.get("adapter_path", ""),
+                            "from_collective": True,
+                        },
+                    ),
+                )
 
             elif artifact_type == "skill":
                 # Store the skill in procedural memory
-                await self.publish("memory.skill.store", Message(
-                    type=MessageType.EVENT,
-                    source_node_id=self.node_id,
-                    topic="memory.skill.store",
-                    payload={
-                        "name": digest.capability or digest.domain,
-                        "steps": data.get("steps", []),
-                        "domain": digest.domain,
-                        "from_collective": True,
-                    },
-                ))
+                await self.publish(
+                    "memory.skill.store",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="memory.skill.store",
+                        payload={
+                            "name": digest.capability or digest.domain,
+                            "steps": data.get("steps", []),
+                            "domain": digest.domain,
+                            "from_collective": True,
+                        },
+                    ),
+                )
 
             elif artifact_type == "semantic_fact":
                 # Store facts in semantic memory
-                await self.publish("memory.store", Message(
-                    type=MessageType.EVENT,
-                    source_node_id=self.node_id,
-                    topic="memory.store",
-                    payload={
-                        "text": data.get("text", ""),
-                        "domain": digest.domain,
-                        "metadata": {"source": f"collective:{digest.source_instance_id}"},
-                        "from_collective": True,
-                    },
-                ))
+                await self.publish(
+                    "memory.store",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="memory.store",
+                        payload={
+                            "text": data.get("text", ""),
+                            "domain": digest.domain,
+                            "metadata": {"source": f"collective:{digest.source_instance_id}"},
+                            "from_collective": True,
+                        },
+                    ),
+                )
 
             elif artifact_type == "identity_update":
                 # Forward identity updates for the relevant tenant
-                await self.publish("identity.update", Message(
-                    type=MessageType.EVENT,
-                    source_node_id=self.node_id,
-                    topic="identity.update",
-                    payload=data,
-                ))
+                await self.publish(
+                    "identity.update",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="identity.update",
+                        payload=data,
+                    ),
+                )
             else:
                 logger.debug(
                     "Unknown artifact type '%s' from peer %s — stored but not integrated",
-                    artifact_type, digest.source_instance_id,
+                    artifact_type,
+                    digest.source_instance_id,
                 )
                 return
 
             self.stats["digests_integrated"] += 1
             logger.info(
                 "Integrated %s digest from peer %s (domain=%s)",
-                artifact_type, digest.source_instance_id, digest.domain,
+                artifact_type,
+                digest.source_instance_id,
+                digest.domain,
             )
         except Exception as e:
             logger.warning(
                 "Failed to integrate digest %s from peer %s: %s",
-                digest.id, digest.source_instance_id, e,
+                digest.id,
+                digest.source_instance_id,
+                e,
             )
 
     async def _handle_query(self, message: Message) -> Message | None:
@@ -279,16 +304,14 @@ class CollectiveNode(Node):
         payload = message.payload
         limit = int(payload.get("limit", 10))
 
-        recent_received = [
-            d.to_dict() for d in self.received_log[-limit:]
-        ]
-        recent_broadcast = [
-            d.to_dict() for d in self.broadcast_log[-limit:]
-        ]
+        recent_received = [d.to_dict() for d in self.received_log[-limit:]]
+        recent_broadcast = [d.to_dict() for d in self.broadcast_log[-limit:]]
 
-        return message.create_response({
-            "instance_id": self.instance_id,
-            "stats": self.stats,
-            "recent_received": recent_received,
-            "recent_broadcast": recent_broadcast,
-        })
+        return message.create_response(
+            {
+                "instance_id": self.instance_id,
+                "stats": self.stats,
+                "recent_received": recent_received,
+                "recent_broadcast": recent_broadcast,
+            }
+        )

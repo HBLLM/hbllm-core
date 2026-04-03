@@ -25,6 +25,7 @@ from tests.mock_llm import MockLLM
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 async def cognitive_system():
     """
@@ -63,6 +64,7 @@ async def cognitive_system():
 
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_full_query_flow(cognitive_system):
@@ -140,7 +142,9 @@ async def test_memory_stores_and_retrieves(cognitive_system):
 
     # Store directly in semantic memory (bypasses episodic table issue)
     mem_node.semantic_db.store("I love quantum computing and cats.", metadata={"domain": "general"})
-    mem_node.semantic_db.store("Python is a great programming language.", metadata={"domain": "general"})
+    mem_node.semantic_db.store(
+        "Python is a great programming language.", metadata={"domain": "general"}
+    )
 
     # Verify semantic_db retrieves relevant content
     results = mem_node.semantic_db.search("quantum computing", top_k=3)
@@ -181,6 +185,7 @@ async def test_negative_feedback_triggers_improvement(cognitive_system):
     meta = next(n for n in nodes if n.node_id == "meta")
 
     from hbllm.network.messages import FeedbackPayload
+
     feedback = FeedbackPayload(
         message_id="fb_001",
         rating=-1,
@@ -190,12 +195,15 @@ async def test_negative_feedback_triggers_improvement(cognitive_system):
     )
 
     for _ in range(meta.weakness_threshold):
-        await bus.publish("system.feedback", Message(
-            type=MessageType.FEEDBACK,
-            source_node_id="test",
-            topic="system.feedback",
-            payload=feedback.model_dump(),
-        ))
+        await bus.publish(
+            "system.feedback",
+            Message(
+                type=MessageType.FEEDBACK,
+                source_node_id="test",
+                topic="system.feedback",
+                payload=feedback.model_dump(),
+            ),
+        )
 
     await asyncio.sleep(1.0)
 

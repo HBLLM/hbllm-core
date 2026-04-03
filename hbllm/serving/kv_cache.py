@@ -8,7 +8,6 @@ Features:
   - Optional 8-bit key quantization to further reduce memory footprint
 """
 
-
 import torch
 
 
@@ -34,7 +33,7 @@ class KVCache:
         num_kv_heads: int,
         head_dim: int,
         dtype: torch.dtype = torch.float16,
-        device: torch.device = torch.device('cpu'),
+        device: torch.device = torch.device("cpu"),
         quantize_k: bool = False,
         sliding_window: int | None = None,
         attention_sinks: int = 4,
@@ -67,7 +66,8 @@ class KVCache:
             self.key_cache = torch.zeros(shape, dtype=torch.int8, device=device)
             self.key_scales = torch.zeros(
                 (batch_size, num_kv_heads, self.buffer_size, 1),
-                dtype=dtype, device=device,
+                dtype=dtype,
+                device=device,
             )
         else:
             self.key_cache = torch.zeros(shape, dtype=dtype, device=device)
@@ -186,14 +186,17 @@ class KVCache:
                     dst_start = sinks
                     dst_end = window - shift_amount
 
-                    self.key_cache[:, :, dst_start:dst_end, :] = \
-                        self.key_cache[:, :, src_start:src_end, :].clone()
-                    self.value_cache[:, :, dst_start:dst_end, :] = \
-                        self.value_cache[:, :, src_start:src_end, :].clone()
+                    self.key_cache[:, :, dst_start:dst_end, :] = self.key_cache[
+                        :, :, src_start:src_end, :
+                    ].clone()
+                    self.value_cache[:, :, dst_start:dst_end, :] = self.value_cache[
+                        :, :, src_start:src_end, :
+                    ].clone()
 
                     if self.quantize_k and self.key_scales is not None:
-                        self.key_scales[:, :, dst_start:dst_end, :] = \
-                            self.key_scales[:, :, src_start:src_end, :].clone()
+                        self.key_scales[:, :, dst_start:dst_end, :] = self.key_scales[
+                            :, :, src_start:src_end, :
+                        ].clone()
 
                 # Write new tokens at the end of the buffer
                 write_start = window - shift_amount
@@ -202,7 +205,8 @@ class KVCache:
                 self._write_to_cache(
                     keys[:, :, -actual_new:, :],
                     values[:, :, -actual_new:, :],
-                    write_start, write_end,
+                    write_start,
+                    write_end,
                 )
                 self.seq_len = window
 
@@ -236,21 +240,25 @@ class KVCache:
                         dst_start = sinks
                         dst_end = window - shift_amount
 
-                        self.key_cache[:, :, dst_start:dst_end, :] = \
-                            self.key_cache[:, :, src_start:src_end, :].clone()
-                        self.value_cache[:, :, dst_start:dst_end, :] = \
-                            self.value_cache[:, :, src_start:src_end, :].clone()
+                        self.key_cache[:, :, dst_start:dst_end, :] = self.key_cache[
+                            :, :, src_start:src_end, :
+                        ].clone()
+                        self.value_cache[:, :, dst_start:dst_end, :] = self.value_cache[
+                            :, :, src_start:src_end, :
+                        ].clone()
 
                         if self.quantize_k and self.key_scales is not None:
-                            self.key_scales[:, :, dst_start:dst_end, :] = \
-                                self.key_scales[:, :, src_start:src_end, :].clone()
+                            self.key_scales[:, :, dst_start:dst_end, :] = self.key_scales[
+                                :, :, src_start:src_end, :
+                            ].clone()
 
                     write_start = window - shift_amount
                     actual_new = min(overflow_len, shift_amount)
                     self._write_to_cache(
                         overflow_keys[:, :, -actual_new:, :],
                         overflow_values[:, :, -actual_new:, :],
-                        write_start, window,
+                        write_start,
+                        window,
                     )
                 else:
                     # new_len fits exactly or the initial fill is sufficient
@@ -280,20 +288,22 @@ class KVCache:
     def _read_cache(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the currently valid portion of the cache, dequantizing if needed."""
         if self.quantize_k:
-            k_slice = self.key_cache[:, :, :self.seq_len, :].to(self.dtype)
-            s_slice = self.key_scales[:, :, :self.seq_len, :]
+            k_slice = self.key_cache[:, :, : self.seq_len, :].to(self.dtype)
+            s_slice = self.key_scales[:, :, : self.seq_len, :]
             final_keys = k_slice * s_slice
         else:
-            final_keys = self.key_cache[:, :, :self.seq_len, :]
+            final_keys = self.key_cache[:, :, : self.seq_len, :]
 
-        return (final_keys, self.value_cache[:, :, :self.seq_len, :])
+        return (final_keys, self.value_cache[:, :, : self.seq_len, :])
 
     @property
     def total_tokens_seen(self) -> int:
         """Total number of tokens processed (may exceed buffer_size)."""
         return self._total_tokens_seen
 
-    def _offload_evicted_to_cpu(self, sinks: int, shift_amount: int, new_len: int, window: int) -> None:
+    def _offload_evicted_to_cpu(
+        self, sinks: int, shift_amount: int, new_len: int, window: int
+    ) -> None:
         """Asynchronously stream evicted tokens to pinned CPU memory."""
         start_logical = self._total_tokens_seen - new_len - (window - sinks)
         if start_logical < 0 or start_logical >= self.max_seq_len:
@@ -311,7 +321,9 @@ class KVCache:
 
         if self.quantize_k and self.cpu_key_scales is not None and self.key_scales is not None:
             evicted_scales = self.key_scales[:, :, sinks : sinks + actual_shift, :]
-            self.cpu_key_scales[:, :, start_logical:end_logical, :].copy_(evicted_scales, non_blocking=True)
+            self.cpu_key_scales[:, :, start_logical:end_logical, :].copy_(
+                evicted_scales, non_blocking=True
+            )
 
     def get_full_cache_cpu(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns the fully assembled KV history sequence located on the CPU."""
@@ -324,10 +336,16 @@ class KVCache:
 
         # 1. Sync Attention Sinks to the beginning of the CPU cache
         if sinks > 0:
-            self.cpu_key_cache[:, :, :sinks, :].copy_(self.key_cache[:, :, :sinks, :], non_blocking=True)
-            self.cpu_value_cache[:, :, :sinks, :].copy_(self.value_cache[:, :, :sinks, :], non_blocking=True)
+            self.cpu_key_cache[:, :, :sinks, :].copy_(
+                self.key_cache[:, :, :sinks, :], non_blocking=True
+            )
+            self.cpu_value_cache[:, :, :sinks, :].copy_(
+                self.value_cache[:, :, :sinks, :], non_blocking=True
+            )
             if self.quantize_k and self.cpu_key_scales is not None and self.key_scales is not None:
-                self.cpu_key_scales[:, :, :sinks, :].copy_(self.key_scales[:, :, :sinks, :], non_blocking=True)
+                self.cpu_key_scales[:, :, :sinks, :].copy_(
+                    self.key_scales[:, :, :sinks, :], non_blocking=True
+                )
 
         # 2. Sync the current active rolling window
         if active_len > sinks:
@@ -345,9 +363,11 @@ class KVCache:
 
         # Ensure all async copies to CPU finish before providing CPU tensor access
         if self.device != torch.device("cpu"):
-            torch.cuda.current_stream(self.device).synchronize() if self.device.type == "cuda" else None
+            torch.cuda.current_stream(
+                self.device
+            ).synchronize() if self.device.type == "cuda" else None
 
         return (
             self.cpu_key_cache[:, :, :total_tokens, :],
-            self.cpu_value_cache[:, :, :total_tokens, :]
+            self.cpu_value_cache[:, :, :total_tokens, :],
         )

@@ -9,6 +9,7 @@ from hbllm.memory.semantic import SemanticMemory
 
 # ─── 1. Hybrid Search ───────────────────────────────────────────────────────
 
+
 class TestHybridSearch:
     """Test that hybrid search blends dense and sparse scores."""
 
@@ -68,6 +69,7 @@ class TestHybridSearch:
 
 # ─── 2. Reward-Boosted Re-Ranking ───────────────────────────────────────────
 
+
 class TestRewardReranking:
     """Test that reward scores boost or penalize search results."""
 
@@ -83,7 +85,8 @@ class TestRewardReranking:
 
         # Search with reward boosting doc index 1 (Java)
         boosted_results = sm.search(
-            "programming", top_k=3,
+            "programming",
+            top_k=3,
             reward_scores={1: 5.0},  # Big boost to Java
             reward_boost=0.2,
         )
@@ -101,7 +104,8 @@ class TestRewardReranking:
 
         sm.search("document", top_k=3)
         with_boost = sm.search(
-            "document", top_k=3,
+            "document",
+            top_k=3,
             reward_scores={2: 10.0},  # Massive boost to "birds"
             reward_boost=0.5,
         )
@@ -131,7 +135,8 @@ class TestRewardReranking:
         sm.store("Other stuff unrelated")
 
         results = sm.search(
-            "programming", top_k=3,
+            "programming",
+            top_k=3,
             reward_scores={1: -5.0},  # Penalize "Bad content"
             reward_boost=0.2,
         )
@@ -141,12 +146,14 @@ class TestRewardReranking:
 
 # ─── 3. PlannerNode Prompt Cache ────────────────────────────────────────────
 
+
 class TestPlannerCache:
     """Test the LRU prompt/response cache in PlannerNode."""
 
     def test_cache_key_deterministic(self):
         """Same text should produce the same cache key."""
         from hbllm.brain.planner_node import PlannerNode
+
         key1 = PlannerNode._cache_key("Hello world")
         key2 = PlannerNode._cache_key("Hello world")
         assert key1 == key2
@@ -154,6 +161,7 @@ class TestPlannerCache:
     def test_cache_key_case_insensitive(self):
         """Cache keys should be case-insensitive."""
         from hbllm.brain.planner_node import PlannerNode
+
         key1 = PlannerNode._cache_key("Hello World")
         key2 = PlannerNode._cache_key("hello world")
         assert key1 == key2
@@ -161,6 +169,7 @@ class TestPlannerCache:
     def test_cache_key_strips_whitespace(self):
         """Cache keys should ignore leading/trailing whitespace."""
         from hbllm.brain.planner_node import PlannerNode
+
         key1 = PlannerNode._cache_key("  Hello World  ")
         key2 = PlannerNode._cache_key("Hello World")
         assert key1 == key2
@@ -168,6 +177,7 @@ class TestPlannerCache:
     def test_cache_eviction(self):
         """Cache should evict oldest entries when full."""
         from hbllm.brain.planner_node import PlannerNode
+
         node = PlannerNode(node_id="test_planner")
 
         # Fill cache beyond max
@@ -183,6 +193,7 @@ class TestPlannerCache:
     def test_cache_hit_tracking(self):
         """Cache should track hit/miss counts."""
         from hbllm.brain.planner_node import PlannerNode
+
         node = PlannerNode(node_id="test_planner")
         assert node._cache_hits == 0
         assert node._cache_misses == 0
@@ -190,6 +201,7 @@ class TestPlannerCache:
     def test_cache_stores_and_retrieves(self):
         """Cache should store and retrieve responses correctly."""
         from hbllm.brain.planner_node import PlannerNode
+
         node = PlannerNode(node_id="test_planner")
 
         node._cache_response("test_key", "test_response")

@@ -5,6 +5,7 @@ Receives Python code, validates it against a security policy using AST
 inspection, then executes it in a restricted subprocess (with timeout
 and resource limits) and returns output or traceback as a reward signal.
 """
+
 from __future__ import annotations
 
 import ast
@@ -24,22 +25,57 @@ logger = logging.getLogger(__name__)
 # ── Security policy ──────────────────────────────────────────────────────────
 
 # Modules that grant filesystem, network, or process control access
-BLOCKED_MODULES: frozenset[str] = frozenset({
-    "os", "sys", "subprocess", "shutil", "pathlib",
-    "socket", "http", "urllib", "requests", "httpx",
-    "ctypes", "signal", "multiprocessing", "threading",
-    "importlib", "runpy", "code", "codeop",
-    "pickle", "shelve", "marshal",
-    "webbrowser", "ftplib", "smtplib", "telnetlib",
-})
+BLOCKED_MODULES: frozenset[str] = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "pathlib",
+        "socket",
+        "http",
+        "urllib",
+        "requests",
+        "httpx",
+        "ctypes",
+        "signal",
+        "multiprocessing",
+        "threading",
+        "importlib",
+        "runpy",
+        "code",
+        "codeop",
+        "pickle",
+        "shelve",
+        "marshal",
+        "webbrowser",
+        "ftplib",
+        "smtplib",
+        "telnetlib",
+    }
+)
 
 # Built-in functions / names that can escape the sandbox
-BLOCKED_BUILTINS: frozenset[str] = frozenset({
-    "eval", "exec", "compile", "__import__",
-    "globals", "locals", "vars", "dir",
-    "getattr", "setattr", "delattr",
-    "open", "input", "breakpoint", "exit", "quit",
-})
+BLOCKED_BUILTINS: frozenset[str] = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "getattr",
+        "setattr",
+        "delattr",
+        "open",
+        "input",
+        "breakpoint",
+        "exit",
+        "quit",
+    }
+)
 
 
 class CodeSecurityError(Exception):
@@ -64,18 +100,14 @@ class _SecurityVisitor(ast.NodeVisitor):
         for alias in node.names:
             root_mod = alias.name.split(".")[0]
             if root_mod in BLOCKED_MODULES:
-                self.violations.append(
-                    f"Line {node.lineno}: blocked import '{alias.name}'"
-                )
+                self.violations.append(f"Line {node.lineno}: blocked import '{alias.name}'")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module:
             root_mod = node.module.split(".")[0]
             if root_mod in BLOCKED_MODULES:
-                self.violations.append(
-                    f"Line {node.lineno}: blocked import from '{node.module}'"
-                )
+                self.violations.append(f"Line {node.lineno}: blocked import from '{node.module}'")
         self.generic_visit(node)
 
     # ── dangerous call detection ─────────────────────────────────────────
@@ -89,17 +121,13 @@ class _SecurityVisitor(ast.NodeVisitor):
             name = func.attr
 
         if name and name in BLOCKED_BUILTINS:
-            self.violations.append(
-                f"Line {node.lineno}: blocked built-in call '{name}()'"
-            )
+            self.violations.append(f"Line {node.lineno}: blocked built-in call '{name}()'")
         self.generic_visit(node)
 
     # ── dunder attribute access ──────────────────────────────────────────
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__") and node.attr.endswith("__"):
-            self.violations.append(
-                f"Line {node.lineno}: blocked dunder access '.{node.attr}'"
-            )
+            self.violations.append(f"Line {node.lineno}: blocked dunder access '.{node.attr}'")
         self.generic_visit(node)
 
 
@@ -117,6 +145,7 @@ def validate_code(code: str) -> list[str]:
 
 
 # ── Execution Node ────────────────────────────────────────────────────────────
+
 
 class ExecutionNode(Node):
     """Executes code securely to provide deterministic ground-truth verification."""
@@ -157,9 +186,7 @@ class ExecutionNode(Node):
         if violations:
             detail = "; ".join(violations)
             logger.warning("ExecutionNode rejected code: %s", detail)
-            return message.create_error(
-                f"Code rejected by security policy: {detail}"
-            )
+            return message.create_error(f"Code rejected by security policy: {detail}")
 
         # Run code in an isolated subprocess
         result = await self._execute_python(code)
@@ -181,43 +208,35 @@ class ExecutionNode(Node):
                 }
 
                 proc = await asyncio.create_subprocess_exec(
-                    sys.executable, "-I", temp_script.name,  # -I = isolated mode
+                    sys.executable,
+                    "-I",
+                    temp_script.name,  # -I = isolated mode
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=safe_env,
                 )
 
                 try:
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=self.timeout
+                    )
                 except TimeoutError:
                     proc.kill()
                     await proc.communicate()
                     return {
                         "status": "FAILURE",
                         "output": f"Execution timed out after {self.timeout} seconds.",
-                        "error": "TimeoutError"
+                        "error": "TimeoutError",
                     }
 
                 output = stdout.decode().strip()
                 error = stderr.decode().strip()
 
                 if proc.returncode == 0:
-                    return {
-                        "status": "SUCCESS",
-                        "output": output,
-                        "error": error
-                    }
+                    return {"status": "SUCCESS", "output": output, "error": error}
                 else:
-                    return {
-                        "status": "FAILURE",
-                        "output": output,
-                        "error": error
-                    }
+                    return {"status": "FAILURE", "output": output, "error": error}
             except Exception as e:
-                return {
-                    "status": "FAILURE",
-                    "output": "",
-                    "error": str(e)
-                }
+                return {"status": "FAILURE", "output": "", "error": str(e)}
         finally:
             os.unlink(temp_script.name)

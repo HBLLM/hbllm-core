@@ -44,9 +44,7 @@ class LLMInterface:
         Returns:
             The generated text string (excluding the prompt).
         """
-        return await asyncio.to_thread(
-            self._generate_sync, prompt, max_tokens, temperature
-        )
+        return await asyncio.to_thread(self._generate_sync, prompt, max_tokens, temperature)
 
     async def generate_json(self, prompt: str, max_tokens: int = 256) -> dict[str, Any]:
         """
@@ -83,11 +81,7 @@ class LLMInterface:
             for _ in range(max_tokens):
                 model_input = input_ids[:, -1:] if past_key_values else input_ids
 
-                outputs = self.model(
-                    model_input,
-                    past_key_values=past_key_values,
-                    use_cache=True
-                )
+                outputs = self.model(model_input, past_key_values=past_key_values, use_cache=True)
 
                 logits = outputs["logits"][:, -1, :]
                 past_key_values = outputs.get("past_key_values")

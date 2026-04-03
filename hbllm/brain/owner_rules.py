@@ -60,20 +60,39 @@ _STATE_RE = re.compile(
 
 # Action keywords for deny
 _DENY_KEYWORDS = {
-    "never", "don't", "do not", "dont", "must not", "mustn't",
-    "should not", "shouldn't", "cannot", "can't", "forbid",
-    "prohibit", "block", "prevent", "disallow", "refuse",
+    "never",
+    "don't",
+    "do not",
+    "dont",
+    "must not",
+    "mustn't",
+    "should not",
+    "shouldn't",
+    "cannot",
+    "can't",
+    "forbid",
+    "prohibit",
+    "block",
+    "prevent",
+    "disallow",
+    "refuse",
 }
 
 # Action keywords for require/transform
 _REQUIRE_KEYWORDS = {
-    "always", "must", "should", "ensure", "make sure", "require",
+    "always",
+    "must",
+    "should",
+    "ensure",
+    "make sure",
+    "require",
 }
 
 
 @dataclass
 class ParsedRule:
     """Result of parsing a natural language owner rule."""
+
     original_text: str
     policy_type: PolicyType
     action: PolicyAction
@@ -115,7 +134,9 @@ def _extract_action_subject(text: str) -> str:
         return ""
 
     # Build a regex: split into significant words and join with .*
-    words = [w for w in cleaned.split() if len(w) > 2 and w.lower() not in {"the", "and", "for", "with"}]
+    words = [
+        w for w in cleaned.split() if len(w) > 2 and w.lower() not in {"the", "and", "for", "with"}
+    ]
     if not words:
         return ""
 
@@ -225,6 +246,7 @@ def parse_owner_rule(text: str) -> ParsedRule:
 
 # ── Owner Rule Store ────────────────────────────────────────────────────────
 
+
 class OwnerRuleStore:
     """
     SQLite-backed persistence for owner-defined rules.
@@ -285,23 +307,40 @@ class OwnerRuleStore:
         conditions_json = json.dumps([c.to_dict() for c in parsed.conditions])
 
         with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO owner_rules
                     (id, tenant_id, original_text, policy_name, policy_type,
                      action, description, pattern, content, conditions_json,
                      severity, confidence, source, enabled, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-            """, (
-                rule_id, tenant_id, parsed.original_text, policy_name,
-                parsed.policy_type.value, parsed.action.value,
-                parsed.description, parsed.pattern, parsed.content,
-                conditions_json, parsed.severity, parsed.confidence,
-                source, now, now,
-            ))
+            """,
+                (
+                    rule_id,
+                    tenant_id,
+                    parsed.original_text,
+                    policy_name,
+                    parsed.policy_type.value,
+                    parsed.action.value,
+                    parsed.description,
+                    parsed.pattern,
+                    parsed.content,
+                    conditions_json,
+                    parsed.severity,
+                    parsed.confidence,
+                    source,
+                    now,
+                    now,
+                ),
+            )
 
         logger.info(
             "Added owner rule '%s' for tenant '%s' (type=%s, severity=%s, confidence=%.2f)",
-            rule_id, tenant_id, parsed.policy_type.value, parsed.severity, parsed.confidence,
+            rule_id,
+            tenant_id,
+            parsed.policy_type.value,
+            parsed.severity,
+            parsed.confidence,
         )
         return rule_id, parsed
 
@@ -335,7 +374,8 @@ class OwnerRuleStore:
         """Remove a rule by ID."""
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute(
-                "DELETE FROM owner_rules WHERE id = ?", (rule_id,),
+                "DELETE FROM owner_rules WHERE id = ?",
+                (rule_id,),
             )
             return cursor.rowcount > 0
 
@@ -363,10 +403,7 @@ class OwnerRuleStore:
 
         loaded = 0
         for row in rows:
-            conditions = [
-                PolicyCondition.from_dict(c)
-                for c in json.loads(row["conditions_json"])
-            ]
+            conditions = [PolicyCondition.from_dict(c) for c in json.loads(row["conditions_json"])]
             policy = Policy(
                 name=row["policy_name"],
                 type=PolicyType(row["policy_type"]),
@@ -389,6 +426,7 @@ class OwnerRuleStore:
         """Remove all rules for a tenant."""
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute(
-                "DELETE FROM owner_rules WHERE tenant_id = ?", (tenant_id,),
+                "DELETE FROM owner_rules WHERE tenant_id = ?",
+                (tenant_id,),
             )
             return cursor.rowcount

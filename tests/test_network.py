@@ -34,6 +34,7 @@ from hbllm.network.serialization import JsonSerializer, MsgpackSerializer, get_s
 # Test helpers
 # ──────────────────────────────────────────────
 
+
 class EchoNode(Node):
     """Test node that echoes messages back."""
 
@@ -55,6 +56,7 @@ class EchoNode(Node):
 # ──────────────────────────────────────────────
 # Message tests
 # ──────────────────────────────────────────────
+
 
 class TestMessages:
     def test_message_creation(self):
@@ -129,6 +131,7 @@ class TestMessages:
 # Node tests
 # ──────────────────────────────────────────────
 
+
 class TestNode:
     def test_node_info(self):
         node = EchoNode("echo-1")
@@ -182,6 +185,7 @@ class TestNode:
 # InProcessBus tests
 # ──────────────────────────────────────────────
 
+
 @pytest.fixture
 async def bus():
     b = InProcessBus()
@@ -208,7 +212,12 @@ class TestInProcessBus:
 
         await bus.subscribe("test.topic", handler)
 
-        msg = Message(type=MessageType.QUERY, source_node_id="test", topic="test.topic", payload={"data": "hello"})
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="test",
+            topic="test.topic",
+            payload={"data": "hello"},
+        )
         await bus.publish("test.topic", msg)
         await asyncio.sleep(0.2)
 
@@ -326,6 +335,7 @@ class TestInProcessBus:
 # ──────────────────────────────────────────────
 # Circuit Breaker tests
 # ──────────────────────────────────────────────
+
 
 class TestCircuitBreaker:
     def test_initial_state_closed(self):
@@ -475,6 +485,7 @@ class TestCircuitBreakerRegistry:
 # Service Registry tests
 # ──────────────────────────────────────────────
 
+
 class TestServiceRegistry:
     @pytest.mark.asyncio
     async def test_register_and_discover(self):
@@ -495,8 +506,12 @@ class TestServiceRegistry:
         reg = ServiceRegistry(health_check_interval=999)
         await reg.start()
 
-        await reg.register(NodeInfo(node_id="a", node_type=NodeType.DOMAIN_MODULE, capabilities=["coding"]))
-        await reg.register(NodeInfo(node_id="b", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"]))
+        await reg.register(
+            NodeInfo(node_id="a", node_type=NodeType.DOMAIN_MODULE, capabilities=["coding"])
+        )
+        await reg.register(
+            NodeInfo(node_id="b", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"])
+        )
 
         coding = await reg.discover(capability="coding")
         assert len(coding) == 1
@@ -513,7 +528,9 @@ class TestServiceRegistry:
         reg = ServiceRegistry(health_check_interval=999)
         await reg.start()
 
-        await reg.register(NodeInfo(node_id="a", node_type=NodeType.DOMAIN_MODULE, capabilities=["general"]))
+        await reg.register(
+            NodeInfo(node_id="a", node_type=NodeType.DOMAIN_MODULE, capabilities=["general"])
+        )
         await reg.update_health(NodeHealth(node_id="a", status=HealthStatus.UNHEALTHY))
 
         healthy = await reg.discover(capability="general", healthy_only=True)
@@ -542,8 +559,14 @@ class TestServiceRegistry:
         reg = ServiceRegistry(health_check_interval=999)
         await reg.start()
 
-        await reg.register(NodeInfo(node_id="a", node_type=NodeType.DOMAIN_MODULE, capabilities=["coding", "general"]))
-        await reg.register(NodeInfo(node_id="b", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"]))
+        await reg.register(
+            NodeInfo(
+                node_id="a", node_type=NodeType.DOMAIN_MODULE, capabilities=["coding", "general"]
+            )
+        )
+        await reg.register(
+            NodeInfo(node_id="b", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"])
+        )
 
         # Mark both as healthy
         await reg.update_health(NodeHealth(node_id="a", status=HealthStatus.HEALTHY))
@@ -575,8 +598,22 @@ class TestServiceRegistry:
         reg = ServiceRegistry(health_check_interval=999)
         await reg.start()
 
-        await reg.register(NodeInfo(node_id="low", node_type=NodeType.DOMAIN_MODULE, capabilities=["general"], priority=0))
-        await reg.register(NodeInfo(node_id="high", node_type=NodeType.DOMAIN_MODULE, capabilities=["general"], priority=10))
+        await reg.register(
+            NodeInfo(
+                node_id="low",
+                node_type=NodeType.DOMAIN_MODULE,
+                capabilities=["general"],
+                priority=0,
+            )
+        )
+        await reg.register(
+            NodeInfo(
+                node_id="high",
+                node_type=NodeType.DOMAIN_MODULE,
+                capabilities=["general"],
+                priority=10,
+            )
+        )
 
         found = await reg.discover(capability="general")
         assert found[0].node_id == "high"
@@ -587,6 +624,7 @@ class TestServiceRegistry:
 # ──────────────────────────────────────────────
 # Serialization tests
 # ──────────────────────────────────────────────
+
 
 class TestSerialization:
     def test_json_roundtrip(self):

@@ -17,6 +17,7 @@ from hbllm.benchmarks.runner import (
 
 # ── Result / Report Types ───────────────────────────────────────────────────
 
+
 def test_benchmark_result_to_dict():
     r = BenchmarkResult(name="Test", metric="latency", value=1.234, unit="ms")
     d = r.to_dict()
@@ -46,6 +47,7 @@ def test_report_save_and_load(tmp_path):
 
 # ── Latency Benchmark ───────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_latency_benchmark():
     bench = LatencyBenchmark()
@@ -58,6 +60,7 @@ async def test_latency_benchmark():
 
 
 # ── Memory Benchmark ────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_memory_benchmark():
@@ -72,6 +75,7 @@ async def test_memory_benchmark():
 
 # ── Specialization Benchmark ────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_specialization_benchmark():
     bench = SpecializationBenchmark()
@@ -83,6 +87,7 @@ async def test_specialization_benchmark():
 
 # ── Multi-Tenant Benchmark ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_multi_tenant_benchmark():
     bench = MultiTenantBenchmark()
@@ -93,6 +98,7 @@ async def test_multi_tenant_benchmark():
 
 
 # ── Suite Registry ───────────────────────────────────────────────────────────
+
 
 def test_suites_registered():
     assert "latency" in SUITES

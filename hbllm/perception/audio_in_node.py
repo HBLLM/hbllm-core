@@ -34,7 +34,11 @@ class AudioInputNode(Node):
     """
 
     def __init__(self, node_id: str, model_size: str = "tiny.en"):
-        super().__init__(node_id=node_id, node_type=NodeType.PERCEPTION, capabilities=["speech_to_text", "audio_streaming"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.PERCEPTION,
+            capabilities=["speech_to_text", "audio_streaming"],
+        )
         self.model_size = model_size
         self.model = None
         # Streaming buffers: session_id -> {"chunks": [bytes], "start": float, "last_chunk": float}
@@ -43,6 +47,7 @@ class AudioInputNode(Node):
     def _load_model(self):
         if self.model is None:
             import whisper
+
             logger.info("Loading Whisper %s model for AudioInput...", self.model_size)
             self.model = whisper.load_model(self.model_size)
 
@@ -94,10 +99,11 @@ class AudioInputNode(Node):
                 source_node_id=self.node_id,
                 topic="router.query",
                 payload={"text": transcription},
-                correlation_id=message.id  # Maintain chain
+                correlation_id=message.id,  # Maintain chain
             )
             # Fire and forget the internal brain query
             import asyncio
+
             asyncio.create_task(self.bus.publish("router.query", query_msg))
 
             return resp
@@ -175,6 +181,7 @@ class AudioInputNode(Node):
             def _transcribe_bytes():
                 # Write raw PCM to a temp wav file
                 import wave
+
                 tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 try:
                     with wave.open(tmp.name, "wb") as wf:

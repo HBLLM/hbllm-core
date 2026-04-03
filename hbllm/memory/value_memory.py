@@ -79,13 +79,24 @@ class ValueMemory:
             conn.execute(
                 """INSERT INTO rewards (id, tenant_id, topic, action, reward, context, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (reward_id, tenant_id, topic, action,
-                 max(-1.0, min(1.0, reward)),  # Clamp to [-1, 1]
-                 json.dumps(context or {}), now),
+                (
+                    reward_id,
+                    tenant_id,
+                    topic,
+                    action,
+                    max(-1.0, min(1.0, reward)),  # Clamp to [-1, 1]
+                    json.dumps(context or {}),
+                    now,
+                ),
             )
 
-        logger.debug("Recorded reward for tenant '%s': topic=%s action=%s reward=%.2f",
-                     tenant_id, topic, action, reward)
+        logger.debug(
+            "Recorded reward for tenant '%s': topic=%s action=%s reward=%.2f",
+            tenant_id,
+            topic,
+            action,
+            reward,
+        )
         return reward_id
 
     def get_preference(self, tenant_id: str, topic: str) -> dict[str, float]:
@@ -111,20 +122,15 @@ class ValueMemory:
         preferences: dict[str, list[float]] = {}
         for i, row in enumerate(rows):
             action = row["action"]
-            decay = 0.9 ** i  # More recent = higher weight
+            decay = 0.9**i  # More recent = higher weight
             weighted_reward = row["reward"] * decay
             if action not in preferences:
                 preferences[action] = []
             preferences[action].append(weighted_reward)
 
-        return {
-            action: sum(values) / len(values)
-            for action, values in preferences.items()
-        }
+        return {action: sum(values) / len(values) for action, values in preferences.items()}
 
-    def get_top_preferences(
-        self, tenant_id: str, top_k: int = 5
-    ) -> list[dict[str, Any]]:
+    def get_top_preferences(self, tenant_id: str, top_k: int = 5) -> list[dict[str, Any]]:
         """
         Get the tenant's strongest preferences across all topics.
 
@@ -165,7 +171,8 @@ class ValueMemory:
         """Purge all rewards for a tenant. Returns count of deleted records."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "DELETE FROM rewards WHERE tenant_id = ?", (tenant_id,),
+                "DELETE FROM rewards WHERE tenant_id = ?",
+                (tenant_id,),
             )
             deleted = cursor.rowcount
             conn.commit()

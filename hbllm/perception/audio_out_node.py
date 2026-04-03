@@ -16,6 +16,7 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
 class AudioOutputNode(Node):
     """
     Service node that acts as the model's "voice".
@@ -23,7 +24,11 @@ class AudioOutputNode(Node):
     """
 
     def __init__(self, node_id: str, output_dir: str = "workspace/audio"):
-        super().__init__(node_id=node_id, node_type=NodeType.PERCEPTION, capabilities=["text_to_speech", "voice_customization"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.PERCEPTION,
+            capabilities=["text_to_speech", "voice_customization"],
+        )
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +52,9 @@ class AudioOutputNode(Node):
 
             # Load default speaker embedding
             embeddings_dataset = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-            self.default_speaker_embeddings = torch.tensor(embeddings_dataset[7306]["xvector"]).unsqueeze(0)
+            self.default_speaker_embeddings = torch.tensor(
+                embeddings_dataset[7306]["xvector"]
+            ).unsqueeze(0)
 
     def _get_speaker_embedding(self, tenant_id: str, payload: dict) -> Any:
         """Get speaker embedding: custom per-tenant or default."""
@@ -93,7 +100,8 @@ class AudioOutputNode(Node):
 
         # Clean the text (SpeechT5 has limited character support)
         import re
-        clean_text = re.sub(r'[^A-Za-z0-9 .,?!\'-]', '', text)
+
+        clean_text = re.sub(r"[^A-Za-z0-9 .,?!\'-]", "", text)
 
         # Chunk long text into segments for better quality
         chunks = self._chunk_text(clean_text, max_len=450)
@@ -106,6 +114,7 @@ class AudioOutputNode(Node):
 
             def _synthesize():
                 import torch
+
                 self._load_model()
 
                 speaker_emb = self._get_speaker_embedding(tenant_id, payload)
@@ -115,9 +124,7 @@ class AudioOutputNode(Node):
                     inputs = self.processor(text=chunk, return_tensors="pt")
                     with torch.no_grad():
                         speech = self.model.generate_speech(
-                            inputs["input_ids"],
-                            speaker_emb,
-                            vocoder=self.vocoder
+                            inputs["input_ids"], speaker_emb, vocoder=self.vocoder
                         )
                     all_speech.append(speech.numpy())
 
@@ -132,7 +139,8 @@ class AudioOutputNode(Node):
 
                 # Attempt to play natively on macOS
                 import os
-                if os.uname().sysname == 'Darwin':
+
+                if os.uname().sysname == "Darwin":
                     os.system(f"afplay {out_path} &")
 
                 return str(out_path)
@@ -148,6 +156,7 @@ class AudioOutputNode(Node):
     async def _handle_voice_config(self, message: Message) -> Message | None:
         """Configure a per-tenant voice embedding."""
         import torch
+
         tenant_id = message.tenant_id or message.payload.get("tenant_id", "")
         embedding = message.payload.get("voice_embedding")
 
@@ -166,7 +175,8 @@ class AudioOutputNode(Node):
         current = ""
         # Split on sentence boundaries
         import re
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        sentences = re.split(r"(?<=[.!?])\s+", text)
 
         for sentence in sentences:
             if len(current) + len(sentence) + 1 <= max_len:

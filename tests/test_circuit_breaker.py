@@ -13,6 +13,7 @@ from hbllm.network.circuit_breaker import (
 
 # ── Single CircuitBreaker ────────────────────────────────────────────────────
 
+
 def test_initial_state():
     cb = CircuitBreaker("node_1")
     assert cb.state == CircuitState.CLOSED
@@ -42,6 +43,7 @@ def test_circuit_open_error():
 
     with pytest.raises(CircuitOpenError) as exc_info:
         import asyncio
+
         asyncio.run(cb.call(lambda: None))
 
     assert "node_1" in str(exc_info.value)
@@ -140,6 +142,7 @@ def test_repr():
 
 
 # ── Registry ────────────────────────────────────────────────────────────────
+
 
 def test_registry_get_or_create():
     reg = CircuitBreakerRegistry()

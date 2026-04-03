@@ -105,7 +105,9 @@ class LoadBalancer:
         self._rr_counters[capability] = counter + 1
         logger.debug(
             "RoundRobin selected '%s' for '%s' (%d candidates)",
-            selected.node_id, capability, len(candidates),
+            selected.node_id,
+            capability,
+            len(candidates),
         )
         return selected
 
@@ -142,7 +144,10 @@ class LoadBalancer:
 
         logger.debug(
             "LeastLoaded selected '%s' for '%s' (score=%.1f, %d candidates)",
-            best.node_id, capability, best_score, len(candidates),
+            best.node_id,
+            capability,
+            best_score,
+            len(candidates),
         )
         return best
 

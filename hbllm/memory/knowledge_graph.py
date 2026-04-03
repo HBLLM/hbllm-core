@@ -15,6 +15,7 @@ import re
 import time
 from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -22,9 +23,11 @@ logger = logging.getLogger(__name__)
 
 # ── Data types ───────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Entity:
     """A node in the knowledge graph."""
+
     id: str
     label: str
     entity_type: str = "concept"
@@ -38,6 +41,7 @@ class Entity:
 @dataclass
 class Relation:
     """A directed edge in the knowledge graph."""
+
     source_id: str
     target_id: str
     relation_type: str
@@ -65,15 +69,76 @@ _RELATION_PATTERNS: list[tuple[str, str]] = [
 ]
 
 # Stopwords to filter out from entity extraction
-_STOPWORDS = frozenset({
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "it", "its", "this", "that",
-    "these", "those", "i", "you", "he", "she", "we", "they", "me", "him",
-    "her", "us", "them", "my", "your", "his", "our", "their", "and", "or",
-    "but", "if", "then", "else", "when", "where", "how", "what", "which",
-    "who", "whom", "not", "no", "so", "very", "just", "also", "too",
-})
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "our",
+        "their",
+        "and",
+        "or",
+        "but",
+        "if",
+        "then",
+        "else",
+        "when",
+        "where",
+        "how",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "not",
+        "no",
+        "so",
+        "very",
+        "just",
+        "also",
+        "too",
+    }
+)
 
 
 def _entity_id(label: str) -> str:
@@ -111,6 +176,7 @@ def extract_entities_from_text(text: str) -> list[tuple[str, str, str]]:
 
 
 # ── Knowledge Graph ──────────────────────────────────────────────────────────
+
 
 class KnowledgeGraph:
     """
@@ -179,7 +245,7 @@ class KnowledgeGraph:
             existing = self._entities[eid]
             if attributes:
                 existing.attributes.update(attributes)
-            self._entities.move_to_end(eid) # Update LRU
+            self._entities.move_to_end(eid)  # Update LRU
             return existing
 
         entity = Entity(
@@ -189,14 +255,14 @@ class KnowledgeGraph:
             attributes=attributes or {},
         )
         self._entities[eid] = entity
-        self._evict_lru() # Check bounds
+        self._evict_lru()  # Check bounds
         return entity
 
     def get_entity(self, label: str) -> Entity | None:
         """Get entity by label."""
         eid = _entity_id(label)
         if eid in self._entities:
-            self._entities.move_to_end(eid) # Update LRU
+            self._entities.move_to_end(eid)  # Update LRU
             return self._entities[eid]
         return None
 
@@ -247,7 +313,7 @@ class KnowledgeGraph:
         community = self.add_entity(
             label=community_label,
             entity_type="community",
-            attributes={"summary": summary, "is_macro_node": True}
+            attributes={"summary": summary, "is_macro_node": True},
         )
 
         for leaf in member_labels:
@@ -256,8 +322,8 @@ class KnowledgeGraph:
                 source_label=leaf,
                 target_label=community_label,
                 relation_type="member_of",
-                weight=2.0, # Macro ties are strong
-                metadata={"auto_generated": "graphrag"}
+                weight=2.0,  # Macro ties are strong
+                metadata={"auto_generated": "graphrag"},
             )
 
         return community
@@ -294,13 +360,15 @@ class KnowledgeGraph:
                     continue
                 target = self._entities.get(rel.target_id)
                 if target:
-                    results.append({
-                        "entity": target.label,
-                        "entity_type": target.entity_type,
-                        "relation": rel.relation_type,
-                        "direction": "out",
-                        "weight": rel.weight,
-                    })
+                    results.append(
+                        {
+                            "entity": target.label,
+                            "entity_type": target.entity_type,
+                            "relation": rel.relation_type,
+                            "direction": "out",
+                            "weight": rel.weight,
+                        }
+                    )
 
         if direction in ("in", "both"):
             for rk in self._incoming.get(eid, []):
@@ -309,13 +377,15 @@ class KnowledgeGraph:
                     continue
                 source = self._entities.get(rel.source_id)
                 if source:
-                    results.append({
-                        "entity": source.label,
-                        "entity_type": source.entity_type,
-                        "relation": rel.relation_type,
-                        "direction": "in",
-                        "weight": rel.weight,
-                    })
+                    results.append(
+                        {
+                            "entity": source.label,
+                            "entity_type": source.entity_type,
+                            "relation": rel.relation_type,
+                            "direction": "in",
+                            "weight": rel.weight,
+                        }
+                    )
 
         return results
 
@@ -452,7 +522,9 @@ class KnowledgeGraph:
         if added:
             logger.debug(
                 "[KnowledgeGraph] Ingested %d relations from text (total: %d entities, %d relations)",
-                added, self.entity_count, self.relation_count,
+                added,
+                self.entity_count,
+                self.relation_count,
             )
 
         return added
@@ -469,16 +541,22 @@ class KnowledgeGraph:
         return {
             "entities": [
                 {
-                    "id": e.id, "label": e.label, "type": e.entity_type,
-                    "attributes": e.attributes, "created_at": e.created_at,
+                    "id": e.id,
+                    "label": e.label,
+                    "type": e.entity_type,
+                    "attributes": e.attributes,
+                    "created_at": e.created_at,
                 }
                 for e in self._entities.values()
             ],
             "relations": [
                 {
-                    "source_id": r.source_id, "target_id": r.target_id,
-                    "type": r.relation_type, "weight": r.weight,
-                    "metadata": r.metadata, "created_at": r.created_at,
+                    "source_id": r.source_id,
+                    "target_id": r.target_id,
+                    "type": r.relation_type,
+                    "weight": r.weight,
+                    "metadata": r.metadata,
+                    "created_at": r.created_at,
                 }
                 for r in self._relations.values()
             ],
@@ -517,18 +595,24 @@ class KnowledgeGraph:
         """Save the knowledge graph to a JSON file."""
         import json
         from pathlib import Path as _Path
+
         save_path = _Path(path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
         with open(save_path, "w") as f:
             json.dump(self.to_dict(), f)
-        logger.info("KnowledgeGraph saved to %s (%d entities, %d relations)",
-                     save_path, self.entity_count, self.relation_count)
+        logger.info(
+            "KnowledgeGraph saved to %s (%d entities, %d relations)",
+            save_path,
+            self.entity_count,
+            self.relation_count,
+        )
 
     @classmethod
     def load_from_disk(cls, path: str | Path) -> KnowledgeGraph:
         """Load a knowledge graph from a JSON file."""
         import json
         from pathlib import Path as _Path
+
         load_path = _Path(path)
         if not load_path.exists():
             logger.info("No KnowledgeGraph file at %s, starting empty", load_path)
@@ -536,7 +620,10 @@ class KnowledgeGraph:
         with open(load_path) as f:
             data = json.load(f)
         graph = cls.from_dict(data)
-        logger.info("KnowledgeGraph loaded from %s (%d entities, %d relations)",
-                     load_path, graph.entity_count, graph.relation_count)
+        logger.info(
+            "KnowledgeGraph loaded from %s (%d entities, %d relations)",
+            load_path,
+            graph.entity_count,
+            graph.relation_count,
+        )
         return graph
-

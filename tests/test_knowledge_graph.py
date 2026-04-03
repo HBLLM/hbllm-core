@@ -9,6 +9,7 @@ from hbllm.memory.knowledge_graph import (
 
 # ── Entity & Relation CRUD ───────────────────────────────────────────────────
 
+
 class TestEntityCRUD:
     def test_add_entity(self):
         kg = KnowledgeGraph()
@@ -57,6 +58,7 @@ class TestEntityCRUD:
 
 # ── Neighbor Queries ─────────────────────────────────────────────────────────
 
+
 class TestNeighborQueries:
     def setup_method(self):
         self.kg = KnowledgeGraph()
@@ -90,6 +92,7 @@ class TestNeighborQueries:
 
 
 # ── Shortest Path ────────────────────────────────────────────────────────────
+
 
 class TestShortestPath:
     def setup_method(self):
@@ -128,6 +131,7 @@ class TestShortestPath:
 
 # ── Subgraph Extraction ──────────────────────────────────────────────────────
 
+
 class TestSubgraph:
     def test_subgraph_depth_1(self):
         kg = KnowledgeGraph()
@@ -158,6 +162,7 @@ class TestSubgraph:
 
 
 # ── Text Ingestion ───────────────────────────────────────────────────────────
+
 
 class TestTextIngestion:
     def test_extract_is_a_relation(self):
@@ -196,6 +201,7 @@ class TestTextIngestion:
 
 
 # ── Serialization ────────────────────────────────────────────────────────────
+
 
 class TestSerialization:
     def test_to_dict(self):

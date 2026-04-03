@@ -39,6 +39,7 @@ class MessageStatus(StrEnum):
 @dataclass
 class DurableMessage:
     """A message with durability metadata."""
+
     id: str
     topic: str
     payload_json: str
@@ -183,15 +184,19 @@ class DurableBus(MessageBus):
             return
 
         try:
-            payload = json.dumps({
-                "type": message.type.value if hasattr(message.type, 'value') else str(message.type),
-                "source_node_id": message.source_node_id,
-                "topic": topic,
-                "tenant_id": message.tenant_id,
-                "session_id": message.session_id,
-                "correlation_id": message.correlation_id,
-                "payload": message.payload,
-            })
+            payload = json.dumps(
+                {
+                    "type": message.type.value
+                    if hasattr(message.type, "value")
+                    else str(message.type),
+                    "source_node_id": message.source_node_id,
+                    "topic": topic,
+                    "tenant_id": message.tenant_id,
+                    "session_id": message.session_id,
+                    "correlation_id": message.correlation_id,
+                    "payload": message.payload,
+                }
+            )
 
             self._conn.execute(
                 """INSERT OR IGNORE INTO messages
@@ -207,9 +212,7 @@ class DurableBus(MessageBus):
         """Mark message as successfully delivered."""
         if not self._conn:
             return
-        self._conn.execute(
-            "UPDATE messages SET status='delivered' WHERE id=?", (msg_id,)
-        )
+        self._conn.execute("UPDATE messages SET status='delivered' WHERE id=?", (msg_id,))
         self._conn.commit()
 
     def _mark_failed(self, msg_id: str, error: str) -> None:
@@ -233,7 +236,7 @@ class DurableBus(MessageBus):
                 (attempts, error, msg_id),
             )
         else:
-            delay = min(self._base_delay * (2 ** attempts), self._max_delay)
+            delay = min(self._base_delay * (2**attempts), self._max_delay)
             next_retry = time.time() + delay
             self._conn.execute(
                 "UPDATE messages SET status='failed', attempts=?, next_retry_at=?, error=? WHERE id=?",
@@ -302,8 +305,12 @@ class DurableBus(MessageBus):
 
         return [
             {
-                "id": r[0], "topic": r[1], "payload": json.loads(r[2]),
-                "attempts": r[3], "created_at": r[4], "error": r[5],
+                "id": r[0],
+                "topic": r[1],
+                "payload": json.loads(r[2]),
+                "attempts": r[3],
+                "created_at": r[4],
+                "error": r[5],
             }
             for r in rows
         ]

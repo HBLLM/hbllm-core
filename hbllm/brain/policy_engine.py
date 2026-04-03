@@ -35,14 +35,17 @@ logger = logging.getLogger(__name__)
 
 # ── Context Provider ─────────────────────────────────────────────────────────
 
+
 @runtime_checkable
 class ContextProvider(Protocol):
     """Interface for providing runtime context (time, sensors, etc.)."""
+
     def get_context(self) -> dict[str, Any]: ...
 
 
 class DefaultContextProvider:
     """Provides basic time-based context."""
+
     def get_context(self) -> dict[str, Any]:
         now = datetime.now()
         return {
@@ -70,9 +73,10 @@ _OPERATORS: dict[str, Any] = {
 @dataclass
 class PolicyCondition:
     """A runtime condition that must be true for a policy to activate."""
-    key: str          # e.g. "time_hour", "baby_sleeping", "person_type"
-    operator: str     # "eq", "neq", "gt", "lt", "gte", "lte", "in", "not_in"
-    value: Any        # e.g. 21, True, "stranger"
+
+    key: str  # e.g. "time_hour", "baby_sleeping", "person_type"
+    operator: str  # "eq", "neq", "gt", "lt", "gte", "lte", "in", "not_in"
+    value: Any  # e.g. 21, True, "stranger"
 
     def evaluate(self, context: dict[str, Any]) -> bool:
         """Check if this condition is met given the current context."""
@@ -104,30 +108,31 @@ class PolicyType(StrEnum):
 
 
 class PolicyAction(StrEnum):
-    BLOCK = "block"           # Block the response entirely
-    WARN = "warn"             # Allow but log a warning
-    APPEND = "append"         # Append text to response
-    PREPEND = "prepend"       # Prepend text to response
-    REPLACE = "replace"       # Replace matched content
-    RESTRICT = "restrict"     # Restrict access to domains/tools
+    BLOCK = "block"  # Block the response entirely
+    WARN = "warn"  # Allow but log a warning
+    APPEND = "append"  # Append text to response
+    PREPEND = "prepend"  # Prepend text to response
+    REPLACE = "replace"  # Replace matched content
+    RESTRICT = "restrict"  # Restrict access to domains/tools
 
 
 @dataclass
 class Policy:
     """A single governance policy/rule."""
+
     name: str
     type: PolicyType
     action: PolicyAction = PolicyAction.BLOCK
     description: str = ""
-    pattern: str = ""          # Regex pattern for DENY/REQUIRE
-    content: str = ""          # Content for TRANSFORM (append/prepend text)
+    pattern: str = ""  # Regex pattern for DENY/REQUIRE
+    content: str = ""  # Content for TRANSFORM (append/prepend text)
     domains: list[str] = field(default_factory=list)  # For SCOPE policies
     tenant_ids: list[str] = field(default_factory=lambda: ["*"])  # Which tenants
-    priority: int = 0          # Higher = evaluated first
+    priority: int = 0  # Higher = evaluated first
     enabled: bool = True
-    severity: str = "medium"   # low, medium, high, critical
+    severity: str = "medium"  # low, medium, high, critical
     conditions: list[PolicyCondition] = field(default_factory=list)  # Runtime conditions
-    source: str = ""           # "owner", "system", "auto" (from rule extraction)
+    source: str = ""  # "owner", "system", "auto" (from rule extraction)
 
     def applies_to(self, tenant_id: str) -> bool:
         """Check if this policy applies to a given tenant."""
@@ -143,6 +148,7 @@ class Policy:
 @dataclass
 class PolicyResult:
     """Result of policy evaluation."""
+
     passed: bool
     original_text: str
     modified_text: str
@@ -312,8 +318,10 @@ class PolicyEngine:
                     result.warnings.append(f"{policy.name}: {policy.description}")
                 elif policy.action == PolicyAction.REPLACE:
                     result.modified_text = re.sub(
-                        policy.pattern, policy.content or "[REDACTED]",
-                        result.modified_text, flags=re.IGNORECASE
+                        policy.pattern,
+                        policy.content or "[REDACTED]",
+                        result.modified_text,
+                        flags=re.IGNORECASE,
                     )
 
                 result.applied_policies.append(policy.name)
@@ -352,8 +360,7 @@ class PolicyEngine:
         elif policy.action == PolicyAction.REPLACE and policy.pattern:
             try:
                 new_text = re.sub(
-                    policy.pattern, policy.content,
-                    result.modified_text, flags=re.IGNORECASE
+                    policy.pattern, policy.content, result.modified_text, flags=re.IGNORECASE
                 )
                 if new_text != result.modified_text:
                     result.modified_text = new_text

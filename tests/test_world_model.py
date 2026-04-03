@@ -19,14 +19,17 @@ async def simulated_bus():
     await world_model.stop()
     await bus.stop()
 
+
 @pytest.mark.asyncio
 async def test_world_model_safe_code(simulated_bus):
     bus, world_model = simulated_bus
 
     responses = []
+
     async def thought_listener(msg):
         responses.append(msg)
         return None
+
     await bus.subscribe("workspace.thought", thought_listener)
 
     # Send a safe piece of code
@@ -36,8 +39,8 @@ async def test_world_model_safe_code(simulated_bus):
         topic="workspace.simulate",
         payload={
             "action_type": "execute_python",
-            "content": "def add(a, b): return a + b\nprint(add(2, 2))"
-        }
+            "content": "def add(a, b): return a + b\nprint(add(2, 2))",
+        },
     )
 
     await bus.publish("workspace.simulate", msg)
@@ -52,14 +55,17 @@ async def test_world_model_safe_code(simulated_bus):
     assert "AST check passed" in payload["content"]
     assert payload["confidence"] == 1.0
 
+
 @pytest.mark.asyncio
 async def test_world_model_dangerous_import(simulated_bus):
     bus, world_model = simulated_bus
 
     responses = []
+
     async def thought_listener(msg):
         responses.append(msg)
         return None
+
     await bus.subscribe("workspace.thought", thought_listener)
 
     # Send dangerous code
@@ -69,8 +75,8 @@ async def test_world_model_dangerous_import(simulated_bus):
         topic="workspace.simulate",
         payload={
             "action_type": "execute_python",
-            "content": "import subprocess\nsubprocess.run(['rm', '-rf', '/'])"
-        }
+            "content": "import subprocess\nsubprocess.run(['rm', '-rf', '/'])",
+        },
     )
 
     await bus.publish("workspace.simulate", msg)
@@ -84,14 +90,17 @@ async def test_world_model_dangerous_import(simulated_bus):
     assert payload["prediction"] == "FAILURE"
     assert "blocked by sandbox safety policies" in payload["content"]
 
+
 @pytest.mark.asyncio
 async def test_world_model_syntax_error(simulated_bus):
     bus, world_model = simulated_bus
 
     responses = []
+
     async def thought_listener(msg):
         responses.append(msg)
         return None
+
     await bus.subscribe("workspace.thought", thought_listener)
 
     # Send malformed code
@@ -99,10 +108,7 @@ async def test_world_model_syntax_error(simulated_bus):
         type=MessageType.EVENT,
         source_node_id="workspace_01",
         topic="workspace.simulate",
-        payload={
-            "action_type": "execute_python",
-            "content": "def bad_func(:\n  return 'oops'"
-        }
+        payload={"action_type": "execute_python", "content": "def bad_func(:\n  return 'oops'"},
     )
 
     await bus.publish("workspace.simulate", msg)

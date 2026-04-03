@@ -17,6 +17,7 @@ async def run_prm_benchmark() -> dict[str, Any]:
     # Mock trained state for pure inference speed benchmarking
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForProcessReward
+
     config = get_config("125m")
     config.vocab_size = 65536
     config.hidden_size = 32
@@ -60,10 +61,12 @@ async def run_prm_benchmark() -> dict[str, Any]:
     return {
         "throughput_evals_per_sec": len(results) / latency,
         "total_time_sec": latency,
-        "total_evals": len(results)
+        "total_evals": len(results),
     }
+
 
 if __name__ == "__main__":
     import yaml
+
     results = asyncio.run(run_prm_benchmark())
     print(yaml.dump(results))

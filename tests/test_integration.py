@@ -39,7 +39,11 @@ class TestEndToEndPipeline:
         async def mock_router(msg: Message) -> Message | None:
             """Classify and forward to workspace."""
             text = msg.payload.get("text", "")
-            domain = "math" if any(w in text.lower() for w in ["calculate", "sum", "+", "math"]) else "general"
+            domain = (
+                "math"
+                if any(w in text.lower() for w in ["calculate", "sum", "+", "math"])
+                else "general"
+            )
 
             workspace_msg = Message(
                 type=MessageType.EVENT,
@@ -128,9 +132,7 @@ class TestEndToEndPipeline:
         pipe, _ = full_pipeline
 
         queries = [f"Query number {i}" for i in range(5)]
-        results = await asyncio.gather(
-            *(pipe.process(q, tenant_id="t1") for q in queries)
-        )
+        results = await asyncio.gather(*(pipe.process(q, tenant_id="t1") for q in queries))
 
         assert len(results) == 5
         assert all(not r.error for r in results)
@@ -222,7 +224,9 @@ class TestPipelineFallback:
         """Pipeline returns error when no nodes respond."""
         bus = InProcessBus()
         await bus.start()
-        config = PipelineConfig(total_timeout=2.0, inject_memory=False, inject_identity=False, inject_curiosity=False)
+        config = PipelineConfig(
+            total_timeout=2.0, inject_memory=False, inject_identity=False, inject_curiosity=False
+        )
         pipe = CognitivePipeline(bus=bus, config=config)
         await pipe.start()
 

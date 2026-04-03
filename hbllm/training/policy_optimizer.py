@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PolicyUpdate:
     """Record of a policy optimization step."""
+
     step: int
     loss: float
     reward_mean: float
@@ -90,9 +91,7 @@ class PolicyOptimizer:
         value_loss = 0.0
         entropy = 0.0
 
-        for lp, olp, adv, val, ret in zip(
-            log_probs, old_log_probs, advantages, values, returns
-        ):
+        for lp, olp, adv, val, ret in zip(log_probs, old_log_probs, advantages, values, returns):
             ratio = math.exp(lp - olp)
             clipped = max(
                 min(ratio, 1.0 + self.clip_range),
@@ -104,7 +103,7 @@ class PolicyOptimizer:
 
         n = max(len(log_probs), 1)
         policy_loss /= n
-        value_loss /= (2 * n)
+        value_loss /= 2 * n
         entropy /= n
 
         total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
@@ -134,8 +133,10 @@ class PolicyOptimizer:
         """
         total_loss = 0.0
         for c, r, rc, rr in zip(
-            chosen_logprobs, rejected_logprobs,
-            ref_chosen_logprobs, ref_rejected_logprobs,
+            chosen_logprobs,
+            rejected_logprobs,
+            ref_chosen_logprobs,
+            ref_rejected_logprobs,
         ):
             log_ratio_chosen = c - rc
             log_ratio_rejected = r - rr
@@ -191,9 +192,7 @@ class PolicyOptimizer:
         # Normalize advantages
         if advantages:
             mean_adv = sum(advantages) / len(advantages)
-            std_adv = (
-                sum((a - mean_adv) ** 2 for a in advantages) / len(advantages)
-            ) ** 0.5 + 1e-8
+            std_adv = (sum((a - mean_adv) ** 2 for a in advantages) / len(advantages)) ** 0.5 + 1e-8
             advantages = [(a - mean_adv) / std_adv for a in advantages]
 
         return advantages, returns_list
@@ -217,7 +216,10 @@ class PolicyOptimizer:
         self._history.append(update)
         logger.info(
             "Policy step %d: loss=%.4f reward=%.3f kl=%.4f",
-            self._step, loss, reward_mean, kl_divergence,
+            self._step,
+            loss,
+            reward_mean,
+            kl_divergence,
         )
         return update
 

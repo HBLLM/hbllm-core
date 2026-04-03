@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RevisionResult:
     """Result of a revision cycle."""
+
     original: str
     revised: str
     revision_count: int
@@ -105,10 +106,10 @@ class RevisionNode:
                 critique = await critique_fn(query, current)
                 issues = critique.get("issues", [])
                 score = critique.get("score", 0.5)
-                notes.append(f"Rev {i+1}: score={score:.2f}, issues={issues}")
+                notes.append(f"Rev {i + 1}: score={score:.2f}, issues={issues}")
             else:
                 issues = self._default_critique(query, current)
-                notes.append(f"Rev {i+1}: {len(issues)} issues found")
+                notes.append(f"Rev {i + 1}: {len(issues)} issues found")
 
             if not issues:
                 break
@@ -186,7 +187,5 @@ class RevisionNode:
         return {
             "total_processed": self._total_processed,
             "total_revisions": self._total_revisions,
-            "avg_revisions_per_query": (
-                self._total_revisions / max(self._total_processed, 1)
-            ),
+            "avg_revisions_per_query": (self._total_revisions / max(self._total_processed, 1)),
         }

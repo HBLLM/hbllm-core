@@ -7,6 +7,7 @@ from hbllm.serving.token_optimizer import TokenOptimizer
 
 # ─── CognitionRouter ─────────────────────────────────────────────────────
 
+
 class TestCognitionRouter:
     @pytest.fixture
     def router(self):
@@ -63,6 +64,7 @@ class TestCognitionRouter:
 
 # ─── TokenOptimizer ──────────────────────────────────────────────────────
 
+
 class TestTokenOptimizer:
     @pytest.fixture
     def optimizer(self):
@@ -111,10 +113,9 @@ class TestTokenOptimizer:
         assert cost_small < cost_large
 
     def test_savings_tracking(self, optimizer):
-        optimizer.optimize("hi", context=[
-            {"role": "user", "content": "long message " * 200}
-            for _ in range(5)
-        ])
+        optimizer.optimize(
+            "hi", context=[{"role": "user", "content": "long message " * 200} for _ in range(5)]
+        )
         stats = optimizer.stats()
         assert stats["total_optimized"] == 1
         assert stats["tokens_saved"] >= 0

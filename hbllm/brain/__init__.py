@@ -10,8 +10,15 @@ from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.world_simulator import WorldSimulator
 
 __all__ = [
-    "BrainFactory", "BrainConfig", "Brain",
-    "SkillRegistry", "GoalManager", "GoalPriority",
-    "SelfModel", "CognitiveMetrics", "WorldSimulator",
-    "RevisionNode", "ConfidenceEstimator",
+    "BrainFactory",
+    "BrainConfig",
+    "Brain",
+    "SkillRegistry",
+    "GoalManager",
+    "GoalPriority",
+    "SelfModel",
+    "CognitiveMetrics",
+    "WorldSimulator",
+    "RevisionNode",
+    "ConfidenceEstimator",
 ]

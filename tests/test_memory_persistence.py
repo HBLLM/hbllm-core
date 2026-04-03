@@ -22,6 +22,7 @@ def tmp_dir():
 
 # ── KnowledgeGraph Persistence ───────────────────────────────────────────────
 
+
 class TestKnowledgeGraphPersistence:
     def test_save_load_round_trip(self, tmp_dir):
         """KG entities and relations survive save/load."""
@@ -114,6 +115,7 @@ class TestKnowledgeGraphPersistence:
 
 # ── SemanticMemory Persistence ───────────────────────────────────────────────
 
+
 class TestSemanticMemoryPersistence:
     def test_save_load_round_trip(self, tmp_dir):
         """Stored documents survive save/load."""
@@ -199,4 +201,4 @@ class TestSemanticMemoryPersistence:
         mem2 = SemanticMemory.load_from_disk(save_dir)
         assert len(mem2._vector_list) == 2
         # Vectors should be numpy arrays
-        assert hasattr(mem2._vector_list[0], 'shape')
+        assert hasattr(mem2._vector_list[0], "shape")

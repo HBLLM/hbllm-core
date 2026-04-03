@@ -30,14 +30,18 @@ async def test_native_swarm_transfer():
     await bus.start()
 
     workspace = WorkspaceNode(node_id="workspace_swarm", thinking_deadline=1.0)
-    router = RouterNode(node_id="router_swarm", default_domain="general", llm=None, use_vectors=False)
+    router = RouterNode(
+        node_id="router_swarm", default_domain="general", llm=None, use_vectors=False
+    )
 
     await workspace.start(bus)
     await router.start(bus)
 
     updates_received = []
+
     async def track_updates(msg):
         updates_received.append(msg)
+
     await bus.subscribe("workspace.update", track_updates)
 
     try:
@@ -49,7 +53,7 @@ async def test_native_swarm_transfer():
             source_node_id="user",
             topic="router.query",
             payload={"text": "I need help with a poem about math", "domain_hint": "general"},
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await bus.publish("router.query", initial_msg)
 
@@ -70,9 +74,9 @@ async def test_native_swarm_transfer():
             payload={
                 "type": "swarm_transfer",
                 "confidence": 1.0,
-                "content": "creative_writer", # The target target_domain
+                "content": "creative_writer",  # The target target_domain
             },
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await bus.publish("workspace.thought", handoff_thought)
 
@@ -85,7 +89,7 @@ async def test_native_swarm_transfer():
 
         # 3. Verify the newly bounced query payload
         second_update = updates_received[1]
-        assert second_update.correlation_id == corr_id # Must NOT drop connection
+        assert second_update.correlation_id == corr_id  # Must NOT drop connection
         assert second_update.payload["domain_hint"] == "creative_writer"
         assert "SWARM TRANSFER" in second_update.payload["text"]
         assert "agent_general" in second_update.payload["text"]

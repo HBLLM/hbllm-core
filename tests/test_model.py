@@ -25,6 +25,7 @@ from hbllm.model.transformer import HBLLMForCausalLM, TransformerBlock
 # ModelConfig tests
 # ──────────────────────────────────────────────
 
+
 class TestModelConfig:
     def test_default_config(self):
         config = ModelConfig()
@@ -91,6 +92,7 @@ class TestModelConfig:
 # RMSNorm tests
 # ──────────────────────────────────────────────
 
+
 class TestRMSNorm:
     def test_output_shape(self):
         norm = RMSNorm(768)
@@ -131,6 +133,7 @@ class TestRMSNorm:
 # ──────────────────────────────────────────────
 # Embedding tests
 # ──────────────────────────────────────────────
+
 
 class TestTokenEmbedding:
     def test_output_shape(self):
@@ -207,6 +210,7 @@ class TestRotaryEmbedding:
 # Feed-Forward Network tests
 # ──────────────────────────────────────────────
 
+
 class TestSwiGLUFFN:
     def test_output_shape(self):
         config = ModelConfig()
@@ -216,14 +220,18 @@ class TestSwiGLUFFN:
         assert out.shape == (2, 10, 768)
 
     def test_different_input_different_output(self):
-        config = ModelConfig(hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2)
+        config = ModelConfig(
+            hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2
+        )
         ffn = SwiGLUFFN(config)
         x1 = torch.randn(1, 5, 64)
         x2 = torch.randn(1, 5, 64)
         assert not torch.equal(ffn(x1), ffn(x2))
 
     def test_gradient_flow(self):
-        config = ModelConfig(hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2)
+        config = ModelConfig(
+            hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2
+        )
         ffn = SwiGLUFFN(config)
         x = torch.randn(1, 5, 64, requires_grad=True)
         out = ffn(x)
@@ -231,7 +239,9 @@ class TestSwiGLUFFN:
         assert x.grad is not None
 
     def test_deterministic(self):
-        config = ModelConfig(hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2)
+        config = ModelConfig(
+            hidden_size=64, intermediate_size=128, num_attention_heads=4, num_kv_heads=2
+        )
         ffn = SwiGLUFFN(config)
         ffn.eval()
         x = torch.randn(1, 5, 64)
@@ -243,6 +253,7 @@ class TestSwiGLUFFN:
 # ──────────────────────────────────────────────
 # Attention tests
 # ──────────────────────────────────────────────
+
 
 class TestGroupedQueryAttention:
     def _get_attn(self, **kwargs):
@@ -269,7 +280,7 @@ class TestGroupedQueryAttention:
         assert cache is not None
         k_cache, v_cache = cache
         assert k_cache.shape[2] == 10  # seq_len
-        assert k_cache.shape[1] == 4   # num_kv_heads
+        assert k_cache.shape[1] == 4  # num_kv_heads
 
     def test_kv_cache_extend(self):
         attn, _ = self._get_attn()
@@ -324,6 +335,7 @@ class TestGroupedQueryAttention:
 # TransformerBlock tests
 # ──────────────────────────────────────────────
 
+
 class TestTransformerBlock:
     def _small_config(self):
         return ModelConfig(
@@ -377,6 +389,7 @@ class TestTransformerBlock:
 # ──────────────────────────────────────────────
 # Full Model tests
 # ──────────────────────────────────────────────
+
 
 class TestHBLLMForCausalLM:
     def _small_model(self):
@@ -496,8 +509,12 @@ class TestHBLLMForCausalLM:
 
         # Draft model (smaller)
         config_draft = ModelConfig(
-            num_layers=1, hidden_size=64, num_attention_heads=2,
-            num_kv_heads=1, intermediate_size=128, vocab_size=256
+            num_layers=1,
+            hidden_size=64,
+            num_attention_heads=2,
+            num_kv_heads=1,
+            intermediate_size=128,
+            vocab_size=256,
         )
         draft_model = HBLLMForCausalLM(config_draft)
 
@@ -510,35 +527,55 @@ class TestHBLLMForCausalLM:
             )
 
             spec_output = target_model.generate_speculative(
-                ids.clone(), draft_model=draft_model, gamma=4, max_new_tokens=15,
-                temperature=1.0, top_k=1, top_p=1.0
+                ids.clone(),
+                draft_model=draft_model,
+                gamma=4,
+                max_new_tokens=15,
+                temperature=1.0,
+                top_k=1,
+                top_p=1.0,
             )
 
-        assert torch.equal(auto_output, spec_output), "Speculative output differs from standard output"
+        assert torch.equal(auto_output, spec_output), (
+            "Speculative output differs from standard output"
+        )
 
     def test_generate_speculative_kv_cache_alignment(self):
         """Verifies that early stopping, rejections, and KV cache bounds remain uncorrupted."""
         config_target = ModelConfig(
-            num_layers=2, hidden_size=64, num_attention_heads=4,
-            num_kv_heads=2, intermediate_size=128, vocab_size=100
+            num_layers=2,
+            hidden_size=64,
+            num_attention_heads=4,
+            num_kv_heads=2,
+            intermediate_size=128,
+            vocab_size=100,
         )
         target_model = HBLLMForCausalLM(config_target)
 
         config_draft = ModelConfig(
-            num_layers=1, hidden_size=32, num_attention_heads=2,
-            num_kv_heads=1, intermediate_size=64, vocab_size=100
+            num_layers=1,
+            hidden_size=32,
+            num_attention_heads=2,
+            num_kv_heads=1,
+            intermediate_size=64,
+            vocab_size=100,
         )
         draft_model = HBLLMForCausalLM(config_draft)
 
-        ids = torch.randint(0, 100, (2, 3)) # Batch size 2
+        ids = torch.randint(0, 100, (2, 3))  # Batch size 2
 
         with torch.no_grad():
             auto_output = target_model.generate(
                 ids.clone(), max_new_tokens=22, temperature=1.0, top_k=1, eos_token_id=0
             )
             spec_output = target_model.generate_speculative(
-                ids.clone(), draft_model=draft_model, gamma=3, max_new_tokens=22,
-                temperature=1.0, top_k=1, eos_token_id=0
+                ids.clone(),
+                draft_model=draft_model,
+                gamma=3,
+                max_new_tokens=22,
+                temperature=1.0,
+                top_k=1,
+                eos_token_id=0,
             )
 
         assert torch.equal(auto_output, spec_output)
@@ -585,8 +622,12 @@ class TestHBLLMForCausalLM:
         target_model = self._small_model()
 
         config_draft = ModelConfig(
-            num_layers=1, hidden_size=64, num_attention_heads=2,
-            num_kv_heads=1, intermediate_size=128, vocab_size=256
+            num_layers=1,
+            hidden_size=64,
+            num_attention_heads=2,
+            num_kv_heads=1,
+            intermediate_size=128,
+            vocab_size=256,
         )
         draft_model = HBLLMForCausalLM(config_draft)
 
@@ -598,9 +639,18 @@ class TestHBLLMForCausalLM:
             )
 
             adaptive_output = target_model.generate_speculative(
-                ids.clone(), draft_model=draft_model, max_new_tokens=15,
-                temperature=1.0, top_k=1, top_p=1.0,
-                adaptive_gamma=True, gamma_min=1, gamma_max=6, ewma_alpha=0.4
+                ids.clone(),
+                draft_model=draft_model,
+                max_new_tokens=15,
+                temperature=1.0,
+                top_k=1,
+                top_p=1.0,
+                adaptive_gamma=True,
+                gamma_min=1,
+                gamma_max=6,
+                ewma_alpha=0.4,
             )
 
-        assert torch.equal(auto_output, adaptive_output), "Adaptive gamma output differs from standard output"
+        assert torch.equal(auto_output, adaptive_output), (
+            "Adaptive gamma output differs from standard output"
+        )

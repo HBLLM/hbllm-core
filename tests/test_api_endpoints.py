@@ -8,6 +8,7 @@ from hbllm.serving.api import ChatRequest, HealthResponse, app
 
 # ── Schema Tests ─────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_chat_request_accepts_session():
     """ChatRequest auto-generates session IDs."""
@@ -20,11 +21,14 @@ async def test_chat_request_accepts_session():
 @pytest.mark.asyncio
 async def test_health_response_provider_mode():
     """HealthResponse includes provider_mode field."""
-    resp = HealthResponse(status="healthy", nodes_registered=15, bus_type="in_process", provider_mode="full")
+    resp = HealthResponse(
+        status="healthy", nodes_registered=15, bus_type="in_process", provider_mode="full"
+    )
     assert resp.provider_mode == "full"
 
 
 # ── Route existence tests ────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_knowledge_routes_registered():

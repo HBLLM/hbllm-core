@@ -7,6 +7,7 @@ from hbllm.brain.revision_node import RevisionNode
 
 # ─── ConfidenceEstimator Tests ───────────────────────────────────────────
 
+
 class TestConfidenceEstimator:
     @pytest.fixture
     def estimator(self):
@@ -19,7 +20,9 @@ class TestConfidenceEstimator:
         assert 0 <= report.coherence <= 1
 
     def test_relevant_response_scores_higher(self, estimator):
-        relevant = estimator.score("What is Python?", "Python is a high-level programming language.")
+        relevant = estimator.score(
+            "What is Python?", "Python is a high-level programming language."
+        )
         irrelevant = estimator.score("What is Python?", "The weather today is sunny and warm.")
         assert relevant > irrelevant
 
@@ -34,8 +37,12 @@ class TestConfidenceEstimator:
         assert "too_brief" in report.flags
 
     def test_factual_claims_increase_risk(self, estimator):
-        with_claims = estimator.estimate("Tell me about X", "Founded in 1985, the company earned $5.2M in 2020.")
-        without_claims = estimator.estimate("Tell me about X", "The company is well known for its services.")
+        with_claims = estimator.estimate(
+            "Tell me about X", "Founded in 1985, the company earned $5.2M in 2020."
+        )
+        without_claims = estimator.estimate(
+            "Tell me about X", "The company is well known for its services."
+        )
         assert with_claims.factuality_risk > without_claims.factuality_risk
 
     def test_hallucination_flag(self, estimator):
@@ -47,6 +54,7 @@ class TestConfidenceEstimator:
 
 
 # ─── RevisionNode Tests ──────────────────────────────────────────────────
+
 
 class TestRevisionNode:
     @pytest.fixture

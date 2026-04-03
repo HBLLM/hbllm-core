@@ -23,9 +23,13 @@ class TestJSONFormatter:
 
     def test_basic_format(self):
         record = logging.LogRecord(
-            name="hbllm.test", level=logging.INFO,
-            pathname="test.py", lineno=1, msg="Hello world",
-            args=None, exc_info=None,
+            name="hbllm.test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Hello world",
+            args=None,
+            exc_info=None,
         )
         output = self.formatter.format(record)
         parsed = json.loads(output)
@@ -39,9 +43,13 @@ class TestJSONFormatter:
         set_correlation_id("corr-123")
         try:
             record = logging.LogRecord(
-                name="hbllm.test", level=logging.INFO,
-                pathname="test.py", lineno=1, msg="Test",
-                args=None, exc_info=None,
+                name="hbllm.test",
+                level=logging.INFO,
+                pathname="test.py",
+                lineno=1,
+                msg="Test",
+                args=None,
+                exc_info=None,
             )
             output = self.formatter.format(record)
             parsed = json.loads(output)
@@ -52,9 +60,13 @@ class TestJSONFormatter:
     def test_no_correlation_id_when_empty(self):
         set_correlation_id("")
         record = logging.LogRecord(
-            name="hbllm.test", level=logging.INFO,
-            pathname="test.py", lineno=1, msg="Test",
-            args=None, exc_info=None,
+            name="hbllm.test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Test",
+            args=None,
+            exc_info=None,
         )
         output = self.formatter.format(record)
         parsed = json.loads(output)
@@ -65,12 +77,17 @@ class TestJSONFormatter:
             raise ValueError("test error")
         except ValueError:
             import sys
+
             exc_info = sys.exc_info()
 
         record = logging.LogRecord(
-            name="hbllm.test", level=logging.ERROR,
-            pathname="test.py", lineno=1, msg="Error occurred",
-            args=None, exc_info=exc_info,
+            name="hbllm.test",
+            level=logging.ERROR,
+            pathname="test.py",
+            lineno=1,
+            msg="Error occurred",
+            args=None,
+            exc_info=exc_info,
         )
         output = self.formatter.format(record)
         parsed = json.loads(output)
@@ -79,9 +96,13 @@ class TestJSONFormatter:
 
     def test_extra_fields(self):
         record = logging.LogRecord(
-            name="hbllm.test", level=logging.INFO,
-            pathname="test.py", lineno=1, msg="Node event",
-            args=None, exc_info=None,
+            name="hbllm.test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Node event",
+            args=None,
+            exc_info=None,
         )
         record.node_id = "router_01"
         record.tenant_id = "acme"

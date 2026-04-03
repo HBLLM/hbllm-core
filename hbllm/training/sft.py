@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Instruction Dataset ─────────────────────────────────────────────────────
 
+
 class InstructionDataset(Dataset):
     """
     Dataset for instruction fine-tuning.
@@ -56,18 +57,22 @@ class InstructionDataset(Dataset):
             # Find where the assistant response starts (for loss masking)
             # We compute loss only on assistant tokens
             prompt_messages = [m for m in messages if m["role"] != "assistant"]
-            prompt_text = self.tokenizer.apply_chat_template(prompt_messages, add_generation_prompt=True)
+            prompt_text = self.tokenizer.apply_chat_template(
+                prompt_messages, add_generation_prompt=True
+            )
             prompt_ids = self.tokenizer.encode(prompt_text, add_bos=True)
             prompt_len = len(prompt_ids)
 
             # Truncate if needed
             if len(full_ids) > self.max_length:
-                full_ids = full_ids[:self.max_length]
+                full_ids = full_ids[: self.max_length]
 
-            examples.append({
-                "input_ids": full_ids,
-                "prompt_len": prompt_len,
-            })
+            examples.append(
+                {
+                    "input_ids": full_ids,
+                    "prompt_len": prompt_len,
+                }
+            )
 
         logger.info("Prepared %d SFT examples (from %d raw)", len(examples), len(data))
         return examples
@@ -108,7 +113,7 @@ class InstructionDataset(Dataset):
 
         # Labels: mask prompt tokens with -100 (ignore in loss)
         labels = input_ids.clone()
-        labels[:ex["prompt_len"]] = -100
+        labels[: ex["prompt_len"]] = -100
 
         return {"input_ids": input_ids, "labels": labels}
 
@@ -130,6 +135,7 @@ def collate_sft(batch: list[dict[str, torch.Tensor]], pad_id: int = 0) -> dict[s
 
 # ─── Dataset Loaders ─────────────────────────────────────────────────────────
 
+
 def load_sft_data(name: str, max_samples: int | None = None) -> list[dict]:
     """Load instruction-following data from HuggingFace or local files."""
 
@@ -147,6 +153,7 @@ def _load_alpaca(max_samples: int | None = None) -> list[dict]:
     """Load Stanford Alpaca dataset from HuggingFace."""
     try:
         from datasets import load_dataset
+
         ds = load_dataset("tatsu-lab/alpaca", split="train")
         data = list(ds)
         if max_samples:
@@ -162,6 +169,7 @@ def _load_sharegpt(max_samples: int | None = None) -> list[dict]:
     """Load ShareGPT dataset."""
     try:
         from datasets import load_dataset
+
         ds = load_dataset("anon8231489123/ShareGPT_Vicuna_unfiltered", split="train")
         data = list(ds)
         if max_samples:
@@ -191,6 +199,7 @@ def _load_local(path: str, max_samples: int | None = None) -> list[dict]:
 
 
 # ─── SFT Training Runner ────────────────────────────────────────────────────
+
 
 def run_sft_training(
     model_size: str = "125m",
@@ -237,6 +246,7 @@ def run_sft_training(
     ckpt_dir = Path(checkpoint_dir).parent / "pretrained"
     if ckpt_dir.exists():
         from hbllm.training.trainer import CheckpointManager
+
         mgr = CheckpointManager(ckpt_dir)
         ckpt = mgr.load_latest()
         if ckpt:
@@ -246,6 +256,7 @@ def run_sft_training(
     # Inject LoRA
     if use_lora:
         from hbllm.modules.lora import LoRAManager
+
         injected = LoRAManager.inject(model, r=lora_r)
         logger.info("LoRA injected into %d modules (r=%d)", len(injected), lora_r)
 
@@ -256,7 +267,9 @@ def run_sft_training(
 
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in model.parameters())
-        logger.info("Trainable: %s / %s (%.1f%%)", f"{trainable:,}", f"{total:,}", 100 * trainable / total)
+        logger.info(
+            "Trainable: %s / %s (%.1f%%)", f"{trainable:,}", f"{total:,}", 100 * trainable / total
+        )
 
     # Load data
     logger.info("Loading SFT data (%s)...", dataset_name)
@@ -298,7 +311,10 @@ def run_sft_training(
         if (step + 1) % 10 == 0:
             logger.info(
                 "SFT step %d/%d | loss=%.4f lr=%.2e",
-                step + 1, max_steps, metrics["loss"], step_metrics["lr"],
+                step + 1,
+                max_steps,
+                metrics["loss"],
+                step_metrics["lr"],
             )
 
         if (step + 1) % 200 == 0:
@@ -310,6 +326,7 @@ def run_sft_training(
     # Save LoRA weights separately
     if use_lora:
         from hbllm.modules.lora import LoRAManager
+
         lora_state = LoRAManager.get_lora_state_dict(model)
         lora_path = Path(checkpoint_dir) / "lora_adapter.pt"
         torch.save(lora_state, lora_path)

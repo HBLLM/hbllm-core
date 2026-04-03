@@ -39,7 +39,9 @@ class DomainModuleNode(Node):
         lora_state_dict: dict[str, torch.Tensor] | None = None,
         capabilities: list[str] | None = None,
     ):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=capabilities)
+        super().__init__(
+            node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=capabilities
+        )
         self.domain_name = domain_name
         self.model = model
         self.tokenizer = tokenizer
@@ -83,14 +85,18 @@ class DomainModuleNode(Node):
             highest_domain = max(domain_hint.items(), key=lambda x: x[1])[0]
             if self.domain_name == highest_domain:
                 is_targeted = True
-                logger.info("Domain '%s' elected to process MoE Hybrid %s", self.domain_name, domain_hint)
+                logger.info(
+                    "Domain '%s' elected to process MoE Hybrid %s", self.domain_name, domain_hint
+                )
         elif domain_hint == self.domain_name or self.domain_name == "general":
             is_targeted = True
 
         if not is_targeted:
             return None
 
-        logger.info("Domain '%s' generating response for prompt: %s...", self.domain_name, prompt[:30])
+        logger.info(
+            "Domain '%s' generating response for prompt: %s...", self.domain_name, prompt[:30]
+        )
 
         try:
             # 1. Page in LoRA (Asynchronous PCIe VRAM transfer) and set ContextVar (O(1) Lock-Free mapping)
@@ -119,9 +125,7 @@ class DomainModuleNode(Node):
 
                     with torch.no_grad():
                         outputs = self.model(
-                            model_input,
-                            past_key_values=past_key_values,
-                            use_cache=True
+                            model_input, past_key_values=past_key_values, use_cache=True
                         )
 
                     logits = outputs["logits"][:, -1, :]
@@ -129,7 +133,9 @@ class DomainModuleNode(Node):
 
                     next_token = logits.argmax().item()
                     out_tokens.append(next_token)
-                    input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
+                    input_ids = torch.cat(
+                        [input_ids, torch.tensor([[next_token]], device=device)], dim=1
+                    )
 
                     # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
                     await asyncio.sleep(0.001)
@@ -148,10 +154,10 @@ class DomainModuleNode(Node):
                 topic="workspace.thought",
                 payload={
                     "type": f"intuition_{self.domain_name}",
-                    "confidence": 0.8, # Base LLM confidence
-                    "content": response_text
+                    "confidence": 0.8,  # Base LLM confidence
+                    "content": response_text,
                 },
-                correlation_id=message.correlation_id
+                correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
             return None

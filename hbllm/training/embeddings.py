@@ -72,7 +72,9 @@ class MiniEmbeddingModel(nn.Module):
         nn.init.xavier_uniform_(self.proj.weight)
         nn.init.zeros_(self.proj.bias)
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """
         Encode input tokens into embeddings.
 
@@ -87,7 +89,9 @@ class MiniEmbeddingModel(nn.Module):
         seq_len = min(seq_len, self.max_seq_len)
         input_ids = input_ids[:, :seq_len]
 
-        positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+        positions = (
+            torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+        )
         x = self.token_embedding(input_ids) + self.position_embedding(positions)
 
         # Transformer encoding
@@ -201,7 +205,9 @@ class EmbeddingTrainer:
 
         logger.info(
             "Training embedding model: %d pairs, %d epochs, batch_size=%d",
-            len(train_pairs), epochs, batch_size,
+            len(train_pairs),
+            epochs,
+            batch_size,
         )
 
         for epoch in range(epochs):
@@ -212,7 +218,7 @@ class EmbeddingTrainer:
             indices = torch.randperm(len(train_pairs))
 
             for start in range(0, len(train_pairs), batch_size):
-                batch_indices = indices[start:start + batch_size]
+                batch_indices = indices[start : start + batch_size]
                 if len(batch_indices) < 2:
                     continue  # Need at least 2 for contrastive learning
 
@@ -222,7 +228,9 @@ class EmbeddingTrainer:
                 )
 
                 anchor_emb = self.model(anchor_ids.to(self.device), anchor_mask.to(self.device))
-                positive_emb = self.model(positive_ids.to(self.device), positive_mask.to(self.device))
+                positive_emb = self.model(
+                    positive_ids.to(self.device), positive_mask.to(self.device)
+                )
 
                 loss = info_nce_loss(anchor_emb, positive_emb, temperature)
 
@@ -241,10 +249,17 @@ class EmbeddingTrainer:
 
             logger.info(
                 "  Epoch %d/%d: loss=%.4f lr=%.2e",
-                epoch + 1, epochs, avg_loss, scheduler.get_last_lr()[0],
+                epoch + 1,
+                epochs,
+                avg_loss,
+                scheduler.get_last_lr()[0],
             )
 
-        logger.info("Embedding training complete: %d steps, final_loss=%.4f", total_steps, losses[-1] if losses else 0)
+        logger.info(
+            "Embedding training complete: %d steps, final_loss=%.4f",
+            total_steps,
+            losses[-1] if losses else 0,
+        )
         return {
             "total_steps": total_steps,
             "epochs": epochs,
@@ -256,10 +271,13 @@ class EmbeddingTrainer:
         """Save the trained embedding model."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({
-            "model_state_dict": self.model.state_dict(),
-            "embedding_dim": self.embedding_dim,
-        }, path)
+        torch.save(
+            {
+                "model_state_dict": self.model.state_dict(),
+                "embedding_dim": self.embedding_dim,
+            },
+            path,
+        )
         logger.info("Embedding model saved to %s", path)
         return path
 
@@ -302,7 +320,8 @@ class EmbeddingTrainer:
 
     @staticmethod
     def _pad_batch(
-        sequences: list[list[int]], max_len: int = 256,
+        sequences: list[list[int]],
+        max_len: int = 256,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Pad sequences to uniform length and create attention mask."""
         batch_max = min(max(len(s) for s in sequences), max_len)

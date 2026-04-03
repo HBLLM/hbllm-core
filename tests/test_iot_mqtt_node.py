@@ -10,6 +10,7 @@ from hbllm.network.messages import Message, MessageType
 
 # ── Device State Tests ───────────────────────────────────────────────────────
 
+
 def test_device_state_creation():
     dev = DeviceState(id="light_1", name="Living Room Light", type="light", room="living_room")
     assert dev.id == "light_1"
@@ -32,6 +33,7 @@ def test_device_types_defined():
 
 # ── Node Lifecycle Tests ─────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_iot_node_starts_and_stops():
     bus = InProcessBus()
@@ -47,6 +49,7 @@ async def test_iot_node_starts_and_stops():
 
 
 # ── Device Registration ──────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_register_device():
@@ -65,6 +68,7 @@ async def test_register_device():
 
 
 # ── Command Execution ────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_execute_command():
@@ -143,6 +147,7 @@ async def test_command_invalid_action():
 
 # ── Device Query ─────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_query_all_devices():
     bus = InProcessBus()
@@ -203,6 +208,7 @@ async def test_query_by_room():
 
 # ── Scene Management ─────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_register_and_activate_scene():
     bus = InProcessBus()
@@ -216,10 +222,13 @@ async def test_register_and_activate_scene():
     node.register_device("light_1", "Light", device_type="light")
     node.register_device("blinds_1", "Blinds", device_type="blinds")
 
-    node.register_scene("goodnight", [
-        {"device_id": "light_1", "action": "off"},
-        {"device_id": "blinds_1", "action": "close"},
-    ])
+    node.register_scene(
+        "goodnight",
+        [
+            {"device_id": "light_1", "action": "off"},
+            {"device_id": "blinds_1", "action": "close"},
+        ],
+    )
 
     msg = Message(
         type=MessageType.QUERY,

@@ -10,6 +10,7 @@ from hbllm.serving.provider import LLMProvider, LLMResponse
 
 # ── Mock Provider ────────────────────────────────────────────────────────────
 
+
 class MockProvider(LLMProvider):
     """A mock LLM provider for testing. Returns configurable responses."""
 
@@ -57,6 +58,7 @@ class MockProvider(LLMProvider):
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_provider():

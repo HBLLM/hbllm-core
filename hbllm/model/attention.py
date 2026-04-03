@@ -84,9 +84,15 @@ class GroupedQueryAttention(nn.Module):
         value_states = self.v_proj(hidden_states)
 
         # Reshape to [batch, num_heads, seq_len, head_dim]
-        query_states = query_states.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(batch_size, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(batch_size, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.view(
+            batch_size, seq_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.view(
+            batch_size, seq_len, self.num_kv_heads, self.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.view(
+            batch_size, seq_len, self.num_kv_heads, self.head_dim
+        ).transpose(1, 2)
 
         # Apply rotary position embeddings
         cos, sin = self.rotary_emb(query_states, position_ids)
@@ -97,7 +103,9 @@ class GroupedQueryAttention(nn.Module):
             if hasattr(past_key_value, "update"):
                 # Pre-allocated O(1) buffer object (KVCache)
                 seq_offset = position_ids[0, 0].item()
-                key_states, value_states = past_key_value.update(key_states, value_states, seq_offset)
+                key_states, value_states = past_key_value.update(
+                    key_states, value_states, seq_offset
+                )
                 new_past_key_value = past_key_value if use_cache else None
             else:
                 # Legacy O(N) tuple concatenation

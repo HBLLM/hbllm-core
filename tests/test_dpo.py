@@ -22,7 +22,7 @@ def test_dpo_loss_computation():
         policy_rejected_logps=pi_rejected,
         reference_chosen_logps=ref_chosen,
         reference_rejected_logps=ref_rejected,
-        beta=beta
+        beta=beta,
     )
 
     # Check shapes
@@ -45,6 +45,7 @@ def test_dpo_loss_computation():
     # 2. Decrease pi_rejected (gradient is positive w.r.t loss)
     assert (pi_chosen.grad < 0).all()
     assert (pi_rejected.grad > 0).all()
+
 
 def test_get_batch_logps():
     batch_size = 2

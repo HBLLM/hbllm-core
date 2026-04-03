@@ -104,7 +104,9 @@ class CosineWarmupScheduler:
         else:
             # Cosine decay
             progress = (step - self.warmup_steps) / max(1, self.max_steps - self.warmup_steps)
-            return self.min_lr + 0.5 * (self.max_lr - self.min_lr) * (1 + math.cos(math.pi * progress))
+            return self.min_lr + 0.5 * (self.max_lr - self.min_lr) * (
+                1 + math.cos(math.pi * progress)
+            )
 
     def __call__(self, step: int) -> float:
         """For use with LambdaLR — returns multiplier."""
@@ -156,6 +158,7 @@ class CheckpointManager:
             old = self._saved.pop(0)
             if old.exists():
                 import shutil
+
                 shutil.rmtree(old)
                 logger.info("Removed old checkpoint: %s", old)
 
@@ -206,9 +209,7 @@ class Trainer:
             self.scaler = torch.amp.GradScaler()
 
         # Checkpoint manager
-        self.checkpoint_mgr = CheckpointManager(
-            config.checkpoint_dir, config.max_checkpoints
-        )
+        self.checkpoint_mgr = CheckpointManager(config.checkpoint_dir, config.max_checkpoints)
 
         # Training state
         self.global_step = 0
@@ -219,13 +220,14 @@ class Trainer:
         if config.wandb_project:
             try:
                 import wandb
+
                 self._wandb_run = wandb.init(
-                    project=config.wandb_project,
-                    entity=config.wandb_entity,
-                    config=config.__dict__
+                    project=config.wandb_project, entity=config.wandb_entity, config=config.__dict__
                 )
             except ImportError:
-                logger.warning("wandb is not installed. Run `pip install wandb` to enable W&B logging.")
+                logger.warning(
+                    "wandb is not installed. Run `pip install wandb` to enable W&B logging."
+                )
 
     def _auto_device(self) -> torch.device:
         """Automatically select the best device."""
@@ -269,6 +271,7 @@ class Trainer:
             return torch.amp.autocast("cuda", dtype=torch.float16)
         else:
             import contextlib
+
             return contextlib.nullcontext()
 
     def train_step(self, batch: dict[str, torch.Tensor]) -> dict[str, float]:

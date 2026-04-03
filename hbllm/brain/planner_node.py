@@ -75,7 +75,9 @@ class ThoughtGraph:
         self.root_ids.append(node.id)
         return node
 
-    def branch(self, parent_id: str, content: str, score: float = 0.0, is_observation: bool = False) -> ThoughtNode:
+    def branch(
+        self, parent_id: str, content: str, score: float = 0.0, is_observation: bool = False
+    ) -> ThoughtNode:
         """Create a child thought branching from a parent."""
         parent = self.nodes[parent_id]
         child = ThoughtNode(
@@ -83,7 +85,7 @@ class ThoughtGraph:
             score=score,
             depth=parent.depth + 1,
             parent_ids=[parent_id],
-            trajectory_history=parent.trajectory_history + [parent.content]
+            trajectory_history=parent.trajectory_history + [parent.content],
         )
         if is_observation:
             child.metadata["is_observation"] = True
@@ -147,8 +149,7 @@ class ThoughtGraph:
         while current.parent_ids:
             # Pick the highest-scoring parent (using Q-value/visits)
             best_parent = max(
-                (self.nodes[pid] for pid in current.parent_ids),
-                key=lambda n: (n.visits, n.q_value)
+                (self.nodes[pid] for pid in current.parent_ids), key=lambda n: (n.visits, n.q_value)
             )
             path.append(best_parent)
             current = best_parent
@@ -156,19 +157,24 @@ class ThoughtGraph:
         path.reverse()
         return path
 
-    def select_leaf_uct(self, root_id: str, c_param: float = 1.414, prm_weight: float = 0.5) -> ThoughtNode:
+    def select_leaf_uct(
+        self, root_id: str, c_param: float = 1.414, prm_weight: float = 0.5
+    ) -> ThoughtNode:
         import math
+
         """Select a leaf node to expand using the UCT formula, blended with PRM scores."""
         current = self.nodes[root_id]
 
         while not current.is_leaf:
             # If any child is completely unexplored, return it instantly
-            unvisited = [self.nodes[cid] for cid in current.children_ids if self.nodes[cid].visits == 0]
+            unvisited = [
+                self.nodes[cid] for cid in current.children_ids if self.nodes[cid].visits == 0
+            ]
             if unvisited:
                 return unvisited[0]
 
             # UCT Selection (blending standard MCTS Q-value with immediate PRM score)
-            best_score = -float('inf')
+            best_score = -float("inf")
             best_child = None
             parent_visits = current.visits
 
@@ -204,7 +210,7 @@ class ThoughtGraph:
             if not current.parent_ids:
                 break
             current = self.nodes[current.parent_ids[0]]
-            current_reward *= decay # Discount future rewards
+            current_reward *= decay  # Discount future rewards
 
     def prune(self, min_score: float = 0.3) -> int:
         """Remove leaf nodes below the score threshold. Returns count removed."""
@@ -231,8 +237,7 @@ class ThoughtGraph:
             "max_depth": max((n.depth for n in self.nodes.values()), default=0),
             "merged_count": sum(1 for n in self.nodes.values() if n.is_merged),
             "avg_score": (
-                sum(n.score for n in self.nodes.values()) / len(self.nodes)
-                if self.nodes else 0.0
+                sum(n.score for n in self.nodes.values()) / len(self.nodes) if self.nodes else 0.0
             ),
         }
 
@@ -246,7 +251,14 @@ class PlannerNode(Node):
     # Max cached prompt/response pairs
     MAX_CACHE_SIZE = 200
 
-    def __init__(self, node_id: str, branch_factor: int = 3, max_depth: int = 2, policy_engine=None, cache_ttl_seconds: float = 3600.0):
+    def __init__(
+        self,
+        node_id: str,
+        branch_factor: int = 3,
+        max_depth: int = 2,
+        policy_engine=None,
+        cache_ttl_seconds: float = 3600.0,
+    ):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PLANNER,
@@ -290,13 +302,20 @@ class PlannerNode(Node):
         cache_key = self._cache_key(text)
         if cache_key in self._response_cache:
             import time
+
             cached, timestamp = self._response_cache[cache_key]
             if time.time() - timestamp <= self.cache_ttl_seconds:
                 self._cache_hits += 1
                 # Move to end (most recently used)
                 self._response_cache.move_to_end(cache_key)
-                logger.info("[GoT] Cache HIT for query (hits=%d, misses=%d)", self._cache_hits, self._cache_misses)
-                return message.create_response({"text": cached, "domain": "planner", "cached": True})
+                logger.info(
+                    "[GoT] Cache HIT for query (hits=%d, misses=%d)",
+                    self._cache_hits,
+                    self._cache_misses,
+                )
+                return message.create_response(
+                    {"text": cached, "domain": "planner", "cached": True}
+                )
             else:
                 # Evict expired entry
                 self._response_cache.pop(cache_key, None)
@@ -309,6 +328,7 @@ class PlannerNode(Node):
 
         # ── Step 1: Root Node & Initial Plausible Branches ────────────────
         import time
+
         root_node = graph.add_root("Root Query: " + text[:50], score=0.5)
 
         initial_thoughts = await asyncio.gather(
@@ -346,9 +366,7 @@ class PlannerNode(Node):
         # Score the initial unblocked roots
         unblocked_branches = [n for n in branch_nodes if not n.metadata.get("policy_blocked")]
         if unblocked_branches:
-            await asyncio.gather(
-                *[self._score_thought(graph, node) for node in unblocked_branches]
-            )
+            await asyncio.gather(*[self._score_thought(graph, node) for node in unblocked_branches])
             # Backpropagate initial scores
             for node in unblocked_branches:
                 graph.backpropagate(node.id, node.score)
@@ -356,6 +374,7 @@ class PlannerNode(Node):
         # ── Step 3: MCTS Compute Loop (Infinite Test-Time Compute) ────────
         # Run until depth budget or time budget exhausted
         import time
+
         deadline = time.time() + 15.0  # 15 seconds thinking budget per query
         max_iterations = 20
         iteration = 0
@@ -369,7 +388,9 @@ class PlannerNode(Node):
                 await self._refine_thought(graph, leaf, text, iteration)
 
                 # Pick one of the newly expanded children to simulate
-                unvisited = [graph.nodes[cid] for cid in leaf.children_ids if graph.nodes[cid].visits == 0]
+                unvisited = [
+                    graph.nodes[cid] for cid in leaf.children_ids if graph.nodes[cid].visits == 0
+                ]
                 if unvisited:
                     leaf = unvisited[0]
 
@@ -390,9 +411,13 @@ class PlannerNode(Node):
 
         # ── Step 4: Optional Merge — Combine complementary top thoughts ───
         top_leaves = sorted(
-            [n for n in graph.nodes.values() if n.is_leaf and n.visits > 0 and not n.metadata.get("policy_blocked")],
+            [
+                n
+                for n in graph.nodes.values()
+                if n.is_leaf and n.visits > 0 and not n.metadata.get("policy_blocked")
+            ],
             key=lambda n: n.q_value,
-            reverse=True
+            reverse=True,
         )[:2]
 
         if len(top_leaves) >= 2 and top_leaves[0].q_value > 0.5:
@@ -400,9 +425,7 @@ class PlannerNode(Node):
                 text, top_leaves[0].content, top_leaves[1].content
             )
             if merged_content:
-                merged_node = graph.merge(
-                    [n.id for n in top_leaves], merged_content
-                )
+                merged_node = graph.merge([n.id for n in top_leaves], merged_content)
                 await self._score_thought(graph, merged_node)
                 graph.backpropagate(merged_node.id, merged_node.score)
 
@@ -415,20 +438,23 @@ class PlannerNode(Node):
 
         final_node = best_path[-1]
 
-        path_desc = " → ".join(
-            f"[D{n.depth}: Q={n.q_value:.2f}, N={n.visits}]" for n in best_path
-        )
+        path_desc = " → ".join(f"[D{n.depth}: Q={n.q_value:.2f}, N={n.visits}]" for n in best_path)
 
         final_text = (
             f"[MCTS Planner] Explored {graph_stats['total_nodes']} thoughts "
-            f"across {graph_stats['max_depth']+1} depths "
+            f"across {graph_stats['max_depth'] + 1} depths "
             f"({graph_stats['merged_count']} merged, "
             f"avg score: {graph_stats['avg_score']:.2f}).\n"
             f"Best path: {path_desc}\n\n"
             f"{final_node.content}"
         )
 
-        logger.info("[MCTS] Selected path: %s (Q=%.2f, N=%d)", path_desc, final_node.q_value, final_node.visits)
+        logger.info(
+            "[MCTS] Selected path: %s (Q=%.2f, N=%d)",
+            path_desc,
+            final_node.q_value,
+            final_node.visits,
+        )
 
         # Cache the result
         self._cache_response(cache_key, final_text)
@@ -445,6 +471,7 @@ class PlannerNode(Node):
     def _cache_response(self, key: str, response: str) -> None:
         """Store a response in the LRU cache, evicting oldest if full."""
         import time
+
         self._response_cache[key] = (response, time.time())
         while len(self._response_cache) > self.MAX_CACHE_SIZE:
             self._response_cache.popitem(last=False)
@@ -471,7 +498,7 @@ class PlannerNode(Node):
         """Score a thought node by querying the evaluation domain or ExecutionNode/ToolRouter."""
 
         if node.metadata.get("is_observation"):
-            node.score = 1.0 # Observations are always factual steps
+            node.score = 1.0  # Observations are always factual steps
             return
 
         # 1. Deterministic verification for Python code
@@ -501,7 +528,11 @@ class PlannerNode(Node):
                 # Fall through to LLM scoring if execution bus falls over
 
         # 1.5. Tool Call Interception
-        tool_match = re.search(r"<tool_call\s+name=[\"'](.*?)[\"']>(.*?)</tool_call>", node.content, re.DOTALL | re.IGNORECASE)
+        tool_match = re.search(
+            r"<tool_call\s+name=[\"'](.*?)[\"']>(.*?)</tool_call>",
+            node.content,
+            re.DOTALL | re.IGNORECASE,
+        )
         if tool_match:
             tool_name = tool_match.group(1).strip()
             tool_args_str = tool_match.group(2).strip()
@@ -521,7 +552,7 @@ class PlannerNode(Node):
 
                 # Expand the tree deterministically with the observation
                 graph.branch(node.id, obs_content, score=1.0, is_observation=True)
-                node.score = 1.0 # Reward emitting a valid tool call
+                node.score = 1.0  # Reward emitting a valid tool call
                 return
             except Exception as e:
                 logger.warning("[GoT] Tool execution failed/timed out: %s", e)
@@ -568,10 +599,12 @@ class PlannerNode(Node):
             omitted_count = len(compressed_traj) - MAX_CONTEXT_STEPS
             head_step = f"Step 1: {compressed_traj[0]}"
 
-            tail_steps = compressed_traj[-(MAX_CONTEXT_STEPS - 1):]
+            tail_steps = compressed_traj[-(MAX_CONTEXT_STEPS - 1) :]
             start_num = len(compressed_traj) - (MAX_CONTEXT_STEPS - 1) + 1
 
-            tail_text = "\n\n".join([f"Step {start_num + i}: {txt}" for i, txt in enumerate(tail_steps)])
+            tail_text = "\n\n".join(
+                [f"Step {start_num + i}: {txt}" for i, txt in enumerate(tail_steps)]
+            )
 
             history_text = (
                 f"{head_step}\n\n"
@@ -579,13 +612,15 @@ class PlannerNode(Node):
                 f"{tail_text}"
             )
         else:
-            history_text = "\n\n".join([f"Step {i+1}: {txt}" for i, txt in enumerate(compressed_traj)])
+            history_text = "\n\n".join(
+                [f"Step {i + 1}: {txt}" for i, txt in enumerate(compressed_traj)]
+            )
 
         prompt = (
             f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"
             f"Original query: {query}\n"
             f"Trajectory:\n{history_text}\n\n"
-            f"If you need to use a tool to continue reasoning, output exactly <tool_call name=\"tool_name\">{{\"arg\":\"val\"}}</tool_call>.\n"
+            f'If you need to use a tool to continue reasoning, output exactly <tool_call name="tool_name">{{"arg":"val"}}</tool_call>.\n'
             f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
         req = Message(
@@ -640,6 +675,7 @@ class PlannerNode(Node):
         cached_content = None
         if cache_key in self._response_cache:
             import time
+
             cached, timestamp = self._response_cache[cache_key]
             if time.time() - timestamp <= self.cache_ttl_seconds:
                 cached_content = cached
@@ -688,4 +724,3 @@ class PlannerNode(Node):
         await self.bus.publish("workspace.thought", thought_msg)
         logger.debug("[GoT] Posted workspace thought for: %s", text[:60])
         return None
-

@@ -38,7 +38,7 @@ class HardwareProfile:
     arch: str
     total_ram_gb: float
     total_vram_gb: float
-    disk_write_latency_ms: float # Benchmarks I/O for SSD expert streaming
+    disk_write_latency_ms: float  # Benchmarks I/O for SSD expert streaming
     cpu_threads: int
     is_low_power: bool
 
@@ -56,6 +56,7 @@ class HardwareHAL:
         # RAM Detection (psutil is enterprise standard)
         try:
             import psutil
+
             ram_gb = psutil.virtual_memory().total / (1024**3)
         except ImportError:
             ram_gb = 4.0
@@ -69,7 +70,7 @@ class HardwareHAL:
             vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         elif torch.backends.mps.is_available():
             device_type = ComputeDeviceType.MPS
-            vram_gb = ram_gb * 0.75 # Mac unified memory limit
+            vram_gb = ram_gb * 0.75  # Mac unified memory limit
 
         # I/O Benchmarking (Enterprise standard for expert streaming)
         disk_latency = HardwareHAL._benchmark_disk_latency()
@@ -83,7 +84,7 @@ class HardwareHAL:
             total_vram_gb=vram_gb,
             disk_write_latency_ms=disk_latency,
             cpu_threads=cpu_threads,
-            is_low_power=is_low_power
+            is_low_power=is_low_power,
         )
 
     @staticmethod
@@ -92,15 +93,15 @@ class HardwareHAL:
         test_file = f"/tmp/hbllm_io_test_{int(time.time())}.tmp"
         try:
             start_time = time.time()
-            with open(test_file, 'wb') as f:
-                f.write(os.urandom(1024 * 1024)) # 1MB write
+            with open(test_file, "wb") as f:
+                f.write(os.urandom(1024 * 1024))  # 1MB write
                 f.flush()
                 os.fsync(f.fileno())
             end_time = time.time()
             os.remove(test_file)
             return (end_time - start_time) * 1000
         except Exception:
-            return 10.0 # Default high latency if disk is protected
+            return 10.0  # Default high latency if disk is protected
 
     @staticmethod
     def recommend_policy(model_params_billions: float) -> dict[str, any]:
@@ -116,7 +117,7 @@ class HardwareHAL:
             "offload_experts": False,
             "device": profile.device_type.value,
             "simd_optimized": True,
-            "kv_cache_quant": False
+            "kv_cache_quant": False,
         }
 
         # Memory Constraint Logic

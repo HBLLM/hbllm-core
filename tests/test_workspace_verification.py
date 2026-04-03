@@ -41,6 +41,7 @@ async def test_workspace_executes_python_and_commits(bus):
     await workspace.start(bus)
 
     decision_received = []
+
     async def mock_decision(msg: Message) -> None:
         decision_received.append(msg.payload)
 
@@ -71,9 +72,9 @@ async def test_workspace_executes_python_and_commits(bus):
             payload={
                 "type": "intuition",
                 "confidence": 0.9,
-                "content": "Here is the code: ```python\nprint(2+2)\n```"
+                "content": "Here is the code: ```python\nprint(2+2)\n```",
             },
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await bus.publish("workspace.thought", thought_msg)
 
@@ -89,6 +90,7 @@ async def test_workspace_executes_python_and_commits(bus):
         await workspace.stop()
         await asyncio.sleep(0.1)
 
+
 @pytest.mark.asyncio
 async def test_workspace_fails_bad_python_and_monologues(bus):
     exec_node = ExecutionNode(node_id="exec_2", timeout=5.0)
@@ -98,6 +100,7 @@ async def test_workspace_fails_bad_python_and_monologues(bus):
     await workspace.start(bus)
 
     monologue_received = []
+
     async def mock_monologue(msg: Message) -> None:
         monologue_received.append(msg.payload)
 
@@ -131,9 +134,9 @@ async def test_workspace_fails_bad_python_and_monologues(bus):
             payload={
                 "type": "intuition",
                 "confidence": 0.9,
-                "content": "Bad code: ```python\nprint(1/0)\n```"
+                "content": "Bad code: ```python\nprint(1/0)\n```",
             },
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await bus.publish("workspace.thought", thought_msg)
 
@@ -148,12 +151,14 @@ async def test_workspace_fails_bad_python_and_monologues(bus):
         await workspace.stop()
         await asyncio.sleep(0.1)
 
+
 from hbllm.brain.learner_node import LearnerNode
 
 
 @pytest.mark.asyncio
 async def test_autonomous_learning(bus):
     import os
+
     queue_path = "workspace/reflection/dpo_queue.json"
     if os.path.exists(queue_path):
         os.remove(queue_path)
@@ -195,9 +200,9 @@ async def test_autonomous_learning(bus):
             payload={
                 "type": "intuition",
                 "confidence": 0.9,
-                "content": "Let's divide by zero: ```python\nprint(1/0)\n```"
+                "content": "Let's divide by zero: ```python\nprint(1/0)\n```",
             },
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await bus.publish("workspace.thought", bad_thought)
 
@@ -207,7 +212,7 @@ async def test_autonomous_learning(bus):
                 "Calculate fibonacci 5" in learner.pending_pairs
                 and learner.pending_pairs["Calculate fibonacci 5"]["rejected"] is not None
             ),
-            timeout=8.0
+            timeout=8.0,
         )
 
         # Check that Learner has the negative pair
@@ -224,21 +229,21 @@ async def test_autonomous_learning(bus):
             payload={
                 "type": "intuition",
                 "confidence": 0.95,
-                "content": "Let's do it safely: ```python\nprint(5)\n```"
+                "content": "Let's do it safely: ```python\nprint(5)\n```",
             },
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await bus.publish("workspace.thought", good_thought)
 
         # Wait until the positive pair is stitched and removed
         assert await _poll_until(
-            lambda: "Calculate fibonacci 5" not in learner.pending_pairs,
-            timeout=8.0
+            lambda: "Calculate fibonacci 5" not in learner.pending_pairs, timeout=8.0
         )
 
         # Both pairs should now be stitched into perfect contrastive DPO batch
         import json
         import os
+
         queue_path = "workspace/reflection/dpo_queue.json"
         assert os.path.exists(queue_path)
 
@@ -249,8 +254,8 @@ async def test_autonomous_learning(bus):
 
         paired = queue[0]
         assert paired[0] == "Calculate fibonacci 5"
-        assert "print(5)" in paired[1] # Chosen
-        assert "print(1/0)" in paired[2] # Rejected
+        assert "print(5)" in paired[1]  # Chosen
+        assert "print(1/0)" in paired[2]  # Rejected
 
         # Cleanup
         os.remove(queue_path)

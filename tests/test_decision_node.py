@@ -11,12 +11,14 @@ from hbllm.network.messages import Message, MessageType
 
 class MockSafeLLM:
     """Mock LLM that classifies content as safe."""
+
     async def generate_json(self, prompt):
         return {"safe": True, "reason": "Content is safe"}
 
 
 class MockUnsafeLLM:
     """Mock LLM that classifies content as unsafe."""
+
     async def generate_json(self, prompt):
         return {"safe": False, "reason": "Contains harmful instructions"}
 
@@ -39,6 +41,7 @@ def _make_decision_message(content="Hello, world!", intent="answer", **kwargs):
 
 class OutputCollector:
     """Collects messages from the bus for assertions."""
+
     def __init__(self):
         self.messages = []
 
@@ -47,6 +50,7 @@ class OutputCollector:
 
 
 # ── Safety Classification Tests ──────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_safe_content_passes_through():
@@ -118,6 +122,7 @@ async def test_no_llm_skips_safety_check():
 
 
 # ── Output Routing Tests ─────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_routes_to_audio_output():
@@ -191,6 +196,7 @@ async def test_routes_plain_text_to_ui():
 
 
 # ── Node Lifecycle Tests ─────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_decision_node_starts_and_stops():

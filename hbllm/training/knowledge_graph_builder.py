@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Entity:
     """A named entity in the knowledge graph."""
+
     name: str
     entity_type: str  # person, org, tech, concept, place
     frequency: int = 0
@@ -35,6 +36,7 @@ class Entity:
 @dataclass
 class Relationship:
     """An edge between two entities."""
+
     source: str
     target: str
     relation_type: str  # co-occurs, part-of, related-to
@@ -54,21 +56,21 @@ class KnowledgeGraphBuilder:
 
     # Common technical terms to track as entities
     TECH_PATTERNS = [
-        r'\b(?:Python|JavaScript|TypeScript|Rust|Go|Java|C\+\+|Ruby|PHP|Swift|Kotlin)\b',
-        r'\b(?:React|Vue|Angular|Django|Flask|Laravel|Rails|Spring|Express|FastAPI)\b',
-        r'\b(?:Docker|Kubernetes|AWS|Azure|GCP|Linux|macOS|Windows|Git|GitHub)\b',
-        r'\b(?:PostgreSQL|MySQL|MongoDB|Redis|Elasticsearch|SQLite|DynamoDB)\b',
-        r'\b(?:TensorFlow|PyTorch|Transformers|CUDA|ONNX|LLVM|WebAssembly)\b',
-        r'\b(?:HTTP|REST|GraphQL|gRPC|WebSocket|OAuth|JWT|SSL|TLS|DNS)\b',
-        r'\b(?:machine learning|deep learning|neural network|natural language)\b',
-        r'\b(?:API|SDK|CLI|GUI|UI|UX|CI|CD|DevOps|MLOps)\b',
+        r"\b(?:Python|JavaScript|TypeScript|Rust|Go|Java|C\+\+|Ruby|PHP|Swift|Kotlin)\b",
+        r"\b(?:React|Vue|Angular|Django|Flask|Laravel|Rails|Spring|Express|FastAPI)\b",
+        r"\b(?:Docker|Kubernetes|AWS|Azure|GCP|Linux|macOS|Windows|Git|GitHub)\b",
+        r"\b(?:PostgreSQL|MySQL|MongoDB|Redis|Elasticsearch|SQLite|DynamoDB)\b",
+        r"\b(?:TensorFlow|PyTorch|Transformers|CUDA|ONNX|LLVM|WebAssembly)\b",
+        r"\b(?:HTTP|REST|GraphQL|gRPC|WebSocket|OAuth|JWT|SSL|TLS|DNS)\b",
+        r"\b(?:machine learning|deep learning|neural network|natural language)\b",
+        r"\b(?:API|SDK|CLI|GUI|UI|UX|CI|CD|DevOps|MLOps)\b",
     ]
 
     # Patterns for concept-type entities
     CONCEPT_PATTERNS = [
-        r'\b(?:algorithm|architecture|pattern|framework|protocol|paradigm)\b',
-        r'\b(?:optimization|inference|training|embedding|tokenization)\b',
-        r'\b(?:classification|regression|clustering|segmentation)\b',
+        r"\b(?:algorithm|architecture|pattern|framework|protocol|paradigm)\b",
+        r"\b(?:optimization|inference|training|embedding|tokenization)\b",
+        r"\b(?:classification|regression|clustering|segmentation)\b",
     ]
 
     def __init__(self, max_entities: int = 10000, max_contexts_per_entity: int = 5):
@@ -81,8 +83,8 @@ class KnowledgeGraphBuilder:
         self._max_contexts = max_contexts_per_entity
 
         # Compile regex patterns
-        self._tech_re = re.compile('|'.join(self.TECH_PATTERNS), re.IGNORECASE)
-        self._concept_re = re.compile('|'.join(self.CONCEPT_PATTERNS), re.IGNORECASE)
+        self._tech_re = re.compile("|".join(self.TECH_PATTERNS), re.IGNORECASE)
+        self._concept_re = re.compile("|".join(self.CONCEPT_PATTERNS), re.IGNORECASE)
 
     def add_from_text(self, text: str, step: int = 0) -> list[str]:
         """
@@ -118,7 +120,7 @@ class KnowledgeGraphBuilder:
                 self._cooccurrence[pair] += 1
 
         # Track topic keywords
-        words = re.findall(r'\b[a-z]{4,}\b', text.lower())
+        words = re.findall(r"\b[a-z]{4,}\b", text.lower())
         self._topic_keywords.update(words)
 
         return found_entities
@@ -153,25 +155,54 @@ class KnowledgeGraphBuilder:
         self.edges = []
         for (src, tgt), count in self._cooccurrence.items():
             if count >= min_cooccurrence:
-                self.edges.append(Relationship(
-                    source=src,
-                    target=tgt,
-                    relation_type="co-occurs",
-                    weight=float(count),
-                ))
+                self.edges.append(
+                    Relationship(
+                        source=src,
+                        target=tgt,
+                        relation_type="co-occurs",
+                        weight=float(count),
+                    )
+                )
         self.edges.sort(key=lambda e: e.weight, reverse=True)
         return self.edges
 
     def get_topic_clusters(self, top_n: int = 20) -> list[dict]:
         """Get top topic clusters from keyword frequency."""
         stopwords = {
-            "that", "this", "with", "from", "have", "been", "were", "will",
-            "would", "could", "should", "their", "which", "about", "there",
-            "other", "some", "when", "them", "then", "than", "also", "into",
-            "more", "very", "just", "each", "only", "between", "such",
+            "that",
+            "this",
+            "with",
+            "from",
+            "have",
+            "been",
+            "were",
+            "will",
+            "would",
+            "could",
+            "should",
+            "their",
+            "which",
+            "about",
+            "there",
+            "other",
+            "some",
+            "when",
+            "them",
+            "then",
+            "than",
+            "also",
+            "into",
+            "more",
+            "very",
+            "just",
+            "each",
+            "only",
+            "between",
+            "such",
         }
         filtered = [
-            (word, count) for word, count in self._topic_keywords.most_common(top_n * 3)
+            (word, count)
+            for word, count in self._topic_keywords.most_common(top_n * 3)
             if word not in stopwords
         ]
         return [{"keyword": w, "count": c} for w, c in filtered[:top_n]]
@@ -186,7 +217,9 @@ class KnowledgeGraphBuilder:
             "entity_types": dict(type_counts),
             "top_entities": [
                 {"name": e.name, "type": e.entity_type, "freq": e.frequency}
-                for e in sorted(self.entities.values(), key=lambda x: x.frequency, reverse=True)[:10]
+                for e in sorted(self.entities.values(), key=lambda x: x.frequency, reverse=True)[
+                    :10
+                ]
             ],
         }
 
@@ -231,7 +264,9 @@ class KnowledgeGraphBuilder:
 
         logger.info(
             "Knowledge graph saved: %d entities, %d edges → %s",
-            len(self.entities), len(self.edges), path,
+            len(self.entities),
+            len(self.edges),
+            path,
         )
 
     @classmethod
@@ -255,12 +290,18 @@ class KnowledgeGraphBuilder:
             )
 
         for edge_data in data["edges"]:
-            builder.edges.append(Relationship(
-                source=edge_data["source"],
-                target=edge_data["target"],
-                relation_type=edge_data["relation"],
-                weight=edge_data["weight"],
-            ))
+            builder.edges.append(
+                Relationship(
+                    source=edge_data["source"],
+                    target=edge_data["target"],
+                    relation_type=edge_data["relation"],
+                    weight=edge_data["weight"],
+                )
+            )
 
-        logger.info("Loaded knowledge graph: %d entities, %d edges", len(builder.entities), len(builder.edges))
+        logger.info(
+            "Loaded knowledge graph: %d entities, %d edges",
+            len(builder.entities),
+            len(builder.edges),
+        )
         return builder

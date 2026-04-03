@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CognitionWorker:
     """A registered cognitive worker with specialization."""
+
     worker_id: str
     specializations: list[str]  # domains this worker excels at
     capacity: int = 10  # max concurrent tasks
@@ -36,6 +37,7 @@ class CognitionWorker:
 @dataclass
 class CognitionTask:
     """A cognitive task to be routed."""
+
     task_id: str
     domain: str  # reasoning | research | creative | verification | general
     priority: int = 5  # 1 = highest, 10 = lowest
@@ -110,7 +112,9 @@ class CognitionRouter:
         4. None if all workers at capacity
         """
         self._task_history.append(task)
-        available = [w for w in self._workers.values() if w.is_healthy and w.current_load < w.capacity]
+        available = [
+            w for w in self._workers.values() if w.is_healthy and w.current_load < w.capacity
+        ]
 
         if not available:
             logger.warning("No available workers for task %s", task.task_id)
@@ -139,14 +143,18 @@ class CognitionRouter:
         if worker:
             worker.current_load = max(0, worker.current_load - 1)
 
-    def _find_specialist(self, domain: str, available: list[CognitionWorker]) -> CognitionWorker | None:
+    def _find_specialist(
+        self, domain: str, available: list[CognitionWorker]
+    ) -> CognitionWorker | None:
         specialists = [w for w in available if domain in w.specializations]
         if not specialists:
             return None
         # Prefer least loaded specialist
         return min(specialists, key=lambda w: w.current_load)
 
-    def _find_best_performer(self, domain: str, available: list[CognitionWorker]) -> CognitionWorker | None:
+    def _find_best_performer(
+        self, domain: str, available: list[CognitionWorker]
+    ) -> CognitionWorker | None:
         scored = [(w, w.performance.get(domain, 0.5)) for w in available]
         scored.sort(key=lambda x: x[1], reverse=True)
         if scored and scored[0][1] > 0.5:
@@ -161,7 +169,8 @@ class CognitionRouter:
     # ─── Parallel Execution ──────────────────────────────────────────
 
     def split_and_route(
-        self, subtasks: list[CognitionTask],
+        self,
+        subtasks: list[CognitionTask],
     ) -> dict[str, list[CognitionTask]]:
         """
         Route multiple subtasks for parallel execution.
@@ -180,12 +189,14 @@ class CognitionRouter:
     def get_cluster_status(self) -> dict[str, Any]:
         workers = []
         for w in self._workers.values():
-            workers.append({
-                "id": w.worker_id,
-                "specializations": w.specializations,
-                "load": f"{w.current_load}/{w.capacity}",
-                "healthy": w.is_healthy,
-            })
+            workers.append(
+                {
+                    "id": w.worker_id,
+                    "specializations": w.specializations,
+                    "load": f"{w.current_load}/{w.capacity}",
+                    "healthy": w.is_healthy,
+                }
+            )
         return {
             "total_workers": len(self._workers),
             "total_tasks_routed": len(self._task_history),

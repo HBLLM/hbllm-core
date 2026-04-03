@@ -10,6 +10,7 @@ from hbllm.serving.provider import LLMProvider, LLMResponse
 
 # ── Mock Provider ────────────────────────────────────────────────────────────
 
+
 class MockBrainProvider(LLMProvider):
     """Mock provider that returns structured responses for brain node queries."""
 
@@ -63,6 +64,7 @@ class MockBrainProvider(LLMProvider):
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_factory_creates_brain():
     """Factory creates a Brain with all components."""
@@ -74,7 +76,9 @@ async def test_factory_creates_brain():
     assert brain.registry is not None
     assert brain.pipeline is not None
     assert brain.llm is not None
-    assert len(brain.nodes) >= 10  # Core pipeline + Memory + MetaCognitive + RuleExtractor + Identity + Sleep
+    assert (
+        len(brain.nodes) >= 10
+    )  # Core pipeline + Memory + MetaCognitive + RuleExtractor + Identity + Sleep
 
     await brain.shutdown()
 
@@ -150,15 +154,13 @@ async def test_adapter_integration_with_nodes():
 
     # Simulate what CriticNode does
     evaluation = await llm.generate_json(
-        "You are a QA evaluator.\n"
-        'Output JSON: {"verdict": "PASS" or "FAIL", "reason": "..."}'
+        'You are a QA evaluator.\nOutput JSON: {"verdict": "PASS" or "FAIL", "reason": "..."}'
     )
     assert "verdict" in evaluation or "error" in evaluation
 
     # Simulate what DecisionNode does
     safety = await llm.generate_json(
-        "You are a safety classifier.\n"
-        'Output JSON: {"safe": true/false, "reason": "..."}'
+        'You are a safety classifier.\nOutput JSON: {"safe": true/false, "reason": "..."}'
     )
     assert "safe" in safety or "error" in safety
 

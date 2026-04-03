@@ -30,9 +30,9 @@ class MockDomainNode:
             payload={
                 "type": "intuition_general",
                 "confidence": 0.9,
-                "content": f"Answer for tenant {msg.tenant_id} session {msg.session_id}"
+                "content": f"Answer for tenant {msg.tenant_id} session {msg.session_id}",
             },
-            correlation_id=msg.correlation_id
+            correlation_id=msg.correlation_id,
         )
         await self.bus.publish("workspace.thought", thought)
 
@@ -69,7 +69,7 @@ async def test_concurrent_multi_tenant_workspaces(mt_env):
         tenant_id="tenant_A",
         session_id="session_A_1",
         topic="router.query",
-        payload={"text": "Hello A"}
+        payload={"text": "Hello A"},
     )
 
     req2 = Message(
@@ -78,7 +78,7 @@ async def test_concurrent_multi_tenant_workspaces(mt_env):
         tenant_id="tenant_B",
         session_id="session_B_1",
         topic="router.query",
-        payload={"text": "Hello B"}
+        payload={"text": "Hello B"},
     )
 
     await bus.publish("router.query", req1)

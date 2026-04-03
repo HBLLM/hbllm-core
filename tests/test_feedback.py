@@ -126,10 +126,7 @@ async def test_learner_node_triggers_dpo_at_sleep(tmp_path):
     await learner.start(bus)
 
     # Create the queue file manually to simulate pending pairs
-    initial_queue = [
-        ["Q1", "Good 1", "Bad 1"],
-        ["Q2", "Good 2", "Bad 2"]
-    ]
+    initial_queue = [["Q1", "Good 1", "Bad 1"], ["Q2", "Good 2", "Bad 2"]]
     with open(q_path, "w") as f:
         json.dump(initial_queue, f)
 
@@ -137,7 +134,9 @@ async def test_learner_node_triggers_dpo_at_sleep(tmp_path):
     assert learner.training_task is None
 
     # Trigger Sleep
-    sleep_trigger = Message(type=MessageType.EVENT, source_node_id="test", topic="system.sleep.dpo_trigger", payload={})
+    sleep_trigger = Message(
+        type=MessageType.EVENT, source_node_id="test", topic="system.sleep.dpo_trigger", payload={}
+    )
     await bus.publish("system.sleep.dpo_trigger", sleep_trigger)
 
     # Wait for DPO training trigger

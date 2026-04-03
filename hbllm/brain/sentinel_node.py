@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SentinelAlert:
     """A record of a triggered rule and the action taken."""
+
     rule_name: str
     violation: str
     action_taken: str  # "corrective", "alert", "blocked"
@@ -107,24 +108,28 @@ class SentinelNode(Node):
         action = message.payload.get("action", "status")
 
         if action == "status":
-            return message.create_response({
-                "context": self._current_context,
-                "alert_count": len(self._alert_history),
-                "triggered_rules": list(self._triggered_rules),
-            })
+            return message.create_response(
+                {
+                    "context": self._current_context,
+                    "alert_count": len(self._alert_history),
+                    "triggered_rules": list(self._triggered_rules),
+                }
+            )
         elif action == "alerts":
             limit = message.payload.get("limit", 10)
-            return message.create_response({
-                "alerts": [
-                    {
-                        "rule": a.rule_name,
-                        "violation": a.violation,
-                        "action_taken": a.action_taken,
-                        "timestamp": a.timestamp,
-                    }
-                    for a in self._alert_history[-limit:]
-                ],
-            })
+            return message.create_response(
+                {
+                    "alerts": [
+                        {
+                            "rule": a.rule_name,
+                            "violation": a.violation,
+                            "action_taken": a.action_taken,
+                            "timestamp": a.timestamp,
+                        }
+                        for a in self._alert_history[-limit:]
+                    ],
+                }
+            )
         elif action == "clear_alerts":
             self._alert_history.clear()
             self._triggered_rules.clear()
@@ -212,8 +217,16 @@ class SentinelNode(Node):
             parts.append(f"Location is {context['location']}")
 
         # Include any other keys as generic state descriptions
-        known_keys = {"door_state", "time_hour", "time_minute", "baby_state",
-                       "person_type", "location", "day_of_week", "is_weekend"}
+        known_keys = {
+            "door_state",
+            "time_hour",
+            "time_minute",
+            "baby_state",
+            "person_type",
+            "location",
+            "day_of_week",
+            "is_weekend",
+        }
         for key, value in context.items():
             if key not in known_keys:
                 parts.append(f"{key.replace('_', ' ')} is {value}")
@@ -248,11 +261,12 @@ class SentinelNode(Node):
         )
         self._alert_history.append(alert)
         if len(self._alert_history) > self.max_history:
-            self._alert_history = self._alert_history[-self.max_history:]
+            self._alert_history = self._alert_history[-self.max_history :]
 
         logger.warning(
             "[Sentinel] VIOLATION: %s → action: %s",
-            violation, corrective_action["type"],
+            violation,
+            corrective_action["type"],
         )
 
         if corrective_action["type"] == "corrective":
@@ -282,7 +296,7 @@ class SentinelNode(Node):
                 topic="sensory.output",
                 payload={
                     "text": f"⚠️ Rule triggered: {violation}. "
-                            f"Action: {corrective_action.get('description', corrective_action['type'])}.",
+                    f"Action: {corrective_action.get('description', corrective_action['type'])}.",
                     "source": "sentinel",
                     "severity": "high",
                 },

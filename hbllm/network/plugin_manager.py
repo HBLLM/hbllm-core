@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PluginInfo:
     """Metadata about a discovered plugin."""
+
     name: str
     path: str
     version: str = "0.0.0"
@@ -184,6 +185,7 @@ class PluginManager:
 
                 # Call register(bus, registry) or register(bus)
                 import inspect
+
                 sig = inspect.signature(register_fn)
                 if len(sig.parameters) >= 2 and registry:
                     nodes = await register_fn(bus, registry)
@@ -198,13 +200,17 @@ class PluginManager:
 
                     # Register with service registry
                     if registry:
-                        for node in (nodes if isinstance(nodes, list) else [nodes]):
+                        for node in nodes if isinstance(nodes, list) else [nodes]:
                             if hasattr(node, "get_info"):
                                 await registry.register(node.get_info())
 
                 info.loaded = True
                 info.error = None
-                logger.info("Loaded plugin: %s (%d nodes)", name, len(nodes) if isinstance(nodes, list) else 1)
+                logger.info(
+                    "Loaded plugin: %s (%d nodes)",
+                    name,
+                    len(nodes) if isinstance(nodes, list) else 1,
+                )
 
             except Exception as e:
                 info.error = str(e)

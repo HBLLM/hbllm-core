@@ -20,6 +20,7 @@ import torch.nn.functional as F
 # Try to import our Rust accelerated kernel
 try:
     from hbllm_compute import UniversalEngine
+
     rust_engine = UniversalEngine()
 except ImportError:
     rust_engine = None
@@ -36,6 +37,7 @@ class QuantizedLinear(nn.Module):
     providing much finer control than per-tensor scaling while keeping
     overhead minimal (1 scale + 1 bias per block per output row).
     """
+
     def __init__(
         self,
         in_features: int,
@@ -86,9 +88,11 @@ class QuantizedLinear(nn.Module):
                 self.q_bias.numpy(),
                 self.group_size,
             )
-            w_float = torch.from_numpy(w_flat).reshape(
-                self.out_features, self.in_features
-            ).to(x.device, x.dtype)
+            w_float = (
+                torch.from_numpy(w_flat)
+                .reshape(self.out_features, self.in_features)
+                .to(x.device, x.dtype)
+            )
         else:
             # PyTorch fallback
             w_float = self._unpack_native()
@@ -113,8 +117,8 @@ class QuantizedLinear(nn.Module):
         bias_expanded = self.q_bias.repeat_interleave(self.group_size, dim=1)
 
         # Trim to exact in_features (handles non-divisible case)
-        scale_expanded = scale_expanded[:, :self.in_features]
-        bias_expanded = bias_expanded[:, :self.in_features]
+        scale_expanded = scale_expanded[:, : self.in_features]
+        bias_expanded = bias_expanded[:, : self.in_features]
 
         return w * scale_expanded + bias_expanded
 
@@ -180,9 +184,11 @@ class HybridLinear(nn.Module):
     Delegates all LoRA computation to LoRALinear to avoid duplicating
     MoE blending, device paging, and dropout logic.
     """
+
     def __init__(self, base_layer: QuantizedLinear, r: int = 8):
         super().__init__()
         from hbllm.modules.lora import LoRALinear
+
         self.base = base_layer
         self.r = r
 

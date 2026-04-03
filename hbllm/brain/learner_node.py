@@ -26,7 +26,7 @@ class LearnerNode(Node):
         node_id: str,
         model: torch.nn.Module | None = None,
         tokenizer: Any = None,
-        batch_size: int = 4, # Used as limit per sleep cycle now
+        batch_size: int = 4,  # Used as limit per sleep cycle now
         lr: float = 1e-5,
         dpo_beta: float = 0.1,
         lora_r: int = 8,
@@ -41,6 +41,7 @@ class LearnerNode(Node):
         self.pending_pairs: dict[str, dict[str, str | None]] = {}
         self.queue_path = "workspace/reflection/dpo_queue.json"
         import os
+
         os.makedirs(os.path.dirname(self.queue_path), exist_ok=True)
 
         self.batch_size = batch_size
@@ -81,12 +82,18 @@ class LearnerNode(Node):
         response = payload.response
 
         if not prompt or not response:
-            logger.debug("Learner '%s' received feedback with missing prompt/response", self.node_id)
+            logger.debug(
+                "Learner '%s' received feedback with missing prompt/response", self.node_id
+            )
             return None
 
         async with self._lock:
-            logger.info("Learner '%s' processing feedback for msg %s (rating: %d)",
-                        self.node_id, payload.message_id, payload.rating)
+            logger.info(
+                "Learner '%s' processing feedback for msg %s (rating: %d)",
+                self.node_id,
+                payload.message_id,
+                payload.rating,
+            )
 
             if prompt not in self.pending_pairs:
                 self.pending_pairs[prompt] = {"chosen": None, "rejected": None}
@@ -120,7 +127,9 @@ class LearnerNode(Node):
                     p.parent.mkdir(parents=True, exist_ok=True)
                     with p.open("w") as f:
                         json.dump(queue, f)
-                    logger.info("LearnerNode queued contrastive DPO pair for prompt: '%s...'", prompt[:30])
+                    logger.info(
+                        "LearnerNode queued contrastive DPO pair for prompt: '%s...'", prompt[:30]
+                    )
                 except OSError as e:
                     logger.error("Failed to write to dpo_queue.json: %s", e)
                     # Don't delete from pending_pairs so we can retry or at least not lose it
@@ -157,8 +166,8 @@ class LearnerNode(Node):
             return None
 
         # Cap batch to self.batch_size to prevent memory explosion
-        target_batch = batch[:self.batch_size]
-        re_queue = batch[self.batch_size:]
+        target_batch = batch[: self.batch_size]
+        re_queue = batch[self.batch_size :]
 
         if re_queue:
             with open(self.queue_path, "w") as f:
@@ -198,13 +207,22 @@ class LearnerNode(Node):
                     # reference model's log-probabilities. This ensures the
                     # DPO loss produces a non-zero gradient signal.
                     from hbllm.modules.lora import LoRAManager
+
                     LoRAManager.set_active_adapter(self.model, None)
 
                     with torch.no_grad():
                         ref_chosen_out = self.model(chosen_ids)
                         ref_rejected_out = self.model(rejected_ids)
-                        ref_chosen_logits = ref_chosen_out["logits"] if isinstance(ref_chosen_out, dict) else ref_chosen_out
-                        ref_rejected_logits = ref_rejected_out["logits"] if isinstance(ref_rejected_out, dict) else ref_rejected_out
+                        ref_chosen_logits = (
+                            ref_chosen_out["logits"]
+                            if isinstance(ref_chosen_out, dict)
+                            else ref_chosen_out
+                        )
+                        ref_rejected_logits = (
+                            ref_rejected_out["logits"]
+                            if isinstance(ref_rejected_out, dict)
+                            else ref_rejected_out
+                        )
                         ref_chosen_logps = get_batch_logps(ref_chosen_logits, chosen_ids)
                         ref_rejected_logps = get_batch_logps(ref_rejected_logits, rejected_ids)
 
@@ -215,8 +233,12 @@ class LearnerNode(Node):
                     chosen_out = self.model(chosen_ids)
                     rejected_out = self.model(rejected_ids)
 
-                    chosen_logits = chosen_out["logits"] if isinstance(chosen_out, dict) else chosen_out
-                    rejected_logits = rejected_out["logits"] if isinstance(rejected_out, dict) else rejected_out
+                    chosen_logits = (
+                        chosen_out["logits"] if isinstance(chosen_out, dict) else chosen_out
+                    )
+                    rejected_logits = (
+                        rejected_out["logits"] if isinstance(rejected_out, dict) else rejected_out
+                    )
 
                     policy_chosen_logps = get_batch_logps(chosen_logits, chosen_ids)
                     policy_rejected_logps = get_batch_logps(rejected_logits, rejected_ids)
@@ -240,7 +262,9 @@ class LearnerNode(Node):
                     reward_margin = (chosen_rewards - rejected_rewards).mean().item()
                     logger.info(
                         "  DPO step %d: loss=%.4f reward_margin=%.4f",
-                        self._training_steps, loss.item(), reward_margin,
+                        self._training_steps,
+                        loss.item(),
+                        reward_margin,
                     )
 
                 except Exception as e:
@@ -253,7 +277,10 @@ class LearnerNode(Node):
 
         try:
             await asyncio.to_thread(_train)
-            logger.info("LearnerNode DPO training complete (%d total steps). Broadcasting update...", self._training_steps)
+            logger.info(
+                "LearnerNode DPO training complete (%d total steps). Broadcasting update...",
+                self._training_steps,
+            )
             await self._broadcast_complete()
 
         except Exception as e:
@@ -266,12 +293,16 @@ class LearnerNode(Node):
             source_node_id=self.node_id,
             target_node_id="",
             topic="system.learning_update",
-            payload={"status": "weights_updated", "steps": getattr(self, "_training_steps", 0)}
+            payload={"status": "weights_updated", "steps": getattr(self, "_training_steps", 0)},
         )
         await self.bus.publish("system.learning_update", update_msg)
 
     def _build_dpo_pair(
-        self, prompt_text: str, chosen_text: str, rejected_text: str, device: torch.device,
+        self,
+        prompt_text: str,
+        chosen_text: str,
+        rejected_text: str,
+        device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Build a chosen/rejected tensor pair."""
         if not prompt_text or not chosen_text or not rejected_text:
@@ -300,8 +331,11 @@ class LearnerNode(Node):
             return
         try:
             from hbllm.modules.lora import LoRAManager
+
             injected = LoRAManager.inject(self.model, r=self.lora_r)
-            logger.info("LearnerNode injected LoRA (r=%d) into %d modules", self.lora_r, len(injected))
+            logger.info(
+                "LearnerNode injected LoRA (r=%d) into %d modules", self.lora_r, len(injected)
+            )
             self._lora_injected = True
         except Exception as e:
             logger.warning("Could not inject LoRA: %s", e)
@@ -311,7 +345,9 @@ class LearnerNode(Node):
         if self._optimizer is not None:
             return
 
-        lora_params = [p for n, p in self.model.named_parameters() if "lora_" in n and p.requires_grad]
+        lora_params = [
+            p for n, p in self.model.named_parameters() if "lora_" in n and p.requires_grad
+        ]
         if not lora_params:
             lora_params = [p for p in self.model.parameters() if p.requires_grad]
 
@@ -323,6 +359,7 @@ class LearnerNode(Node):
 
         try:
             from hbllm.modules.lora import LoRAManager
+
             adapter_state = LoRAManager.get_lora_state_dict(self.model)
             save_dir = Path(self.checkpoint_dir)
             save_dir.mkdir(parents=True, exist_ok=True)
@@ -331,4 +368,3 @@ class LearnerNode(Node):
             logger.info("LearnerNode saved LoRA adapter to %s", save_path)
         except Exception as e:
             logger.warning("Failed to save LoRA adapter: %s", e)
-

@@ -48,7 +48,9 @@ class ToolRouterNode(Node):
         tool_args_raw = message.payload.get("arguments", "{}")
 
         try:
-            tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else tool_args_raw
+            tool_args = (
+                json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else tool_args_raw
+            )
         except json.JSONDecodeError:
             logger.warning("ToolRouterNode received invalid JSON arguments for tool %s", tool_name)
             return message.create_response({"status": "ERROR", "error": "Invalid JSON arguments"})
@@ -66,10 +68,7 @@ class ToolRouterNode(Node):
         else:
             # 2. Generic Tool Routing (e.g. MCP)
             target_topic = f"action.tool.{tool_name}"
-            target_payload = {
-                 "tool_name": tool_name,
-                 "arguments": tool_args
-            }
+            target_payload = {"tool_name": tool_name, "arguments": tool_args}
 
         req = Message(
             type=MessageType.QUERY,

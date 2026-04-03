@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 # Key prefixes in Redis
 _PREFIX = "hbllm:registry"
-_NODES_KEY = f"{_PREFIX}:nodes"        # Hash: node_id → JSON(NodeInfo)
-_HEALTH_KEY = f"{_PREFIX}:health"      # Hash: node_id → JSON(NodeHealth)
-_CHANNEL = f"{_PREFIX}:events"         # PubSub channel for join/leave events
-_DEFAULT_TTL = 60                       # seconds before a node is auto-expired
+_NODES_KEY = f"{_PREFIX}:nodes"  # Hash: node_id → JSON(NodeInfo)
+_HEALTH_KEY = f"{_PREFIX}:health"  # Hash: node_id → JSON(NodeHealth)
+_CHANNEL = f"{_PREFIX}:events"  # PubSub channel for join/leave events
+_DEFAULT_TTL = 60  # seconds before a node is auto-expired
 
 
 class RedisRegistry(ServiceRegistry):
@@ -58,6 +58,7 @@ class RedisRegistry(ServiceRegistry):
         """Connect to Redis and start health check loop."""
         try:
             import redis.asyncio as aioredis
+
             self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
             await self._redis.ping()
             logger.info("RedisRegistry connected to %s", self.redis_url)
@@ -65,7 +66,8 @@ class RedisRegistry(ServiceRegistry):
             logger.warning(
                 "RedisRegistry failed to connect to Redis (%s), "
                 "falling back to in-process registry: %s",
-                self.redis_url, e,
+                self.redis_url,
+                e,
             )
             self._redis = None
 
@@ -101,12 +103,17 @@ class RedisRegistry(ServiceRegistry):
                 await self._redis.set(ttl_key, "1", ex=self.ttl)
 
                 # Announce join
-                await self._redis.publish(_CHANNEL, json.dumps({
-                    "event": "join",
-                    "node_id": node_info.node_id,
-                    "node_type": node_info.node_type.value,
-                    "capabilities": node_info.capabilities,
-                }))
+                await self._redis.publish(
+                    _CHANNEL,
+                    json.dumps(
+                        {
+                            "event": "join",
+                            "node_id": node_info.node_id,
+                            "node_type": node_info.node_type.value,
+                            "capabilities": node_info.capabilities,
+                        }
+                    ),
+                )
                 logger.info("Registered '%s' in Redis", node_info.node_id)
             except Exception as e:
                 logger.error("Failed to register '%s' in Redis: %s", node_info.node_id, e)
@@ -121,10 +128,15 @@ class RedisRegistry(ServiceRegistry):
                 await self._redis.hdel(_HEALTH_KEY, node_id)
                 await self._redis.delete(f"{_PREFIX}:ttl:{node_id}")
 
-                await self._redis.publish(_CHANNEL, json.dumps({
-                    "event": "leave",
-                    "node_id": node_id,
-                }))
+                await self._redis.publish(
+                    _CHANNEL,
+                    json.dumps(
+                        {
+                            "event": "leave",
+                            "node_id": node_id,
+                        }
+                    ),
+                )
                 logger.info("Deregistered '%s' from Redis", node_id)
             except Exception as e:
                 logger.error("Failed to deregister '%s' from Redis: %s", node_id, e)

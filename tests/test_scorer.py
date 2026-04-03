@@ -1,6 +1,7 @@
 """
 Tests for hbllm.data.scorer — data quality filtering heuristics.
 """
+
 from hbllm.data.scorer import QualityScorer
 
 
@@ -11,8 +12,10 @@ class TestQualityScorer:
         self.scorer = QualityScorer()
 
     def test_high_quality_text(self):
-        text = "This is a well-written English paragraph about machine learning. " \
-               "It contains proper words and punctuation, making it suitable for training."
+        text = (
+            "This is a well-written English paragraph about machine learning. "
+            "It contains proper words and punctuation, making it suitable for training."
+        )
         assert self.scorer.is_high_quality(text)
 
     def test_rejects_gibberish(self):

@@ -25,7 +25,11 @@ class WorldModelNode(Node):
     """
 
     def __init__(self, node_id: str):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["simulation", "ast_parsing"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["simulation", "ast_parsing"],
+        )
         # A list of inherently dangerous modules we want to prevent the LLM from executing
         self.dangerous_imports = {"os", "subprocess", "sys", "shutil", "socket"}
 
@@ -60,11 +64,11 @@ class WorldModelNode(Node):
                 topic="workspace.thought",
                 payload={
                     "type": "simulation_result",
-                    "confidence": 1.0, # The AST validation is deterministic
-                    "prediction": prediction["status"], # 'SUCCESS' or 'FAILURE'
-                    "content": prediction["reason"]
+                    "confidence": 1.0,  # The AST validation is deterministic
+                    "prediction": prediction["status"],  # 'SUCCESS' or 'FAILURE'
+                    "content": prediction["reason"],
                 },
-                correlation_id=message.correlation_id
+                correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", sim_msg)
 
@@ -83,13 +87,22 @@ class WorldModelNode(Node):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
-                        if alias.name.split('.')[0] in self.dangerous_imports:
-                            return {"status": "FAILURE", "reason": f"ImportError: the module '{alias.name}' is blocked by sandbox safety policies."}
+                        if alias.name.split(".")[0] in self.dangerous_imports:
+                            return {
+                                "status": "FAILURE",
+                                "reason": f"ImportError: the module '{alias.name}' is blocked by sandbox safety policies.",
+                            }
                 elif isinstance(node, ast.ImportFrom):
-                    if node.module and node.module.split('.')[0] in self.dangerous_imports:
-                        return {"status": "FAILURE", "reason": f"ImportError: the module '{node.module}' is blocked by sandbox safety policies."}
+                    if node.module and node.module.split(".")[0] in self.dangerous_imports:
+                        return {
+                            "status": "FAILURE",
+                            "reason": f"ImportError: the module '{node.module}' is blocked by sandbox safety policies.",
+                        }
 
-            return {"status": "SUCCESS", "reason": "AST check passed. Code appears structurally safe."}
+            return {
+                "status": "SUCCESS",
+                "reason": "AST check passed. Code appears structurally safe.",
+            }
 
         except SyntaxError as e:
             return {"status": "FAILURE", "reason": f"SyntaxError on line {e.lineno}: {e.msg}"}

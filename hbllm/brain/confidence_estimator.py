@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ConfidenceReport:
     """Detailed confidence analysis of a response."""
+
     overall: float  # 0.0 - 1.0
     relevance: float
     coherence: float
@@ -130,10 +131,28 @@ class ConfidenceEstimator:
 
     def _score_relevance(self, query: str, response: str) -> float:
         """Query-response relevance via lexical overlap."""
-        q_words = set(re.findall(r'\b\w+\b', query.lower()))
-        r_words = set(re.findall(r'\b\w+\b', response.lower()))
-        stopwords = {"the", "a", "an", "is", "are", "was", "were", "and", "or",
-                     "to", "in", "of", "for", "on", "with", "it", "this", "that"}
+        q_words = set(re.findall(r"\b\w+\b", query.lower()))
+        r_words = set(re.findall(r"\b\w+\b", response.lower()))
+        stopwords = {
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "and",
+            "or",
+            "to",
+            "in",
+            "of",
+            "for",
+            "on",
+            "with",
+            "it",
+            "this",
+            "that",
+        }
         q_words -= stopwords
         r_words -= stopwords
 
@@ -144,7 +163,7 @@ class ConfidenceEstimator:
 
     def _score_coherence(self, response: str) -> float:
         """Score response coherence based on structure."""
-        sentences = [s.strip() for s in re.split(r'[.!?]+', response) if s.strip()]
+        sentences = [s.strip() for s in re.split(r"[.!?]+", response) if s.strip()]
 
         if len(sentences) <= 1:
             return 0.6
@@ -158,12 +177,12 @@ class ConfidenceEstimator:
         if lengths:
             mean_len = sum(lengths) / len(lengths)
             variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
-            cv = (variance ** 0.5) / max(mean_len, 1)  # coefficient of variation
+            cv = (variance**0.5) / max(mean_len, 1)  # coefficient of variation
             length_consistency = max(0.0, 1.0 - cv * 0.5)
         else:
             length_consistency = 0.5
 
-        return (repetition_ratio * 0.6 + length_consistency * 0.4)
+        return repetition_ratio * 0.6 + length_consistency * 0.4
 
     def _score_factuality_risk(self, response: str) -> float:
         """Estimate risk of factual hallucination."""
@@ -180,7 +199,7 @@ class ConfidenceEstimator:
             risk += min(0.3, len(definitive) * 0.1)
 
         # Long numeric sequences (likely made up)
-        if re.search(r'\b\d{6,}\b', response):
+        if re.search(r"\b\d{6,}\b", response):
             risk += 0.2
 
         return min(1.0, risk)

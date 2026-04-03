@@ -10,6 +10,7 @@ from hbllm.network.messages import Message, MessageType
 
 # ── Robot State Tests ────────────────────────────────────────────────────────
 
+
 def test_robot_state_creation():
     r = RobotState(id="bot_1", name="TurtleBot", type="mobile")
     assert r.id == "bot_1"
@@ -35,6 +36,7 @@ def test_robot_commands_defined():
 
 # ── Node Lifecycle (no ROS2 needed) ──────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_ros2_node_starts_in_simulation():
     bus = InProcessBus()
@@ -53,6 +55,7 @@ async def test_ros2_node_starts_in_simulation():
 
 # ── Robot Registration ───────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_register_robot():
     bus = InProcessBus()
@@ -70,6 +73,7 @@ async def test_register_robot():
 
 
 # ── Command Execution (Simulation) ──────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_execute_move_command():
@@ -175,6 +179,7 @@ async def test_command_invalid_action():
 
 # ── Navigation ───────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_navigate_command():
     bus = InProcessBus()
@@ -205,6 +210,7 @@ async def test_navigate_command():
 
 
 # ── Query ────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_query_all_robots():
@@ -266,6 +272,7 @@ async def test_query_available_commands():
 
 # ── Behaviors ────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_register_and_execute_behavior():
     bus = InProcessBus()
@@ -278,10 +285,13 @@ async def test_register_and_execute_behavior():
     await node.start(bus)
     node.register_robot("bot_1", "Bot", "mobile")
 
-    node.register_behavior("patrol", [
-        {"command": "navigate", "params": {"x": 1.0, "y": 0.0}},
-        {"command": "navigate", "params": {"x": 0.0, "y": 1.0}},
-    ])
+    node.register_behavior(
+        "patrol",
+        [
+            {"command": "navigate", "params": {"x": 1.0, "y": 0.0}},
+            {"command": "navigate", "params": {"x": 0.0, "y": 1.0}},
+        ],
+    )
 
     msg = Message(
         type=MessageType.QUERY,
@@ -299,6 +309,7 @@ async def test_register_and_execute_behavior():
 
 
 # ── Command Log ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_command_log():

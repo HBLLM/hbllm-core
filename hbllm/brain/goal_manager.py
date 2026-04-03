@@ -35,15 +35,16 @@ class GoalStatus(StrEnum):
 
 class GoalPriority(StrEnum):
     CRITICAL = "critical"  # must do
-    HIGH = "high"          # should do soon
-    MEDIUM = "medium"      # do when idle
-    LOW = "low"            # nice to have
+    HIGH = "high"  # should do soon
+    MEDIUM = "medium"  # do when idle
+    LOW = "low"  # nice to have
     BACKGROUND = "background"  # continuous
 
 
 @dataclass
 class Goal:
     """A persistent internal goal."""
+
     goal_id: str
     name: str
     description: str
@@ -111,9 +112,13 @@ class GoalManager:
         """Create a new goal."""
         goal_id = f"goal_{int(time.time())}_{hash(name) % 10000}"
         goal = Goal(
-            goal_id=goal_id, name=name, description=description,
-            goal_type=goal_type, priority=priority,
-            success_criteria=success_criteria, deadline=deadline,
+            goal_id=goal_id,
+            name=name,
+            description=description,
+            goal_type=goal_type,
+            priority=priority,
+            success_criteria=success_criteria,
+            deadline=deadline,
         )
         self._save(goal)
         logger.info("Created goal: %s [%s] priority=%s", name, goal_type, priority.value)
@@ -122,19 +127,31 @@ class GoalManager:
     def _save(self, goal: Goal) -> None:
         now = time.time()
         with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO goals
                 (goal_id, name, description, goal_type, priority, status,
                  progress, success_criteria, sub_goals, actions_taken,
                  metadata, created_at, updated_at, deadline)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                goal.goal_id, goal.name, goal.description, goal.goal_type,
-                goal.priority.value, goal.status.value, goal.progress,
-                goal.success_criteria, json.dumps(goal.sub_goals),
-                json.dumps(goal.actions_taken), json.dumps(goal.metadata),
-                goal.created_at, now, goal.deadline,
-            ))
+            """,
+                (
+                    goal.goal_id,
+                    goal.name,
+                    goal.description,
+                    goal.goal_type,
+                    goal.priority.value,
+                    goal.status.value,
+                    goal.progress,
+                    goal.success_criteria,
+                    json.dumps(goal.sub_goals),
+                    json.dumps(goal.actions_taken),
+                    json.dumps(goal.metadata),
+                    goal.created_at,
+                    now,
+                    goal.deadline,
+                ),
+            )
 
     def update_progress(self, goal_id: str, progress: float, action: str = "") -> None:
         """Update goal progress and optionally record an action."""
@@ -180,8 +197,7 @@ class GoalManager:
         }
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(
-                "SELECT * FROM goals WHERE status IN ('pending', 'active') "
-                "ORDER BY updated_at ASC",
+                "SELECT * FROM goals WHERE status IN ('pending', 'active') ORDER BY updated_at ASC",
             ).fetchall()
 
         if not rows:
@@ -205,36 +221,48 @@ class GoalManager:
         goals = []
 
         if metrics.get("hallucination_rate", 0) > 0.1:
-            goals.append(self.create_goal(
-                name="Reduce hallucination rate",
-                description="Hallucination rate is above 10%. Improve factual accuracy.",
-                goal_type="optimization", priority=GoalPriority.HIGH,
-                success_criteria="hallucination_rate < 0.05",
-            ))
+            goals.append(
+                self.create_goal(
+                    name="Reduce hallucination rate",
+                    description="Hallucination rate is above 10%. Improve factual accuracy.",
+                    goal_type="optimization",
+                    priority=GoalPriority.HIGH,
+                    success_criteria="hallucination_rate < 0.05",
+                )
+            )
 
         if metrics.get("avg_latency_ms", 0) > 5000:
-            goals.append(self.create_goal(
-                name="Optimize response latency",
-                description="Average latency exceeds 5s. Optimize inference pipeline.",
-                goal_type="optimization", priority=GoalPriority.MEDIUM,
-                success_criteria="avg_latency_ms < 2000",
-            ))
+            goals.append(
+                self.create_goal(
+                    name="Optimize response latency",
+                    description="Average latency exceeds 5s. Optimize inference pipeline.",
+                    goal_type="optimization",
+                    priority=GoalPriority.MEDIUM,
+                    success_criteria="avg_latency_ms < 2000",
+                )
+            )
 
         if metrics.get("tool_success_rate", 1.0) < 0.8:
-            goals.append(self.create_goal(
-                name="Improve tool usage accuracy",
-                description="Tool success rate below 80%. Learn better tool selection.",
-                goal_type="learning", priority=GoalPriority.MEDIUM,
-                success_criteria="tool_success_rate > 0.9",
-            ))
+            goals.append(
+                self.create_goal(
+                    name="Improve tool usage accuracy",
+                    description="Tool success rate below 80%. Learn better tool selection.",
+                    goal_type="learning",
+                    priority=GoalPriority.MEDIUM,
+                    success_criteria="tool_success_rate > 0.9",
+                )
+            )
 
         if metrics.get("memory_utilization", 0) < 0.3:
-            goals.append(self.create_goal(
-                name="Improve memory utilization",
-                description="Memory is underutilized. Store more contextual knowledge.",
-                goal_type="exploration", priority=GoalPriority.LOW,
-                success_criteria="memory_utilization > 0.6",
-            ))
+            goals.append(
+                self.create_goal(
+                    name="Improve memory utilization",
+                    description="Memory is underutilized. Store more contextual knowledge.",
+                    goal_type="exploration",
+                    priority=GoalPriority.LOW,
+                    success_criteria="memory_utilization > 0.6",
+                )
+            )
 
         return goals
 
@@ -242,17 +270,28 @@ class GoalManager:
 
     def _row_to_goal(self, row: tuple) -> Goal:
         return Goal(
-            goal_id=row[0], name=row[1], description=row[2],
-            goal_type=row[3], priority=GoalPriority(row[4]),
-            status=GoalStatus(row[5]), progress=row[6],
-            success_criteria=row[7], sub_goals=json.loads(row[8]),
-            actions_taken=json.loads(row[9]), metadata=json.loads(row[10]),
-            created_at=row[11], deadline=row[13],
+            goal_id=row[0],
+            name=row[1],
+            description=row[2],
+            goal_type=row[3],
+            priority=GoalPriority(row[4]),
+            status=GoalStatus(row[5]),
+            progress=row[6],
+            success_criteria=row[7],
+            sub_goals=json.loads(row[8]),
+            actions_taken=json.loads(row[9]),
+            metadata=json.loads(row[10]),
+            created_at=row[11],
+            deadline=row[13],
         )
 
     def stats(self) -> dict[str, Any]:
         with sqlite3.connect(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0]
-            active = conn.execute("SELECT COUNT(*) FROM goals WHERE status IN ('pending','active')").fetchone()[0]
-            completed = conn.execute("SELECT COUNT(*) FROM goals WHERE status = 'completed'").fetchone()[0]
+            active = conn.execute(
+                "SELECT COUNT(*) FROM goals WHERE status IN ('pending','active')"
+            ).fetchone()[0]
+            completed = conn.execute(
+                "SELECT COUNT(*) FROM goals WHERE status = 'completed'"
+            ).fetchone()[0]
         return {"total_goals": total, "active": active, "completed": completed}

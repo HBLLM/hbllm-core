@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RewardSignal:
     """A single reward observation from user feedback."""
+
     query: str
     response: str
     reward: float  # -1.0 to 1.0
@@ -35,6 +36,7 @@ class RewardSignal:
 @dataclass
 class PreferencePair:
     """A preference pair for RLHF training."""
+
     query: str
     chosen: str
     rejected: str
@@ -89,9 +91,7 @@ class RewardModel:
                     created_at REAL NOT NULL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_rewards_time ON rewards(created_at)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_rewards_time ON rewards(created_at)")
 
     # ─── Feedback Collection ─────────────────────────────────────────
 
@@ -101,8 +101,14 @@ class RewardModel:
             conn.execute(
                 "INSERT INTO rewards (query, response, reward, source, metadata, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (signal.query, signal.response, signal.reward,
-                 signal.source, json.dumps(signal.metadata), signal.timestamp),
+                (
+                    signal.query,
+                    signal.response,
+                    signal.reward,
+                    signal.source,
+                    json.dumps(signal.metadata),
+                    signal.timestamp,
+                ),
             )
         logger.debug("Recorded reward=%.2f source=%s", signal.reward, signal.source)
 
@@ -112,14 +118,16 @@ class RewardModel:
             conn.execute(
                 "INSERT INTO preferences (query, chosen, rejected, margin, source, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (pair.query, pair.chosen, pair.rejected,
-                 pair.margin, pair.source, pair.timestamp),
+                (pair.query, pair.chosen, pair.rejected, pair.margin, pair.source, pair.timestamp),
             )
 
     # ─── Implicit Feedback Inference ─────────────────────────────────
 
     def infer_implicit_reward(
-        self, query: str, response: str, signals: dict[str, Any],
+        self,
+        query: str,
+        response: str,
+        signals: dict[str, Any],
     ) -> float:
         """
         Infer reward from implicit user behavior signals.
@@ -151,10 +159,15 @@ class RewardModel:
 
         reward = max(-1.0, min(1.0, reward))
 
-        self.record_reward(RewardSignal(
-            query=query, response=response, reward=reward,
-            source="implicit", metadata=signals,
-        ))
+        self.record_reward(
+            RewardSignal(
+                query=query,
+                response=response,
+                reward=reward,
+                source="implicit",
+                metadata=signals,
+            )
+        )
         return reward
 
     # ─── Reward Scoring ──────────────────────────────────────────────
@@ -214,10 +227,7 @@ class RewardModel:
                 "WHERE margin >= ? ORDER BY created_at DESC LIMIT ?",
                 (min_margin, limit),
             ).fetchall()
-        return [
-            {"query": r[0], "chosen": r[1], "rejected": r[2], "margin": r[3]}
-            for r in rows
-        ]
+        return [{"query": r[0], "chosen": r[1], "rejected": r[2], "margin": r[3]} for r in rows]
 
     def export_rewards(self, min_reward: float = 0.0, limit: int = 10000) -> list[dict]:
         """Export high-reward interactions for SFT training."""
@@ -227,10 +237,7 @@ class RewardModel:
                 "WHERE reward >= ? ORDER BY reward DESC LIMIT ?",
                 (min_reward, limit),
             ).fetchall()
-        return [
-            {"instruction": r[0], "response": r[1], "reward": r[2]}
-            for r in rows
-        ]
+        return [{"instruction": r[0], "response": r[1], "reward": r[2]} for r in rows]
 
     def stats(self) -> dict[str, Any]:
         """Return reward model statistics."""

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 # ─── Node Factory ─────────────────────────────────────────────────────────────
 # Maps node ID strings from cluster.yaml to actual Node instances.
 
+
 def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
     """
     Create a Node instance from its ID string.
@@ -48,6 +49,7 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
     if node_id.startswith("domain:"):
         domain_name = node_id.split(":", 1)[1]
         from hbllm.modules.base_module import DomainModuleNode
+
         return DomainModuleNode(
             node_id=f"domain_{domain_name}",
             domain=domain_name,
@@ -56,19 +58,19 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
     # Standard nodes
     node_map: dict[str, tuple[str, str]] = {
         # node_id → (module_path, class_name)
-        "router":       ("hbllm.brain.router_node", "RouterNode"),
-        "workspace":    ("hbllm.brain.workspace_node", "WorkspaceNode"),
-        "planner":      ("hbllm.brain.planner_node", "PlannerNode"),
-        "critic":       ("hbllm.brain.critic_node", "CriticNode"),
-        "decision":     ("hbllm.brain.decision_node", "DecisionNode"),
-        "meta":         ("hbllm.brain.meta_node", "MetaReasoningNode"),
-        "identity":     ("hbllm.brain.identity_node", "IdentityNode"),
-        "curiosity":    ("hbllm.brain.curiosity_node", "CuriosityNode"),
-        "collective":   ("hbllm.brain.collective_node", "CollectiveNode"),
-        "learner":      ("hbllm.brain.learner_node", "LearnerNode"),
-        "sleep_cycle":  ("hbllm.brain.sleep_node", "SleepCycleNode"),
-        "world_model":  ("hbllm.brain.world_model_node", "WorldModelNode"),
-        "memory":       ("hbllm.memory.memory_node", "MemoryNode"),
+        "router": ("hbllm.brain.router_node", "RouterNode"),
+        "workspace": ("hbllm.brain.workspace_node", "WorkspaceNode"),
+        "planner": ("hbllm.brain.planner_node", "PlannerNode"),
+        "critic": ("hbllm.brain.critic_node", "CriticNode"),
+        "decision": ("hbllm.brain.decision_node", "DecisionNode"),
+        "meta": ("hbllm.brain.meta_node", "MetaReasoningNode"),
+        "identity": ("hbllm.brain.identity_node", "IdentityNode"),
+        "curiosity": ("hbllm.brain.curiosity_node", "CuriosityNode"),
+        "collective": ("hbllm.brain.collective_node", "CollectiveNode"),
+        "learner": ("hbllm.brain.learner_node", "LearnerNode"),
+        "sleep_cycle": ("hbllm.brain.sleep_node", "SleepCycleNode"),
+        "world_model": ("hbllm.brain.world_model_node", "WorldModelNode"),
+        "memory": ("hbllm.memory.memory_node", "MemoryNode"),
     }
 
     if node_id not in node_map:
@@ -79,6 +81,7 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
 
     try:
         import importlib
+
         module = importlib.import_module(module_path)
         node_class = getattr(module, class_name)
         return node_class(node_id=node_id)
@@ -88,6 +91,7 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
 
 
 # ─── Server Bootstrap ─────────────────────────────────────────────────────────
+
 
 class ServerInstance:
     """
@@ -130,6 +134,7 @@ class ServerInstance:
             self.bus = InProcessBus()
         else:
             from hbllm.network.redis_bus import RedisBus
+
             self.bus = RedisBus(redis_url=self.config.cluster.redis_url)
 
         await self.bus.start()
@@ -141,6 +146,7 @@ class ServerInstance:
             )
         else:
             from hbllm.network.redis_registry import RedisRegistry
+
             self.registry = RedisRegistry(
                 redis_url=self.config.cluster.redis_url,
                 health_check_interval=self.config.node_defaults.heartbeat_interval,
@@ -163,9 +169,17 @@ class ServerInstance:
             if not node_ids:
                 # No config — boot core nodes for local dev
                 node_ids = [
-                    "router", "workspace", "planner", "critic",
-                    "decision", "meta", "memory", "identity",
-                    "curiosity", "collective", "learner",
+                    "router",
+                    "workspace",
+                    "planner",
+                    "critic",
+                    "decision",
+                    "meta",
+                    "memory",
+                    "identity",
+                    "curiosity",
+                    "collective",
+                    "learner",
                 ]
         else:
             server_config = self.config.get_server(self.server_name)
@@ -245,6 +259,7 @@ class ServerInstance:
 
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────
 
+
 async def _run_server(server_name: str, config_path: str | None) -> None:
     config = load_cluster_config(config_path)
     server = ServerInstance(server_name, config)
@@ -280,18 +295,18 @@ Examples:
   python -m hbllm.serving.launcher --list-nodes
         """,
     )
-    parser.add_argument("--server", "-s", default=None,
-                        help="Server role to boot, or 'all' for single-server")
-    parser.add_argument("--config", "-c", default=None,
-                        help="Path to cluster.yaml")
-    parser.add_argument("--log-level", default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--validate", action="store_true",
-                        help="Validate cluster config and exit")
-    parser.add_argument("--list-nodes", action="store_true",
-                        help="List available node types and exit")
-    parser.add_argument("--plugins", default=None,
-                        help="Path to plugins directory")
+    parser.add_argument(
+        "--server", "-s", default=None, help="Server role to boot, or 'all' for single-server"
+    )
+    parser.add_argument("--config", "-c", default=None, help="Path to cluster.yaml")
+    parser.add_argument(
+        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+    )
+    parser.add_argument("--validate", action="store_true", help="Validate cluster config and exit")
+    parser.add_argument(
+        "--list-nodes", action="store_true", help="List available node types and exit"
+    )
+    parser.add_argument("--plugins", default=None, help="Path to plugins directory")
 
     args = parser.parse_args()
 
@@ -317,19 +332,19 @@ Examples:
 def _handle_list_nodes() -> None:
     """Print all available node types."""
     node_map = {
-        "router":        "RouterNode — LLM intent classification + routing",
-        "workspace":     "WorkspaceNode — Global Workspace (blackboard)",
-        "planner":       "PlannerNode — Graph-of-Thoughts DAG planner",
-        "critic":        "CriticNode — Real-time thought evaluation",
-        "decision":      "DecisionNode — Action gatekeeper + output",
-        "meta":          "MetaReasoningNode — Strategy selection",
-        "identity":      "IdentityNode — Persona + goals per tenant",
-        "curiosity":     "CuriosityNode — Knowledge gap detection",
-        "collective":    "CollectiveNode — Cross-instance sharing",
-        "learner":       "LearnerNode — RLHF / DPO training loop",
-        "sleep_cycle":   "SleepCycleNode — Memory consolidation",
-        "world_model":   "WorldModelNode — Environment simulation",
-        "memory":        "MemoryNode — Episodic + semantic storage",
+        "router": "RouterNode — LLM intent classification + routing",
+        "workspace": "WorkspaceNode — Global Workspace (blackboard)",
+        "planner": "PlannerNode — Graph-of-Thoughts DAG planner",
+        "critic": "CriticNode — Real-time thought evaluation",
+        "decision": "DecisionNode — Action gatekeeper + output",
+        "meta": "MetaReasoningNode — Strategy selection",
+        "identity": "IdentityNode — Persona + goals per tenant",
+        "curiosity": "CuriosityNode — Knowledge gap detection",
+        "collective": "CollectiveNode — Cross-instance sharing",
+        "learner": "LearnerNode — RLHF / DPO training loop",
+        "sleep_cycle": "SleepCycleNode — Memory consolidation",
+        "world_model": "WorldModelNode — Environment simulation",
+        "memory": "MemoryNode — Episodic + semantic storage",
         "domain:<name>": "DomainModuleNode — Domain expert (e.g. domain:math)",
     }
     print("╔══ Available HBLLM Node Types ══")
@@ -380,4 +395,3 @@ def _handle_validate(config_path: str | None) -> None:
 
 if __name__ == "__main__":
     main()
-

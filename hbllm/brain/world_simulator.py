@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Scenario:
     """A simulated scenario with predicted outcomes."""
+
     scenario_id: str
     strategy: str
     steps: list[str]
@@ -38,6 +39,7 @@ class Scenario:
 @dataclass
 class SimulationResult:
     """Result of simulating multiple scenarios."""
+
     best_scenario: Scenario
     all_scenarios: list[Scenario]
     simulation_time_ms: float
@@ -80,9 +82,12 @@ class WorldSimulator:
         self._simulations_run += 1
 
         scenarios: list[Scenario] = []
-        for i, strategy in enumerate(strategies[:self.max_scenarios]):
+        for i, strategy in enumerate(strategies[: self.max_scenarios]):
             scenario = await self._simulate_strategy(
-                f"scenario_{i}", goal, strategy, predict_fn,
+                f"scenario_{i}",
+                goal,
+                strategy,
+                predict_fn,
             )
             scenarios.append(scenario)
 
@@ -92,10 +97,17 @@ class WorldSimulator:
             reverse=True,
         )
 
-        best = scenarios[0] if scenarios else Scenario(
-            scenario_id="fallback", strategy="direct",
-            steps=["Execute directly"], predicted_outcome="Unknown",
-            confidence=0.3, expected_reward=0.0,
+        best = (
+            scenarios[0]
+            if scenarios
+            else Scenario(
+                scenario_id="fallback",
+                strategy="direct",
+                steps=["Execute directly"],
+                predicted_outcome="Unknown",
+                confidence=0.3,
+                expected_reward=0.0,
+            )
         )
 
         # Consensus confidence = how much do top strategies agree?
@@ -149,7 +161,10 @@ class WorldSimulator:
         )
 
     def _heuristic_predict(
-        self, goal: str, steps: list[str], tools: list[str],
+        self,
+        goal: str,
+        steps: list[str],
+        tools: list[str],
     ) -> tuple[str, float, float, list[str]]:
         """Heuristic outcome prediction when no ML model is available."""
         risks: list[str] = []

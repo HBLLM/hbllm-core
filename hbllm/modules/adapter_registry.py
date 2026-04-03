@@ -40,6 +40,7 @@ PEFT_WEIGHTS_SAFE = "adapter_model.safetensors"
 
 # --- Security Utilities ---
 
+
 def compute_sha256(file_path: str | Path) -> str:
     """Compute the SHA-256 hash of a file."""
     sha256_hash = hashlib.sha256()
@@ -65,8 +66,10 @@ def safe_torch_load(path: str | Path) -> dict[str, Any]:
 
 # --- Configuration Models ---
 
+
 class AdapterSource(BaseModel):
     """Configuration for a remote adapter repository on HuggingFace."""
+
     domain: str
     repo_id: str
     filename: str | None = None
@@ -90,6 +93,7 @@ class AdapterSource(BaseModel):
 
 class AdapterRegistryConfig(BaseModel):
     """Global configuration for the AdapterRegistry."""
+
     enabled: bool = False
     cache_dir: str = "./checkpoints/adapters"
     auto_download: bool = True
@@ -99,6 +103,7 @@ class AdapterRegistryConfig(BaseModel):
 
 
 # --- Registry Class ---
+
 
 class AdapterRegistry:
     """
@@ -111,9 +116,7 @@ class AdapterRegistry:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # In-memory mapping of known sources
-        self._sources: dict[str, AdapterSource] = {
-            s.domain.lower(): s for s in config.sources
-        }
+        self._sources: dict[str, AdapterSource] = {s.domain.lower(): s for s in config.sources}
 
         # Locks ensure two nodes don't download the same adapter concurrently
         self._locks: dict[str, asyncio.Lock] = {}
@@ -179,13 +182,15 @@ class AdapterRegistry:
         result = []
         cached_domains = set(self.list_cached())
         for source in self._sources.values():
-            result.append({
-                "domain": source.domain,
-                "repo_id": source.repo_id,
-                "revision": source.revision or "main",
-                "cached": source.domain.lower() in cached_domains,
-                "has_sha256": bool(source.sha256),
-            })
+            result.append(
+                {
+                    "domain": source.domain,
+                    "repo_id": source.repo_id,
+                    "revision": source.revision or "main",
+                    "cached": source.domain.lower() in cached_domains,
+                    "has_sha256": bool(source.sha256),
+                }
+            )
         return result
 
     def evict(self, domain: str) -> bool:
@@ -269,8 +274,11 @@ class AdapterRegistry:
                 is_peft = await self._is_hf_repo_peft(source.repo_id, revision=source.revision)
                 if is_peft:
                     source.peft_format = True
-                    logger.info("Detected PEFT format for '%s' (revision: %s)",
-                                source.repo_id, source.revision or "main")
+                    logger.info(
+                        "Detected PEFT format for '%s' (revision: %s)",
+                        source.repo_id,
+                        source.revision or "main",
+                    )
 
             if source.peft_format:
                 # PEFT format requires multiple files (config + weights)
@@ -278,9 +286,7 @@ class AdapterRegistry:
 
             # HBLLM Native Format (Single PT file)
             download_path = await self._hf_download(
-                source.repo_id,
-                source.effective_filename,
-                revision=source.revision
+                source.repo_id, source.effective_filename, revision=source.revision
             )
 
             if not download_path:
@@ -289,15 +295,19 @@ class AdapterRegistry:
             # Security: Size check
             size_mb = os.path.getsize(download_path) / (1024 * 1024)
             if size_mb > self.config.max_adapter_size_mb:
-                logger.error("Adapter for '%s' too large (%.2f MB > %d MB limit). Rejected.",
-                            domain, size_mb, self.config.max_adapter_size_mb)
+                logger.error(
+                    "Adapter for '%s' too large (%.2f MB > %d MB limit). Rejected.",
+                    domain,
+                    size_mb,
+                    self.config.max_adapter_size_mb,
+                )
                 return None
 
             # Security: SHA-256 Check
             if self.config.require_sha256:
                 if not source.sha256:
-                   logger.error("SHA-256 missing in config for '%s'. Security block.", domain)
-                   return None
+                    logger.error("SHA-256 missing in config for '%s'. Security block.", domain)
+                    return None
 
                 if not verify_sha256(download_path, source.sha256):
                     logger.error("SHA-256 Mismatch for '%s'! File may be compromised.", domain)
@@ -322,6 +332,7 @@ class AdapterRegistry:
     async def _is_hf_repo_peft(self, repo_id: str, revision: str | None = None) -> bool:
         """Check if an HF repo contains a PEFT config file."""
         from huggingface_hub import HfApi
+
         try:
             api = HfApi()
             files = api.list_repo_files(repo_id, revision=revision)
@@ -329,7 +340,9 @@ class AdapterRegistry:
         except Exception:
             return False
 
-    async def _handle_peft_download(self, source: AdapterSource, target_path: Path) -> dict[str, torch.Tensor] | None:
+    async def _handle_peft_download(
+        self, source: AdapterSource, target_path: Path
+    ) -> dict[str, torch.Tensor] | None:
         """Handles downloading and converting a PEFT model from HF."""
         from huggingface_hub import snapshot_download
 
@@ -344,7 +357,7 @@ class AdapterRegistry:
                 repo_id=source.repo_id,
                 revision=source.revision,
                 local_dir=str(temp_dir),
-                allow_patterns=[PEFT_CONFIG_FILE, PEFT_WEIGHTS_BIN, PEFT_WEIGHTS_SAFE]
+                allow_patterns=[PEFT_CONFIG_FILE, PEFT_WEIGHTS_BIN, PEFT_WEIGHTS_SAFE],
             )
 
             # Load and convert
@@ -359,7 +372,7 @@ class AdapterRegistry:
 
         finally:
             if temp_dir.exists():
-                 shutil.rmtree(temp_dir)
+                shutil.rmtree(temp_dir)
 
     @staticmethod
     def _load_peft_from_dir(adapter_dir: Path) -> dict[str, torch.Tensor] | None:
@@ -372,7 +385,9 @@ class AdapterRegistry:
             peft_config = json.load(f)
 
         if peft_config.get("peft_type") != "LORA":
-            logger.warning("Only LORA PEFT adapters are supported. Found: %s", peft_config.get("peft_type"))
+            logger.warning(
+                "Only LORA PEFT adapters are supported. Found: %s", peft_config.get("peft_type")
+            )
             return None
 
         # Check weights file (safetensors preferred)
@@ -385,6 +400,7 @@ class AdapterRegistry:
 
         if weights_path.suffix == ".safetensors":
             from safetensors.torch import load_file
+
             peft_state = load_file(str(weights_path), device="cpu")
         else:
             peft_state = safe_torch_load(weights_path)
@@ -392,7 +408,9 @@ class AdapterRegistry:
         return AdapterRegistry._convert_peft_state_dict(peft_state, peft_config)
 
     @staticmethod
-    def _convert_peft_state_dict(peft_state: dict[str, Any], peft_config: dict[str, Any]) -> dict[str, torch.Tensor]:
+    def _convert_peft_state_dict(
+        peft_state: dict[str, Any], peft_config: dict[str, Any]
+    ) -> dict[str, torch.Tensor]:
         """Convert PEFT-style keys to HBLLM-style keys."""
         converted = {}
         # PEFT keys usually start with 'base_model.model.model.'
@@ -407,18 +425,18 @@ class AdapterRegistry:
 
     # --- External Interaction ---
 
-    async def _hf_download(self, repo_id: str, filename: str, revision: str | None = None) -> str | None:
+    async def _hf_download(
+        self, repo_id: str, filename: str, revision: str | None = None
+    ) -> str | None:
         """Wraps hf_hub_download to work with asyncio."""
         from huggingface_hub import hf_hub_download
+
         try:
-           # Token usually read from HF_TOKEN env var automatically
-           path = await asyncio.to_thread(
-               hf_hub_download,
-               repo_id=repo_id,
-               filename=filename,
-               revision=revision
-           )
-           return path
+            # Token usually read from HF_TOKEN env var automatically
+            path = await asyncio.to_thread(
+                hf_hub_download, repo_id=repo_id, filename=filename, revision=revision
+            )
+            return path
         except Exception as e:
             logger.error("HuggingFace download error for %s/%s: %s", repo_id, filename, e)
             return None
@@ -429,7 +447,7 @@ class AdapterRegistry:
         path: Path,
         domain: str = "general",
         rank: int = 8,
-        source_repo: str = "local"
+        source_repo: str = "local",
     ) -> str:
         """
         Helper to save an adapter with full provenance metadata and compute its hash.
@@ -442,7 +460,7 @@ class AdapterRegistry:
                 "rank": rank,
                 "source_repo": source_repo,
                 "format_version": 1,
-            }
+            },
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(payload, path)

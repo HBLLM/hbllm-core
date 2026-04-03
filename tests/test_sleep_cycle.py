@@ -26,6 +26,7 @@ class MockMemoryNode:
         self.store_calls.append(msg)
         return None
 
+
 @pytest.fixture
 async def simulated_sleep_env():
     bus = InProcessBus()
@@ -42,6 +43,7 @@ async def simulated_sleep_env():
 
     await sleep_node.stop()
     await bus.stop()
+
 
 @pytest.mark.asyncio
 async def test_sleep_cycle_triggers_on_idle(simulated_sleep_env):
@@ -63,6 +65,7 @@ async def test_sleep_cycle_triggers_on_idle(simulated_sleep_env):
     assert payload["role"] == "system"
     assert "CONSOLIDATED MEMORY" in payload["content"]
 
+
 @pytest.mark.asyncio
 async def test_sleep_cycle_interrupted_by_user(simulated_sleep_env):
     bus, sleep_node, memory = simulated_sleep_env
@@ -75,7 +78,7 @@ async def test_sleep_cycle_interrupted_by_user(simulated_sleep_env):
         type=MessageType.QUERY,
         source_node_id="user",
         topic="router.query",
-        payload={"text": "Hello"}
+        payload={"text": "Hello"},
     )
     await bus.publish("router.query", msg)
 

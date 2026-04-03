@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Skill:
     """A learned, reusable skill."""
+
     skill_id: str
     name: str
     description: str
@@ -77,9 +78,7 @@ class SkillRegistry:
                     updated_at REAL NOT NULL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_skills_cat ON skills(category)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_cat ON skills(category)")
 
     # ─── Skill Extraction ────────────────────────────────────────────
 
@@ -135,19 +134,30 @@ class SkillRegistry:
     def _store(self, skill: Skill) -> None:
         now = time.time()
         with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO skills
                 (skill_id, name, description, category, steps, tools_used,
                  success_criteria, examples, success_rate, invocations,
                  avg_latency_ms, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                skill.skill_id, skill.name, skill.description, skill.category,
-                json.dumps(skill.steps), json.dumps(skill.tools_used),
-                skill.success_criteria, json.dumps(skill.examples),
-                skill.success_rate, skill.invocations, skill.avg_latency_ms,
-                skill.created_at, now,
-            ))
+            """,
+                (
+                    skill.skill_id,
+                    skill.name,
+                    skill.description,
+                    skill.category,
+                    json.dumps(skill.steps),
+                    json.dumps(skill.tools_used),
+                    skill.success_criteria,
+                    json.dumps(skill.examples),
+                    skill.success_rate,
+                    skill.invocations,
+                    skill.avg_latency_ms,
+                    skill.created_at,
+                    now,
+                ),
+            )
 
     # ─── Skill Lookup ────────────────────────────────────────────────
 
@@ -218,11 +228,18 @@ class SkillRegistry:
 
     def _row_to_skill(self, row: tuple) -> Skill:
         return Skill(
-            skill_id=row[0], name=row[1], description=row[2],
-            category=row[3], steps=json.loads(row[4]),
-            tools_used=json.loads(row[5]), success_criteria=row[6],
-            examples=json.loads(row[7]), success_rate=row[8],
-            invocations=row[9], avg_latency_ms=row[10], created_at=row[11],
+            skill_id=row[0],
+            name=row[1],
+            description=row[2],
+            category=row[3],
+            steps=json.loads(row[4]),
+            tools_used=json.loads(row[5]),
+            success_criteria=row[6],
+            examples=json.loads(row[7]),
+            success_rate=row[8],
+            invocations=row[9],
+            avg_latency_ms=row[10],
+            created_at=row[11],
         )
 
     def list_skills(self, category: str | None = None, limit: int = 50) -> list[Skill]:
@@ -234,7 +251,8 @@ class SkillRegistry:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM skills ORDER BY invocations DESC LIMIT ?", (limit,),
+                    "SELECT * FROM skills ORDER BY invocations DESC LIMIT ?",
+                    (limit,),
                 ).fetchall()
         return [self._row_to_skill(r) for r in rows]
 
@@ -243,4 +261,8 @@ class SkillRegistry:
             total = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
             cats = conn.execute("SELECT COUNT(DISTINCT category) FROM skills").fetchone()[0]
             avg_sr = conn.execute("SELECT AVG(success_rate) FROM skills").fetchone()[0]
-        return {"total_skills": total, "categories": cats, "avg_success_rate": round(avg_sr or 0, 3)}
+        return {
+            "total_skills": total,
+            "categories": cats,
+            "avg_success_rate": round(avg_sr or 0, 3),
+        }

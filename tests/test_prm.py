@@ -2,7 +2,6 @@
 Process Reward Model Tests.
 """
 
-
 import pytest
 import torch
 

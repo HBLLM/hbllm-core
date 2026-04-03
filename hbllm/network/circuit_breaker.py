@@ -38,10 +38,7 @@ class CircuitOpenError(Exception):
     def __init__(self, node_id: str, time_until_retry: float):
         self.node_id = node_id
         self.time_until_retry = time_until_retry
-        super().__init__(
-            f"Circuit open for node '{node_id}'. "
-            f"Retry in {time_until_retry:.1f}s"
-        )
+        super().__init__(f"Circuit open for node '{node_id}'. Retry in {time_until_retry:.1f}s")
 
 
 class CircuitBreaker:

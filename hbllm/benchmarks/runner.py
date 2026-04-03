@@ -31,9 +31,11 @@ logger = logging.getLogger(__name__)
 
 # ── Result Types ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class BenchmarkResult:
     """Single benchmark result."""
+
     name: str
     metric: str
     value: float
@@ -42,8 +44,10 @@ class BenchmarkResult:
 
     def to_dict(self) -> dict:
         return {
-            "name": self.name, "metric": self.metric,
-            "value": round(self.value, 4), "unit": self.unit,
+            "name": self.name,
+            "metric": self.metric,
+            "value": round(self.value, 4),
+            "unit": self.unit,
             "metadata": self.metadata,
         }
 
@@ -51,6 +55,7 @@ class BenchmarkResult:
 @dataclass
 class BenchmarkReport:
     """Aggregated benchmark report."""
+
     suite: str
     timestamp: float = field(default_factory=time.time)
     results: list[BenchmarkResult] = field(default_factory=list)
@@ -94,6 +99,7 @@ class BenchmarkReport:
 
 # ── Benchmark Suites ─────────────────────────────────────────────────────────
 
+
 class LatencyBenchmark:
     """Measure per-node latency across the cognitive pipeline."""
 
@@ -129,18 +135,22 @@ class LatencyBenchmark:
             await bus.publish("bench.echo", msg)
             await asyncio.wait_for(received.wait(), timeout=1.0)
 
-        report.add(BenchmarkResult(
-            name="MessageBus pub/sub latency (p50)",
-            metric="latency_p50",
-            value=statistics.median(latencies) * 1000,
-            unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name="MessageBus pub/sub latency (p99)",
-            metric="latency_p99",
-            value=sorted(latencies)[int(0.99 * len(latencies))] * 1000,
-            unit="ms",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="MessageBus pub/sub latency (p50)",
+                metric="latency_p50",
+                value=statistics.median(latencies) * 1000,
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="MessageBus pub/sub latency (p99)",
+                metric="latency_p99",
+                value=sorted(latencies)[int(0.99 * len(latencies))] * 1000,
+                unit="ms",
+            )
+        )
 
         # 2. Node start/stop overhead
         from hbllm.brain.decision_node import DecisionNode
@@ -153,12 +163,14 @@ class LatencyBenchmark:
             start_times.append(time.perf_counter() - t0)
             await node.stop()
 
-        report.add(BenchmarkResult(
-            name="Node start overhead (avg)",
-            metric="node_start_avg",
-            value=statistics.mean(start_times) * 1000,
-            unit="ms",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Node start overhead (avg)",
+                metric="node_start_avg",
+                value=statistics.mean(start_times) * 1000,
+                unit="ms",
+            )
+        )
 
         # 3. Throughput — messages/sec
         count = 0
@@ -182,21 +194,31 @@ class LatencyBenchmark:
         await asyncio.sleep(0.1)  # let callbacks complete
         elapsed = time.perf_counter() - t0
 
-        report.add(BenchmarkResult(
-            name="Bus throughput",
-            metric="throughput",
-            value=count / elapsed,
-            unit="msg/s",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Bus throughput",
+                metric="throughput",
+                value=count / elapsed,
+                unit="msg/s",
+            )
+        )
 
         await bus.stop()
 
         # Comparisons
         report.comparisons = [
-            {"name": "Bus latency (p50)", "hbllm": f"{report.results[0].value:.2f}ms",
-             "baseline": "~5ms (HTTP)", "delta": "faster"},
-            {"name": "Throughput", "hbllm": f"{report.results[3].value:.0f}/s",
-             "baseline": "~200/s (REST)", "delta": "faster"},
+            {
+                "name": "Bus latency (p50)",
+                "hbllm": f"{report.results[0].value:.2f}ms",
+                "baseline": "~5ms (HTTP)",
+                "delta": "faster",
+            },
+            {
+                "name": "Throughput",
+                "hbllm": f"{report.results[3].value:.0f}/s",
+                "baseline": "~200/s (REST)",
+                "delta": "faster",
+            },
         ]
 
         return report
@@ -212,35 +234,44 @@ class MemoryBenchmark:
 
         # 1. Measure LoRA adapter size vs full model
         # A 125M model ~= 500MB, a LoRA adapter ~= 2-8MB
-        report.add(BenchmarkResult(
-            name="Base model (125M params)",
-            metric="model_size",
-            value=500,
-            unit="MB",
-            metadata={"params": "125M"},
-        ))
-        report.add(BenchmarkResult(
-            name="LoRA adapter (rank=8)",
-            metric="adapter_size",
-            value=4,
-            unit="MB",
-            metadata={"rank": 8, "alpha": 16},
-        ))
-        report.add(BenchmarkResult(
-            name="10 domain specialists (zoning)",
-            metric="zoning_total",
-            value=500 + (10 * 4),  # 1 base + 10 adapters
-            unit="MB",
-        ))
-        report.add(BenchmarkResult(
-            name="10 domain specialists (monolithic)",
-            metric="monolithic_total",
-            value=500 * 10,  # 10 full copies
-            unit="MB",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Base model (125M params)",
+                metric="model_size",
+                value=500,
+                unit="MB",
+                metadata={"params": "125M"},
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="LoRA adapter (rank=8)",
+                metric="adapter_size",
+                value=4,
+                unit="MB",
+                metadata={"rank": 8, "alpha": 16},
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="10 domain specialists (zoning)",
+                metric="zoning_total",
+                value=500 + (10 * 4),  # 1 base + 10 adapters
+                unit="MB",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="10 domain specialists (monolithic)",
+                metric="monolithic_total",
+                value=500 * 10,  # 10 full copies
+                unit="MB",
+            )
+        )
 
         # 2. Measure bus object sizes
         from hbllm.network.messages import Message, MessageType
+
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="bench",
@@ -248,29 +279,49 @@ class MemoryBenchmark:
             payload={"text": "Hello " * 100},
         )
         msg_size = sys.getsizeof(json.dumps(msg.model_dump(), default=str))
-        report.add(BenchmarkResult(
-            name="Message object (serialized)",
-            metric="msg_size",
-            value=msg_size,
-            unit="bytes",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Message object (serialized)",
+                metric="msg_size",
+                value=msg_size,
+                unit="bytes",
+            )
+        )
 
         # 3. Device registry memory (IoT)
         from hbllm.actions.iot_mqtt_node import DeviceState
+
         devices = [DeviceState(id=f"dev_{i}", name=f"Device {i}") for i in range(100)]
         total = sum(sys.getsizeof(d) for d in devices)
-        report.add(BenchmarkResult(
-            name="100 IoT devices in registry",
-            metric="iot_registry",
-            value=total / 1024,
-            unit="KB",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="100 IoT devices in registry",
+                metric="iot_registry",
+                value=total / 1024,
+                unit="KB",
+            )
+        )
 
         # Comparisons
         report.comparisons = [
-            {"name": "10 specialists", "hbllm": "540 MB", "baseline": "5,000 MB", "delta": "9.3× smaller"},
-            {"name": "50 specialists", "hbllm": "700 MB", "baseline": "25,000 MB", "delta": "35× smaller"},
-            {"name": "Memory/domain", "hbllm": "4 MB/LoRA", "baseline": "500 MB/model", "delta": "125× smaller"},
+            {
+                "name": "10 specialists",
+                "hbllm": "540 MB",
+                "baseline": "5,000 MB",
+                "delta": "9.3× smaller",
+            },
+            {
+                "name": "50 specialists",
+                "hbllm": "700 MB",
+                "baseline": "25,000 MB",
+                "delta": "35× smaller",
+            },
+            {
+                "name": "Memory/domain",
+                "hbllm": "4 MB/LoRA",
+                "baseline": "500 MB/model",
+                "delta": "125× smaller",
+            },
         ]
 
         return report
@@ -317,35 +368,53 @@ class SpecializationBenchmark:
 
         accuracy = correct / len(test_cases) * 100
 
-        report.add(BenchmarkResult(
-            name="Domain routing accuracy",
-            metric="routing_accuracy",
-            value=accuracy,
-            unit="%",
-            metadata={"total_queries": len(test_cases), "correct": correct},
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Domain routing accuracy",
+                metric="routing_accuracy",
+                value=accuracy,
+                unit="%",
+                metadata={"total_queries": len(test_cases), "correct": correct},
+            )
+        )
 
-        report.add(BenchmarkResult(
-            name="Supported domains",
-            metric="domain_count",
-            value=len(routing_keywords),
-            unit="domains",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Supported domains",
+                metric="domain_count",
+                value=len(routing_keywords),
+                unit="domains",
+            )
+        )
 
-        report.add(BenchmarkResult(
-            name="Self-expandable",
-            metric="expandable",
-            value=1,
-            unit="bool (SpawnerNode)",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Self-expandable",
+                metric="expandable",
+                value=1,
+                unit="bool (SpawnerNode)",
+            )
+        )
 
         report.comparisons = [
-            {"name": "Domain routing", "hbllm": f"{accuracy:.0f}% keyword",
-             "baseline": "N/A (single model)", "delta": "specialized"},
-            {"name": "New domain cost", "hbllm": "4 MB (LoRA)",
-             "baseline": "Full retrain", "delta": "instant"},
-            {"name": "Domain isolation", "hbllm": "Per-zone LoRA",
-             "baseline": "Shared weights", "delta": "no interference"},
+            {
+                "name": "Domain routing",
+                "hbllm": f"{accuracy:.0f}% keyword",
+                "baseline": "N/A (single model)",
+                "delta": "specialized",
+            },
+            {
+                "name": "New domain cost",
+                "hbllm": "4 MB (LoRA)",
+                "baseline": "Full retrain",
+                "delta": "instant",
+            },
+            {
+                "name": "Domain isolation",
+                "hbllm": "Per-zone LoRA",
+                "baseline": "Shared weights",
+                "delta": "no interference",
+            },
         ]
 
         return report
@@ -391,24 +460,30 @@ class MultiTenantBenchmark:
 
         total = sum(len(v) for v in tenant_messages.values())
 
-        report.add(BenchmarkResult(
-            name="Concurrent tenants",
-            metric="tenant_count",
-            value=10,
-            unit="tenants",
-        ))
-        report.add(BenchmarkResult(
-            name="Total messages routed",
-            metric="total_messages",
-            value=total,
-            unit="messages",
-        ))
-        report.add(BenchmarkResult(
-            name="Multi-tenant throughput",
-            metric="mt_throughput",
-            value=total / elapsed if elapsed > 0 else 0,
-            unit="msg/s",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Concurrent tenants",
+                metric="tenant_count",
+                value=10,
+                unit="tenants",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="Total messages routed",
+                metric="total_messages",
+                value=total,
+                unit="messages",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="Multi-tenant throughput",
+                metric="mt_throughput",
+                value=total / elapsed if elapsed > 0 else 0,
+                unit="msg/s",
+            )
+        )
 
         # Check isolation — verify messages arrived at correct tenant buckets
         all_correct = all(
@@ -416,20 +491,30 @@ class MultiTenantBenchmark:
             for tid, msgs in tenant_messages.items()
             if msgs  # only check tenants that received messages
         )
-        report.add(BenchmarkResult(
-            name="Tenant isolation verified",
-            metric="isolation",
-            value=1 if all_correct else 0,
-            unit="bool",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Tenant isolation verified",
+                metric="isolation",
+                value=1 if all_correct else 0,
+                unit="bool",
+            )
+        )
 
         await bus.stop()
 
         report.comparisons = [
-            {"name": "Tenant isolation", "hbllm": "Bus-level",
-             "baseline": "App-level", "delta": "stronger"},
-            {"name": "10-tenant throughput", "hbllm": f"{total / elapsed:.0f}/s",
-             "baseline": "~100/s (HTTP)", "delta": "faster"},
+            {
+                "name": "Tenant isolation",
+                "hbllm": "Bus-level",
+                "baseline": "App-level",
+                "delta": "stronger",
+            },
+            {
+                "name": "10-tenant throughput",
+                "hbllm": f"{total / elapsed:.0f}/s",
+                "baseline": "~100/s (HTTP)",
+                "delta": "faster",
+            },
         ]
 
         return report

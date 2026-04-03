@@ -55,7 +55,7 @@ class ModelConfig:
     use_shared_expert: bool = True
 
     # Hardware & Quantization (Phase 4)
-    quantization_level: int = 16 # 16, 8, 4
+    quantization_level: int = 16  # 16, 8, 4
     offload_experts: bool = False
     force_cpu: bool = False
 

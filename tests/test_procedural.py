@@ -1,6 +1,5 @@
 """Tests for Procedural Memory — skill storage and retrieval."""
 
-
 import pytest
 
 from hbllm.memory.procedural import ProceduralMemory

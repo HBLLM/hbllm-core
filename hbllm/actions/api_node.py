@@ -23,7 +23,11 @@ class ApiNode(Node):
     """
 
     def __init__(self, node_id: str, llm=None):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["openapi", "json_schema", "tool_synthesis"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["openapi", "json_schema", "tool_synthesis"],
+        )
         self.llm = llm  # LLMInterface instance
 
     async def on_start(self) -> None:
@@ -50,8 +54,8 @@ class ApiNode(Node):
         classification = await self.llm.generate_json(
             f"Determine if the following query is asking to generate an API schema, "
             f"JSON payload, OpenAPI specification, REST endpoint structure, or tool definition. "
-            f"Query: \"{text}\"\n"
-            f"Output JSON: {{\"is_api_request\": true/false, \"request_type\": \"schema|payload|openapi|tool\"}}"
+            f'Query: "{text}"\n'
+            f'Output JSON: {{"is_api_request": true/false, "request_type": "schema|payload|openapi|tool"}}'
         )
 
         if not classification.get("is_api_request", False):
@@ -74,12 +78,8 @@ class ApiNode(Node):
                 tenant_id=message.tenant_id,
                 session_id=message.session_id,
                 topic="workspace.thought",
-                payload={
-                    "type": "api_synthesis",
-                    "confidence": 0.90,
-                    "content": schema_content
-                },
-                correlation_id=message.correlation_id
+                payload={"type": "api_synthesis", "confidence": 0.90, "content": schema_content},
+                correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
 
@@ -97,25 +97,25 @@ class ApiNode(Node):
                 f"Generate a valid OpenAPI 3.0 Tool/Function JSON schema based on the "
                 f"following description. Include parameter names, types, descriptions, "
                 f"and required fields.\n\n"
-                f"Description: \"{query}\"\n\n"
+                f'Description: "{query}"\n\n'
                 f"Output ONLY valid JSON:"
             ),
             "payload": (
                 f"Generate a complete example JSON request payload based on the following "
                 f"API description. Include realistic example values.\n\n"
-                f"Description: \"{query}\"\n\n"
+                f'Description: "{query}"\n\n'
                 f"Output ONLY valid JSON:"
             ),
             "openapi": (
                 f"Generate a minimal OpenAPI 3.0 specification (as JSON) for the following "
                 f"API endpoint description. Include paths, methods, request/response schemas.\n\n"
-                f"Description: \"{query}\"\n\n"
+                f'Description: "{query}"\n\n'
                 f"Output ONLY valid JSON:"
             ),
             "tool": (
                 f"Generate an LLM Tool/Function calling schema (compatible with OpenAI function "
                 f"calling format) for the following description.\n\n"
-                f"Description: \"{query}\"\n\n"
+                f'Description: "{query}"\n\n'
                 f"Output ONLY valid JSON:"
             ),
         }

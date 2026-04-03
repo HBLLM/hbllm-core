@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PipelineResult:
     """Result of a cognitive pipeline execution."""
+
     text: str
     correlation_id: str
     source_node: str = "decision"
@@ -55,6 +56,7 @@ class PipelineResult:
 @dataclass
 class PipelineConfig:
     """Configuration for the cognitive pipeline."""
+
     router_timeout: float = 15.0
     workspace_timeout: float = 30.0
     decision_timeout: float = 30.0
@@ -138,9 +140,7 @@ class CognitivePipeline:
 
         try:
             # ── Stage 1: Pre-processing (memory + identity injection) ──
-            context = await self._pre_process(
-                text, tenant_id, session_id, correlation_id
-            )
+            context = await self._pre_process(text, tenant_id, session_id, correlation_id)
             stages.append("pre_process")
 
             # ── Stage 2: Route through cognitive pipeline ──
@@ -157,9 +157,7 @@ class CognitivePipeline:
             stages.append("decision")
 
             # ── Stage 3: Post-processing (memory storage) ──
-            await self._post_process(
-                text, response, tenant_id, session_id, correlation_id
-            )
+            await self._post_process(text, response, tenant_id, session_id, correlation_id)
             stages.append("post_process")
 
             latency_ms = (time.monotonic() - start_time) * 1000
@@ -180,7 +178,8 @@ class CognitivePipeline:
             latency_ms = (time.monotonic() - start_time) * 1000
             logger.warning(
                 "Pipeline timed out after %.0fms for '%s...'",
-                latency_ms, text[:30],
+                latency_ms,
+                text[:30],
             )
             return PipelineResult(
                 text="I'm taking longer than expected to think about this. Please try again.",
@@ -317,9 +316,7 @@ class CognitivePipeline:
 
         # Wait for decision output with total timeout
         try:
-            response = await asyncio.wait_for(
-                future, timeout=self.config.total_timeout
-            )
+            response = await asyncio.wait_for(future, timeout=self.config.total_timeout)
             return response.payload
         finally:
             self._response_futures.pop(correlation_id, None)
@@ -422,11 +419,11 @@ class CognitivePipeline:
                     )
                     caption = resp.payload.get("caption", "")
                     if caption:
-                        context_parts.append(f"[Image {i+1}]: {caption}")
+                        context_parts.append(f"[Image {i + 1}]: {caption}")
                 except TimeoutError:
-                    context_parts.append(f"[Image {i+1}]: (could not process)")
+                    context_parts.append(f"[Image {i + 1}]: (could not process)")
                 except Exception:
-                    context_parts.append(f"[Image {i+1}]: (processing error)")
+                    context_parts.append(f"[Image {i + 1}]: (processing error)")
 
         # Process audio → transcript
         if audio:
@@ -462,4 +459,3 @@ class CognitivePipeline:
             session_id=session_id,
             model_size=model_size,
         )
-

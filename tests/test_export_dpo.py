@@ -25,15 +25,29 @@ def tmp_workspace(tmp_path):
     queue_data = [
         ["How do I reset my password?", "Go to Settings > Security > Reset.", "I don't know."],
         ["What is Python?", "Python is a programming language.", "Python is a snake."],
-        {"prompt": "Explain DPO", "chosen": "DPO optimizes preferences directly.", "rejected": "DPO is a protocol."},
+        {
+            "prompt": "Explain DPO",
+            "chosen": "DPO optimizes preferences directly.",
+            "rejected": "DPO is a protocol.",
+        },
     ]
     with open(reflection_dir / "dpo_queue.json", "w") as f:
         json.dump(queue_data, f)
 
     # Reflection logs (MetaReasoningNode format)
     reflection_data = [
-        {"instruction": "How do I fix auth?", "response": "Unknown error.", "rejected": True, "domain": "auth_domain"},
-        {"instruction": "Configure TLS?", "response": "Not sure.", "rejected": True, "domain": "security"},
+        {
+            "instruction": "How do I fix auth?",
+            "response": "Unknown error.",
+            "rejected": True,
+            "domain": "auth_domain",
+        },
+        {
+            "instruction": "Configure TLS?",
+            "response": "Not sure.",
+            "rejected": True,
+            "domain": "security",
+        },
     ]
     with open(reflection_dir / "reflection_auth_domain_abc123.jsonl", "w") as f:
         for item in reflection_data:
@@ -178,7 +192,13 @@ class TestBuildStats:
         pairs = [
             {"prompt": "q1", "chosen": "c1", "rejected": "r1", "source": "queue"},
             {"prompt": "q2", "chosen": "c2", "rejected": "r2", "source": "queue"},
-            {"prompt": "q3", "chosen": "", "rejected": "r3", "source": "reflection", "domain": "auth"},
+            {
+                "prompt": "q3",
+                "chosen": "",
+                "rejected": "r3",
+                "source": "reflection",
+                "domain": "auth",
+            },
         ]
         stats = build_stats(pairs)
         assert stats["total_pairs"] == 3
@@ -192,11 +212,17 @@ class TestBuildStats:
 class TestCLI:
     def test_main_exports_successfully(self, tmp_workspace, tmp_path):
         output = str(tmp_path / "cli_output.jsonl")
-        exit_code = main([
-            "--output", output,
-            "--workspace", str(tmp_workspace / "workspace"),
-            "--source", "queue", "reflection",
-        ])
+        exit_code = main(
+            [
+                "--output",
+                output,
+                "--workspace",
+                str(tmp_workspace / "workspace"),
+                "--source",
+                "queue",
+                "reflection",
+            ]
+        )
         assert exit_code == 0
         assert Path(output).exists()
         with open(output) as f:
@@ -205,20 +231,29 @@ class TestCLI:
 
     def test_main_empty_workspace(self, tmp_path):
         output = str(tmp_path / "empty.jsonl")
-        exit_code = main([
-            "--output", output,
-            "--workspace", str(tmp_path / "nonexistent"),
-        ])
+        exit_code = main(
+            [
+                "--output",
+                output,
+                "--workspace",
+                str(tmp_path / "nonexistent"),
+            ]
+        )
         assert exit_code == 1  # No pairs found
 
     def test_main_with_stats(self, tmp_workspace, tmp_path, capsys):
         output = str(tmp_path / "stats_output.jsonl")
-        exit_code = main([
-            "--output", output,
-            "--workspace", str(tmp_workspace / "workspace"),
-            "--source", "queue",
-            "--stats",
-        ])
+        exit_code = main(
+            [
+                "--output",
+                output,
+                "--workspace",
+                str(tmp_workspace / "workspace"),
+                "--source",
+                "queue",
+                "--stats",
+            ]
+        )
         assert exit_code == 0
         captured = capsys.readouterr()
         # Stats JSON is printed with indent=2, followed by the success message

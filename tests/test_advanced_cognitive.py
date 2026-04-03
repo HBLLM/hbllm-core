@@ -11,6 +11,7 @@ from hbllm.memory.concept_extractor import ConceptExtractor
 
 # ─── SkillRegistry ───────────────────────────────────────────────────────
 
+
 class TestSkillRegistry:
     @pytest.fixture
     def registry(self, tmp_path):
@@ -19,9 +20,14 @@ class TestSkillRegistry:
     def test_extract_skill(self, registry):
         skill = registry.extract_and_store(
             task_description="Summarize a technical document",
-            execution_trace=[{"action": "read doc"}, {"action": "extract key points"}, {"action": "write summary"}],
+            execution_trace=[
+                {"action": "read doc"},
+                {"action": "extract key points"},
+                {"action": "write summary"},
+            ],
             tools_used=["browser_node"],
-            success=True, category="writing",
+            success=True,
+            category="writing",
         )
         assert skill is not None
         assert skill.category == "writing"
@@ -29,8 +35,10 @@ class TestSkillRegistry:
 
     def test_failed_task_no_skill(self, registry):
         skill = registry.extract_and_store(
-            task_description="Failed task", execution_trace=[{"action": "try"}],
-            tools_used=[], success=False,
+            task_description="Failed task",
+            execution_trace=[{"action": "try"}],
+            tools_used=[],
+            success=False,
         )
         assert skill is None
 
@@ -38,14 +46,19 @@ class TestSkillRegistry:
         registry.extract_and_store(
             task_description="Debug Python error traceback",
             execution_trace=[{"action": "read error"}, {"action": "fix code"}],
-            tools_used=["execution_node"], success=True, category="coding",
+            tools_used=["execution_node"],
+            success=True,
+            category="coding",
         )
         results = registry.find_skill("Python debug", category="coding")
         assert len(results) >= 1
 
     def test_execution_tracking(self, registry):
         skill = registry.extract_and_store(
-            "Task A", [{"action": "step1"}], ["tool1"], True,
+            "Task A",
+            [{"action": "step1"}],
+            ["tool1"],
+            True,
         )
         registry.record_execution(skill.skill_id, success=True, latency_ms=150.0)
         updated = registry.get_skill(skill.skill_id)
@@ -55,13 +68,16 @@ class TestSkillRegistry:
 
 # ─── GoalManager ─────────────────────────────────────────────────────────
 
+
 class TestGoalManager:
     @pytest.fixture
     def gm(self, tmp_path):
         return GoalManager(data_dir=str(tmp_path))
 
     def test_create_goal(self, gm):
-        goal = gm.create_goal("Improve coding", "Get better at code generation", goal_type="learning")
+        goal = gm.create_goal(
+            "Improve coding", "Get better at code generation", goal_type="learning"
+        )
         assert goal.name == "Improve coding"
         stats = gm.stats()
         assert stats["total_goals"] == 1
@@ -81,13 +97,17 @@ class TestGoalManager:
         assert stats["completed"] == 1
 
     def test_auto_generate_from_performance(self, gm):
-        goals = gm.generate_from_performance({
-            "hallucination_rate": 0.2, "avg_latency_ms": 6000,
-        })
+        goals = gm.generate_from_performance(
+            {
+                "hallucination_rate": 0.2,
+                "avg_latency_ms": 6000,
+            }
+        )
         assert len(goals) >= 2  # hallucination + latency
 
 
 # ─── SelfModel ───────────────────────────────────────────────────────────
+
 
 class TestSelfModel:
     @pytest.fixture
@@ -123,6 +143,7 @@ class TestSelfModel:
 
 # ─── CognitiveMetrics ────────────────────────────────────────────────────
 
+
 class TestCognitiveMetrics:
     @pytest.fixture
     def metrics(self, tmp_path):
@@ -152,6 +173,7 @@ class TestCognitiveMetrics:
 
 # ─── WorldSimulator ──────────────────────────────────────────────────────
 
+
 class TestWorldSimulator:
     @pytest.fixture
     def simulator(self):
@@ -161,7 +183,11 @@ class TestWorldSimulator:
     async def test_simulate_strategies(self, simulator):
         strategies = [
             {"name": "Direct", "steps": ["do it"], "tools": []},
-            {"name": "Research first", "steps": ["research", "plan", "execute"], "tools": ["browser"]},
+            {
+                "name": "Research first",
+                "steps": ["research", "plan", "execute"],
+                "tools": ["browser"],
+            },
         ]
         result = await simulator.simulate("Solve the problem", strategies)
         assert result.best_scenario is not None
@@ -172,7 +198,11 @@ class TestWorldSimulator:
     async def test_simple_plan_preferred(self, simulator):
         strategies = [
             {"name": "Simple", "steps": ["do"], "tools": []},
-            {"name": "Complex", "steps": [f"step{i}" for i in range(12)], "tools": ["api", "browser", "database"]},
+            {
+                "name": "Complex",
+                "steps": [f"step{i}" for i in range(12)],
+                "tools": ["api", "browser", "database"],
+            },
         ]
         result = await simulator.simulate("Goal", strategies)
         # Simple plan should score higher (fewer risks)
@@ -185,6 +215,7 @@ class TestWorldSimulator:
 
 
 # ─── ConceptExtractor ────────────────────────────────────────────────────
+
 
 class TestConceptExtractor:
     @pytest.fixture
@@ -213,8 +244,11 @@ class TestConceptExtractor:
         ]
         concepts = extractor.extract_from_queries(queries)
         if concepts:
-            assert any("procedural" in r.lower() or "how-to" in r.lower()
-                       for c in concepts for r in c.rules)
+            assert any(
+                "procedural" in r.lower() or "how-to" in r.lower()
+                for c in concepts
+                for r in c.rules
+            )
 
     def test_no_concepts_from_unique_queries(self):
         extractor = ConceptExtractor(min_frequency=5)

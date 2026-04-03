@@ -39,8 +39,11 @@ class TestPPOLoss:
 
     def test_loss_is_finite(self, optimizer):
         result = optimizer.compute_ppo_loss(
-            log_probs=[-1.0], old_log_probs=[-1.0],
-            advantages=[0.5], values=[0.3], returns=[0.4],
+            log_probs=[-1.0],
+            old_log_probs=[-1.0],
+            advantages=[0.5],
+            values=[0.3],
+            returns=[0.4],
         )
         assert result["total_loss"] != float("inf")
 

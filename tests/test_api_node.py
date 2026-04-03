@@ -41,8 +41,8 @@ async def test_api_node_schema_synthesis(api_env):
         topic="module.evaluate",
         payload={
             "text": "Generate an OpenAPI schema for a weather API endpoint",
-            "domain_hint": "api_synth"
-        }
+            "domain_hint": "api_synth",
+        },
     )
 
     await bus.publish("module.evaluate", query_msg)
@@ -61,6 +61,7 @@ async def test_api_node_ignores_non_api_prompts(api_env):
     bus, api_node = api_env
 
     caught_thoughts = []
+
     async def thought_catcher(msg: Message):
         caught_thoughts.append(msg)
 
@@ -70,10 +71,7 @@ async def test_api_node_ignores_non_api_prompts(api_env):
         type=MessageType.EVENT,
         source_node_id="workspace_mock",
         topic="module.evaluate",
-        payload={
-            "text": "What is the meaning of life?",
-            "domain_hint": "general"
-        }
+        payload={"text": "What is the meaning of life?", "domain_hint": "general"},
     )
 
     await bus.publish("module.evaluate", query_msg)

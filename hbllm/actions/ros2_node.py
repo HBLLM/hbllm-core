@@ -60,6 +60,7 @@ def _get_rclpy():
             import rclpy.node
             from geometry_msgs.msg import PoseStamped, Twist
             from std_msgs.msg import String
+
             _rclpy = rclpy
             logger.info("ROS2 (rclpy) available — real robot mode enabled")
         except ImportError:
@@ -71,9 +72,11 @@ def _get_rclpy():
 
 # ── Robot State ──────────────────────────────────────────────────────────────
 
+
 @dataclass
 class RobotState:
     """Tracks state of a connected robot."""
+
     id: str
     name: str
     type: str = "mobile"  # mobile, arm, drone, humanoid
@@ -86,10 +89,15 @@ class RobotState:
 
     def to_dict(self) -> dict:
         return {
-            "id": self.id, "name": self.name, "type": self.type,
-            "status": self.status, "position": self.position,
-            "orientation": self.orientation, "battery": self.battery,
-            "sensors": self.sensors, "last_seen": self.last_seen,
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "status": self.status,
+            "position": self.position,
+            "orientation": self.orientation,
+            "battery": self.battery,
+            "sensors": self.sensors,
+            "last_seen": self.last_seen,
         }
 
 
@@ -193,8 +201,7 @@ class Ros2Node(Node):
     async def on_start(self) -> None:
         """Subscribe to brain messages and optionally init ROS2."""
         logger.info(
-            "Starting Ros2Node — %s mode",
-            "REAL ROS2" if self.ros2_enabled else "SIMULATION"
+            "Starting Ros2Node — %s mode", "REAL ROS2" if self.ros2_enabled else "SIMULATION"
         )
 
         # Subscribe to brain messages (always works)
@@ -289,14 +296,15 @@ class Ros2Node(Node):
         if valid_cmds and command not in valid_cmds:
             return self._error(
                 message,
-                f"Invalid command '{command}' for {robot.type}. "
-                f"Valid: {list(valid_cmds.keys())}"
+                f"Invalid command '{command}' for {robot.type}. Valid: {list(valid_cmds.keys())}",
             )
 
         # Log command
         cmd_entry = {
-            "robot_id": robot_id, "command": command,
-            "params": params, "timestamp": time.time(),
+            "robot_id": robot_id,
+            "command": command,
+            "params": params,
+            "timestamp": time.time(),
             "mode": "real" if self.is_real else "simulation",
         }
         self.command_log.append(cmd_entry)
@@ -342,6 +350,7 @@ class Ros2Node(Node):
 
         if self.is_real and "cmd_vel" in self._publishers:
             from geometry_msgs.msg import Twist
+
             twist = Twist()
             twist.linear.x = float(linear_x)
             twist.angular.z = float(angular_z)
@@ -357,9 +366,7 @@ class Ros2Node(Node):
         await self._execute_move(robot, {"linear_x": 0.0, "angular_z": 0.0})
         robot.status = "idle"
 
-    async def _execute_navigate(
-        self, robot: RobotState, params: dict, message: Message
-    ) -> None:
+    async def _execute_navigate(self, robot: RobotState, params: dict, message: Message) -> None:
         """Send Nav2 goal."""
         x = params.get("x", 0.0)
         y = params.get("y", 0.0)
@@ -369,6 +376,7 @@ class Ros2Node(Node):
             import math
 
             from geometry_msgs.msg import PoseStamped
+
             goal = PoseStamped()
             goal.header.frame_id = "map"
             goal.pose.position.x = float(x)
@@ -383,12 +391,11 @@ class Ros2Node(Node):
         robot.status = "navigating"
         robot.position = {"x": x, "y": y, "z": 0.0}
 
-    async def _execute_manipulation(
-        self, robot: RobotState, command: str, params: dict
-    ) -> None:
+    async def _execute_manipulation(self, robot: RobotState, command: str, params: dict) -> None:
         """Handle arm/gripper commands."""
         if self.is_real:
             from std_msgs.msg import String
+
             cmd_msg = String()
             cmd_msg.data = json.dumps({"command": command, "params": params})
             if "brain_cmd" in self._publishers:
@@ -492,13 +499,20 @@ class Ros2Node(Node):
     # ── Registration ─────────────────────────────────────────────────────
 
     def register_robot(
-        self, robot_id: str, name: str, robot_type: str = "mobile",
+        self,
+        robot_id: str,
+        name: str,
+        robot_type: str = "mobile",
     ) -> RobotState:
         """Register a robot in the brain's registry."""
         robot = RobotState(id=robot_id, name=name, type=robot_type)
         self.robots[robot_id] = robot
-        logger.info("Registered robot: %s (%s) [%s]", name, robot_type,
-                     "real" if self.is_real else "simulation")
+        logger.info(
+            "Registered robot: %s (%s) [%s]",
+            name,
+            robot_type,
+            "real" if self.is_real else "simulation",
+        )
         return robot
 
     def register_behavior(self, name: str, commands: list[dict]) -> None:

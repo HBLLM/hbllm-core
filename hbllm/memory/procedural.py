@@ -116,8 +116,16 @@ class ProceduralMemory:
                        (id, tenant_id, skill_name, trigger_pattern, steps_json,
                         source_node, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (skill_id, tenant_id, skill_name, trigger_pattern,
-                     json.dumps(steps), source_node, now, now),
+                    (
+                        skill_id,
+                        tenant_id,
+                        skill_name,
+                        trigger_pattern,
+                        json.dumps(steps),
+                        source_node,
+                        now,
+                        now,
+                    ),
                 )
                 logger.info("Stored new skill '%s' for tenant '%s'", skill_name, tenant_id)
                 return skill_id
@@ -210,7 +218,8 @@ class ProceduralMemory:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT * FROM skills WHERE id = ?", (skill_id,),
+                "SELECT * FROM skills WHERE id = ?",
+                (skill_id,),
             ).fetchone()
 
         if not row:

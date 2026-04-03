@@ -43,6 +43,7 @@ def _small_model() -> HBLLMForCausalLM:
 # Learning Rate Schedule tests
 # ──────────────────────────────────────────────
 
+
 class TestCosineWarmupScheduler:
     def test_warmup_starts_at_zero(self):
         sched = CosineWarmupScheduler(warmup_steps=100, max_steps=1000, max_lr=1e-3)
@@ -87,6 +88,7 @@ class TestCosineWarmupScheduler:
 # ──────────────────────────────────────────────
 # Checkpoint Manager tests
 # ──────────────────────────────────────────────
+
 
 class TestCheckpointManager:
     def test_save_checkpoint(self, tmp_path: Path):
@@ -147,6 +149,7 @@ class TestCheckpointManager:
 # ──────────────────────────────────────────────
 # Trainer tests
 # ──────────────────────────────────────────────
+
 
 class TestTrainer:
     def test_trainer_creation(self):

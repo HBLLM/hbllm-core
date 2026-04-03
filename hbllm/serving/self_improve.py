@@ -52,11 +52,13 @@ def _convert_to_sft_format(samples: list[dict]) -> list[dict]:
         context = s.get("context", "")
 
         if instruction and response:
-            sft_data.append({
-                "instruction": instruction,
-                "input": context,
-                "output": response,
-            })
+            sft_data.append(
+                {
+                    "instruction": instruction,
+                    "input": context,
+                    "output": response,
+                }
+            )
     return sft_data
 
 
@@ -177,12 +179,14 @@ def _train_on_domain(
         if latest:
             logger.info("Loading base checkpoint: %s", latest[-1])
             from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
             ckpt = load_checkpoint(latest[-1])
             model.load_state_dict(extract_model_state(ckpt), strict=False)
 
     # Inject LoRA if requested
     if use_lora:
         from hbllm.modules.lora import LoRAManager
+
         injected = LoRAManager.inject(model, r=lora_r)
         logger.info("Injected LoRA (r=%d) into %d modules", lora_r, len(injected))
 
@@ -237,7 +241,12 @@ def _train_on_domain(
                 avg = total_loss / step
                 logger.info(
                     "  [%s] Step %d/%d  loss=%.4f  avg=%.4f  lr=%.2e",
-                    domain, step, max_steps, loss, avg, result.get("lr", lr),
+                    domain,
+                    step,
+                    max_steps,
+                    loss,
+                    avg,
+                    result.get("lr", lr),
                 )
 
             # Optimizer step after accumulation
@@ -252,6 +261,7 @@ def _train_on_domain(
 
     if use_lora:
         from hbllm.modules.lora import LoRAManager
+
         adapter_state = LoRAManager.get_lora_state_dict(model)
         save_path = Path(domain_ckpt_dir) / "lora_adapter.pt"
         torch.save(adapter_state, save_path)
@@ -262,7 +272,9 @@ def _train_on_domain(
     avg_loss = total_loss / max(step, 1)
     logger.info(
         "Training complete for domain '%s': %d steps, avg_loss=%.4f",
-        domain, step, avg_loss,
+        domain,
+        step,
+        avg_loss,
     )
 
     return {

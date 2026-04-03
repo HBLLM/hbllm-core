@@ -18,12 +18,13 @@ async def test_meta_reasoning_node_triggers_improvement(tmp_path):
     # Redirect reflection directory to pytest temp dir
     meta_node.reflection_dir = str(tmp_path / "reflection")
     os.makedirs(meta_node.reflection_dir, exist_ok=True)
-    meta_node.weakness_threshold = 2 # lower for test
+    meta_node.weakness_threshold = 2  # lower for test
 
     await meta_node.start(bus)
-    await asyncio.sleep(0.1) # settling time
+    await asyncio.sleep(0.1)  # settling time
 
     improve_events = []
+
     async def improve_handler(msg: Message) -> Message | None:
         improve_events.append(msg)
         return None
@@ -40,8 +41,8 @@ async def test_meta_reasoning_node_triggers_improvement(tmp_path):
             rating=-1,
             prompt="Write a rust script",
             response="Sorry I cannot do that",
-            module_id="coding"
-        ).model_dump()
+            module_id="coding",
+        ).model_dump(),
     )
     await bus.publish("system.feedback", msg1)
     await asyncio.sleep(0.1)
@@ -60,8 +61,8 @@ async def test_meta_reasoning_node_triggers_improvement(tmp_path):
             rating=1,
             prompt="Write a python script",
             response="print('hello')",
-            module_id="coding"
-        ).model_dump()
+            module_id="coding",
+        ).model_dump(),
     )
     await bus.publish("system.feedback", msg2)
     await asyncio.sleep(0.1)
@@ -80,8 +81,8 @@ async def test_meta_reasoning_node_triggers_improvement(tmp_path):
             rating=-1,
             prompt="Fix this python bug",
             response="I don't know",
-            module_id="coding"
-        ).model_dump()
+            module_id="coding",
+        ).model_dump(),
     )
     await bus.publish("system.feedback", msg3)
 

@@ -14,6 +14,7 @@ from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineRe
 
 # ─── ContextWindowManager Tests ──────────────────────────────────────────────
 
+
 class TestEstimateTokens:
     def test_empty(self):
         assert estimate_tokens("") == 0
@@ -111,6 +112,7 @@ class TestContextWindowManager:
 
 # ─── PipelineResult Tests ────────────────────────────────────────────────────
 
+
 class TestPipelineResult:
     def test_to_dict(self):
         r = PipelineResult(
@@ -131,6 +133,7 @@ class TestPipelineResult:
 
 
 # ─── CognitivePipeline Tests ─────────────────────────────────────────────────
+
 
 class TestCognitivePipeline:
     @pytest.fixture

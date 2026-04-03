@@ -57,10 +57,7 @@ def test_lora_manager():
             super().__init__()
             self.embed = nn.Embedding(10, 16)
             self.q_proj = nn.Linear(16, 16)
-            self.nested = nn.ModuleDict({
-                "v_proj": nn.Linear(16, 16),
-                "other": nn.Linear(16, 16)
-            })
+            self.nested = nn.ModuleDict({"v_proj": nn.Linear(16, 16), "other": nn.Linear(16, 16)})
 
         def forward(self, x):
             x = self.embed(x)
@@ -72,11 +69,7 @@ def test_lora_manager():
     model = DummyModel()
 
     # Inject LoRA
-    injected = LoRAManager.inject(
-        model,
-        r=2,
-        target_modules=["q_proj", "v_proj"]
-    )
+    injected = LoRAManager.inject(model, r=2, target_modules=["q_proj", "v_proj"])
 
     assert len(injected) == 2
     assert "q_proj" in injected
@@ -89,7 +82,9 @@ def test_lora_manager():
 
     # Verify state dict extraction
     state = LoRAManager.get_lora_state_dict(model)
-    assert len(state) == 4  # q_proj.lora_A, q_proj.lora_B, nested.v_proj.lora_A, nested.v_proj.lora_B
+    assert (
+        len(state) == 4
+    )  # q_proj.lora_A, q_proj.lora_B, nested.v_proj.lora_A, nested.v_proj.lora_B
     assert "q_proj.lora_A" in state
 
     # Forward pass

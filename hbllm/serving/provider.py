@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LLMResponse:
     """Standardized response from any LLM provider."""
+
     content: str
     model: str
     usage: dict[str, int]  # prompt_tokens, completion_tokens, total_tokens
@@ -71,21 +72,27 @@ async def _retry_api_call(
                 raise  # Non-retryable (e.g. 401, 403, 404)
             if attempt == max_retries:
                 raise
-            delay = min(initial_delay * (2 ** attempt), max_delay)
+            delay = min(initial_delay * (2**attempt), max_delay)
             delay += random.uniform(0, delay * 0.1)  # jitter
             logger.warning(
                 "API call failed (HTTP %d), retrying in %.1fs (attempt %d/%d)",
-                e.response.status_code, delay, attempt + 1, max_retries,
+                e.response.status_code,
+                delay,
+                attempt + 1,
+                max_retries,
             )
             await asyncio.sleep(delay)
         except (httpx.TransportError, httpx.TimeoutException) as e:
             if attempt == max_retries:
                 raise
-            delay = min(initial_delay * (2 ** attempt), max_delay)
+            delay = min(initial_delay * (2**attempt), max_delay)
             delay += random.uniform(0, delay * 0.1)
             logger.warning(
                 "API transport error (%s), retrying in %.1fs (attempt %d/%d)",
-                type(e).__name__, delay, attempt + 1, max_retries,
+                type(e).__name__,
+                delay,
+                attempt + 1,
+                max_retries,
             )
             await asyncio.sleep(delay)
 
@@ -125,6 +132,7 @@ class LLMProvider(ABC):
 
 # ─── Local Provider ──────────────────────────────────────────────────────────
 
+
 class LocalProvider(LLMProvider):
     """Uses the local HBLLM transformer for generation."""
 
@@ -150,7 +158,10 @@ class LocalProvider(LLMProvider):
         self._ensure_loaded()
         import torch
 
-        with trace_span("llm.generate", {"provider": "local", "model": "hbllm-local", "max_tokens": str(max_tokens)}):
+        with trace_span(
+            "llm.generate",
+            {"provider": "local", "model": "hbllm-local", "max_tokens": str(max_tokens)},
+        ):
             prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
             input_ids = self._tokenizer.encode(prompt, add_bos=True)
             input_tensor = torch.tensor([input_ids], dtype=torch.long)
@@ -168,7 +179,7 @@ class LocalProvider(LLMProvider):
                 )
 
             # Decode only new tokens
-            new_tokens = output[0][len(input_ids):].tolist()
+            new_tokens = output[0][len(input_ids) :].tolist()
             content = self._tokenizer.decode(new_tokens)
 
         return LLMResponse(
@@ -201,6 +212,7 @@ class LocalProvider(LLMProvider):
 
         if has_draft_model:
             from hbllm.model.speculative import speculate_step
+
             K = kwargs.get("speculative_k", 4)
             current_input = input_tensor
 
@@ -213,7 +225,7 @@ class LocalProvider(LLMProvider):
                     main_input_ids=current_input,
                     K=K,
                     temperature=temperature,
-                    top_p=top_p
+                    top_p=top_p,
                 )
 
                 # Yield newly accepted tokens as chunks
@@ -223,13 +235,16 @@ class LocalProvider(LLMProvider):
                     yield self._tokenizer.decode([token_id])
                     tokens_generated += 1
 
-                current_input = torch.cat([current_input, accepted_tokens.to(current_input.device)], dim=1)
+                current_input = torch.cat(
+                    [current_input, accepted_tokens.to(current_input.device)], dim=1
+                )
 
         else:
             # Traditional Autoregressive Loop (with KV Cache)
             past_key_values = None
             if hasattr(self._model, "config"):
                 from hbllm.serving.kv_cache import KVCache
+
                 cfg = self._model.config
                 budget = input_tensor.shape[1] + max_tokens
                 # Initialize array of KVCaches (one per layer) if safe memory budget
@@ -242,13 +257,14 @@ class LocalProvider(LLMProvider):
                             head_dim=cfg.hidden_size // cfg.num_attention_heads,
                             dtype=next(self._model.parameters()).dtype,
                             device=input_tensor.device,
-                            sliding_window=getattr(cfg, 'sliding_window', None),
-                            attention_sinks=getattr(cfg, 'attention_sinks', 4),
+                            sliding_window=getattr(cfg, "sliding_window", None),
+                            attention_sinks=getattr(cfg, "attention_sinks", 4),
                         )
                         for _ in range(cfg.num_layers)
                     ]
 
             with torch.no_grad():
+                next_token = None
                 for step in range(max_tokens):
                     # On step 0, process the full prompt; afterwards only the new token
                     if step == 0:
@@ -329,6 +345,7 @@ class LocalProvider(LLMProvider):
 
 # ─── OpenAI Provider ─────────────────────────────────────────────────────────
 
+
 class OpenAIProvider(LLMProvider):
     """Calls OpenAI-compatible APIs."""
 
@@ -355,7 +372,10 @@ class OpenAIProvider(LLMProvider):
     ) -> LLMResponse:
         import httpx
 
-        with trace_span("llm.generate", {"provider": "openai", "model": self._model, "max_tokens": str(max_tokens)}):
+        with trace_span(
+            "llm.generate",
+            {"provider": "openai", "model": self._model, "max_tokens": str(max_tokens)},
+        ):
             headers = {
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
@@ -444,6 +464,7 @@ class OpenAIProvider(LLMProvider):
 
 # ─── Anthropic Provider ──────────────────────────────────────────────────────
 
+
 class AnthropicProvider(LLMProvider):
     """Calls Anthropic Claude API."""
 
@@ -468,7 +489,10 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         import httpx
 
-        with trace_span("llm.generate", {"provider": "anthropic", "model": self._model, "max_tokens": str(max_tokens)}):
+        with trace_span(
+            "llm.generate",
+            {"provider": "anthropic", "model": self._model, "max_tokens": str(max_tokens)},
+        ):
             # Anthropic separates system message
             system = ""
             user_messages = []
@@ -605,10 +629,7 @@ def get_provider(
         provider_name = name
 
     if provider_name not in _PROVIDERS:
-        raise ValueError(
-            f"Unknown provider: {provider_name}. "
-            f"Available: {list(_PROVIDERS.keys())}"
-        )
+        raise ValueError(f"Unknown provider: {provider_name}. Available: {list(_PROVIDERS.keys())}")
 
     return _PROVIDERS[provider_name](**kwargs)
 

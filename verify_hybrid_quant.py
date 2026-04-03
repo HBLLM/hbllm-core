@@ -16,6 +16,7 @@ def verify_hal():
     print(f"Recommendation for 13B: {recommendation}")
     return recommendation
 
+
 def verify_hybrid_model(policy):
     print("\n--- Testing Hybrid Model Initialization ---")
     # Small test config
@@ -25,7 +26,7 @@ def verify_hybrid_model(policy):
         num_attention_heads=8,
         num_kv_heads=2,
         intermediate_size=512,
-        quantization_level=policy["quantization"].value
+        quantization_level=policy["quantization"].value,
     )
 
     model = HBLLMModel(config)
@@ -44,6 +45,7 @@ def verify_hybrid_model(policy):
         print("SUCCESS: Hybrid Quantization system is active.")
     else:
         print("FAILURE: No Hybrid layers found.")
+
 
 if __name__ == "__main__":
     policy = verify_hal()

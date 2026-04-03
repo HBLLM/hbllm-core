@@ -11,6 +11,7 @@ from hbllm.network.node import Node, NodeType
 
 # ── Helper Nodes ─────────────────────────────────────────────────────────────
 
+
 class FailingNode(Node):
     """Node that raises on every message after start."""
 
@@ -50,6 +51,7 @@ class CountingNode(Node):
 
 # ── Bus Subscriber Isolation ─────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_bad_subscriber_does_not_crash_bus():
     """One failing subscriber should not prevent others from receiving messages."""
@@ -86,6 +88,7 @@ async def test_bad_subscriber_does_not_crash_bus():
 
 # ── Node Restart After Failure ───────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_node_restart_after_failure():
     """Nodes can be stopped and restarted after a failure."""
@@ -118,6 +121,7 @@ async def test_node_restart_after_failure():
 
 
 # ── Circuit Breaker Under Load ───────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_opens_under_failures():
@@ -159,6 +163,7 @@ async def test_circuit_breaker_recovers():
 
 # ── Concurrent Message Flood ────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_concurrent_message_flood():
     """Bus handles 1000 concurrent messages without dropping any."""
@@ -197,6 +202,7 @@ async def test_concurrent_message_flood():
 
 # ── Multiple Nodes Concurrent ────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_multiple_nodes_concurrent():
     """Multiple nodes can operate on the same bus without interference."""
@@ -209,18 +215,24 @@ async def test_multiple_nodes_concurrent():
     await n2.start(bus)
 
     for i in range(10):
-        await bus.publish("multi.a", Message(
-            type=MessageType.EVENT,
-            source_node_id="test",
-            topic="multi.a",
-            payload={"i": i},
-        ))
-        await bus.publish("multi.b", Message(
-            type=MessageType.EVENT,
-            source_node_id="test",
-            topic="multi.b",
-            payload={"i": i},
-        ))
+        await bus.publish(
+            "multi.a",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id="test",
+                topic="multi.a",
+                payload={"i": i},
+            ),
+        )
+        await bus.publish(
+            "multi.b",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id="test",
+                topic="multi.b",
+                payload={"i": i},
+            ),
+        )
 
     await asyncio.sleep(0.3)
 
@@ -233,6 +245,7 @@ async def test_multiple_nodes_concurrent():
 
 
 # ── Registry Failure Tracking ────────────────────────────────────────────────
+
 
 def test_registry_tracks_multiple_nodes():
     """Registry correctly tracks failure states across many nodes."""
@@ -256,6 +269,7 @@ def test_registry_tracks_multiple_nodes():
 
 
 # ── Memory Under Concurrent Access ──────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_episodic_concurrent_writes():

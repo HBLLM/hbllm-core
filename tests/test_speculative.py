@@ -17,6 +17,7 @@ class MockModel(nn.Module):
         logits[:, :, self.always_predict] = 100.0
         return {"logits": logits}
 
+
 def test_speculative_equivalence():
     """
     Test that speculative decoding mathematically preserves target model outputs
@@ -45,4 +46,3 @@ def test_speculative_equivalence():
     # and we get exactly 1 token (the resampled correct token).
     assert out.shape == (1, 1)
     assert out[0, 0].item() == 7
-

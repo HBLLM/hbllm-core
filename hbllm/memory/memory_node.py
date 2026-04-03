@@ -29,7 +29,16 @@ class MemoryNode(Node):
     """
 
     def __init__(self, node_id: str, db_path: str | Path = "working_memory.db"):
-        super().__init__(node_id=node_id, node_type=NodeType.MEMORY, capabilities=["episodic_storage", "semantic_retrieval", "procedural_skills", "value_tracking"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.MEMORY,
+            capabilities=[
+                "episodic_storage",
+                "semantic_retrieval",
+                "procedural_skills",
+                "value_tracking",
+            ],
+        )
         # Ensure the memory directory exists
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,8 +53,16 @@ class MemoryNode(Node):
         _use_persistence = str(db_path) != ":memory:" and str(self._persistence_dir) != "."
         semantic_dir = self._persistence_dir / "semantic"
         kg_path = self._persistence_dir / "knowledge_graph.json"
-        self.semantic_db = SemanticMemory.load_from_disk(semantic_dir) if (_use_persistence and semantic_dir.exists()) else SemanticMemory()
-        self.knowledge_graph = KnowledgeGraph.load_from_disk(kg_path) if (_use_persistence and kg_path.exists()) else KnowledgeGraph()
+        self.semantic_db = (
+            SemanticMemory.load_from_disk(semantic_dir)
+            if (_use_persistence and semantic_dir.exists())
+            else SemanticMemory()
+        )
+        self.knowledge_graph = (
+            KnowledgeGraph.load_from_disk(kg_path)
+            if (_use_persistence and kg_path.exists())
+            else KnowledgeGraph()
+        )
         # Track background tasks for graceful shutdown
         self._pending_tasks: set[asyncio.Task] = set()
 
@@ -68,7 +85,9 @@ class MemoryNode(Node):
         """Persist in-memory data to disk and clean up."""
         # Await any in-flight background storage tasks before persisting
         if self._pending_tasks:
-            logger.info("Awaiting %d pending background tasks before shutdown", len(self._pending_tasks))
+            logger.info(
+                "Awaiting %d pending background tasks before shutdown", len(self._pending_tasks)
+            )
             await asyncio.gather(*self._pending_tasks, return_exceptions=True)
             self._pending_tasks.clear()
 
@@ -101,7 +120,9 @@ class MemoryNode(Node):
         domain = payload.get("domain")
         reasoning = payload.get("reasoning")
 
-        logger.info("[MemoryNode] Extracting patterns from reflection on domain '%s' (Node N)", domain)
+        logger.info(
+            "[MemoryNode] Extracting patterns from reflection on domain '%s' (Node N)", domain
+        )
 
         # Store a summary fact in Semantic Memory.
         pattern_content = f"Learned pattern in domain '{domain}': {reasoning}"
@@ -110,7 +131,7 @@ class MemoryNode(Node):
             self.semantic_db.store,
             pattern_content,
             {"source": "reflection_engine", "domain": domain},
-            is_priority=False  # Patterns grow general semantic memory
+            is_priority=False,  # Patterns grow general semantic memory
         )
 
     async def handle_salience(self, message: Message) -> None:
@@ -126,12 +147,14 @@ class MemoryNode(Node):
         content = payload.get("content", "")
 
         if is_priority and content:
-            logger.info("[MemoryNode] Archiving high-salience experience to Priority Memory (Node K)")
+            logger.info(
+                "[MemoryNode] Archiving high-salience experience to Priority Memory (Node K)"
+            )
             await asyncio.to_thread(
                 self.semantic_db.store,
                 content,
                 {"source": "salience_detector", "message_id": payload.get("message_id")},
-                is_priority=True
+                is_priority=True,
             )
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -159,9 +182,7 @@ class MemoryNode(Node):
 
         # 2. Extract and add relations from the content text
         if content:
-            self.knowledge_graph.ingest_text(
-                content, source=payload.get("category", "reflection")
-            )
+            self.knowledge_graph.ingest_text(content, source=payload.get("category", "reflection"))
 
         # 3. Add rule-derived relations (condition → action)
         for rule in rules:
@@ -173,7 +194,10 @@ class MemoryNode(Node):
                     target_label=action,
                     relation_type="leads_to",
                     weight=rule.get("confidence", 0.5),
-                    metadata={"rule_id": rule.get("rule_id", ""), "category": rule.get("category", "")},
+                    metadata={
+                        "rule_id": rule.get("rule_id", ""),
+                        "category": rule.get("category", ""),
+                    },
                 )
 
         logger.info(
@@ -219,10 +243,12 @@ class MemoryNode(Node):
             return message.create_response({"subgraph": sg, "entity": label})
 
         elif action == "stats":
-            return message.create_response({
-                "entity_count": self.knowledge_graph.entity_count,
-                "relation_count": self.knowledge_graph.relation_count,
-            })
+            return message.create_response(
+                {
+                    "entity_count": self.knowledge_graph.entity_count,
+                    "relation_count": self.knowledge_graph.relation_count,
+                }
+            )
 
         elif action == "all_entities":
             limit = payload.get("limit", 100)
@@ -274,7 +300,9 @@ class MemoryNode(Node):
 
             # Offload semantic storage to a background thread with error handling
             task = asyncio.create_task(
-                asyncio.to_thread(self.semantic_db.store, content, {"session_id": session_id, "role": role})
+                asyncio.to_thread(
+                    self.semantic_db.store, content, {"session_id": session_id, "role": role}
+                )
             )
             task.add_done_callback(self._handle_background_task_result)
             # Track for graceful shutdown
@@ -306,10 +334,12 @@ class MemoryNode(Node):
                 tenant_id=payload.get("tenant_id", message.tenant_id or "default"),
             )
 
-            return message.create_response({
-                "session_id": session_id,
-                "turns": turns,
-            })
+            return message.create_response(
+                {
+                    "session_id": session_id,
+                    "turns": turns,
+                }
+            )
 
         except Exception as e:
             logger.error("Memory retrieval failed: %s", e)
@@ -332,9 +362,11 @@ class MemoryNode(Node):
 
             results = await asyncio.to_thread(self.semantic_db.search, query, limit)
 
-            return message.create_response({
-                "results": results,
-            })
+            return message.create_response(
+                {
+                    "results": results,
+                }
+            )
 
         except Exception as e:
             logger.error("Semantic search failed: %s", e)
@@ -449,4 +481,3 @@ class MemoryNode(Node):
         except Exception as e:
             logger.error("Reward query failed: %s", e)
             return message.create_error(str(e))
-

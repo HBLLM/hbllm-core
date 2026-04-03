@@ -6,17 +6,21 @@ from tokenizers import Tokenizer
 
 def test_onnx():
     print("Downloading model...")
-    model_path = hf_hub_download(repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx")
+    model_path = hf_hub_download(
+        repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx"
+    )
 
     print("Downloading tokenizer...")
-    tokenizer_path = hf_hub_download(repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json")
+    tokenizer_path = hf_hub_download(
+        repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json"
+    )
 
     print("Loading...")
     tokenizer = Tokenizer.from_file(tokenizer_path)
     tokenizer.enable_truncation(max_length=128)
     tokenizer.enable_padding(length=128)
 
-    session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+    session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
     input_names = [i.name for i in session.get_inputs()]
     print("Expected Model Inputs:", input_names)
@@ -45,6 +49,7 @@ def test_onnx():
     sentence_emb = sentence_emb / np.linalg.norm(sentence_emb, axis=1, keepdims=True)
 
     print("Success! Final dimension:", sentence_emb.shape)
+
 
 if __name__ == "__main__":
     test_onnx()

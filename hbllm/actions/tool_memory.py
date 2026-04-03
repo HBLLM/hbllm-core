@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolUsageRecord:
     """Record of a single tool invocation."""
+
     tool_name: str
     query_type: str  # classified query category
     success: bool
@@ -84,13 +85,23 @@ class ToolMemory:
                 "INSERT INTO tool_usage "
                 "(tool_name, query_type, success, latency_ms, result_quality, context, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (record.tool_name, record.query_type, int(record.success),
-                 record.latency_ms, record.result_quality,
-                 json.dumps(record.context), record.timestamp),
+                (
+                    record.tool_name,
+                    record.query_type,
+                    int(record.success),
+                    record.latency_ms,
+                    record.result_quality,
+                    json.dumps(record.context),
+                    record.timestamp,
+                ),
             )
 
     def record_sequence(
-        self, task_type: str, tools: list[str], success: bool, total_ms: float,
+        self,
+        task_type: str,
+        tools: list[str],
+        success: bool,
+        total_ms: float,
     ) -> None:
         """Record a multi-tool sequence execution."""
         with sqlite3.connect(str(self._db_path)) as conn:
@@ -109,7 +120,8 @@ class ToolMemory:
         Returns tools ranked by a composite score of success rate + quality - latency.
         """
         with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT tool_name,
                        COUNT(*) as uses,
                        AVG(success) as success_rate,
@@ -121,7 +133,9 @@ class ToolMemory:
                 HAVING uses >= 3
                 ORDER BY (AVG(success) * 0.4 + AVG(result_quality) * 0.4 - AVG(latency_ms) / 10000 * 0.2) DESC
                 LIMIT ?
-            """, (query_type, top_n)).fetchall()
+            """,
+                (query_type, top_n),
+            ).fetchall()
 
         return [
             {
@@ -138,13 +152,16 @@ class ToolMemory:
     def recommend_sequence(self, task_type: str) -> list[str] | None:
         """Recommend the best tool sequence for a task type."""
         with sqlite3.connect(str(self._db_path)) as conn:
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT sequence FROM tool_sequences
                 WHERE task_type = ? AND success = 1
                 GROUP BY sequence
                 ORDER BY COUNT(*) DESC, AVG(total_latency_ms) ASC
                 LIMIT 1
-            """, (task_type,)).fetchone()
+            """,
+                (task_type,),
+            ).fetchone()
 
         return json.loads(row[0]) if row else None
 

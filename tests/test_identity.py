@@ -1,6 +1,5 @@
 """Tests for the Identity Core — per-tenant persona management."""
 
-
 import pytest
 
 from hbllm.brain.identity_node import IdentityNode, IdentityProfile, IdentityStore
@@ -14,6 +13,7 @@ def identity_store(tmp_path):
 
 
 # ─── IdentityProfile Tests ───────────────────────────────────────────────────
+
 
 def test_profile_to_dict():
     profile = IdentityProfile(
@@ -52,6 +52,7 @@ def test_profile_empty_context_string():
 
 
 # ─── IdentityStore Tests ─────────────────────────────────────────────────────
+
 
 def test_store_upsert_and_get(identity_store):
     profile = IdentityProfile(
@@ -95,6 +96,7 @@ def test_store_delete(identity_store):
 
 
 # ─── IdentityNode Integration Tests ──────────────────────────────────────────
+
 
 @pytest.fixture
 async def identity_node(tmp_path):

@@ -27,7 +27,11 @@ class CriticNode(Node):
     MAX_CACHE_SIZE = 500
 
     def __init__(self, node_id: str, llm=None):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["critic", "evaluation", "halting"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["critic", "evaluation", "halting"],
+        )
         self.llm = llm  # LLMInterface instance
 
         # LRU cache for original queries (bounded to prevent memory leaks)
@@ -89,12 +93,12 @@ class CriticNode(Node):
                 f"You are a strict Constitutional AI Evaluator. Given the user's original query "
                 f"and a proposed response, determine if the response violates ANY of the following principles:\n\n"
                 f"{principles_str}\n\n"
-                f"Original Query: \"{original_query}\"\n"
-                f"Proposed Response: \"{content[:1000]}\"\n\n"
+                f'Original Query: "{original_query}"\n'
+                f'Proposed Response: "{content[:1000]}"\n\n'
                 f"Output JSON:\n"
                 f"{{\n"
-                f"  \"violations\": [\"name_of_failed_principle_1\", ...],\n"
-                f"  \"rationale\": \"brief explanation of why the violation occurred, or 'All clear' if none\"\n"
+                f'  "violations": ["name_of_failed_principle_1", ...],\n'
+                f'  "rationale": "brief explanation of why the violation occurred, or \'All clear\' if none"\n'
                 f"}}"
             )
 
@@ -110,14 +114,17 @@ class CriticNode(Node):
                     reason = "Passed all constitutional principles."
 
         except Exception as e:
-            logger.warning("[CriticNode] LLM constitutional evaluation failed, defaulting to PASS: %s", e)
+            logger.warning(
+                "[CriticNode] LLM constitutional evaluation failed, defaulting to PASS: %s", e
+            )
             status = "PASS"
             reason = "Critic evaluation skipped due to LLM error"
 
         if status == "FAIL":
             logger.warning(
                 "[CriticNode] LLM evaluation FAILED thought from %s. Reason: %s",
-                message.source_node_id, reason
+                message.source_node_id,
+                reason,
             )
 
         # Note: Do NOT pop the cache here — multiple thoughts may share
@@ -136,9 +143,9 @@ class CriticNode(Node):
                 "status": status,
                 "reason": reason,
                 "confidence": 1.0,
-                "original_content": proposal.get("content")
+                "original_content": proposal.get("content"),
             },
-            correlation_id=message.correlation_id
+            correlation_id=message.correlation_id,
         )
         await self.bus.publish("workspace.thought", critique_msg)
         return None

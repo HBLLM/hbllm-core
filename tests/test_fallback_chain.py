@@ -16,24 +16,34 @@ async def setup():
     breakers = CircuitBreakerRegistry(failure_threshold=2)
 
     # Register coding specialist
-    await registry.register(NodeInfo(
-        node_id="coding_01",
-        node_type=NodeType.DOMAIN_MODULE,
-        capabilities=["coding"],
-    ))
-    await registry.update_health(NodeHealth(
-        node_id="coding_01", status=HealthStatus.HEALTHY,
-    ))
+    await registry.register(
+        NodeInfo(
+            node_id="coding_01",
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["coding"],
+        )
+    )
+    await registry.update_health(
+        NodeHealth(
+            node_id="coding_01",
+            status=HealthStatus.HEALTHY,
+        )
+    )
 
     # Register general fallback
-    await registry.register(NodeInfo(
-        node_id="general_01",
-        node_type=NodeType.DOMAIN_MODULE,
-        capabilities=["general"],
-    ))
-    await registry.update_health(NodeHealth(
-        node_id="general_01", status=HealthStatus.HEALTHY,
-    ))
+    await registry.register(
+        NodeInfo(
+            node_id="general_01",
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["general"],
+        )
+    )
+    await registry.update_health(
+        NodeHealth(
+            node_id="general_01",
+            status=HealthStatus.HEALTHY,
+        )
+    )
 
     fm = FallbackManager(registry, breakers)
     fm.register_chain("coding", ["coding", "general"])
@@ -120,14 +130,19 @@ async def test_chain_position():
 
     # Register 3 levels
     for i, cap in enumerate(["expert", "standard", "basic"]):
-        await registry.register(NodeInfo(
-            node_id=f"node_{cap}",
-            node_type=NodeType.DOMAIN_MODULE,
-            capabilities=[cap],
-        ))
-        await registry.update_health(NodeHealth(
-            node_id=f"node_{cap}", status=HealthStatus.HEALTHY,
-        ))
+        await registry.register(
+            NodeInfo(
+                node_id=f"node_{cap}",
+                node_type=NodeType.DOMAIN_MODULE,
+                capabilities=[cap],
+            )
+        )
+        await registry.update_health(
+            NodeHealth(
+                node_id=f"node_{cap}",
+                status=HealthStatus.HEALTHY,
+            )
+        )
 
     fm = FallbackManager(registry, breakers)
     fm.register_chain("expert", ["expert", "standard", "basic"])

@@ -6,6 +6,7 @@ from hbllm.memory.semantic import SemanticMemory, _TfIdfEmbedder
 
 # ── TF-IDF Embedder Tests ───────────────────────────────────────────────────
 
+
 def test_tfidf_tokenize():
     tokens = _TfIdfEmbedder._tokenize("Hello, World! This is a test.")
     assert "hello" in tokens
@@ -23,6 +24,7 @@ def test_tfidf_encode():
 
 
 # ── SemanticMemory Tests (TF-IDF fallback mode) ─────────────────────────────
+
 
 @pytest.fixture
 def sem_mem():

@@ -31,7 +31,9 @@ class _MockProvider(LLMProvider):
     def name(self) -> str:
         return "mock"
 
-    async def generate(self, messages, max_tokens=1024, temperature=0.7, top_p=0.9, **kw) -> LLMResponse:
+    async def generate(
+        self, messages, max_tokens=1024, temperature=0.7, top_p=0.9, **kw
+    ) -> LLMResponse:
         return LLMResponse(
             content="Mock response about the topic.",
             model="mock",
@@ -159,7 +161,9 @@ class TestBrainCognitiveSubsystems:
     async def test_token_optimizer_routes_model(self, brain):
         result = brain.token_optimizer.optimize("Hello")
         assert result.recommended_model == "small"
-        result = brain.token_optimizer.optimize("Explain quantum entanglement and derive the equations")
+        result = brain.token_optimizer.optimize(
+            "Explain quantum entanglement and derive the equations"
+        )
         assert result.recommended_model == "large"
 
     # ─── Config Toggling ─────────────────────────────────────────────

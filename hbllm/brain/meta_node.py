@@ -10,6 +10,7 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
 class MetaReasoningNode(Node):
     """
     AGI Layer: Meta-Reasoning Supervisor.
@@ -48,12 +49,14 @@ class MetaReasoningNode(Node):
 
         payload = message.payload
         if payload.get("is_priority"):
-            logger.info("MetaReasoningNode detected high-salience event. Triggering priority reflection.")
+            logger.info(
+                "MetaReasoningNode detected high-salience event. Triggering priority reflection."
+            )
             # Map salience to the reflection engine (Node M)
             await self._trigger_reflection(
                 domain="high_salience",
                 reason=f"High saliency score detected: {payload.get('score')}",
-                content=payload.get("content")
+                content=payload.get("content"),
             )
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -64,7 +67,7 @@ class MetaReasoningNode(Node):
         try:
             payload = FeedbackPayload(**message.payload)
         except Exception:
-            return None # Ignore invalid
+            return None  # Ignore invalid
 
         domain = payload.module_id or "general"
         rating = payload.rating
@@ -78,7 +81,7 @@ class MetaReasoningNode(Node):
                     "instruction": payload.prompt,
                     "response": payload.response,
                     "rejected": True,
-                    "domain": domain
+                    "domain": domain,
                 }
                 self.negative_feedback_buffer[domain].append(sample)
 
@@ -88,7 +91,9 @@ class MetaReasoningNode(Node):
 
         return None
 
-    async def _trigger_reflection(self, domain: str, reason: str | None = None, content: str | None = None) -> None:
+    async def _trigger_reflection(
+        self, domain: str, reason: str | None = None, content: str | None = None
+    ) -> None:
         """Creates a reflection dataset and triggers the self-improvement loop."""
         logger.critical("--- REFLECTION INITIATED FOR DOMAIN '%s' ---", domain.upper())
         logger.info("MetaReasoningNode is initiating a self-improvement loop.")
@@ -101,7 +106,9 @@ class MetaReasoningNode(Node):
         if not dataset and content:
             dataset = [{"content": content, "domain": domain}]
 
-        reason = reason or f"Accumulated {self.weakness_threshold} negative feedback events recently."
+        reason = (
+            reason or f"Accumulated {self.weakness_threshold} negative feedback events recently."
+        )
 
         try:
             # Thread file IO
@@ -124,10 +131,8 @@ class MetaReasoningNode(Node):
             target_node_id="",
             topic="system.improve",
             payload=SystemImprovePayload(
-                domain=domain,
-                reasoning=reason,
-                dataset_path=filepath
-            ).model_dump()
+                domain=domain, reasoning=reason, dataset_path=filepath
+            ).model_dump(),
         )
         await self.bus.publish("system.improve", improve_msg)
 

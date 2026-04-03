@@ -13,6 +13,7 @@ from hbllm.brain.policy_engine import (
 
 # ── PolicyCondition Tests ───────────────────────────────────────────────────
 
+
 class TestPolicyCondition:
     def test_eq(self):
         c = PolicyCondition(key="person_type", operator="eq", value="family")
@@ -55,48 +56,65 @@ class TestPolicyCondition:
 
 # ── Context-Aware PolicyEngine Tests ────────────────────────────────────────
 
+
 class TestContextAwarePolicyEngine:
     def test_policy_with_no_conditions_always_fires(self):
         engine = PolicyEngine(context_provider=None)
-        engine.add_policy(Policy(
-            name="no-violence", type=PolicyType.DENY,
-            pattern="kill|attack|harm", action=PolicyAction.BLOCK,
-        ))
+        engine.add_policy(
+            Policy(
+                name="no-violence",
+                type=PolicyType.DENY,
+                pattern="kill|attack|harm",
+                action=PolicyAction.BLOCK,
+            )
+        )
         result = engine.evaluate("I will harm you", context={})
         assert not result.passed
 
     def test_policy_fires_when_conditions_met(self):
         engine = PolicyEngine(context_provider=None)
-        engine.add_policy(Policy(
-            name="no-door-after-9pm", type=PolicyType.DENY,
-            pattern="open.*door", action=PolicyAction.BLOCK,
-            conditions=[PolicyCondition("time_hour", "gte", 21)],
-        ))
+        engine.add_policy(
+            Policy(
+                name="no-door-after-9pm",
+                type=PolicyType.DENY,
+                pattern="open.*door",
+                action=PolicyAction.BLOCK,
+                conditions=[PolicyCondition("time_hour", "gte", 21)],
+            )
+        )
         # After 9pm — should block
         result = engine.evaluate("I will open the door", context={"time_hour": 22})
         assert not result.passed
 
     def test_policy_skipped_when_conditions_not_met(self):
         engine = PolicyEngine(context_provider=None)
-        engine.add_policy(Policy(
-            name="no-door-after-9pm", type=PolicyType.DENY,
-            pattern="open.*door", action=PolicyAction.BLOCK,
-            conditions=[PolicyCondition("time_hour", "gte", 21)],
-        ))
+        engine.add_policy(
+            Policy(
+                name="no-door-after-9pm",
+                type=PolicyType.DENY,
+                pattern="open.*door",
+                action=PolicyAction.BLOCK,
+                conditions=[PolicyCondition("time_hour", "gte", 21)],
+            )
+        )
         # Before 9pm — should pass
         result = engine.evaluate("I will open the door", context={"time_hour": 14})
         assert result.passed
 
     def test_multiple_conditions_all_must_match(self):
         engine = PolicyEngine(context_provider=None)
-        engine.add_policy(Policy(
-            name="no-door-strangers-night", type=PolicyType.DENY,
-            pattern="open.*door", action=PolicyAction.BLOCK,
-            conditions=[
-                PolicyCondition("time_hour", "gte", 21),
-                PolicyCondition("person_type", "neq", "family"),
-            ],
-        ))
+        engine.add_policy(
+            Policy(
+                name="no-door-strangers-night",
+                type=PolicyType.DENY,
+                pattern="open.*door",
+                action=PolicyAction.BLOCK,
+                conditions=[
+                    PolicyCondition("time_hour", "gte", 21),
+                    PolicyCondition("person_type", "neq", "family"),
+                ],
+            )
+        )
         # Night + stranger → block
         result = engine.evaluate(
             "I will open the door",
@@ -121,13 +139,15 @@ class TestContextAwarePolicyEngine:
 
 # ── NL Rule Parsing Tests ───────────────────────────────────────────────────
 
+
 class TestOwnerRuleParsing:
     def test_never_after_time(self):
         r = parse_owner_rule("Never open the door after 9pm")
         assert r.policy_type == PolicyType.DENY
         assert r.severity in ("critical", "high")
-        assert any(c.key == "time_hour" and c.operator == "gte" and c.value == 21
-                    for c in r.conditions)
+        assert any(
+            c.key == "time_hour" and c.operator == "gte" and c.value == 21 for c in r.conditions
+        )
 
     def test_dont_with_person(self):
         r = parse_owner_rule("Don't discuss finances with guests")
@@ -137,13 +157,13 @@ class TestOwnerRuleParsing:
     def test_always_when_state(self):
         r = parse_owner_rule("Always speak softly when the baby is sleeping")
         assert r.policy_type == PolicyType.TRANSFORM
-        assert any(c.key == "baby_state" and c.value == "sleeping"
-                    for c in r.conditions)
+        assert any(c.key == "baby_state" and c.value == "sleeping" for c in r.conditions)
 
     def test_before_time(self):
         r = parse_owner_rule("Don't make noise before 6am")
-        assert any(c.key == "time_hour" and c.operator == "lt" and c.value == 6
-                    for c in r.conditions)
+        assert any(
+            c.key == "time_hour" and c.operator == "lt" and c.value == 6 for c in r.conditions
+        )
 
     def test_confidence_increases_with_specificity(self):
         vague = parse_owner_rule("be careful")
@@ -157,6 +177,7 @@ class TestOwnerRuleParsing:
 
 
 # ── OwnerRuleStore Tests ────────────────────────────────────────────────────
+
 
 class TestOwnerRuleStore:
     @pytest.fixture
@@ -205,6 +226,7 @@ class TestOwnerRuleStore:
 
 
 # ── Integration: Rules → Engine → Evaluation ───────────────────────────────
+
 
 class TestIntegration:
     def test_owner_rule_blocks_response(self, tmp_path):

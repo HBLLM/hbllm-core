@@ -5,7 +5,6 @@ Tests text chunking, voice config, and tenant voice caching
 WITHOUT loading the SpeechT5 model.
 """
 
-
 from hbllm.perception.audio_out_node import AudioOutputNode
 
 
@@ -28,7 +27,7 @@ class TestTextChunking:
         assert len(chunks) >= 2
         # Each chunk should be under the limit
         for chunk in chunks:
-            assert len(chunk) <= 50 or len(chunk.split('.')[0]) <= 50
+            assert len(chunk) <= 50 or len(chunk.split(".")[0]) <= 50
 
     def test_single_very_long_sentence_truncated(self):
         text = "A " * 300  # 600 chars

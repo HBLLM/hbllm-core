@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 
 # ─── API Key Manager ─────────────────────────────────────────────────────────
 
+
 @dataclass
 class ApiKey:
     """An API key with associated permissions."""
+
     key_hash: str
     tenant_id: str
     name: str = ""
@@ -122,9 +124,11 @@ class ApiKeyManager:
 
 # ─── Rate Limiter ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class TokenBucket:
     """Token bucket for rate limiting."""
+
     capacity: float
     refill_rate: float  # tokens per second
     tokens: float = 0.0
@@ -217,6 +221,7 @@ class RateLimiter:
 
 # ─── Input Sanitizer ──────────────────────────────────────────────────────────
 
+
 class InputSanitizer:
     """
     Sanitizes user input to prevent injection and abuse.
@@ -234,7 +239,7 @@ class InputSanitizer:
         re.compile(r"javascript:", re.IGNORECASE),
         re.compile(r"on\w+\s*=", re.IGNORECASE),  # onload=, onclick=
         re.compile(r"\{\{.*\}\}"),  # Template injection
-        re.compile(r"\$\{.*\}"),    # Expression injection
+        re.compile(r"\$\{.*\}"),  # Expression injection
     ]
 
     def __init__(self, max_length: int = 10000, strip_html: bool = True):
@@ -263,7 +268,7 @@ class InputSanitizer:
         # Length enforcement
         if len(text) > self.max_length:
             warnings.append(f"truncated_from_{len(text)}_to_{self.max_length}")
-            text = text[:self.max_length]
+            text = text[: self.max_length]
 
         # Strip control characters (keep newlines and tabs)
         cleaned = []
@@ -290,6 +295,7 @@ class InputSanitizer:
 
 
 # ─── Security Middleware ──────────────────────────────────────────────────────
+
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     """

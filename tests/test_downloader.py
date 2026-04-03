@@ -1,6 +1,7 @@
 """
 Tests for hbllm.data.downloader — dataset registry, text extraction, streaming.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,9 +49,16 @@ class TestPredefinedSources:
 
     def test_all_10_datasets_registered(self):
         expected = {
-            "fineweb", "wikipedia", "the_stack_v2", "starcoderdata",
-            "codeparrot", "openwebmath", "metamath", "pes2o",
-            "openhermes", "slimorca",
+            "fineweb",
+            "wikipedia",
+            "the_stack_v2",
+            "starcoderdata",
+            "codeparrot",
+            "openwebmath",
+            "metamath",
+            "pes2o",
+            "openhermes",
+            "slimorca",
         }
         assert set(PREDEFINED_SOURCES.keys()) == expected
 

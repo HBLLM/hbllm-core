@@ -3,6 +3,7 @@ Tests for hbllm.training.sft — Supervised Fine-Tuning pipeline.
 Tests for hbllm.training.evaluator — Model evaluation benchmarks.
 Tests for hbllm.training.embeddings — Embedding model & contrastive training.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,6 +21,7 @@ from hbllm.training.evaluator import ModelEvaluator
 from hbllm.training.sft import InstructionDataset, collate_sft, load_sft_data
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_tokenizer():
@@ -65,6 +67,7 @@ def sharegpt_data():
 
 # ─── SFT Tests ────────────────────────────────────────────────────────────────
 
+
 class TestInstructionDataset:
     """Tests for InstructionDataset."""
 
@@ -104,12 +107,14 @@ class TestInstructionDataset:
 
     def test_to_messages_sharegpt(self, mock_tokenizer):
         ds = InstructionDataset([], mock_tokenizer)
-        msgs = ds._to_messages({
-            "conversations": [
-                {"from": "human", "value": "Q"},
-                {"from": "gpt", "value": "A"},
-            ]
-        })
+        msgs = ds._to_messages(
+            {
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ]
+            }
+        )
         assert len(msgs) == 2
 
     def test_to_messages_direct(self, mock_tokenizer):
@@ -185,6 +190,7 @@ class TestLoadSftData:
 
 # ─── Evaluator Tests ──────────────────────────────────────────────────────────
 
+
 class TestModelEvaluator:
     """Tests for ModelEvaluator."""
 
@@ -254,6 +260,7 @@ class TestModelEvaluator:
 
 
 # ─── Embedding Tests ──────────────────────────────────────────────────────────
+
 
 class TestMiniEmbeddingModel:
     """Tests for MiniEmbeddingModel."""

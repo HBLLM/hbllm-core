@@ -72,8 +72,8 @@ class Message(BaseModel):
     type: MessageType
     source_node_id: str
     target_node_id: str | None = None  # None = broadcast
-    tenant_id: str = "default"         # Phase 9.5: Multi-tenant isolation
-    session_id: str = "default"        # Phase 9.5: Session correlation
+    tenant_id: str = "default"  # Phase 9.5: Multi-tenant isolation
+    session_id: str = "default"  # Phase 9.5: Session correlation
     topic: str
     payload: dict[str, Any] = Field(default_factory=dict)
     priority: Priority = Priority.NORMAL
@@ -163,12 +163,14 @@ class HeartbeatPayload(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     load: float = 0.0  # 0.0 - 1.0
 
+
 class SpawnRequestPayload(BaseModel):
     """Payload to request the creation of a new domain module."""
 
     topic: str
     trigger_query: str
     confidence_score: float
+
 
 class SystemImprovePayload(BaseModel):
     """Payload to trigger offline self-improvement on a weak domain."""

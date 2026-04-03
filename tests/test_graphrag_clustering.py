@@ -14,6 +14,7 @@ from hbllm.network.messages import Message, MessageType
 
 class MockLLM:
     """Mock LLM to simulate the GraphRAG clustering instruction."""
+
     def __init__(self):
         self.called = False
 
@@ -24,13 +25,13 @@ class MockLLM:
                 {
                     "name": "Machine Learning Algorithms",
                     "summary": "Various algorithms used in ML systems.",
-                    "members": ["attention", "softmax", "transformers"]
+                    "members": ["attention", "softmax", "transformers"],
                 },
                 {
                     "name": "Hardware",
                     "summary": "Physical compute units.",
-                    "members": ["gpu", "tpu"]
-                }
+                    "members": ["gpu", "tpu"],
+                },
             ]
         }
 
@@ -58,12 +59,16 @@ async def test_graphrag_hierarchical_clustering():
 
     # Mock learner to immediately complete phase 2 so test doesn't hang
     async def mock_learner(msg):
-        await bus.publish("system.learning_update", Message(
-            type=MessageType.EVENT,
-            source_node_id="mock_learner",
-            topic="system.learning_update",
-            payload={"status": "complete"}
-        ))
+        await bus.publish(
+            "system.learning_update",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id="mock_learner",
+                topic="system.learning_update",
+                payload={"status": "complete"},
+            ),
+        )
+
     await bus.subscribe("system.sleep.dpo_trigger", mock_learner)
 
     # 2. Setup Sleep Node with our mock LLM
@@ -97,11 +102,15 @@ async def test_graphrag_hierarchical_clustering():
         assert hw_comm.entity_type == "community"
 
         # Verify relations
-        ml_neighbors = memory.knowledge_graph.neighbors("Machine Learning Algorithms", direction="in", relation_type="member_of")
+        ml_neighbors = memory.knowledge_graph.neighbors(
+            "Machine Learning Algorithms", direction="in", relation_type="member_of"
+        )
         ml_member_labels = {rel["entity"] for rel in ml_neighbors}
         assert ml_member_labels == {"attention", "softmax", "transformers"}
 
-        hw_neighbors = memory.knowledge_graph.neighbors("Hardware", direction="in", relation_type="member_of")
+        hw_neighbors = memory.knowledge_graph.neighbors(
+            "Hardware", direction="in", relation_type="member_of"
+        )
         hw_member_labels = {rel["entity"] for rel in hw_neighbors}
         assert hw_member_labels == {"gpu", "tpu"}
     finally:

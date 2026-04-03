@@ -15,7 +15,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -32,18 +32,25 @@ logger = logging.getLogger(__name__)
 
 # ─── Request / Response Schemas ───────────────────────────────────────────────
 
+
 class ChatRequest(BaseModel):
     """Incoming chat message from a tenant."""
+
     tenant_id: str = Field(..., description="Unique tenant identifier")
-    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Session identifier")
+    session_id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()), description="Session identifier"
+    )
     text: str = Field(..., min_length=1, description="User message text")
     model_size: str = Field(default="125M", description="Model size to use")
-    provider: str | None = Field(default=None, description="LLM provider override (openai, anthropic, local)")
+    provider: str | None = Field(
+        default=None, description="LLM provider override (openai, anthropic, local)"
+    )
     system_prompt: str | None = Field(default=None, description="Optional system prompt")
 
 
 class ChatResponse(BaseModel):
     """Response from the cognitive pipeline."""
+
     tenant_id: str
     session_id: str
     correlation_id: str
@@ -56,6 +63,7 @@ class ChatResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Server health check response."""
+
     status: str = "healthy"
     nodes_registered: int = 0
     bus_type: str = "in_process"
@@ -64,6 +72,7 @@ class HealthResponse(BaseModel):
 
 class FeedbackRequest(BaseModel):
     """User feedback on a response (thumbs up/down for RLHF loop)."""
+
     tenant_id: str = Field(..., description="Tenant who sent the feedback")
     message_id: str = Field(..., description="Correlation ID of the response being rated")
     rating: int = Field(..., ge=-1, le=1, description="-1 (bad), 0 (neutral), 1 (good)")
@@ -77,7 +86,9 @@ class FeedbackRequest(BaseModel):
 _state: dict[str, Any] = {}
 
 
-async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"):
+async def _boot_brain(
+    model_size: str = "125M", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
+):
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
     import torch
@@ -127,7 +138,13 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
     logger.info("Loading base transformer model (%s)...", model_size)
     config = get_config(model_size)
     model = HBLLMForCausalLM(config)
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     model.to(device)
 
     # 3. Tokenizer
@@ -141,14 +158,12 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
     nodes = [
         # Memory + Knowledge Graph
         MemoryNode(node_id="memory_01", db_path="chat_memory.db"),
-
         # Core cognitive pipeline
         RouterNode(node_id="router_01", llm=llm_interface),
         PlannerNode(node_id="planner_01"),
         CriticNode(node_id="critic_01", llm=llm_interface),
         DecisionNode(node_id="decision_01", llm=llm_interface),
         WorkspaceNode(node_id="workspace_01"),
-
         # Experience & meta-cognitive
         ExperienceNode(node_id="experience_01", llm=llm_interface),
         MetaReasoningNode(node_id="meta_01"),
@@ -156,16 +171,13 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
         CuriosityNode(node_id="curiosity_01"),
         IdentityNode(node_id="identity_01"),
         CollectiveNode(node_id="collective_01"),
-
         # Learning
         LearnerNode(node_id="learner_01"),
         SpawnerNode(node_id="spawner_01", model=model, tokenizer=vocab),
-
         # Perception
         VisionNode(node_id="vision_01"),
         AudioInputNode(node_id="audio_in_01", model_size="tiny"),
         AudioOutputNode(node_id="audio_out_01"),
-
         # Simulation & actions
         WorldModelNode(node_id="world_model_01"),
         ExecutionNode(node_id="exec_01"),
@@ -173,13 +185,15 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
         LogicNode(node_id="logic_01", llm=llm_interface),
         FuzzyNode(node_id="fuzzy_01", llm=llm_interface),
         ApiNode(node_id="api_01", llm=llm_interface),
-
         # Consolidation
         SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=60.0, llm=llm_interface),
-
         # Domain experts
-        DomainModuleNode(node_id="domain_general", domain_name="general", model=model, tokenizer=vocab),
-        DomainModuleNode(node_id="domain_coding", domain_name="coding", model=model, tokenizer=vocab),
+        DomainModuleNode(
+            node_id="domain_general", domain_name="general", model=model, tokenizer=vocab
+        ),
+        DomainModuleNode(
+            node_id="domain_coding", domain_name="coding", model=model, tokenizer=vocab
+        ),
         DomainModuleNode(node_id="domain_math", domain_name="math", model=model, tokenizer=vocab),
     ]
 
@@ -210,6 +224,7 @@ async def _shutdown_brain():
 
 
 # ─── FastAPI Application ──────────────────────────────────────────────────────
+
 
 async def _boot_provider_mode():
     """Lightweight mode: use external LLM providers without the full brain."""
@@ -274,18 +289,21 @@ async def lifespan(app: FastAPI):
         from pathlib import Path
 
         import hbllm_cloud.dashboard as _dash_pkg
+
         static_dir = Path(_dash_pkg.__file__).parent / "static"
         if static_dir.exists():
             app.mount("/admin/static", StaticFiles(directory=str(static_dir)), name="admin-static")
 
         # Auth middleware (protects /admin/* except /admin/login and /admin/static)
         from hbllm_cloud.dashboard.auth import DashboardAuthMiddleware
+
         app.add_middleware(DashboardAuthMiddleware)
 
         # API security middleware (protects /v1/* with API key auth + rate limiting)
         from hbllm_cloud.api_middleware import ApiSecurityMiddleware
 
         from hbllm.serving.security import RateLimiter
+
         rate_limiter = RateLimiter(requests_per_minute=60.0, burst_size=10.0)
         _state["rate_limiter"] = rate_limiter
         app.add_middleware(
@@ -365,6 +383,7 @@ async def lifespan(app: FastAPI):
         app.include_router(portal_router, prefix="/portal")
 
         import hbllm_cloud.portal as _portal_pkg
+
         portal_static = Path(_portal_pkg.__file__).parent / "static"
         if portal_static.exists():
             app.mount("/portal/static", SF2(directory=str(portal_static)), name="portal-static")
@@ -525,6 +544,7 @@ async def lifespan(app: FastAPI):
         # ── Embeddable Widget ──
         import hbllm_cloud.widget as _widget_pkg
         from fastapi.responses import FileResponse
+
         widget_path = Path(_widget_pkg.__file__).parent / "hbllm-widget.js"
 
         @app.get("/widget/hbllm-widget.js")
@@ -532,10 +552,15 @@ async def lifespan(app: FastAPI):
             return FileResponse(
                 str(widget_path),
                 media_type="application/javascript",
-                headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*",
+                },
             )
 
-        logger.info("🚀 Platform features enabled (workflows, extraction, agents, multilang, widget)")
+        logger.info(
+            "🚀 Platform features enabled (workflows, extraction, agents, multilang, widget)"
+        )
     except ImportError as e:
         logger.info("Platform features not available: %s", e)
 
@@ -571,9 +596,12 @@ async def lifespan(app: FastAPI):
                 "consensus_confidence": result.consensus_confidence,
                 "perspectives": [
                     {
-                        "lens": p.lens_id, "name": p.lens_name, "icon": p.icon,
+                        "lens": p.lens_id,
+                        "name": p.lens_name,
+                        "icon": p.icon,
                         "node_analog": p.node_analog,
-                        "analysis": p.analysis, "confidence": p.confidence,
+                        "analysis": p.analysis,
+                        "confidence": p.confidence,
                         "processing_time_ms": p.processing_time_ms,
                     }
                     for p in result.perspectives
@@ -637,8 +665,7 @@ app = FastAPI(
 )
 
 _cors_origins = os.environ.get(
-    "HBLLM_CORS_ORIGINS",
-    "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+    "HBLLM_CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
 ).split(",")
 
 app.add_middleware(
@@ -674,6 +701,7 @@ async def metrics():
 
 
 # ─── Provider-based Chat (lightweight) ────────────────────────────────────────
+
 
 async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
     """Handle chat using the LLM provider abstraction (no brain pipeline)."""
@@ -769,6 +797,7 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
 
 
 # ─── Brain-based Chat (full pipeline) ────────────────────────────────────────
+
 
 async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     """Handle chat using the full brain pipeline."""
@@ -922,6 +951,7 @@ async def chat_stream(request: ChatRequest):
 
     async def event_generator():
         import json as _json
+
         try:
             while True:
                 try:
@@ -1015,8 +1045,11 @@ async def submit_feedback(request: FeedbackRequest):
 
 # ─── Knowledge Graph Endpoints ────────────────────────────────────────────────
 
+
 @app.get("/v1/knowledge/{entity}")
-async def knowledge_neighbors(entity: str, direction: str = "both", relation_type: str | None = None):
+async def knowledge_neighbors(
+    entity: str, direction: str = "both", relation_type: str | None = None
+):
     """Query KnowledgeGraph neighbors for an entity."""
     bus = _state.get("bus")
     if not bus:
@@ -1035,7 +1068,12 @@ async def knowledge_neighbors(entity: str, direction: str = "both", relation_typ
         type=MessageType.QUERY,
         source_node_id="api_server",
         topic="knowledge.query",
-        payload={"action": "neighbors", "entity": entity, "direction": direction, "relation_type": relation_type},
+        payload={
+            "action": "neighbors",
+            "entity": entity,
+            "direction": direction,
+            "relation_type": relation_type,
+        },
         correlation_id=correlation_id,
     )
     await bus.publish("knowledge.query", query)
@@ -1145,6 +1183,7 @@ async def knowledge_stats():
 
 # ─── Rules Endpoint ───────────────────────────────────────────────────────────
 
+
 @app.get("/v1/rules")
 async def list_rules():
     """List extracted if→then rules from the RuleExtractorNode."""
@@ -1160,6 +1199,7 @@ async def list_rules():
 
 
 # ─── WebSocket Streaming ─────────────────────────────────────────────────────
+
 
 @app.websocket("/v1/chat/ws")
 async def chat_websocket(ws: WebSocket):
@@ -1213,7 +1253,12 @@ async def chat_websocket(ws: WebSocket):
                 tenant_id=tenant_id,
                 session_id=session_id,
                 topic="memory.store",
-                payload={"session_id": session_id, "tenant_id": tenant_id, "role": "user", "content": text},
+                payload={
+                    "session_id": session_id,
+                    "tenant_id": tenant_id,
+                    "role": "user",
+                    "content": text,
+                },
             )
             await bus.publish("memory.store", memory_msg)
 
@@ -1249,7 +1294,12 @@ async def chat_websocket(ws: WebSocket):
                     tenant_id=tenant_id,
                     session_id=session_id,
                     topic="memory.store",
-                    payload={"session_id": session_id, "tenant_id": tenant_id, "role": "assistant", "content": response_text},
+                    payload={
+                        "session_id": session_id,
+                        "tenant_id": tenant_id,
+                        "role": "assistant",
+                        "content": response_text,
+                    },
                 )
                 await bus.publish("memory.store", store_msg)
 
@@ -1267,6 +1317,7 @@ async def chat_websocket(ws: WebSocket):
 
 
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────
+
 
 def main():
     """Run the FastAPI server with uvicorn."""

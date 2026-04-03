@@ -41,7 +41,7 @@ class EpisodicMemory:
         """Create the necessary tables if they don't exist."""
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS turns (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -52,15 +52,15 @@ class EpisodicMemory:
                 timestamp_iso TEXT NOT NULL,
                 metadata TEXT
             )
-        ''')
+        """)
         # Index for fast retrieval of latest turns per tenant+session
-        cursor.execute('''
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_tenant_session_time
             ON turns(tenant_id, session_id, timestamp_iso DESC)
-        ''')
+        """)
         # Migrate: add tenant_id column if upgrading from old schema
         try:
-            cursor.execute('SELECT tenant_id FROM turns LIMIT 1')
+            cursor.execute("SELECT tenant_id FROM turns LIMIT 1")
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE turns ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
         conn.commit()
@@ -101,15 +101,20 @@ class EpisodicMemory:
 
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO turns (id, tenant_id, session_id, role, content, domain, timestamp_iso, metadata)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (turn_id, tenant_id, session_id, role, content, domain, now_iso, meta_str))
+        """,
+            (turn_id, tenant_id, session_id, role, content, domain, now_iso, meta_str),
+        )
         conn.commit()
 
         return turn_id
 
-    def retrieve_recent(self, session_id: str, limit: int = 10, tenant_id: str = "default") -> list[dict[str, Any]]:
+    def retrieve_recent(
+        self, session_id: str, limit: int = 10, tenant_id: str = "default"
+    ) -> list[dict[str, Any]]:
         """
         Retrieve the most recent turns for a given tenant's session.
 
@@ -119,27 +124,32 @@ class EpisodicMemory:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT * FROM turns
             WHERE tenant_id = ? AND session_id = ?
             ORDER BY timestamp_iso DESC
             LIMIT ?
-        ''', (tenant_id, session_id, limit))
+        """,
+            (tenant_id, session_id, limit),
+        )
 
         rows = cursor.fetchall()
         conn.row_factory = None  # Reset for other methods
 
         results = []
         for row in reversed(rows):
-            results.append({
-                "id": row["id"],
-                "tenant_id": row["tenant_id"],
-                "role": row["role"],
-                "content": row["content"],
-                "domain": row["domain"],
-                "timestamp": row["timestamp_iso"],
-                "metadata": json.loads(row["metadata"]),
-            })
+            results.append(
+                {
+                    "id": row["id"],
+                    "tenant_id": row["tenant_id"],
+                    "role": row["role"],
+                    "content": row["content"],
+                    "domain": row["domain"],
+                    "timestamp": row["timestamp_iso"],
+                    "metadata": json.loads(row["metadata"]),
+                }
+            )
 
         return results
 
@@ -147,13 +157,18 @@ class EpisodicMemory:
         """Delete all turns for a tenant's session. Returns deleted count."""
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM turns WHERE tenant_id = ? AND session_id = ?', (tenant_id, session_id))
+        cursor.execute(
+            "DELETE FROM turns WHERE tenant_id = ? AND session_id = ?", (tenant_id, session_id)
+        )
         deleted = cursor.rowcount
         conn.commit()
         return deleted
 
     def search_by_content(
-        self, query: str, tenant_id: str = "default", limit: int = 10,
+        self,
+        query: str,
+        tenant_id: str = "default",
+        limit: int = 10,
     ) -> list[dict[str, Any]]:
         """
         Search across all sessions for turns containing the query string.
@@ -191,7 +206,10 @@ class EpisodicMemory:
         ]
 
     def retrieve_by_domain(
-        self, domain: str, tenant_id: str = "default", limit: int = 10,
+        self,
+        domain: str,
+        tenant_id: str = "default",
+        limit: int = 10,
     ) -> list[dict[str, Any]]:
         """
         Retrieve turns tagged with a specific domain across all sessions.
@@ -235,6 +253,7 @@ class EpisodicMemory:
             Number of deleted turns.
         """
         from datetime import timedelta
+
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
         conn = self._get_conn()

@@ -87,7 +87,9 @@ class InProcessBus:
     def __init__(self, queue_size: int = 1000, max_concurrent_handlers: int = 1000):
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
-        self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = asyncio.PriorityQueue(maxsize=queue_size)
+        self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = asyncio.PriorityQueue(
+            maxsize=queue_size
+        )
         self._queue_size = queue_size
         self._running = False
         self._dispatch_task: asyncio.Task[None] | None = None
@@ -139,7 +141,9 @@ class InProcessBus:
         if queue_fullness >= self._backpressure_warning_threshold:
             logger.warning(
                 "Bus queue at %.0f%% capacity (%d/%d)",
-                queue_fullness * 100, self._queue.qsize(), self._queue_size
+                queue_fullness * 100,
+                self._queue.qsize(),
+                self._queue_size,
             )
 
         self.metrics.record_publish(topic)
@@ -198,10 +202,15 @@ class InProcessBus:
 
             # TTL enforcement: drop expired messages
             if message.ttl_seconds is not None:
-                age = (time.time() - message.timestamp.replace(tzinfo=UTC).timestamp())
+                age = time.time() - message.timestamp.replace(tzinfo=UTC).timestamp()
                 if age > message.ttl_seconds:
                     self.metrics.record_drop(topic)
-                    logger.debug("Dropped expired message %s (age=%.1fs, ttl=%.1fs)", message.id, age, message.ttl_seconds)
+                    logger.debug(
+                        "Dropped expired message %s (age=%.1fs, ttl=%.1fs)",
+                        message.id,
+                        age,
+                        message.ttl_seconds,
+                    )
                     continue
 
             # Check if this is a response to a pending request
@@ -223,11 +232,14 @@ class InProcessBus:
             for sub in self._subscriptions.get(match_topic, []):
                 if not sub.active:
                     continue
+
                 async def _run_handler(s=sub, t=topic, m=message):
                     async with self._handler_semaphore:
                         _start = time.monotonic()
                         try:
-                            with trace_span(f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}):
+                            with trace_span(
+                                f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}
+                            ):
                                 response = await s.handler(m)
                             latency = (time.monotonic() - _start) * 1000
                             self.metrics.record_delivery(t, latency)

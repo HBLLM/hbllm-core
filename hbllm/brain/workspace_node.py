@@ -27,7 +27,13 @@ class WorkspaceNode(Node):
     efforts and aggregates competing or collaborating thoughts.
     """
 
-    def __init__(self, node_id: str, thinking_deadline: float = 4.0, max_concurrent_boards: int = 100, max_board_age: float = 300.0):
+    def __init__(
+        self,
+        node_id: str,
+        thinking_deadline: float = 4.0,
+        max_concurrent_boards: int = 100,
+        max_board_age: float = 300.0,
+    ):
         super().__init__(node_id=node_id, node_type=NodeType.CORE)
 
         # In-memory "Blackboard" mapping conversation correlation_ids
@@ -83,7 +89,9 @@ class WorkspaceNode(Node):
         payload = message.payload
         correlation_id = message.correlation_id or message.id
 
-        logger.info("Workspace received new Problem State: %s...", str(payload.get("text", ""))[:40])
+        logger.info(
+            "Workspace received new Problem State: %s...", str(payload.get("text", ""))[:40]
+        )
 
         # Guard: evict oldest boards if capacity exceeded
         if len(self.blackboards) >= self._max_concurrent_boards:
@@ -119,7 +127,7 @@ class WorkspaceNode(Node):
             session_id=message.session_id,
             topic="module.evaluate",  # Intuition, Logic, and Fuzzy modules listen here
             payload={**payload, "search_priority_memory": True},
-            correlation_id=correlation_id
+            correlation_id=correlation_id,
         )
         await self.bus.publish("module.evaluate", broadcast_msg)
 
@@ -135,11 +143,11 @@ class WorkspaceNode(Node):
         """
         corr_id = message.correlation_id
         if not corr_id or corr_id not in self.blackboards:
-            return None # Orphaned thought
+            return None  # Orphaned thought
 
         board = self.blackboards[corr_id]
         if board["resolved"]:
-            return None # Too late
+            return None  # Too late
 
         proposal = message.payload
         thought_type = proposal.get("type", "intuition")
@@ -147,25 +155,33 @@ class WorkspaceNode(Node):
 
         logger.info(
             "Workspace received a [%s] thought with %s confidence from %s",
-            thought_type, confidence, message.source_node_id
+            thought_type,
+            confidence,
+            message.source_node_id,
         )
 
-        board["thoughts"].append({
-            "node": message.source_node_id,
-            "type": thought_type,
-            "confidence": confidence,
-            "content": proposal.get("content")
-        })
+        board["thoughts"].append(
+            {
+                "node": message.source_node_id,
+                "type": thought_type,
+                "confidence": confidence,
+                "content": proposal.get("content"),
+            }
+        )
 
         # Phase 9: The Internal Monologue Loop
         if thought_type == "symbolic_logic" and confidence == 1.0:
             is_intermediate = proposal.get("is_intermediate", False)
             if is_intermediate:
-                logger.info("Workspace logic proof complete. Feeding back to Intuition Engine for monologue...")
+                logger.info(
+                    "Workspace logic proof complete. Feeding back to Intuition Engine for monologue..."
+                )
 
                 # We inject the logical proof into the user's prompt
                 new_payload = board["original_query"].copy()
-                new_payload["text"] = f"System Log: The logic engine has mathematically proven: '{proposal.get('content')}'. Based on this, formulate a final friendly response to the user."
+                new_payload["text"] = (
+                    f"System Log: The logic engine has mathematically proven: '{proposal.get('content')}'. Based on this, formulate a final friendly response to the user."
+                )
 
                 board["turn_count"] += 1
                 # Extend deadline to allow Intuition node to read the proof and generate text
@@ -179,7 +195,7 @@ class WorkspaceNode(Node):
                     session_id=board["session_id"],
                     topic="module.evaluate",
                     payload=new_payload,
-                    correlation_id=corr_id
+                    correlation_id=corr_id,
                 )
                 await self.bus.publish("module.evaluate", broadcast_msg)
             else:
@@ -200,10 +216,12 @@ class WorkspaceNode(Node):
                 logger.warning("Workspace WorldModel predicted a FAILURE: %s", reason)
                 # Initiate an internal monologue turn to fix the broken code
                 new_payload = board["original_query"].copy()
-                new_payload["text"] = f"System Log: Your previous action was simulated and failed due to: '{reason}'. Please fix the errors and try again."
+                new_payload["text"] = (
+                    f"System Log: Your previous action was simulated and failed due to: '{reason}'. Please fix the errors and try again."
+                )
 
                 board["turn_count"] += 1
-                board["resolved"] = False # Un-resolve it so thinking continues
+                board["resolved"] = False  # Un-resolve it so thinking continues
                 board["deadline"] = time.time() + self._thinking_deadline
 
                 self._spawn_watcher(corr_id)
@@ -215,7 +233,7 @@ class WorkspaceNode(Node):
                     session_id=board["session_id"],
                     topic="module.evaluate",
                     payload=new_payload,
-                    correlation_id=corr_id
+                    correlation_id=corr_id,
                 )
                 await self.bus.publish("module.evaluate", broadcast_msg)
             return None
@@ -232,13 +250,16 @@ class WorkspaceNode(Node):
                 retry_key = f"retries_{corr_id}"
                 current_retries = board.get(retry_key, 0)
                 if current_retries >= 3:
-                    logger.warning("Workspace max retries reached for %s, accepting as-is.", corr_id)
+                    logger.warning(
+                        "Workspace max retries reached for %s, accepting as-is.", corr_id
+                    )
                     return None
                 board[retry_key] = current_retries + 1
 
                 logger.warning(
                     "Workspace halting %s's thought due to Critic evaluation: %s",
-                    target_node, reason
+                    target_node,
+                    reason,
                 )
 
                 # We need to remove the flawed thought from the board so it isn't picked at consensus
@@ -246,10 +267,14 @@ class WorkspaceNode(Node):
 
                 # Trigger a forced backtrack via Internal Monologue
                 new_payload = board["original_query"].copy()
-                new_payload["text"] = f"CONSTITUTIONAL VIOLATION: Your previous thought '{content_failed}' was reviewed by the Critic Node and violated core system principles: '{reason}'. Please revise your response to strictly comply with all safety and logic principles."
+                new_payload["text"] = (
+                    f"CONSTITUTIONAL VIOLATION: Your previous thought '{content_failed}' was reviewed by the Critic Node and violated core system principles: '{reason}'. Please revise your response to strictly comply with all safety and logic principles."
+                )
 
                 board["turn_count"] += 1
-                board["deadline"] = time.time() + self._thinking_deadline # Give them time to redo it
+                board["deadline"] = (
+                    time.time() + self._thinking_deadline
+                )  # Give them time to redo it
                 board["resolved"] = False  # Make sure it's unresolved
 
                 self._spawn_watcher(corr_id)
@@ -261,7 +286,7 @@ class WorkspaceNode(Node):
                     session_id=board["session_id"],
                     topic="module.evaluate",
                     payload=new_payload,
-                    correlation_id=corr_id
+                    correlation_id=corr_id,
                 )
                 await self.bus.publish("module.evaluate", broadcast_msg)
             return None
@@ -312,7 +337,7 @@ class WorkspaceNode(Node):
             logger.warning("Workspace deadline expired with ZERO thoughts generated.")
             await self._send_error_fallback(
                 corr_id,
-                "I wasn't able to form a clear response to that. Could you rephrase your question?"
+                "I wasn't able to form a clear response to that. Could you rephrase your question?",
             )
             return
 
@@ -323,7 +348,8 @@ class WorkspaceNode(Node):
         best_thought = max(board["thoughts"], key=lambda t: t["confidence"])
         logger.info(
             "Workspace reached Consensus! Selecting %s thought from %s",
-            best_thought["type"], best_thought["node"]
+            best_thought["type"],
+            best_thought["node"],
         )
 
         content = best_thought.get("content", "")
@@ -331,7 +357,9 @@ class WorkspaceNode(Node):
         # Phase 12: Swarm Handoff Integration
         if best_thought["type"] == "swarm_transfer":
             target_specialty = content.strip().lower()
-            logger.info("Workspace initiating Native Swarm Transfer to specialty: '%s'", target_specialty)
+            logger.info(
+                "Workspace initiating Native Swarm Transfer to specialty: '%s'", target_specialty
+            )
 
             # Repackage the blackboard state so the new specialist has full context
             transfer_msg = Message(
@@ -343,9 +371,9 @@ class WorkspaceNode(Node):
                 payload={
                     "target_domain": target_specialty,
                     "original_query": board["original_query"],
-                    "history": board["thoughts"]
+                    "history": board["thoughts"],
                 },
-                correlation_id=corr_id
+                correlation_id=corr_id,
             )
             await self.bus.publish("system.swarm.transfer", transfer_msg)
             # Cleanup the local blackboard as it's no longer our responsibility
@@ -353,10 +381,13 @@ class WorkspaceNode(Node):
             return
 
         import re
+
         match = re.search(r"```python\n(.*?)```", str(content), re.DOTALL | re.IGNORECASE)
 
         if match:
-            logger.info("Workspace detected python code in winning thought. Verifying via ExecutionNode...")
+            logger.info(
+                "Workspace detected python code in winning thought. Verifying via ExecutionNode..."
+            )
             code_to_exec = match.group(1).strip()
 
             exec_msg = Message(
@@ -366,7 +397,7 @@ class WorkspaceNode(Node):
                 session_id=board["session_id"],
                 topic="action.execute_code",
                 payload={"code": code_to_exec},
-                correlation_id=corr_id
+                correlation_id=corr_id,
             )
 
             try:
@@ -390,7 +421,9 @@ class WorkspaceNode(Node):
 
                     # Force internal monologue to fix the code
                     new_payload = board["original_query"].copy()
-                    new_payload["text"] = f"CRITICAL SYSTEM ERROR: The code approach you provided failed with the following traceback:\n```\n{err}\n```\n\nPlease analyze the traceback and formulate a corrected approach."
+                    new_payload["text"] = (
+                        f"CRITICAL SYSTEM ERROR: The code approach you provided failed with the following traceback:\n```\n{err}\n```\n\nPlease analyze the traceback and formulate a corrected approach."
+                    )
 
                     board["turn_count"] += 1
                     board["resolved"] = False
@@ -405,18 +438,22 @@ class WorkspaceNode(Node):
                         session_id=board["session_id"],
                         topic="module.evaluate",
                         payload=new_payload,
-                        correlation_id=corr_id
+                        correlation_id=corr_id,
                     )
                     await self.bus.publish("module.evaluate", broadcast_msg)
             except Exception as e:
-                logger.warning("Execution verification timed out: %s. Accepting thought with warning.", e)
+                logger.warning(
+                    "Execution verification timed out: %s. Accepting thought with warning.", e
+                )
                 best_thought["execution_warning"] = "Verification timed out"
                 await self._commit_to_decision(corr_id, best_thought)
             return
 
         # Legacy simulation heuristic
         if "execute_python" in best_thought["type"] or "<execute_python>" in str(content):
-            logger.info("Workspace detected an executable action. Pushing to WorldModel for simulation...")
+            logger.info(
+                "Workspace detected an executable action. Pushing to WorldModel for simulation..."
+            )
             board["simulating_thought"] = best_thought
 
             code_to_sim = str(content)
@@ -427,11 +464,8 @@ class WorkspaceNode(Node):
                 tenant_id=board["tenant_id"],
                 session_id=board["session_id"],
                 topic="workspace.simulate",
-                payload={
-                    "action_type": "execute_python",
-                    "content": code_to_sim
-                },
-                correlation_id=corr_id
+                payload={"action_type": "execute_python", "content": code_to_sim},
+                correlation_id=corr_id,
             )
             await self.bus.publish("workspace.simulate", sim_msg)
             board["resolved"] = False
@@ -452,7 +486,7 @@ class WorkspaceNode(Node):
             return
 
         # Check which memory services are available by inspecting bus subscriptions
-        bus_subs = getattr(self.bus, '_subscriptions', {})
+        bus_subs = getattr(self.bus, "_subscriptions", {})
         has_semantic = bool(bus_subs.get("memory.search"))
         has_procedural = bool(bus_subs.get("memory.skill.find"))
 
@@ -481,12 +515,14 @@ class WorkspaceNode(Node):
                     memory_context = "\n".join(
                         f"- {r.get('text', r.get('content', ''))[:200]}" for r in results[:3]
                     )
-                    board["thoughts"].append({
-                        "node": "memory_retrieval",
-                        "type": "memory_context",
-                        "confidence": 0.3,
-                        "content": f"Relevant past context:\n{memory_context}",
-                    })
+                    board["thoughts"].append(
+                        {
+                            "node": "memory_retrieval",
+                            "type": "memory_context",
+                            "confidence": 0.3,
+                            "content": f"Relevant past context:\n{memory_context}",
+                        }
+                    )
             except (TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
@@ -514,12 +550,14 @@ class WorkspaceNode(Node):
                         f"- {s.get('name', 'unknown')}: {', '.join(s.get('steps', [])[:3])}"
                         for s in skills[:2]
                     )
-                    board["thoughts"].append({
-                        "node": "procedural_memory",
-                        "type": "skill_context",
-                        "confidence": 0.25,
-                        "content": f"Applicable learned skills:\n{skill_text}",
-                    })
+                    board["thoughts"].append(
+                        {
+                            "node": "procedural_memory",
+                            "type": "skill_context",
+                            "confidence": 0.25,
+                            "content": f"Applicable learned skills:\n{skill_text}",
+                        }
+                    )
             except (TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
@@ -549,9 +587,9 @@ class WorkspaceNode(Node):
                 topic="decision.evaluate",
                 payload={
                     "original_query": board["original_query"],
-                    "selected_thought": best_thought
+                    "selected_thought": best_thought,
                 },
-                correlation_id=corr_id
+                correlation_id=corr_id,
             )
             await self.bus.publish("decision.evaluate", decision_msg)
         except Exception:
@@ -577,7 +615,7 @@ class WorkspaceNode(Node):
                 session_id=board["session_id"] if board else "unknown",
                 topic="sensory.output",
                 payload={"text": error_text, "source": "workspace_fallback"},
-                correlation_id=corr_id
+                correlation_id=corr_id,
             )
             await self.bus.publish("sensory.output", msg)
         except Exception:
@@ -595,7 +633,9 @@ class WorkspaceNode(Node):
         omitted = len(text) - max_chars
         return f"{head}\n\n[... {omitted} characters dynamically omitted to preserve context bounds ...]\n\n{tail}"
 
-    async def _emit_training_feedback(self, board: dict[str, Any], thought: dict[str, Any], rating: int) -> None:
+    async def _emit_training_feedback(
+        self, board: dict[str, Any], thought: dict[str, Any], rating: int
+    ) -> None:
         """Phase 3: Autonomous Neural-Symbolic Training Feedback."""
         try:
             prompt = board["original_query"].get("text", "")
@@ -618,10 +658,12 @@ class WorkspaceNode(Node):
                     "rating": rating,
                     "prompt": prompt,
                     "response": response,
-                }
+                },
             )
             await self.bus.publish("system.feedback", feedback_msg)
-            logger.info("Emitted autonomous training feedback (rating=%d) for auto-training loop", rating)
+            logger.info(
+                "Emitted autonomous training feedback (rating=%d) for auto-training loop", rating
+            )
         except Exception as e:
             logger.warning("Failed to emit autonomous training feedback: %s", e)
 
@@ -632,14 +674,13 @@ class WorkspaceNode(Node):
                 await asyncio.sleep(10.0)  # Check every 10 seconds
                 now = time.time()
                 stale_ids = [
-                    cid for cid, board in self.blackboards.items()
+                    cid
+                    for cid, board in self.blackboards.items()
                     if now - board.get("start_time", now) > self._max_board_age
                 ]
                 for cid in stale_ids:
                     logger.warning("Sweeper cleaning stale blackboard: %s", cid)
-                    await self._send_error_fallback(
-                        cid, "Request timed out. Please try again."
-                    )
+                    await self._send_error_fallback(cid, "Request timed out. Please try again.")
             except asyncio.CancelledError:
                 break
             except Exception:

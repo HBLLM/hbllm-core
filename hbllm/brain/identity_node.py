@@ -24,8 +24,16 @@ logger = logging.getLogger(__name__)
 class IdentityProfile:
     """A tenant's identity profile."""
 
-    __slots__ = ("tenant_id", "persona_name", "system_prompt", "goals",
-                 "constraints", "personality_traits", "created_at", "updated_at")
+    __slots__ = (
+        "tenant_id",
+        "persona_name",
+        "system_prompt",
+        "goals",
+        "constraints",
+        "personality_traits",
+        "created_at",
+        "updated_at",
+    )
 
     def __init__(
         self,
@@ -101,7 +109,8 @@ class IdentityStore:
         """Insert or update a tenant's identity profile."""
         now = datetime.now(UTC).isoformat()
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO identities
                     (tenant_id, persona_name, system_prompt, goals_json,
                      constraints_json, traits_json, created_at, updated_at)
@@ -113,11 +122,18 @@ class IdentityStore:
                     constraints_json = excluded.constraints_json,
                     traits_json = excluded.traits_json,
                     updated_at = excluded.updated_at
-            """, (
-                profile.tenant_id, profile.persona_name, profile.system_prompt,
-                json.dumps(profile.goals), json.dumps(profile.constraints),
-                json.dumps(profile.personality_traits), profile.created_at, now,
-            ))
+            """,
+                (
+                    profile.tenant_id,
+                    profile.persona_name,
+                    profile.system_prompt,
+                    json.dumps(profile.goals),
+                    json.dumps(profile.constraints),
+                    json.dumps(profile.personality_traits),
+                    profile.created_at,
+                    now,
+                ),
+            )
 
     def get(self, tenant_id: str) -> IdentityProfile | None:
         """Retrieve a tenant's identity profile."""
@@ -145,7 +161,8 @@ class IdentityStore:
     def delete(self, tenant_id: str) -> bool:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "DELETE FROM identities WHERE tenant_id = ?", (tenant_id,),
+                "DELETE FROM identities WHERE tenant_id = ?",
+                (tenant_id,),
             )
             return cursor.rowcount > 0
 
@@ -188,17 +205,21 @@ class IdentityNode(Node):
             profile = self.store.get(tenant_id)
 
             if profile is None:
-                return message.create_response({
-                    "found": False,
-                    "profile": None,
-                    "context_string": "",
-                })
+                return message.create_response(
+                    {
+                        "found": False,
+                        "profile": None,
+                        "context_string": "",
+                    }
+                )
 
-            return message.create_response({
-                "found": True,
-                "profile": profile.to_dict(),
-                "context_string": profile.to_context_string(),
-            })
+            return message.create_response(
+                {
+                    "found": True,
+                    "profile": profile.to_dict(),
+                    "context_string": profile.to_context_string(),
+                }
+            )
 
         except Exception as e:
             logger.error("Identity query failed: %s", e)
@@ -223,17 +244,20 @@ class IdentityNode(Node):
             logger.info("Updated identity for tenant '%s'", tenant_id)
 
             # Publish identity context to workspace
-            await self.publish("workspace.identity", Message(
-                type=MessageType.EVENT,
-                source_node_id=self.node_id,
-                tenant_id=tenant_id,
-                topic="workspace.identity",
-                payload={
-                    "tenant_id": tenant_id,
-                    "context_string": profile.to_context_string(),
-                    "profile": profile.to_dict(),
-                },
-            ))
+            await self.publish(
+                "workspace.identity",
+                Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    tenant_id=tenant_id,
+                    topic="workspace.identity",
+                    payload={
+                        "tenant_id": tenant_id,
+                        "context_string": profile.to_context_string(),
+                        "profile": profile.to_dict(),
+                    },
+                ),
+            )
 
             return message.create_response({"status": "updated", "tenant_id": tenant_id})
 

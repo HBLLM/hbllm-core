@@ -25,7 +25,11 @@ class LogicNode(Node):
     """
 
     def __init__(self, node_id: str, llm=None):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["symbolic_math", "theorem_proving"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["symbolic_math", "theorem_proving"],
+        )
         self.llm = llm  # LLMInterface instance — injected at startup
 
     async def on_start(self) -> None:
@@ -53,8 +57,8 @@ class LogicNode(Node):
         classification = await self.llm.generate_json(
             f"Classify whether the following query requires formal logical deduction, "
             f"mathematical constraint solving, or theorem proving. "
-            f"Query: \"{text}\"\n"
-            f"Output JSON: {{\"is_logical\": true/false, \"reason\": \"brief explanation\"}}"
+            f'Query: "{text}"\n'
+            f'Output JSON: {{"is_logical": true/false, "reason": "brief explanation"}}'
         )
 
         if not classification.get("is_logical", False):
@@ -80,9 +84,9 @@ class LogicNode(Node):
                     "type": "symbolic_logic",
                     "confidence": 1.0,  # Z3 answers are unequivocally true
                     "content": answer,
-                    "is_intermediate": True  # Return to Intuition Engine for conversational wrapper
+                    "is_intermediate": True,  # Return to Intuition Engine for conversational wrapper
                 },
-                correlation_id=message.correlation_id
+                correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
 
@@ -103,16 +107,18 @@ class LogicNode(Node):
         # Ask the LLM to write Z3 code
         loop = asyncio.new_event_loop()
         try:
-            z3_code = loop.run_until_complete(self.llm.generate(
-                f"You are a Z3 theorem prover expert. Translate the following problem into "
-                f"Python code using the z3-solver library. Use ONLY z3 API calls. "
-                f"The code must define variables, add constraints to a Solver, check satisfiability, "
-                f"and store the final human-readable answer string in a variable called `result`.\n\n"
-                f"Problem: \"{query}\"\n\n"
-                f"Output ONLY the Python code, no explanations:\n```python\n",
-                max_tokens=256,
-                temperature=0.2
-            ))
+            z3_code = loop.run_until_complete(
+                self.llm.generate(
+                    f"You are a Z3 theorem prover expert. Translate the following problem into "
+                    f"Python code using the z3-solver library. Use ONLY z3 API calls. "
+                    f"The code must define variables, add constraints to a Solver, check satisfiability, "
+                    f"and store the final human-readable answer string in a variable called `result`.\n\n"
+                    f'Problem: "{query}"\n\n'
+                    f"Output ONLY the Python code, no explanations:\n```python\n",
+                    max_tokens=256,
+                    temperature=0.2,
+                )
+            )
         finally:
             loop.close()
 
@@ -132,10 +138,19 @@ class LogicNode(Node):
         # 3. Execute in a restricted sandbox
         sandbox_globals = {
             "__builtins__": {
-                "print": print, "range": range, "len": len,
-                "str": str, "int": int, "float": float, "bool": bool,
-                "list": list, "dict": dict, "tuple": tuple,
-                "True": True, "False": False, "None": None,
+                "print": print,
+                "range": range,
+                "len": len,
+                "str": str,
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "list": list,
+                "dict": dict,
+                "tuple": tuple,
+                "True": True,
+                "False": False,
+                "None": None,
             },
             "z3": z3,
         }
@@ -149,6 +164,7 @@ class LogicNode(Node):
         try:
             # ── AST validation: reject dangerous patterns ──
             import ast as _ast
+
             try:
                 tree = _ast.parse(z3_code)
             except SyntaxError as se:
@@ -156,9 +172,11 @@ class LogicNode(Node):
                 return None
 
             _BLOCKED = (
-                _ast.Import, _ast.ImportFrom,   # no imports
-                _ast.FunctionDef, _ast.AsyncFunctionDef,  # no function defs
-                _ast.ClassDef,                  # no class defs
+                _ast.Import,
+                _ast.ImportFrom,  # no imports
+                _ast.FunctionDef,
+                _ast.AsyncFunctionDef,  # no function defs
+                _ast.ClassDef,  # no class defs
             )
             for node in _ast.walk(tree):
                 if isinstance(node, _BLOCKED):

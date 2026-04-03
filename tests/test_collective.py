@@ -10,6 +10,7 @@ from hbllm.network.messages import Message, MessageType
 
 # ─── KnowledgeDigest Tests ────────────────────────────────────────────────────
 
+
 def test_digest_checksum():
     d = KnowledgeDigest(
         domain="math",
@@ -45,6 +46,7 @@ def test_digest_to_dict():
 
 # ─── CollectiveNode Integration Tests ─────────────────────────────────────────
 
+
 @pytest.fixture
 async def collective_setup():
     """Set up two collective nodes on the same bus (simulating peer instances)."""
@@ -58,8 +60,7 @@ async def collective_setup():
     await node_b.start(bus)
 
     # Wire broadcast → sync so nodes can communicate
-    await bus.subscribe("collective.broadcast",
-        lambda msg: bus.publish("collective.sync", msg))
+    await bus.subscribe("collective.broadcast", lambda msg: bus.publish("collective.sync", msg))
 
     yield node_a, node_b, bus
 

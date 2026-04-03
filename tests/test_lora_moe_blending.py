@@ -40,7 +40,9 @@ def test_lora_moe_blending():
 
         ACTIVE_ADAPTER.set("coding")
         coding_out = lora_layer(x) - base_out
-        assert torch.allclose(coding_out, torch.full_like(coding_out, 256.0)), f"Coding out {coding_out[0,0]} != 256.0"
+        assert torch.allclose(coding_out, torch.full_like(coding_out, 256.0)), (
+            f"Coding out {coding_out[0, 0]} != 256.0"
+        )
 
         # Math component = x @ (2.0) @ (2.0) = 16 * 2.0 * 4 * 2.0 = 256
         # wait!
@@ -49,7 +51,9 @@ def test_lora_moe_blending():
         # scaled = 256.0 * 4.0 = 1024.0!
         ACTIVE_ADAPTER.set("math")
         math_out = lora_layer(x) - base_out
-        assert torch.allclose(math_out, torch.full_like(math_out, 1024.0)), f"Math out {math_out[0,0]} != 1024.0"
+        assert torch.allclose(math_out, torch.full_like(math_out, 1024.0)), (
+            f"Math out {math_out[0, 0]} != 1024.0"
+        )
 
         # Now test Dynamic MoE Blending: 0.7 coding + 0.3 math
         # It should exactly equal 0.7 * 256.0 + 0.3 * 1024.0!
@@ -59,6 +63,8 @@ def test_lora_moe_blending():
 
         ACTIVE_ADAPTER.set({"coding": 0.7, "math": 0.3})
         blended_out = lora_layer(x) - base_out
-        assert torch.allclose(blended_out, torch.full_like(blended_out, 486.4)), f"Blended out {blended_out[0,0]} != 486.4"
+        assert torch.allclose(blended_out, torch.full_like(blended_out, 486.4)), (
+            f"Blended out {blended_out[0, 0]} != 486.4"
+        )
 
     print("Dynamic MoE Blending mathematical equivalence verified perfectly!")

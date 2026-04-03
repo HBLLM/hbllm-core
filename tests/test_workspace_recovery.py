@@ -43,7 +43,11 @@ async def test_workspace_fallback_on_zero_thoughts():
     # The workspace should have sent a fallback response
     assert len(fallback_received) >= 1
     fallback_text = fallback_received[0].payload.get("text", "")
-    assert "rephrase" in fallback_text.lower() or "unable" in fallback_text.lower() or "wasn't able" in fallback_text.lower()
+    assert (
+        "rephrase" in fallback_text.lower()
+        or "unable" in fallback_text.lower()
+        or "wasn't able" in fallback_text.lower()
+    )
     assert fallback_received[0].payload.get("source") == "workspace_fallback"
 
     await workspace.stop()
@@ -91,8 +95,10 @@ async def test_workspace_cleanup_after_commit():
 
     # Capture decision messages
     decisions = []
+
     async def decision_handler(msg: Message):
         decisions.append(msg)
+
     await bus.subscribe("decision.evaluate", decision_handler)
 
     # Send query

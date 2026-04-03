@@ -73,7 +73,7 @@ async def test_lora_concurrency():
     await asyncio.gather(
         run_concurrent_generation("A"),
         run_concurrent_generation("B"),
-        run_concurrent_generation("C")
+        run_concurrent_generation("C"),
     )
 
     print(f"Results: {results}")

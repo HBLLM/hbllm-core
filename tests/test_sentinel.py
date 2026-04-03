@@ -15,6 +15,7 @@ from hbllm.network.messages import Message, MessageType
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+
 class FakeBus:
     """Minimal bus mock for testing nodes."""
 
@@ -38,34 +39,41 @@ class FakeBus:
 def make_engine_with_rules() -> PolicyEngine:
     """Create a PolicyEngine with test rules."""
     engine = PolicyEngine(context_provider=None)
-    engine.add_policy(Policy(
-        name="no-door-night",
-        type=PolicyType.DENY,
-        pattern="door.*open|open.*door",
-        action=PolicyAction.BLOCK,
-        severity="critical",
-        conditions=[PolicyCondition("time_hour", "gte", 21)],
-    ))
-    engine.add_policy(Policy(
-        name="quiet-baby",
-        type=PolicyType.DENY,
-        pattern="loud|yell|shout",
-        action=PolicyAction.BLOCK,
-        severity="high",
-        conditions=[PolicyCondition("baby_state", "eq", "sleeping")],
-    ))
-    engine.add_policy(Policy(
-        name="no-finance-strangers",
-        type=PolicyType.DENY,
-        pattern="salary|bank|mortgage",
-        action=PolicyAction.BLOCK,
-        severity="high",
-        conditions=[PolicyCondition("person_type", "neq", "family")],
-    ))
+    engine.add_policy(
+        Policy(
+            name="no-door-night",
+            type=PolicyType.DENY,
+            pattern="door.*open|open.*door",
+            action=PolicyAction.BLOCK,
+            severity="critical",
+            conditions=[PolicyCondition("time_hour", "gte", 21)],
+        )
+    )
+    engine.add_policy(
+        Policy(
+            name="quiet-baby",
+            type=PolicyType.DENY,
+            pattern="loud|yell|shout",
+            action=PolicyAction.BLOCK,
+            severity="high",
+            conditions=[PolicyCondition("baby_state", "eq", "sleeping")],
+        )
+    )
+    engine.add_policy(
+        Policy(
+            name="no-finance-strangers",
+            type=PolicyType.DENY,
+            pattern="salary|bank|mortgage",
+            action=PolicyAction.BLOCK,
+            severity="high",
+            conditions=[PolicyCondition("person_type", "neq", "family")],
+        )
+    )
     return engine
 
 
 # ── SentinelNode Tests ────────────────────────────────────────────────────
+
 
 class TestSentinelNode:
     @pytest.fixture
@@ -193,16 +201,19 @@ class TestSentinelNode:
     @pytest.mark.asyncio
     async def test_context_to_text(self, sentinel):
         """Should generate readable text from context dict."""
-        text = sentinel._context_to_text({
-            "time_hour": 22,
-            "door_state": "open",
-            "baby_state": "sleeping",
-        })
+        text = sentinel._context_to_text(
+            {
+                "time_hour": 22,
+                "door_state": "open",
+                "baby_state": "sleeping",
+            }
+        )
         assert "door" in text.lower()
         assert "baby" in text.lower()
 
 
 # ── PlannerNode Policy Gate Tests ──────────────────────────────────────────
+
 
 class TestPlannerPolicyGate:
     def test_planner_accepts_policy_engine(self):
@@ -240,20 +251,25 @@ class TestPlannerPolicyGate:
 
 # ── Integration: Sentinel + PolicyEngine ────────────────────────────────────
 
+
 class TestAgenticIntegration:
     @pytest.mark.asyncio
     async def test_full_sentinel_flow(self):
         """End-to-end: engine → sentinel → context change → corrective action."""
         engine = PolicyEngine(context_provider=None)
-        engine.add_policy(Policy(
-            name="lights-off-midnight",
-            type=PolicyType.DENY,
-            pattern="light.*on|lights.*on",
-            action=PolicyAction.BLOCK,
-            severity="high",
-            conditions=[PolicyCondition("time_hour", "gte", 0),
-                        PolicyCondition("time_hour", "lt", 6)],
-        ))
+        engine.add_policy(
+            Policy(
+                name="lights-off-midnight",
+                type=PolicyType.DENY,
+                pattern="light.*on|lights.*on",
+                action=PolicyAction.BLOCK,
+                severity="high",
+                conditions=[
+                    PolicyCondition("time_hour", "gte", 0),
+                    PolicyCondition("time_hour", "lt", 6),
+                ],
+            )
+        )
 
         sentinel = SentinelNode(
             node_id="sentinel",
@@ -281,13 +297,15 @@ class TestAgenticIntegration:
     async def test_sentinel_safe_context_no_action(self):
         """Safe context should not trigger any actions."""
         engine = PolicyEngine(context_provider=None)
-        engine.add_policy(Policy(
-            name="no-door-night",
-            type=PolicyType.DENY,
-            pattern="door.*open",
-            action=PolicyAction.BLOCK,
-            conditions=[PolicyCondition("time_hour", "gte", 21)],
-        ))
+        engine.add_policy(
+            Policy(
+                name="no-door-night",
+                type=PolicyType.DENY,
+                pattern="door.*open",
+                action=PolicyAction.BLOCK,
+                conditions=[PolicyCondition("time_hour", "gte", 21)],
+            )
+        )
 
         sentinel = SentinelNode(
             node_id="sentinel",

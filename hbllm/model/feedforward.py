@@ -63,6 +63,7 @@ class SwiGLUFFN(nn.Module):
         output = self.dropout(output)
         return output
 
+
 class MoEFFN(nn.Module):
     """
     Mixture of Experts Feed-Forward Network.
@@ -107,7 +108,9 @@ class MoEFFN(nn.Module):
         routing_weights = F.softmax(router_logits, dim=-1)
 
         # Select top-k experts for each token
-        routing_weights, selected_experts = torch.topk(routing_weights, self.num_active_experts, dim=-1)
+        routing_weights, selected_experts = torch.topk(
+            routing_weights, self.num_active_experts, dim=-1
+        )
 
         # Normalize weights for the selected experts
         routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
@@ -115,14 +118,18 @@ class MoEFFN(nn.Module):
 
         # 2. Compute Load Balancing Loss
         # f_i (fraction of tokens routed to expert i)
-        expert_mask = F.one_hot(selected_experts, num_classes=self.num_experts).sum(dim=1)  # [batch * seq_len, num_experts]
+        expert_mask = F.one_hot(selected_experts, num_classes=self.num_experts).sum(
+            dim=1
+        )  # [batch * seq_len, num_experts]
         tokens_per_expert = expert_mask.float().mean(dim=0)  # [num_experts]
 
         # P_i (average routing probability of expert i across all tokens)
         router_prob_per_expert = F.softmax(router_logits, dim=-1).mean(dim=0)  # [num_experts]
 
         # auxiliary load balancing loss (alpha * N * sum(f_i * P_i))
-        load_balancing_loss = self.num_experts * torch.sum(tokens_per_expert * router_prob_per_expert)
+        load_balancing_loss = self.num_experts * torch.sum(
+            tokens_per_expert * router_prob_per_expert
+        )
 
         # 3. Apply Experts
         final_hidden_states = torch.zeros_like(x_flat)

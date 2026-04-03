@@ -138,6 +138,7 @@ def test_prune_doesnt_remove_roots():
     assert pruned == 0
     assert root.id in g.nodes
 
+
 def test_thought_graph_mcts_stats():
     """Verify backpropagate correctly updates visits and cumulative_reward."""
     g = ThoughtGraph()
@@ -164,6 +165,7 @@ def test_thought_graph_mcts_stats():
     assert root.cumulative_reward == pytest.approx(0.95)  # 0.95 + 0.0*0.95
     assert root.q_value == pytest.approx(0.475)  # 0.95 / 2
 
+
 def test_thought_graph_uct_selection():
     """Verify UCT selects unvisited nodes first, then balances Q-value and exploration."""
     g = ThoughtGraph()
@@ -179,9 +181,9 @@ def test_thought_graph_uct_selection():
     assert first_sel.id in [c1.id, c2.id, c3.id]
 
     # Manually visit all children with different rewards
-    g.backpropagate(c1.id, 1.0) # q=1.0
-    g.backpropagate(c2.id, 0.5) # q=0.5
-    g.backpropagate(c3.id, 0.0) # q=0.0
+    g.backpropagate(c1.id, 1.0)  # q=1.0
+    g.backpropagate(c2.id, 0.5)  # q=0.5
+    g.backpropagate(c3.id, 0.0)  # q=0.0
 
     # C1 has highest Q, should be selected next (exploration term is equal for all)
     next_sel = g.select_leaf_uct(root.id)

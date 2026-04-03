@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class UncertaintyEvent:
     """A recorded instance of system uncertainty."""
+
     topic: str
     query: str
     reason: str  # "low_confidence", "negative_feedback", "error_fallback"
@@ -35,6 +36,7 @@ class UncertaintyEvent:
 @dataclass
 class LearningGoal:
     """An autonomous learning objective generated from knowledge gaps."""
+
     topic: str
     description: str
     priority: float  # Higher = more urgent (based on frequency/recency)
@@ -49,7 +51,9 @@ class GoalQueue:
         self.goals: list[LearningGoal] = []
         self.max_size = max_size
 
-    def add_or_update(self, topic: str, description: str, priority: float, event_count: int) -> LearningGoal:
+    def add_or_update(
+        self, topic: str, description: str, priority: float, event_count: int
+    ) -> LearningGoal:
         """Add a new goal or update an existing one for the same topic."""
         for goal in self.goals:
             if goal.topic == topic and goal.status == "pending":
@@ -69,7 +73,7 @@ class GoalQueue:
         self._sort()
 
         if len(self.goals) > self.max_size:
-            self.goals = self.goals[:self.max_size]
+            self.goals = self.goals[: self.max_size]
 
         return goal
 
@@ -137,8 +141,11 @@ class CuriosityNode(Node):
         await self.bus.subscribe("curiosity.query", self._handle_query)
 
     async def on_stop(self) -> None:
-        logger.info("Stopping CuriosityNode (%d events, %d goals)",
-                     len(self.events), len(self.goal_queue.goals))
+        logger.info(
+            "Stopping CuriosityNode (%d events, %d goals)",
+            len(self.events),
+            len(self.goal_queue.goals),
+        )
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
@@ -199,11 +206,13 @@ class CuriosityNode(Node):
 
     async def _handle_query(self, message: Message) -> Message | None:
         """Return curiosity engine stats."""
-        return message.create_response({
-            "event_count": len(self.events),
-            "goal_queue": self.goal_queue.summary(),
-            "top_gaps": self._get_top_gaps(5),
-        })
+        return message.create_response(
+            {
+                "event_count": len(self.events),
+                "goal_queue": self.goal_queue.summary(),
+                "top_gaps": self._get_top_gaps(5),
+            }
+        )
 
     async def _record_event(self, event: UncertaintyEvent) -> None:
         """Record an uncertainty event and check if a goal should be generated."""
@@ -215,12 +224,13 @@ class CuriosityNode(Node):
             goal = self.goal_queue.add_or_update(
                 topic=event.topic,
                 description=f"Improve handling of '{event.topic}' — "
-                            f"{count} uncertainty events recorded",
+                f"{count} uncertainty events recorded",
                 priority=min(1.0, count / 10.0),
                 event_count=count,
             )
-            logger.info("Generated learning goal for topic '%s' (priority=%.2f)",
-                        event.topic, goal.priority)
+            logger.info(
+                "Generated learning goal for topic '%s' (priority=%.2f)", event.topic, goal.priority
+            )
 
             # Attempt to dispatch
             await self._maybe_dispatch()
@@ -244,40 +254,46 @@ class CuriosityNode(Node):
         }
 
         # 1. Publish to curiosity.goal (general signal)
-        await self.publish("curiosity.goal", Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            topic="curiosity.goal",
-            payload=goal_payload,
-        ))
+        await self.publish(
+            "curiosity.goal",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="curiosity.goal",
+                payload=goal_payload,
+            ),
+        )
 
         # 2. Dispatch to SpawnerNode for data synthesis + training
-        await self.publish("system.spawn", Message(
-            type=MessageType.SPAWN_REQUEST,
-            source_node_id=self.node_id,
-            topic="system.spawn",
-            payload={
-                "topic": goal.topic,
-                "trigger_query": goal.description,
-                "confidence_score": 0.0,
-                "from_curiosity": True,
-            },
-        ))
+        await self.publish(
+            "system.spawn",
+            Message(
+                type=MessageType.SPAWN_REQUEST,
+                source_node_id=self.node_id,
+                topic="system.spawn",
+                payload={
+                    "topic": goal.topic,
+                    "trigger_query": goal.description,
+                    "confidence_score": 0.0,
+                    "from_curiosity": True,
+                },
+            ),
+        )
 
         # 3. Queue for SleepNode consolidation during idle time
-        await self.publish("system.sleep.goal", Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            topic="system.sleep.goal",
-            payload=goal_payload,
-        ))
+        await self.publish(
+            "system.sleep.goal",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="system.sleep.goal",
+                payload=goal_payload,
+            ),
+        )
 
         logger.info("Dispatched learning goal to spawn+sleep: %s", goal.description)
 
     def _get_top_gaps(self, top_k: int = 5) -> list[dict[str, Any]]:
         """Return the topics with the most uncertainty events."""
         sorted_topics = sorted(self.topic_counts.items(), key=lambda x: x[1], reverse=True)
-        return [
-            {"topic": topic, "event_count": count}
-            for topic, count in sorted_topics[:top_k]
-        ]
+        return [{"topic": topic, "event_count": count} for topic, count in sorted_topics[:top_k]]

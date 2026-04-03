@@ -123,4 +123,3 @@ def set_correlation_id(corr_id: str) -> None:
 def get_correlation_id() -> str:
     """Get the current correlation ID."""
     return _correlation_id.get("")
-

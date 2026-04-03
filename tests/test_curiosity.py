@@ -13,6 +13,7 @@ from hbllm.network.messages import Message, MessageType
 
 # ─── GoalQueue Tests ──────────────────────────────────────────────────────────
 
+
 def test_goal_queue_add():
     q = GoalQueue()
     goal = q.add_or_update("math", "Improve math reasoning", 0.8, 3)
@@ -78,6 +79,7 @@ def test_goal_queue_summary():
 
 
 # ─── CuriosityNode Integration Tests ─────────────────────────────────────────
+
 
 @pytest.fixture
 async def curiosity_node():

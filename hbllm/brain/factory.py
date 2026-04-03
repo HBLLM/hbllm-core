@@ -60,20 +60,21 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BrainConfig:
     """Configuration for Brain creation."""
+
     inject_memory: bool = True
     inject_identity: bool = True
     inject_curiosity: bool = True
     inject_perception: bool = False  # Audio/Vision nodes (require ML models)
-    inject_revision: bool = True     # Self-critique loop
-    inject_goals: bool = True        # Autonomous goal system
-    inject_self_model: bool = True   # Capability tracking
-    inject_metrics: bool = True      # Live cognitive metrics
+    inject_revision: bool = True  # Self-critique loop
+    inject_goals: bool = True  # Autonomous goal system
+    inject_self_model: bool = True  # Capability tracking
+    inject_metrics: bool = True  # Live cognitive metrics
     inject_cost_optimizer: bool = True  # Token optimization
-    inject_policy_engine: bool = True   # Governance policy enforcement
-    inject_owner_rules: bool = True     # Owner-defined behavioral rules
-    inject_sentinel: bool = True        # Proactive governance monitoring
-    inject_fuzzy_logic: bool = False    # Fuzzy reasoning (requires scikit-fuzzy)
-    inject_symbolic_logic: bool = False # Z3 theorem prover (requires z3-solver)
+    inject_policy_engine: bool = True  # Governance policy enforcement
+    inject_owner_rules: bool = True  # Owner-defined behavioral rules
+    inject_sentinel: bool = True  # Proactive governance monitoring
+    inject_fuzzy_logic: bool = False  # Fuzzy reasoning (requires scikit-fuzzy)
+    inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
     total_timeout: float = 60.0
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
@@ -132,6 +133,7 @@ class Brain:
     ) -> PipelineResult:
         """Send a query through the full cognitive pipeline."""
         import time as _time
+
         _start = _time.monotonic()
 
         # Token optimization (pre-process)
@@ -155,15 +157,19 @@ class Brain:
         if self.self_model:
             domain = result.metadata.get("domain_hint", "general")
             self.self_model.record_outcome(
-                domain, success=not result.error, confidence=result.confidence,
+                domain,
+                success=not result.error,
+                confidence=result.confidence,
                 latency_ms=_elapsed,
             )
 
         # Post-process: interaction mining
         if self.interaction_miner and not result.error:
             self.interaction_miner.record_interaction(
-                query=text, response=result.text,
-                reward=result.confidence, tenant_id=tenant_id,
+                query=text,
+                response=result.text,
+                reward=result.confidence,
+                tenant_id=tenant_id,
             )
 
         return result
@@ -301,20 +307,21 @@ class BrainFactory:
             search_paths.append(Path(checkpoint_path))
         else:
             # Search default locations
-            search_paths.extend([
-                Path("./checkpoints/sft"),
-                Path("./checkpoints/self_improve"),
-                Path("./checkpoints"),
-            ])
+            search_paths.extend(
+                [
+                    Path("./checkpoints/sft"),
+                    Path("./checkpoints/self_improve"),
+                    Path("./checkpoints"),
+                ]
+            )
 
         for ckpt_dir in search_paths:
             if ckpt_dir.is_file() and ckpt_dir.suffix == ".pt":
                 logger.info("Loading checkpoint: %s", ckpt_dir)
                 from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
                 ckpt = load_checkpoint(ckpt_dir)
-                model.load_state_dict(
-                    extract_model_state(ckpt), strict=False
-                )
+                model.load_state_dict(extract_model_state(ckpt), strict=False)
                 ckpt_loaded = True
                 break
             elif ckpt_dir.is_dir():
@@ -322,10 +329,9 @@ class BrainFactory:
                 if pts:
                     logger.info("Loading latest checkpoint: %s", pts[-1])
                     from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
+
                     ckpt = load_checkpoint(pts[-1])
-                    model.load_state_dict(
-                        extract_model_state(ckpt), strict=False
-                    )
+                    model.load_state_dict(extract_model_state(ckpt), strict=False)
                     ckpt_loaded = True
                     break
 
@@ -341,6 +347,7 @@ class BrainFactory:
             adapter_path = Path(lora_adapter_path)
             if adapter_path.exists():
                 from hbllm.modules.lora import LoRAManager
+
                 LoRAManager.inject(model)
                 state = torch.load(adapter_path, map_location="cpu", weights_only=True)
                 LoRAManager.load_lora_state_dict(model, state)
@@ -351,7 +358,9 @@ class BrainFactory:
 
         logger.info(
             "Local model ready: %s on %s (%s params)",
-            model_config.name, dev, f"{model_config.num_params_estimate:,}",
+            model_config.name,
+            dev,
+            f"{model_config.num_params_estimate:,}",
         )
 
         # Create LocalProvider
@@ -412,27 +421,20 @@ class BrainFactory:
             CriticNode(node_id="critic", llm=llm),
             DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
             WorkspaceNode(node_id="workspace"),
-
             # Memory (episodic + semantic + procedural + value + knowledge graph)
             MemoryNode(node_id="memory"),
-
             # Experience & meta-cognitive layer
             ExperienceNode(node_id="experience", llm=llm),
             MetaReasoningNode(node_id="meta"),
             RuleExtractorNode(node_id="rule_extractor"),
-
             # Curiosity-driven goal generation
             CuriosityNode(node_id="curiosity"),
-
             # Collective intelligence (multi-instance knowledge sharing)
             CollectiveNode(node_id="collective"),
-
             # Online learning from feedback (DPO)
             LearnerNode(node_id="learner"),
-
             # World model (code simulation & sandboxed execution)
             WorldModelNode(node_id="world_model"),
-
             # Memory consolidation during idle
             SleepCycleNode(node_id="sleep", llm=llm),
         ]
@@ -455,20 +457,25 @@ class BrainFactory:
             from hbllm.perception.audio_in_node import AudioInputNode
             from hbllm.perception.audio_out_node import AudioOutputNode
             from hbllm.perception.vision_node import VisionNode
-            nodes.extend([
-                AudioInputNode(node_id="audio_in"),
-                AudioOutputNode(node_id="audio_out"),
-                VisionNode(node_id="vision"),
-            ])
+
+            nodes.extend(
+                [
+                    AudioInputNode(node_id="audio_in"),
+                    AudioOutputNode(node_id="audio_out"),
+                    VisionNode(node_id="vision"),
+                ]
+            )
 
         # Reasoning nodes (optional — require extra dependencies)
         if cfg.inject_fuzzy_logic:
             from hbllm.actions.fuzzy_node import FuzzyNode
+
             nodes.append(FuzzyNode(node_id="fuzzy", llm=llm))
             logger.info("FuzzyNode wired (scikit-fuzzy reasoning)")
 
         if cfg.inject_symbolic_logic:
             from hbllm.actions.logic_node import LogicNode
+
             nodes.append(LogicNode(node_id="logic", llm=llm))
             logger.info("LogicNode wired (Z3 theorem prover)")
 
@@ -479,15 +486,20 @@ class BrainFactory:
         for node in nodes:
             await node.start(message_bus)
             from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-            await registry.register(NodeInfo(
-                node_id=node.node_id,
-                node_type=node.node_type,
-                capabilities=node.capabilities,
-            ))
-            await registry.update_health(NodeHealth(
-                node_id=node.node_id,
-                status=HealthStatus.HEALTHY,
-            ))
+
+            await registry.register(
+                NodeInfo(
+                    node_id=node.node_id,
+                    node_type=node.node_type,
+                    capabilities=node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(
+                    node_id=node.node_id,
+                    status=HealthStatus.HEALTHY,
+                )
+            )
 
         # 5. Create and start pipeline
         pipeline_config = PipelineConfig(
@@ -552,14 +564,13 @@ class BrainFactory:
             brain.policy_engine = policy_engine
 
         if cfg.inject_owner_rules:
-            brain.owner_rules = OwnerRuleStore(
-                db_path=str(Path(data_dir) / "owner_rules.db")
-            )
+            brain.owner_rules = OwnerRuleStore(db_path=str(Path(data_dir) / "owner_rules.db"))
 
         if cfg.inject_sentinel and sentinel_node:
             brain.sentinel = sentinel_node
 
-        logger.info("Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules, sentinel")
+        logger.info(
+            "Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules, sentinel"
+        )
 
         return brain
-

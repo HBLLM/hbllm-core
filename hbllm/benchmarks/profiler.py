@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # ── Memory Profiler ──────────────────────────────────────────────────────────
 
+
 async def profile_memory() -> BenchmarkReport:
     """Measure memory footprint of each memory system under load."""
     report = BenchmarkReport(suite="profile_memory")
@@ -49,19 +50,23 @@ async def profile_memory() -> BenchmarkReport:
 
             db_size = (Path(tmp) / "ep.db").stat().st_size
 
-            report.add(BenchmarkResult(
-                name=f"EpisodicMemory — {n} turns",
-                metric=f"ep_write_{n}",
-                value=round(elapsed * 1000, 2),
-                unit="ms",
-                metadata={"db_size_kb": round(db_size / 1024, 1)},
-            ))
-            report.add(BenchmarkResult(
-                name=f"EpisodicMemory DB — {n} turns",
-                metric=f"ep_size_{n}",
-                value=round(db_size / 1024, 1),
-                unit="KB",
-            ))
+            report.add(
+                BenchmarkResult(
+                    name=f"EpisodicMemory — {n} turns",
+                    metric=f"ep_write_{n}",
+                    value=round(elapsed * 1000, 2),
+                    unit="ms",
+                    metadata={"db_size_kb": round(db_size / 1024, 1)},
+                )
+            )
+            report.add(
+                BenchmarkResult(
+                    name=f"EpisodicMemory DB — {n} turns",
+                    metric=f"ep_size_{n}",
+                    value=round(db_size / 1024, 1),
+                    unit="KB",
+                )
+            )
 
     # Semantic Memory (TF-IDF mode)
     from hbllm.memory.semantic import SemanticMemory
@@ -81,24 +86,30 @@ async def profile_memory() -> BenchmarkReport:
 
         vec_size = sys.getsizeof(mem.vectors.tobytes()) if mem.vectors is not None else 0
 
-        report.add(BenchmarkResult(
-            name=f"SemanticMemory TF-IDF — {n} docs write",
-            metric=f"sem_write_{n}",
-            value=round(write_time * 1000, 2),
-            unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name=f"SemanticMemory TF-IDF — {n} docs search",
-            metric=f"sem_search_{n}",
-            value=round(search_time * 1000, 3),
-            unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name=f"SemanticMemory vectors — {n} docs",
-            metric=f"sem_vec_size_{n}",
-            value=round(vec_size / 1024, 1),
-            unit="KB",
-        ))
+        report.add(
+            BenchmarkResult(
+                name=f"SemanticMemory TF-IDF — {n} docs write",
+                metric=f"sem_write_{n}",
+                value=round(write_time * 1000, 2),
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name=f"SemanticMemory TF-IDF — {n} docs search",
+                metric=f"sem_search_{n}",
+                value=round(search_time * 1000, 3),
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name=f"SemanticMemory vectors — {n} docs",
+                metric=f"sem_vec_size_{n}",
+                value=round(vec_size / 1024, 1),
+                unit="KB",
+            )
+        )
 
     # Procedural Memory
     from hbllm.memory.procedural import ProceduralMemory
@@ -108,32 +119,39 @@ async def profile_memory() -> BenchmarkReport:
         t0 = time.perf_counter()
         for i in range(500):
             mem.store_skill(
-                "t1", f"skill_{i}", f"trigger {i}",
+                "t1",
+                f"skill_{i}",
+                f"trigger {i}",
                 [{"step": j} for j in range(3)],
             )
         elapsed = time.perf_counter() - t0
 
-        report.add(BenchmarkResult(
-            name="ProceduralMemory — 500 skills write",
-            metric="proc_write_500",
-            value=round(elapsed * 1000, 2),
-            unit="ms",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="ProceduralMemory — 500 skills write",
+                metric="proc_write_500",
+                value=round(elapsed * 1000, 2),
+                unit="ms",
+            )
+        )
 
         t0 = time.perf_counter()
         mem.find_skill("t1", "skill_250")
         search_time = time.perf_counter() - t0
-        report.add(BenchmarkResult(
-            name="ProceduralMemory — skill search",
-            metric="proc_search",
-            value=round(search_time * 1000, 3),
-            unit="ms",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="ProceduralMemory — skill search",
+                metric="proc_search",
+                value=round(search_time * 1000, 3),
+                unit="ms",
+            )
+        )
 
     return report
 
 
 # ── Bus Throughput ───────────────────────────────────────────────────────────
+
 
 async def profile_throughput() -> BenchmarkReport:
     """Measure sustained bus throughput with varying payload sizes."""
@@ -178,13 +196,15 @@ async def profile_throughput() -> BenchmarkReport:
 
         throughput = count / elapsed if elapsed > 0 else 0
 
-        report.add(BenchmarkResult(
-            name=f"Bus throughput — {label}",
-            metric=f"throughput_{label.split()[0]}",
-            value=round(throughput),
-            unit="msg/s",
-            metadata={"messages_delivered": count, "elapsed_s": round(elapsed, 3)},
-        ))
+        report.add(
+            BenchmarkResult(
+                name=f"Bus throughput — {label}",
+                metric=f"throughput_{label.split()[0]}",
+                value=round(throughput),
+                unit="msg/s",
+                metadata={"messages_delivered": count, "elapsed_s": round(elapsed, 3)},
+            )
+        )
 
         await bus.stop()
 
@@ -192,6 +212,7 @@ async def profile_throughput() -> BenchmarkReport:
 
 
 # ── Node Startup ─────────────────────────────────────────────────────────────
+
 
 async def profile_startup() -> BenchmarkReport:
     """Time to start/stop each node type."""
@@ -225,24 +246,29 @@ async def profile_startup() -> BenchmarkReport:
         await node.stop()
         stop_time = time.perf_counter() - t0
 
-        report.add(BenchmarkResult(
-            name=f"{name} start",
-            metric=f"start_{name.lower()}",
-            value=round(start_time * 1000, 3),
-            unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name=f"{name} stop",
-            metric=f"stop_{name.lower()}",
-            value=round(stop_time * 1000, 3),
-            unit="ms",
-        ))
+        report.add(
+            BenchmarkResult(
+                name=f"{name} start",
+                metric=f"start_{name.lower()}",
+                value=round(start_time * 1000, 3),
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name=f"{name} stop",
+                metric=f"stop_{name.lower()}",
+                value=round(stop_time * 1000, 3),
+                unit="ms",
+            )
+        )
 
     await bus.stop()
     return report
 
 
 # ── Pipeline Latency ─────────────────────────────────────────────────────────
+
 
 async def profile_pipeline() -> BenchmarkReport:
     """End-to-end message flow latency: publish → subscribe → callback."""
@@ -285,22 +311,38 @@ async def profile_pipeline() -> BenchmarkReport:
         latencies_ms = [l * 1000 for l in latencies]
         latencies_ms.sort()
 
-        report.add(BenchmarkResult(
-            name="Pipeline p50", metric="pipeline_p50",
-            value=round(latencies_ms[len(latencies_ms) // 2], 4), unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name="Pipeline p99", metric="pipeline_p99",
-            value=round(latencies_ms[int(len(latencies_ms) * 0.99)], 4), unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name="Pipeline mean", metric="pipeline_mean",
-            value=round(statistics.mean(latencies_ms), 4), unit="ms",
-        ))
-        report.add(BenchmarkResult(
-            name="Pipeline stdev", metric="pipeline_stdev",
-            value=round(statistics.stdev(latencies_ms), 4) if len(latencies_ms) > 1 else 0, unit="ms",
-        ))
+        report.add(
+            BenchmarkResult(
+                name="Pipeline p50",
+                metric="pipeline_p50",
+                value=round(latencies_ms[len(latencies_ms) // 2], 4),
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="Pipeline p99",
+                metric="pipeline_p99",
+                value=round(latencies_ms[int(len(latencies_ms) * 0.99)], 4),
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="Pipeline mean",
+                metric="pipeline_mean",
+                value=round(statistics.mean(latencies_ms), 4),
+                unit="ms",
+            )
+        )
+        report.add(
+            BenchmarkResult(
+                name="Pipeline stdev",
+                metric="pipeline_stdev",
+                value=round(statistics.stdev(latencies_ms), 4) if len(latencies_ms) > 1 else 0,
+                unit="ms",
+            )
+        )
 
     await bus.stop()
     return report
@@ -323,6 +365,7 @@ async def run_profile(suite: str) -> BenchmarkReport:
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
 
 def _print_report(report: BenchmarkReport) -> None:
     """Human-readable profile report."""

@@ -47,8 +47,12 @@ class DeviceState:
     __slots__ = ("id", "name", "type", "room", "state", "last_seen", "attributes")
 
     def __init__(
-        self, id: str, name: str, type: str = "unknown",
-        room: str = "unknown", state: dict | None = None,
+        self,
+        id: str,
+        name: str,
+        type: str = "unknown",
+        room: str = "unknown",
+        state: dict | None = None,
     ):
         self.id = id
         self.name = name
@@ -60,9 +64,13 @@ class DeviceState:
 
     def to_dict(self) -> dict:
         return {
-            "id": self.id, "name": self.name, "type": self.type,
-            "room": self.room, "state": self.state,
-            "last_seen": self.last_seen, "attributes": self.attributes,
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "room": self.room,
+            "state": self.state,
+            "last_seen": self.last_seen,
+            "attributes": self.attributes,
         }
 
 
@@ -178,9 +186,7 @@ class MqttIoTNode(Node):
         try:
             client.connect_async(self.broker_host, self.broker_port)
             self._mqtt_client = client
-            self._mqtt_loop_task = asyncio.create_task(
-                asyncio.to_thread(client.loop_forever)
-            )
+            self._mqtt_loop_task = asyncio.create_task(asyncio.to_thread(client.loop_forever))
             logger.info("MQTT connecting to %s:%d", self.broker_host, self.broker_port)
         except Exception as e:
             logger.error("MQTT connection failed: %s", e)
@@ -262,7 +268,9 @@ class MqttIoTNode(Node):
             device_id = parts[2]
             name = payload.get("name", device_id)
             dev = DeviceState(
-                id=device_id, name=name, type=component,
+                id=device_id,
+                name=name,
+                type=component,
                 room=payload.get("room", "unknown"),
             )
             self.devices[device_id] = dev
@@ -339,20 +347,14 @@ class MqttIoTNode(Node):
             devices = {k: v.to_dict() for k, v in self.devices.items()}
         elif query_type == "room":
             room = payload.get("room", "")
-            devices = {
-                k: v.to_dict() for k, v in self.devices.items()
-                if v.room == room
-            }
+            devices = {k: v.to_dict() for k, v in self.devices.items() if v.room == room}
         elif query_type == "device":
             device_id = payload.get("device_id", "")
             dev = self.devices.get(device_id)
             devices = {device_id: dev.to_dict()} if dev else {}
         elif query_type == "type":
             dev_type = payload.get("device_type", "")
-            devices = {
-                k: v.to_dict() for k, v in self.devices.items()
-                if v.type == dev_type
-            }
+            devices = {k: v.to_dict() for k, v in self.devices.items() if v.type == dev_type}
         else:
             devices = {}
 
@@ -404,7 +406,10 @@ class MqttIoTNode(Node):
         logger.info("Registered scene '%s' with %d commands", name, len(commands))
 
     def register_device(
-        self, device_id: str, name: str, device_type: str = "unknown",
+        self,
+        device_id: str,
+        name: str,
+        device_type: str = "unknown",
         room: str = "unknown",
     ) -> DeviceState:
         """Manually register a device."""

@@ -27,7 +27,11 @@ class SleepCycleNode(Node):
     """
 
     def __init__(self, node_id: str, idle_timeout_seconds: float = 10.0, llm: Any = None):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["sleep_cycle", "memory_consolidation"])
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["sleep_cycle", "memory_consolidation"],
+        )
         self.idle_timeout_seconds = idle_timeout_seconds
         self.is_sleeping = False
         self._last_system_activity = time.time()
@@ -67,7 +71,9 @@ class SleepCycleNode(Node):
         self._last_system_activity = time.time()
 
         if self.is_sleeping:
-            logger.info("[SleepNode] User input detected! Waking up immediately. Aborting deep sleep.")
+            logger.info(
+                "[SleepNode] User input detected! Waking up immediately. Aborting deep sleep."
+            )
             self.is_sleeping = False
 
         return None
@@ -90,7 +96,10 @@ class SleepCycleNode(Node):
         self.is_sleeping = True
         cycle_start = time.time()
         report = {"memories_consolidated": 0, "goals_replayed": 0, "training_ran": False}
-        logger.info("[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...", self.idle_timeout_seconds)
+        logger.info(
+            "[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...",
+            self.idle_timeout_seconds,
+        )
 
         try:
             # ── Phase 1: Memory Consolidation ────────────────────────────
@@ -107,18 +116,21 @@ class SleepCycleNode(Node):
             report["goals_replayed"] = await self._replay_curiosity_goals()
 
         except TimeoutError:
-             logger.warning("[SleepNode] Timeout during sleep cycle. Waking up.")
+            logger.warning("[SleepNode] Timeout during sleep cycle. Waking up.")
         except Exception as e:
             logger.error("[SleepNode] Sleep cycle interrupted by internal error: %s", e)
 
         # Emit sleep report
         report["duration_seconds"] = round(time.time() - cycle_start, 1)
-        await self.bus.publish("system.sleep.report", Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            topic="system.sleep.report",
-            payload=report,
-        ))
+        await self.bus.publish(
+            "system.sleep.report",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="system.sleep.report",
+                payload=report,
+            ),
+        )
 
         # Reset activity timer so we don't immediately go back to sleep unless idle again
         self._last_system_activity = time.time()
@@ -130,7 +142,7 @@ class SleepCycleNode(Node):
             type=MessageType.QUERY,
             source_node_id=self.node_id,
             topic="memory.retrieve_recent",
-            payload={"session_id": "default_session", "limit": 10}
+            payload={"session_id": "default_session", "limit": 10},
         )
 
         try:
@@ -148,7 +160,10 @@ class SleepCycleNode(Node):
         turns = resp.payload.get("turns", [])
 
         if len(turns) >= 4:
-            logger.info("[SleepNode] Compressing %d recent turns into semantic long-term memory...", len(turns))
+            logger.info(
+                "[SleepNode] Compressing %d recent turns into semantic long-term memory...",
+                len(turns),
+            )
 
             store_msg = Message(
                 type=MessageType.EVENT,
@@ -157,13 +172,15 @@ class SleepCycleNode(Node):
                 payload={
                     "session_id": "default_session",
                     "role": "system",
-                    "content": f"[CONSOLIDATED MEMORY] User discussed {len(turns)//2} topics. Key facts extracted and embedded."
-                }
+                    "content": f"[CONSOLIDATED MEMORY] User discussed {len(turns) // 2} topics. Key facts extracted and embedded.",
+                },
             )
             await self.bus.publish("memory.store", store_msg)
 
         else:
-            logger.info("[SleepNode] Not enough new memories to consolidate linearly. Proceeding to GraphRAG.")
+            logger.info(
+                "[SleepNode] Not enough new memories to consolidate linearly. Proceeding to GraphRAG."
+            )
 
         # ── Phase 1.5: Hierarchical GraphRAG Clustering ──
         if self.llm:
@@ -173,7 +190,7 @@ class SleepCycleNode(Node):
                     type=MessageType.QUERY,
                     source_node_id=self.node_id,
                     topic="knowledge.query",
-                    payload={"action": "all_entities", "limit": 20}
+                    payload={"action": "all_entities", "limit": 20},
                 )
                 kg_resp = await self.bus.request("knowledge.query", kg_msg, timeout=5.0)
                 entities = kg_resp.payload.get("entities", [])
@@ -182,11 +199,14 @@ class SleepCycleNode(Node):
                 leaf_nodes = [e["label"] for e in entities if e.get("type") != "community"]
 
                 if len(leaf_nodes) >= 5:
-                    logger.info("[SleepNode] GraphRAG: Clustering %d entities into Communities...", len(leaf_nodes))
+                    logger.info(
+                        "[SleepNode] GraphRAG: Clustering %d entities into Communities...",
+                        len(leaf_nodes),
+                    )
                     cluster_json = await self.llm.generate_json(
                         f"Group these concepts into 1 or 2 broad thematic Communities.\n"
                         f"Concepts: {leaf_nodes}\n"
-                        f"Output JSON format: {{\"communities\": [{{\"name\": \"Short Title\", \"summary\": \"1 sentence desc\", \"members\": [\"concept1\", \"concept2\"]}}]}}"
+                        f'Output JSON format: {{"communities": [{{"name": "Short Title", "summary": "1 sentence desc", "members": ["concept1", "concept2"]}}]}}'
                     )
 
                     if "error" not in cluster_json and "communities" in cluster_json:
@@ -199,11 +219,15 @@ class SleepCycleNode(Node):
                                     "action": "add_community",
                                     "community_label": comm.get("name"),
                                     "member_labels": comm.get("members", []),
-                                    "summary": comm.get("summary", "")
-                                }
+                                    "summary": comm.get("summary", ""),
+                                },
                             )
                             await self.bus.publish("knowledge.query", add_comm_msg)
-                            logger.info("[SleepNode] GraphRAG created Community: '%s' with %d members", comm.get("name"), len(comm.get("members", [])))
+                            logger.info(
+                                "[SleepNode] GraphRAG created Community: '%s' with %d members",
+                                comm.get("name"),
+                                len(comm.get("members", [])),
+                            )
             except Exception as e:
                 logger.warning("[SleepNode] GraphRAG clustering failed: %s", e)
 
@@ -230,7 +254,7 @@ class SleepCycleNode(Node):
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
                 topic="system.sleep.dpo_trigger",
-                payload={"mode": "overnight_continuous"}
+                payload={"mode": "overnight_continuous"},
             )
             await self.bus.publish("system.sleep.dpo_trigger", trigger_msg)
 
@@ -240,8 +264,8 @@ class SleepCycleNode(Node):
             logger.info("[SleepNode] Continuous DPO phase completed successfully.")
             return True
         except TimeoutError:
-             logger.warning("[SleepNode] DPO training timed out after 15 minutes.")
-             return False
+            logger.warning("[SleepNode] DPO training timed out after 15 minutes.")
+            return False
         except Exception as e:
             logger.warning("[SleepNode] Self-improvement skipped/failed: %s", e)
             return False

@@ -62,8 +62,10 @@ async def test_self_learning_vector_routing():
 
     # Listen for workspace.update to intercept decisions
     decisions = []
+
     async def _capture_decision(msg: Message):
         decisions.append(msg)
+
     await bus.subscribe("workspace.update", _capture_decision)
 
     try:
@@ -73,7 +75,7 @@ async def test_self_learning_vector_routing():
             source_node_id="user_api",
             topic="router.query",
             payload={"text": "Hello, please calculate something random for me."},
-            correlation_id="routing_test_1"
+            correlation_id="routing_test_1",
         )
         await bus.publish("router.query", query_msg)
 
@@ -104,8 +106,8 @@ async def test_self_learning_vector_routing():
                 "message_id": "routing_test_1",
                 "rating": -1,
                 "domain": "math",
-                "prompt": "Hello, please calculate something random for me."
-            }
+                "prompt": "Hello, please calculate something random for me.",
+            },
         )
         await bus.publish("system.feedback", feedback_msg)
         await asyncio.sleep(0.1)
@@ -115,7 +117,7 @@ async def test_self_learning_vector_routing():
             source_node_id="user_api",
             topic="router.query",
             payload={"text": "Hello, please calculate something random for me."},
-            correlation_id="routing_test_2"
+            correlation_id="routing_test_2",
         )
         await bus.publish("router.query", query_msg2)
         await asyncio.sleep(0.1)
@@ -126,7 +128,9 @@ async def test_self_learning_vector_routing():
         second_confidence = second_payload["confidence"]
 
         # The key logic: Did negative feedback properly push the centroid away causing confidence to drop?!
-        assert second_confidence < first_confidence, f"Confidence did not drop! {second_confidence} >= {first_confidence}"
+        assert second_confidence < first_confidence, (
+            f"Confidence did not drop! {second_confidence} >= {first_confidence}"
+        )
 
     finally:
         await router.stop()

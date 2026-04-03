@@ -101,7 +101,7 @@ def registry(tmp_cache):
     config = AdapterRegistryConfig(
         enabled=True,
         cache_dir=str(tmp_cache),
-        auto_download=False,   # disable downloads for most tests
+        auto_download=False,  # disable downloads for most tests
         require_sha256=False,  # relaxed for unit tests
     )
     return AdapterRegistry(config)
@@ -292,6 +292,7 @@ class TestResolve:
         finally:
             # Clean up
             import shutil
+
             shutil.rmtree("./checkpoints/domains/custom", ignore_errors=True)
 
     @pytest.mark.asyncio
@@ -313,11 +314,13 @@ class TestSecurityEnforcement:
             cache_dir=str(tmp_cache),
             auto_download=True,
             require_sha256=True,
-            sources=[{
-                "domain": "coding",
-                "repo_id": "test/repo",
-                "sha256": "",  # No hash!
-            }],
+            sources=[
+                {
+                    "domain": "coding",
+                    "repo_id": "test/repo",
+                    "sha256": "",  # No hash!
+                }
+            ],
         )
         reg = AdapterRegistry(config)
         result = await reg._download_and_cache(reg._sources["coding"])
@@ -339,10 +342,12 @@ class TestSecurityEnforcement:
             auto_download=True,
             require_sha256=False,
             max_adapter_size_mb=0,  # 0 MB limit — reject everything
-            sources=[{
-                "domain": "coding",
-                "repo_id": "test/repo",
-            }],
+            sources=[
+                {
+                    "domain": "coding",
+                    "repo_id": "test/repo",
+                }
+            ],
         )
         reg = AdapterRegistry(config)
 
@@ -350,7 +355,7 @@ class TestSecurityEnforcement:
         fake_path = tmp_cache / "fake_download.pt"
         torch.save(_make_fake_adapter(), fake_path)
 
-        with patch.object(reg, '_hf_download', return_value=fake_path):
+        with patch.object(reg, "_hf_download", return_value=fake_path):
             result = await reg._download_and_cache(reg._sources["coding"])
             assert result is None  # should be rejected due to size
 
@@ -445,7 +450,8 @@ class TestSaveAdapter:
         path = tmp_path / "adapter.pt"
 
         sha = AdapterRegistry.save_adapter(
-            state_dict, path,
+            state_dict,
+            path,
             domain="coding",
             rank=8,
             source_repo="test/repo",
@@ -533,14 +539,6 @@ class TestDownloadPropagation:
         mock_hf.return_value = str(tmp_path / "fake.pt")
         Path(mock_hf.return_value).touch()
 
-        await registry._hf_download(
-            repo_id="test/repo",
-            filename="file.pt",
-            revision="v1.1"
-        )
+        await registry._hf_download(repo_id="test/repo", filename="file.pt", revision="v1.1")
 
-        mock_hf.assert_called_once_with(
-            repo_id="test/repo",
-            filename="file.pt",
-            revision="v1.1"
-        )
+        mock_hf.assert_called_once_with(repo_id="test/repo", filename="file.pt", revision="v1.1")

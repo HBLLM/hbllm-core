@@ -39,7 +39,7 @@ class ProcessRewardNode(Node):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
-            capabilities=["process_reward", "thought_evaluation"]
+            capabilities=["process_reward", "thought_evaluation"],
         )
         self.device = torch.device(device)
         self.checkpoint_dir = Path(checkpoint_dir)
@@ -49,7 +49,9 @@ class ProcessRewardNode(Node):
         # Load PRM model
         config = get_config(model_name)
         self.prm_model = HBLLMForProcessReward(config)
-        self.tokenizer = HBLLMTokenizer.from_tiktoken()  # Standard dummy tokenizer for tests or load real one
+        self.tokenizer = (
+            HBLLMTokenizer.from_tiktoken()
+        )  # Standard dummy tokenizer for tests or load real one
         self.prm_is_trained = False
 
     async def on_start(self) -> None:
@@ -65,7 +67,9 @@ class ProcessRewardNode(Node):
             except Exception as e:
                 logger.warning(f"[ProcessRewardNode] Failed to load PRM weights: {e}")
         else:
-            logger.info(f"[ProcessRewardNode] No PRM weights found at {self.prm_path}. Will use fallback heuristic/LLM.")
+            logger.info(
+                f"[ProcessRewardNode] No PRM weights found at {self.prm_path}. Will use fallback heuristic/LLM."
+            )
 
         self.prm_model.to(self.device)
         self.prm_model.eval()
@@ -90,10 +94,9 @@ class ProcessRewardNode(Node):
         score = await self.score_thought(thought_content)
 
         logger.debug(f"[ProcessRewardNode] Scored thought: {score:.3f}")
-        return message.create_response({
-            "score": score,
-            "source": "prm_network" if self.prm_is_trained else "fallback"
-        })
+        return message.create_response(
+            {"score": score, "source": "prm_network" if self.prm_is_trained else "fallback"}
+        )
 
     async def score_thought(self, content: str) -> float:
         """Run the PRM model or fallback on the thought content."""
@@ -104,7 +107,7 @@ class ProcessRewardNode(Node):
                     f"Evaluate the logical soundness and correctness of this reasoning step. "
                     f"Output a score between 0.0 and 1.0.\n\n"
                     f"Step: {content[:300]}\n\n"
-                    f"Output JSON: {{\"score\": 0.0-1.0}}"
+                    f'Output JSON: {{"score": 0.0-1.0}}'
                 )
                 return float(result.get("score", 0.5))
             except Exception:

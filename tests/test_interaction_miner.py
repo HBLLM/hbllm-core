@@ -13,8 +13,10 @@ def miner(tmp_path):
 class TestRecording:
     def test_record_interaction(self, miner):
         miner.record_interaction(
-            query="What is Python?", response="A programming language.",
-            reward=0.8, tenant_id="t1",
+            query="What is Python?",
+            response="A programming language.",
+            reward=0.8,
+            tenant_id="t1",
         )
         stats = miner.stats()
         assert stats["total_interactions"] == 1
@@ -31,7 +33,8 @@ class TestMining:
     def test_mine_sft_samples(self, miner):
         for i in range(5):
             miner.record_interaction(
-                f"query {i}", f"A good response about topic {i} with enough detail.",
+                f"query {i}",
+                f"A good response about topic {i} with enough detail.",
                 reward=0.7 + 0.05 * i,
             )
         samples = miner.mine_sft_samples(min_reward=0.7)
@@ -54,7 +57,9 @@ class TestExport:
     def test_export_dataset(self, miner, tmp_path):
         for i in range(3):
             miner.record_interaction(
-                f"q{i}", f"response {i} with good detail and info", reward=0.8,
+                f"q{i}",
+                f"response {i} with good detail and info",
+                reward=0.8,
             )
         output = str(tmp_path / "dataset.jsonl")
         data = miner.export_dataset(output_path=output, min_reward=0.5)

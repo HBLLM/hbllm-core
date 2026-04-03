@@ -119,12 +119,15 @@ class ModelExporter:
         )
 
         # Save the quantized model
-        torch.save({
-            "model_state_dict": quantized.state_dict(),
-            "config": self.config.to_dict() if hasattr(self.config, "to_dict") else {},
-            "quantized": True,
-            "dtype": str(dtype),
-        }, output_path)
+        torch.save(
+            {
+                "model_state_dict": quantized.state_dict(),
+                "config": self.config.to_dict() if hasattr(self.config, "to_dict") else {},
+                "quantized": True,
+                "dtype": str(dtype),
+            },
+            output_path,
+        )
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         logger.info("Quantized model saved to %s (%.1f MB)", output_path, size_mb)
@@ -149,11 +152,14 @@ class ModelExporter:
 
         fp16_model = self.model.half().cpu()
 
-        torch.save({
-            "model_state_dict": fp16_model.state_dict(),
-            "config": self.config.to_dict() if hasattr(self.config, "to_dict") else {},
-            "dtype": "float16",
-        }, output_path)
+        torch.save(
+            {
+                "model_state_dict": fp16_model.state_dict(),
+                "config": self.config.to_dict() if hasattr(self.config, "to_dict") else {},
+                "dtype": "float16",
+            },
+            output_path,
+        )
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         logger.info("FP16 model saved to %s (%.1f MB)", output_path, size_mb)
@@ -194,18 +200,22 @@ class ModelExporter:
         # Save as a combined archive with metadata + state dict
         state_dict = {k: v.cpu().float() for k, v in self.model.state_dict().items()}
 
-        torch.save({
-            "gguf_metadata": metadata,
-            "model_state_dict": state_dict,
-            "config": self.config.to_dict() if hasattr(self.config, "to_dict") else {},
-            "format": "gguf_prep",
-        }, output_path)
+        torch.save(
+            {
+                "gguf_metadata": metadata,
+                "model_state_dict": state_dict,
+                "config": self.config.to_dict() if hasattr(self.config, "to_dict") else {},
+                "format": "gguf_prep",
+            },
+            output_path,
+        )
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         logger.info(
             "GGUF-prep exported to %s (%.1f MB). "
             "Use llama.cpp's convert tool for final GGUF conversion.",
-            output_path, size_mb,
+            output_path,
+            size_mb,
         )
         return output_path
 

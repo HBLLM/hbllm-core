@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExtractedConcept:
     """A concept extracted from recurring patterns."""
+
     concept_id: str
     name: str
     description: str
@@ -54,10 +55,44 @@ class ConceptExtractor:
         self.min_keyword_count = min_keyword_count
         self.max_concepts = max_concepts
         self._stopwords = {
-            "the", "a", "an", "is", "are", "was", "were", "and", "or", "but",
-            "to", "in", "of", "for", "on", "with", "it", "this", "that", "be",
-            "how", "what", "why", "when", "can", "do", "does", "did", "will",
-            "would", "should", "could", "have", "has", "had", "not", "my", "i",
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "and",
+            "or",
+            "but",
+            "to",
+            "in",
+            "of",
+            "for",
+            "on",
+            "with",
+            "it",
+            "this",
+            "that",
+            "be",
+            "how",
+            "what",
+            "why",
+            "when",
+            "can",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "should",
+            "could",
+            "have",
+            "has",
+            "had",
+            "not",
+            "my",
+            "i",
         }
 
     def extract_from_queries(self, queries: list[str]) -> list[ExtractedConcept]:
@@ -94,10 +129,11 @@ class ConceptExtractor:
             concepts.append(concept)
 
         concepts.sort(key=lambda c: c.frequency, reverse=True)
-        return concepts[:self.max_concepts]
+        return concepts[: self.max_concepts]
 
     def extract_from_qa_pairs(
-        self, pairs: list[dict[str, str]],
+        self,
+        pairs: list[dict[str, str]],
     ) -> list[ExtractedConcept]:
         """
         Extract concepts from Q&A pairs (including answers).
@@ -110,18 +146,19 @@ class ConceptExtractor:
         # Enrich rules with answer patterns
         for concept in concepts:
             relevant_pairs = [
-                p for p in pairs
-                if any(k in (p.get("question", "") + p.get("query", "")).lower()
-                       for k in concept.keywords)
+                p
+                for p in pairs
+                if any(
+                    k in (p.get("question", "") + p.get("query", "")).lower()
+                    for k in concept.keywords
+                )
             ]
-            answer_keywords = self._count_keywords([
-                p.get("answer", p.get("response", "")) for p in relevant_pairs
-            ])
+            answer_keywords = self._count_keywords(
+                [p.get("answer", p.get("response", "")) for p in relevant_pairs]
+            )
             if answer_keywords:
                 top_answer_terms = [k for k, _ in answer_keywords.most_common(5)]
-                concept.rules.append(
-                    f"Common answer themes: {', '.join(top_answer_terms)}"
-                )
+                concept.rules.append(f"Common answer themes: {', '.join(top_answer_terms)}")
 
         return concepts
 
@@ -131,25 +168,24 @@ class ConceptExtractor:
         """Count significant keywords across texts."""
         keywords: Counter = Counter()
         for text in texts:
-            words = re.findall(r'\b[a-z]{3,}\b', text.lower())
+            words = re.findall(r"\b[a-z]{3,}\b", text.lower())
             filtered = [w for w in words if w not in self._stopwords]
             keywords.update(set(filtered))  # count unique per text
         return keywords
 
     def _cluster_keywords(
-        self, queries: list[str], keyword_freq: Counter,
+        self,
+        queries: list[str],
+        keyword_freq: Counter,
     ) -> list[tuple[list[str], list[str]]]:
         """Cluster queries by co-occurring keywords."""
         # Get significant keywords
-        significant = {
-            k for k, v in keyword_freq.items()
-            if v >= self.min_frequency
-        }
+        significant = {k for k, v in keyword_freq.items() if v >= self.min_frequency}
 
         # Group queries by their significant keyword sets
         clusters: dict[frozenset[str], list[str]] = {}
         for query in queries:
-            words = set(re.findall(r'\b[a-z]{3,}\b', query.lower()))
+            words = set(re.findall(r"\b[a-z]{3,}\b", query.lower()))
             matched = words & significant
             if len(matched) >= self.min_keyword_count:
                 key = frozenset(list(matched)[:5])
@@ -178,7 +214,8 @@ class ConceptExtractor:
 
         # If many "error" or "fix" queries → troubleshooting topic
         error_count = sum(
-            1 for q in queries
+            1
+            for q in queries
             if any(w in q.lower() for w in ["error", "fix", "bug", "issue", "problem"])
         )
         if error_count > len(queries) * 0.3:

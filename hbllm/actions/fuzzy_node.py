@@ -24,7 +24,9 @@ class FuzzyNode(Node):
     """
 
     def __init__(self, node_id: str, llm=None):
-        super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["fuzzy_logic"])
+        super().__init__(
+            node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["fuzzy_logic"]
+        )
         self.llm = llm  # LLMInterface instance
 
     async def on_start(self) -> None:
@@ -51,8 +53,8 @@ class FuzzyNode(Node):
         classification = await self.llm.generate_json(
             f"Determine if the following query involves subjective, approximate, or fuzzy reasoning "
             f"(e.g., concepts like 'fairly', 'somewhat', 'very', quality judgments, subjective ratings). "
-            f"Query: \"{text}\"\n"
-            f"Output JSON: {{\"is_fuzzy\": true/false, \"reason\": \"brief explanation\"}}"
+            f'Query: "{text}"\n'
+            f'Output JSON: {{"is_fuzzy": true/false, "reason": "brief explanation"}}'
         )
 
         if not classification.get("is_fuzzy", False):
@@ -74,12 +76,8 @@ class FuzzyNode(Node):
                 tenant_id=message.tenant_id,
                 session_id=message.session_id,
                 topic="workspace.thought",
-                payload={
-                    "type": "fuzzy_reasoning",
-                    "confidence": confidence,
-                    "content": answer
-                },
-                correlation_id=message.correlation_id
+                payload={"type": "fuzzy_reasoning", "confidence": confidence, "content": answer},
+                correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
 
@@ -102,24 +100,28 @@ class FuzzyNode(Node):
         # Ask the LLM to extract fuzzy modeling parameters
         loop = asyncio.new_event_loop()
         try:
-            params = loop.run_until_complete(self.llm.generate_json(
-                f"You are a fuzzy logic expert. Extract the fuzzy variables from this query "
-                f"and define a fuzzy control system.\n\n"
-                f"Query: \"{query}\"\n\n"
-                f"Output JSON with this structure:\n"
-                f"{{\n"
-                f"  \"antecedents\": [{{\"name\": \"variable_name\", \"range\": [min, max], \"value\": numeric_value}}],\n"
-                f"  \"consequent\": {{\"name\": \"output_name\", \"range\": [min, max]}},\n"
-                f"  \"rules\": [\n"
-                f"    {{\"if\": \"condition_description\", \"then\": \"low/medium/high\"}}\n"
-                f"  ]\n"
-                f"}}"
-            ))
+            params = loop.run_until_complete(
+                self.llm.generate_json(
+                    f"You are a fuzzy logic expert. Extract the fuzzy variables from this query "
+                    f"and define a fuzzy control system.\n\n"
+                    f'Query: "{query}"\n\n'
+                    f"Output JSON with this structure:\n"
+                    f"{{\n"
+                    f'  "antecedents": [{{"name": "variable_name", "range": [min, max], "value": numeric_value}}],\n'
+                    f'  "consequent": {{"name": "output_name", "range": [min, max]}},\n'
+                    f'  "rules": [\n'
+                    f'    {{"if": "condition_description", "then": "low/medium/high"}}\n'
+                    f"  ]\n"
+                    f"}}"
+                )
+            )
         finally:
             loop.close()
 
         if "error" in params:
-            logger.warning("[FuzzyNode] LLM failed to extract fuzzy parameters: %s", params.get("error"))
+            logger.warning(
+                "[FuzzyNode] LLM failed to extract fuzzy parameters: %s", params.get("error")
+            )
             return None, None
 
         antecedents_data = params.get("antecedents", [])
@@ -145,16 +147,16 @@ class FuzzyNode(Node):
             consequent = ctrl.Consequent(con_universe, con_name)
 
             mid = (con_range[0] + con_range[1]) / 2
-            consequent['low'] = fuzz.trimf(con_universe, [con_range[0], con_range[0], mid])
-            consequent['medium'] = fuzz.trimf(con_universe, [con_range[0], mid, con_range[1]])
-            consequent['high'] = fuzz.trimf(con_universe, [mid, con_range[1], con_range[1]])
+            consequent["low"] = fuzz.trimf(con_universe, [con_range[0], con_range[0], mid])
+            consequent["medium"] = fuzz.trimf(con_universe, [con_range[0], mid, con_range[1]])
+            consequent["high"] = fuzz.trimf(con_universe, [mid, con_range[1], con_range[1]])
 
             # Build rules from LLM output — use first antecedent as the primary driver
             primary = list(antecedents.values())[0]
             rules = [
-                ctrl.Rule(primary['poor'], consequent['low']),
-                ctrl.Rule(primary['average'], consequent['medium']),
-                ctrl.Rule(primary['good'], consequent['high']),
+                ctrl.Rule(primary["poor"], consequent["low"]),
+                ctrl.Rule(primary["average"], consequent["medium"]),
+                ctrl.Rule(primary["good"], consequent["high"]),
             ]
 
             # Run the simulation

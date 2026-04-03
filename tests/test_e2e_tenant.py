@@ -19,6 +19,7 @@ from hbllm.serving.security import ApiKeyManager, InputSanitizer, RateLimiter
 
 # ─── 1. API Key Manager ─────────────────────────────────────────────────────
 
+
 class TestApiKeyAuth:
     """Test API key authentication flow."""
 
@@ -26,7 +27,9 @@ class TestApiKeyAuth:
         self.akm = ApiKeyManager()
 
     def test_add_and_validate_key(self):
-        key = self.akm.add_key("sk-test-key-123", tenant_id="acme", name="test", scopes=["chat", "knowledge"])
+        key = self.akm.add_key(
+            "sk-test-key-123", tenant_id="acme", name="test", scopes=["chat", "knowledge"]
+        )
         assert key.tenant_id == "acme"
 
         # Valid key
@@ -65,6 +68,7 @@ class TestApiKeyAuth:
 
 
 # ─── 2. Rate Limiting ───────────────────────────────────────────────────────
+
 
 class TestRateLimiting:
     """Test per-tenant rate limiting."""
@@ -108,6 +112,7 @@ class TestRateLimiting:
 
 # ─── 3. Input Sanitization ──────────────────────────────────────────────────
 
+
 class TestInputSanitizer:
     """Test input sanitization."""
 
@@ -130,6 +135,7 @@ class TestInputSanitizer:
 
 # ─── 4. Knowledge Base (Core SemanticMemory) ────────────────────────────────
 
+
 class TestKnowledgeBase:
     """Test document storage, embedding, and search using core SemanticMemory."""
 
@@ -139,7 +145,9 @@ class TestKnowledgeBase:
     def test_document_storage_and_search(self):
         """Test that documents are stored and searchable."""
         self.sm.store("Our return policy allows 30-day returns on all items.", {"topic": "policy"})
-        self.sm.store("Shipping takes 3-5 business days for standard orders.", {"topic": "shipping"})
+        self.sm.store(
+            "Shipping takes 3-5 business days for standard orders.", {"topic": "shipping"}
+        )
         self.sm.store("Python is a great programming language for AI.", {"topic": "coding"})
 
         results = self.sm.search("return policy", top_k=2)
@@ -181,6 +189,7 @@ class TestKnowledgeBase:
 
 # ─── 5. Episodic Memory (Tenant Isolation) ──────────────────────────────────
 
+
 class TestEpisodicTenantIsolation:
     """Test that episodic memory properly isolates tenants."""
 
@@ -219,6 +228,7 @@ class TestEpisodicTenantIsolation:
 
 
 # ─── 6. Full Journey (Core Only) ───────────────────────────────────────────
+
 
 class TestFullTenantJourney:
     """
@@ -265,15 +275,14 @@ class TestFullTenantJourney:
         # 5. Store knowledge in semantic memory
         self.semantic.store(
             "All items can be returned within 30 days of purchase.",
-            {"tenant": tenant_id, "topic": "policy"}
+            {"tenant": tenant_id, "topic": "policy"},
         )
         self.semantic.store(
-            "Shipping takes 3-5 business days.",
-            {"tenant": tenant_id, "topic": "shipping"}
+            "Shipping takes 3-5 business days.", {"tenant": tenant_id, "topic": "shipping"}
         )
         self.semantic.store(
             "Contact customer support for billing questions.",
-            {"tenant": tenant_id, "topic": "support"}
+            {"tenant": tenant_id, "topic": "support"},
         )
 
         # 6. Verify documents stored
@@ -281,7 +290,9 @@ class TestFullTenantJourney:
 
         # 7. Store conversation in episodic memory
         self.episodic.store_turn("s1", "user", clean_input, tenant_id=tenant_id)
-        self.episodic.store_turn("s1", "assistant", "All items can be returned within 30 days.", tenant_id=tenant_id)
+        self.episodic.store_turn(
+            "s1", "assistant", "All items can be returned within 30 days.", tenant_id=tenant_id
+        )
 
         # 8. Retrieve conversation history
         turns = self.episodic.retrieve_recent("s1", limit=10, tenant_id=tenant_id)

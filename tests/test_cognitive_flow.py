@@ -25,6 +25,7 @@ from hbllm.network.messages import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _wait_for_message(bus, topic: str, predicate=None, timeout: float = 3.0):
     """Subscribe to *topic* and return the first message matching *predicate*."""
     future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
@@ -43,6 +44,7 @@ async def _wait_for_message(bus, topic: str, predicate=None, timeout: float = 3.
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_experience_node_detects_high_saliency():
     """ExperienceNode should flag content with priority keywords as high-saliency."""
@@ -54,17 +56,21 @@ async def test_experience_node_detects_high_saliency():
 
     # Subscribe BEFORE publishing
     salience_future = _wait_for_message(
-        bus, "system.salience",
+        bus,
+        "system.salience",
         predicate=lambda m: m.correlation_id == "corr_001",
     )
 
-    await bus.publish("sensory.output", Message(
-        type=MessageType.EVENT,
-        source_node_id="test",
-        topic="sensory.output",
-        payload={"text": "Critical system error detected in the reactor core!"},
-        correlation_id="corr_001",
-    ))
+    await bus.publish(
+        "sensory.output",
+        Message(
+            type=MessageType.EVENT,
+            source_node_id="test",
+            topic="sensory.output",
+            payload={"text": "Critical system error detected in the reactor core!"},
+            correlation_id="corr_001",
+        ),
+    )
 
     msg = await salience_future
     assert msg.payload["is_priority"] is True
@@ -83,17 +89,21 @@ async def test_experience_node_low_saliency():
     await experience.start(bus)
 
     salience_future = _wait_for_message(
-        bus, "system.salience",
+        bus,
+        "system.salience",
         predicate=lambda m: m.correlation_id == "corr_002",
     )
 
-    await bus.publish("sensory.output", Message(
-        type=MessageType.EVENT,
-        source_node_id="test",
-        topic="sensory.output",
-        payload={"text": "The weather today is sunny and pleasant."},
-        correlation_id="corr_002",
-    ))
+    await bus.publish(
+        "sensory.output",
+        Message(
+            type=MessageType.EVENT,
+            source_node_id="test",
+            topic="sensory.output",
+            payload={"text": "The weather today is sunny and pleasant."},
+            correlation_id="corr_002",
+        ),
+    )
 
     msg = await salience_future
     assert msg.payload["is_priority"] is False
@@ -113,7 +123,8 @@ async def test_meta_node_triggers_reflection_on_negative_feedback():
 
     # Listen for improve signal specifically for reactor_domain
     improve_future = _wait_for_message(
-        bus, "system.improve",
+        bus,
+        "system.improve",
         predicate=lambda m: m.payload.get("domain") == "reactor_domain",
     )
 
@@ -126,12 +137,15 @@ async def test_meta_node_triggers_reflection_on_negative_feedback():
     )
 
     for _ in range(meta.weakness_threshold):
-        await bus.publish("system.feedback", Message(
-            type=MessageType.FEEDBACK,
-            source_node_id="test",
-            topic="system.feedback",
-            payload=feedback.model_dump(),
-        ))
+        await bus.publish(
+            "system.feedback",
+            Message(
+                type=MessageType.FEEDBACK,
+                source_node_id="test",
+                topic="system.feedback",
+                payload=feedback.model_dump(),
+            ),
+        )
 
     msg = await improve_future
     assert msg.payload["domain"] == "reactor_domain"
@@ -161,24 +175,29 @@ async def test_full_cognitive_loop():
     try:
         # --- Step 1: salience detection ---
         salience_future = _wait_for_message(
-            bus, "system.salience",
+            bus,
+            "system.salience",
             predicate=lambda m: m.correlation_id == "e2e_001",
         )
 
-        await bus.publish("sensory.output", Message(
-            type=MessageType.EVENT,
-            source_node_id="test",
-            topic="sensory.output",
-            payload={"text": "Critical failure in authentication module!"},
-            correlation_id="e2e_001",
-        ))
+        await bus.publish(
+            "sensory.output",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id="test",
+                topic="sensory.output",
+                payload={"text": "Critical failure in authentication module!"},
+                correlation_id="e2e_001",
+            ),
+        )
 
         salience_msg = await salience_future
         assert salience_msg.payload["is_priority"] is True
 
         # --- Step 2: negative-feedback → reflection → SYSTEM_IMPROVE ---
         improve_future = _wait_for_message(
-            bus, "system.improve",
+            bus,
+            "system.improve",
             predicate=lambda m: m.payload.get("domain") == "auth_domain",
         )
 
@@ -190,12 +209,15 @@ async def test_full_cognitive_loop():
             module_id="auth_domain",
         )
         for _ in range(meta.weakness_threshold):
-            await bus.publish("system.feedback", Message(
-                type=MessageType.FEEDBACK,
-                source_node_id="test",
-                topic="system.feedback",
-                payload=feedback.model_dump(),
-            ))
+            await bus.publish(
+                "system.feedback",
+                Message(
+                    type=MessageType.FEEDBACK,
+                    source_node_id="test",
+                    topic="system.feedback",
+                    payload=feedback.model_dump(),
+                ),
+            )
 
         improve_msg = await improve_future
         assert improve_msg.payload["domain"] == "auth_domain"
@@ -207,9 +229,8 @@ async def test_full_cognitive_loop():
         await memory.handle_improvement(improve_msg)
 
         docs = memory.semantic_db.get_all()
-        assert any(
-            "Learned pattern in domain 'auth_domain'" in d["content"]
-            for d in docs
-        ), f"Pattern not found in semantic memory. Documents: {docs}"
+        assert any("Learned pattern in domain 'auth_domain'" in d["content"] for d in docs), (
+            f"Pattern not found in semantic memory. Documents: {docs}"
+        )
     finally:
         await bus.stop()

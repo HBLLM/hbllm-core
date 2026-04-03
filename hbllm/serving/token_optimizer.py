@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OptimizationResult:
     """Result of token optimization."""
+
     original_tokens: int
     optimized_tokens: int
     savings_pct: float
@@ -62,9 +63,9 @@ class TokenOptimizer:
 
         # Model cost tiers (relative cost per 1K tokens)
         self._model_costs = {
-            "small": 0.01,    # e.g., 7B model
-            "medium": 0.05,   # e.g., 30B model
-            "large": 0.10,    # e.g., 70B model
+            "small": 0.01,  # e.g., 7B model
+            "medium": 0.05,  # e.g., 30B model
+            "large": 0.10,  # e.g., 70B model
             "specialist": 0.15,  # domain-specific fine-tuned
         }
 
@@ -114,9 +115,7 @@ class TokenOptimizer:
         recommended = self.select_model(query, optimized_tokens)
         strategies.append(f"model_routing:{recommended}")
 
-        savings_pct = (
-            (original_tokens - optimized_tokens) / max(original_tokens, 1) * 100
-        )
+        savings_pct = (original_tokens - optimized_tokens) / max(original_tokens, 1) * 100
         self._stats["tokens_saved"] += max(0, original_tokens - optimized_tokens)
 
         return OptimizationResult(
@@ -178,19 +177,24 @@ class TokenOptimizer:
     def prune_prompt(self, text: str) -> str:
         """Remove redundant tokens from a prompt."""
         # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
 
         # Remove filler words that don't affect meaning
         fillers = [
-            r'\bbasically\b', r'\bactually\b', r'\bjust\b',
-            r'\breally\b', r'\bvery\b', r'\bquite\b',
-            r'\bsimply\b', r'\bliterally\b',
+            r"\bbasically\b",
+            r"\bactually\b",
+            r"\bjust\b",
+            r"\breally\b",
+            r"\bvery\b",
+            r"\bquite\b",
+            r"\bsimply\b",
+            r"\bliterally\b",
         ]
         for filler in fillers:
-            text = re.sub(filler, '', text, flags=re.IGNORECASE)
+            text = re.sub(filler, "", text, flags=re.IGNORECASE)
 
         # Clean up resulting double spaces
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
         return text
 
     # ─── Model Selection ─────────────────────────────────────────────
@@ -215,16 +219,30 @@ class TokenOptimizer:
 
         # Complex reasoning indicators
         reasoning_signals = [
-            "explain", "analyze", "compare", "prove", "derive",
-            "calculate", "debug", "implement", "design", "architect",
+            "explain",
+            "analyze",
+            "compare",
+            "prove",
+            "derive",
+            "calculate",
+            "debug",
+            "implement",
+            "design",
+            "architect",
         ]
         if any(s in query_lower for s in reasoning_signals):
             return "large"
 
         # Domain-specific
         domain_signals = [
-            "medical", "legal", "financial", "clinical",
-            "diagnosis", "contract", "compliance", "hipaa",
+            "medical",
+            "legal",
+            "financial",
+            "clinical",
+            "diagnosis",
+            "contract",
+            "compliance",
+            "hipaa",
         ]
         if any(s in query_lower for s in domain_signals):
             return "specialist"

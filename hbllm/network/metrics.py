@@ -40,6 +40,7 @@ try:
         Info,
         generate_latest,
     )
+
     HAS_PROMETHEUS = True
 except ImportError:
     HAS_PROMETHEUS = False
@@ -137,7 +138,9 @@ class MetricsCollector:
         self._mem_counters: dict[str, float] = defaultdict(float)
         self._mem_histograms: dict[str, list[float]] = defaultdict(list)
         self._mem_gauges: dict[str, float] = defaultdict(float)
-        logger.info("MetricsCollector initialized with in-memory backend (install prometheus_client for full metrics)")
+        logger.info(
+            "MetricsCollector initialized with in-memory backend (install prometheus_client for full metrics)"
+        )
 
     # ─── Public API ───────────────────────────────────────────────────────
 

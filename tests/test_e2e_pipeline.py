@@ -89,17 +89,31 @@ async def test_memory_multi_tenant_isolation(tmp_db_dir):
 
     # Store for tenant A
     msg_a = Message(
-        type=MessageType.EVENT, source_node_id="test", tenant_id="tenantA",
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="tenantA",
         topic="memory.store",
-        payload={"session_id": "s1", "tenant_id": "tenantA", "role": "user", "content": "Tenant A data"},
+        payload={
+            "session_id": "s1",
+            "tenant_id": "tenantA",
+            "role": "user",
+            "content": "Tenant A data",
+        },
     )
     await bus.publish("memory.store", msg_a)
 
     # Store for tenant B
     msg_b = Message(
-        type=MessageType.EVENT, source_node_id="test", tenant_id="tenantB",
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="tenantB",
         topic="memory.store",
-        payload={"session_id": "s1", "tenant_id": "tenantB", "role": "user", "content": "Tenant B data"},
+        payload={
+            "session_id": "s1",
+            "tenant_id": "tenantB",
+            "role": "user",
+            "content": "Tenant B data",
+        },
     )
     await bus.publish("memory.store", msg_b)
     await asyncio.sleep(0.3)

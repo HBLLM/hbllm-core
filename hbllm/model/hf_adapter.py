@@ -134,8 +134,14 @@ class HuggingFaceModelAdapter(nn.Module):
                 "  pip install bitsandbytes"
             )
 
-        logger.info("Loading HF model: %s (device=%s, dtype=%s, 4bit=%s, 8bit=%s)",
-                     model_name_or_path, device, dtype, load_in_4bit, load_in_8bit)
+        logger.info(
+            "Loading HF model: %s (device=%s, dtype=%s, 4bit=%s, 8bit=%s)",
+            model_name_or_path,
+            device,
+            dtype,
+            load_in_4bit,
+            load_in_8bit,
+        )
 
         # Build kwargs
         model_kwargs: dict[str, Any] = {
@@ -151,6 +157,7 @@ class HuggingFaceModelAdapter(nn.Module):
         if load_in_4bit:
             try:
                 from transformers import BitsAndBytesConfig
+
                 model_kwargs["quantization_config"] = BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_compute_dtype=torch.bfloat16,
@@ -177,9 +184,7 @@ class HuggingFaceModelAdapter(nn.Module):
         hf_config = AutoConfig.from_pretrained(
             model_name_or_path, trust_remote_code=trust_remote_code
         )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path, **model_kwargs
-        )
+        model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs)
         tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path, trust_remote_code=trust_remote_code
         )
@@ -201,8 +206,9 @@ class HuggingFaceModelAdapter(nn.Module):
             hidden_size=getattr(hf_config, "hidden_size", 4096),
             num_layers=getattr(hf_config, "num_hidden_layers", 32),
             num_attention_heads=getattr(hf_config, "num_attention_heads", 32),
-            num_kv_heads=getattr(hf_config, "num_key_value_heads",
-                                 getattr(hf_config, "num_attention_heads", 32)),
+            num_kv_heads=getattr(
+                hf_config, "num_key_value_heads", getattr(hf_config, "num_attention_heads", 32)
+            ),
             intermediate_size=getattr(hf_config, "intermediate_size", 11008),
             max_position_embeddings=getattr(hf_config, "max_position_embeddings", 4096),
             rms_norm_eps=getattr(hf_config, "rms_norm_eps", 1e-5),
@@ -225,8 +231,9 @@ class HuggingFaceModelAdapter(nn.Module):
             hidden_size=getattr(hf_config, "hidden_size", 768),
             num_layers=getattr(hf_config, "num_hidden_layers", 12),
             num_attention_heads=getattr(hf_config, "num_attention_heads", 12),
-            num_kv_heads=getattr(hf_config, "num_key_value_heads",
-                                 getattr(hf_config, "num_attention_heads", 12)),
+            num_kv_heads=getattr(
+                hf_config, "num_key_value_heads", getattr(hf_config, "num_attention_heads", 12)
+            ),
             intermediate_size=getattr(hf_config, "intermediate_size", 3072),
             max_position_embeddings=getattr(hf_config, "max_position_embeddings", 2048),
         )

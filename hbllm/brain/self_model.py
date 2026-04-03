@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CapabilityScore:
     """Score for a specific capability."""
+
     domain: str
     score: float  # 0.0 - 1.0
     sample_count: int
@@ -74,9 +75,7 @@ class SelfModel:
                     created_at REAL NOT NULL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_perf_domain ON performance_log(domain)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_perf_domain ON performance_log(domain)")
 
     # ─── Recording ───────────────────────────────────────────────────
 
@@ -123,9 +122,16 @@ class SelfModel:
                     "(domain, score, sample_count, successes, failures, "
                     "avg_confidence, avg_latency_ms, created_at, updated_at) "
                     "VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)",
-                    (domain, 1.0 if success else 0.0,
-                     1 if success else 0, 0 if success else 1,
-                     confidence, latency_ms, now, now),
+                    (
+                        domain,
+                        1.0 if success else 0.0,
+                        1 if success else 0,
+                        0 if success else 1,
+                        confidence,
+                        latency_ms,
+                        now,
+                        now,
+                    ),
                 )
 
     # ─── Querying ────────────────────────────────────────────────────
@@ -142,8 +148,11 @@ class SelfModel:
 
         trend = self._compute_trend(domain)
         return CapabilityScore(
-            domain=row[0], score=round(row[1], 3),
-            sample_count=row[2], trend=trend, last_updated=row[3],
+            domain=row[0],
+            score=round(row[1], 3),
+            sample_count=row[2],
+            trend=trend,
+            last_updated=row[3],
         )
 
     def get_all_capabilities(self) -> list[CapabilityScore]:
@@ -154,8 +163,11 @@ class SelfModel:
             ).fetchall()
         return [
             CapabilityScore(
-                domain=r[0], score=round(r[1], 3), sample_count=r[2],
-                trend=self._compute_trend(r[0]), last_updated=r[3],
+                domain=r[0],
+                score=round(r[1], 3),
+                sample_count=r[2],
+                trend=self._compute_trend(r[0]),
+                last_updated=r[3],
             )
             for r in rows
         ]

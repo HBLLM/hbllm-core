@@ -29,17 +29,36 @@ class RouterNode(Node):
     traffic to the correct specialized experts via the Global Workspace.
     """
 
-    def __init__(self, node_id: str, default_domain: str = "general", llm=None, use_vectors: bool = True):
-        super().__init__(node_id=node_id, node_type=NodeType.ROUTER, capabilities=["routing", "intent_classification"])
+    def __init__(
+        self, node_id: str, default_domain: str = "general", llm=None, use_vectors: bool = True
+    ):
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.ROUTER,
+            capabilities=["routing", "intent_classification"],
+        )
         self.default_domain = default_domain
         self.topic_sub = "router.query"
         self.llm = llm  # LLMInterface instance
 
         # Dynamic domain registry (updated by SpawnerNode when new modules are created)
-        self.known_domains: set[str] = {"general", "coding", "math", "planner", "api_synth", "fuzzy"}
+        self.known_domains: set[str] = {
+            "general",
+            "coding",
+            "math",
+            "planner",
+            "api_synth",
+            "fuzzy",
+        }
         self.known_intents: set[str] = {
-            "general_knowledge", "code_generation", "math_reasoning",
-            "complex_reasoning", "web_search", "tool_synthesis", "fuzzy_reasoning", "unknown_topic"
+            "general_knowledge",
+            "code_generation",
+            "math_reasoning",
+            "complex_reasoning",
+            "web_search",
+            "tool_synthesis",
+            "fuzzy_reasoning",
+            "unknown_topic",
         }
 
         # Self-expansion tracking
@@ -68,15 +87,19 @@ class RouterNode(Node):
             logger.info("Initializing ONNX Edge Vector Model (paraphrase-MiniLM-L3-v2)")
 
             # Using INT8 quantized model for extreme low-memory footprint (~15MB RAM)
-            model_path = hf_hub_download(repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx")
-            tokenizer_path = hf_hub_download(repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json")
+            model_path = hf_hub_download(
+                repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx"
+            )
+            tokenizer_path = hf_hub_download(
+                repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json"
+            )
 
             self._tokenizer = Tokenizer.from_file(tokenizer_path)
             self._tokenizer.enable_truncation(max_length=128)
             self._tokenizer.enable_padding(length=128)
 
             # Start strict C++ CPU Execution Provider
-            self.encoder = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+            self.encoder = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
             self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
 
         for d in self.known_domains:
@@ -162,6 +185,7 @@ class RouterNode(Node):
                 self._bootstrap_centroids()
 
             import numpy as np
+
             query_emb = self._encode_text(text)
 
             scores = {}
@@ -186,13 +210,18 @@ class RouterNode(Node):
                     if len(sorted_domains) > 1:
                         second_domain, second_score = sorted_domains[1]
                         # Only blend if second score is also very high and relatively close
-                        if second_score > self.unknown_threshold and (top_score - second_score) < 0.15:
+                        if (
+                            second_score > self.unknown_threshold
+                            and (top_score - second_score) < 0.15
+                        ):
                             total = top_score + second_score
                             target_domain = {
                                 top_domain: round(top_score / total, 3),
-                                second_domain: round(second_score / total, 3)
+                                second_domain: round(second_score / total, 3),
                             }
-                            logger.info("Vector Router triggered MoE Hybrid mapping: %s", target_domain)
+                            logger.info(
+                                "Vector Router triggered MoE Hybrid mapping: %s", target_domain
+                            )
                         else:
                             target_domain = top_domain
                     else:
@@ -200,7 +229,9 @@ class RouterNode(Node):
                 else:
                     target_domain = "general"
 
-            logger.debug("Vector Router chose domain '%s' with confidence %.3f", target_domain, confidence)
+            logger.debug(
+                "Vector Router chose domain '%s' with confidence %.3f", target_domain, confidence
+            )
         elif self.llm:
             # Fallback to LLM if vector encoder isn't available
             domains_str = ", ".join(sorted(self.known_domains))
@@ -211,8 +242,8 @@ class RouterNode(Node):
                     f"query into exactly one domain and intent.\n\n"
                     f"Available domains: {domains_str}\n"
                     f"Available intents: {intents_str}\n\n"
-                    f"Query: \"{text}\"\n\n"
-                    f"Output JSON: {{\"domain\": \"...\", \"intent\": \"...\", \"confidence\": 0.0-1.0}}"
+                    f'Query: "{text}"\n\n'
+                    f'Output JSON: {{"domain": "...", "intent": "...", "confidence": 0.0-1.0}}'
                 )
 
                 if "error" not in classification:
@@ -227,19 +258,25 @@ class RouterNode(Node):
 
         # 2. Self-Expansion Logic
         if confidence < self.unknown_threshold:
-            logger.warning("Router confidence too low (%.2f) for query: '%s'. Marking unknown.", confidence, text[:30])
+            logger.warning(
+                "Router confidence too low (%.2f) for query: '%s'. Marking unknown.",
+                confidence,
+                text[:30],
+            )
             self.unknown_counts["general_unknown"] += 1
 
             if self.unknown_counts["general_unknown"] >= self.spawn_trigger_count:
                 logger.warning("Unknown threshold reached! Triggering Module Spawning...")
 
                 # Extract topic name via LLM
-                topic_guess = target_domain if target_domain != self.default_domain else "new_domain"
+                topic_guess = (
+                    target_domain if target_domain != self.default_domain else "new_domain"
+                )
                 if self.llm:
                     topic_result = await self.llm.generate_json(
                         f"What academic or technical domain does this query belong to? "
-                        f"Query: \"{text}\"\n"
-                        f"Output JSON: {{\"topic\": \"one_word_domain_name\"}}"
+                        f'Query: "{text}"\n'
+                        f'Output JSON: {{"topic": "one_word_domain_name"}}'
                     )
                     topic_guess = topic_result.get("topic", topic_guess)
 
@@ -251,25 +288,27 @@ class RouterNode(Node):
                     session_id=message.session_id,
                     topic="system.spawn",
                     payload=SpawnRequestPayload(
-                        topic=topic_guess,
-                        trigger_query=text,
-                        confidence_score=confidence
-                    ).model_dump()
+                        topic=topic_guess, trigger_query=text, confidence_score=confidence
+                    ).model_dump(),
                 )
                 await self.bus.publish("system.spawn", spawn_req)
 
                 self.unknown_counts["general_unknown"] = 0
 
-                return message.create_response({
-                    "text": f"I don't know much about this topic yet. I am spawning a new '{topic_guess}' module to learn about it. Please try asking again in a few moments!",
-                    "domain": "system"
-                })
+                return message.create_response(
+                    {
+                        "text": f"I don't know much about this topic yet. I am spawning a new '{topic_guess}' module to learn about it. Please try asking again in a few moments!",
+                        "domain": "system",
+                    }
+                )
         else:
             if self.unknown_counts["general_unknown"] > 0:
                 self.unknown_counts["general_unknown"] -= 1
 
         # 3. Publish to Global Workspace
-        logger.info("Routing to Workspace with dominant intent: %s (confidence: %.2f)", intent, confidence)
+        logger.info(
+            "Routing to Workspace with dominant intent: %s (confidence: %.2f)", intent, confidence
+        )
 
         workspace_payload = message.payload.copy()
         workspace_payload["intent"] = intent
@@ -283,7 +322,7 @@ class RouterNode(Node):
             session_id=message.session_id,
             topic="workspace.update",
             payload=workspace_payload,
-            correlation_id=message.correlation_id or message.id
+            correlation_id=message.correlation_id or message.id,
         )
         await self.bus.publish("workspace.update", routed_query)
 
@@ -302,6 +341,7 @@ class RouterNode(Node):
         # Self-Learning Embedding Update
         if self.use_vectors and domain in self.domain_centroids and prompt:
             import numpy as np
+
             query_emb = self._encode_text(prompt)
             current_centroid = self.domain_centroids[domain]
 
@@ -311,11 +351,17 @@ class RouterNode(Node):
             if rating > 0:
                 # Pull centroid towards the successful query
                 new_centroid = (1 - alpha) * current_centroid + alpha * query_emb
-                logger.info("RouterNode pulled centroid for domain '%s' towards query (Positive Rating)", domain)
+                logger.info(
+                    "RouterNode pulled centroid for domain '%s' towards query (Positive Rating)",
+                    domain,
+                )
             elif rating < 0:
                 # Push centroid away from the unsuccessful query
                 new_centroid = current_centroid - (alpha * query_emb)
-                logger.info("RouterNode pushed centroid for domain '%s' away from query (Negative Rating)", domain)
+                logger.info(
+                    "RouterNode pushed centroid for domain '%s' away from query (Negative Rating)",
+                    domain,
+                )
             else:
                 new_centroid = current_centroid
 
@@ -333,14 +379,17 @@ class RouterNode(Node):
                 self.known_domains.add(domain)
                 logger.info("RouterNode learned new domain from feedback: %s", domain)
                 if self.use_vectors:
-                    self.domain_centroids[domain] = self._encode_text(f"Topics relating to {domain}")
+                    self.domain_centroids[domain] = self._encode_text(
+                        f"Topics relating to {domain}"
+                    )
         elif rating < 0:
             # Negative: routing may have been wrong, become slightly more cautious
             self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
 
         logger.debug(
             "RouterNode threshold adjusted to %.2f after feedback (rating=%d)",
-            self.unknown_threshold, rating,
+            self.unknown_threshold,
+            rating,
         )
         return None
 
@@ -366,7 +415,8 @@ class RouterNode(Node):
 
         logger.info(
             "Router executing Swarm Handoff. Bouncing session %s from Workspace back to domain '%s'",
-            message.correlation_id, target_domain
+            message.correlation_id,
+            target_domain,
         )
 
         # We rewrite the query payload to include the historical work of the previous agents!
@@ -376,8 +426,12 @@ class RouterNode(Node):
         workspace_payload["swarm_history"] = history
 
         # Inject context directly into the text for the next agent to read
-        history_text = "\n".join([f"- [{h['node']}]: {h['type']} (confidence: {h['confidence']})" for h in history])
-        workspace_payload["text"] = f"[SWARM TRANSFER] The previous agent transferred this to you ({target_domain}).\n\nPrevious Agent Work:\n{history_text}\n\nOriginal Request:\n{original_query.get('text', '')}"
+        history_text = "\n".join(
+            [f"- [{h['node']}]: {h['type']} (confidence: {h['confidence']})" for h in history]
+        )
+        workspace_payload["text"] = (
+            f"[SWARM TRANSFER] The previous agent transferred this to you ({target_domain}).\n\nPrevious Agent Work:\n{history_text}\n\nOriginal Request:\n{original_query.get('text', '')}"
+        )
 
         routed_query = Message(
             type=MessageType.EVENT,
@@ -386,7 +440,7 @@ class RouterNode(Node):
             session_id=message.session_id,
             topic="workspace.update",
             payload=workspace_payload,
-            correlation_id=message.correlation_id
+            correlation_id=message.correlation_id,
         )
         await self.bus.publish("workspace.update", routed_query)
 

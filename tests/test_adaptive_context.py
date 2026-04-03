@@ -33,6 +33,7 @@ async def test_planner_compresses_long_step():
     assert compressed.endswith("B" * 1000)
     assert "[... 8000 characters dynamically omitted" in compressed
 
+
 @pytest.mark.asyncio
 async def test_planner_trajectory_middle_out_truncation():
     """Verify PlannerNode truncates deep histories (e.g., depth 10) by dropping middle steps."""
@@ -41,6 +42,7 @@ async def test_planner_trajectory_middle_out_truncation():
 
     # Mock bus to capture the domain.general.query prompt
     query_payload = None
+
     async def mock_request(topic, msg, timeout=30.0):
         nonlocal query_payload
         query_payload = msg.payload
@@ -56,14 +58,16 @@ async def test_planner_trajectory_middle_out_truncation():
         node="internal_monologue",
         content="Step 10 Content",
         score=1.0,
-        trajectory=["Step 1 Base"] + [f"Intermediate Step {i}" for i in range(2, 10)]
+        trajectory=["Step 1 Base"] + [f"Intermediate Step {i}" for i in range(2, 10)],
     )
 
     # We must construct a real ThoughtNode for the _refine_thought signature
     parent_node = ThoughtNode()
     parent_node.node = "test"
     parent_node.content = "Step 10 Content"
-    parent_node.trajectory_history = ["Step 1 Base"] + [f"Intermediate Step {i}" for i in range(2, 10)]
+    parent_node.trajectory_history = ["Step 1 Base"] + [
+        f"Intermediate Step {i}" for i in range(2, 10)
+    ]
 
     await planner._refine_thought(graph, parent_node, "How to X?", 1)
 
@@ -75,13 +79,17 @@ async def test_planner_trajectory_middle_out_truncation():
     # Steps kept: 1, 6, 7, 8, 9, 10.
 
     assert "Step 1: Step 1 Base" in prompt
-    assert "[... 4 intermediate logic steps dynamically omitted to preserve context bounds ...]" in prompt
+    assert (
+        "[... 4 intermediate logic steps dynamically omitted to preserve context bounds ...]"
+        in prompt
+    )
     assert "Step 6: Intermediate Step 6" in prompt
     assert "Step 10: Step 10 Content" in prompt
 
     # Middle steps should be erased
     assert "Step 2: Intermediate Step 2" not in prompt
     assert "Step 3:" not in prompt
+
 
 @pytest.mark.asyncio
 async def test_workspace_compresses_dpo_payload():
@@ -90,6 +98,7 @@ async def test_workspace_compresses_dpo_payload():
     workspace._bus = MagicMock()
 
     published_msg = None
+
     async def mock_publish(topic, msg):
         nonlocal published_msg
         published_msg = msg
@@ -99,12 +108,10 @@ async def test_workspace_compresses_dpo_payload():
     board = {
         "original_query": {"text": "Make me a sandwich"},
         "tenant_id": "test",
-        "session_id": "test-session"
+        "session_id": "test-session",
     }
 
-    massive_thought = {
-        "content": ("X" * 6000)
-    }
+    massive_thought = {"content": ("X" * 6000)}
 
     await workspace._emit_training_feedback(board, massive_thought, rating=1)
 

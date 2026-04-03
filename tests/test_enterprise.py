@@ -8,6 +8,7 @@ from hbllm.network.plugin_manager import PluginInfo, PluginManager
 
 # ─── MetricsCollector Tests ──────────────────────────────────────────────────
 
+
 class TestMetricsCollector:
     def setup_method(self):
         MetricsCollector.reset()
@@ -75,6 +76,7 @@ class TestMetricsCollector:
 
 # ─── PluginInfo Tests ────────────────────────────────────────────────────────
 
+
 class TestPluginInfo:
     def test_to_dict(self):
         info = PluginInfo(
@@ -91,6 +93,7 @@ class TestPluginInfo:
 
 # ─── PluginManager Tests ─────────────────────────────────────────────────────
 
+
 class TestPluginManager:
     def test_discover_empty_dir(self):
         with tempfile.TemporaryDirectory() as d:
@@ -106,9 +109,7 @@ class TestPluginManager:
     def test_discover_plugin_file(self):
         with tempfile.TemporaryDirectory() as d:
             plugin_file = Path(d) / "my_plugin.py"
-            plugin_file.write_text(
-                'async def register(bus):\n    return []\n'
-            )
+            plugin_file.write_text("async def register(bus):\n    return []\n")
 
             pm = PluginManager(plugin_dirs=[d])
             discovered = pm.discover()
@@ -127,7 +128,7 @@ class TestPluginManager:
     def test_skip_underscore_files(self):
         with tempfile.TemporaryDirectory() as d:
             plugin_file = Path(d) / "__init__.py"
-            plugin_file.write_text('async def register(bus): pass\n')
+            plugin_file.write_text("async def register(bus): pass\n")
 
             pm = PluginManager(plugin_dirs=[d])
             discovered = pm.discover()
@@ -138,7 +139,7 @@ class TestPluginManager:
             plugin_file = Path(d) / "fancy_plugin.py"
             plugin_file.write_text(
                 '__plugin__ = {"name": "fancy", "version": "2.0", "description": "A fancy plugin"}\n'
-                'async def register(bus):\n    return []\n'
+                "async def register(bus):\n    return []\n"
             )
 
             pm = PluginManager(plugin_dirs=[d])

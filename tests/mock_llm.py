@@ -60,13 +60,22 @@ class MockLLM:
         prompt_lower = prompt.lower()
 
         # API request classification — must be checked BEFORE generic patterns
-        if "api schema" in prompt_lower or "json payload" in prompt_lower or "openapi specification" in prompt_lower or "tool definition" in prompt_lower:
+        if (
+            "api schema" in prompt_lower
+            or "json payload" in prompt_lower
+            or "openapi specification" in prompt_lower
+            or "tool definition" in prompt_lower
+        ):
             # Extract the actual query text between the quotes after "Query:"
             import re
+
             query_match = re.search(r'query:\s*"([^"]+)"', prompt_lower)
             if query_match:
                 actual_query = query_match.group(1)
-                if any(kw in actual_query for kw in ["openapi", "api", "rest", "json", "schema", "endpoint", "tool"]):
+                if any(
+                    kw in actual_query
+                    for kw in ["openapi", "api", "rest", "json", "schema", "endpoint", "tool"]
+                ):
                     return {"is_api_request": True, "request_type": "schema"}
             return {"is_api_request": False, "request_type": "none"}
 
@@ -95,12 +104,13 @@ class MockLLM:
             return {
                 "antecedents": [{"name": "quality", "range": [0, 10], "value": 7}],
                 "consequent": {"name": "score", "range": [0, 25]},
-                "rules": [{"if": "quality is high", "then": "high"}]
+                "rules": [{"if": "quality is high", "then": "high"}],
             }
 
         # Critic evaluation — inspect ONLY the Proposed Response, not the full prompt
         if "constitutional ai evaluator" in prompt_lower:
             import re
+
             response_match = re.search(r'proposed response:\s*"([^"]+)"', prompt_lower)
             if response_match:
                 response_text = response_match.group(1)

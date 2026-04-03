@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 # ── Data Source Readers ──────────────────────────────────────────────────────
 
+
 def read_dpo_queue(queue_path: str | Path) -> list[dict[str, str]]:
     """
     Read preference pairs from the LearnerNode's DPO queue.
@@ -56,11 +57,13 @@ def read_dpo_queue(queue_path: str | Path) -> list[dict[str, str]]:
     pairs: list[dict[str, str]] = []
     for item in raw:
         if isinstance(item, (list, tuple)) and len(item) >= 3:
-            pairs.append({
-                "prompt": str(item[0]),
-                "chosen": str(item[1]),
-                "rejected": str(item[2]),
-            })
+            pairs.append(
+                {
+                    "prompt": str(item[0]),
+                    "chosen": str(item[1]),
+                    "rejected": str(item[2]),
+                }
+            )
         elif isinstance(item, dict):
             prompt = item.get("prompt") or item.get("instruction", "")
             chosen = item.get("chosen") or item.get("response", "")
@@ -99,13 +102,15 @@ def read_reflection_logs(reflection_dir: str | Path) -> list[dict[str, str]]:
                     domain = record.get("domain", "unknown")
 
                     if instruction and rejected:
-                        pairs.append({
-                            "prompt": instruction,
-                            "chosen": "",  # to be filled by trainer with model output
-                            "rejected": rejected,
-                            "domain": domain,
-                            "source": "reflection",
-                        })
+                        pairs.append(
+                            {
+                                "prompt": instruction,
+                                "chosen": "",  # to be filled by trainer with model output
+                                "rejected": rejected,
+                                "domain": domain,
+                                "source": "reflection",
+                            }
+                        )
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Skipping corrupt reflection file %s: %s", jsonl_file, e)
 
@@ -135,18 +140,21 @@ def read_mined_pairs(
 
     pairs: list[dict[str, str]] = []
     for p in raw_pairs:
-        pairs.append({
-            "prompt": p.get("query", ""),
-            "chosen": p.get("chosen", ""),
-            "rejected": p.get("rejected", ""),
-            "source": "mined",
-        })
+        pairs.append(
+            {
+                "prompt": p.get("query", ""),
+                "chosen": p.get("chosen", ""),
+                "rejected": p.get("rejected", ""),
+                "source": "mined",
+            }
+        )
 
     logger.info("Mined %d preference pairs (min_reward=%.2f)", len(pairs), min_reward)
     return pairs
 
 
 # ── Export Logic ─────────────────────────────────────────────────────────────
+
 
 def collect_all_pairs(
     workspace_dir: str | Path = "workspace",
@@ -194,7 +202,9 @@ def collect_all_pairs(
 
     logger.info(
         "Collected %d unique DPO pairs (%d before dedup) from sources: %s",
-        len(unique), len(all_pairs), sources,
+        len(unique),
+        len(all_pairs),
+        sources,
     )
     return unique
 
@@ -253,18 +263,21 @@ def build_stats(pairs: list[dict[str, str]]) -> dict[str, Any]:
 
 # ── CLI Entry Point ─────────────────────────────────────────────────────────
 
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="export_dpo",
         description="Export DPO preference datasets from HBLLM reflection and interaction data.",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         default="dpo_dataset.jsonl",
         help="Output file path (default: dpo_dataset.jsonl)",
     )
     parser.add_argument(
-        "--workspace", "-w",
+        "--workspace",
+        "-w",
         default="workspace",
         help="Workspace directory (default: workspace)",
     )
@@ -274,7 +287,8 @@ def main(argv: list[str] | None = None) -> int:
         help="InteractionMiner data directory (default: data)",
     )
     parser.add_argument(
-        "--source", "-s",
+        "--source",
+        "-s",
         nargs="+",
         choices=["queue", "reflection", "mined"],
         default=None,
@@ -292,7 +306,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Print dataset statistics to stdout",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable verbose logging",
     )

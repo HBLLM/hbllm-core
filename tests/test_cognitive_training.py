@@ -23,6 +23,7 @@ class TestKnowledgeGraphBuilder:
 
     def setup_method(self):
         from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
+
         self.kg = KnowledgeGraphBuilder()
 
     def test_extract_tech_entities(self):
@@ -77,8 +78,8 @@ class TestKnowledgeGraphBuilder:
         # Check that Python-PyTorch edge exists
         edge_pairs = [(e.source, e.target) for e in edges]
         found = any(
-            ("python" in s.lower() and "pytorch" in t.lower()) or
-            ("pytorch" in s.lower() and "python" in t.lower())
+            ("python" in s.lower() and "pytorch" in t.lower())
+            or ("pytorch" in s.lower() and "python" in t.lower())
             for s, t in edge_pairs
         )
         assert found, f"Expected Python-PyTorch edge, got: {edge_pairs}"
@@ -97,9 +98,7 @@ class TestKnowledgeGraphBuilder:
     def test_topic_clusters(self):
         """Should return top topic keywords."""
         for _ in range(10):
-            self.kg.add_from_text(
-                "Machine learning models need training data for optimization"
-            )
+            self.kg.add_from_text("Machine learning models need training data for optimization")
         clusters = self.kg.get_topic_clusters(top_n=5)
         assert len(clusters) > 0
         assert all("keyword" in c and "count" in c for c in clusters)
@@ -127,6 +126,7 @@ class TestKnowledgeGraphBuilder:
 
             # Load and verify
             from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
+
             loaded = KnowledgeGraphBuilder.load(path)
             assert len(loaded.entities) == len(self.kg.entities)
             assert loaded._doc_count == 2
@@ -134,6 +134,7 @@ class TestKnowledgeGraphBuilder:
     def test_max_entities_cap(self):
         """Should respect max_entities limit."""
         from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
+
         kg = KnowledgeGraphBuilder(max_entities=3)
         kg.add_from_text("Python PyTorch TensorFlow Docker React Vue Angular")
         assert len(kg.entities) <= 3
@@ -159,34 +160,46 @@ class TestDomainDetection:
 
     def test_detect_code(self):
         from hbllm.training.training_memory import detect_domain
+
         assert detect_domain("def foo(): return bar()") == "code"
         assert detect_domain("class MyClass: pass") == "code"
         assert detect_domain("function hello() { console.log('hi') }") == "code"
 
     def test_detect_math(self):
         from hbllm.training.training_memory import detect_domain
+
         assert detect_domain("The theorem states that the integral of x") == "math"
         assert detect_domain("Using probability and statistical analysis") == "math"
 
     def test_detect_science(self):
         from hbllm.training.training_memory import detect_domain
+
         assert detect_domain("The experiment tested the hypothesis about electrons") == "science"
         assert detect_domain("The quantum state of the molecule was measured") == "science"
 
     def test_detect_reasoning(self):
         from hbllm.training.training_memory import detect_domain
-        assert detect_domain("Therefore we can conclude that consequently the result implies") == "reasoning"
+
+        assert (
+            detect_domain("Therefore we can conclude that consequently the result implies")
+            == "reasoning"
+        )
 
     def test_detect_factual(self):
         from hbllm.training.training_memory import detect_domain
+
         assert detect_domain("Einstein was born in 1879 and discovered relativity") == "factual"
 
     def test_detect_creative(self):
         from hbllm.training.training_memory import detect_domain
-        assert detect_domain("Once upon a time she said to the character in the story") == "creative"
+
+        assert (
+            detect_domain("Once upon a time she said to the character in the story") == "creative"
+        )
 
     def test_detect_general(self):
         from hbllm.training.training_memory import detect_domain
+
         assert detect_domain("The quick brown fox jumps over the lazy dog") == "general"
 
 
@@ -195,6 +208,7 @@ class TestTrainingMemory:
 
     def setup_method(self):
         from hbllm.training.training_memory import TrainingMemory
+
         self.mem = TrainingMemory()
 
     def test_record_document(self):
@@ -221,6 +235,7 @@ class TestTrainingMemory:
     def test_mastery_score(self):
         """Mastery score should be higher for lower loss."""
         from hbllm.training.training_memory import DomainStats
+
         # Low loss = high mastery
         low_ds = DomainStats(domain="test", total_docs=10, total_loss=20.0)  # avg=2.0
         high_ds = DomainStats(domain="test", total_docs=10, total_loss=90.0)  # avg=9.0
@@ -271,6 +286,7 @@ class TestTrainingMemory:
             assert os.path.exists(path)
 
             from hbllm.training.training_memory import TrainingMemory
+
             loaded = TrainingMemory.load(path)
             assert len(loaded.domain_stats) == len(self.mem.domain_stats)
             assert len(loaded._step_losses) == 1
@@ -278,6 +294,7 @@ class TestTrainingMemory:
     def test_max_records_eviction(self):
         """Should evict low-loss records when max reached."""
         from hbllm.training.training_memory import TrainingMemory
+
         mem = TrainingMemory(max_records=10)
         for i in range(15):
             mem.record(f"text {i}", loss=float(i), step=i)
@@ -309,6 +326,7 @@ class TestCognitiveConfig:
 
     def test_default_config(self):
         from hbllm.training.cognitive_trainer import CognitiveConfig
+
         config = CognitiveConfig()
         assert config.cognitive_interval == 10
         assert config.build_knowledge_graph is True
@@ -319,6 +337,7 @@ class TestCognitiveConfig:
 
     def test_custom_config(self):
         from hbllm.training.cognitive_trainer import CognitiveConfig
+
         config = CognitiveConfig(
             use_lora=True,
             lora_r=16,
@@ -371,7 +390,9 @@ class TestCognitiveTrainer:
             use_lora=False,
         )
         return CognitiveTrainer(
-            tiny_model, train_config, cog_config,
+            tiny_model,
+            train_config,
+            cog_config,
             device=torch.device("cpu"),
         )
 
@@ -397,7 +418,9 @@ class TestCognitiveTrainer:
             lora_r=4,
         )
         return CognitiveTrainer(
-            tiny_model, train_config, cog_config,
+            tiny_model,
+            train_config,
+            cog_config,
             device=torch.device("cpu"),
         )
 
@@ -600,22 +623,28 @@ class TestCognitiveTrainingIntegration:
 
         # Tiny model
         model_config = ModelConfig(
-            hidden_size=128, num_attention_heads=2,
+            hidden_size=128,
+            num_attention_heads=2,
             num_kv_heads=2,
-            num_layers=2, intermediate_size=256,
-            vocab_size=1000, max_position_embeddings=128,
+            num_layers=2,
+            intermediate_size=256,
+            vocab_size=1000,
+            max_position_embeddings=128,
         )
         model = HBLLMForCausalLM(model_config)
 
         train_config = TrainingConfig(
-            learning_rate=1e-3, max_steps=5,
-            micro_batch_size=2, gradient_accumulation_steps=1,
+            learning_rate=1e-3,
+            max_steps=5,
+            micro_batch_size=2,
+            gradient_accumulation_steps=1,
             checkpoint_dir=str(tmp_path / "ckpt"),
         )
         cog_config = CognitiveConfig(
             output_dir=str(tmp_path / "cog"),
             cognitive_interval=1,
-            use_lora=True, lora_r=4,
+            use_lora=True,
+            lora_r=4,
         )
 
         trainer = CognitiveTrainer(model, train_config, cog_config, torch.device("cpu"))

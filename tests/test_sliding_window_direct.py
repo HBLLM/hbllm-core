@@ -17,13 +17,17 @@ from hbllm.serving.kv_cache import KVCache
 
 # ─── Unit Tests for KVCache ──────────────────────────────────────────────────
 
+
 class TestKVCacheStatic:
     """Tests for the non-sliding-window (static) mode."""
 
     def test_basic_update(self):
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
         )
         keys = torch.randn(1, 2, 4, 8)
         values = torch.randn(1, 2, 4, 8)
@@ -35,8 +39,11 @@ class TestKVCacheStatic:
 
     def test_incremental_update(self):
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
         )
         k1 = torch.randn(1, 2, 4, 8)
         v1 = torch.randn(1, 2, 4, 8)
@@ -51,8 +58,11 @@ class TestKVCacheStatic:
 
     def test_overflow_raises_error(self):
         cache = KVCache(
-            batch_size=1, max_seq_len=4, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
+            batch_size=1,
+            max_seq_len=4,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
         )
         keys = torch.randn(1, 2, 5, 8)
         values = torch.randn(1, 2, 5, 8)
@@ -67,9 +77,13 @@ class TestKVCacheSlidingWindow:
     def test_within_window(self):
         """Tokens within the window should behave normally."""
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
-            sliding_window=8, attention_sinks=2,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
+            sliding_window=8,
+            attention_sinks=2,
         )
         keys = torch.randn(1, 2, 5, 8)
         values = torch.randn(1, 2, 5, 8)
@@ -81,9 +95,13 @@ class TestKVCacheSlidingWindow:
     def test_at_window_boundary(self):
         """Filling exactly to the window size."""
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
-            sliding_window=8, attention_sinks=2,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
+            sliding_window=8,
+            attention_sinks=2,
         )
         # Fill to exactly 8
         k1 = torch.randn(1, 2, 5, 8)
@@ -100,9 +118,13 @@ class TestKVCacheSlidingWindow:
     def test_overflow_evicts_old_tokens(self):
         """Going beyond the window should evict old tokens and keep length constant."""
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
-            sliding_window=8, attention_sinks=2,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
+            sliding_window=8,
+            attention_sinks=2,
         )
         # Fill to window
         k_init = torch.randn(1, 2, 8, 8)
@@ -121,14 +143,18 @@ class TestKVCacheSlidingWindow:
     def test_sinks_preserved_during_eviction(self):
         """Attention sink tokens must survive eviction."""
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
-            sliding_window=8, attention_sinks=2,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
+            sliding_window=8,
+            attention_sinks=2,
         )
 
         # Create identifiable tokens
         sink_keys = torch.ones(1, 2, 2, 8) * 42.0  # sinks (positions 0-1)
-        other_keys = torch.randn(1, 2, 6, 8)        # positions 2-7
+        other_keys = torch.randn(1, 2, 6, 8)  # positions 2-7
         all_keys = torch.cat([sink_keys, other_keys], dim=2)
         all_values = torch.randn(1, 2, 8, 8)
 
@@ -145,15 +171,20 @@ class TestKVCacheSlidingWindow:
         # Check sinks are still at positions 0-1
         k_out, _ = cache._read_cache()
         sink_result = k_out[:, :, :2, :]
-        assert torch.allclose(sink_result, sink_keys), \
+        assert torch.allclose(sink_result, sink_keys), (
             "Attention sink tokens were corrupted during eviction!"
+        )
 
     def test_multiple_overflow_steps(self):
         """Repeatedly overflowing should maintain constant cache size."""
         cache = KVCache(
-            batch_size=1, max_seq_len=32, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
-            sliding_window=8, attention_sinks=2,
+            batch_size=1,
+            max_seq_len=32,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
+            sliding_window=8,
+            attention_sinks=2,
         )
 
         # Initial fill
@@ -167,8 +198,7 @@ class TestKVCacheSlidingWindow:
             v = torch.randn(1, 2, 1, 8)
             cache.update(k, v, seq_offset=8 + i)
 
-            assert cache.seq_len == 8, \
-                f"Step {i}: expected seq_len=8, got {cache.seq_len}"
+            assert cache.seq_len == 8, f"Step {i}: expected seq_len=8, got {cache.seq_len}"
 
         assert cache.total_tokens_seen == 28
 
@@ -176,9 +206,13 @@ class TestKVCacheSlidingWindow:
         """attention_sinks >= sliding_window should raise ValueError."""
         with pytest.raises(ValueError, match="attention_sinks"):
             KVCache(
-                batch_size=1, max_seq_len=16, num_kv_heads=2,
-                head_dim=8, dtype=torch.float32,
-                sliding_window=4, attention_sinks=4,
+                batch_size=1,
+                max_seq_len=16,
+                num_kv_heads=2,
+                head_dim=8,
+                dtype=torch.float32,
+                sliding_window=4,
+                attention_sinks=4,
             )
 
 
@@ -187,8 +221,11 @@ class TestKVCacheQuantized:
 
     def test_quantized_basic(self):
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
             quantize_k=True,
         )
         keys = torch.randn(1, 2, 4, 8)
@@ -201,10 +238,14 @@ class TestKVCacheQuantized:
 
     def test_quantized_sliding_window(self):
         cache = KVCache(
-            batch_size=1, max_seq_len=16, num_kv_heads=2,
-            head_dim=8, dtype=torch.float32,
+            batch_size=1,
+            max_seq_len=16,
+            num_kv_heads=2,
+            head_dim=8,
+            dtype=torch.float32,
             quantize_k=True,
-            sliding_window=8, attention_sinks=2,
+            sliding_window=8,
+            attention_sinks=2,
         )
 
         k_init = torch.randn(1, 2, 8, 8)
@@ -220,6 +261,7 @@ class TestKVCacheQuantized:
 
 
 # ─── Integration Test (Model End-to-End) ─────────────────────────────────────
+
 
 def test_sliding_window_vram_constant():
     """End-to-end: KV cache length stays constant when sliding_window is set."""

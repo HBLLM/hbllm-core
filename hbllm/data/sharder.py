@@ -210,9 +210,9 @@ class ShardReader:
                     remaining = self._sequence_length - len(first_part)
                     if shard_idx + 1 < len(self._shard_paths):
                         next_shard = self._load_shard(shard_idx + 1)
-                        result[len(first_part) : len(first_part) + min(remaining, len(next_shard))] = (
-                            next_shard[:remaining]
-                        )
+                        result[
+                            len(first_part) : len(first_part) + min(remaining, len(next_shard))
+                        ] = next_shard[:remaining]
                     return result
 
             cumulative += size

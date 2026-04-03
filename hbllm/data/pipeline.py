@@ -20,6 +20,7 @@ from hbllm.data.sharder import ShardWriter
 try:
     from hbllm_data_tools_rs import Deduplicator, fast_clean_batch
     from hbllm_tokenizer_rs import Trainer, Vocab
+
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
@@ -44,9 +45,7 @@ class DataPipeline:
         self.shard_dir.mkdir(exist_ok=True)
 
         if not RUST_AVAILABLE:
-            raise RuntimeError(
-                "Rust extensions not installed. Use PurePythonPipeline instead."
-            )
+            raise RuntimeError("Rust extensions not installed. Use PurePythonPipeline instead.")
 
     def run_all(
         self,
@@ -59,7 +58,7 @@ class DataPipeline:
         logger.info("Starting Rust-accelerated Data Pipeline in %s", self.work_dir)
         start = time.time()
         # Parse multi-dataset names (+ separated)
-        dataset_names = [d.strip() for d in dataset_name.replace(',', '+').split('+') if d.strip()]
+        dataset_names = [d.strip() for d in dataset_name.replace(",", "+").split("+") if d.strip()]
         # Calculate per-dataset samples using weights or equal split
         if data_weights and len(data_weights) == len(dataset_names):
             total_w = sum(data_weights)
@@ -110,7 +109,9 @@ class DataPipeline:
             tokens.append(0)
             writer.add_tokens(tokens)
         writer.flush()
-        logger.info("Wrote %d tokens across %d shards", writer.total_tokens, len(writer.created_shards))
+        logger.info(
+            "Wrote %d tokens across %d shards", writer.total_tokens, len(writer.created_shards)
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -122,8 +123,8 @@ def _clean_text(text: str) -> str:
     """Basic text cleaning without Rust extensions."""
     if not text or not isinstance(text, str):
         return ""
-    text = re.sub(r'\s+', ' ', text).strip()
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
     return text
 
 
@@ -176,7 +177,7 @@ class PurePythonPipeline:
         import tiktoken
 
         # Parse multi-dataset names
-        dataset_names = [d.strip() for d in dataset_name.replace(',', '+').split('+') if d.strip()]
+        dataset_names = [d.strip() for d in dataset_name.replace(",", "+").split("+") if d.strip()]
 
         # Calculate per-dataset samples using weights or equal split
         if data_weights and len(data_weights) == len(dataset_names):
@@ -187,10 +188,10 @@ class PurePythonPipeline:
 
         logger.info("=" * 60)
         logger.info("HBLLM Pure-Python Data Pipeline")
-        logger.info("  Dataset(s) : %s", ' + '.join(dataset_names))
+        logger.info("  Dataset(s) : %s", " + ".join(dataset_names))
         logger.info("  Max samples: %d (total)", max_samples)
         if data_weights:
-            logger.info("  Weights    : %s", ', '.join(f'{w:.2f}' for w in data_weights))
+            logger.info("  Weights    : %s", ", ".join(f"{w:.2f}" for w in data_weights))
         logger.info("  Seq length : %d", sequence_length)
         logger.info("  Shard dir  : %s", self.shard_dir)
         logger.info("=" * 60)
@@ -249,7 +250,10 @@ class PurePythonPipeline:
                     tps = total_tokens / elapsed if elapsed > 0 else 0
                     logger.info(
                         "  %d docs | %d tokens | %.0f tok/s | %d shards",
-                        total_docs, total_tokens, tps, len(writer.created_shards),
+                        total_docs,
+                        total_tokens,
+                        tps,
+                        len(writer.created_shards),
                     )
 
         # Flush remaining buffer

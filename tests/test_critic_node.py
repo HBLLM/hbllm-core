@@ -25,7 +25,9 @@ class MockIntuitionNode:
         if "CONSTITUTIONAL VIOLATION" in text:
             await self.propose("I am a helpful assistant and the sky is blue.", msg.correlation_id)
         else:
-            await self.propose("As an AI language model, I don't know the answer.", msg.correlation_id)
+            await self.propose(
+                "As an AI language model, I don't know the answer.", msg.correlation_id
+            )
 
     async def propose(self, content, corr_id):
         thought = Message(
@@ -33,7 +35,7 @@ class MockIntuitionNode:
             source_node_id="intuition_01",
             topic="workspace.thought",
             payload={"type": "intuition", "confidence": 0.9, "content": content},
-            correlation_id=corr_id
+            correlation_id=corr_id,
         )
         await self.bus.publish("workspace.thought", thought)
 
@@ -59,6 +61,7 @@ async def critic_env():
     await critic.stop()
     await bus.stop()
 
+
 @pytest.mark.asyncio
 async def test_critic_active_halting_and_backtracking(critic_env):
     bus, workspace, critic, intuition = critic_env
@@ -69,7 +72,7 @@ async def test_critic_active_halting_and_backtracking(critic_env):
         source_node_id="router",
         topic="workspace.update",
         payload={"text": "What color is the sky?"},
-        correlation_id="test_halt_001"
+        correlation_id="test_halt_001",
     )
 
     await bus.publish("workspace.update", query)

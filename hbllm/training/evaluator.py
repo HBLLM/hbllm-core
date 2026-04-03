@@ -149,6 +149,7 @@ class ModelEvaluator:
         """Load HellaSwag from HuggingFace."""
         try:
             from datasets import load_dataset
+
             ds = load_dataset("Rowan/hellaswag", split="validation", streaming=True)
             examples = []
             for item in ds:

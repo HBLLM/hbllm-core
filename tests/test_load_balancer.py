@@ -17,17 +17,25 @@ async def lb_setup():
     breakers = CircuitBreakerRegistry()
 
     nodes = [
-        NodeInfo(node_id="math_1", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"], priority=1),
-        NodeInfo(node_id="math_2", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"], priority=1),
-        NodeInfo(node_id="math_3", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"], priority=1),
+        NodeInfo(
+            node_id="math_1", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"], priority=1
+        ),
+        NodeInfo(
+            node_id="math_2", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"], priority=1
+        ),
+        NodeInfo(
+            node_id="math_3", node_type=NodeType.DOMAIN_MODULE, capabilities=["math"], priority=1
+        ),
     ]
     for n in nodes:
         await registry.register(n)
-        await registry.update_health(NodeHealth(
-            node_id=n.node_id,
-            status=HealthStatus.HEALTHY,
-            latency_ms=10.0,
-        ))
+        await registry.update_health(
+            NodeHealth(
+                node_id=n.node_id,
+                status=HealthStatus.HEALTHY,
+                latency_ms=10.0,
+            )
+        )
 
     lb = LoadBalancer(registry, breakers, strategy="round_robin")
     yield lb, registry, breakers
@@ -84,9 +92,15 @@ async def test_least_loaded(lb_setup):
     lb._strategy = "least_loaded"
 
     # Give math_1 high latency, math_3 low
-    await registry.update_health(NodeHealth(node_id="math_1", status=HealthStatus.HEALTHY, latency_ms=100.0))
-    await registry.update_health(NodeHealth(node_id="math_2", status=HealthStatus.HEALTHY, latency_ms=50.0))
-    await registry.update_health(NodeHealth(node_id="math_3", status=HealthStatus.HEALTHY, latency_ms=5.0))
+    await registry.update_health(
+        NodeHealth(node_id="math_1", status=HealthStatus.HEALTHY, latency_ms=100.0)
+    )
+    await registry.update_health(
+        NodeHealth(node_id="math_2", status=HealthStatus.HEALTHY, latency_ms=50.0)
+    )
+    await registry.update_health(
+        NodeHealth(node_id="math_3", status=HealthStatus.HEALTHY, latency_ms=5.0)
+    )
 
     node = await lb.select("math")
     assert node.node_id == "math_3"
@@ -97,9 +111,15 @@ async def test_least_loaded_prefers_healthy(lb_setup):
     lb._strategy = "least_loaded"
 
     # math_1 degraded but low latency, math_2 healthy with higher latency
-    await registry.update_health(NodeHealth(node_id="math_1", status=HealthStatus.DEGRADED, latency_ms=1.0))
-    await registry.update_health(NodeHealth(node_id="math_2", status=HealthStatus.HEALTHY, latency_ms=10.0))
-    await registry.update_health(NodeHealth(node_id="math_3", status=HealthStatus.HEALTHY, latency_ms=10.0))
+    await registry.update_health(
+        NodeHealth(node_id="math_1", status=HealthStatus.DEGRADED, latency_ms=1.0)
+    )
+    await registry.update_health(
+        NodeHealth(node_id="math_2", status=HealthStatus.HEALTHY, latency_ms=10.0)
+    )
+    await registry.update_health(
+        NodeHealth(node_id="math_3", status=HealthStatus.HEALTHY, latency_ms=10.0)
+    )
 
     node = await lb.select("math")
     # math_2 or math_3 should win (healthy beats degraded with penalty)
@@ -112,17 +132,23 @@ async def test_capability_match():
     breakers = CircuitBreakerRegistry()
 
     # Node with exact match first
-    await registry.register(NodeInfo(
-        node_id="exact", node_type=NodeType.DOMAIN_MODULE,
-        capabilities=["math", "general"],
-    ))
+    await registry.register(
+        NodeInfo(
+            node_id="exact",
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["math", "general"],
+        )
+    )
     await registry.update_health(NodeHealth(node_id="exact", status=HealthStatus.HEALTHY))
 
     # Node with general first
-    await registry.register(NodeInfo(
-        node_id="general", node_type=NodeType.DOMAIN_MODULE,
-        capabilities=["general", "math"],
-    ))
+    await registry.register(
+        NodeInfo(
+            node_id="general",
+            node_type=NodeType.DOMAIN_MODULE,
+            capabilities=["general", "math"],
+        )
+    )
     await registry.update_health(NodeHealth(node_id="general", status=HealthStatus.HEALTHY))
 
     lb = LoadBalancer(registry, breakers, strategy="capability_match")
@@ -135,9 +161,15 @@ async def test_strategy_override(lb_setup):
     lb, registry, _ = lb_setup
 
     # Default is round_robin, override to least_loaded
-    await registry.update_health(NodeHealth(node_id="math_1", status=HealthStatus.HEALTHY, latency_ms=100.0))
-    await registry.update_health(NodeHealth(node_id="math_2", status=HealthStatus.HEALTHY, latency_ms=1.0))
-    await registry.update_health(NodeHealth(node_id="math_3", status=HealthStatus.HEALTHY, latency_ms=50.0))
+    await registry.update_health(
+        NodeHealth(node_id="math_1", status=HealthStatus.HEALTHY, latency_ms=100.0)
+    )
+    await registry.update_health(
+        NodeHealth(node_id="math_2", status=HealthStatus.HEALTHY, latency_ms=1.0)
+    )
+    await registry.update_health(
+        NodeHealth(node_id="math_3", status=HealthStatus.HEALTHY, latency_ms=50.0)
+    )
 
     node = await lb.select("math", strategy="least_loaded")
     assert node.node_id == "math_2"

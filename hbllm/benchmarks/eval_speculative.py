@@ -35,10 +35,13 @@ def run_speculative_benchmark() -> dict[str, Any]:
     class MockTokenizer:
         def __init__(self):
             self.eos_id = 1
+
         def encode(self, text, **kwargs):
             return [10, 20, 30, 40, 50]
+
         def decode(self, token_ids):
             return " " + " ".join(str(x) for x in token_ids)
+
         def apply_chat_template(self, msgs, **kwargs):
             return msgs[0]["content"]
 
@@ -72,7 +75,7 @@ def run_speculative_benchmark() -> dict[str, Any]:
             max_new_tokens=max_tokens,
             eos_token_id=1,
             gamma=4,
-            adaptive_gamma=False
+            adaptive_gamma=False,
         )
     spec_fixed_time = time.time() - start_time
     spec_fixed_tokens = spec_fixed_output.size(1) - input_ids.size(1)
@@ -87,7 +90,7 @@ def run_speculative_benchmark() -> dict[str, Any]:
             max_new_tokens=max_tokens,
             eos_token_id=1,
             gamma=4,
-            adaptive_gamma=True
+            adaptive_gamma=True,
         )
     spec_adaptive_time = time.time() - start_time
     spec_adaptive_tokens = spec_adaptive_output.size(1) - input_ids.size(1)
@@ -97,21 +100,22 @@ def run_speculative_benchmark() -> dict[str, Any]:
         "autoregressive": {
             "tokens_per_sec": baseline_tps,
             "latency_sec": baseline_time,
-            "tokens_generated": baseline_tokens
+            "tokens_generated": baseline_tokens,
         },
         "speculative_fixed": {
             "tokens_per_sec": spec_fixed_tps,
             "latency_sec": spec_fixed_time,
             "tokens_generated": spec_fixed_tokens,
-            "speedup": spec_fixed_tps / baseline_tps
+            "speedup": spec_fixed_tps / baseline_tps,
         },
         "speculative_adaptive": {
             "tokens_per_sec": spec_adaptive_tps,
             "latency_sec": spec_adaptive_time,
             "tokens_generated": spec_adaptive_tokens,
-            "speedup": spec_adaptive_tps / baseline_tps
-        }
+            "speedup": spec_adaptive_tps / baseline_tps,
+        },
     }
+
 
 if __name__ == "__main__":
     results = run_speculative_benchmark()

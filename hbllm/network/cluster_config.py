@@ -24,10 +24,12 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
 def _interpolate_env(value: Any) -> Any:
     """Recursively interpolate ${VAR} and ${VAR:default} in strings."""
     if isinstance(value, str):
+
         def _replacer(m: re.Match) -> str:
             var_name = m.group(1)
             default = m.group(2)
             return os.environ.get(var_name, default if default is not None else "")
+
         return _ENV_VAR_PATTERN.sub(_replacer, value)
     if isinstance(value, dict):
         return {k: _interpolate_env(v) for k, v in value.items()}
@@ -38,8 +40,10 @@ def _interpolate_env(value: Any) -> Any:
 
 # ─── Pydantic Models ─────────────────────────────────────────────────────────
 
+
 class ClusterInfo(BaseModel):
     """Top-level cluster identity."""
+
     name: str = "hbllm-default"
     redis_url: str = "redis://localhost:6379"
     auth_secret: str = ""
@@ -48,6 +52,7 @@ class ClusterInfo(BaseModel):
 
 class NodeDefaults(BaseModel):
     """Default parameters for all nodes."""
+
     heartbeat_interval: float = 10.0
     circuit_breaker_threshold: int = 3
     circuit_breaker_recovery: float = 30.0
@@ -56,6 +61,7 @@ class NodeDefaults(BaseModel):
 
 class LoadBalancingConfig(BaseModel):
     """Load balancing strategy configuration."""
+
     strategy: str = "round_robin"  # round_robin | least_loaded | capability_match
     health_weight: float = 0.7
     latency_weight: float = 0.3
@@ -63,12 +69,14 @@ class LoadBalancingConfig(BaseModel):
 
 class ApiConfig(BaseModel):
     """API server configuration for a server role."""
+
     enabled: bool = False
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
 
 class ServerConfig(BaseModel):
     """Configuration for a single server role."""
+
     host: str = "0.0.0.0"
     port: int = 8000
     description: str = ""
@@ -78,6 +86,7 @@ class ServerConfig(BaseModel):
 
 class ClusterConfig(BaseModel):
     """Complete cluster topology configuration."""
+
     cluster: ClusterInfo = Field(default_factory=ClusterInfo)
     node_defaults: NodeDefaults = Field(default_factory=NodeDefaults)
     load_balancing: LoadBalancingConfig = Field(default_factory=LoadBalancingConfig)
@@ -88,8 +97,7 @@ class ClusterConfig(BaseModel):
         if server_name not in self.servers:
             available = ", ".join(self.servers.keys())
             raise KeyError(
-                f"Server '{server_name}' not found in cluster config. "
-                f"Available: {available}"
+                f"Server '{server_name}' not found in cluster config. Available: {available}"
             )
         return self.servers[server_name]
 
@@ -124,8 +132,7 @@ class ClusterConfig(BaseModel):
             for node in server.nodes:
                 if node in seen_nodes:
                     warnings.append(
-                        f"Node '{node}' assigned to both '{seen_nodes[node]}' "
-                        f"and '{server_name}'"
+                        f"Node '{node}' assigned to both '{seen_nodes[node]}' and '{server_name}'"
                     )
                 seen_nodes[node] = server_name
 

@@ -50,10 +50,13 @@ async def reflection_system(tmp_reflection_dir):
 
 # ── Unit tests for reflection analysis ───────────────────────────────────────
 
+
 class TestEventCategorization:
     def test_security_category(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
-        assert node._categorize_event("critical security breach detected in auth module") == "security"
+        assert (
+            node._categorize_event("critical security breach detected in auth module") == "security"
+        )
 
     def test_error_category(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
@@ -61,15 +64,24 @@ class TestEventCategorization:
 
     def test_performance_category(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
-        assert node._categorize_event("database query timeout after 30 seconds of latency") == "performance"
+        assert (
+            node._categorize_event("database query timeout after 30 seconds of latency")
+            == "performance"
+        )
 
     def test_user_preference_category(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
-        assert node._categorize_event("user prefers dark mode and always uses compact view") == "user_preference"
+        assert (
+            node._categorize_event("user prefers dark mode and always uses compact view")
+            == "user_preference"
+        )
 
     def test_learning_category(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
-        assert node._categorize_event("discovered a new pattern in user behavior insights") == "learning"
+        assert (
+            node._categorize_event("discovered a new pattern in user behavior insights")
+            == "learning"
+        )
 
     def test_general_fallback(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
@@ -123,7 +135,9 @@ class TestEntityExtraction:
 
     def test_extracts_technical_terms(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
-        entities = node._extract_key_entities("The camelCase and snake_case variables need refactoring")
+        entities = node._extract_key_entities(
+            "The camelCase and snake_case variables need refactoring"
+        )
         labels = [e["label"] for e in entities]
         assert any("camelCase" in l for l in labels)
         assert any("snake_case" in l for l in labels)
@@ -136,7 +150,9 @@ class TestEntityExtraction:
 
     def test_extracts_domain_concepts(self):
         node = ExperienceNode(node_id="test", reflection_dir="/tmp/test_ref")
-        entities = node._extract_key_entities("The training pipeline node handles checkpoint gradient updates")
+        entities = node._extract_key_entities(
+            "The training pipeline node handles checkpoint gradient updates"
+        )
         types = {e["type"] for e in entities}
         assert "domain_concept" in types
 
@@ -187,6 +203,7 @@ class TestRuleExtraction:
 
 # ── Integration: JSONL writing + bus publishing ──────────────────────────────
 
+
 class TestDeepReflectionIntegration:
     @pytest.mark.asyncio
     async def test_reflection_writes_jsonl(self, reflection_system):
@@ -199,7 +216,9 @@ class TestDeepReflectionIntegration:
             tenant_id="t1",
             session_id="s1",
             topic="sensory.output",
-            payload={"text": "Critical security breach detected in authentication module! Unauthorized access from unknown IP."},
+            payload={
+                "text": "Critical security breach detected in authentication module! Unauthorized access from unknown IP."
+            },
             correlation_id="ref_001",
         )
         await bus.publish("sensory.output", msg)
@@ -226,15 +245,19 @@ class TestDeepReflectionIntegration:
         bus, experience, memory, ref_dir = reflection_system
 
         reflections = []
+
         async def capture(msg):
             reflections.append(msg)
+
         await bus.subscribe("system.reflection", capture)
 
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="test",
             topic="sensory.output",
-            payload={"text": "Fatal exception in payment processing module. Traceback shows null pointer error."},
+            payload={
+                "text": "Fatal exception in payment processing module. Traceback shows null pointer error."
+            },
             correlation_id="ref_002",
         )
         await bus.publish("sensory.output", msg)
@@ -251,15 +274,19 @@ class TestDeepReflectionIntegration:
         bus, experience, memory, ref_dir = reflection_system
 
         reflections = []
+
         async def capture(msg):
             reflections.append(msg)
+
         await bus.subscribe("system.reflection", capture)
 
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="test",
             topic="sensory.output",
-            payload={"text": "Security vulnerability discovered in the API gateway! Exploit allows unauthorized access."},
+            payload={
+                "text": "Security vulnerability discovered in the API gateway! Exploit allows unauthorized access."
+            },
             correlation_id="ref_003",
         )
         await bus.publish("sensory.output", msg)
@@ -280,7 +307,9 @@ class TestDeepReflectionIntegration:
             type=MessageType.EVENT,
             source_node_id="test",
             topic="sensory.output",
-            payload={"text": "The authentication module has a critical vulnerability. Python is a programming language used by the system."},
+            payload={
+                "text": "The authentication module has a critical vulnerability. Python is a programming language used by the system."
+            },
             correlation_id="ref_004",
         )
         await bus.publish("sensory.output", msg)

@@ -12,11 +12,13 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
 class VisionNode(Node):
     """
     Multimodal sensory node that converts images to dense text captions
     and extracts text via OCR, bridging visual perception to the LLM.
     """
+
     def __init__(self, node_id: str):
         super().__init__(
             node_id=node_id,
@@ -30,23 +32,29 @@ class VisionNode(Node):
     async def on_start(self) -> None:
         logger.info("Starting VisionNode. Loading ViT model...")
         import asyncio
+
         await asyncio.to_thread(self._load_model)
         await self.bus.subscribe(self.topic_sub, self.handle_message)
         await self.bus.subscribe("vision.ocr", self.handle_ocr)
         await self.bus.subscribe("vision.caption", self.handle_message)
         # Multi-modal workspace: participate as a competing thought source
         await self.bus.subscribe("module.evaluate", self.handle_workspace_query)
-        logger.info("VisionNode Ready. Subscribed to %s + vision.ocr + module.evaluate", self.topic_sub)
+        logger.info(
+            "VisionNode Ready. Subscribed to %s + vision.ocr + module.evaluate", self.topic_sub
+        )
 
     def _load_model(self):
         try:
             import torch
             from transformers import pipeline
+
             device = 0 if torch.cuda.is_available() else -1
             if torch.backends.mps.is_available() and device == -1:
                 # pipeline device=-1 means CPU. pipeline currently drops support for strings like 'mps' in some versions unless passed explicitly as a torch.device
                 device = "mps"
-            self.pipeline = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base", device=device)
+            self.pipeline = pipeline(
+                "image-to-text", model="Salesforce/blip-image-captioning-base", device=device
+            )
         except Exception as e:
             logger.error("Failed to load vision model: %s", e)
 
@@ -66,6 +74,7 @@ class VisionNode(Node):
 
         try:
             import asyncio
+
             caption = await asyncio.to_thread(self._process_image, image_path)
             return message.create_response({"text": caption, "domain": "vision"})
         except Exception as e:
@@ -74,6 +83,7 @@ class VisionNode(Node):
 
     def _process_image(self, path: str) -> str:
         from PIL import Image
+
         image = Image.open(path).convert("RGB")
         res = self.pipeline(image)
         return res[0]["generated_text"]
@@ -84,7 +94,8 @@ class VisionNode(Node):
         try:
             if self._ocr_reader is None:
                 import easyocr
-                self._ocr_reader = easyocr.Reader(['en'], gpu=False)
+
+                self._ocr_reader = easyocr.Reader(["en"], gpu=False)
 
             results = self._ocr_reader.readtext(path, detail=0)
             return "\n".join(results) if results else ""
@@ -95,6 +106,7 @@ class VisionNode(Node):
         try:
             import pytesseract
             from PIL import Image
+
             image = Image.open(path)
             return pytesseract.image_to_string(image).strip()
         except ImportError:
@@ -121,7 +133,9 @@ class VisionNode(Node):
             import asyncio
 
             # Run caption + OCR in parallel threads
-            caption_task = asyncio.to_thread(self._process_image, image_path) if self.pipeline else None
+            caption_task = (
+                asyncio.to_thread(self._process_image, image_path) if self.pipeline else None
+            )
             ocr_task = asyncio.to_thread(self._extract_text_ocr, image_path)
 
             tasks = [t for t in [caption_task, ocr_task] if t is not None]
@@ -132,7 +146,9 @@ class VisionNode(Node):
 
             if caption_task is not None:
                 caption = results[0] if not isinstance(results[0], Exception) else ""
-                ocr_text = results[1] if len(results) > 1 and not isinstance(results[1], Exception) else ""
+                ocr_text = (
+                    results[1] if len(results) > 1 and not isinstance(results[1], Exception) else ""
+                )
             else:
                 ocr_text = results[0] if not isinstance(results[0], Exception) else ""
 
@@ -140,12 +156,14 @@ class VisionNode(Node):
             if ocr_text:
                 combined = f"{caption}\n\n[Extracted Text]:\n{ocr_text}" if caption else ocr_text
 
-            return message.create_response({
-                "caption": caption,
-                "ocr_text": ocr_text,
-                "combined": combined,
-                "domain": "vision",
-            })
+            return message.create_response(
+                {
+                    "caption": caption,
+                    "ocr_text": ocr_text,
+                    "combined": combined,
+                    "domain": "vision",
+                }
+            )
         except Exception as e:
             logger.error("OCR processing error: %s", e)
             return message.create_error(f"OCR failure: {e}")
