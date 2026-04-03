@@ -31,7 +31,7 @@ class ModelConfig:
     max_position_embeddings: int = 2048
     
     # Efficiency / Long Context (SWA)
-    sliding_window: Optional[int] = None
+    sliding_window: int | None = None
     attention_sinks: int = 4
 
     # Normalization
@@ -53,6 +53,11 @@ class ModelConfig:
     num_experts: int = 16
     num_active_experts: int = 2
     use_shared_expert: bool = True
+
+    # Hardware & Quantization (Phase 4)
+    quantization_level: int = 16 # 16, 8, 4
+    offload_experts: bool = False
+    force_cpu: bool = False
 
     def __post_init__(self) -> None:
         """Validate architectural constraints to catch misconfigurations early."""

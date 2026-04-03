@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 ACTIVE_ADAPTER = contextvars.ContextVar('active_adapter', default=None)
 
 
+def is_quantization_enabled() -> bool:
+    """Helper to check if quantization is globally active."""
+    # We could check a global context or config here
+    return False
+
+
 class LoRALinear(nn.Module):
     """
     Wraps an existing nn.Linear layer and applies low-rank updates.
@@ -46,9 +52,11 @@ class LoRALinear(nn.Module):
         self.lora_alpha = lora_alpha
         self.scaling = lora_alpha / r
 
-        # Freeze base layer
-        self.base_layer.weight.requires_grad = False
-        if self.base_layer.bias is not None:
+        # Freeze base layer — handle both nn.Linear (.weight) and
+        # QuantizedLinear (.weight_shards buffer, already frozen)
+        if hasattr(self.base_layer, 'weight') and self.base_layer.weight is not None:
+            self.base_layer.weight.requires_grad = False
+        if hasattr(self.base_layer, 'bias') and self.base_layer.bias is not None:
             self.base_layer.bias.requires_grad = False
 
         self.in_features = self.base_layer.in_features
@@ -131,10 +139,13 @@ class LoRAManager:
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
         target_modules: list[str] | None = None,
+        quantization_level: int = 16,
     ) -> list[str]:
         """
-        Recursively replaces matching Linear layers with LoRALinear.
+        Recursively replaces matching Linear layers with LoRALinear or HybridLinear.
         """
+        from hbllm.model.quantization import QuantizedLinear, HybridLinear
+        
         if target_modules is None:
             target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
@@ -143,22 +154,40 @@ class LoRAManager:
         # Recursively patch modules
         for name, module in list(model.named_modules()):
             for target in target_modules:
-                if name.endswith(target) and isinstance(module, nn.Linear) and not isinstance(module, LoRALinear):
+                if name.endswith(target) and isinstance(module, nn.Linear) and not isinstance(module, (LoRALinear, HybridLinear)):
                     parent_name = name.rsplit(".", 1)[0] if "." in name else ""
                     child_name = name.rsplit(".", 1)[-1] if "." in name else name
 
                     parent = model.get_submodule(parent_name) if parent_name else model
-                    lora_layer = LoRALinear(
-                        base_layer=module,
-                        r=r,
-                        lora_alpha=lora_alpha,
-                        lora_dropout=lora_dropout,
-                    )
+                    
+                    if quantization_level in [4, 8]:
+                        # Wrap in Hybrid Shield
+                        base_quant = QuantizedLinear(
+                            module.in_features, 
+                            module.out_features, 
+                            bits=quantization_level,
+                            bias=module.bias is not None
+                        )
+                        # Copy optional bias from original linear
+                        if module.bias is not None and base_quant.bias_param is not None:
+                            base_quant.bias_param.data.copy_(module.bias.data)
+                            
+                        lora_layer = HybridLinear(base_layer=base_quant, r=r)
+                        logger.info("Injected HybridLinear (r=%d, bits=%d) into %s", r, quantization_level, name)
+                    else:
+                        # Standard LoRA
+                        lora_layer = LoRALinear(
+                            base_layer=module,
+                            r=r,
+                            lora_alpha=lora_alpha,
+                            lora_dropout=lora_dropout,
+                        )
+                        logger.info("Injected LoRALinear (r=%d) into %s", r, name)
+                        
                     setattr(parent, child_name, lora_layer)
                     injected.append(name)
                     break
 
-        logger.info("Injected LoRA (r=%d) into %d modules", r, len(injected))
         return injected
         
     @staticmethod

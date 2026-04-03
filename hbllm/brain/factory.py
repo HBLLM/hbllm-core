@@ -311,9 +311,10 @@ class BrainFactory:
         for ckpt_dir in search_paths:
             if ckpt_dir.is_file() and ckpt_dir.suffix == ".pt":
                 logger.info("Loading checkpoint: %s", ckpt_dir)
-                ckpt = torch.load(ckpt_dir, map_location="cpu", weights_only=False)
+                from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+                ckpt = load_checkpoint(ckpt_dir)
                 model.load_state_dict(
-                    ckpt.get("model_state_dict", ckpt), strict=False
+                    extract_model_state(ckpt), strict=False
                 )
                 ckpt_loaded = True
                 break
@@ -321,9 +322,10 @@ class BrainFactory:
                 pts = sorted(ckpt_dir.rglob("step_*.pt"))
                 if pts:
                     logger.info("Loading latest checkpoint: %s", pts[-1])
-                    ckpt = torch.load(pts[-1], map_location="cpu", weights_only=False)
+                    from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+                    ckpt = load_checkpoint(pts[-1])
                     model.load_state_dict(
-                        ckpt.get("model_state_dict", ckpt), strict=False
+                        extract_model_state(ckpt), strict=False
                     )
                     ckpt_loaded = True
                     break

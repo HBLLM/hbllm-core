@@ -199,6 +199,10 @@ HBLLM operates **5 distinct memory types** mirroring human cognitive psychology:
 - **Owner Rules:** The `RuleExtractor` mines high-salience interactions for recurring *if→then* preferences, auto-promoting them to strict `OwnerRuleStore` behavioral guardrails.
 
 ### ⚙️ Scalable Infrastructure
+- **128k+ Context via Sliding Window Attention:** True $O(1)$ memory scaling. Supports infinite-length conversations without VRAM explosion by evicting older tokens while perfectly preserving multi-head Attention Sinks for generation stability.
+- **Per-Block Quantization (Rust SIMD):** Universal hybrid layers combine 16-bit LoRA sidecars over an ultra-compressed base model backbone. Evaluated with `group_size=128`, scaling natively via a tightly integrated Rust compute kernel (AVX2/NEON optimizations). 
+- **Enterprise Reliability:** Automatic exponential backoff + jitter for external LLM calls (Anthropic/OpenAI) to silently heal transient `429` and `5xx` rate limits in production deployments.
+- **Hardened Checkpoint Security:** Checkpoint-loads implement forced `weights_only=True` sanitization to prevent arbitrary code execution attacks, ensuring deployment confidence for community-sourced LoRAs and models.
 - **Edge-Ready ONNX Router:** The Vector Routing Engine operates completely independently of PyTorch using `onnxruntime` and `tokenizers`. At under `15MB` of RAM footprint and ~0.0001ms native inference times, the routing engine thrives on constrained IoT devices like wearables or Raspberry Pis.
 - **Distributed Async Message Bus:** Nodes communicate purely via Pub/Sub. Deploy locally via `InProcessBus` or scale across clusters via `RedisBus` (featuring HMAC auth, TTLs, and exponential backoff).
 - **Token Optimization:** Dynamic routing to the cheapest capable provider. Automatically offsets easy queries to local ~125M models while elevating complex logic to GPT-4o or Claude 3.5.

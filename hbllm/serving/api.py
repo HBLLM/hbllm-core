@@ -174,7 +174,7 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
         ApiNode(node_id="api_01", llm=llm_interface),
 
         # Consolidation
-        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=60.0, llm=llm),
+        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=60.0, llm=llm_interface),
 
         # Domain experts
         DomainModuleNode(node_id="domain_general", domain_name="general", model=model, tokenizer=vocab),

@@ -628,8 +628,9 @@ def run_eval(args: argparse.Namespace) -> None:
     # Load checkpoint
     if args.checkpoint:
         logger.info("Loading checkpoint: %s", args.checkpoint)
-        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+        from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+        ckpt = load_checkpoint(args.checkpoint)
+        model.load_state_dict(extract_model_state(ckpt), strict=False)
     else:
         logger.warning("No checkpoint specified, evaluating random model.")
 
@@ -666,8 +667,9 @@ def run_export(args: argparse.Namespace) -> None:
     # Load checkpoint
     if args.checkpoint:
         logger.info("Loading checkpoint: %s", args.checkpoint)
-        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+        from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+        ckpt = load_checkpoint(args.checkpoint)
+        model.load_state_dict(extract_model_state(ckpt), strict=False)
     else:
         logger.warning("No checkpoint specified, exporting random model.")
 
@@ -739,8 +741,9 @@ def run_embed(args: argparse.Namespace) -> None:
 
     if args.checkpoint:
         logger.info("Loading base checkpoint: %s", args.checkpoint)
-        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+        from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+        ckpt = load_checkpoint(args.checkpoint)
+        model.load_state_dict(extract_model_state(ckpt), strict=False)
 
     model = model.to(device)
 
@@ -788,8 +791,9 @@ def _run_post_training_eval(args: argparse.Namespace) -> None:
         ckpt_dir = Path(args.checkpoint_dir)
         latest = sorted(ckpt_dir.glob("*.pt"))[-1] if ckpt_dir.exists() else None
         if latest:
-            ckpt = torch.load(str(latest), map_location="cpu", weights_only=False)
-            model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+            from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+            ckpt = load_checkpoint(str(latest))
+            model.load_state_dict(extract_model_state(ckpt), strict=False)
 
         model = model.to(device)
         tokenizer = HBLLMTokenizer.from_tiktoken()

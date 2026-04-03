@@ -2,5 +2,6 @@
 members = [
     "rust/tokenizer",
     "rust/data_tools",
+    "rust/compute_kernel",
 ]
 resolver = "2"

@@ -13,9 +13,11 @@ Use get_provider() to create the appropriate provider:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -31,6 +33,61 @@ class LLMResponse:
     usage: dict[str, int]  # prompt_tokens, completion_tokens, total_tokens
     finish_reason: str = "stop"
     raw: Any = None  # Original provider response
+
+
+# ─── Retry Helper ─────────────────────────────────────────────────────────────
+
+# HTTP status codes that indicate transient failures worth retrying
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+async def _retry_api_call(
+    func,
+    *args,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 30.0,
+    **kwargs,
+):
+    """
+    Execute an async callable with exponential backoff on transient failures.
+
+    Retries on:
+      - httpx.HTTPStatusError with status in _RETRYABLE_STATUS_CODES
+      - httpx.TransportError (connection reset, DNS failure, timeout)
+
+    Backoff formula: delay = initial_delay * 2^attempt + jitter
+    """
+    import httpx
+
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await func(*args, **kwargs)
+        except httpx.HTTPStatusError as e:
+            last_exc = e
+            if e.response.status_code not in _RETRYABLE_STATUS_CODES:
+                raise  # Non-retryable (e.g. 401, 403, 404)
+            if attempt == max_retries:
+                raise
+            delay = min(initial_delay * (2 ** attempt), max_delay)
+            delay += random.uniform(0, delay * 0.1)  # jitter
+            logger.warning(
+                "API call failed (HTTP %d), retrying in %.1fs (attempt %d/%d)",
+                e.response.status_code, delay, attempt + 1, max_retries,
+            )
+            await asyncio.sleep(delay)
+        except (httpx.TransportError, httpx.TimeoutException) as e:
+            last_exc = e
+            if attempt == max_retries:
+                raise
+            delay = min(initial_delay * (2 ** attempt), max_delay)
+            delay += random.uniform(0, delay * 0.1)
+            logger.warning(
+                "API transport error (%s), retrying in %.1fs (attempt %d/%d)",
+                type(e).__name__, delay, attempt + 1, max_retries,
+            )
+            await asyncio.sleep(delay)
 
 
 class LLMProvider(ABC):
@@ -181,11 +238,13 @@ class LocalProvider(LLMProvider):
                             batch_size=1,
                             max_seq_len=budget,
                             num_kv_heads=cfg.num_kv_heads,
-                            head_dim=cfg.hidden_size // cfg.num_heads,
+                            head_dim=cfg.hidden_size // cfg.num_attention_heads,
                             dtype=next(self._model.parameters()).dtype,
                             device=input_tensor.device,
+                            sliding_window=getattr(cfg, 'sliding_window', None),
+                            attention_sinks=getattr(cfg, 'attention_sinks', 4),
                         )
-                        for _ in range(cfg.num_hidden_layers)
+                        for _ in range(cfg.num_layers)
                     ]
     
             with torch.no_grad():
@@ -306,14 +365,17 @@ class OpenAIProvider(LLMProvider):
             "top_p": top_p,
         }
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{self._base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        async def _do_request():
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                return resp.json()
+
+        data = await _retry_api_call(_do_request)
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
@@ -426,14 +488,17 @@ class AnthropicProvider(LLMProvider):
         if system:
             payload["system"] = system
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        async def _do_request():
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                return resp.json()
+
+        data = await _retry_api_call(_do_request)
 
         content = data["content"][0]["text"] if data.get("content") else ""
         usage = data.get("usage", {})

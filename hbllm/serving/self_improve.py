@@ -176,8 +176,9 @@ def _train_on_domain(
         latest = sorted(base_ckpt.glob("step_*.pt"))
         if latest:
             logger.info("Loading base checkpoint: %s", latest[-1])
-            ckpt = torch.load(latest[-1], map_location="cpu", weights_only=False)
-            model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+            from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+            ckpt = load_checkpoint(latest[-1])
+            model.load_state_dict(extract_model_state(ckpt), strict=False)
 
     # Inject LoRA if requested
     if use_lora:

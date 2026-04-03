@@ -121,6 +121,15 @@ class HBLLMModel(nn.Module):
         self.layers = nn.ModuleList(
             [TransformerBlock(config, layer_idx=i) for i in range(config.num_layers)]
         )
+        
+        # Automatic Hybrid Quantization Injection (Phase 4)
+        if getattr(config, "quantization_level", 16) in [4, 8]:
+            from hbllm.modules.lora import LoRAManager
+            LoRAManager.inject(
+                self, 
+                quantization_level=config.quantization_level,
+                r=getattr(config, "lora_rank", 8)
+            )
 
         # Final normalization
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)

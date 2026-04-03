@@ -1,68 +1,270 @@
+"""
+Enterprise-Grade KV Cache with Sliding Window Attention & 8-bit Key Quantization.
+
+Features:
+  - Pre-allocated O(1) buffer for autoregressive inference
+  - Sliding Window Attention (SWA) for constant-VRAM long-context generation
+  - Attention Sinks: preserves the first N tokens (critical for generation quality)
+  - Optional 8-bit key quantization to further reduce memory footprint
+"""
+
 import torch
 from typing import Tuple
 
+
 class KVCache:
     """
-    Holds pre-allocated Key and Value tensors for autoregressive decoding.
-    
-    Prevents O(N) memory reallocation on every step by pre-allocating the max
-    sequence length budget and performing in-place slicing updates.
+    Pre-allocated KV Cache with Sliding Window + Attention Sink support.
+
+    When ``sliding_window`` is set, the cache acts as a rolling buffer:
+    - The first ``attention_sinks`` positions are pinned (never evicted).
+    - The remaining ``sliding_window - attention_sinks`` positions hold the
+      most recent tokens and are shifted as new tokens arrive.
+    - This guarantees O(1) memory regardless of total sequence length.
+
+    When ``sliding_window`` is None, the cache behaves as a standard
+    fixed-size buffer and raises ValueError if the sequence exceeds
+    ``max_seq_len``.
     """
+
     def __init__(
         self,
         batch_size: int,
         max_seq_len: int,
         num_kv_heads: int,
         head_dim: int,
-        dtype: torch.dtype = torch.float32,
+        dtype: torch.dtype = torch.float16,
         device: torch.device = torch.device('cpu'),
+        quantize_k: bool = False,
+        sliding_window: int | None = None,
+        attention_sinks: int = 4,
     ):
         self.max_seq_len = max_seq_len
         self.device = device
-        
-        # [batch_size, num_kv_heads, max_seq_len, head_dim]
-        shape = (batch_size, num_kv_heads, max_seq_len, head_dim)
-        
-        self.key_cache = torch.zeros(shape, dtype=dtype, device=device)
+        self.quantize_k = quantize_k
+        self.dtype = dtype
+
+        # Sliding Window configuration
+        self.sliding_window = sliding_window
+        self.attention_sinks = attention_sinks if sliding_window else 0
+
+        # Effective buffer size: use sliding_window if set, else max_seq_len
+        self.buffer_size = sliding_window if sliding_window else max_seq_len
+
+        # Validate constraints
+        if self.sliding_window and self.attention_sinks >= self.sliding_window:
+            raise ValueError(
+                f"attention_sinks ({self.attention_sinks}) must be less than "
+                f"sliding_window ({self.sliding_window})"
+            )
+
+        # Pre-allocate buffers: [batch_size, num_kv_heads, buffer_size, head_dim]
+        shape = (batch_size, num_kv_heads, self.buffer_size, head_dim)
+
+        if quantize_k:
+            self.key_cache = torch.zeros(shape, dtype=torch.int8, device=device)
+            self.key_scales = torch.zeros(
+                (batch_size, num_kv_heads, self.buffer_size, 1),
+                dtype=dtype, device=device,
+            )
+        else:
+            self.key_cache = torch.zeros(shape, dtype=dtype, device=device)
+            self.key_scales = None
+
         self.value_cache = torch.zeros(shape, dtype=dtype, device=device)
-        
-        # Tracks current filled length
+
+        # Tracks current filled length in the buffer
         self.seq_len = 0
+
+        # Tracks the total number of tokens that have passed through the cache
+        # (may exceed buffer_size when sliding)
+        self._total_tokens_seen = 0
 
     def update(
         self,
         keys: torch.Tensor,
         values: torch.Tensor,
-        seq_offset: int
+        seq_offset: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Update the cache with new incoming keys/values.
-        
+        Update the cache with new keys/values and return the full cached history.
+
+        When the sliding window is active and the buffer would overflow, this
+        method evicts old tokens while preserving attention sinks.
+
         Args:
-            keys: [batch, num_kv_heads, seq_len, head_dim]
-            values: [batch, num_kv_heads, seq_len, head_dim]
-            seq_offset: The sliding offset in the max_seq_len buffer
-            
+            keys:   [batch, num_kv_heads, new_len, head_dim]
+            values: [batch, num_kv_heads, new_len, head_dim]
+            seq_offset: Starting position in the logical sequence.
+
         Returns:
-            The complete unpadded slice of historical keys and values up to the new seq_len.
+            (cached_keys, cached_values) sliced to current seq_len.
         """
         new_len = keys.shape[2]
+        self._total_tokens_seen = max(self._total_tokens_seen, seq_offset + new_len)
+
+        if self.sliding_window is not None:
+            return self._update_sliding(keys, values, seq_offset, new_len)
+        else:
+            return self._update_static(keys, values, seq_offset, new_len)
+
+    def _update_static(
+        self,
+        keys: torch.Tensor,
+        values: torch.Tensor,
+        seq_offset: int,
+        new_len: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Standard fixed-buffer update without sliding window."""
         end_offset = seq_offset + new_len
-        
+
         if end_offset > self.max_seq_len:
             raise ValueError(
-                f"KV Cache exceeded: requested length {end_offset} "
-                f"> max_seq_len {self.max_seq_len}"
+                f"KV Cache exceeded: {end_offset} > {self.max_seq_len}. "
+                f"Consider enabling sliding_window in ModelConfig."
             )
-            
-        # In-place write
-        self.key_cache[:, :, seq_offset:end_offset, :] = keys
-        self.value_cache[:, :, seq_offset:end_offset, :] = values
-        
+
+        self._write_to_cache(keys, values, seq_offset, end_offset)
         self.seq_len = max(self.seq_len, end_offset)
-        
-        # Return full history up to seq_len
-        return (
-            self.key_cache[:, :, :self.seq_len, :],
-            self.value_cache[:, :, :self.seq_len, :]
-        )
+
+        return self._read_cache()
+
+    def _update_sliding(
+        self,
+        keys: torch.Tensor,
+        values: torch.Tensor,
+        seq_offset: int,
+        new_len: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Sliding window update with attention sink preservation."""
+        window = self.sliding_window
+        sinks = self.attention_sinks
+
+        # Phase 1: Determine if we need to evict
+        projected_len = self.seq_len + new_len
+
+        if projected_len <= window:
+            # Buffer still has room — standard write
+            write_start = self.seq_len
+            write_end = self.seq_len + new_len
+            self._write_to_cache(keys, values, write_start, write_end)
+            self.seq_len = write_end
+        else:
+            # Buffer overflows — shift to maintain sinks + recent tokens
+            recent_capacity = window - sinks
+
+            if self.seq_len >= window:
+                # Cache is already full: shift existing recent tokens left by new_len
+                # Keep sinks[0:sinks] untouched
+                # Shift recent region: move [sinks + new_len : window] → [sinks : window - new_len]
+                shift_amount = min(new_len, recent_capacity)
+
+                if shift_amount < recent_capacity:
+                    # Copy the surviving recent tokens
+                    src_start = sinks + shift_amount
+                    src_end = window
+                    dst_start = sinks
+                    dst_end = window - shift_amount
+
+                    self.key_cache[:, :, dst_start:dst_end, :] = \
+                        self.key_cache[:, :, src_start:src_end, :].clone()
+                    self.value_cache[:, :, dst_start:dst_end, :] = \
+                        self.value_cache[:, :, src_start:src_end, :].clone()
+
+                    if self.quantize_k and self.key_scales is not None:
+                        self.key_scales[:, :, dst_start:dst_end, :] = \
+                            self.key_scales[:, :, src_start:src_end, :].clone()
+
+                # Write new tokens at the end of the buffer
+                write_start = window - shift_amount
+                write_end = window
+                actual_new = min(new_len, shift_amount)
+                self._write_to_cache(
+                    keys[:, :, -actual_new:, :],
+                    values[:, :, -actual_new:, :],
+                    write_start, write_end,
+                )
+                self.seq_len = window
+
+            else:
+                # Cache is partially filled but new tokens push it over
+                # First fill remaining space
+                remaining = window - self.seq_len
+                if remaining > 0 and remaining < new_len:
+                    # Write what fits directly
+                    self._write_to_cache(
+                        keys[:, :, :remaining, :],
+                        values[:, :, :remaining, :],
+                        self.seq_len,
+                        window,
+                    )
+                    self.seq_len = window
+
+                    # Now handle the overflow portion
+                    overflow_keys = keys[:, :, remaining:, :]
+                    overflow_values = values[:, :, remaining:, :]
+                    overflow_len = overflow_keys.shape[2]
+                    shift_amount = min(overflow_len, recent_capacity)
+
+                    if shift_amount < recent_capacity:
+                        src_start = sinks + shift_amount
+                        src_end = window
+                        dst_start = sinks
+                        dst_end = window - shift_amount
+
+                        self.key_cache[:, :, dst_start:dst_end, :] = \
+                            self.key_cache[:, :, src_start:src_end, :].clone()
+                        self.value_cache[:, :, dst_start:dst_end, :] = \
+                            self.value_cache[:, :, src_start:src_end, :].clone()
+
+                        if self.quantize_k and self.key_scales is not None:
+                            self.key_scales[:, :, dst_start:dst_end, :] = \
+                                self.key_scales[:, :, src_start:src_end, :].clone()
+
+                    write_start = window - shift_amount
+                    actual_new = min(overflow_len, shift_amount)
+                    self._write_to_cache(
+                        overflow_keys[:, :, -actual_new:, :],
+                        overflow_values[:, :, -actual_new:, :],
+                        write_start, window,
+                    )
+                else:
+                    # new_len fits exactly or the initial fill is sufficient
+                    self._write_to_cache(keys, values, self.seq_len, self.seq_len + new_len)
+                    self.seq_len = self.seq_len + new_len
+
+        return self._read_cache()
+
+    def _write_to_cache(
+        self,
+        keys: torch.Tensor,
+        values: torch.Tensor,
+        start: int,
+        end: int,
+    ) -> None:
+        """Write keys/values into the buffer at [start:end], handling quantization."""
+        if self.quantize_k:
+            scale = keys.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-5) / 127.0
+            q_keys = (keys / scale).round().to(torch.int8)
+            self.key_cache[:, :, start:end, :] = q_keys
+            self.key_scales[:, :, start:end, :] = scale
+        else:
+            self.key_cache[:, :, start:end, :] = keys.to(self.dtype)
+
+        self.value_cache[:, :, start:end, :] = values.to(self.dtype)
+
+    def _read_cache(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return the currently valid portion of the cache, dequantizing if needed."""
+        if self.quantize_k:
+            k_slice = self.key_cache[:, :, :self.seq_len, :].to(self.dtype)
+            s_slice = self.key_scales[:, :, :self.seq_len, :]
+            final_keys = k_slice * s_slice
+        else:
+            final_keys = self.key_cache[:, :, :self.seq_len, :]
+
+        return (final_keys, self.value_cache[:, :, :self.seq_len, :])
+
+    @property
+    def total_tokens_seen(self) -> int:
+        """Total number of tokens processed (may exceed buffer_size)."""
+        return self._total_tokens_seen

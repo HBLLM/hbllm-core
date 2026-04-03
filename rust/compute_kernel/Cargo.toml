@@ -1,0 +1,29 @@
+[package]
+name = "hbllm_compute"
+version = "0.1.0"
+edition = "2021"
+description = "Universal SIMD compute kernels for HBLLM quantization and inference."
+
+[lib]
+name = "hbllm_compute"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py311"] }
+numpy = "0.20.0"
+
+# SIMD support
+packed_simd_2 = { version = "0.3.8", optional = true }
+
+# Memory mapping for expert streaming
+memmap2 = "0.9.0"
+
+# Rayon for parallel expert processing
+rayon = "1.8.0"
+
+[features]
+default = []
+neon = ["packed_simd_2"]
+avx2 = ["packed_simd_2"]
+mps = []
