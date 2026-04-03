@@ -38,11 +38,13 @@ class KVCache:
         quantize_k: bool = False,
         sliding_window: int | None = None,
         attention_sinks: int = 4,
+        cpu_offload: bool = False,
     ):
         self.max_seq_len = max_seq_len
         self.device = device
         self.quantize_k = quantize_k
         self.dtype = dtype
+        self.cpu_offload = cpu_offload
 
         # Sliding Window configuration
         self.sliding_window = sliding_window
@@ -72,6 +74,20 @@ class KVCache:
             self.key_scales = None
 
         self.value_cache = torch.zeros(shape, dtype=dtype, device=device)
+
+        # CPU Offload Tensors for holding evicted history beyond the VRAM sliding window
+        if self.cpu_offload:
+            cpu_shape = (batch_size, num_kv_heads, max_seq_len, head_dim)
+            if quantize_k:
+                self.cpu_key_cache = torch.empty(cpu_shape, dtype=torch.int8, pin_memory=True)
+                self.cpu_key_scales = torch.empty(
+                    (batch_size, num_kv_heads, max_seq_len, 1), dtype=dtype, pin_memory=True
+                )
+            else:
+                self.cpu_key_cache = torch.empty(cpu_shape, dtype=dtype, pin_memory=True)
+                self.cpu_key_scales = None
+                
+            self.cpu_value_cache = torch.empty(cpu_shape, dtype=dtype, pin_memory=True)
 
         # Tracks current filled length in the buffer
         self.seq_len = 0
@@ -159,6 +175,10 @@ class KVCache:
                 # Shift recent region: move [sinks + new_len : window] → [sinks : window - new_len]
                 shift_amount = min(new_len, recent_capacity)
 
+                # Offload evicted tokens to CPU gracefully via PCIe
+                if self.cpu_offload:
+                    self._offload_evicted_to_cpu(sinks, shift_amount, new_len, window)
+
                 if shift_amount < recent_capacity:
                     # Copy the surviving recent tokens
                     src_start = sinks + shift_amount
@@ -205,6 +225,10 @@ class KVCache:
                     overflow_values = values[:, :, remaining:, :]
                     overflow_len = overflow_keys.shape[2]
                     shift_amount = min(overflow_len, recent_capacity)
+
+                    # Offload evicted tokens
+                    if self.cpu_offload:
+                        self._offload_evicted_to_cpu(sinks, shift_amount, overflow_len, window)
 
                     if shift_amount < recent_capacity:
                         src_start = sinks + shift_amount
@@ -268,3 +292,62 @@ class KVCache:
     def total_tokens_seen(self) -> int:
         """Total number of tokens processed (may exceed buffer_size)."""
         return self._total_tokens_seen
+
+    def _offload_evicted_to_cpu(self, sinks: int, shift_amount: int, new_len: int, window: int) -> None:
+        """Asynchronously stream evicted tokens to pinned CPU memory."""
+        start_logical = self._total_tokens_seen - new_len - (window - sinks)
+        if start_logical < 0 or start_logical >= self.max_seq_len:
+            return
+
+        end_logical = min(start_logical + shift_amount, self.max_seq_len)
+        actual_shift = end_logical - start_logical
+
+        evicted_k = self.key_cache[:, :, sinks : sinks + actual_shift, :]
+        evicted_v = self.value_cache[:, :, sinks : sinks + actual_shift, :]
+
+        # Non-blocking copy into pinned memory
+        self.cpu_key_cache[:, :, start_logical:end_logical, :].copy_(evicted_k, non_blocking=True)
+        self.cpu_value_cache[:, :, start_logical:end_logical, :].copy_(evicted_v, non_blocking=True)
+
+        if self.quantize_k and self.cpu_key_scales is not None and self.key_scales is not None:
+            evicted_scales = self.key_scales[:, :, sinks : sinks + actual_shift, :]
+            self.cpu_key_scales[:, :, start_logical:end_logical, :].copy_(evicted_scales, non_blocking=True)
+
+    def get_full_cache_cpu(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Returns the fully assembled KV history sequence located on the CPU."""
+        if not getattr(self, "cpu_offload", False):
+            raise ValueError("cpu_offload must be enabled to retrieve the full cache.")
+            
+        active_len = self.seq_len
+        sinks = self.attention_sinks
+        total_tokens = min(self._total_tokens_seen, self.max_seq_len)
+        
+        # 1. Sync Attention Sinks to the beginning of the CPU cache
+        if sinks > 0:
+            self.cpu_key_cache[:, :, :sinks, :].copy_(self.key_cache[:, :, :sinks, :], non_blocking=True)
+            self.cpu_value_cache[:, :, :sinks, :].copy_(self.value_cache[:, :, :sinks, :], non_blocking=True)
+            if self.quantize_k and self.cpu_key_scales is not None and self.key_scales is not None:
+                self.cpu_key_scales[:, :, :sinks, :].copy_(self.key_scales[:, :, :sinks, :], non_blocking=True)
+                
+        # 2. Sync the current active rolling window
+        if active_len > sinks:
+            active_start_logical = total_tokens - (active_len - sinks)
+            self.cpu_key_cache[:, :, active_start_logical:total_tokens, :].copy_(
+                self.key_cache[:, :, sinks:active_len, :], non_blocking=True
+            )
+            self.cpu_value_cache[:, :, active_start_logical:total_tokens, :].copy_(
+                self.value_cache[:, :, sinks:active_len, :], non_blocking=True
+            )
+            if self.quantize_k and self.cpu_key_scales is not None and self.key_scales is not None:
+                self.cpu_key_scales[:, :, active_start_logical:total_tokens, :].copy_(
+                    self.key_scales[:, :, sinks:active_len, :], non_blocking=True
+                )
+            
+        # Ensure all async copies to CPU finish before providing CPU tensor access
+        if self.device != torch.device("cpu"):
+            torch.cuda.current_stream(self.device).synchronize() if self.device.type == "cuda" else None
+            
+        return (
+            self.cpu_key_cache[:, :, :total_tokens, :],
+            self.cpu_value_cache[:, :, :total_tokens, :]
+        )
