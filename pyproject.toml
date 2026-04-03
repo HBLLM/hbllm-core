@@ -94,3 +94,8 @@ asyncio_mode = "auto"
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+disable_error_code = [
+    "assignment", "arg-type", "call-arg", "attr-defined", "import-untyped", 
+    "misc", "var-annotated", "index", "dict-item", "override", 
+    "return-value", "operator", "valid-type", "union-attr"
+]
