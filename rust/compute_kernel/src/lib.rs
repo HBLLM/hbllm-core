@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
-use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use numpy::ndarray::Array1;
+use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
+use pyo3::prelude::*;
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::*;
@@ -169,8 +169,8 @@ impl UniversalEngine {
 
                 // Process low nibbles (16 values)
                 // Split into two 8-byte halves, then widen to u16, then to u32, then to f32
-                let low_lo = vget_low_u8(low_u8);   // first 8 bytes
-                let low_hi = vget_high_u8(low_u8);   // last 8 bytes
+                let low_lo = vget_low_u8(low_u8); // first 8 bytes
+                let low_hi = vget_high_u8(low_u8); // last 8 bytes
 
                 // First 8 low nibbles → 2 groups of 4 floats
                 let lo16 = vmovl_u8(low_lo);
@@ -290,7 +290,7 @@ impl UniversalEngine {
     ) {
         use std::arch::x86_64::*;
         let _mask_4bit = _mm512_set1_epi8(0x0F);
-        
+
         let n = packed.len();
         let mut i = 0usize;
 
@@ -305,21 +305,23 @@ impl UniversalEngine {
                 let b = *bias.get(grp_start).unwrap_or(&0.0);
 
                 // Note: Full AVX-512 f32 conversion would expand the 512-bit register into
-                // 8 separate 512-bit f32 registers. For safety and proof-of-concept, we 
-                // leverage the _mm512_permutexvar_epi8 intrinsic for arbitrary 64-byte shuffles 
+                // 8 separate 512-bit f32 registers. For safety and proof-of-concept, we
+                // leverage the _mm512_permutexvar_epi8 intrinsic for arbitrary 64-byte shuffles
                 // in the decode process before scalar expansion.
-                
+
                 // Read 64 packed bytes into AVX512 register
                 let packed_data = _mm512_loadu_si512(packed.as_ptr().add(i) as *const _);
-                
+
                 // Use a dummy identity permutation just to demonstrate _mm512_permutexvar_epi8.
                 // In a production SIMD kernel, this idx would contain the unpackhi/lo interleaving scheme.
                 let mut idx_arr = [0u8; 64];
-                for j in 0..64 { idx_arr[j] = j as u8; }
+                for j in 0..64 {
+                    idx_arr[j] = j as u8;
+                }
                 let idx = _mm512_loadu_si512(idx_arr.as_ptr() as *const _);
-                
+
                 let _shuffled = _mm512_permutexvar_epi8(idx, packed_data);
-                
+
                 // Fallback decode block (simulating extraction after shuffle)
                 for k in 0..64 {
                     let byte = packed[i + k];
