@@ -64,3 +64,6 @@ workspace/reflection/
 # Memory persistence artifacts
 knowledge_graph.json
 semantic/
+
+# MkDocs build output
+site/

@@ -1,0 +1,129 @@
+site_name: HBLLM Core — Cognitive Architecture for Edge AI
+site_description: >-
+  Open-source AGI framework with 25+ cognitive nodes, multi-tiered memory,
+  Graph-of-Thoughts planning, and Rust-accelerated hybrid quantization.
+  Deploy autonomous agents that think, learn, and adapt on edge devices.
+site_author: HBLLM Team
+site_url: https://dumithsalinda.github.io/HBLLM/
+repo_url: https://github.com/DumithSalinda/HBLLM
+repo_name: DumithSalinda/HBLLM
+edit_uri: edit/master/core/docs/
+
+copyright: Copyright &copy; 2024–2026 HBLLM Team — MIT License
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/brain
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+
+plugins:
+  - search:
+      separator: '[\s\-\.]+'
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/DumithSalinda/HBLLM
+      name: HBLLM on GitHub
+  generator: false
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Cognitive Nodes: architecture/cognitive-nodes.md
+      - Message Bus: architecture/message-bus.md
+      - Memory Systems: architecture/memory-systems.md
+  - Zoning Model:
+      - How It Works: zoning/how-it-works.md
+      - LoRA Routing: zoning/lora-routing.md
+      - Hybrid Quantization: zoning/hybrid-quantization.md
+  - Guides:
+      - Quick Start: guides/quickstart.md
+      - Configuration: guides/configuration.md
+      - Custom Nodes: guides/custom-nodes.md
+      - Deployment: guides/deployment.md
+  - API Reference:
+      - Brain Factory: api/brain-factory.md
+      - Tokenizer: api/tokenizer.md
+      - Network: api/network.md
+  - Contributing: contributing.md
