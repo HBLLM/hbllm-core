@@ -16,8 +16,6 @@ Architecture follows LLaMA 3 / Mistral design:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,7 +23,7 @@ import torch.nn.functional as F
 from hbllm.model.attention import GroupedQueryAttention
 from hbllm.model.config import ModelConfig
 from hbllm.model.embeddings import TokenEmbedding
-from hbllm.model.feedforward import SwiGLUFFN, MoEFFN
+from hbllm.model.feedforward import MoEFFN, SwiGLUFFN
 from hbllm.model.normalization import RMSNorm
 
 
@@ -57,10 +55,10 @@ class TransformerBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_value: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        attention_mask: torch.Tensor | None = None,
+        past_key_value: tuple[torch.Tensor, torch.Tensor] | None = None,
         use_cache: bool = False,
-    ) -> tuple[torch.Tensor, Optional[tuple[torch.Tensor, torch.Tensor]], torch.Tensor]:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | None, torch.Tensor]:
         """
         Forward pass through one transformer block.
 
@@ -89,13 +87,13 @@ class TransformerBlock(nn.Module):
         # FFN with residual connection (pre-norm)
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        
+
         load_balancing_loss = torch.tensor(0.0, device=hidden_states.device)
         if isinstance(self.mlp, MoEFFN):
             hidden_states, load_balancing_loss = self.mlp(hidden_states)
         else:
             hidden_states = self.mlp(hidden_states)
-            
+
         hidden_states = residual + hidden_states
 
         return hidden_states, new_kv, load_balancing_loss
@@ -121,12 +119,12 @@ class HBLLMModel(nn.Module):
         self.layers = nn.ModuleList(
             [TransformerBlock(config, layer_idx=i) for i in range(config.num_layers)]
         )
-        
+
         # Automatic Hybrid Quantization Injection (Phase 4)
         if getattr(config, "quantization_level", 16) in [4, 8]:
             from hbllm.modules.lora import LoRAManager
             LoRAManager.inject(
-                self, 
+                self,
                 quantization_level=config.quantization_level,
                 r=getattr(config, "lora_rank", 8)
             )
@@ -137,11 +135,11 @@ class HBLLMModel(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[list[tuple[torch.Tensor, torch.Tensor]]] = None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
         use_cache: bool = False,
-    ) -> tuple[torch.Tensor, Optional[list[tuple[torch.Tensor, torch.Tensor]]], torch.Tensor]:
+    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]] | None, torch.Tensor]:
         """
         Forward pass through the base model.
 
@@ -169,7 +167,7 @@ class HBLLMModel(nn.Module):
                     past_len = past_key_values[0][0].shape[2]
             else:
                 past_len = 0
-                
+
             position_ids = torch.arange(
                 past_len, past_len + seq_len, device=input_ids.device
             ).unsqueeze(0).expand(batch_size, -1)
@@ -182,7 +180,7 @@ class HBLLMModel(nn.Module):
                     past_len = past_key_values[0].seq_len
                 else:
                     past_len = past_key_values[0][0].shape[2]
-                    
+
             if past_len == 0:
                 attention_mask = self._build_causal_mask(seq_len, hidden_states.device, hidden_states.dtype)
             else:
@@ -285,7 +283,7 @@ class HBLLMForCausalLM(nn.Module):
     ) -> None:
         """
         Dynamically injects a LoRA adapter into the model and loads weights.
-        
+
         Args:
             state_dict: The LoRA Weights
             r: LoRA rank
@@ -294,10 +292,11 @@ class HBLLMForCausalLM(nn.Module):
             target_modules: List of module name suffixes to apply LoRA (e.g. ['q_proj', 'v_proj']).
                             If None, targets self-attention and FFN.
         """
-        from hbllm.modules.lora import LoRAManager
         import logging
+
+        from hbllm.modules.lora import LoRAManager
         logger = logging.getLogger(__name__)
-        
+
         # Check if LoRA is already injected; if not, inject it.
         # This assumes we swap standard Linear with LoRALinear.
         has_lora = any("lora_A" in name for name, _ in self.named_parameters())
@@ -306,11 +305,11 @@ class HBLLMForCausalLM(nn.Module):
             LoRAManager.inject(
                 self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, target_modules=target_modules
             )
-            
+
         # Load the state into the 'default' adapter slot so the LocalProvider can trigger it globally
         logger.info("Loading LoRA state dict into default Multi-LoRA slot...")
         LoRAManager.add_adapter(self, adapter_name="default", state_dict=state_dict)
-        
+
     def set_lora_active(self, active: bool = True) -> None:
         """Toggle LoRA adapters on or off for inference."""
         from hbllm.modules.lora import LoRAManager
@@ -319,10 +318,10 @@ class HBLLMForCausalLM(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[list[tuple[torch.Tensor, torch.Tensor]]] = None,
+        labels: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
         use_cache: bool = False,
     ) -> dict[str, torch.Tensor]:
         """
@@ -361,7 +360,7 @@ class HBLLMForCausalLM(nn.Module):
                 shift_labels.view(-1),
                 ignore_index=-100,
             )
-            
+
             # Add aux loss: empirically alpha=0.01 or 0.02 is used
             loss = ce_loss + (0.01 * lb_loss)
             result["loss"] = loss
@@ -492,7 +491,7 @@ class HBLLMForCausalLM(nn.Module):
     ) -> torch.Tensor:
         """
         Accelerated autoregressive generation using speculative decoding.
-        
+
         Args:
             input_ids: [batch_size, prompt_len] initial token IDs
             draft_model: Smaller HBLLMForCausalLM instance for drafting
@@ -522,14 +521,14 @@ class HBLLMForCausalLM(nn.Module):
 
         target_past_key_values = None
         draft_past_key_values = None
-        
+
         n_generated = 0
         while n_generated < max_new_tokens:
             current_gamma = gamma
             # --- Drafting Phase ---
             draft_input_ids = input_ids
             draft_tokens = []
-            
+
             for _ in range(current_gamma):
                 if draft_past_key_values is not None:
                     model_input_draft = draft_input_ids[:, -1:]
@@ -543,11 +542,11 @@ class HBLLMForCausalLM(nn.Module):
                 )
                 draft_logits = draft_outputs["logits"][:, -1, :]
                 draft_past_key_values = draft_outputs.get("past_key_values")
-                
+
                 next_draft_token = self._sample_logits(draft_logits, temperature, top_k, top_p)
                 draft_tokens.append(next_draft_token)
                 draft_input_ids = torch.cat([draft_input_ids, next_draft_token], dim=1)
-            
+
             draft_tokens_tensor = torch.cat(draft_tokens, dim=1) # [batch_size, current_gamma]
 
             # --- Verification Phase ---
@@ -556,22 +555,22 @@ class HBLLMForCausalLM(nn.Module):
                 target_input = torch.cat([input_ids[:, -1:], draft_tokens_tensor], dim=1)
             else:
                 target_input = torch.cat([input_ids, draft_tokens_tensor], dim=1)
-            
+
             target_outputs = self.forward(
                 input_ids=target_input,
                 past_key_values=target_past_key_values,
                 use_cache=True,
             )
             target_past_key_values = target_outputs.get("past_key_values")
-            
+
             # Extract logits predicting the draft tokens and the bonus token
             eval_logits = target_outputs["logits"][:, -(current_gamma + 1):, :] # [batch_size, current_gamma + 1, vocab]
-            
+
             # --- Rejection/Acceptance ---
             accepted_count = 0
             for i in range(current_gamma):
                 target_token = self._sample_logits(eval_logits[:, i, :], temperature, top_k, top_p)
-                
+
                 # Check for exact match across batches
                 if (target_token == draft_tokens_tensor[:, i:i+1]).all():
                     accepted_count += 1
@@ -593,19 +592,19 @@ class HBLLMForCausalLM(nn.Module):
                 input_ids = torch.cat([input_ids, bonus_token], dim=1)
                 n_generated += 1
                 accepted_count += 1
-                
+
             if eos_token_id is not None and (input_ids[:, -1:] == eos_token_id).all():
                 return input_ids
-                
+
             if n_generated >= max_new_tokens:
                 return input_ids
 
             # --- KV Cache Synchronization ---
             # Truncate both caches to the correctly accepted length before the bonus/reject token
-            # Since input_ids was extended by (accepted_count + 1) tokens, the accepted sequence 
+            # Since input_ids was extended by (accepted_count + 1) tokens, the accepted sequence
             # (excluding the final newly appended token to be processed next) has length:
             cache_keep_len = input_ids.shape[1] - 1
-            
+
             def truncate_kv_cache(pkv, keep_len):
                 if pkv is None: return None
                 new_pkv = []
@@ -626,7 +625,7 @@ class HBLLMForCausalLM(nn.Module):
 class HBLLMForProcessReward(nn.Module):
     """
     HBLLM with a sequence classification head for Process Reward Modeling.
-    
+
     Scores an entire reasoning step. By default, it takes the representation of
     the last non-padding token and projects it to a continuous scalar.
     Used for step-level MCTS UCT scoring (0.0 means incorrect, 1.0 means correct).
@@ -636,13 +635,13 @@ class HBLLMForProcessReward(nn.Module):
         super().__init__()
         self.config = config
         self.model = HBLLMModel(config)
-        
+
         # Single logit output for binary correctness estimation
         self.score = nn.Linear(config.hidden_size, 1, bias=False)
-        
+
         # Initialize weights
         self.apply(self._init_weights)
-        
+
     def _init_weights(self, module: nn.Module) -> None:
         """Initialize weights using small init."""
         if isinstance(module, nn.Linear):
@@ -655,22 +654,22 @@ class HBLLMForProcessReward(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
+        labels: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Forward pass for the Process Reward Model.
-        
+
         Args:
             input_ids: [batch_size, seq_len]
             labels: [batch_size] continuous labels in [0.0, 1.0] to compute BCE loss
-            
+
         Returns:
             Dict with 'logits', 'scores' (sigmoid of logits), optionally 'loss'
         """
         batch_size = input_ids.shape[0]
-        
+
         # Run base transformer
         hidden_states, _, lb_loss = self.model(
             input_ids=input_ids,
@@ -678,7 +677,7 @@ class HBLLMForProcessReward(nn.Module):
             attention_mask=attention_mask,
             use_cache=False,
         )
-        
+
         # If user provides a 2D mask (1=valid, 0=pad), we extract the last valid token representation
         # Otherwise, default to the last token sequence index
         if attention_mask is not None and attention_mask.dim() == 2:
@@ -686,35 +685,35 @@ class HBLLMForProcessReward(nn.Module):
             pooled_hidden_states = hidden_states[torch.arange(batch_size, device=hidden_states.device), sequence_lengths]
         else:
             pooled_hidden_states = hidden_states[:, -1, :]
-            
+
         # Linear projection to single logit
         logits = self.score(pooled_hidden_states)
-        
+
         # Map logit to [0, 1] probability
         scores = torch.sigmoid(logits)
-        
+
         result = {
             "logits": logits,
             "scores": scores,
         }
-        
+
         # Compute BCE loss if labels are provided
         if labels is not None:
             # labels shape: [batch_size], logits shape: [batch_size, 1]
             loss_fct = nn.BCEWithLogitsLoss()
-            
+
             # Ensure proper dtypes and shapes
             if labels.dim() == 1:
                 labels = labels.unsqueeze(-1)
-                
+
             bce_loss = loss_fct(logits.float(), labels.float())
-            
+
             # Add MoE auxiliary loss if present
             loss = bce_loss + (0.01 * lb_loss)
-            
+
             result["loss"] = loss
             result["bce_loss"] = bce_loss
             result["lb_loss"] = lb_loss
-            
+
         return result
 

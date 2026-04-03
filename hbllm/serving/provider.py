@@ -19,8 +19,9 @@ import logging
 import os
 import random
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any
 
 from hbllm.network.tracing import trace_span
 
@@ -62,12 +63,10 @@ async def _retry_api_call(
     """
     import httpx
 
-    last_exc = None
     for attempt in range(max_retries + 1):
         try:
             return await func(*args, **kwargs)
         except httpx.HTTPStatusError as e:
-            last_exc = e
             if e.response.status_code not in _RETRYABLE_STATUS_CODES:
                 raise  # Non-retryable (e.g. 401, 403, 404)
             if attempt == max_retries:
@@ -80,7 +79,6 @@ async def _retry_api_call(
             )
             await asyncio.sleep(delay)
         except (httpx.TransportError, httpx.TimeoutException) as e:
-            last_exc = e
             if attempt == max_retries:
                 raise
             delay = min(initial_delay * (2 ** attempt), max_delay)
@@ -205,7 +203,7 @@ class LocalProvider(LLMProvider):
             from hbllm.model.speculative import speculate_step
             K = kwargs.get("speculative_k", 4)
             current_input = input_tensor
-            
+
             tokens_generated = 0
             while tokens_generated < max_tokens:
                 accepted_tokens = speculate_step(
@@ -217,14 +215,14 @@ class LocalProvider(LLMProvider):
                     temperature=temperature,
                     top_p=top_p
                 )
-                
+
                 # Yield newly accepted tokens as chunks
                 for token_id in accepted_tokens[0].tolist():
                     if token_id == eos_id:
                         return
                     yield self._tokenizer.decode([token_id])
                     tokens_generated += 1
-                    
+
                 current_input = torch.cat([current_input, accepted_tokens.to(current_input.device)], dim=1)
 
         else:
@@ -249,7 +247,7 @@ class LocalProvider(LLMProvider):
                         )
                         for _ in range(cfg.num_layers)
                     ]
-    
+
             with torch.no_grad():
                 for step in range(max_tokens):
                     # On step 0, process the full prompt; afterwards only the new token
@@ -257,21 +255,21 @@ class LocalProvider(LLMProvider):
                         model_input = input_tensor
                     else:
                         model_input = next_token  # [1, 1] — single new token
-    
+
                     output = self._model(
                         model_input,
                         past_key_values=past_key_values,
                         use_cache=True,
                     )
-    
+
                     if isinstance(output, dict):
                         logits = output["logits"]
                         past_key_values = output.get("past_key_values", past_key_values)
                     else:
                         logits = output
-    
+
                     next_logits = logits[:, -1, :] / max(temperature, 1e-7)
-    
+
                     # Top-p (nucleus) sampling
                     sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
                     cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
@@ -280,11 +278,11 @@ class LocalProvider(LLMProvider):
                     probs = torch.softmax(sorted_logits, dim=-1)
                     next_index = torch.multinomial(probs, num_samples=1)
                     next_token = sorted_indices.gather(-1, next_index)
-    
+
                     token_id = next_token.item()
                     if token_id == eos_id:
                         break
-    
+
                     token_text = self._tokenizer.decode([token_id])
                     yield token_text
 
@@ -301,15 +299,16 @@ class LocalProvider(LLMProvider):
     ) -> None:
         """Dynamically load and activate a LoRA adapter from disk."""
         self._ensure_loaded()
-        import torch
         import os
-        
+
+        import torch
+
         if not os.path.exists(lora_path):
             raise FileNotFoundError(f"LoRA adapter not found at {lora_path}")
-            
+
         logger.info("Loading LoRA adapter from %s", lora_path)
         state_dict = torch.load(lora_path, map_location=self._device, weights_only=True)
-        
+
         # Dispatch to the model
         if hasattr(self._model, "load_lora_adapter"):
             self._model.load_lora_adapter(
@@ -319,7 +318,7 @@ class LocalProvider(LLMProvider):
             self._model.set_lora_active(True)
         else:
             raise NotImplementedError("Model does not support load_lora_adapter")
-            
+
     def set_lora_active(self, active: bool = True) -> None:
         """Toggle LoRA active state without unloading weights."""
         self._ensure_loaded()

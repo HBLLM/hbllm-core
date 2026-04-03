@@ -21,7 +21,6 @@ import asyncio
 import logging
 import signal
 import sys
-from typing import Any
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
     """
     Create a Node instance from its ID string.
-    
+
     Supports:
       - Standard node IDs (router, workspace, planner, etc.)
       - Domain modules:  domain:<name> (e.g. domain:math)

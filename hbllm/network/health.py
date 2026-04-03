@@ -107,7 +107,7 @@ class HealthMonitor:
 
             return health
 
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             logger.warning("Heartbeat timeout for node '%s'", node_id)
 
             health = NodeHealth(

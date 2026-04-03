@@ -7,24 +7,21 @@ loop and verifies the output flows correctly.
 """
 
 import asyncio
+
 import pytest
 
-from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import Message, MessageType
-from hbllm.network.registry import ServiceRegistry
-
-from hbllm.brain.router_node import RouterNode
-from hbllm.brain.workspace_node import WorkspaceNode
-from hbllm.brain.planner_node import PlannerNode
 from hbllm.brain.critic_node import CriticNode
 from hbllm.brain.decision_node import DecisionNode
 from hbllm.brain.experience_node import ExperienceNode
-from hbllm.brain.meta_node import MetaReasoningNode
 from hbllm.brain.identity_node import IdentityNode
+from hbllm.brain.meta_node import MetaReasoningNode
+from hbllm.brain.planner_node import PlannerNode
+from hbllm.brain.router_node import RouterNode
+from hbllm.brain.workspace_node import WorkspaceNode
 from hbllm.memory.memory_node import MemoryNode
-
+from hbllm.network.bus import InProcessBus
+from hbllm.network.messages import Message, MessageType
 from tests.mock_llm import MockLLM
-
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -51,7 +48,7 @@ async def cognitive_system():
     memory = MemoryNode(node_id="memory", db_path=":memory:")
 
     nodes = [router, workspace, planner, critic, decision, experience, meta, identity, memory]
-    
+
     for node in nodes:
         await node.start(bus)
 
@@ -71,7 +68,7 @@ async def cognitive_system():
 async def test_full_query_flow(cognitive_system):
     """
     Send a query through the full pipeline:
-    router.query → Router classifies → workspace.update → 
+    router.query → Router classifies → workspace.update →
     Workspace collects thoughts → decision.evaluate → Decision emits output.
     """
     bus, nodes, llm = cognitive_system

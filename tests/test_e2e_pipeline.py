@@ -3,15 +3,16 @@ End-to-End Integration Test — verifies nodes process messages on the bus,
 memory stores/retrieves, and persistence survives restarts.
 """
 
-import pytest
 import asyncio
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 
+import pytest
+
+from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.memory.memory_node import MemoryNode
 
 
 class MockLLM:

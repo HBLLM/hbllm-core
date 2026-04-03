@@ -7,10 +7,9 @@ This is the fundamental building block of the distributed architecture.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -20,7 +19,7 @@ if TYPE_CHECKING:
     from hbllm.network.messages import Message
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     """Types of nodes in the HBLLM network."""
 
     ROUTER = "router"
@@ -35,7 +34,7 @@ class NodeType(str, Enum):
     PERCEPTION = "perception"
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(StrEnum):
     """Health states for a node."""
 
     HEALTHY = "healthy"

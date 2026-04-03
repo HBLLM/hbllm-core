@@ -1,9 +1,9 @@
 """Tests for RevisionNode and ConfidenceEstimator."""
 
 import pytest
-from hbllm.brain.revision_node import RevisionNode
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
 
+from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.revision_node import RevisionNode
 
 # ─── ConfidenceEstimator Tests ───────────────────────────────────────────
 

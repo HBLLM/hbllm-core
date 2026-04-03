@@ -23,7 +23,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from hbllm.serving.provider import LLMProvider, LLMResponse
 
@@ -34,7 +35,7 @@ class ProviderLLM:
     """
     Adapter that wraps an LLMProvider to expose the same interface
     as LLMInterface (generate / generate_json / generate_stream).
-    
+
     Brain nodes accept ``llm=`` and call:
       - ``await llm.generate(prompt)`` → str
       - ``await llm.generate_json(prompt)`` → dict

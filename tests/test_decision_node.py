@@ -1,11 +1,12 @@
 """Tests for DecisionNode — the safety gatekeeper and output dispatcher."""
 
-import pytest
 import asyncio
 
+import pytest
+
+from hbllm.brain.decision_node import DecisionNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.brain.decision_node import DecisionNode
 
 
 class MockSafeLLM:

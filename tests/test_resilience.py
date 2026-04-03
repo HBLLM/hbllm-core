@@ -1,13 +1,13 @@
 """Resilience tests — failure injection, concurrent load, subscriber isolation."""
 
-import pytest
 import asyncio
+
+import pytest
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.circuit_breaker import CircuitBreaker, CircuitBreakerRegistry, CircuitOpenError
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
-
 
 # ── Helper Nodes ─────────────────────────────────────────────────────────────
 
@@ -183,7 +183,7 @@ async def test_concurrent_message_flood():
         tasks.append(bus.publish("flood.test", msg))
 
     await asyncio.gather(*tasks)
-    
+
     # Wait dynamically for messages rather than fixed sleep
     for _ in range(20):
         if len(received) == 500:
@@ -262,6 +262,7 @@ async def test_episodic_concurrent_writes():
     """EpisodicMemory handles concurrent writes without corruption."""
     import tempfile
     from pathlib import Path
+
     from hbllm.memory.episodic import EpisodicMemory
 
     with tempfile.TemporaryDirectory() as tmp:

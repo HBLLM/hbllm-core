@@ -2,7 +2,7 @@
 Abstract Domain Module Node.
 
 Each domain specialization (General, Coding, Math) is a Node that wraps
-the shared base LLM but dynamically activates its specific LoRA adapter 
+the shared base LLM but dynamically activates its specific LoRA adapter
 before generating text.
 """
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class DomainModuleNode(Node):
     """
     A network node that provides Domain-specific LLM inference.
-    
+
     It listens to the bus for `domain.{name}.query` messages, activates
     its LoRA adapter on the shared base model, generates a response,
     and publishes it back.
@@ -43,12 +43,12 @@ class DomainModuleNode(Node):
         self.domain_name = domain_name
         self.model = model
         self.tokenizer = tokenizer
-        
+
         self.has_lora = lora_state_dict is not None
         if self.has_lora:
             logger.info("DomainModuleNode '%s' registering LoRA adapter...", self.domain_name)
             LoRAManager.add_adapter(self.model, self.domain_name, lora_state_dict)
-            
+
         self.topic_sub = "module.evaluate"
 
     async def on_start(self) -> None:
@@ -74,7 +74,7 @@ class DomainModuleNode(Node):
         prompt = payload.get("text", "")
 
         domain_hint = payload.get("domain_hint", "general")
-        
+
         # Domain eligibility check
         is_targeted = False
         if isinstance(domain_hint, dict):
@@ -86,7 +86,7 @@ class DomainModuleNode(Node):
                 logger.info("Domain '%s' elected to process MoE Hybrid %s", self.domain_name, domain_hint)
         elif domain_hint == self.domain_name or self.domain_name == "general":
             is_targeted = True
-            
+
         if not is_targeted:
             return None
 
@@ -102,43 +102,43 @@ class DomainModuleNode(Node):
 
             # 2. Tokenize and Generate
             device = next(self.model.parameters()).device
-            
+
             async def _generate_async() -> str:
                 enc = self.tokenizer.encode(prompt)
                 input_ids = torch.tensor([enc], dtype=torch.long).to(device)
-                
+
                 self.model.eval()
                 out_tokens = input_ids[0].tolist()
                 past_key_values = None
-                
+
                 # with torch.no_grad() is thread-local. Awaiting inside it leaks the context to other coroutines!
                 # Generate 30 tokens using cached autoregressive steps
                 for _ in range(30):
                     # Only pass the last decoded token to the model if caching
                     model_input = input_ids[:, -1:] if past_key_values else input_ids
-                    
+
                     with torch.no_grad():
                         outputs = self.model(
                             model_input,
                             past_key_values=past_key_values,
                             use_cache=True
                         )
-                    
+
                     logits = outputs["logits"][:, -1, :]
                     past_key_values = outputs.get("past_key_values")
-                    
+
                     next_token = logits.argmax().item()
                     out_tokens.append(next_token)
                     input_ids = torch.cat([input_ids, torch.tensor([[next_token]], device=device)], dim=1)
-                    
+
                     # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
-                    await asyncio.sleep(0.001) 
-                
+                    await asyncio.sleep(0.001)
+
                 return self.tokenizer.decode_to_string(out_tokens)
 
             response_text = await _generate_async()
             logger.info("Domain '%s' finished generating.", self.domain_name)
-            
+
             # 3. Propose thought to Blackboard instead of creating a synchronous response
             thought_msg = Message(
                 type=MessageType.EVENT,
@@ -155,11 +155,11 @@ class DomainModuleNode(Node):
             )
             await self.bus.publish("workspace.thought", thought_msg)
             return None
-            
+
         except Exception as e:
             logger.error("Generation failed: %s", e)
             return None
-            
+
         finally:
             if self.has_lora:
                 LoRAManager.page_out(self.model, domain_hint)

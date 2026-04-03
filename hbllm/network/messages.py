@@ -8,14 +8,14 @@ This ensures consistency whether the bus is in-process or distributed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import Enum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     """Types of messages that can be sent between nodes."""
 
     # Queries & responses
@@ -50,7 +50,7 @@ class MessageType(str, Enum):
     # Self-Expansion
     SPAWN_REQUEST = "spawn_request"
     SPAWN_COMPLETE = "spawn_complete"
-    
+
     # AGI / Self-Improvement
     SYSTEM_IMPROVE = "system_improve"
     SALIENCE_SCORE = "salience_score"
@@ -77,7 +77,7 @@ class Message(BaseModel):
     topic: str
     payload: dict[str, Any] = Field(default_factory=dict)
     priority: Priority = Priority.NORMAL
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     correlation_id: str | None = None  # Links request → response
     ttl_seconds: float | None = None  # Time-to-live
 
@@ -165,14 +165,14 @@ class HeartbeatPayload(BaseModel):
 
 class SpawnRequestPayload(BaseModel):
     """Payload to request the creation of a new domain module."""
-    
+
     topic: str
     trigger_query: str
     confidence_score: float
 
 class SystemImprovePayload(BaseModel):
     """Payload to trigger offline self-improvement on a weak domain."""
-    
+
     domain: str
     reasoning: str
     dataset_path: str

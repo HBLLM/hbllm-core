@@ -21,12 +21,10 @@ import asyncio
 import json
 import logging
 import sys
-import uuid
 from typing import Any
 
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import Node
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +435,7 @@ async def run_stdio(server: HBLLMMcpServer) -> None:
 
         except (json.JSONDecodeError, asyncio.IncompleteReadError):
             continue
-        except Exception as e:
+        except Exception:
             logger.exception("Error in stdio transport")
             break
 

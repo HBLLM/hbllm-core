@@ -7,7 +7,6 @@ Phase 3+: Can switch to protobuf for cross-language compatibility.
 
 from __future__ import annotations
 
-import json
 import logging
 from abc import ABC, abstractmethod
 

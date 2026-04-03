@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import struct
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +24,6 @@ from hbllm.data.sharder import (
     ShardReader,
     ShardWriter,
 )
-
 
 # ──────────────────────────────────────────────
 # Downloader / JSONL tests

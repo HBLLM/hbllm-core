@@ -24,7 +24,7 @@ import operator
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -95,7 +95,7 @@ class PolicyCondition:
         return cls(key=d["key"], operator=d["operator"], value=d["value"])
 
 
-class PolicyType(str, Enum):
+class PolicyType(StrEnum):
     DENY = "deny"
     REQUIRE = "require"
     TRANSFORM = "transform"
@@ -103,7 +103,7 @@ class PolicyType(str, Enum):
     RATE = "rate"
 
 
-class PolicyAction(str, Enum):
+class PolicyAction(StrEnum):
     BLOCK = "block"           # Block the response entirely
     WARN = "warn"             # Allow but log a warning
     APPEND = "append"         # Append text to response

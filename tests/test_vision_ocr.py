@@ -4,7 +4,6 @@ Tests for VisionNode OCR capability.
 Tests OCR fallback chain and capabilities WITHOUT loading models.
 """
 
-import pytest
 
 from hbllm.perception.vision_node import VisionNode
 

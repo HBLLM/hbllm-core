@@ -15,16 +15,16 @@ Transitions:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from enum import Enum
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     """States of a circuit breaker."""
 
     CLOSED = "closed"  # Normal — requests flow through
@@ -147,7 +147,7 @@ class CircuitBreaker:
             result = await func(*args, **kwargs)
             self.record_success()
             return result
-        except Exception as e:
+        except Exception:
             self.record_failure()
             raise
 

@@ -1,13 +1,14 @@
 import time
+from typing import Any
+
 import torch
 import yaml
-from typing import Dict, Any
 
 from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForCausalLM
-from hbllm.serving.provider import LocalProvider
 
-def run_speculative_benchmark() -> Dict[str, Any]:
+
+def run_speculative_benchmark() -> dict[str, Any]:
     # 1. Setup Models
     target_config = get_config("125m")
     target_config.vocab_size = 32000
@@ -15,7 +16,7 @@ def run_speculative_benchmark() -> Dict[str, Any]:
     target_config.num_layers = 4
     target_config.num_attention_heads = 4
     target_config.num_kv_heads = 4
-    
+
     draft_config = get_config("125m")
     draft_config.vocab_size = 32000
     draft_config.hidden_size = 64
@@ -45,7 +46,7 @@ def run_speculative_benchmark() -> Dict[str, Any]:
 
     input_text = "Once upon a time in a faraway land,"
     input_ids = torch.tensor([tokenizer.encode(input_text)])
-    
+
     # Warmup
     with torch.no_grad():
         _ = target_model.generate(input_ids, max_new_tokens=10, eos_token_id=1)

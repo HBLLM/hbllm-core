@@ -12,13 +12,12 @@ of packed sequences. Supports:
 from __future__ import annotations
 
 import logging
-import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from hbllm.data.sharder import ShardReader
 
@@ -40,7 +39,7 @@ class PretrainingDataset(Dataset):
     ):
         self.reader = ShardReader(shard_dir)
         self.sequence_length = sequence_length if sequence_length else self.reader.sequence_length
-        
+
         # Override reader seq len if needed for num_sequences
         self._len = max(0, (self.reader.total_tokens - self.sequence_length) // self.sequence_length)
 

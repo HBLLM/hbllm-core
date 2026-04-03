@@ -1,8 +1,8 @@
 """
 Shared Memory Node.
 
-Acts as the single source of truth for conversation history across 
-all domain modules. It listens to `memory.store` and `memory.retrieve_recent` 
+Acts as the single source of truth for conversation history across
+all domain modules. It listens to `memory.store` and `memory.retrieve_recent`
 messages on the bus, reading/writing to the local SQLite database.
 """
 
@@ -13,10 +13,10 @@ import logging
 from pathlib import Path
 
 from hbllm.memory.episodic import EpisodicMemory
-from hbllm.memory.semantic import SemanticMemory
-from hbllm.memory.procedural import ProceduralMemory
-from hbllm.memory.value_memory import ValueMemory
 from hbllm.memory.knowledge_graph import KnowledgeGraph
+from hbllm.memory.procedural import ProceduralMemory
+from hbllm.memory.semantic import SemanticMemory
+from hbllm.memory.value_memory import ValueMemory
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
@@ -33,7 +33,7 @@ class MemoryNode(Node):
         # Ensure the memory directory exists
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self.db = EpisodicMemory(db_path)
         self.procedural_db = ProceduralMemory(db_path.parent / "procedural_memory.db")
         self.value_db = ValueMemory(db_path.parent / "value_memory.db")
@@ -100,22 +100,22 @@ class MemoryNode(Node):
         payload = message.payload
         domain = payload.get("domain")
         reasoning = payload.get("reasoning")
-        
+
         logger.info("[MemoryNode] Extracting patterns from reflection on domain '%s' (Node N)", domain)
-        
+
         # Store a summary fact in Semantic Memory.
         pattern_content = f"Learned pattern in domain '{domain}': {reasoning}"
-        
+
         await asyncio.to_thread(
-            self.semantic_db.store, 
-            pattern_content, 
+            self.semantic_db.store,
+            pattern_content,
             {"source": "reflection_engine", "domain": domain},
             is_priority=False  # Patterns grow general semantic memory
         )
 
     async def handle_salience(self, message: Message) -> None:
         """
-        Handle salience scores. High-salience experiences are stored in 
+        Handle salience scores. High-salience experiences are stored in
         priority semantic memory (Node K).
         """
         if message.type != MessageType.SALIENCE_SCORE:
@@ -124,12 +124,12 @@ class MemoryNode(Node):
         payload = message.payload
         is_priority = payload.get("is_priority", False)
         content = payload.get("content", "")
-        
+
         if is_priority and content:
             logger.info("[MemoryNode] Archiving high-salience experience to Priority Memory (Node K)")
             await asyncio.to_thread(
-                self.semantic_db.store, 
-                content, 
+                self.semantic_db.store,
+                content,
                 {"source": "salience_detector", "message_id": payload.get("message_id")},
                 is_priority=True
             )
@@ -223,7 +223,7 @@ class MemoryNode(Node):
                 "entity_count": self.knowledge_graph.entity_count,
                 "relation_count": self.knowledge_graph.relation_count,
             })
-            
+
         elif action == "all_entities":
             limit = payload.get("limit", 100)
             entities = [
@@ -231,7 +231,7 @@ class MemoryNode(Node):
                 for e in list(self.knowledge_graph._entities.values())[-limit:]
             ]
             return message.create_response({"entities": entities})
-            
+
         elif action == "add_community":
             community_label = payload.get("community_label")
             member_labels = payload.get("member_labels", [])
@@ -259,7 +259,7 @@ class MemoryNode(Node):
             session_id = payload.get("session_id", "default_session")
             role = payload.get("role")
             content = payload.get("content")
-            
+
             if not role or not content:
                 return message.create_error("Missing 'role' or 'content' in store payload")
 
@@ -271,7 +271,7 @@ class MemoryNode(Node):
                 metadata=payload.get("metadata"),
                 tenant_id=payload.get("tenant_id", message.tenant_id or "default"),
             )
-            
+
             # Offload semantic storage to a background thread with error handling
             task = asyncio.create_task(
                 asyncio.to_thread(self.semantic_db.store, content, {"session_id": session_id, "role": role})
@@ -280,10 +280,10 @@ class MemoryNode(Node):
             # Track for graceful shutdown
             self._pending_tasks.add(task)
             task.add_done_callback(self._pending_tasks.discard)
-            
+
             # Fire and forget mostly, but we reply with success
             return message.create_response({"status": "stored", "turn_id": turn_id})
-            
+
         except Exception as e:
             logger.error("Memory store failed: %s", e)
             return message.create_error(str(e))
@@ -299,18 +299,18 @@ class MemoryNode(Node):
             payload = message.payload
             session_id = payload.get("session_id", "default_session")
             limit = int(payload.get("limit", 10))
-            
+
             turns = self.db.retrieve_recent(
-                session_id, 
+                session_id,
                 limit=limit,
                 tenant_id=payload.get("tenant_id", message.tenant_id or "default"),
             )
-            
+
             return message.create_response({
                 "session_id": session_id,
                 "turns": turns,
             })
-            
+
         except Exception as e:
             logger.error("Memory retrieval failed: %s", e)
             return message.create_error(str(e))
@@ -326,16 +326,16 @@ class MemoryNode(Node):
             payload = message.payload
             query = payload.get("query_text")
             limit = int(payload.get("limit", 3))
-            
+
             if not query:
                 return message.create_error("Missing 'query_text'")
-                
+
             results = await asyncio.to_thread(self.semantic_db.search, query, limit)
-            
+
             return message.create_response({
                 "results": results,
             })
-            
+
         except Exception as e:
             logger.error("Semantic search failed: %s", e)
             return message.create_error(str(e))

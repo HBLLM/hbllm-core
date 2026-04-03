@@ -18,17 +18,18 @@ import logging
 import sqlite3
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Awaitable
+from enum import StrEnum
+from typing import Any
 
-from hbllm.network.bus import MessageBus, InProcessBus
+from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.messages import Message, MessageType
 
 logger = logging.getLogger(__name__)
 
 
-class MessageStatus(str, Enum):
+class MessageStatus(StrEnum):
     PENDING = "pending"
     DELIVERED = "delivered"
     FAILED = "failed"

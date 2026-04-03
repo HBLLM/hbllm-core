@@ -1,7 +1,7 @@
 """
 FastAPI HTTP Server for the HBLLM Cognitive Architecture.
 
-Exposes the full brain pipeline (Router → Workspace → Domain Modules → 
+Exposes the full brain pipeline (Router → Workspace → Domain Modules →
 Critic → Decision) as REST endpoints with multi-tenant session isolation.
 """
 
@@ -81,44 +81,45 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
     import torch
+    from hbllm_tokenizer_rs import Vocab
+
+    from hbllm.actions.api_node import ApiNode
+    from hbllm.actions.browser_node import BrowserNode
+    from hbllm.actions.execution_node import ExecutionNode
+    from hbllm.actions.fuzzy_node import FuzzyNode
+    from hbllm.actions.logic_node import LogicNode
+    from hbllm.brain.collective_node import CollectiveNode
+    from hbllm.brain.critic_node import CriticNode
+    from hbllm.brain.curiosity_node import CuriosityNode
+    from hbllm.brain.decision_node import DecisionNode
+    from hbllm.brain.experience_node import ExperienceNode
+    from hbllm.brain.identity_node import IdentityNode
+    from hbllm.brain.learner_node import LearnerNode
+    from hbllm.brain.llm_interface import LLMInterface
+    from hbllm.brain.meta_node import MetaReasoningNode
     from hbllm.brain.planner_node import PlannerNode
     from hbllm.brain.router_node import RouterNode
-    from hbllm.brain.llm_interface import LLMInterface
+    from hbllm.brain.rule_extractor import RuleExtractorNode
+    from hbllm.brain.sleep_node import SleepCycleNode
+    from hbllm.brain.spawner_node import SpawnerNode
     from hbllm.brain.workspace_node import WorkspaceNode
     from hbllm.brain.world_model_node import WorldModelNode
-    from hbllm.brain.sleep_node import SleepCycleNode
-    from hbllm.brain.critic_node import CriticNode
-    from hbllm.brain.decision_node import DecisionNode
-    from hbllm.brain.learner_node import LearnerNode
-    from hbllm.brain.spawner_node import SpawnerNode
-    from hbllm.brain.meta_node import MetaReasoningNode
-    from hbllm.brain.experience_node import ExperienceNode
-    from hbllm.brain.rule_extractor import RuleExtractorNode
-    from hbllm.brain.identity_node import IdentityNode
-    from hbllm.brain.curiosity_node import CuriosityNode
-    from hbllm.brain.collective_node import CollectiveNode
     from hbllm.memory.memory_node import MemoryNode
-    from hbllm.modules.base_module import DomainModuleNode
-    from hbllm.perception.vision_node import VisionNode
-    from hbllm.perception.audio_in_node import AudioInputNode
-    from hbllm.perception.audio_out_node import AudioOutputNode
-    from hbllm.actions.execution_node import ExecutionNode
-    from hbllm.actions.browser_node import BrowserNode
-    from hbllm.actions.logic_node import LogicNode
-    from hbllm.actions.fuzzy_node import FuzzyNode
-    from hbllm.actions.api_node import ApiNode
-    from hbllm.network.redis_bus import RedisBus
-    from hbllm.network.registry import ServiceRegistry
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
-    from hbllm_tokenizer_rs import Vocab
-    
+    from hbllm.modules.base_module import DomainModuleNode
+    from hbllm.network.redis_bus import RedisBus
+    from hbllm.network.registry import ServiceRegistry
+    from hbllm.perception.audio_in_node import AudioInputNode
+    from hbllm.perception.audio_out_node import AudioOutputNode
+    from hbllm.perception.vision_node import VisionNode
+
     # 1. Bus
     if bus_type == "redis":
         bus = RedisBus(redis_url=redis_url)
     else:
         bus = InProcessBus()
-    
+
     registry = ServiceRegistry()
     await bus.start()
 
@@ -185,12 +186,12 @@ async def _boot_brain(model_size: str = "125M", bus_type: str = "inprocess", red
     for node in nodes:
         await registry.register(node.get_info())
         await node.start(bus)
-    
+
     _state["bus"] = bus
     _state["registry"] = registry
     _state["nodes"] = nodes
     _state["bus_type"] = bus_type
-    
+
     _state["mode"] = "full"
     logger.info("Brain pipeline booted with %d nodes.", len(nodes))
 
@@ -200,11 +201,11 @@ async def _shutdown_brain():
     nodes = _state.get("nodes", [])
     for node in reversed(nodes):
         await node.stop()
-    
+
     bus = _state.get("bus")
     if bus:
         await bus.stop()
-    
+
     logger.info("Brain pipeline shutdown complete.")
 
 
@@ -213,6 +214,7 @@ async def _shutdown_brain():
 async def _boot_provider_mode():
     """Lightweight mode: use external LLM providers without the full brain."""
     import os
+
     from hbllm.serving.provider import get_provider
 
     provider_name = os.getenv("HBLLM_PROVIDER", "openai")
@@ -242,12 +244,13 @@ async def lifespan(app: FastAPI):
 
     # ── Cloud features (SaaS layer) — graceful fallback for OSS mode ──
     try:
-        from hbllm_cloud.tenant_manager import TenantManager
+        from fastapi.staticfiles import StaticFiles
         from hbllm_cloud.admin_api import create_admin_router
         from hbllm_cloud.dashboard.routes import create_dashboard_router
+        from hbllm_cloud.tenant_manager import TenantManager
+
         from hbllm.brain.policy_engine import PolicyEngine
         from hbllm.serving.security import ApiKeyManager
-        from fastapi.staticfiles import StaticFiles
 
         tm = TenantManager(db_path="data/tenants.db")
         pe = PolicyEngine()
@@ -269,6 +272,7 @@ async def lifespan(app: FastAPI):
 
         # Static files
         from pathlib import Path
+
         import hbllm_cloud.dashboard as _dash_pkg
         static_dir = Path(_dash_pkg.__file__).parent / "static"
         if static_dir.exists():
@@ -280,6 +284,7 @@ async def lifespan(app: FastAPI):
 
         # API security middleware (protects /v1/* with API key auth + rate limiting)
         from hbllm_cloud.api_middleware import ApiSecurityMiddleware
+
         from hbllm.serving.security import RateLimiter
         rate_limiter = RateLimiter(requests_per_minute=60.0, burst_size=10.0)
         _state["rate_limiter"] = rate_limiter
@@ -297,12 +302,12 @@ async def lifespan(app: FastAPI):
 
     # ── Knowledge Base + Usage + Billing ──
     try:
-        from hbllm_cloud.knowledge.embeddings import EmbeddingsService
-        from hbllm_cloud.knowledge.vector_store import VectorStore
-        from hbllm_cloud.knowledge.processor import DocumentProcessor
-        from hbllm_cloud.knowledge.api import create_knowledge_router
-        from hbllm_cloud.usage import UsageTracker
         from hbllm_cloud.billing import BillingManager
+        from hbllm_cloud.knowledge.api import create_knowledge_router
+        from hbllm_cloud.knowledge.embeddings import EmbeddingsService
+        from hbllm_cloud.knowledge.processor import DocumentProcessor
+        from hbllm_cloud.knowledge.vector_store import VectorStore
+        from hbllm_cloud.usage import UsageTracker
 
         embeddings_svc = EmbeddingsService(provider=os.getenv("HBLLM_EMBEDDING_PROVIDER", "openai"))
         vector_store = VectorStore(db_path="data/vectors.db")
@@ -345,8 +350,8 @@ async def lifespan(app: FastAPI):
 
     # ── Tenant Portal (self-service UI) ──
     try:
-        from hbllm_cloud.portal.routes import create_portal_router
         from fastapi.staticfiles import StaticFiles as SF2
+        from hbllm_cloud.portal.routes import create_portal_router
 
         portal_router = create_portal_router(
             tenant_manager=_state.get("tenant_manager"),
@@ -370,10 +375,10 @@ async def lifespan(app: FastAPI):
 
     # ── High-Value Platform Features ──
     try:
-        from hbllm_cloud.workflows import WorkflowEngine
-        from hbllm_cloud.extraction import DataExtractor
         from hbllm_cloud.agents import AgentRegistry
+        from hbllm_cloud.extraction import DataExtractor
         from hbllm_cloud.multilang import MultiLanguageService
+        from hbllm_cloud.workflows import WorkflowEngine
 
         provider = _state.get("provider")
         workflow_engine = WorkflowEngine(provider=provider)
@@ -518,8 +523,8 @@ async def lifespan(app: FastAPI):
             return {"languages": multilang.list_languages()}
 
         # ── Embeddable Widget ──
-        from fastapi.responses import FileResponse
         import hbllm_cloud.widget as _widget_pkg
+        from fastapi.responses import FileResponse
         widget_path = Path(_widget_pkg.__file__).parent / "hbllm-widget.js"
 
         @app.get("/widget/hbllm-widget.js")
@@ -650,7 +655,7 @@ async def health_check():
     """Check server health and node count."""
     node_count = len(_state.get("nodes", []))
     mode = _state.get("mode", "unknown")
-    provider = _state.get("provider")
+    _state.get("provider")
     return HealthResponse(
         status="healthy",
         nodes_registered=node_count,
@@ -834,7 +839,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
             response_text=response_text,
             source_node=source,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(status_code=504, detail="Pipeline timed out (30s)")
     finally:
         # Always clean up subscription to prevent memory leak
@@ -866,7 +871,7 @@ async def chat(request: ChatRequest):
 async def chat_stream(request: ChatRequest):
     """
     Stream a response from the cognitive pipeline as Server-Sent Events (SSE).
-    
+
     Each SSE event has the format:
         data: {"token": "...", "done": false}
         data: {"token": "", "done": true, "correlation_id": "..."}
@@ -874,19 +879,19 @@ async def chat_stream(request: ChatRequest):
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-    
+
     correlation_id = str(uuid.uuid4())
-    
+
     token_queue: asyncio.Queue = asyncio.Queue()
-    
+
     async def output_handler(msg: Message):
         if msg.correlation_id == correlation_id:
             text = msg.payload.get("text", "")
             await token_queue.put(text)
             await token_queue.put(None)  # Signal completion
-    
+
     await bus.subscribe("sensory.output", output_handler)
-    
+
     # Store user message in memory
     memory_msg = Message(
         type=MessageType.EVENT,
@@ -902,7 +907,7 @@ async def chat_stream(request: ChatRequest):
         },
     )
     await bus.publish("memory.store", memory_msg)
-    
+
     # Send to router
     query_msg = Message(
         type=MessageType.QUERY,
@@ -914,17 +919,17 @@ async def chat_stream(request: ChatRequest):
         correlation_id=correlation_id,
     )
     await bus.publish("router.query", query_msg)
-    
+
     async def event_generator():
         import json as _json
         try:
             while True:
                 try:
                     chunk = await asyncio.wait_for(token_queue.get(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield f"data: {_json.dumps({'token': '', 'done': True, 'error': 'timeout'})}\n\n"
                     break
-                
+
                 if chunk is None:
                     yield f"data: {_json.dumps({'token': '', 'done': True, 'correlation_id': correlation_id})}\n\n"
                     break
@@ -932,7 +937,7 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {_json.dumps({'token': chunk, 'done': False})}\n\n"
         except asyncio.CancelledError:
             pass
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -946,16 +951,16 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20):
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-    
+
     correlation_id = str(uuid.uuid4())
     response_future: asyncio.Future = asyncio.get_event_loop().create_future()
-    
+
     async def memory_handler(msg: Message):
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
-    
+
     await bus.subscribe("memory.retrieve_recent.response", memory_handler)
-    
+
     query = Message(
         type=MessageType.QUERY,
         source_node_id="api_server",
@@ -966,11 +971,11 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20):
         correlation_id=correlation_id,
     )
     await bus.publish("memory.retrieve_recent", query)
-    
+
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"session_id": session_id, "turns": []}
 
 
@@ -978,14 +983,14 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20):
 async def submit_feedback(request: FeedbackRequest):
     """
     Submit user feedback on a response for RLHF / DPO continuous learning.
-    
+
     Feedback is published to the LearnerNode which accumulates samples
     and triggers DPO training once a batch threshold is reached.
     """
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-    
+
     feedback_msg = Message(
         type=MessageType.FEEDBACK,
         source_node_id="api_server",
@@ -1000,7 +1005,7 @@ async def submit_feedback(request: FeedbackRequest):
         },
     )
     await bus.publish("system.feedback", feedback_msg)
-    
+
     return {
         "status": "accepted",
         "message_id": request.message_id,
@@ -1038,7 +1043,7 @@ async def knowledge_neighbors(entity: str, direction: str = "both", relation_typ
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"neighbors": [], "entity": entity}
 
 
@@ -1070,7 +1075,7 @@ async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5):
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"path": None, "from": from_entity, "to": to_entity}
 
 
@@ -1102,7 +1107,7 @@ async def knowledge_subgraph(entity: str, depth: int = 2):
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"subgraph": {"entities": [], "relations": []}, "entity": entity}
 
 
@@ -1134,7 +1139,7 @@ async def knowledge_stats():
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"entity_count": 0, "relation_count": 0}
 
 
@@ -1248,7 +1253,7 @@ async def chat_websocket(ws: WebSocket):
                 )
                 await bus.publish("memory.store", store_msg)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await ws.send_json({"token": "", "done": True, "error": "timeout"})
 
     except WebSocketDisconnect:
@@ -1266,13 +1271,13 @@ async def chat_websocket(ws: WebSocket):
 def main():
     """Run the FastAPI server with uvicorn."""
     import uvicorn
-    
+
     parser = argparse.ArgumentParser(description="HBLLM Cognitive API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8000, help="Bind port")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
     args = parser.parse_args()
-    
+
     uvicorn.run(
         "hbllm.serving.api:app",
         host=args.host,

@@ -3,8 +3,8 @@ Tests for WebSocket + Knowledge Graph + Rules API endpoints.
 """
 
 import pytest
-from hbllm.serving.api import app, ChatRequest, HealthResponse
 
+from hbllm.serving.api import ChatRequest, HealthResponse, app
 
 # ── Schema Tests ─────────────────────────────────────────────────────────────
 

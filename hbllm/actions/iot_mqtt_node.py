@@ -17,7 +17,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType

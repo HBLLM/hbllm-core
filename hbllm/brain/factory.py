@@ -26,33 +26,33 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hbllm.actions.tool_memory import ToolMemory
+from hbllm.brain.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.goal_manager import GoalManager
+from hbllm.brain.owner_rules import OwnerRuleStore
+from hbllm.brain.policy_engine import PolicyEngine
 from hbllm.brain.provider_adapter import ProviderLLM
-from hbllm.network.bus import InProcessBus, MessageBus
-from hbllm.network.registry import ServiceRegistry
-from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
-from hbllm.serving.provider import LLMProvider, get_provider
+from hbllm.brain.revision_node import RevisionNode
+from hbllm.brain.self_model import SelfModel
 
 # New cognitive modules
 from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.goal_manager import GoalManager
-from hbllm.brain.self_model import SelfModel
-from hbllm.brain.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.world_simulator import WorldSimulator
-from hbllm.brain.revision_node import RevisionNode
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
-from hbllm.brain.policy_engine import PolicyEngine
-from hbllm.brain.owner_rules import OwnerRuleStore
-from hbllm.actions.tool_memory import ToolMemory
-from hbllm.memory.concept_extractor import ConceptExtractor
-from hbllm.network.cognition_router import CognitionRouter
-from hbllm.serving.token_optimizer import TokenOptimizer
-from hbllm.training.reward_model import RewardModel
-from hbllm.training.policy_optimizer import PolicyOptimizer
 from hbllm.data.interaction_miner import InteractionMiner
+from hbllm.memory.concept_extractor import ConceptExtractor
+from hbllm.network.bus import InProcessBus, MessageBus
+from hbllm.network.cognition_router import CognitionRouter
+from hbllm.network.registry import ServiceRegistry
+from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
+from hbllm.serving.provider import LLMProvider, get_provider
+from hbllm.serving.token_optimizer import TokenOptimizer
+from hbllm.training.policy_optimizer import PolicyOptimizer
+from hbllm.training.reward_model import RewardModel
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class BrainConfig:
 class Brain:
     """
     A fully wired, running HBLLM cognitive brain.
-    
+
     Holds references to all nodes, the bus, registry, and pipeline.
     Use ``process()`` to send queries through the full cognitive loop.
     """
@@ -135,10 +135,8 @@ class Brain:
         _start = _time.monotonic()
 
         # Token optimization (pre-process)
-        recommended_model = None
         if self.token_optimizer:
-            opt_result = self.token_optimizer.optimize(text)
-            recommended_model = opt_result.recommended_model
+            self.token_optimizer.optimize(text)
 
         result = await self.pipeline.process(
             text=text,
@@ -210,7 +208,7 @@ class Brain:
 class BrainFactory:
     """
     Factory for creating a fully wired Brain with one line.
-    
+
     Handles provider creation, node instantiation, bus wiring, and startup.
     """
 
@@ -223,14 +221,14 @@ class BrainFactory:
     ) -> Brain:
         """
         Create and start a fully wired Brain.
-        
+
         Args:
-            provider: Provider name (e.g., "openai/gpt-4o-mini", "anthropic") 
+            provider: Provider name (e.g., "openai/gpt-4o-mini", "anthropic")
                       or an LLMProvider instance.
             config: Brain configuration. Defaults to BrainConfig().
             bus: Custom message bus. Defaults to InProcessBus.
             **provider_kwargs: Extra args passed to get_provider().
-            
+
         Returns:
             A running Brain instance ready for queries.
         """
@@ -255,9 +253,9 @@ class BrainFactory:
     ) -> Brain:
         """
         Create a Brain powered entirely by a local HBLLM model.
-        
+
         No API keys or internet required.
-        
+
         Args:
             checkpoint_path: Path to a model checkpoint (.pt file or directory).
                              If None, searches default locations.
@@ -266,11 +264,12 @@ class BrainFactory:
             bus: Custom message bus. Defaults to InProcessBus.
             device: Device for inference ("auto", "cpu", "cuda", "mps").
             lora_adapter_path: Optional LoRA adapter .pt file to load on top.
-            
+
         Returns:
             A running Brain instance using local model inference.
         """
         import torch
+
         from hbllm.model.config import get_config
         from hbllm.model.tokenizer import Tokenizer
         from hbllm.model.transformer import HBLLMForCausalLM
@@ -297,7 +296,7 @@ class BrainFactory:
         # Try to load checkpoint
         ckpt_loaded = False
         search_paths = []
-        
+
         if checkpoint_path:
             search_paths.append(Path(checkpoint_path))
         else:
@@ -311,7 +310,7 @@ class BrainFactory:
         for ckpt_dir in search_paths:
             if ckpt_dir.is_file() and ckpt_dir.suffix == ".pt":
                 logger.info("Loading checkpoint: %s", ckpt_dir)
-                from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+                from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
                 ckpt = load_checkpoint(ckpt_dir)
                 model.load_state_dict(
                     extract_model_state(ckpt), strict=False
@@ -322,7 +321,7 @@ class BrainFactory:
                 pts = sorted(ckpt_dir.rglob("step_*.pt"))
                 if pts:
                     logger.info("Loading latest checkpoint: %s", pts[-1])
-                    from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+                    from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
                     ckpt = load_checkpoint(pts[-1])
                     model.load_state_dict(
                         extract_model_state(ckpt), strict=False
@@ -378,21 +377,21 @@ class BrainFactory:
         await registry.start()
 
         # 3. Create cognitive nodes with LLM injected
-        from hbllm.brain.router_node import RouterNode
-        from hbllm.brain.planner_node import PlannerNode
-        from hbllm.brain.critic_node import CriticNode
-        from hbllm.brain.decision_node import DecisionNode
-        from hbllm.brain.workspace_node import WorkspaceNode
-        from hbllm.brain.experience_node import ExperienceNode
-        from hbllm.brain.meta_node import MetaReasoningNode
-        from hbllm.brain.identity_node import IdentityNode
-        from hbllm.brain.sleep_node import SleepCycleNode
-        from hbllm.brain.rule_extractor import RuleExtractorNode
-        from hbllm.brain.curiosity_node import CuriosityNode
         from hbllm.brain.collective_node import CollectiveNode
+        from hbllm.brain.critic_node import CriticNode
+        from hbllm.brain.curiosity_node import CuriosityNode
+        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.experience_node import ExperienceNode
+        from hbllm.brain.identity_node import IdentityNode
         from hbllm.brain.learner_node import LearnerNode
-        from hbllm.brain.world_model_node import WorldModelNode
+        from hbllm.brain.meta_node import MetaReasoningNode
+        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.rule_extractor import RuleExtractorNode
         from hbllm.brain.sentinel_node import SentinelNode
+        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.workspace_node import WorkspaceNode
+        from hbllm.brain.world_model_node import WorldModelNode
         from hbllm.memory.memory_node import MemoryNode
 
         # Create PolicyEngine for governance
@@ -479,7 +478,7 @@ class BrainFactory:
         # 4. Start all nodes on the bus
         for node in nodes:
             await node.start(message_bus)
-            from hbllm.network.node import NodeInfo, NodeHealth, HealthStatus
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
             await registry.register(NodeInfo(
                 node_id=node.node_id,
                 node_type=node.node_type,

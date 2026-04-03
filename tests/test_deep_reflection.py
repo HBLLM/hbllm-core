@@ -5,10 +5,11 @@ end-to-end reflection pipeline via bus.
 
 import asyncio
 import json
-import pytest
 import shutil
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from hbllm.brain.experience_node import ExperienceNode
 from hbllm.memory.memory_node import MemoryNode

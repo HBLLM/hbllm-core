@@ -3,18 +3,17 @@ Training Pipeline Smoke Tests — verifies SFT, DPO, and checkpoint
 sanity without requiring a GPU or large dataset.
 """
 
-import pytest
 import shutil
 import tempfile
 from pathlib import Path
 
+import pytest
 import torch
 
 from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForCausalLM
 from hbllm.training.dpo import compute_dpo_loss, get_batch_logps
-from hbllm.training.trainer import Trainer, TrainingConfig, CheckpointManager
-
+from hbllm.training.trainer import CheckpointManager, Trainer, TrainingConfig
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -214,11 +213,11 @@ class TestCheckpoint:
     def test_checkpoint_manager_rotation(self, tmp_checkpoint_dir):
         """CheckpointManager rotates old checkpoints."""
         mgr = CheckpointManager(tmp_checkpoint_dir, max_checkpoints=2)
-        
+
         # Create a minimal model
         model = torch.nn.Linear(4, 4)
         optimizer = torch.optim.Adam(model.parameters())
-        
+
         # Save 3 checkpoints
         mgr.save(model, optimizer, None, step=1, loss=1.0, config={})
         mgr.save(model, optimizer, None, step=2, loss=0.8, config={})

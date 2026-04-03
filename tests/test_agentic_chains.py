@@ -9,17 +9,14 @@ Validates that:
 4. ToolRouterNode correctly multiplexes tool calls to the right bus topic.
 """
 
-import asyncio
 import json
-import re
 
 import pytest
 
-from hbllm.brain.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
 from hbllm.actions.tool_router import ToolRouterNode
+from hbllm.brain.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-
 
 # ─── Unit Tests: ThoughtNode trajectory_history ──────────────────────────────
 

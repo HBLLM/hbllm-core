@@ -1,7 +1,7 @@
 """
 Data Quality Scorer.
 
-Provides heuristics to filter out low-quality web documents (e.g., gibberish, 
+Provides heuristics to filter out low-quality web documents (e.g., gibberish,
 excessive symbols, extremely long words) before they enter the pre-training dataset.
 """
 

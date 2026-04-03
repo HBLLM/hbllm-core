@@ -13,31 +13,27 @@ Covers:
   - Graceful fallback when HuggingFace is unavailable
 """
 
-import asyncio
 import hashlib
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 import torch
 
 from hbllm.modules.adapter_registry import (
-    AdapterRegistry,
-    AdapterRegistryConfig,
-    AdapterSource,
     ADAPTER_FILENAME_TEMPLATE,
     ADAPTER_HASH_TEMPLATE,
     ADAPTER_METADATA_KEY,
     PEFT_CONFIG_FILE,
     PEFT_WEIGHTS_BIN,
+    AdapterRegistry,
+    AdapterRegistryConfig,
+    AdapterSource,
     compute_sha256,
-    verify_sha256,
     safe_torch_load,
+    verify_sha256,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -180,7 +176,7 @@ class TestAdapterSource:
         """Should support pinning to a specific Git revision."""
         src = AdapterSource(domain="coding", repo_id="org/repo", revision="v1.0")
         assert src.revision == "v1.0"
-        
+
         src_sha = AdapterSource(domain="coding", repo_id="org/repo", revision="8f32a4b")
         assert src_sha.revision == "8f32a4b"
 
@@ -536,13 +532,13 @@ class TestDownloadPropagation:
         """Registry._hf_download should pass revision to hf_hub_download."""
         mock_hf.return_value = str(tmp_path / "fake.pt")
         Path(mock_hf.return_value).touch()
-        
+
         await registry._hf_download(
-            repo_id="test/repo", 
-            filename="file.pt", 
+            repo_id="test/repo",
+            filename="file.pt",
             revision="v1.1"
         )
-        
+
         mock_hf.assert_called_once_with(
             repo_id="test/repo",
             filename="file.pt",

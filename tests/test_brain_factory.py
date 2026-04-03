@@ -1,12 +1,12 @@
 """Tests for BrainFactory — end-to-end brain creation and query processing."""
 
+from typing import Any
+
 import pytest
-from typing import Any, AsyncIterator
 
 from hbllm.brain.factory import Brain, BrainConfig, BrainFactory
 from hbllm.brain.provider_adapter import ProviderLLM
 from hbllm.serving.provider import LLMProvider, LLMResponse
-
 
 # ── Mock Provider ────────────────────────────────────────────────────────────
 
@@ -116,7 +116,7 @@ async def test_brain_shutdown():
     """Brain shuts down cleanly."""
     provider = MockBrainProvider()
     brain = await BrainFactory.create(provider=provider)
-    
+
     # Shutdown should not raise
     await brain.shutdown()
 

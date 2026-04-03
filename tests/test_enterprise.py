@@ -1,13 +1,10 @@
 """Tests for MetricsCollector and PluginManager."""
 
-import pytest
 import tempfile
-import os
 from pathlib import Path
 
 from hbllm.network.metrics import MetricsCollector
-from hbllm.network.plugin_manager import PluginManager, PluginInfo
-
+from hbllm.network.plugin_manager import PluginInfo, PluginManager
 
 # ─── MetricsCollector Tests ──────────────────────────────────────────────────
 
@@ -60,7 +57,7 @@ class TestMetricsCollector:
     def test_measure_latency_context(self):
         m = MetricsCollector.get_instance()
         with m.measure_latency("test_stage"):
-            x = sum(range(100))
+            sum(range(100))
         # Should record a duration
 
     def test_get_metrics_text(self):

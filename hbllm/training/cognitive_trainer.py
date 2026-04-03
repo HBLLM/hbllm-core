@@ -17,17 +17,17 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from hbllm.training.trainer import Trainer, TrainingConfig
-from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
-from hbllm.training.training_memory import TrainingMemory, detect_domain
-from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.memory.concept_extractor import ConceptExtractor
+from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
+from hbllm.training.trainer import Trainer, TrainingConfig
+from hbllm.training.training_memory import TrainingMemory, detect_domain
 
 logger = logging.getLogger(__name__)
 

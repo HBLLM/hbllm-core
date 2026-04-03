@@ -3,15 +3,14 @@ Memory Persistence Tests — verifies SemanticMemory and KnowledgeGraph
 survive save/load round-trips.
 """
 
-import pytest
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 
-import numpy as np
+import pytest
 
+from hbllm.memory.knowledge_graph import KnowledgeGraph
 from hbllm.memory.semantic import SemanticMemory
-from hbllm.memory.knowledge_graph import KnowledgeGraph, Entity, Relation
 
 
 @pytest.fixture

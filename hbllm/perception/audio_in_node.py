@@ -68,26 +68,26 @@ class AudioInputNode(Node):
         """
         payload = message.payload
         file_path = payload.get("file_path")
-        
+
         if not file_path:
             return message.create_error("Missing 'file_path'")
-            
+
         try:
             import asyncio
-            
+
             # Offload heavy whisper STT inference to thread
             def _transcribe():
                 self._load_model()
                 logger.info("Transcribing audio file: %s", file_path)
                 result = self.model.transcribe(file_path, fp16=False)
                 return result["text"].strip()
-                
+
             transcription = await asyncio.to_thread(_transcribe)
             logger.info("Transcribed text: '%s'", transcription)
-            
+
             # Formulate the response so the Caller knows we succeeded
             resp = message.create_response({"text": transcription})
-            
+
             # Automatically forward what the user said to the brain
             query_msg = Message(
                 type=MessageType.QUERY,
@@ -99,9 +99,9 @@ class AudioInputNode(Node):
             # Fire and forget the internal brain query
             import asyncio
             asyncio.create_task(self.bus.publish("router.query", query_msg))
-            
+
             return resp
-            
+
         except Exception as e:
             logger.error("Audio transcription failed: %s", e)
             return message.create_error(str(e))
@@ -110,7 +110,7 @@ class AudioInputNode(Node):
         """
         Handle streaming audio chunks. Buffers chunks per session and
         auto-transcribes when silence is detected or buffer is full.
-        
+
         Payload expects:
             chunk: str -> hex-encoded audio bytes
             sample_rate: int -> sample rate (default 16000)
@@ -120,12 +120,12 @@ class AudioInputNode(Node):
         session_id = message.session_id or "default"
         chunk_hex = payload.get("chunk", "")
         is_final = payload.get("is_final", False)
-        
+
         if not chunk_hex and not is_final:
             return None
-        
+
         now = time.monotonic()
-        
+
         # Initialize buffer for this session
         if session_id not in self._stream_buffers:
             self._stream_buffers[session_id] = {
@@ -134,9 +134,9 @@ class AudioInputNode(Node):
                 "last_chunk": now,
                 "sample_rate": payload.get("sample_rate", 16000),
             }
-        
+
         buf = self._stream_buffers[session_id]
-        
+
         # Append chunk
         if chunk_hex:
             try:
@@ -144,7 +144,7 @@ class AudioInputNode(Node):
             except ValueError:
                 return message.create_error("Invalid hex chunk data")
             buf["last_chunk"] = now
-        
+
         # Decide whether to flush
         elapsed = now - buf["start"]
         silence = now - buf["last_chunk"]
@@ -153,10 +153,10 @@ class AudioInputNode(Node):
             or elapsed >= STREAM_MAX_BUFFER_SECONDS
             or (silence >= STREAM_SILENCE_TIMEOUT and buf["chunks"])
         )
-        
+
         if should_flush and buf["chunks"]:
             await self._flush_stream_buffer(session_id, message)
-        
+
         return None
 
     async def _flush_stream_buffer(self, session_id: str, message: Message) -> None:
@@ -164,14 +164,14 @@ class AudioInputNode(Node):
         buf = self._stream_buffers.pop(session_id, None)
         if not buf or not buf["chunks"]:
             return
-        
+
         try:
             import asyncio
             import os
-            
+
             combined = b"".join(buf["chunks"])
             sample_rate = buf.get("sample_rate", 16000)
-            
+
             def _transcribe_bytes():
                 # Write raw PCM to a temp wav file
                 import wave
@@ -182,18 +182,18 @@ class AudioInputNode(Node):
                         wf.setsampwidth(2)  # 16-bit
                         wf.setframerate(sample_rate)
                         wf.writeframes(combined)
-                    
+
                     self._load_model()
                     result = self.model.transcribe(tmp.name, fp16=False)
                     return result["text"].strip()
                 finally:
                     os.unlink(tmp.name)
-            
+
             transcription = await asyncio.to_thread(_transcribe_bytes)
-            
+
             if transcription:
                 logger.info("Stream transcribed (%s): '%s'", session_id, transcription[:60])
-                
+
                 # Forward to router
                 query_msg = Message(
                     type=MessageType.QUERY,
@@ -204,7 +204,7 @@ class AudioInputNode(Node):
                     payload={"text": transcription, "source": "audio_stream"},
                 )
                 asyncio.create_task(self.bus.publish("router.query", query_msg))
-                
+
         except Exception as e:
             logger.warning("Stream transcription failed for %s: %s", session_id, e)
 
@@ -215,20 +215,20 @@ class AudioInputNode(Node):
         """
         payload = message.payload
         audio_path = payload.get("audio_path") or payload.get("file_path")
-        
+
         if not audio_path:
             return None  # Not an audio-relevant query
-        
+
         try:
             import asyncio
-            
+
             def _transcribe():
                 self._load_model()
                 result = self.model.transcribe(audio_path, fp16=False)
                 return result["text"].strip()
-            
+
             transcription = await asyncio.to_thread(_transcribe)
-            
+
             # Post as a competing thought on the Workspace blackboard
             thought_msg = Message(
                 type=MessageType.EVENT,
@@ -247,5 +247,5 @@ class AudioInputNode(Node):
             await self.bus.publish("workspace.thought", thought_msg)
         except Exception as e:
             logger.warning("AudioInputNode workspace thought failed: %s", e)
-        
+
         return None

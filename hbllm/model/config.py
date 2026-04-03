@@ -7,7 +7,7 @@ for 125M, 500M, and 1.5B parameter configurations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +29,7 @@ class ModelConfig:
     num_kv_heads: int = 4  # For Grouped Query Attention
     intermediate_size: int = 3072  # SwiGLU FFN dimension
     max_position_embeddings: int = 2048
-    
+
     # Efficiency / Long Context (SWA)
     sliding_window: int | None = None
     attention_sinks: int = 4
@@ -169,6 +169,7 @@ CONFIGS = {
 
 
 import copy
+
 
 def get_config(size: str = "125m") -> ModelConfig:
     """Get a preset model config by size."""

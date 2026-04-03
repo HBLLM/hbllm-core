@@ -1,15 +1,14 @@
 """
 Tool Router Node — Generic multiplexer for agentic tool calls.
 
-Listens for `action.tool_call` requests containing a generic XML-extracted 
-tool name and arguments. Routes the payload to the correct specialized 
+Listens for `action.tool_call` requests containing a generic XML-extracted
+tool name and arguments. Routes the payload to the correct specialized
 action node (e.g., McpClientNode, ExecutionNode) over the MessageBus,
 and returns the resulting observation.
 """
 
 import json
 import logging
-from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -47,7 +46,7 @@ class ToolRouterNode(Node):
 
         tool_name = message.payload.get("tool_name", "")
         tool_args_raw = message.payload.get("arguments", "{}")
-        
+
         try:
             tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else tool_args_raw
         except json.JSONDecodeError:
@@ -58,7 +57,7 @@ class ToolRouterNode(Node):
 
         target_topic = ""
         target_payload = {}
-        
+
         # 1. Native Execution Node Routing
         if tool_name == "execute_python":
             target_topic = "action.execute_code"
@@ -71,7 +70,7 @@ class ToolRouterNode(Node):
                  "tool_name": tool_name,
                  "arguments": tool_args
             }
-            
+
         req = Message(
             type=MessageType.QUERY,
             source_node_id=self.node_id,
@@ -80,7 +79,7 @@ class ToolRouterNode(Node):
             topic=target_topic,
             payload=target_payload,
         )
-        
+
         try:
             # Execute tool across the bus
             resp = await self.request(target_topic, req, timeout=30.0)

@@ -3,19 +3,19 @@ LoRA Online Learning Loop Tests — verifies LearnerNode feedback flow,
 LoRA injection, optimizer creation, and adapter checkpoint saving.
 """
 
-import pytest
 import asyncio
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 
+import pytest
 import torch
 
-from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import Message, MessageType
 from hbllm.brain.learner_node import LearnerNode
 from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForCausalLM
+from hbllm.network.bus import InProcessBus
+from hbllm.network.messages import Message, MessageType
 
 
 @pytest.fixture

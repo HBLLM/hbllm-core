@@ -1,9 +1,9 @@
 """Tests for CognitionRouter and TokenOptimizer."""
 
 import pytest
+
 from hbllm.network.cognition_router import CognitionRouter, CognitionTask
 from hbllm.serving.token_optimizer import TokenOptimizer
-
 
 # ─── CognitionRouter ─────────────────────────────────────────────────────
 

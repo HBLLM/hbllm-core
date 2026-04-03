@@ -1,12 +1,12 @@
 """Tests for Ros2Node — runs entirely in simulation mode (no ROS2 needed)."""
 
-import pytest
 import asyncio
 
+import pytest
+
+from hbllm.actions.ros2_node import ROBOT_COMMANDS, RobotState, Ros2Node
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.actions.ros2_node import Ros2Node, RobotState, ROBOT_COMMANDS
-
 
 # ── Robot State Tests ────────────────────────────────────────────────────────
 

@@ -1,10 +1,11 @@
 import asyncio
 import logging
-import torch
 from typing import Any
 
+import torch
+
+from hbllm.network.messages import FeedbackPayload, Message, MessageType
 from hbllm.network.node import Node, NodeType
-from hbllm.network.messages import Message, MessageType, FeedbackPayload
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,13 @@ class LearnerNode(Node):
         self.node_type = NodeType.MEMORY
         self.model = model
         self.tokenizer = tokenizer
-        
+
         # Continuous Lifelong DPO: persistent queue
         self.pending_pairs: dict[str, dict[str, str | None]] = {}
         self.queue_path = "workspace/reflection/dpo_queue.json"
         import os
         os.makedirs(os.path.dirname(self.queue_path), exist_ok=True)
-        
+
         self.batch_size = batch_size
         self.lr = lr
         self.dpo_beta = dpo_beta
@@ -78,28 +79,28 @@ class LearnerNode(Node):
 
         prompt = payload.prompt
         response = payload.response
-        
+
         if not prompt or not response:
             logger.debug("Learner '%s' received feedback with missing prompt/response", self.node_id)
             return None
 
         async with self._lock:
-            logger.info("Learner '%s' processing feedback for msg %s (rating: %d)", 
+            logger.info("Learner '%s' processing feedback for msg %s (rating: %d)",
                         self.node_id, payload.message_id, payload.rating)
 
             if prompt not in self.pending_pairs:
                 self.pending_pairs[prompt] = {"chosen": None, "rejected": None}
-                
+
             if payload.rating == 1:
                 self.pending_pairs[prompt]["chosen"] = response
             elif payload.rating == -1:
                 self.pending_pairs[prompt]["rejected"] = response
-                
+
             pair = self.pending_pairs[prompt]
             if pair["chosen"] and pair["rejected"]:
                 import json
                 from pathlib import Path
-                
+
                 # Append to persistent JSON array
                 queue = []
                 p = Path(self.queue_path)
@@ -112,9 +113,9 @@ class LearnerNode(Node):
                     except (json.JSONDecodeError, OSError) as e:
                         logger.warning("Could not read dpo_queue.json, starting fresh: %s", e)
                         queue = []
-                            
+
                 queue.append((prompt, pair["chosen"], pair["rejected"]))
-                
+
                 try:
                     p.parent.mkdir(parents=True, exist_ok=True)
                     with p.open("w") as f:
@@ -122,46 +123,47 @@ class LearnerNode(Node):
                     logger.info("LearnerNode queued contrastive DPO pair for prompt: '%s...'", prompt[:30])
                 except OSError as e:
                     logger.error("Failed to write to dpo_queue.json: %s", e)
-                    # Don't delete from pending_pairs so we can retry or at least not lose it 
+                    # Don't delete from pending_pairs so we can retry or at least not lose it
                     # but actually we probably should just log and continue for now
-                    
+
                 del self.pending_pairs[prompt]
 
         return None
-        
+
     async def handle_sleep_trigger(self, message: Message) -> Message | None:
         """Triggered by SleepNode when user is idle for background DPO processing."""
-        import json, os
-        
+        import json
+        import os
+
         if not os.path.exists(self.queue_path):
             await self._broadcast_complete()
             return None
-            
-        with open(self.queue_path, "r") as f:
+
+        with open(self.queue_path) as f:
             try:
                 batch = json.load(f)
             except json.JSONDecodeError:
                 batch = []
-                
+
         if not batch:
             await self._broadcast_complete()
             return None
-            
+
         # Empty the queue so we don't double train if it crashes midway
         os.remove(self.queue_path)
-            
+
         if self.training_task and not self.training_task.done():
             logger.warning("[LearnerNode] DPO already running.")
             return None
-            
+
         # Cap batch to self.batch_size to prevent memory explosion
         target_batch = batch[:self.batch_size]
         re_queue = batch[self.batch_size:]
-        
+
         if re_queue:
             with open(self.queue_path, "w") as f:
                 json.dump(re_queue, f)
-            
+
         self.training_task = asyncio.create_task(self._run_dpo_training(target_batch))
         return None
 
@@ -253,7 +255,7 @@ class LearnerNode(Node):
             await asyncio.to_thread(_train)
             logger.info("LearnerNode DPO training complete (%d total steps). Broadcasting update...", self._training_steps)
             await self._broadcast_complete()
-            
+
         except Exception as e:
             logger.error("LearnerNode background DPO task failed: %s", e)
             await self._broadcast_complete()
@@ -317,7 +319,6 @@ class LearnerNode(Node):
 
     def _save_adapter(self) -> None:
         """Save the trained LoRA adapter."""
-        import os
         from pathlib import Path
 
         try:

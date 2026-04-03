@@ -1,18 +1,19 @@
 import asyncio
 import time
-from typing import Dict, Any
+from typing import Any
 
+from hbllm.brain.process_reward_node import ProcessRewardNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.brain.process_reward_node import ProcessRewardNode
 
-async def run_prm_benchmark() -> Dict[str, Any]:
+
+async def run_prm_benchmark() -> dict[str, Any]:
     bus = InProcessBus()
     await bus.start()
 
     prm_node = ProcessRewardNode(node_id="test_prm")
     await prm_node.start(bus)
-    
+
     # Mock trained state for pure inference speed benchmarking
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForProcessReward
@@ -30,10 +31,10 @@ async def run_prm_benchmark() -> Dict[str, Any]:
         "The fastest sorting algorithm in python is typically built-in TimSort. Let me demonstrate.",
         "To find the sum of all elements, we simply subtract them.",
     ]
-    
+
     start_time = time.time()
     results = []
-    
+
     # Run 100 evaluations to benchmark throughput
     for _ in range(25):
         for text in prompts:

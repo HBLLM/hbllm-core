@@ -1,12 +1,12 @@
 """Tests for MqttIoTNode — Home Automation Bridge."""
 
-import pytest
 import asyncio
 
+import pytest
+
+from hbllm.actions.iot_mqtt_node import DEVICE_TYPES, DeviceState, MqttIoTNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.actions.iot_mqtt_node import MqttIoTNode, DeviceState, DEVICE_TYPES
-
 
 # ── Device State Tests ───────────────────────────────────────────────────────
 

@@ -13,12 +13,9 @@ Tests the complete flow using only HBLLM Core modules:
 import os
 import tempfile
 
-import pytest
-
-from hbllm.serving.security import ApiKeyManager, RateLimiter, InputSanitizer
-from hbllm.memory.semantic import SemanticMemory
 from hbllm.memory.episodic import EpisodicMemory
-
+from hbllm.memory.semantic import SemanticMemory
+from hbllm.serving.security import ApiKeyManager, InputSanitizer, RateLimiter
 
 # ─── 1. API Key Manager ─────────────────────────────────────────────────────
 

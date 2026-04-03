@@ -7,7 +7,6 @@ Provides encode/decode with special tokens and chat templates.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any

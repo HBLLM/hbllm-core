@@ -2,16 +2,16 @@
 System 2 Symbolic Logic Node (Deductive Reasoning).
 
 Powered by Microsoft's Z3 Theorem Prover.
-When the Workspace Blackboard opens, this node looks for formal logical or 
-mathematical constraints in the prompt. If found, it uses the base LLM to 
-translate the text into Z3 Python solver code, executes it in a sandboxed 
+When the Workspace Blackboard opens, this node looks for formal logical or
+mathematical constraints in the prompt. If found, it uses the base LLM to
+translate the text into Z3 Python solver code, executes it in a sandboxed
 namespace, and posts the verified result back to the Blackboard.
 """
 
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -45,7 +45,7 @@ class LogicNode(Node):
         """
         payload = message.payload
         text = payload.get("text", "")
-        
+
         # 1. Intent Detection — use LLM to determine if this is a logic problem
         if not self.llm:
             return None
@@ -56,19 +56,19 @@ class LogicNode(Node):
             f"Query: \"{text}\"\n"
             f"Output JSON: {{\"is_logical\": true/false, \"reason\": \"brief explanation\"}}"
         )
-        
+
         if not classification.get("is_logical", False):
             return None
-            
+
         logger.info("[LogicNode] Evaluating formal constraint problem...")
-        
+
         # 2. LLM Translation: English → Z3 Python Code
         try:
             answer = await asyncio.to_thread(self._solve_with_z3, text)
-            
+
             if not answer:
                 return None
-            
+
             # 3. Blackboard Proposal
             thought_msg = Message(
                 type=MessageType.EVENT,
@@ -85,20 +85,21 @@ class LogicNode(Node):
                 correlation_id=message.correlation_id
             )
             await self.bus.publish("workspace.thought", thought_msg)
-            
+
         except Exception as e:
             logger.error("[LogicNode] Constraint modeling failed: %s", e)
-            
+
         return None
 
     def _solve_with_z3(self, query: str) -> str | None:
         """
-        Uses the LLM to translate English into Z3 solver code, then executes 
+        Uses the LLM to translate English into Z3 solver code, then executes
         it in a restricted sandbox to obtain the proven result.
         """
-        import z3
         import asyncio
-        
+
+        import z3
+
         # Ask the LLM to write Z3 code
         loop = asyncio.new_event_loop()
         try:
@@ -114,7 +115,7 @@ class LogicNode(Node):
             ))
         finally:
             loop.close()
-        
+
         # Clean the output — strip code fences if present
         z3_code = z3_code.strip()
         if z3_code.startswith("```"):
@@ -122,12 +123,12 @@ class LogicNode(Node):
         if z3_code.endswith("```"):
             z3_code = z3_code.rsplit("```", 1)[0]
         z3_code = z3_code.strip()
-        
+
         if not z3_code:
             return None
-        
+
         logger.info("[LogicNode] Executing LLM-generated Z3 code:\n%s", z3_code[:200])
-        
+
         # 3. Execute in a restricted sandbox
         sandbox_globals = {
             "__builtins__": {
@@ -139,12 +140,12 @@ class LogicNode(Node):
             "z3": z3,
         }
         sandbox_locals: dict = {}
-        
+
         # Inject common z3 names into the sandbox
         for name in dir(z3):
             if not name.startswith("_"):
                 sandbox_globals[name] = getattr(z3, name)
-        
+
         try:
             # ── AST validation: reject dangerous patterns ──
             import ast as _ast

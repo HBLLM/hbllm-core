@@ -1,16 +1,17 @@
 """Tests for the Agentic Governance Layer (SentinelNode + PlannerNode policy gate)."""
 
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
+from hbllm.brain.planner_node import PlannerNode
 from hbllm.brain.policy_engine import (
-    Policy, PolicyAction, PolicyCondition, PolicyEngine, PolicyType,
+    Policy,
+    PolicyAction,
+    PolicyCondition,
+    PolicyEngine,
+    PolicyType,
 )
-from hbllm.brain.sentinel_node import SentinelNode, SentinelAlert
-from hbllm.brain.planner_node import PlannerNode, ThoughtGraph
+from hbllm.brain.sentinel_node import SentinelNode
 from hbllm.network.messages import Message, MessageType
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 

@@ -1,10 +1,10 @@
 """
 System 4 Sleep Cycle Node (Offline Consolidation).
 
-Monitors system activity. If the user stops interacting with the API/CLI 
+Monitors system activity. If the user stops interacting with the API/CLI
 for a configurable duration, it triggers a `system.sleep` event.
-During sleep, it accesses the MemoryNode to compress raw verbose logs 
-into semantic summaries and triggers LoRA training if weakness was 
+During sleep, it accesses the MemoryNode to compress raw verbose logs
+into semantic summaries and triggers LoRA training if weakness was
 detected throughout the day.
 """
 
@@ -39,10 +39,10 @@ class SleepCycleNode(Node):
         logger.info("Starting SleepCycleNode (Idle timeout: %s seconds)", self.idle_timeout_seconds)
         # Listen to router queries to track user activity
         await self.bus.subscribe("router.query", self._check_activity)
-        
+
         # Accumulate curiosity goals for processing during sleep
         await self.bus.subscribe("system.sleep.goal", self._collect_goal)
-        
+
         # Start the background idle monitor
         self._monitor_task = asyncio.create_task(self._idle_monitor_loop())
 
@@ -65,37 +65,37 @@ class SleepCycleNode(Node):
     async def _check_activity(self, message: Message) -> Message | None:
         """Update our internal timestamp whenever a user query flows through the system."""
         self._last_system_activity = time.time()
-        
+
         if self.is_sleeping:
             logger.info("[SleepNode] User input detected! Waking up immediately. Aborting deep sleep.")
             self.is_sleeping = False
-            
+
         return None
 
     async def _idle_monitor_loop(self):
         """Continuously check if the system has been inactive."""
         # We use a short interval for testing if timeout is small
         check_interval = min(2.0, self.idle_timeout_seconds / 2.0)
-        
+
         while self._running:
             await asyncio.sleep(check_interval)
-            
+
             if not self.is_sleeping:
                 idle_time = time.time() - self._last_system_activity
                 if idle_time > self.idle_timeout_seconds:
                     await self._enter_sleep_cycle()
-                    
+
     async def _enter_sleep_cycle(self):
         """Perform offline memory consolidation and self-improvement training."""
         self.is_sleeping = True
         cycle_start = time.time()
         report = {"memories_consolidated": 0, "goals_replayed": 0, "training_ran": False}
         logger.info("[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...", self.idle_timeout_seconds)
-        
+
         try:
             # ── Phase 1: Memory Consolidation ────────────────────────────
             report["memories_consolidated"] = await self._consolidate_memory()
-            
+
             # ── Phase 2: Self-Improvement Training ───────────────────────
             if not self.is_sleeping:
                 return  # User woke up during consolidation
@@ -110,7 +110,7 @@ class SleepCycleNode(Node):
              logger.warning("[SleepNode] Timeout during sleep cycle. Waking up.")
         except Exception as e:
             logger.error("[SleepNode] Sleep cycle interrupted by internal error: %s", e)
-        
+
         # Emit sleep report
         report["duration_seconds"] = round(time.time() - cycle_start, 1)
         await self.bus.publish("system.sleep.report", Message(
@@ -132,7 +132,7 @@ class SleepCycleNode(Node):
             topic="memory.retrieve_recent",
             payload={"session_id": "default_session", "limit": 10}
         )
-        
+
         try:
             resp = await self.bus.request("memory.retrieve_recent", req_msg, timeout=5.0)
         except Exception:
@@ -146,25 +146,25 @@ class SleepCycleNode(Node):
             return 0
 
         turns = resp.payload.get("turns", [])
-        
+
         if len(turns) >= 4:
             logger.info("[SleepNode] Compressing %d recent turns into semantic long-term memory...", len(turns))
-            
+
             store_msg = Message(
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
                 topic="memory.store",
                 payload={
-                    "session_id": "default_session", 
-                    "role": "system", 
+                    "session_id": "default_session",
+                    "role": "system",
                     "content": f"[CONSOLIDATED MEMORY] User discussed {len(turns)//2} topics. Key facts extracted and embedded."
                 }
             )
             await self.bus.publish("memory.store", store_msg)
-            
+
         else:
             logger.info("[SleepNode] Not enough new memories to consolidate linearly. Proceeding to GraphRAG.")
-            
+
         # ── Phase 1.5: Hierarchical GraphRAG Clustering ──
         if self.llm:
             try:
@@ -177,10 +177,10 @@ class SleepCycleNode(Node):
                 )
                 kg_resp = await self.bus.request("knowledge.query", kg_msg, timeout=5.0)
                 entities = kg_resp.payload.get("entities", [])
-                
+
                 # Filter out existing communities
                 leaf_nodes = [e["label"] for e in entities if e.get("type") != "community"]
-                
+
                 if len(leaf_nodes) >= 5:
                     logger.info("[SleepNode] GraphRAG: Clustering %d entities into Communities...", len(leaf_nodes))
                     cluster_json = await self.llm.generate_json(
@@ -188,7 +188,7 @@ class SleepCycleNode(Node):
                         f"Concepts: {leaf_nodes}\n"
                         f"Output JSON format: {{\"communities\": [{{\"name\": \"Short Title\", \"summary\": \"1 sentence desc\", \"members\": [\"concept1\", \"concept2\"]}}]}}"
                     )
-                    
+
                     if "error" not in cluster_json and "communities" in cluster_json:
                         for comm in cluster_json["communities"]:
                             add_comm_msg = Message(
@@ -213,15 +213,15 @@ class SleepCycleNode(Node):
     async def _run_self_improvement(self) -> bool:
         """Phase 2: Trigger Lifelong Continuous DPO overnight."""
         import asyncio
-        
+
         logger.info("[SleepNode] Initiating Phase 2: Autonomous Continuous DPO...")
 
         # Create an event to wait for the learner node to respond
         training_complete_event = asyncio.Event()
-        
+
         async def _on_learning_update(msg: Message):
             training_complete_event.set()
-            
+
         sub = await self.bus.subscribe("system.learning_update", _on_learning_update)
 
         try:
@@ -233,7 +233,7 @@ class SleepCycleNode(Node):
                 payload={"mode": "overnight_continuous"}
             )
             await self.bus.publish("system.sleep.dpo_trigger", trigger_msg)
-            
+
             # Wait for learner to process. If it's empty, it returns immediately.
             # If it's a huge batch, give it 15 minutes max during 'sleep'.
             await asyncio.wait_for(training_complete_event.wait(), timeout=900.0)
@@ -251,7 +251,7 @@ class SleepCycleNode(Node):
     async def _replay_curiosity_goals(self) -> int:
         """
         Phase 3: Replay accumulated curiosity goals during sleep.
-        
+
         For each queued goal, publishes a research query to memory.store
         so the system can explore and learn about curiosity-driven topics.
         """

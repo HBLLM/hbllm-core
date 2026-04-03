@@ -14,12 +14,12 @@ import time
 from pathlib import Path
 
 from hbllm.data.downloader import DatasetDownloader, iter_jsonl_dir
-from hbllm.data.sharder import ShardWriter
 from hbllm.data.scorer import QualityScorer
+from hbllm.data.sharder import ShardWriter
 
 try:
-    from hbllm_data_tools_rs import fast_clean_batch, Deduplicator
-    from hbllm_tokenizer_rs import Vocab, Trainer
+    from hbllm_data_tools_rs import Deduplicator, fast_clean_batch
+    from hbllm_tokenizer_rs import Trainer, Vocab
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False

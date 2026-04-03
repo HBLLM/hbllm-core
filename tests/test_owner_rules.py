@@ -1,11 +1,15 @@
 """Tests for the Owner Rule System (policy_engine + owner_rules)."""
 
 import pytest
-from hbllm.brain.policy_engine import (
-    Policy, PolicyAction, PolicyCondition, PolicyEngine, PolicyType,
-)
-from hbllm.brain.owner_rules import OwnerRuleStore, parse_owner_rule
 
+from hbllm.brain.owner_rules import OwnerRuleStore, parse_owner_rule
+from hbllm.brain.policy_engine import (
+    Policy,
+    PolicyAction,
+    PolicyCondition,
+    PolicyEngine,
+    PolicyType,
+)
 
 # ── PolicyCondition Tests ───────────────────────────────────────────────────
 

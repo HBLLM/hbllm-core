@@ -18,9 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +27,6 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-from hbllm.model.config import ModelConfig
 from hbllm.model.transformer import HBLLMForCausalLM
 
 logger = logging.getLogger(__name__)
@@ -336,10 +333,10 @@ class Trainer:
             "grad_norm": grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm,
             "lr": self.optimizer.param_groups[0]["lr"],
         }
-        
+
         if self._wandb_run is not None:
             self._wandb_run.log(metrics, step=self.global_step)
-            
+
         return metrics
 
     def save_checkpoint(self, loss: float = 0.0) -> Path:

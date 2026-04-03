@@ -1,6 +1,6 @@
 import pytest
 
-from hbllm.serving.api import app, ChatRequest, HealthResponse
+from hbllm.serving.api import ChatRequest, HealthResponse, app
 
 
 @pytest.mark.asyncio

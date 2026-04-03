@@ -1,16 +1,19 @@
 """Tests for the benchmark runner."""
 
-import pytest
-import asyncio
 import json
 
-from hbllm.benchmarks.runner import (
-    BenchmarkResult, BenchmarkReport,
-    LatencyBenchmark, MemoryBenchmark,
-    SpecializationBenchmark, MultiTenantBenchmark,
-    SUITES, run_suite,
-)
+import pytest
 
+from hbllm.benchmarks.runner import (
+    SUITES,
+    BenchmarkReport,
+    BenchmarkResult,
+    LatencyBenchmark,
+    MemoryBenchmark,
+    MultiTenantBenchmark,
+    SpecializationBenchmark,
+    run_suite,
+)
 
 # ── Result / Report Types ───────────────────────────────────────────────────
 

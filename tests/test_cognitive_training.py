@@ -10,11 +10,8 @@ Tests the three new modules:
 import json
 import os
 import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ──────────────────────────────────────────────────────────────────────
 # KnowledgeGraphBuilder Tests
@@ -338,7 +335,6 @@ class TestCognitiveTrainer:
     @pytest.fixture
     def tiny_model(self):
         """Create a minimal model for testing."""
-        import torch
         from hbllm.model.config import ModelConfig
         from hbllm.model.transformer import HBLLMForCausalLM
 
@@ -358,8 +354,9 @@ class TestCognitiveTrainer:
     def cog_trainer(self, tiny_model, tmp_path):
         """Create a CognitiveTrainer with default config."""
         import torch
+
+        from hbllm.training.cognitive_trainer import CognitiveConfig, CognitiveTrainer
         from hbllm.training.trainer import TrainingConfig
-        from hbllm.training.cognitive_trainer import CognitiveTrainer, CognitiveConfig
 
         train_config = TrainingConfig(
             learning_rate=1e-4,
@@ -382,8 +379,9 @@ class TestCognitiveTrainer:
     def cog_trainer_with_lora(self, tiny_model, tmp_path):
         """Create a CognitiveTrainer with LoRA enabled."""
         import torch
+
+        from hbllm.training.cognitive_trainer import CognitiveConfig, CognitiveTrainer
         from hbllm.training.trainer import TrainingConfig
-        from hbllm.training.cognitive_trainer import CognitiveTrainer, CognitiveConfig
 
         train_config = TrainingConfig(
             learning_rate=1e-4,
@@ -532,8 +530,9 @@ class TestCognitiveTrainer:
 
     def test_log_cognitive_status(self, cog_trainer, caplog):
         """log_cognitive_status should log without errors."""
-        import torch
         import logging
+
+        import torch
 
         batch = {
             "input_ids": torch.randint(0, 999, (2, 32)),
@@ -593,10 +592,11 @@ class TestCognitiveTrainingIntegration:
     def test_full_cognitive_training_loop(self, tmp_path):
         """Simulate a complete cognitive training loop."""
         import torch
+
         from hbllm.model.config import ModelConfig
         from hbllm.model.transformer import HBLLMForCausalLM
+        from hbllm.training.cognitive_trainer import CognitiveConfig, CognitiveTrainer
         from hbllm.training.trainer import TrainingConfig
-        from hbllm.training.cognitive_trainer import CognitiveTrainer, CognitiveConfig
 
         # Tiny model
         model_config = ModelConfig(

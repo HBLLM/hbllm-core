@@ -37,7 +37,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -58,7 +58,7 @@ def _get_rclpy():
         try:
             import rclpy
             import rclpy.node
-            from geometry_msgs.msg import Twist, PoseStamped
+            from geometry_msgs.msg import PoseStamped, Twist
             from std_msgs.msg import String
             _rclpy = rclpy
             logger.info("ROS2 (rclpy) available — real robot mode enabled")
@@ -243,7 +243,7 @@ class Ros2Node(Node):
             self._ros2_node = rclpy.node.Node(self.ros2_node_name)
 
             # Create publishers
-            from geometry_msgs.msg import Twist, PoseStamped
+            from geometry_msgs.msg import PoseStamped, Twist
             from std_msgs.msg import String
 
             self._publishers["cmd_vel"] = self._ros2_node.create_publisher(
@@ -366,8 +366,9 @@ class Ros2Node(Node):
         yaw = params.get("yaw", 0.0)
 
         if self.is_real and "nav_goal" in self._publishers:
-            from geometry_msgs.msg import PoseStamped
             import math
+
+            from geometry_msgs.msg import PoseStamped
             goal = PoseStamped()
             goal.header.frame_id = "map"
             goal.pose.position.x = float(x)

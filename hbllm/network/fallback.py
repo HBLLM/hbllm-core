@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from hbllm.network.circuit_breaker import CircuitBreakerRegistry, CircuitOpenError
+from hbllm.network.circuit_breaker import CircuitBreakerRegistry
 from hbllm.network.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)

@@ -8,12 +8,13 @@ deliberation guarantees a safe, helpful, and accurate output.
 
 from dataclasses import dataclass
 
+
 @dataclass
 class Principle:
     name: str
     description: str
     failure_criteria: str
-    
+
 
 # The core HHH (Helpful, Harmless, Honest) + Accurate foundation.
 CONSTITUTION = {

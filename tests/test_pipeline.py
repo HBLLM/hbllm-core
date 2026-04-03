@@ -1,19 +1,16 @@
 """Tests for CognitivePipeline and ContextWindowManager."""
 
-import asyncio
 import pytest
 
+from hbllm.brain.context_window import (
+    ContextBlock,
+    ContextWindowManager,
+    estimate_tokens,
+)
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
-from hbllm.brain.context_window import (
-    ContextWindowManager,
-    ContextBlock,
-    ContextResult,
-    estimate_tokens,
-)
-
 
 # ─── ContextWindowManager Tests ──────────────────────────────────────────────
 

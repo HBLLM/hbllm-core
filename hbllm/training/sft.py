@@ -7,14 +7,13 @@ Supports full fine-tuning or LoRA-only fine-tuning.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -223,8 +222,8 @@ def run_sft_training(
         max_samples: Max dataset samples
     """
     from hbllm.model.config import get_config
-    from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.model.tokenizer import HBLLMTokenizer
+    from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.training.trainer import Trainer, TrainingConfig
 
     device = device or torch.device("cpu")

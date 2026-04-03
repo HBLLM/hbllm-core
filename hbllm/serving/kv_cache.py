@@ -8,8 +8,8 @@ Features:
   - Optional 8-bit key quantization to further reduce memory footprint
 """
 
+
 import torch
-from typing import Tuple
 
 
 class KVCache:
@@ -86,7 +86,7 @@ class KVCache:
             else:
                 self.cpu_key_cache = torch.empty(cpu_shape, dtype=dtype, pin_memory=True)
                 self.cpu_key_scales = None
-                
+
             self.cpu_value_cache = torch.empty(cpu_shape, dtype=dtype, pin_memory=True)
 
         # Tracks current filled length in the buffer
@@ -101,7 +101,7 @@ class KVCache:
         keys: torch.Tensor,
         values: torch.Tensor,
         seq_offset: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Update the cache with new keys/values and return the full cached history.
 
@@ -130,7 +130,7 @@ class KVCache:
         values: torch.Tensor,
         seq_offset: int,
         new_len: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Standard fixed-buffer update without sliding window."""
         end_offset = seq_offset + new_len
 
@@ -151,7 +151,7 @@ class KVCache:
         values: torch.Tensor,
         seq_offset: int,
         new_len: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sliding window update with attention sink preservation."""
         window = self.sliding_window
         sinks = self.attention_sinks
@@ -277,7 +277,7 @@ class KVCache:
 
         self.value_cache[:, :, start:end, :] = values.to(self.dtype)
 
-    def _read_cache(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _read_cache(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the currently valid portion of the cache, dequantizing if needed."""
         if self.quantize_k:
             k_slice = self.key_cache[:, :, :self.seq_len, :].to(self.dtype)
@@ -313,22 +313,22 @@ class KVCache:
             evicted_scales = self.key_scales[:, :, sinks : sinks + actual_shift, :]
             self.cpu_key_scales[:, :, start_logical:end_logical, :].copy_(evicted_scales, non_blocking=True)
 
-    def get_full_cache_cpu(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_full_cache_cpu(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns the fully assembled KV history sequence located on the CPU."""
         if not getattr(self, "cpu_offload", False):
             raise ValueError("cpu_offload must be enabled to retrieve the full cache.")
-            
+
         active_len = self.seq_len
         sinks = self.attention_sinks
         total_tokens = min(self._total_tokens_seen, self.max_seq_len)
-        
+
         # 1. Sync Attention Sinks to the beginning of the CPU cache
         if sinks > 0:
             self.cpu_key_cache[:, :, :sinks, :].copy_(self.key_cache[:, :, :sinks, :], non_blocking=True)
             self.cpu_value_cache[:, :, :sinks, :].copy_(self.value_cache[:, :, :sinks, :], non_blocking=True)
             if self.quantize_k and self.cpu_key_scales is not None and self.key_scales is not None:
                 self.cpu_key_scales[:, :, :sinks, :].copy_(self.key_scales[:, :, :sinks, :], non_blocking=True)
-                
+
         # 2. Sync the current active rolling window
         if active_len > sinks:
             active_start_logical = total_tokens - (active_len - sinks)
@@ -342,11 +342,11 @@ class KVCache:
                 self.cpu_key_scales[:, :, active_start_logical:total_tokens, :].copy_(
                     self.key_scales[:, :, sinks:active_len, :], non_blocking=True
                 )
-            
+
         # Ensure all async copies to CPU finish before providing CPU tensor access
         if self.device != torch.device("cpu"):
             torch.cuda.current_stream(self.device).synchronize() if self.device.type == "cuda" else None
-            
+
         return (
             self.cpu_key_cache[:, :, :total_tokens, :],
             self.cpu_value_cache[:, :, :total_tokens, :]

@@ -5,10 +5,7 @@ Tests for the three core improvements:
 3. PlannerNode prompt/response cache
 """
 
-import pytest
-from collections import OrderedDict
 from hbllm.memory.semantic import SemanticMemory
-
 
 # ─── 1. Hybrid Search ───────────────────────────────────────────────────────
 
@@ -90,7 +87,7 @@ class TestRewardReranking:
             reward_scores={1: 5.0},  # Big boost to Java
             reward_boost=0.2,
         )
-        
+
         # Both should return results
         assert len(base_results) >= 1
         assert len(boosted_results) >= 1
@@ -102,7 +99,7 @@ class TestRewardReranking:
         sm.store("Beta document about dogs")
         sm.store("Gamma document about birds")
 
-        no_boost = sm.search("document", top_k=3)
+        sm.search("document", top_k=3)
         with_boost = sm.search(
             "document", top_k=3,
             reward_scores={2: 10.0},  # Massive boost to "birds"
@@ -119,10 +116,10 @@ class TestRewardReranking:
         sm = SemanticMemory()
         sm.store("Test document one")
         sm.store("Test document two")
-        
+
         results_default = sm.search("test", top_k=2)
         results_none = sm.search("test", top_k=2, reward_scores=None)
-        
+
         # Same results with no rewards
         assert len(results_default) == len(results_none)
 
@@ -172,11 +169,11 @@ class TestPlannerCache:
         """Cache should evict oldest entries when full."""
         from hbllm.brain.planner_node import PlannerNode
         node = PlannerNode(node_id="test_planner")
-        
+
         # Fill cache beyond max
         for i in range(PlannerNode.MAX_CACHE_SIZE + 50):
             node._cache_response(f"key_{i}", f"response_{i}")
-        
+
         assert len(node._response_cache) == PlannerNode.MAX_CACHE_SIZE
         # First entries should be evicted
         assert "key_0" not in node._response_cache
@@ -194,7 +191,7 @@ class TestPlannerCache:
         """Cache should store and retrieve responses correctly."""
         from hbllm.brain.planner_node import PlannerNode
         node = PlannerNode(node_id="test_planner")
-        
+
         node._cache_response("test_key", "test_response")
         assert "test_key" in node._response_cache
         assert node._response_cache["test_key"][0] == "test_response"

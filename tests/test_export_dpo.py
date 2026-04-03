@@ -1,17 +1,17 @@
 """Tests for the DPO Dataset Export CLI."""
 
 import json
-import os
-import pytest
 from pathlib import Path
 
+import pytest
+
 from hbllm.cli.export_dpo import (
-    read_dpo_queue,
-    read_reflection_logs,
+    build_stats,
     collect_all_pairs,
     export_jsonl,
-    build_stats,
     main,
+    read_dpo_queue,
+    read_reflection_logs,
 )
 
 

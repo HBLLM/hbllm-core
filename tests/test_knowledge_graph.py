@@ -2,14 +2,10 @@
 Tests for KnowledgeGraph — entity/relation storage, query, and text ingestion.
 """
 
-import pytest
 from hbllm.memory.knowledge_graph import (
     KnowledgeGraph,
-    Entity,
-    Relation,
     extract_entities_from_text,
 )
-
 
 # ── Entity & Relation CRUD ───────────────────────────────────────────────────
 

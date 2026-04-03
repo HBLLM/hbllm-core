@@ -76,13 +76,13 @@ class MoEFFN(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_experts = config.num_experts
         self.num_active_experts = config.num_active_experts
-        
+
         # Gate network to predict routing probabilities
         self.gate = nn.Linear(config.hidden_size, self.num_experts, bias=False)
-        
+
         # The experts (parallel SwiGLU FFNs)
         self.experts = nn.ModuleList([SwiGLUFFN(config) for _ in range(self.num_experts)])
-        
+
         # Shared expert routing (always active for all tokens)
         self.use_shared_expert = getattr(config, "use_shared_expert", False)
         if self.use_shared_expert:
@@ -108,7 +108,7 @@ class MoEFFN(nn.Module):
 
         # Select top-k experts for each token
         routing_weights, selected_experts = torch.topk(routing_weights, self.num_active_experts, dim=-1)
-        
+
         # Normalize weights for the selected experts
         routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
         routing_weights = routing_weights.to(x.dtype)
@@ -117,10 +117,10 @@ class MoEFFN(nn.Module):
         # f_i (fraction of tokens routed to expert i)
         expert_mask = F.one_hot(selected_experts, num_classes=self.num_experts).sum(dim=1)  # [batch * seq_len, num_experts]
         tokens_per_expert = expert_mask.float().mean(dim=0)  # [num_experts]
-        
+
         # P_i (average routing probability of expert i across all tokens)
         router_prob_per_expert = F.softmax(router_logits, dim=-1).mean(dim=0)  # [num_experts]
-        
+
         # auxiliary load balancing loss (alpha * N * sum(f_i * P_i))
         load_balancing_loss = self.num_experts * torch.sum(tokens_per_expert * router_prob_per_expert)
 
@@ -135,11 +135,11 @@ class MoEFFN(nn.Module):
             if idx.numel() > 0:
                 expert_inputs = x_flat[idx]
                 expert_outputs = expert(expert_inputs)
-                
+
                 # Apply routing weight
                 expert_weights = routing_weights[idx, nth_expert].unsqueeze(-1)
                 weighted_outputs = expert_outputs * expert_weights
-                
+
                 # Accumulate back into final hidden states
                 final_hidden_states.index_add_(0, idx, weighted_outputs)
 

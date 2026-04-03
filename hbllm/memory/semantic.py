@@ -1,7 +1,7 @@
 """
 Semantic Memory (RAG Vector Database).
 
-Embeds text using Sentence-Transformers and stores them for cosine-similarity 
+Embeds text using Sentence-Transformers and stores them for cosine-similarity
 semantic search. This allows the agent to recall long-term context that falls
 out of the immediate rolling episodic window.
 
@@ -25,13 +25,13 @@ import hashlib
 import logging
 import math
 import re
+import threading
 import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from qdrant_client import QdrantClient
-    from qdrant_client.models import VectorParams, Distance, PointStruct
+    from qdrant_client.models import Distance, PointStruct, VectorParams
     _HAS_QDRANT = True
 except ImportError:
     _HAS_QDRANT = False
@@ -49,33 +49,33 @@ except ImportError:
 class _TfIdfEmbedder:
     """
     Lightweight TF-IDF embedder used when sentence-transformers is not installed.
-    
+
     Builds a vocabulary from stored documents and computes sparse TF-IDF vectors.
     Not as good as dense embeddings, but works without any ML dependencies.
     """
-    
+
     def __init__(self):
         self._vocab: dict[str, int] = {}
         self._idf: dict[str, float] = {}
         self._doc_count = 0
         self._doc_freqs: Counter = Counter()
-    
+
     @staticmethod
     def _tokenize(text: str) -> list[str]:
         """Simple whitespace + punctuation tokenizer."""
         return re.findall(r'\b\w+\b', text.lower())
-    
+
     def _update_vocab(self, tokens: list[str]) -> None:
         """Add new tokens to vocabulary."""
         for token in tokens:
             if token not in self._vocab:
                 self._vocab[token] = len(self._vocab)
-    
+
     def _compute_idf(self) -> None:
         """Recompute IDF values based on document frequencies."""
         for term, df in self._doc_freqs.items():
             self._idf[term] = math.log((self._doc_count + 1) / (df + 1)) + 1
-    
+
     def fit_token(self, text: str) -> None:
         """Update vocabulary and document frequencies with a new document."""
         tokens = self._tokenize(text)
@@ -87,41 +87,41 @@ class _TfIdfEmbedder:
         self._compute_idf()
         # Track whether vocabulary changed (new dimensions added)
         self._vocab_changed = len(self._vocab) != old_vocab_size
-    
+
     def encode(self, texts: list[str]) -> np.ndarray:
         """Encode texts into TF-IDF vectors."""
         if not self._vocab:
             return np.zeros((len(texts), 1))
-        
+
         dim = len(self._vocab)
         vectors = np.zeros((len(texts), dim))
-        
+
         for i, text in enumerate(texts):
             tokens = self._tokenize(text)
             tf = Counter(tokens)
             total = len(tokens) if tokens else 1
-            
+
             for term, count in tf.items():
                 if term in self._vocab:
                     idx = self._vocab[term]
                     idf = self._idf.get(term, 1.0)
                     vectors[i, idx] = (count / total) * idf
-        
+
         # L2 normalize
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1, norms)
         vectors = vectors / norms
-        
+
         return vectors
 
 
 class SemanticMemory:
     """
     A lightweight in-memory vector database for the Modular Brain.
-    
+
     Uses sentence-transformers to compute dense embeddings and NumPy
     for exact k-Nearest Neighbors cosine similarity search.
-    
+
     If sentence-transformers is not installed, falls back to TF-IDF
     which works without any ML dependencies (lower quality but functional).
 
@@ -129,7 +129,7 @@ class SemanticMemory:
     a Qdrant HNSW index is maintained alongside the NumPy index for
     production-grade sub-millisecond search at scale.
     """
-    
+
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
@@ -255,12 +255,12 @@ class SemanticMemory:
     def store(self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False) -> str | None:
         """
         Embed and store a document.
-        
+
         Args:
             content: Text to embed and store.
             metadata: Optional metadata dict.
             is_priority: Whether this is a high-salience priority document.
-            
+
         Returns:
             UUID of the stored document, or None if skipped.
         """
@@ -271,27 +271,27 @@ class SemanticMemory:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
             return None
-        
+
         # Deduplication: skip if this exact content was already stored
         content_hash = self._content_hash(content)
         if content_hash in self._content_hashes:
             logger.debug("Duplicate content detected — skipping store")
             return None
         self._content_hashes.add(content_hash)
-        
+
         if self._use_tfidf or self.model is None:
             self._load_model()
-            
+
         meta = metadata or {}
         if is_priority:
             meta["is_priority"] = True
-            
+
         doc_id = str(uuid.uuid4())
         doc = {"id": doc_id, "content": content, "metadata": meta}
-        
+
         # Always update TF-IDF vocabulary (needed for hybrid sparse index)
         self._tfidf.fit_token(content)
-        
+
         if self._use_tfidf:
             # TF-IDF only mode (no sentence-transformers)
             self.documents[doc_id] = doc
@@ -303,8 +303,8 @@ class SemanticMemory:
             self.documents[doc_id] = doc
             self.ids.append(doc_id)
             self._vector_list.append(np.array([embedding]))
-            
-            # Submits TF-IDF to background queue if vocab changed, 
+
+            # Submits TF-IDF to background queue if vocab changed,
             # otherwise just appends to sparse index
             if self._tfidf._vocab_changed:
                 self._schedule_tfidf_encode()
@@ -327,7 +327,7 @@ class SemanticMemory:
                     )
                 except Exception as e:
                     logger.warning("Qdrant upsert failed (falling back to NumPy): %s", e)
-        
+
         self._vectors_dirty = True
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return doc_id
@@ -336,7 +336,7 @@ class SemanticMemory:
         """Debounces and schedules a full TF-IDF re-encoding."""
         if self._tfidf_timer is not None:
             self._tfidf_timer.cancel()
-        
+
         def _do_encode():
             with self._lock:
                 if not self.ids:
@@ -363,42 +363,42 @@ class SemanticMemory:
     ) -> list[dict[str, Any]]:
         """
         Search for the most semantically similar documents to the query.
-        
+
         Uses hybrid scoring (dense + sparse) when both indexes are available,
         and optionally boosts results using reward scores from ValueMemory.
-        
+
         Args:
             query: Search text.
             top_k: Number of results to return.
             reward_scores: Optional dict mapping doc UUID → reward score.
                            Positive rewards boost documents, negative ones penalize.
             reward_boost: How much to weight reward scores (default 0.1).
-            
+
         Returns:
             List of document dicts with "score" field, sorted by relevance.
         """
         if not self.documents or self.vectors is None:
             return []
-        
+
         if not query or not query.strip():
             return []
-        
+
         # --- Compute dense similarity ---
         query_vec = self._encode([query])[0]
         norms = np.linalg.norm(self.vectors, axis=1)
         query_norm = np.linalg.norm(query_vec)
-        
+
         if query_norm == 0:
             return []
-        
+
         dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
-        
+
         # --- Hybrid: blend with sparse TF-IDF scores if available ---
         if not self._use_tfidf and self.sparse_vectors is not None and len(self._sparse_list) == len(self.documents):
             sparse_query = self._tfidf.encode([query])[0]
             sparse_norms = np.linalg.norm(self.sparse_vectors, axis=1)
             sparse_query_norm = np.linalg.norm(sparse_query)
-            
+
             if sparse_query_norm > 0:
                 sparse_scores = np.dot(self.sparse_vectors, sparse_query) / (sparse_norms * sparse_query_norm + 1e-9)
                 # Blend: alpha * dense + (1 - alpha) * sparse
@@ -407,57 +407,57 @@ class SemanticMemory:
                 final_scores = dense_scores
         else:
             final_scores = dense_scores
-        
+
         # --- Reward boosting ---
         if reward_scores:
             for idx, doc_id in enumerate(self.ids):
                 if doc_id in reward_scores:
                     final_scores[idx] += reward_boost * reward_scores[doc_id]
-        
+
         # Get top-k indices
         top_indices = np.argsort(final_scores)[::-1][:top_k]
-        
+
         results = []
         for idx in top_indices:
             if final_scores[idx] < 0.1:
                 continue
-                
+
             doc_id = self.ids[idx]
             res = self.documents[doc_id].copy()
             res["score"] = float(final_scores[idx])
             results.append(res)
-            
+
         return results
 
     def delete(self, doc_id: str) -> bool:
         """
         Delete a document by UUID.
-        
+
         Args:
             doc_id: UUID of the document to remove.
-            
+
         Returns:
             True if deleted, False if not found.
         """
         with self._lock:
             if doc_id not in self.documents:
                 return False
-            
+
             # Remove content hash
             removed_doc = self.documents[doc_id]
             self._content_hashes.discard(self._content_hash(removed_doc["content"]))
-            
+
             index = self.ids.index(doc_id)
             self.ids.pop(index)
             del self.documents[doc_id]
-            
+
             if self._vector_list and len(self.ids) > 0:
                 self._vector_list.pop(index)
                 self._vectors_dirty = True
             else:
                 self._vector_list.clear()
                 self._vectors_cache = None
-                
+
             if self._sparse_list and len(self.ids) > 0:
                 self._sparse_list.pop(index)
                 self._sparse_dirty = True
@@ -474,7 +474,7 @@ class SemanticMemory:
                     )
                 except Exception as e:
                     logger.warning("Qdrant delete failed: %s", e)
-            
+
             return True
 
     def clear(self) -> int:
@@ -540,8 +540,8 @@ class SemanticMemory:
     @classmethod
     def load_from_disk(cls, path: str | Path, **kwargs) -> "SemanticMemory":
         """Load semantic memory from disk."""
-        from pathlib import Path as _Path
         import json
+        from pathlib import Path as _Path
 
         load_dir = _Path(path)
         if not load_dir.exists() or not (load_dir / "documents.json").exists():

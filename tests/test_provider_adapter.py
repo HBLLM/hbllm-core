@@ -1,12 +1,12 @@
 """Tests for ProviderLLM adapter — bridges LLMProvider with brain node interface."""
 
+from collections.abc import AsyncIterator
+from typing import Any
+
 import pytest
-import json
-from typing import Any, AsyncIterator
 
 from hbllm.brain.provider_adapter import ProviderLLM
 from hbllm.serving.provider import LLMProvider, LLMResponse
-
 
 # ── Mock Provider ────────────────────────────────────────────────────────────
 

@@ -1,14 +1,15 @@
 """Tests for the Curiosity Engine — knowledge gap detection and goal generation."""
 
-import pytest
 import asyncio
 
+import pytest
+
 from hbllm.brain.curiosity_node import (
-    UncertaintyEvent, LearningGoal, GoalQueue, CuriosityNode,
+    CuriosityNode,
+    GoalQueue,
 )
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-
 
 # ─── GoalQueue Tests ──────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ def test_goal_queue_priority_sort():
     q.add_or_update("low", "low priority", 0.2, 1)
     q.add_or_update("high", "high priority", 0.9, 5)
     q.add_or_update("mid", "mid priority", 0.5, 3)
-    
+
     assert q.goals[0].topic == "high"
     assert q.goals[-1].topic == "low"
 
@@ -42,11 +43,11 @@ def test_goal_queue_pop_top():
     q = GoalQueue()
     q.add_or_update("topic_a", "desc", 0.9, 1)
     q.add_or_update("topic_b", "desc", 0.3, 1)
-    
+
     top = q.pop_top()
     assert top.topic == "topic_a"
     assert top.status == "dispatched"
-    
+
     next_top = q.pop_top()
     assert next_top.topic == "topic_b"
 
@@ -69,7 +70,7 @@ def test_goal_queue_summary():
     q.add_or_update("a", "desc", 0.5, 1)
     q.add_or_update("b", "desc", 0.3, 1)
     q.pop_top()  # dispatches "a"
-    
+
     s = q.summary()
     assert s["total"] == 2
     assert s["pending"] == 1
@@ -95,7 +96,7 @@ async def curiosity_node():
 
 async def test_node_tracks_negative_feedback(curiosity_node):
     bus = curiosity_node.bus
-    
+
     msg = Message(
         type=MessageType.EVENT,
         source_node_id="test",
@@ -105,7 +106,7 @@ async def test_node_tracks_negative_feedback(curiosity_node):
     )
     await bus.publish("system.feedback", msg)
     await asyncio.sleep(0.1)
-    
+
     assert len(curiosity_node.events) == 1
     assert curiosity_node.topic_counts["math"] == 1
 
@@ -113,7 +114,7 @@ async def test_node_tracks_negative_feedback(curiosity_node):
 async def test_node_generates_goal_at_threshold(curiosity_node):
     """After threshold events, a learning goal should be created."""
     bus = curiosity_node.bus
-    
+
     for _ in range(3):
         msg = Message(
             type=MessageType.EVENT,
@@ -124,8 +125,8 @@ async def test_node_generates_goal_at_threshold(curiosity_node):
         )
         await bus.publish("system.feedback", msg)
         await asyncio.sleep(0.05)
-    
-    pending = curiosity_node.goal_queue.get_pending()
+
+    curiosity_node.goal_queue.get_pending()
     # Goal should have been dispatched (interval=0), so check dispatched + pending
     total = len(curiosity_node.goal_queue.goals)
     assert total >= 1
@@ -134,7 +135,7 @@ async def test_node_generates_goal_at_threshold(curiosity_node):
 async def test_node_query_stats(curiosity_node):
     """Query returns curiosity stats."""
     bus = curiosity_node.bus
-    
+
     query = Message(
         type=MessageType.QUERY,
         source_node_id="test",

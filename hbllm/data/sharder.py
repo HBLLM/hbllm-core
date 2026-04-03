@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import logging
 import struct
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator, Iterator
 
 import numpy as np
 

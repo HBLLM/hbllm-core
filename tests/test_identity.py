@@ -1,9 +1,9 @@
 """Tests for the Identity Core — per-tenant persona management."""
 
-import pytest
-import asyncio
 
-from hbllm.brain.identity_node import IdentityProfile, IdentityStore, IdentityNode
+import pytest
+
+from hbllm.brain.identity_node import IdentityNode, IdentityProfile, IdentityStore
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -61,7 +61,7 @@ def test_store_upsert_and_get(identity_store):
         goals=["clean code"],
     )
     identity_store.upsert(profile)
-    
+
     loaded = identity_store.get("t1")
     assert loaded is not None
     assert loaded.persona_name == "coder"
@@ -71,7 +71,7 @@ def test_store_upsert_and_get(identity_store):
 def test_store_update_overwrites(identity_store):
     identity_store.upsert(IdentityProfile(tenant_id="t1", persona_name="v1"))
     identity_store.upsert(IdentityProfile(tenant_id="t1", persona_name="v2"))
-    
+
     loaded = identity_store.get("t1")
     assert loaded.persona_name == "v2"
 
@@ -79,7 +79,7 @@ def test_store_update_overwrites(identity_store):
 def test_store_tenant_isolation(identity_store):
     identity_store.upsert(IdentityProfile(tenant_id="t1", persona_name="alice"))
     identity_store.upsert(IdentityProfile(tenant_id="t2", persona_name="bob"))
-    
+
     assert identity_store.get("t1").persona_name == "alice"
     assert identity_store.get("t2").persona_name == "bob"
 
@@ -110,7 +110,7 @@ async def identity_node(tmp_path):
 async def test_node_update_and_query(identity_node):
     """Update a profile via bus and query it back."""
     bus = identity_node.bus
-    
+
     # Update
     update_msg = Message(
         type=MessageType.QUERY,
@@ -127,7 +127,7 @@ async def test_node_update_and_query(identity_node):
     )
     resp = await bus.request("identity.update", update_msg, timeout=5.0)
     assert resp.payload["status"] == "updated"
-    
+
     # Query
     query_msg = Message(
         type=MessageType.QUERY,

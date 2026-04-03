@@ -1,13 +1,15 @@
 """Tests for CircuitBreaker — state transitions and failure detection."""
 
-import pytest
 import time
 
-from hbllm.network.circuit_breaker import (
-    CircuitBreaker, CircuitBreakerRegistry,
-    CircuitState, CircuitOpenError,
-)
+import pytest
 
+from hbllm.network.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerRegistry,
+    CircuitOpenError,
+    CircuitState,
+)
 
 # ── Single CircuitBreaker ────────────────────────────────────────────────────
 

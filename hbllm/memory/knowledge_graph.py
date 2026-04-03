@@ -13,7 +13,7 @@ import hashlib
 import logging
 import re
 import time
-from collections import defaultdict, deque, OrderedDict
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -136,7 +136,7 @@ class KnowledgeGraph:
         while len(self._entities) > self.max_entities:
             # Pop oldest item (FIFO order for LRU tracking)
             eid, _ = self._entities.popitem(last=False)
-            
+
             # Remove all incoming/outgoing relations
             out_rels = self._outgoing.pop(eid, [])
             for rel_key in out_rels:
@@ -146,7 +146,7 @@ class KnowledgeGraph:
                         self._incoming[rel.target_id].remove(rel_key)
                     except ValueError:
                         pass
-                        
+
             in_rels = self._incoming.pop(eid, [])
             for rel_key in in_rels:
                 rel = self._relations.pop(rel_key, None)
@@ -249,7 +249,7 @@ class KnowledgeGraph:
             entity_type="community",
             attributes={"summary": summary, "is_macro_node": True}
         )
-        
+
         for leaf in member_labels:
             # Point leaf node UP to the macro community node
             self.add_relation(
@@ -259,7 +259,7 @@ class KnowledgeGraph:
                 weight=2.0, # Macro ties are strong
                 metadata={"auto_generated": "graphrag"}
             )
-            
+
         return community
 
     # ── Query operations ─────────────────────────────────────────────────
@@ -485,7 +485,7 @@ class KnowledgeGraph:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "KnowledgeGraph":
+    def from_dict(cls, data: dict[str, Any]) -> KnowledgeGraph:
         """Reconstruct a KnowledgeGraph from a dict."""
         graph = cls()
         for e_data in data.get("entities", []):
@@ -525,7 +525,7 @@ class KnowledgeGraph:
                      save_path, self.entity_count, self.relation_count)
 
     @classmethod
-    def load_from_disk(cls, path: str | Path) -> "KnowledgeGraph":
+    def load_from_disk(cls, path: str | Path) -> KnowledgeGraph:
         """Load a knowledge graph from a JSON file."""
         import json
         from pathlib import Path as _Path

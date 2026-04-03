@@ -7,14 +7,11 @@ Covers JSONFormatter, correlation ID context, per-module levels.
 import json
 import logging
 
-import pytest
-
 from hbllm.utils.logger import (
     JSONFormatter,
-    setup_logging,
+    get_correlation_id,
     get_logger,
     set_correlation_id,
-    get_correlation_id,
 )
 
 

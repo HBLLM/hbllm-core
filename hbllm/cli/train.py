@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 import torch
@@ -154,11 +153,11 @@ def get_device(name: str) -> torch.device:
 
 def run_pretrain(args: argparse.Namespace) -> None:
     """Run pre-training pipeline."""
-    from hbllm.model.config import get_config
-    from hbllm.model.transformer import HBLLMForCausalLM
-    from hbllm.model.tokenizer import HBLLMTokenizer
-    from hbllm.training.trainer import Trainer, TrainingConfig
     from hbllm.data.dataloader import create_dataloader
+    from hbllm.model.config import get_config
+    from hbllm.model.tokenizer import HBLLMTokenizer
+    from hbllm.model.transformer import HBLLMForCausalLM
+    from hbllm.training.trainer import Trainer, TrainingConfig
 
     device = get_device(args.device)
 
@@ -340,11 +339,12 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
     """Run cognitive pre-training: base model + knowledge graph + skills + memory + LoRA."""
     import os
     import time as _time
+
+    from hbllm.data.dataloader import create_dataloader
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
-    from hbllm.data.dataloader import create_dataloader
+    from hbllm.training.cognitive_trainer import CognitiveConfig, CognitiveTrainer
     from hbllm.training.trainer import TrainingConfig
-    from hbllm.training.cognitive_trainer import CognitiveTrainer, CognitiveConfig
 
     device = get_device(args.device)
 
@@ -535,8 +535,8 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
             # Eval
             if (step + 1) % train_config.eval_interval_steps == 0 and not args.no_eval:
                 logger.info("  [Eval] Running evaluation at step %d...", steps_done)
-                from hbllm.training.evaluator import ModelEvaluator
                 from hbllm.model.tokenizer import HBLLMTokenizer
+                from hbllm.training.evaluator import ModelEvaluator
                 tokenizer = HBLLMTokenizer.from_tiktoken()
                 evaluator = ModelEvaluator(model, tokenizer, device)
                 eval_results = evaluator.evaluate_all(hellaswag=False, generate=True)
@@ -615,8 +615,8 @@ def run_dpo(args: argparse.Namespace) -> None:
 def run_eval(args: argparse.Namespace) -> None:
     """Run model evaluation."""
     from hbllm.model.config import get_config
-    from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.model.tokenizer import Tokenizer
+    from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.training.evaluator import ModelEvaluator
 
     device = get_device(args.device)
@@ -628,7 +628,7 @@ def run_eval(args: argparse.Namespace) -> None:
     # Load checkpoint
     if args.checkpoint:
         logger.info("Loading checkpoint: %s", args.checkpoint)
-        from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+        from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
         ckpt = load_checkpoint(args.checkpoint)
         model.load_state_dict(extract_model_state(ckpt), strict=False)
     else:
@@ -656,9 +656,9 @@ def run_eval(args: argparse.Namespace) -> None:
 def run_export(args: argparse.Namespace) -> None:
     """Export trained model to various formats."""
     from hbllm.model.config import get_config
-    from hbllm.model.transformer import HBLLMForCausalLM
-    from hbllm.model.tokenizer import Tokenizer
     from hbllm.model.export import ModelExporter
+    from hbllm.model.tokenizer import Tokenizer
+    from hbllm.model.transformer import HBLLMForCausalLM
 
     logger.info("=== Model Export (%s) ===", args.export)
     config = get_config(args.size)
@@ -667,7 +667,7 @@ def run_export(args: argparse.Namespace) -> None:
     # Load checkpoint
     if args.checkpoint:
         logger.info("Loading checkpoint: %s", args.checkpoint)
-        from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+        from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
         ckpt = load_checkpoint(args.checkpoint)
         model.load_state_dict(extract_model_state(ckpt), strict=False)
     else:
@@ -729,9 +729,9 @@ def run_serve_local(args: argparse.Namespace) -> None:
 
 def run_embed(args: argparse.Namespace) -> None:
     """Train custom embedding model with InfoNCE contrastive loss."""
-    from hbllm.training.embeddings import EmbeddingTrainer
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
+    from hbllm.training.embeddings import EmbeddingTrainer
 
     device = get_device(args.device)
 
@@ -741,7 +741,7 @@ def run_embed(args: argparse.Namespace) -> None:
 
     if args.checkpoint:
         logger.info("Loading base checkpoint: %s", args.checkpoint)
-        from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+        from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
         ckpt = load_checkpoint(args.checkpoint)
         model.load_state_dict(extract_model_state(ckpt), strict=False)
 
@@ -779,8 +779,8 @@ def _run_post_training_eval(args: argparse.Namespace) -> None:
     """Auto-evaluate after training completion."""
     try:
         from hbllm.model.config import get_config
-        from hbllm.model.transformer import HBLLMForCausalLM
         from hbllm.model.tokenizer import HBLLMTokenizer
+        from hbllm.model.transformer import HBLLMForCausalLM
         from hbllm.training.evaluator import ModelEvaluator
 
         device = get_device(args.device)
@@ -791,7 +791,7 @@ def _run_post_training_eval(args: argparse.Namespace) -> None:
         ckpt_dir = Path(args.checkpoint_dir)
         latest = sorted(ckpt_dir.glob("*.pt"))[-1] if ckpt_dir.exists() else None
         if latest:
-            from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+            from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
             ckpt = load_checkpoint(str(latest))
             model.load_state_dict(extract_model_state(ckpt), strict=False)
 

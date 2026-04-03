@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.brain.policy_engine import PolicyEngine, PolicyResult
+from hbllm.brain.policy_engine import PolicyEngine
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 

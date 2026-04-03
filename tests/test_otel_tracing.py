@@ -1,14 +1,14 @@
 """Tests for OpenTelemetry tracing integration."""
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from contextlib import contextmanager
 
 from hbllm.network.tracing import (
-    trace_span,
     BusMetrics,
-    get_tracer,
     get_meter,
+    get_tracer,
+    trace_span,
 )
 
 
@@ -154,6 +154,7 @@ class TestProviderTracing:
     def test_openai_provider_has_tracing(self):
         """OpenAIProvider.generate should reference trace_span."""
         import inspect
+
         from hbllm.serving.provider import OpenAIProvider
         source = inspect.getsource(OpenAIProvider.generate)
         assert "trace_span" in source
@@ -161,6 +162,7 @@ class TestProviderTracing:
     def test_anthropic_provider_has_tracing(self):
         """AnthropicProvider.generate should reference trace_span."""
         import inspect
+
         from hbllm.serving.provider import AnthropicProvider
         source = inspect.getsource(AnthropicProvider.generate)
         assert "trace_span" in source
@@ -168,6 +170,7 @@ class TestProviderTracing:
     def test_local_provider_has_tracing(self):
         """LocalProvider.generate should reference trace_span."""
         import inspect
+
         from hbllm.serving.provider import LocalProvider
         source = inspect.getsource(LocalProvider.generate)
         assert "trace_span" in source

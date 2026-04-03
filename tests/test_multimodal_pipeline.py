@@ -3,12 +3,11 @@ Multi-Modal Pipeline Tests — verifies image captioning and audio
 transcription are injected as context before cognitive routing.
 """
 
+
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
 from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import Message, MessageType
+from hbllm.network.messages import Message
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
 
 # Force each test to get its own event loop to prevent hangs
@@ -30,7 +29,7 @@ class MockBusWithRequest(InProcessBus):
             result = await handler(msg)
             if result is not None:
                 return result
-        raise asyncio.TimeoutError(f"No handler responded for topic: {topic}")
+        raise TimeoutError(f"No handler responded for topic: {topic}")
 
     async def register_responder(self, topic: str, handler):
         """Register a handler that responds to requests on a topic."""
@@ -179,7 +178,7 @@ async def test_multimodal_combined_image_audio_text():
 async def test_multimodal_handles_vision_timeout():
     """Pipeline handles vision timeout gracefully."""
     bus = MockBusWithRequest()
-    
+
     try:
         await bus.start()
 

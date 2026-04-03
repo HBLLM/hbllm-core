@@ -4,16 +4,14 @@ Tests for hbllm.data.downloader — dataset registry, text extraction, streaming
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from hbllm.data.downloader import (
-    DatasetSource,
-    DatasetDownloader,
-    PREDEFINED_SOURCES,
     DATASET_DOMAINS,
+    PREDEFINED_SOURCES,
+    DatasetDownloader,
+    DatasetSource,
     iter_jsonl,
     iter_jsonl_dir,
 )

@@ -21,12 +21,11 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from hbllm.model.config import ModelConfig
 
@@ -126,7 +125,7 @@ class HuggingFaceModelAdapter(nn.Module):
     ) -> tuple:
         """Load a HuggingFace model, tokenizer, and build HBLLM config."""
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
+            from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
         except ImportError:
             raise ImportError(
                 "HuggingFace transformers is required. Install with:\n"
@@ -253,10 +252,10 @@ class HuggingFaceModelAdapter(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[Any] = None,
+        labels: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        past_key_values: Any | None = None,
         use_cache: bool = False,
     ) -> dict[str, torch.Tensor]:
         """

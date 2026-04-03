@@ -33,7 +33,7 @@ def _load_reflection_data(ds_path: str) -> tuple[str, list[dict]]:
     """Load a reflection JSONL file and return (domain, samples)."""
     domain = "unknown"
     samples = []
-    with open(ds_path, "r") as f:
+    with open(ds_path) as f:
         for line in f:
             if not line.strip():
                 continue
@@ -176,7 +176,7 @@ def _train_on_domain(
         latest = sorted(base_ckpt.glob("step_*.pt"))
         if latest:
             logger.info("Loading base checkpoint: %s", latest[-1])
-            from hbllm.utils.checkpoint import load_checkpoint, extract_model_state
+            from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
             ckpt = load_checkpoint(latest[-1])
             model.load_state_dict(extract_model_state(ckpt), strict=False)
 

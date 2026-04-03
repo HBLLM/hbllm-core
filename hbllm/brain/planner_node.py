@@ -1,8 +1,8 @@
 """
 Graph-of-Thoughts (GoT) Task Planner Node.
 
-Implements a DAG-based reasoning framework where thoughts are nodes in a 
-directed acyclic graph. Supports branching (generating alternatives), 
+Implements a DAG-based reasoning framework where thoughts are nodes in a
+directed acyclic graph. Supports branching (generating alternatives),
 merging (combining complementary thoughts), and scoring (evaluating quality).
 
 Reference: "Graph of Thoughts: Solving Elaborate Problems with Large Language Models"
@@ -20,7 +20,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.network.messages import Message, MessageType, QueryPayload
+from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ThoughtNode:
     """A single node in the Graph-of-Thoughts DAG."""
-    
+
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     content: str = ""
     score: float = 0.0
@@ -38,17 +38,17 @@ class ThoughtNode:
     children_ids: list[str] = field(default_factory=list)
     is_merged: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+
     # MCTS Tracking
     visits: int = 0
     cumulative_reward: float = 0.0
     trajectory_history: list[str] = field(default_factory=list)
-    
+
     @property
     def q_value(self) -> float:
         """Average reward (exploitation term)"""
         return self.cumulative_reward / self.visits if self.visits > 0 else 0.0
-    
+
     @property
     def is_leaf(self) -> bool:
         return len(self.children_ids) == 0
@@ -57,24 +57,24 @@ class ThoughtNode:
 class ThoughtGraph:
     """
     Directed Acyclic Graph of thoughts.
-    
+
     Supports three core operations:
     - Branch: Generate N child thoughts from a parent (fan-out)
-    - Score: Evaluate thought quality (0.0 to 1.0) 
+    - Score: Evaluate thought quality (0.0 to 1.0)
     - Merge: Combine complementary sibling thoughts into a synthesis (fan-in)
     """
-    
+
     def __init__(self):
         self.nodes: dict[str, ThoughtNode] = {}
         self.root_ids: list[str] = []
-    
+
     def add_root(self, content: str, score: float = 0.0) -> ThoughtNode:
         """Add a root thought (no parents)."""
         node = ThoughtNode(content=content, score=score, depth=0)
         self.nodes[node.id] = node
         self.root_ids.append(node.id)
         return node
-    
+
     def branch(self, parent_id: str, content: str, score: float = 0.0, is_observation: bool = False) -> ThoughtNode:
         """Create a child thought branching from a parent."""
         parent = self.nodes[parent_id]
@@ -90,10 +90,10 @@ class ThoughtGraph:
         parent.children_ids.append(child.id)
         self.nodes[child.id] = child
         return child
-    
+
     def merge(self, parent_ids: list[str], content: str, score: float = 0.0) -> ThoughtNode:
         """Merge multiple parent thoughts into a synthesis node.
-        
+
         Raises ValueError if the merge would create a cycle in the DAG.
         """
         # Cycle detection: ensure no parent is a descendant of another parent
@@ -129,18 +129,18 @@ class ThoughtGraph:
                 ancestors.add(current)
                 stack.extend(self.nodes[current].parent_ids)
         return ancestors
-    
+
     def best_path(self) -> list[ThoughtNode]:
         """Find the path from root to a leaf with the highest visit count / Q-value."""
         leaves = [n for n in self.nodes.values() if n.is_leaf]
         if not leaves:
             return []
-        
+
         # In MCTS, the best action after the budget is spent is typically
         # the child with the highest visit count or highest Q-value.
         # We'll use visits as primary, Q-value as secondary tie-breaker.
         best_leaf = max(leaves, key=lambda n: (n.visits, n.q_value))
-        
+
         # Trace back to root
         path = [best_leaf]
         current = best_leaf
@@ -152,45 +152,45 @@ class ThoughtGraph:
             )
             path.append(best_parent)
             current = best_parent
-        
+
         path.reverse()
         return path
-    
+
     def select_leaf_uct(self, root_id: str, c_param: float = 1.414, prm_weight: float = 0.5) -> ThoughtNode:
         import math
         """Select a leaf node to expand using the UCT formula, blended with PRM scores."""
         current = self.nodes[root_id]
-        
+
         while not current.is_leaf:
             # If any child is completely unexplored, return it instantly
             unvisited = [self.nodes[cid] for cid in current.children_ids if self.nodes[cid].visits == 0]
             if unvisited:
                 return unvisited[0]
-            
+
             # UCT Selection (blending standard MCTS Q-value with immediate PRM score)
             best_score = -float('inf')
             best_child = None
             parent_visits = current.visits
-            
+
             for child_id in current.children_ids:
                 child = self.nodes[child_id]
-                
+
                 # Blend the long-term Q-value with the immediate step score (PRM)
                 blended_q = (1.0 - prm_weight) * child.q_value + prm_weight * child.score
-                
+
                 # Exploration term: c * sqrt(ln(N) / n)
                 exploration = c_param * math.sqrt(math.log(parent_visits) / child.visits)
-                
+
                 score = blended_q + exploration
-                
+
                 if score > best_score:
                     best_score = score
                     best_child = child
-                    
+
             if not best_child:
                 break
             current = best_child
-            
+
         return current
 
     def backpropagate(self, leaf_id: str, reward: float, decay: float = 0.95) -> None:
@@ -205,7 +205,7 @@ class ThoughtGraph:
                 break
             current = self.nodes[current.parent_ids[0]]
             current_reward *= decay # Discount future rewards
-    
+
     def prune(self, min_score: float = 0.3) -> int:
         """Remove leaf nodes below the score threshold. Returns count removed."""
         pruned = 0
@@ -221,7 +221,7 @@ class ThoughtGraph:
                 del self.nodes[leaf.id]
                 pruned += 1
         return pruned
-    
+
     def summary(self) -> dict[str, Any]:
         """Return a serializable summary of the graph."""
         return {
@@ -276,7 +276,7 @@ class PlannerNode(Node):
         Execute a Graph-of-Thoughts reasoning process:
         1. Branch: Generate N diverse initial thoughts
         2. Score: Evaluate each thought
-        3. Prune: Remove low-quality thoughts  
+        3. Prune: Remove low-quality thoughts
         4. Refine: Branch from surviving thoughts
         5. Merge: Combine complementary refined thoughts
         6. Select: Return the best path through the graph
@@ -285,7 +285,7 @@ class PlannerNode(Node):
             return None
 
         text = message.payload.get("text", "")
-        
+
         # Check prompt cache for exact matches
         cache_key = self._cache_key(text)
         if cache_key in self._response_cache:
@@ -301,7 +301,7 @@ class PlannerNode(Node):
                 # Evict expired entry
                 self._response_cache.pop(cache_key, None)
                 logger.debug("[GoT] Cache EXPIRED for query")
-        
+
         self._cache_misses += 1
         logger.info("[GoT] Starting Graph-of-Thoughts for: '%s...'", text[:40])
 
@@ -310,11 +310,11 @@ class PlannerNode(Node):
         # ── Step 1: Root Node & Initial Plausible Branches ────────────────
         import time
         root_node = graph.add_root("Root Query: " + text[:50], score=0.5)
-        
+
         initial_thoughts = await asyncio.gather(
             *[self._generate_thought(text, i + 1) for i in range(self.branch_factor)]
         )
-        
+
         branch_nodes = []
         for thought_text in initial_thoughts:
             if thought_text:
@@ -359,20 +359,20 @@ class PlannerNode(Node):
         deadline = time.time() + 15.0  # 15 seconds thinking budget per query
         max_iterations = 20
         iteration = 0
-        
+
         while time.time() < deadline and iteration < max_iterations:
             # 1. Selection
             leaf = graph.select_leaf_uct(root_node.id, c_param=1.414)
-            
+
             # 2. Expansion (only expand if we've already scored it and haven't hit max depth)
             if leaf.visits > 0 and leaf.depth < self.max_depth:
                 await self._refine_thought(graph, leaf, text, iteration)
-                
+
                 # Pick one of the newly expanded children to simulate
                 unvisited = [graph.nodes[cid] for cid in leaf.children_ids if graph.nodes[cid].visits == 0]
                 if unvisited:
                     leaf = unvisited[0]
-            
+
             # 3. Simulation & Scoring
             if leaf.visits == 0:
                 await self._score_thought(graph, leaf)
@@ -380,10 +380,10 @@ class PlannerNode(Node):
             else:
                 # If we selected a terminal node that can't expand, re-simulate or just use existing score
                 reward = leaf.score
-                
+
             # 4. Backpropagation
             graph.backpropagate(leaf.id, reward)
-            
+
             iteration += 1
 
         logger.info("[MCTS] Completed %d iterations before budget exhaustion.", iteration)
@@ -394,7 +394,7 @@ class PlannerNode(Node):
             key=lambda n: n.q_value,
             reverse=True
         )[:2]
-        
+
         if len(top_leaves) >= 2 and top_leaves[0].q_value > 0.5:
             merged_content = await self._merge_thoughts(
                 text, top_leaves[0].content, top_leaves[1].content
@@ -409,16 +409,16 @@ class PlannerNode(Node):
         # ── Step 7: Select best path ──────────────────────────────────────
         best_path = graph.best_path()
         graph_stats = graph.summary()
-        
+
         if not best_path:
             return message.create_error("GoT: No valid reasoning path found.")
 
         final_node = best_path[-1]
-        
+
         path_desc = " → ".join(
             f"[D{n.depth}: Q={n.q_value:.2f}, N={n.visits}]" for n in best_path
         )
-        
+
         final_text = (
             f"[MCTS Planner] Explored {graph_stats['total_nodes']} thoughts "
             f"across {graph_stats['max_depth']+1} depths "
@@ -427,12 +427,12 @@ class PlannerNode(Node):
             f"Best path: {path_desc}\n\n"
             f"{final_node.content}"
         )
-        
+
         logger.info("[MCTS] Selected path: %s (Q=%.2f, N=%d)", path_desc, final_node.q_value, final_node.visits)
-        
+
         # Cache the result
         self._cache_response(cache_key, final_text)
-        
+
         return message.create_response({"text": final_text, "domain": "planner"})
 
     # ── Cache helpers ─────────────────────────────────────────────────────
@@ -518,7 +518,7 @@ class PlannerNode(Node):
                     obs_content = f"Observation: Error: {err}"
                 else:
                     obs_content = f"Observation:\n{resp.payload}"
-                
+
                 # Expand the tree deterministically with the observation
                 graph.branch(node.id, obs_content, score=1.0, is_observation=True)
                 node.score = 1.0 # Reward emitting a valid tool call
@@ -562,17 +562,17 @@ class PlannerNode(Node):
         """Refine a thought by branching deeper with an adaptive context window."""
         trajectory = parent.trajectory_history + [parent.content]
         compressed_traj = [self._compress_text(txt) for txt in trajectory]
-        
+
         MAX_CONTEXT_STEPS = 6
         if len(compressed_traj) > MAX_CONTEXT_STEPS:
             omitted_count = len(compressed_traj) - MAX_CONTEXT_STEPS
             head_step = f"Step 1: {compressed_traj[0]}"
-            
+
             tail_steps = compressed_traj[-(MAX_CONTEXT_STEPS - 1):]
             start_num = len(compressed_traj) - (MAX_CONTEXT_STEPS - 1) + 1
-            
+
             tail_text = "\n\n".join([f"Step {start_num + i}: {txt}" for i, txt in enumerate(tail_steps)])
-            
+
             history_text = (
                 f"{head_step}\n\n"
                 f"[... {omitted_count} intermediate logic steps dynamically omitted to preserve context bounds ...]\n\n"
@@ -580,7 +580,7 @@ class PlannerNode(Node):
             )
         else:
             history_text = "\n\n".join([f"Step {i+1}: {txt}" for i, txt in enumerate(compressed_traj)])
-        
+
         prompt = (
             f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"
             f"Original query: {query}\n"
@@ -627,7 +627,7 @@ class PlannerNode(Node):
     async def _contribute_to_workspace(self, message: Message) -> Message | None:
         """
         Participate in workspace deliberation by generating GoT thoughts.
-        
+
         When a workspace.update arrives, runs a lightweight GoT process
         and posts the best-path result as a workspace.thought.
         """
@@ -657,12 +657,12 @@ class PlannerNode(Node):
                 payload={"text": text},
                 correlation_id=message.correlation_id or message.id,
             )
-            
+
             result = await self.handle_message(plan_msg)
             if result is None:
                 return None
             cached_content = result.payload.get("text", "")
-        
+
         if not cached_content:
             return None
 

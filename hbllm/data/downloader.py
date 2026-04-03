@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator, Iterator
+from typing import Any
 
-from datasets import IterableDataset, load_dataset
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -322,7 +322,7 @@ class DatasetDownloader:
 
 def iter_jsonl(path: Path) -> Generator[str, None, None]:
     """Iterate over text documents in a JSONL file."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

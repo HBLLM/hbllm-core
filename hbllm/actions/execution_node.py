@@ -16,8 +16,8 @@ import sys
 import tempfile
 from typing import Any
 
-from hbllm.network.node import Node, NodeType
 from hbllm.network.messages import Message, MessageType
+from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ class ExecutionNode(Node):
         """Handle execution requests."""
         if message.type != MessageType.QUERY:
             return None
-            
+
         code = message.payload.get("code", "")
         if not code:
             # Try to extract code blocks if just text is passed
@@ -147,7 +147,7 @@ class ExecutionNode(Node):
                 code = match.group(1).strip()
             else:
                 return message.create_error("No Python code provided for execution.")
-        
+
         # ── Security gate: AST validation before execution ──
         try:
             violations = validate_code(code)
@@ -164,14 +164,14 @@ class ExecutionNode(Node):
         # Run code in an isolated subprocess
         result = await self._execute_python(code)
         return message.create_response(result)
-        
+
     async def _execute_python(self, code: str) -> dict[str, Any]:
         """Write to temp file and run in a restricted subprocess."""
         temp_script = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
         try:
             temp_script.write(code)
             temp_script.close()  # Close so subprocess can read it
-            
+
             try:
                 # Build a restricted environment: strip PATH and dangerous env vars
                 safe_env = {
@@ -186,10 +186,10 @@ class ExecutionNode(Node):
                     stderr=asyncio.subprocess.PIPE,
                     env=safe_env,
                 )
-                
+
                 try:
                     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     proc.kill()
                     await proc.communicate()
                     return {
@@ -197,10 +197,10 @@ class ExecutionNode(Node):
                         "output": f"Execution timed out after {self.timeout} seconds.",
                         "error": "TimeoutError"
                     }
-                
+
                 output = stdout.decode().strip()
                 error = stderr.decode().strip()
-                
+
                 if proc.returncode == 0:
                     return {
                         "status": "SUCCESS",

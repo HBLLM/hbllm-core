@@ -16,7 +16,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
@@ -50,12 +50,12 @@ class KnowledgeDigest:
 class CollectiveNode(Node):
     """
     Service node for cross-instance knowledge sharing.
-    
+
     Subscribes to:
         system.learning_update — local learning completions (LoRA, skills, etc.)
         collective.sync — incoming knowledge from peer instances
         collective.query — query the received knowledge log
-    
+
     Publishes:
         collective.broadcast — outgoing knowledge digests to peers
     """
@@ -73,12 +73,12 @@ class CollectiveNode(Node):
         )
         self.instance_id = instance_id or uuid.uuid4().hex[:8]
         self.max_received = max_received
-        
+
         # Knowledge tracking
         self.broadcast_log: list[KnowledgeDigest] = []
         self.received_log: list[KnowledgeDigest] = []
         self.seen_checksums: set[str] = set()
-        
+
         # Stats
         self.stats = {
             "broadcasts_sent": 0,
@@ -115,7 +115,7 @@ class CollectiveNode(Node):
             artifact_data: dict
         """
         payload = message.payload
-        
+
         digest = KnowledgeDigest(
             source_instance_id=self.instance_id,
             domain=payload.get("domain", "general"),
@@ -124,15 +124,15 @@ class CollectiveNode(Node):
             artifact_data=payload.get("artifact_data", {}),
         )
         digest.compute_checksum()
-        
+
         # Avoid re-broadcasting our own digests
         if digest.checksum in self.seen_checksums:
             return None
-        
+
         self.seen_checksums.add(digest.checksum)
         self.broadcast_log.append(digest)
         self.stats["broadcasts_sent"] += 1
-        
+
         # Broadcast to peers
         await self.publish("collective.broadcast", Message(
             type=MessageType.EVENT,
@@ -140,7 +140,7 @@ class CollectiveNode(Node):
             topic="collective.broadcast",
             payload=digest.to_dict(),
         ))
-        
+
         logger.info(
             "Broadcast knowledge digest: domain=%s capability=%s checksum=%s",
             digest.domain, digest.capability, digest.checksum,
@@ -153,19 +153,19 @@ class CollectiveNode(Node):
         Deduplicates by checksum, stores, and integrates into the local brain.
         """
         payload = message.payload
-        
+
         checksum = payload.get("checksum", "")
         source = payload.get("source_instance_id", "")
-        
+
         # Skip our own broadcasts
         if source == self.instance_id:
             return None
-        
+
         # Deduplicate
         if checksum in self.seen_checksums:
             self.stats["duplicates_filtered"] += 1
             return None
-        
+
         digest = KnowledgeDigest(
             id=payload.get("id", uuid.uuid4().hex[:12]),
             source_instance_id=source,
@@ -176,24 +176,24 @@ class CollectiveNode(Node):
             checksum=checksum,
             timestamp=payload.get("timestamp", time.time()),
         )
-        
+
         self.seen_checksums.add(checksum)
         self.received_log.append(digest)
         self.stats["digests_received"] += 1
-        
+
         # Trim old entries
         if len(self.received_log) > self.max_received:
             removed = self.received_log.pop(0)
             self.seen_checksums.discard(removed.checksum)
-        
+
         logger.info(
             "Received knowledge from instance %s: domain=%s capability=%s",
             source, digest.domain, digest.capability,
         )
-        
+
         # ── Integrate the digest into the local brain ──
         await self._integrate_digest(digest)
-        
+
         return None
 
     async def _integrate_digest(self, digest: KnowledgeDigest) -> None:
@@ -203,7 +203,7 @@ class CollectiveNode(Node):
         """
         artifact_type = digest.artifact_type
         data = digest.artifact_data
-        
+
         try:
             if artifact_type == "lora_weights":
                 # Trigger the spawner to load the new LoRA adapter
@@ -219,7 +219,7 @@ class CollectiveNode(Node):
                         "from_collective": True,
                     },
                 ))
-                
+
             elif artifact_type == "skill":
                 # Store the skill in procedural memory
                 await self.publish("memory.skill.store", Message(
@@ -233,7 +233,7 @@ class CollectiveNode(Node):
                         "from_collective": True,
                     },
                 ))
-                
+
             elif artifact_type == "semantic_fact":
                 # Store facts in semantic memory
                 await self.publish("memory.store", Message(
@@ -247,7 +247,7 @@ class CollectiveNode(Node):
                         "from_collective": True,
                     },
                 ))
-                
+
             elif artifact_type == "identity_update":
                 # Forward identity updates for the relevant tenant
                 await self.publish("identity.update", Message(
@@ -262,7 +262,7 @@ class CollectiveNode(Node):
                     artifact_type, digest.source_instance_id,
                 )
                 return
-                
+
             self.stats["digests_integrated"] += 1
             logger.info(
                 "Integrated %s digest from peer %s (domain=%s)",
@@ -278,14 +278,14 @@ class CollectiveNode(Node):
         """Return collective intelligence stats and recent digests."""
         payload = message.payload
         limit = int(payload.get("limit", 10))
-        
+
         recent_received = [
             d.to_dict() for d in self.received_log[-limit:]
         ]
         recent_broadcast = [
             d.to_dict() for d in self.broadcast_log[-limit:]
         ]
-        
+
         return message.create_response({
             "instance_id": self.instance_id,
             "stats": self.stats,

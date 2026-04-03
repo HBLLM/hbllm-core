@@ -14,8 +14,9 @@ fits within the model's context window. Uses priority-based truncation:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +33,16 @@ class ContextBlock:
     token_estimate: int = 0
 
     # Optional tokenizer encode function for accurate counting
-    _tokenizer_encode: Optional[Callable[[str], list]] = field(default=None, repr=False)
+    _tokenizer_encode: Callable[[str], list] | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if self.token_estimate == 0:
             self.token_estimate = estimate_tokens(self.content, self._tokenizer_encode)
 
 
-def estimate_tokens(text: str, tokenizer_encode: Optional[Callable[[str], list]] = None) -> int:
+def estimate_tokens(text: str, tokenizer_encode: Callable[[str], list] | None = None) -> int:
     """Estimate token count from text.
-    
+
     Uses actual tokenizer if provided, otherwise falls back to
     char-based heuristic (~4 chars/token for English text).
     """
@@ -77,7 +78,7 @@ class ContextWindowManager:
         self._blocks: list[ContextBlock] = []
         # Optional tokenizer for accurate token counting
         # Accepts any object with an .encode(text) -> list method
-        self._tokenizer_encode: Optional[Callable[[str], list]] = None
+        self._tokenizer_encode: Callable[[str], list] | None = None
         if tokenizer is not None and hasattr(tokenizer, 'encode'):
             self._tokenizer_encode = tokenizer.encode
 

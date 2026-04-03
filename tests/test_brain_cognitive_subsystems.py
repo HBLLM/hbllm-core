@@ -1,25 +1,25 @@
 """Integration test: BrainFactory creates Brain with all cognitive subsystems wired."""
 
-import pytest
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
 
-from hbllm.brain.factory import BrainFactory, BrainConfig, Brain
-from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.goal_manager import GoalManager
-from hbllm.brain.self_model import SelfModel
-from hbllm.brain.cognitive_metrics import CognitiveMetrics
-from hbllm.brain.world_simulator import WorldSimulator
-from hbllm.brain.revision_node import RevisionNode
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
+import pytest
+
 from hbllm.actions.tool_memory import ToolMemory
+from hbllm.brain.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.factory import BrainConfig, BrainFactory
+from hbllm.brain.goal_manager import GoalManager
+from hbllm.brain.revision_node import RevisionNode
+from hbllm.brain.self_model import SelfModel
+from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.data.interaction_miner import InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
-from hbllm.serving.token_optimizer import TokenOptimizer
-from hbllm.training.reward_model import RewardModel
-from hbllm.training.policy_optimizer import PolicyOptimizer
-from hbllm.data.interaction_miner import InteractionMiner
 from hbllm.serving.provider import LLMProvider, LLMResponse
-
+from hbllm.serving.token_optimizer import TokenOptimizer
+from hbllm.training.policy_optimizer import PolicyOptimizer
+from hbllm.training.reward_model import RewardModel
 
 pytestmark = pytest.mark.asyncio
 

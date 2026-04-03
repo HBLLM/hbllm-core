@@ -8,19 +8,16 @@ FallbackManager, DegradedModeManager, and integration scenarios.
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 
-from hbllm.network.bus import InProcessBus, Subscription
+from hbllm.network.bus import InProcessBus
 from hbllm.network.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerRegistry,
     CircuitOpenError,
     CircuitState,
 )
-from hbllm.network.degraded import DegradedModeManager, SystemCapabilities
-from hbllm.network.fallback import FallbackManager, FallbackResult
 from hbllm.network.messages import (
     HeartbeatPayload,
     Message,
@@ -32,7 +29,6 @@ from hbllm.network.messages import (
 from hbllm.network.node import HealthStatus, Node, NodeHealth, NodeInfo, NodeType
 from hbllm.network.registry import ServiceRegistry
 from hbllm.network.serialization import JsonSerializer, MsgpackSerializer, get_serializer
-
 
 # ──────────────────────────────────────────────
 # Test helpers

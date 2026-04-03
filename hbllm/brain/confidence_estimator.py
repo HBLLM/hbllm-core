@@ -12,10 +12,8 @@ Multi-signal confidence scoring:
 from __future__ import annotations
 
 import logging
-import math
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +109,7 @@ class ConfidenceEstimator:
         if len(response.split()) < 5:
             flags.append("too_brief")
             overall *= 0.8
-            
+
         overall = max(0.0, min(1.0, overall))
 
         return ConfidenceReport(

@@ -15,7 +15,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class ProceduralMemory:
     """
     SQLite-backed skill/procedure storage.
-    
+
     Each skill has a name, a trigger pattern (when to use it),
     and a list of steps (how to execute it).
     """
@@ -52,11 +52,11 @@ class ProceduralMemory:
                 )
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_skills_tenant 
+                CREATE INDEX IF NOT EXISTS idx_skills_tenant
                 ON skills(tenant_id)
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_skills_name 
+                CREATE INDEX IF NOT EXISTS idx_skills_name
                 ON skills(tenant_id, skill_name)
             """)
 
@@ -70,17 +70,17 @@ class ProceduralMemory:
     ) -> str:
         """
         Store a new skill or update an existing one.
-        
+
         Args:
             tenant_id: Tenant owning this skill.
             skill_name: Human-readable skill name.
             trigger_pattern: Description of when this skill applies.
             steps: List of step dicts. Must not be empty.
             source_node: Node that discovered/created the skill.
-            
+
         Returns:
             The skill ID.
-            
+
         Raises:
             ValueError: If skill_name is empty or steps is empty.
         """
@@ -89,20 +89,20 @@ class ProceduralMemory:
         if not steps:
             raise ValueError("steps must not be empty")
 
-        now = datetime.now(timezone.utc).isoformat()
-        
+        now = datetime.now(UTC).isoformat()
+
         # Check if skill already exists for this tenant
         with sqlite3.connect(self.db_path) as conn:
             existing = conn.execute(
                 "SELECT id FROM skills WHERE tenant_id = ? AND skill_name = ?",
                 (tenant_id, skill_name),
             ).fetchone()
-            
+
             if existing:
                 # Update existing skill
                 conn.execute(
-                    """UPDATE skills 
-                       SET steps_json = ?, trigger_pattern = ?, 
+                    """UPDATE skills
+                       SET steps_json = ?, trigger_pattern = ?,
                            source_node = ?, updated_at = ?
                        WHERE id = ?""",
                     (json.dumps(steps), trigger_pattern, source_node, now, existing[0]),
@@ -112,8 +112,8 @@ class ProceduralMemory:
             else:
                 skill_id = uuid.uuid4().hex[:12]
                 conn.execute(
-                    """INSERT INTO skills 
-                       (id, tenant_id, skill_name, trigger_pattern, steps_json, 
+                    """INSERT INTO skills
+                       (id, tenant_id, skill_name, trigger_pattern, steps_json,
                         source_node, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (skill_id, tenant_id, skill_name, trigger_pattern,
@@ -131,14 +131,14 @@ class ProceduralMemory:
             conn.row_factory = sqlite3.Row
             # Simple keyword search — matches against name and trigger pattern
             rows = conn.execute(
-                """SELECT * FROM skills 
-                   WHERE tenant_id = ? 
+                """SELECT * FROM skills
+                   WHERE tenant_id = ?
                      AND (skill_name LIKE ? OR trigger_pattern LIKE ?)
                    ORDER BY usage_count DESC, success_rate DESC
                    LIMIT ?""",
                 (tenant_id, f"%{query}%", f"%{query}%", top_k),
             ).fetchall()
-            
+
             return [
                 {
                     "id": row["id"],
@@ -158,21 +158,21 @@ class ProceduralMemory:
                 "SELECT usage_count, success_rate FROM skills WHERE id = ?",
                 (skill_id,),
             ).fetchone()
-            
+
             if not row:
                 return
-            
+
             count = row[0] + 1
             # Exponential moving average for success rate
             old_rate = row[1]
             alpha = 0.3
             new_rate = alpha * (1.0 if success else 0.0) + (1 - alpha) * old_rate
-            
+
             conn.execute(
-                """UPDATE skills 
+                """UPDATE skills
                    SET usage_count = ?, success_rate = ?, updated_at = ?
                    WHERE id = ?""",
-                (count, new_rate, datetime.now(timezone.utc).isoformat(), skill_id),
+                (count, new_rate, datetime.now(UTC).isoformat(), skill_id),
             )
 
     def get_most_used(self, tenant_id: str, top_k: int = 5) -> list[dict[str, Any]]:
@@ -180,13 +180,13 @@ class ProceduralMemory:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                """SELECT * FROM skills 
+                """SELECT * FROM skills
                    WHERE tenant_id = ?
                    ORDER BY usage_count DESC
                    LIMIT ?""",
                 (tenant_id, top_k),
             ).fetchall()
-            
+
             return [
                 {
                     "id": row["id"],
@@ -212,10 +212,10 @@ class ProceduralMemory:
             row = conn.execute(
                 "SELECT * FROM skills WHERE id = ?", (skill_id,),
             ).fetchone()
-        
+
         if not row:
             return None
-        
+
         return {
             "id": row["id"],
             "tenant_id": row["tenant_id"],

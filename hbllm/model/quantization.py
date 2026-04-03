@@ -16,7 +16,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Union, Dict
 
 # Try to import our Rust accelerated kernel
 try:

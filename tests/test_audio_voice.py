@@ -5,7 +5,6 @@ Tests text chunking, voice config, and tenant voice caching
 WITHOUT loading the SpeechT5 model.
 """
 
-import pytest
 
 from hbllm.perception.audio_out_node import AudioOutputNode
 

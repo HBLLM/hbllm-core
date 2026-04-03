@@ -12,7 +12,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ValueMemory:
     """
     SQLite-backed preference/reward signal storage.
-    
+
     Tracks per-tenant reward signals keyed by topic and action,
     using exponential decay for older signals so recent preferences
     carry more weight.
@@ -61,20 +61,20 @@ class ValueMemory:
     ) -> str:
         """
         Record a reward signal for a tenant action.
-        
+
         Args:
             tenant_id: Tenant providing the signal.
             topic: Category (e.g. "response_style", "domain_preference").
             action: Specific action taken (e.g. "formal_tone", "code_example").
             reward: Signal strength (-1.0 to 1.0).
             context: Optional context dict for why this reward was given.
-            
+
         Returns:
             The reward record ID.
         """
         reward_id = uuid.uuid4().hex[:12]
-        now = datetime.now(timezone.utc).isoformat()
-        
+        now = datetime.now(UTC).isoformat()
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """INSERT INTO rewards (id, tenant_id, topic, action, reward, context, created_at)
@@ -83,7 +83,7 @@ class ValueMemory:
                  max(-1.0, min(1.0, reward)),  # Clamp to [-1, 1]
                  json.dumps(context or {}), now),
             )
-        
+
         logger.debug("Recorded reward for tenant '%s': topic=%s action=%s reward=%.2f",
                      tenant_id, topic, action, reward)
         return reward_id
@@ -91,7 +91,7 @@ class ValueMemory:
     def get_preference(self, tenant_id: str, topic: str) -> dict[str, float]:
         """
         Get aggregated preferences for a topic.
-        
+
         Returns a dict mapping action → average reward, weighted by
         recency (more recent signals count more).
         """
@@ -103,10 +103,10 @@ class ValueMemory:
                    ORDER BY created_at DESC""",
                 (tenant_id, topic),
             ).fetchall()
-        
+
         if not rows:
             return {}
-        
+
         # Weighted average with exponential decay
         preferences: dict[str, list[float]] = {}
         for i, row in enumerate(rows):
@@ -116,7 +116,7 @@ class ValueMemory:
             if action not in preferences:
                 preferences[action] = []
             preferences[action].append(weighted_reward)
-        
+
         return {
             action: sum(values) / len(values)
             for action, values in preferences.items()
@@ -127,7 +127,7 @@ class ValueMemory:
     ) -> list[dict[str, Any]]:
         """
         Get the tenant's strongest preferences across all topics.
-        
+
         Returns top_k (topic, action) pairs ranked by average reward.
         """
         with sqlite3.connect(self.db_path) as conn:
@@ -141,7 +141,7 @@ class ValueMemory:
                    LIMIT ?""",
                 (tenant_id, top_k),
             ).fetchall()
-        
+
         return [
             {
                 "topic": row["topic"],

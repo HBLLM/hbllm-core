@@ -3,10 +3,10 @@ import copy
 import logging
 from typing import Any
 
-from hbllm.network.node import Node, NodeType
-from hbllm.network.messages import Message, MessageType, SpawnRequestPayload
-from hbllm.modules.base_module import DomainModuleNode
 from hbllm.data.synthesizer import DataSynthesizer
+from hbllm.modules.base_module import DomainModuleNode
+from hbllm.network.messages import Message, MessageType, SpawnRequestPayload
+from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -43,26 +43,26 @@ class SpawnerNode(Node):
         """Handle incoming spawn requests."""
         if message.type != MessageType.SPAWN_REQUEST:
             return None
-            
+
         try:
             payload = SpawnRequestPayload(**message.payload)
         except Exception as e:
             return message.create_error(f"Invalid SpawnRequestPayload: {e}")
-            
+
         logger.info("Spawner received request to expand into domain: '%s'", payload.topic)
 
         # Launch the spawn process in the background so we don't block the bus
         task = asyncio.create_task(self._spawn_new_module(payload.topic))
         self.spawning_tasks.add(task)
         task.add_done_callback(self.spawning_tasks.discard)
-        
+
         return None
 
     async def _spawn_new_module(self, topic: str) -> None:
         """The core expansion logic: resolve adapter → (or synthesize + train) → register module."""
         domain_name = topic.replace(" ", "_").lower()
         new_node_id = f"domain_{domain_name}"
-        
+
         logger.info("--- Self-Expansion Initiated for '%s' ---", domain_name)
 
         # Step 1: Try to resolve a pre-trained adapter from the registry
@@ -92,7 +92,7 @@ class SpawnerNode(Node):
                 return
 
             lora_state_dict = await self._train_lora_adapter(domain_name, dataset_path)
-        
+
         # 3. Create and Register the New Node
         try:
             logger.info("Wiring new DomainModuleNode ('%s') to the MessageBus...", new_node_id)
@@ -103,12 +103,12 @@ class SpawnerNode(Node):
                 tokenizer=self.tokenizer,
                 lora_state_dict=lora_state_dict,
             )
-            
+
             # Start the node — it registers itself on the bus
             await new_module.start(self.bus)
-            
+
             logger.info("--- Self-Expansion COMPLETE for '%s' ---", domain_name)
-            
+
             # 4. Announce completion
             completion_msg = Message(
                 type=MessageType.SPAWN_COMPLETE,
@@ -122,7 +122,7 @@ class SpawnerNode(Node):
                 }
             )
             await self.bus.publish("system.spawn.complete", completion_msg)
-            
+
         except Exception as e:
              logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
 
@@ -135,8 +135,9 @@ class SpawnerNode(Node):
         def _train():
             try:
                 import torch
+
                 from hbllm.modules.lora import LoRAManager
-                from hbllm.training.sft import load_sft_data, InstructionDataset, collate_sft
+                from hbllm.training.sft import InstructionDataset, collate_sft, load_sft_data
 
                 # Load the synthetic dataset
                 raw_data = load_sft_data(dataset_path)

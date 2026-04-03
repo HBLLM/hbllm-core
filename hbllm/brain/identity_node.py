@@ -11,8 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +44,7 @@ class IdentityProfile:
         self.goals = goals or []
         self.constraints = constraints or []
         self.personality_traits = personality_traits or {}
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         self.created_at = created_at or now
         self.updated_at = updated_at or now
 
@@ -100,11 +99,11 @@ class IdentityStore:
 
     def upsert(self, profile: IdentityProfile) -> None:
         """Insert or update a tenant's identity profile."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                INSERT INTO identities 
-                    (tenant_id, persona_name, system_prompt, goals_json, 
+                INSERT INTO identities
+                    (tenant_id, persona_name, system_prompt, goals_json,
                      constraints_json, traits_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tenant_id) DO UPDATE SET
@@ -154,11 +153,11 @@ class IdentityStore:
 class IdentityNode(Node):
     """
     Service node for per-tenant identity/persona management.
-    
+
     Subscribes to:
         identity.query — return the identity profile for a tenant
         identity.update — create or update a tenant's identity
-    
+
     Publishes:
         workspace.identity — identity context for workspace reasoning
     """

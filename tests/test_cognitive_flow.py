@@ -8,16 +8,18 @@ Tests the full loop:
 """
 
 import asyncio
+
 import pytest
 
-from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import (
-    Message, MessageType, FeedbackPayload,
-)
 from hbllm.brain.experience_node import ExperienceNode
 from hbllm.brain.meta_node import MetaReasoningNode
 from hbllm.memory.memory_node import MemoryNode
-
+from hbllm.network.bus import InProcessBus
+from hbllm.network.messages import (
+    FeedbackPayload,
+    Message,
+    MessageType,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

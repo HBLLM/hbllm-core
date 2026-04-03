@@ -1,13 +1,12 @@
 import asyncio
-import logging
 import json
+import logging
 import os
 import uuid
 from collections import defaultdict
-from typing import Any
 
+from hbllm.network.messages import FeedbackPayload, Message, MessageType, SystemImprovePayload
 from hbllm.network.node import Node, NodeType
-from hbllm.network.messages import Message, MessageType, FeedbackPayload, SystemImprovePayload
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +22,12 @@ class MetaReasoningNode(Node):
 
     def __init__(self, node_id: str):
         super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
-        
+
         # Buffer to store negative feedback by domain
         self.negative_feedback_buffer = defaultdict(list)
-        
+
         # Threshold: if we get 3 negative feedbacks for a domain, we trigger reflection
-        self.weakness_threshold = 3 
+        self.weakness_threshold = 3
         self.reflection_dir = "workspace/reflection"
         os.makedirs(self.reflection_dir, exist_ok=True)
 
@@ -64,7 +63,7 @@ class MetaReasoningNode(Node):
 
         try:
             payload = FeedbackPayload(**message.payload)
-        except Exception as e:
+        except Exception:
             return None # Ignore invalid
 
         domain = payload.module_id or "general"
@@ -72,7 +71,7 @@ class MetaReasoningNode(Node):
 
         if rating == -1:
             logger.warning("MetaReasoningNode detected negative feedback for domain '%s'", domain)
-            
+
             # Store the interaction context if available
             if payload.prompt and payload.response:
                 sample = {
@@ -82,7 +81,7 @@ class MetaReasoningNode(Node):
                     "domain": domain
                 }
                 self.negative_feedback_buffer[domain].append(sample)
-                
+
                 # Check if this crosses the systemic weakness threshold
                 if len(self.negative_feedback_buffer[domain]) >= self.weakness_threshold:
                     await self._trigger_reflection(domain)
@@ -93,15 +92,15 @@ class MetaReasoningNode(Node):
         """Creates a reflection dataset and triggers the self-improvement loop."""
         logger.critical("--- REFLECTION INITIATED FOR DOMAIN '%s' ---", domain.upper())
         logger.info("MetaReasoningNode is initiating a self-improvement loop.")
-        
+
         # 1. Dump dataset to disk
         filename = f"reflection_{domain}_{uuid.uuid4().hex[:8]}.jsonl"
         filepath = os.path.join(self.reflection_dir, filename)
-        
+
         dataset = self.negative_feedback_buffer[domain]
         if not dataset and content:
             dataset = [{"content": content, "domain": domain}]
-        
+
         reason = reason or f"Accumulated {self.weakness_threshold} negative feedback events recently."
 
         try:
@@ -110,10 +109,10 @@ class MetaReasoningNode(Node):
                 with open(filepath, "w") as f:
                     for item in dataset:
                         f.write(json.dumps(item) + "\n")
-            
+
             await asyncio.to_thread(_write)
             logger.info("Saved reflection dataset to %s", filepath)
-            
+
         except Exception as e:
             logger.error("Failed to dump reflection dataset: %s", e)
             return
@@ -122,7 +121,7 @@ class MetaReasoningNode(Node):
         improve_msg = Message(
             type=MessageType.SYSTEM_IMPROVE,
             source_node_id=self.node_id,
-            target_node_id="", 
+            target_node_id="",
             topic="system.improve",
             payload=SystemImprovePayload(
                 domain=domain,
@@ -131,6 +130,6 @@ class MetaReasoningNode(Node):
             ).model_dump()
         )
         await self.bus.publish("system.improve", improve_msg)
-        
+
         # 3. Clear the buffer to prevent spamming
         self.negative_feedback_buffer[domain] = []

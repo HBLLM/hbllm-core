@@ -20,11 +20,9 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from hbllm.benchmarks.runner import BenchmarkResult, BenchmarkReport
+from hbllm.benchmarks.runner import BenchmarkReport, BenchmarkResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +35,7 @@ async def profile_memory() -> BenchmarkReport:
 
     # Episodic Memory
     import tempfile
+
     from hbllm.memory.episodic import EpisodicMemory
 
     sizes = [100, 1_000, 10_000]
@@ -196,11 +195,11 @@ async def profile_throughput() -> BenchmarkReport:
 
 async def profile_startup() -> BenchmarkReport:
     """Time to start/stop each node type."""
-    from hbllm.network.bus import InProcessBus
-    from hbllm.brain.router_node import RouterNode
+    from hbllm.brain.critic_node import CriticNode
     from hbllm.brain.decision_node import DecisionNode
     from hbllm.brain.planner_node import PlannerNode
-    from hbllm.brain.critic_node import CriticNode
+    from hbllm.brain.router_node import RouterNode
+    from hbllm.network.bus import InProcessBus
 
     report = BenchmarkReport(suite="profile_startup")
 
@@ -247,9 +246,10 @@ async def profile_startup() -> BenchmarkReport:
 
 async def profile_pipeline() -> BenchmarkReport:
     """End-to-end message flow latency: publish → subscribe → callback."""
+    import statistics
+
     from hbllm.network.bus import InProcessBus
     from hbllm.network.messages import Message, MessageType
-    import statistics
 
     report = BenchmarkReport(suite="profile_pipeline")
 
@@ -278,7 +278,7 @@ async def profile_pipeline() -> BenchmarkReport:
 
     try:
         await asyncio.wait_for(received.wait(), timeout=5.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
 
     if latencies:

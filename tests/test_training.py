@@ -7,11 +7,8 @@ Covers: CosineWarmupScheduler, CheckpointManager, Trainer, and model training.
 from __future__ import annotations
 
 import json
-import math
-import tempfile
 from pathlib import Path
 
-import pytest
 import torch
 
 from hbllm.model.config import ModelConfig

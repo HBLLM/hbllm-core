@@ -100,12 +100,12 @@ class CuriosityNode(Node):
     """
     Monitors the system for signs of uncertainty and generates
     learning goals to fill knowledge gaps.
-    
+
     Subscribes to:
         system.feedback — negative feedback from users
         workspace.fallback — error fallback events
         module.evaluate — low-confidence domain responses
-    
+
     Publishes:
         curiosity.goal — learning goals for the Planner
         curiosity.stats — curiosity engine statistics
@@ -178,15 +178,15 @@ class CuriosityNode(Node):
         payload = message.payload
         confidence = payload.get("confidence", 1.0)
         thought_type = payload.get("type", "")
-        
+
         # Ignore meta-thoughts (critiques, simulation results)
         if thought_type in ("critique", "simulation_result", "curiosity_signal"):
             return None
-        
+
         # Only record if confidence is notably low
         if confidence >= 0.4:
             return None
-        
+
         event = UncertaintyEvent(
             topic=payload.get("domain", thought_type or "general"),
             query=str(payload.get("content", ""))[:200],
@@ -242,7 +242,7 @@ class CuriosityNode(Node):
             "priority": goal.priority,
             "source_events": goal.source_events,
         }
-        
+
         # 1. Publish to curiosity.goal (general signal)
         await self.publish("curiosity.goal", Message(
             type=MessageType.EVENT,
@@ -250,7 +250,7 @@ class CuriosityNode(Node):
             topic="curiosity.goal",
             payload=goal_payload,
         ))
-        
+
         # 2. Dispatch to SpawnerNode for data synthesis + training
         await self.publish("system.spawn", Message(
             type=MessageType.SPAWN_REQUEST,
@@ -263,7 +263,7 @@ class CuriosityNode(Node):
                 "from_curiosity": True,
             },
         ))
-        
+
         # 3. Queue for SleepNode consolidation during idle time
         await self.publish("system.sleep.goal", Message(
             type=MessageType.EVENT,
@@ -271,7 +271,7 @@ class CuriosityNode(Node):
             topic="system.sleep.goal",
             payload=goal_payload,
         ))
-        
+
         logger.info("Dispatched learning goal to spawn+sleep: %s", goal.description)
 
     def _get_top_gaps(self, top_k: int = 5) -> list[dict[str, Any]]:

@@ -1,13 +1,15 @@
 """Tests for LearnerNode — continuous learning via DPO feedback during deep sleep."""
 
-import os
-import json
-import pytest
 import asyncio
+import json
+import os
 
+import pytest
+
+from hbllm.brain.learner_node import LearnerNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-from hbllm.brain.learner_node import LearnerNode
+
 
 def _make_feedback(rating=1, prompt="What is AI?", response="AI is..."):
     return Message(
@@ -45,14 +47,14 @@ async def test_accepts_valid_feedback_and_queues(clean_queue):
     msg_pos = _make_feedback(rating=1)
     await node.handle_message(msg_pos)
     assert "What is AI?" in node.pending_pairs
-    
+
     msg_neg = _make_feedback(rating=-1, response="I don't know")
     await node.handle_message(msg_neg)
-    
+
     # Pair should be completed, removed from pending, and written to disk
     assert "What is AI?" not in node.pending_pairs
     assert os.path.exists(node.queue_path)
-    
+
     with open(node.queue_path) as f:
         queue = json.load(f)
         assert len(queue) == 1
@@ -90,7 +92,7 @@ async def test_training_triggers_ONLY_on_sleep(clean_queue):
     )
     await bus.publish("system.sleep.dpo_trigger", sleep_trigger)
     await asyncio.sleep(0.1)
-    
+
     # 3. Training task should now be spawned
     assert node.training_task is not None
 
@@ -112,9 +114,9 @@ async def test_training_completes_and_broadcasts(clean_queue):
     await bus.subscribe("system.learning_update", lambda msg: updates.append(msg))
 
     # Add 1 pair
-    pos = _make_feedback(rating=1, prompt=f"P", response=f"Good")
+    pos = _make_feedback(rating=1, prompt="P", response="Good")
     await node.handle_message(pos)
-    neg = _make_feedback(rating=-1, prompt=f"P", response=f"Bad")
+    neg = _make_feedback(rating=-1, prompt="P", response="Bad")
     await node.handle_message(neg)
 
     # Trigger Sleep

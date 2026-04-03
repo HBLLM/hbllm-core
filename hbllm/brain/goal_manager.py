@@ -18,14 +18,14 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class GoalStatus(str, Enum):
+class GoalStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
     PAUSED = "paused"
@@ -33,7 +33,7 @@ class GoalStatus(str, Enum):
     FAILED = "failed"
 
 
-class GoalPriority(str, Enum):
+class GoalPriority(StrEnum):
     CRITICAL = "critical"  # must do
     HIGH = "high"          # should do soon
     MEDIUM = "medium"      # do when idle

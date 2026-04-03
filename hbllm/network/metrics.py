@@ -20,24 +20,25 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import time
 import threading
+import time
 from collections import defaultdict
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Try to import prometheus_client, fall back to in-memory
 try:
     from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        REGISTRY,
+        CollectorRegistry,
         Counter,
-        Histogram,
         Gauge,
+        Histogram,
         Info,
         generate_latest,
-        CONTENT_TYPE_LATEST,
-        CollectorRegistry,
-        REGISTRY,
     )
     HAS_PROMETHEUS = True
 except ImportError:

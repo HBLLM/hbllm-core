@@ -30,40 +30,39 @@ def run_pipeline(args):
 
 def run_train(args):
     """Run the pre-training loop."""
-    import torch
+    from hbllm.data.dataloader import create_dataloader
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.training.trainer import Trainer, TrainingConfig
-    from hbllm.data.dataloader import create_dataloader
-    
+
     # 1. Configuration
     model_config = get_config(args.model_size)
     train_config = TrainingConfig(wandb_project=args.wandb_project)
-    
+
     logging.info("Initializing %s model with %d parameters...", args.model_size, model_config.num_params_estimate)
     model = HBLLMForCausalLM(model_config)
-    
+
     trainer = Trainer(model, train_config)
-    
+
     shard_dir = Path(args.work_dir) / "shards"
     dataloader = create_dataloader(
-        shard_dir, 
+        shard_dir,
         sequence_length=train_config.sequence_length if hasattr(train_config, 'sequence_length') else 2048,
         batch_size=train_config.micro_batch_size,
         num_workers=0
     )
-    
+
     logging.info("Starting training loop...")
     for step, batch in enumerate(dataloader):
         if step >= train_config.max_steps:
             break
-            
+
         metrics = trainer.train_step(batch)
-        
+
         if (step + 1) % train_config.gradient_accumulation_steps == 0:
             step_metrics = trainer.step()
             metrics.update(step_metrics)
-            
+
             if trainer.global_step % train_config.log_interval_steps == 0:
                 logging.info(
                     "Step %d | Loss: %.4f | LR: %.2e | GradNorm: %.2f",
@@ -74,7 +73,7 @@ def run_train(args):
                 )
                 if trainer._wandb_run is not None:
                     trainer._wandb_run.log({"loss": metrics["loss"]}, step=trainer.global_step)
-                
+
             if trainer.global_step % train_config.save_interval_steps == 0:
                 trainer.save_checkpoint(metrics["loss"])
 

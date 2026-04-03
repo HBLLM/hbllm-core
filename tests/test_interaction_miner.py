@@ -1,6 +1,7 @@
 """Tests for InteractionMiner — dataset flywheel."""
 
 import pytest
+
 from hbllm.data.interaction_miner import InteractionMiner
 
 

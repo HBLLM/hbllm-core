@@ -11,10 +11,8 @@ import logging
 import os
 import platform
 import time
-import subprocess
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Dict
 
 import torch
 
@@ -54,28 +52,28 @@ class HardwareHAL:
     def get_profile() -> HardwareProfile:
         arch = platform.machine().lower()
         cpu_threads = os.cpu_count() or 4
-        
+
         # RAM Detection (psutil is enterprise standard)
         try:
             import psutil
             ram_gb = psutil.virtual_memory().total / (1024**3)
         except ImportError:
             ram_gb = 4.0
-            
+
         # VRAM / Device Detection
         device_type = ComputeDeviceType.CPU
         vram_gb = 0.0
-        
+
         if torch.cuda.is_available():
             device_type = ComputeDeviceType.CUDA
             vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         elif torch.backends.mps.is_available():
             device_type = ComputeDeviceType.MPS
             vram_gb = ram_gb * 0.75 # Mac unified memory limit
-            
+
         # I/O Benchmarking (Enterprise standard for expert streaming)
         disk_latency = HardwareHAL._benchmark_disk_latency()
-        
+
         is_low_power = "arm" in arch or ram_gb < 8.0 or disk_latency > 1.0
 
         return HardwareProfile(
@@ -105,13 +103,13 @@ class HardwareHAL:
             return 10.0 # Default high latency if disk is protected
 
     @staticmethod
-    def recommend_policy(model_params_billions: float) -> Dict[str, any]:
+    def recommend_policy(model_params_billions: float) -> dict[str, any]:
         """
         Autonomous policy generation based on hardware profile.
         """
         profile = HardwareHAL.get_profile()
         fp16_size_gb = model_params_billions * 2
-        
+
         # High-performance enterprise defaults
         policy = {
             "quantization": QuantizationPolicy.FP16,
@@ -136,7 +134,7 @@ class HardwareHAL:
                 # Force INT4 and 8-bit KV Cache if memory is critical
                 policy["quantization"] = QuantizationPolicy.INT4
                 policy["kv_cache_quant"] = True
-                
+
             # If Disk is fast (SSD), enable offloading to keep VRAM for context
             if profile.disk_write_latency_ms < 5.0:
                 policy["offload_experts"] = True

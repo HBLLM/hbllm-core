@@ -1,8 +1,8 @@
 """Tests for SemanticMemory — vector search with TF-IDF fallback."""
 
 import pytest
-from hbllm.memory.semantic import SemanticMemory, _TfIdfEmbedder
 
+from hbllm.memory.semantic import SemanticMemory, _TfIdfEmbedder
 
 # ── TF-IDF Embedder Tests ───────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ def test_search_empty_db(sem_mem):
 
 def test_delete(sem_mem):
     idx1 = sem_mem.store("First doc")
-    idx2 = sem_mem.store("Second doc")
+    sem_mem.store("Second doc")
     assert sem_mem.count == 2
 
     deleted = sem_mem.delete(idx1)

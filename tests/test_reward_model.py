@@ -1,9 +1,8 @@
 """Tests for RewardModel — preference learning and implicit feedback."""
 
-import os
-import tempfile
 import pytest
-from hbllm.training.reward_model import RewardModel, RewardSignal, PreferencePair
+
+from hbllm.training.reward_model import PreferencePair, RewardModel, RewardSignal
 
 
 @pytest.fixture

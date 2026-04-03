@@ -3,16 +3,16 @@ Tests for RuleExtractorNode — pattern mining from high-salience events.
 """
 
 import asyncio
+
 import pytest
 
 from hbllm.brain.rule_extractor import (
-    RuleExtractorNode,
     ExtractedRule,
+    RuleExtractorNode,
     extract_rules_from_text,
 )
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-
 
 # ── Standalone rule extraction ───────────────────────────────────────────────
 

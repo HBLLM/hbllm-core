@@ -1,11 +1,11 @@
 """
 System Decision Node (The Gatekeeper).
 
-Subscribes to `decision.evaluate`. 
+Subscribes to `decision.evaluate`.
 In the Global Workspace model, the LLM and Symbolic Solvers only pose "Thoughts."
 This Node operates after the Workspace Blackboard has formed a consensus.
 It uses the LLM to evaluate the incoming thought for safety and alignment,
-and if approved, dispatches the final command down to the Agent 
+and if approved, dispatches the final command down to the Agent
 Execution Layer (Browser, Code Execution, Audio TTS, IoT, MCP, or directly to the User).
 """
 
@@ -50,14 +50,14 @@ class DecisionNode(Node):
         payload = message.payload
         original_query = payload.get("original_query", {})
         thought = payload.get("selected_thought", {})
-        
+
         user_intent = original_query.get("intent", "answer")
         thought_type = thought.get("type", "intuition")
         confidence = thought.get("confidence", 0.0)
         content = thought.get("content", "")
-        
+
         logger.info("[DecisionNode] Evaluating %s thought (Confidence: %s)...", thought_type, confidence)
-        
+
         # ── 1. PolicyEngine Governance ──
         if self.policy_engine:
             try:
@@ -86,7 +86,7 @@ class DecisionNode(Node):
                     logger.info("[DecisionNode] Policy warnings: %s", result.warnings)
             except Exception as e:
                 logger.warning("[DecisionNode] PolicyEngine evaluation failed: %s", e)
-        
+
         # ── 2. LLM-Based Safety Classification ──
         if self.llm:
             try:
@@ -100,7 +100,7 @@ class DecisionNode(Node):
                     f"Content: \"{content[:500]}\"\n\n"
                     f"Output JSON: {{\"safe\": true/false, \"reason\": \"brief explanation\"}}"
                 )
-                
+
                 if not safety.get("safe", True):
                     reason = safety.get("reason", "Content flagged by safety classifier")
                     logger.warning("[DecisionNode] Thought rejected: %s", reason)
@@ -109,7 +109,7 @@ class DecisionNode(Node):
                         source_node_id=self.node_id,
                         tenant_id=message.tenant_id,
                         session_id=message.session_id,
-                        topic="sensory.output", 
+                        topic="sensory.output",
                         payload={"text": f"I cannot fulfill this request due to safety constraints: {reason}"},
                         correlation_id=message.correlation_id
                     )
@@ -117,10 +117,10 @@ class DecisionNode(Node):
                     return None
             except Exception as e:
                 logger.warning("[DecisionNode] Safety classification failed, proceeding cautiously: %s", e)
-            
+
         # ── 3. Agent Execution Layer Routing ──
         await self._route_to_execution(message, user_intent, content, thought_type, original_query)
-            
+
         return None
 
     async def _route_to_execution(
@@ -130,7 +130,7 @@ class DecisionNode(Node):
         tenant_id = message.tenant_id
         session_id = message.session_id
         correlation_id = message.correlation_id
-        
+
         def _make_msg(topic: str, payload: dict, msg_type: MessageType = MessageType.EVENT) -> Message:
             return Message(
                 type=msg_type,
@@ -141,14 +141,14 @@ class DecisionNode(Node):
                 payload=payload,
                 correlation_id=correlation_id,
             )
-        
+
         # Audio output
         if intent == "speak" or original_query.get("force_audio", False):
             logger.info("[DecisionNode] Dispatching to AudioOutputNode.")
             await self.bus.publish("sensory.audio.out", _make_msg(
                 "sensory.audio.out", {"text": content}
             ))
-        
+
         # Python code execution
         elif "```python" in content:
             logger.info("[DecisionNode] Dispatching to ExecutionNode Sandbox.")
@@ -164,7 +164,7 @@ class DecisionNode(Node):
             await self.bus.publish("task.execute.python", _make_msg(
                 "task.execute.python", {"code": code}, MessageType.QUERY
             ))
-        
+
         # Web search
         elif intent == "web_search" or original_query.get("force_search", False):
             logger.info("[DecisionNode] Dispatching to BrowserNode.")
@@ -172,14 +172,14 @@ class DecisionNode(Node):
             await self.bus.publish("task.execute.search", _make_msg(
                 "task.execute.search", {"query": query, "max_results": 3}, MessageType.QUERY
             ))
-        
+
         # API synthesis / execution
         elif thought_type == "api_synthesis" or intent == "tool_synthesis":
             logger.info("[DecisionNode] Dispatching to ApiNode.")
             await self.bus.publish("task.execute.api", _make_msg(
                 "task.execute.api", {"schema": content, "intent": intent}, MessageType.QUERY
             ))
-        
+
         # IoT / MQTT commands
         elif intent == "iot_command" or original_query.get("iot_topic"):
             logger.info("[DecisionNode] Dispatching to IoT MQTT Node.")
@@ -189,7 +189,7 @@ class DecisionNode(Node):
                     "payload": content,
                 }
             ))
-        
+
         # MCP tool calls
         elif intent == "mcp_tool" or original_query.get("mcp_tool_name"):
             logger.info("[DecisionNode] Dispatching to MCP Client Node.")
@@ -200,14 +200,14 @@ class DecisionNode(Node):
                     "content": content,
                 }, MessageType.QUERY
             ))
-        
+
         # Default: text output to user
         else:
             logger.info("[DecisionNode] Dispatching to User Interface.")
             await self.bus.publish("sensory.output", _make_msg(
                 "sensory.output", {"text": content, "source": thought_type}
             ))
-        
+
         # Record experience for salience detection
         await self.bus.publish("system.experience", _make_msg(
             "system.experience", {

@@ -6,12 +6,13 @@ with mock LLM to verify the cognitive pipeline works end-to-end.
 """
 
 import asyncio
+
 import pytest
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.registry import ServiceRegistry
-from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
+from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
 
 
 class TestEndToEndPipeline:

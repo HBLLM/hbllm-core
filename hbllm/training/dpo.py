@@ -54,32 +54,32 @@ def get_batch_logps(
 ) -> torch.Tensor:
     """
     Compute log probabilities of the given labels under the logits.
-    
+
     Args:
         logits: [batch_size, seq_len, vocab_size]
         labels: [batch_size, seq_len]
-        
+
     Returns:
         logps: [batch_size]
     """
     # Shift so that tokens predict the next token
     shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
-    
+
     # Calculate log probabilities
     log_probs = F.log_softmax(shift_logits, dim=-1)
-    
+
     # Gather the log probabilities of the actual labels
     # We must mask out ignore_index BEFORE gather to prevent out-of-bounds error
     gather_indices = shift_labels.clone()
     loss_mask = shift_labels != ignore_index
     gather_indices[~loss_mask] = 0
-    
+
     # [batch_size, seq_len_minus_1]
     per_token_logps = torch.gather(log_probs, dim=2, index=gather_indices.unsqueeze(2)).squeeze(2)
-    
+
     # Mask out ignored tokens
     per_token_logps = per_token_logps * loss_mask
-    
+
     # Sum over sequence length
     return per_token_logps.sum(dim=-1)

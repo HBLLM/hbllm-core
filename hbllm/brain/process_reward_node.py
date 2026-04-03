@@ -9,15 +9,14 @@ likelihood that the step is correct or leads to a correct answer.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import torch
 
-from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import Node, NodeType
-from hbllm.model.config import ModelConfig, get_config
-from hbllm.model.transformer import HBLLMForProcessReward
+from hbllm.model.config import get_config
 from hbllm.model.tokenizer import HBLLMTokenizer
+from hbllm.model.transformer import HBLLMForProcessReward
+from hbllm.network.messages import Message
+from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 class ProcessRewardNode(Node):
     """
     Cognitive node that runs the continuous Process Reward Model.
-    
+
     Subscribes to 'action.score_thought'.
     """
 
@@ -38,7 +37,7 @@ class ProcessRewardNode(Node):
         llm=None,  # Fallback LLM if PRM is not fully trained
     ):
         super().__init__(
-            node_id=node_id, 
+            node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
             capabilities=["process_reward", "thought_evaluation"]
         )
@@ -46,7 +45,7 @@ class ProcessRewardNode(Node):
         self.checkpoint_dir = Path(checkpoint_dir)
         self.prm_path = self.checkpoint_dir / "prm_adapter.pt"  # Or separate PRM weights
         self.llm = llm
-        
+
         # Load PRM model
         config = get_config(model_name)
         self.prm_model = HBLLMForProcessReward(config)
@@ -56,7 +55,7 @@ class ProcessRewardNode(Node):
     async def on_start(self) -> None:
         """Load the PRM weights and subscribe to the evaluation topic."""
         logger.info("Starting ProcessRewardNode")
-        
+
         if self.prm_path.exists():
             try:
                 state_dict = torch.load(self.prm_path, map_location=self.device, weights_only=True)
@@ -67,10 +66,10 @@ class ProcessRewardNode(Node):
                 logger.warning(f"[ProcessRewardNode] Failed to load PRM weights: {e}")
         else:
             logger.info(f"[ProcessRewardNode] No PRM weights found at {self.prm_path}. Will use fallback heuristic/LLM.")
-            
+
         self.prm_model.to(self.device)
         self.prm_model.eval()
-        
+
         await self.bus.subscribe("action.score_thought", self.handle_score_request)
 
     async def on_stop(self) -> None:
@@ -89,7 +88,7 @@ class ProcessRewardNode(Node):
             return message.create_response({"score": 0.5, "source": "empty"})
 
         score = await self.score_thought(thought_content)
-        
+
         logger.debug(f"[ProcessRewardNode] Scored thought: {score:.3f}")
         return message.create_response({
             "score": score,
@@ -110,17 +109,17 @@ class ProcessRewardNode(Node):
                 return float(result.get("score", 0.5))
             except Exception:
                 pass
-                
+
         # If PRM is "trained" (or we are forcing it for tests), run the neural net
         try:
             # Tokenize
             tokens = self.tokenizer.encode(content)
             # Add batch dimension and move to device
             input_ids = torch.tensor([tokens], device=self.device)
-            
+
             with torch.no_grad():
                 outputs = self.prm_model(input_ids)
-                
+
             # Extract score from sigmoid output
             score: float = outputs["scores"].item()
             return min(max(score, 0.0), 1.0)

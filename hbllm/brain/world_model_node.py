@@ -1,10 +1,10 @@
 """
 System 3 World Model Node (Environment Simulation).
 
-Before the Cognitive Workspace commits to executing physical actions 
+Before the Cognitive Workspace commits to executing physical actions
 (like running Python scripts or clicking links), it asks the World Model
 to predict the outcome. If the simulation predicts failure or a safety
-violation, the World Model rejects the thought back to the Blackboard 
+violation, the World Model rejects the thought back to the Blackboard
 for the Intuition Engine to rewrite.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import ast
 import logging
-from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -46,12 +45,12 @@ class WorldModelNode(Node):
         """
         payload = message.payload
         action_type = payload.get("action_type")
-        
+
         if action_type == "execute_python":
             code = payload.get("content", "")
             logger.info("[WorldModel] Simulating Python AST execution...")
             prediction = self._simulate_ast(code)
-            
+
             # Post the simulation results back to the workspace
             sim_msg = Message(
                 type=MessageType.EVENT,
@@ -68,7 +67,7 @@ class WorldModelNode(Node):
                 correlation_id=message.correlation_id
             )
             await self.bus.publish("workspace.thought", sim_msg)
-            
+
         return None
 
     def _simulate_ast(self, code: str) -> dict[str, str]:
@@ -79,7 +78,7 @@ class WorldModelNode(Node):
         """
         try:
             tree = ast.parse(code)
-            
+
             # Walk the AST looking for imports
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -91,7 +90,7 @@ class WorldModelNode(Node):
                         return {"status": "FAILURE", "reason": f"ImportError: the module '{node.module}' is blocked by sandbox safety policies."}
 
             return {"status": "SUCCESS", "reason": "AST check passed. Code appears structurally safe."}
-            
+
         except SyntaxError as e:
             return {"status": "FAILURE", "reason": f"SyntaxError on line {e.lineno}: {e.msg}"}
         except Exception as e:

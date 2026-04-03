@@ -11,10 +11,11 @@ import hmac
 import logging
 import time
 from collections import defaultdict
-from typing import Any
+from datetime import UTC
 
 import redis.asyncio as redis
-from hbllm.network.bus import Subscription, MessageHandler, MessageBus
+
+from hbllm.network.bus import MessageBus, MessageHandler, Subscription
 from hbllm.network.messages import Message
 from hbllm.network.tracing import BusMetrics
 
@@ -26,9 +27,9 @@ logger = logging.getLogger(__name__)
 class RedisBus(MessageBus):
     """
     Distributed MessageBus using Redis Pub/Sub.
-    
-    Nodes can run in separate processes or servers. Uses `psubscribe("*")` 
-    to observe all traffic, mimicking the InProcessBus behavior where any node 
+
+    Nodes can run in separate processes or servers. Uses `psubscribe("*")`
+    to observe all traffic, mimicking the InProcessBus behavior where any node
     can correlate request-responses dynamically without explicit response-topic subscriptions.
     """
 
@@ -37,10 +38,10 @@ class RedisBus(MessageBus):
         self.auth_secret = auth_secret
         self.client: redis.Redis | None = None
         self.pubsub: redis.client.PubSub | None = None
-        
+
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
-        
+
         self._running = False
         self._dispatch_task: asyncio.Task[None] | None = None
         self._sub_counter = 0
@@ -65,7 +66,7 @@ class RedisBus(MessageBus):
         self.pubsub = self.client.pubsub()
         # Subscribe to all topics to catch responses and broadcast identically to InProcessBus
         await self.pubsub.psubscribe("*")
-        
+
         self._running = True
         self._dispatch_task = asyncio.create_task(self._dispatch_loop())
         logger.info("RedisBus started connected to %s", self.redis_url)
@@ -112,7 +113,7 @@ class RedisBus(MessageBus):
 
         await self.client.publish(topic, wire)
         self.metrics.messages_published += 1
-        
+
         # When a node fulfills a request locally, it calls bus.publish(response)
         # We intercept it right here if it happens to be our own local pending request,
         # otherwise we'd receive it from Redis a few milliseconds later anyway.
@@ -135,7 +136,7 @@ class RedisBus(MessageBus):
             # Wait for correlated response
             response = await asyncio.wait_for(future, timeout=timeout)
             return response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending_requests.pop(message.id, None)
             raise TimeoutError(
                 f"Request {message.id} to topic '{topic}' timed out after {timeout}s"
@@ -160,20 +161,20 @@ class RedisBus(MessageBus):
         """Main loop: dequeue messages from Redis and dispatch locally."""
         if not self.pubsub:
             return
-        
+
         backoff = 1.0
         max_backoff = 30.0
-            
+
         while self._running:
             try:
                 # get_message is non-blocking technically, but with timeout it yields
                 msg_dict = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
                 if msg_dict is None:
                     continue
-                
+
                 # Reset backoff on successful receive
                 backoff = 1.0
-                    
+
                 if msg_dict["type"] in ("message", "pmessage"):
                     topic = msg_dict["channel"]
                     raw_data = msg_dict["data"]
@@ -187,7 +188,7 @@ class RedisBus(MessageBus):
                             continue
                     else:
                         payload_json = raw_data
-                    
+
                     try:
                         message = Message.model_validate_json(payload_json)
                     except Exception as e:
@@ -196,8 +197,7 @@ class RedisBus(MessageBus):
 
                     # ── TTL enforcement ──
                     if message.ttl_seconds is not None:
-                        from datetime import timezone
-                        age = (time.time() - message.timestamp.replace(tzinfo=timezone.utc).timestamp())
+                        age = (time.time() - message.timestamp.replace(tzinfo=UTC).timestamp())
                         if age > message.ttl_seconds:
                             logger.debug("Dropped expired message %s (age=%.1fs, ttl=%ss)", message.id, age, message.ttl_seconds)
                             self.metrics.messages_dropped_ttl += 1
@@ -215,7 +215,7 @@ class RedisBus(MessageBus):
                     # Dispatch to local subscribers
                     await self._dispatch_to_subscribers(topic, message)
 
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 continue
             except redis.ConnectionError:
                 self.metrics.reconnections += 1
@@ -261,7 +261,7 @@ class RedisBus(MessageBus):
             for sub in self._subscriptions.get(match_topic, []):
                 if not sub.active:
                     continue
-                    
+
                 async def _run_handler(s=sub, t=topic, m=message):
                     try:
                         response = await s.handler(m)
@@ -273,7 +273,7 @@ class RedisBus(MessageBus):
                     except Exception:
                         logger.exception("Error in handler for topic '%s', message %s", t, m.id)
                         self.metrics.handler_errors += 1
-                        
+
                 task = asyncio.create_task(_run_handler())
                 self._active_tasks.add(task)
                 task.add_done_callback(self._active_tasks.discard)

@@ -11,17 +11,15 @@ Provides:
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import os
 import re
-import time
 import threading
-from collections import defaultdict, OrderedDict
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
 
-from fastapi import Request, HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 

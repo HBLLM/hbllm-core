@@ -2,7 +2,7 @@
 Runtime LoRA Adapter Registry — specialized specialization engine.
 
 This module allows the HBLLM SpawnerNode to resolve and download pre-trained
-domain adapters from the HuggingFace Hub, reducing the need for local 
+domain adapters from the HuggingFace Hub, reducing the need for local
 synthetic training while maintaining high security via SHA-256 verification.
 
 Features:
@@ -20,7 +20,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import torch
 from pydantic import BaseModel, Field
@@ -40,7 +40,7 @@ PEFT_WEIGHTS_SAFE = "adapter_model.safetensors"
 
 # --- Security Utilities ---
 
-def compute_sha256(file_path: Union[str, Path]) -> str:
+def compute_sha256(file_path: str | Path) -> str:
     """Compute the SHA-256 hash of a file."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
@@ -50,7 +50,7 @@ def compute_sha256(file_path: Union[str, Path]) -> str:
     return sha256_hash.hexdigest()
 
 
-def verify_sha256(file_path: Union[str, Path], expected_hash: str) -> bool:
+def verify_sha256(file_path: str | Path, expected_hash: str) -> bool:
     """Check if file hash matches the expected hash (case-insensitive)."""
     if not expected_hash:
         return False
@@ -58,7 +58,7 @@ def verify_sha256(file_path: Union[str, Path], expected_hash: str) -> bool:
     return actual_hash.lower() == expected_hash.lower()
 
 
-def safe_torch_load(path: Union[str, Path]) -> Dict[str, Any]:
+def safe_torch_load(path: str | Path) -> dict[str, Any]:
     """Load a torch checkpoint safely (no arbitrary code execution)."""
     return torch.load(path, map_location="cpu", weights_only=True)
 
@@ -69,11 +69,11 @@ class AdapterSource(BaseModel):
     """Configuration for a remote adapter repository on HuggingFace."""
     domain: str
     repo_id: str
-    filename: Optional[str] = None
-    sha256: Optional[str] = None
+    filename: str | None = None
+    sha256: str | None = None
     rank: int = 8
     peft_format: bool = False  # If True, treats as PEFT-compatible repo
-    revision: Optional[str] = None  # Git tag, branch, or commit SHA
+    revision: str | None = None  # Git tag, branch, or commit SHA
 
     @property
     def effective_filename(self) -> str:
@@ -95,7 +95,7 @@ class AdapterRegistryConfig(BaseModel):
     auto_download: bool = True
     require_sha256: bool = True
     max_adapter_size_mb: int = 100
-    sources: List[AdapterSource] = Field(default_factory=list)
+    sources: list[AdapterSource] = Field(default_factory=list)
 
 
 # --- Registry Class ---
@@ -109,14 +109,14 @@ class AdapterRegistry:
         self.config = config
         self.cache_dir = Path(config.cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # In-memory mapping of known sources
-        self._sources: Dict[str, AdapterSource] = {
+        self._sources: dict[str, AdapterSource] = {
             s.domain.lower(): s for s in config.sources
         }
-        
+
         # Locks ensure two nodes don't download the same adapter concurrently
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def _get_lock(self, domain: str) -> asyncio.Lock:
         """Get or create a lock for a specific domain."""
@@ -129,10 +129,10 @@ class AdapterRegistry:
         """Whether the registry is active."""
         return self.config.enabled
 
-    async def resolve(self, domain: str) -> Optional[Dict[str, torch.Tensor]]:
+    async def resolve(self, domain: str) -> dict[str, torch.Tensor] | None:
         """
         Main entry point: resolve an adapter for a given domain.
-        
+
         Resolution order:
             1. Local registry cache (`cache_dir/{domain}`)
             2. Local trained checkpoints (`./checkpoints/domains/{domain}`)
@@ -158,15 +158,15 @@ class AdapterRegistry:
                 source = self._sources[domain_key]
                 if self.config.auto_download:
                     return await self._download_and_cache(source)
-                
+
             return None
 
-    def list_cached(self) -> List[str]:
+    def list_cached(self) -> list[str]:
         """List all domains that have adapters in the local cache."""
         cached = []
         if not self.cache_dir.exists():
             return cached
-            
+
         for d in self.cache_dir.iterdir():
             if d.is_dir():
                 filename = ADAPTER_FILENAME_TEMPLATE.format(domain=d.name)
@@ -174,7 +174,7 @@ class AdapterRegistry:
                     cached.append(d.name)
         return cached
 
-    def list_configured(self) -> List[Dict[str, Any]]:
+    def list_configured(self) -> list[dict[str, Any]]:
         """List all configured remote sources and their cache status."""
         result = []
         cached_domains = set(self.list_cached())
@@ -207,7 +207,7 @@ class AdapterRegistry:
         """The canonical path for the stored hash of a cached adapter."""
         return self.cache_dir / domain / ADAPTER_HASH_TEMPLATE.format(domain=domain)
 
-    def _load_from_cache(self, domain: str) -> Optional[Dict[str, torch.Tensor]]:
+    def _load_from_cache(self, domain: str) -> dict[str, torch.Tensor] | None:
         """Load from the registry's private cache dir."""
         path = self._adapter_path(domain)
         hash_path = self._hash_path(domain)
@@ -231,7 +231,7 @@ class AdapterRegistry:
             logger.error("Failed to load cached adapter for '%s': %s", domain, e)
             return None
 
-    def _check_locally_trained(self, domain: str) -> Optional[Dict[str, torch.Tensor]]:
+    def _check_locally_trained(self, domain: str) -> dict[str, torch.Tensor] | None:
         """Check the default local training output path."""
         path = Path(f"./checkpoints/domains/{domain}/lora_adapter.pt")
         if path.exists():
@@ -244,7 +244,7 @@ class AdapterRegistry:
         return None
 
     @staticmethod
-    def _extract_state_dict(payload: Any) -> Dict[str, torch.Tensor]:
+    def _extract_state_dict(payload: Any) -> dict[str, torch.Tensor]:
         """Handles both raw state_dicts and our internal metadata-wrapped format."""
         if isinstance(payload, dict):
             if "state_dict" in payload:
@@ -252,7 +252,7 @@ class AdapterRegistry:
             return payload
         return {}
 
-    async def _download_and_cache(self, source: AdapterSource) -> Optional[Dict[str, torch.Tensor]]:
+    async def _download_and_cache(self, source: AdapterSource) -> dict[str, torch.Tensor] | None:
         """Download from HuggingFace, verify, and store in cache."""
         domain = source.domain.lower()
         target_path = self._adapter_path(domain)
@@ -269,7 +269,7 @@ class AdapterRegistry:
                 is_peft = await self._is_hf_repo_peft(source.repo_id, revision=source.revision)
                 if is_peft:
                     source.peft_format = True
-                    logger.info("Detected PEFT format for '%s' (revision: %s)", 
+                    logger.info("Detected PEFT format for '%s' (revision: %s)",
                                 source.repo_id, source.revision or "main")
 
             if source.peft_format:
@@ -278,18 +278,18 @@ class AdapterRegistry:
 
             # HBLLM Native Format (Single PT file)
             download_path = await self._hf_download(
-                source.repo_id, 
+                source.repo_id,
                 source.effective_filename,
                 revision=source.revision
             )
-            
+
             if not download_path:
                 return None
 
             # Security: Size check
             size_mb = os.path.getsize(download_path) / (1024 * 1024)
             if size_mb > self.config.max_adapter_size_mb:
-                logger.error("Adapter for '%s' too large (%.2f MB > %d MB limit). Rejected.", 
+                logger.error("Adapter for '%s' too large (%.2f MB > %d MB limit). Rejected.",
                             domain, size_mb, self.config.max_adapter_size_mb)
                 return None
 
@@ -298,7 +298,7 @@ class AdapterRegistry:
                 if not source.sha256:
                    logger.error("SHA-256 missing in config for '%s'. Security block.", domain)
                    return None
-                
+
                 if not verify_sha256(download_path, source.sha256):
                     logger.error("SHA-256 Mismatch for '%s'! File may be compromised.", domain)
                     return None
@@ -319,7 +319,7 @@ class AdapterRegistry:
 
     # --- PEFT Conversion Helpers ---
 
-    async def _is_hf_repo_peft(self, repo_id: str, revision: Optional[str] = None) -> bool:
+    async def _is_hf_repo_peft(self, repo_id: str, revision: str | None = None) -> bool:
         """Check if an HF repo contains a PEFT config file."""
         from huggingface_hub import HfApi
         try:
@@ -329,10 +329,10 @@ class AdapterRegistry:
         except Exception:
             return False
 
-    async def _handle_peft_download(self, source: AdapterSource, target_path: Path) -> Optional[Dict[str, torch.Tensor]]:
+    async def _handle_peft_download(self, source: AdapterSource, target_path: Path) -> dict[str, torch.Tensor] | None:
         """Handles downloading and converting a PEFT model from HF."""
         from huggingface_hub import snapshot_download
-        
+
         domain = source.domain.lower()
         temp_dir = Path(f"./tmp/hf_peft_{domain}")
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -346,7 +346,7 @@ class AdapterRegistry:
                 local_dir=str(temp_dir),
                 allow_patterns=[PEFT_CONFIG_FILE, PEFT_WEIGHTS_BIN, PEFT_WEIGHTS_SAFE]
             )
-            
+
             # Load and convert
             state_dict = self._load_peft_from_dir(Path(path))
             if not state_dict:
@@ -354,23 +354,23 @@ class AdapterRegistry:
 
             # Save the converted weights to our cache
             self.save_adapter(state_dict, target_path, domain=domain, source_repo=source.repo_id)
-            
+
             return state_dict
-            
+
         finally:
             if temp_dir.exists():
                  shutil.rmtree(temp_dir)
 
     @staticmethod
-    def _load_peft_from_dir(adapter_dir: Path) -> Optional[Dict[str, torch.Tensor]]:
+    def _load_peft_from_dir(adapter_dir: Path) -> dict[str, torch.Tensor] | None:
         """Load a PEFT adapter directory and convert to HBLLM state_dict format."""
         config_path = adapter_dir / PEFT_CONFIG_FILE
         if not config_path.exists():
             return None
-            
+
         with open(config_path) as f:
             peft_config = json.load(f)
-            
+
         if peft_config.get("peft_type") != "LORA":
             logger.warning("Only LORA PEFT adapters are supported. Found: %s", peft_config.get("peft_type"))
             return None
@@ -379,7 +379,7 @@ class AdapterRegistry:
         weights_path = adapter_dir / PEFT_WEIGHTS_SAFE
         if not weights_path.exists():
             weights_path = adapter_dir / PEFT_WEIGHTS_BIN
-            
+
         if not weights_path.exists():
             return None
 
@@ -392,7 +392,7 @@ class AdapterRegistry:
         return AdapterRegistry._convert_peft_state_dict(peft_state, peft_config)
 
     @staticmethod
-    def _convert_peft_state_dict(peft_state: Dict[str, Any], peft_config: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+    def _convert_peft_state_dict(peft_state: dict[str, Any], peft_config: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Convert PEFT-style keys to HBLLM-style keys."""
         converted = {}
         # PEFT keys usually start with 'base_model.model.model.'
@@ -407,7 +407,7 @@ class AdapterRegistry:
 
     # --- External Interaction ---
 
-    async def _hf_download(self, repo_id: str, filename: str, revision: Optional[str] = None) -> Optional[str]:
+    async def _hf_download(self, repo_id: str, filename: str, revision: str | None = None) -> str | None:
         """Wraps hf_hub_download to work with asyncio."""
         from huggingface_hub import hf_hub_download
         try:
@@ -425,8 +425,8 @@ class AdapterRegistry:
 
     @staticmethod
     def save_adapter(
-        state_dict: Dict[str, torch.Tensor], 
-        path: Path, 
+        state_dict: dict[str, torch.Tensor],
+        path: Path,
         domain: str = "general",
         rank: int = 8,
         source_repo: str = "local"
@@ -446,14 +446,14 @@ class AdapterRegistry:
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(payload, path)
-        
+
         # Compute and write hash file
         sha = compute_sha256(path)
         path.with_suffix(".sha256").write_text(sha)
         return sha
 
     @staticmethod
-    def load_adapter_metadata(path: Path) -> Dict[str, Any]:
+    def load_adapter_metadata(path: Path) -> dict[str, Any]:
         """Safely load only the metadata from an adapter file."""
         if not path.exists():
             return {}

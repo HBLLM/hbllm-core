@@ -416,7 +416,6 @@ class MultiTenantBenchmark:
             for tid, msgs in tenant_messages.items()
             if msgs  # only check tenants that received messages
         )
-        all_received = total == 1000  # 10 tenants × 100 messages
         report.add(BenchmarkResult(
             name="Tenant isolation verified",
             metric="isolation",

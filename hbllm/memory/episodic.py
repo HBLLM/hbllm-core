@@ -1,8 +1,8 @@
 """
 Episodic Memory storage using SQLite.
 
-This module persists conversation turns across sessions, allowing the 
-MemoryNode to recall context even if the system restarts or the prompt 
+This module persists conversation turns across sessions, allowing the
+MemoryNode to recall context even if the system restarts or the prompt
 is routed to a different DomainModule.
 """
 
@@ -12,7 +12,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,7 @@ class EpisodicMemory:
         ''')
         # Index for fast retrieval of latest turns per tenant+session
         cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_tenant_session_time 
+            CREATE INDEX IF NOT EXISTS idx_tenant_session_time
             ON turns(tenant_id, session_id, timestamp_iso DESC)
         ''')
         # Migrate: add tenant_id column if upgrading from old schema
@@ -83,7 +83,7 @@ class EpisodicMemory:
     ) -> str:
         """
         Store a single conversation turn.
-        
+
         Args:
             session_id: Identifier for the conversation thread.
             role: "user" | "assistant" | "system".
@@ -91,12 +91,12 @@ class EpisodicMemory:
             domain: Which domain module generated this (if assistant).
             metadata: Additional JSON serializable data.
             tenant_id: Tenant identifier for multi-tenant isolation.
-            
+
         Returns:
             The generated ID of the turn.
         """
         turn_id = str(uuid.uuid4())
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         meta_str = json.dumps(metadata) if metadata else "{}"
 
         conn = self._get_conn()
@@ -106,26 +106,26 @@ class EpisodicMemory:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (turn_id, tenant_id, session_id, role, content, domain, now_iso, meta_str))
         conn.commit()
-            
+
         return turn_id
 
     def retrieve_recent(self, session_id: str, limit: int = 10, tenant_id: str = "default") -> list[dict[str, Any]]:
         """
         Retrieve the most recent turns for a given tenant's session.
-        
+
         Returns a list of dicts ordered chronologically (oldest first).
         """
         conn = self._get_conn()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         cursor.execute('''
-            SELECT * FROM turns 
-            WHERE tenant_id = ? AND session_id = ? 
-            ORDER BY timestamp_iso DESC 
+            SELECT * FROM turns
+            WHERE tenant_id = ? AND session_id = ?
+            ORDER BY timestamp_iso DESC
             LIMIT ?
         ''', (tenant_id, session_id, limit))
-        
+
         rows = cursor.fetchall()
         conn.row_factory = None  # Reset for other methods
 
@@ -140,7 +140,7 @@ class EpisodicMemory:
                 "timestamp": row["timestamp_iso"],
                 "metadata": json.loads(row["metadata"]),
             })
-            
+
         return results
 
     def clear_session(self, session_id: str, tenant_id: str = "default") -> int:
@@ -235,7 +235,7 @@ class EpisodicMemory:
             Number of deleted turns.
         """
         from datetime import timedelta
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
         conn = self._get_conn()
         if tenant_id:

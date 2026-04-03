@@ -2,9 +2,14 @@
 Tests for hbllm.model.tokenizer — unified tokenizer with chat templates.
 """
 from hbllm.model.tokenizer import (
-    HBLLMTokenizer,
-    BOS, EOS, PAD, SYSTEM, USER, ASSISTANT,
+    ASSISTANT,
+    BOS,
+    EOS,
+    PAD,
     SPECIAL_TOKENS,
+    SYSTEM,
+    USER,
+    HBLLMTokenizer,
 )
 
 

@@ -89,7 +89,6 @@ def load_model(
 
 def _load_native(size: str, device: str) -> nn.Module:
     """Load a native HBLLM model by preset size."""
-    import torch
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
 

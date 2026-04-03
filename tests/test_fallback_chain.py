@@ -3,7 +3,7 @@
 import pytest
 
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry
-from hbllm.network.fallback import FallbackManager, FallbackResult
+from hbllm.network.fallback import FallbackManager
 from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
 from hbllm.network.registry import ServiceRegistry
 

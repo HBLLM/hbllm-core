@@ -6,21 +6,18 @@ Tests for hbllm.training.embeddings — Embedding model & contrastive training.
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 
-from hbllm.training.sft import InstructionDataset, collate_sft, load_sft_data
-from hbllm.training.evaluator import ModelEvaluator
 from hbllm.training.embeddings import (
+    EmbeddingTrainer,
     MiniEmbeddingModel,
     info_nce_loss,
-    EmbeddingTrainer,
 )
-
+from hbllm.training.evaluator import ModelEvaluator
+from hbllm.training.sft import InstructionDataset, collate_sft, load_sft_data
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
