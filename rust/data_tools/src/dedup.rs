@@ -55,7 +55,7 @@ impl Deduplicator {
     /// Create a new deduplicator with the given config.
     pub fn new(config: DedupConfig) -> Self {
         assert!(
-            config.num_perm % config.num_bands == 0,
+            config.num_perm.is_multiple_of(config.num_bands),
             "num_perm ({}) must be divisible by num_bands ({})",
             config.num_perm,
             config.num_bands
@@ -156,7 +156,7 @@ impl Deduplicator {
             }
 
             // All documents in the same bucket are candidates
-            for (_bucket, doc_indices) in &buckets {
+            for doc_indices in buckets.values() {
                 if doc_indices.len() > 1 {
                     for i in 0..doc_indices.len() {
                         for j in (i + 1)..doc_indices.len() {

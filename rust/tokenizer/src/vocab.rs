@@ -176,8 +176,8 @@ impl Vocab {
             }
 
             // Apply the merge
-            let left = tokens[best_idx];
-            let right = tokens[best_idx + 1];
+            let _left = tokens[best_idx];
+            let _right = tokens[best_idx + 1];
             let merged = self.merges[best_rank as usize].merged;
             tokens[best_idx] = merged;
             tokens.remove(best_idx + 1);

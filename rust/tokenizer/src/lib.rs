@@ -1,3 +1,4 @@
+#![allow(non_local_definitions)]
 //! HBLLM Tokenizer — Custom byte-level BPE tokenizer.
 //!
 //! This crate implements a fast, byte-level Byte Pair Encoding (BPE) tokenizer

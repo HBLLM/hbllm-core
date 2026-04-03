@@ -1,3 +1,4 @@
+#![allow(non_local_definitions)]
 //! HBLLM Data Tools — High-performance text processing.
 //!
 //! This crate provides fast, parallelized data processing tools for

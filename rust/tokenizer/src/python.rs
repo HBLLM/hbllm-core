@@ -76,7 +76,7 @@ impl PyTrainer {
 
     /// Train a new vocabulary from multiple files
     pub fn train_from_files(&self, files: Vec<String>) -> PyResult<PyVocab> {
-        let paths: Vec<&Path> = files.iter().map(|s| Path::new(s)).collect();
+        let paths: Vec<&Path> = files.iter().map(Path::new).collect();
         let vocab = self
             .inner
             .train_from_files(&paths)

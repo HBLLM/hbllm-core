@@ -1,5 +1,5 @@
-use numpy::ndarray::Array1;
-use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
+#![allow(non_local_definitions)]
+use numpy::{PyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
 
 #[cfg(target_arch = "aarch64")]
