@@ -202,7 +202,7 @@ class InProcessBus:
 
             # TTL enforcement: drop expired messages
             if message.ttl_seconds is not None:
-                age = time.time() - message.timestamp.replace(tzinfo=UTC).timestamp()
+                age = time.time() - message.timestamp.replace(tzinfo=timezone.utc).timestamp()
                 if age > message.ttl_seconds:
                     self.metrics.record_drop(topic)
                     logger.debug(

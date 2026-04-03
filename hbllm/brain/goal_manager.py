@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
+
 class StrEnum(str, Enum):
     pass
 from pathlib import Path

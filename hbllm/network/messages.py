@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
+
 class StrEnum(str, Enum):
     pass
 from typing import Any

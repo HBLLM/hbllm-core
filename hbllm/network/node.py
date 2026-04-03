@@ -11,6 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum
 
+
 class StrEnum(str, Enum):
     pass
 from typing import TYPE_CHECKING

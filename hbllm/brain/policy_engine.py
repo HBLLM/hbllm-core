@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+
 class StrEnum(str, Enum):
     pass
 from pathlib import Path

@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable, Coroutine
 from enum import Enum
 
+
 class StrEnum(str, Enum):
     pass
 from typing import Any

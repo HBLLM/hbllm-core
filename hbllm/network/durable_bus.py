@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
+
 class StrEnum(str, Enum):
     pass
 from typing import Any

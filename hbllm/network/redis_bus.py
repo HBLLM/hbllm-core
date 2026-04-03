@@ -199,7 +199,7 @@ class RedisBus(MessageBus):
 
                     # ── TTL enforcement ──
                     if message.ttl_seconds is not None:
-                        age = time.time() - message.timestamp.replace(tzinfo=UTC).timestamp()
+                        age = time.time() - message.timestamp.replace(tzinfo=timezone.utc).timestamp()
                         if age > message.ttl_seconds:
                             logger.debug(
                                 "Dropped expired message %s (age=%.1fs, ttl=%ss)",

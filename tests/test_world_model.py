@@ -122,7 +122,7 @@ async def test_world_model_syntax_error(simulated_bus):
     )
 
     await bus.publish("workspace.simulate", msg)
-    
+
     # Poll for response instead of hard sleep to prevent flaky CI failures
     for _ in range(10):
         if len(responses) > 0:
