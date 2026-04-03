@@ -102,9 +102,20 @@ extra:
       link: https://github.com/hbllm/hbllm-core
       name: HBLLM on GitHub
   generator: false
+  opengraph:
+    image: assets/social_preview.png
+    description: Open-source AGI framework with 25+ cognitive nodes, multi-tiered memory, and Rust-accelerated inference.
+  twitter:
+    card: summary_large_image
+    site: hbllm_core
+    creator: hbllm_team
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - https://cdnjs.cloudflare.com/ajax/libs/tablesort/5.2.1/tablesort.min.js
+  - https://cdnjs.cloudflare.com/ajax/libs/tablesort/5.2.1/sorts/tablesort.number.min.js
 
 nav:
   - Home: index.md
