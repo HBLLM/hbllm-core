@@ -59,6 +59,7 @@ pub struct PyTrainer {
 impl PyTrainer {
     #[new]
     #[pyo3(signature = (vocab_size=32768, min_frequency=2))]
+    #[allow(clippy::field_reassign_with_default)]
     pub fn new(vocab_size: u32, min_frequency: u32) -> Self {
         let mut config = TrainerConfig::default();
         config.vocab_size = vocab_size;

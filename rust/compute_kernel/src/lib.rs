@@ -315,6 +315,7 @@ impl UniversalEngine {
                 // Use a dummy identity permutation just to demonstrate _mm512_permutexvar_epi8.
                 // In a production SIMD kernel, this idx would contain the unpackhi/lo interleaving scheme.
                 let mut idx_arr = [0u8; 64];
+                #[allow(clippy::needless_range_loop)]
                 for j in 0..64 {
                     idx_arr[j] = j as u8;
                 }
