@@ -121,9 +121,11 @@ nav:
       - Quick Start: guides/quickstart.md
       - Configuration: guides/configuration.md
       - Custom Nodes: guides/custom-nodes.md
+      - Training Pipeline: guides/training.md
       - Deployment: guides/deployment.md
   - API Reference:
       - Brain Factory: api/brain-factory.md
+      - Serving & REST API: api/serving.md
       - Tokenizer: api/tokenizer.md
       - Network: api/network.md
   - Contributing: contributing.md
