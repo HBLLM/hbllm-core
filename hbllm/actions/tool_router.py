@@ -7,6 +7,7 @@ action node (e.g., McpClientNode, ExecutionNode) over the MessageBus,
 and returns the resulting observation.
 """
 
+import asyncio
 import json
 import logging
 
@@ -83,7 +84,7 @@ class ToolRouterNode(Node):
             # Execute tool across the bus
             resp = await self.request(target_topic, req, timeout=30.0)
             return message.create_response(resp.payload)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return message.create_error(f"Tool execution for '{tool_name}' timed out.")
         except Exception as e:
             logger.error("Error executing tool %s: %s", tool_name, e)

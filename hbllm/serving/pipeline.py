@@ -174,7 +174,7 @@ class CognitivePipeline:
                 metadata=response,
             )
 
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             latency_ms = (time.monotonic() - start_time) * 1000
             logger.warning(
                 "Pipeline timed out after %.0fms for '%s...'",
@@ -232,7 +232,7 @@ class CognitivePipeline:
                     timeout=5.0,
                 )
                 context["memory"] = mem_resp.payload.get("results", [])
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 logger.debug("Memory retrieval timed out, continuing without")
                 context["memory"] = []
             except Exception:
@@ -253,7 +253,7 @@ class CognitivePipeline:
                     timeout=3.0,
                 )
                 context["identity"] = id_resp.payload
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 context["identity"] = {}
             except Exception:
                 context["identity"] = {}
@@ -273,7 +273,7 @@ class CognitivePipeline:
                     timeout=3.0,
                 )
                 context["curiosity_goals"] = cur_resp.payload.get("goals", [])
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 context["curiosity_goals"] = []
             except Exception:
                 context["curiosity_goals"] = []
@@ -420,7 +420,7 @@ class CognitivePipeline:
                     caption = resp.payload.get("caption", "")
                     if caption:
                         context_parts.append(f"[Image {i + 1}]: {caption}")
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     context_parts.append(f"[Image {i + 1}]: (could not process)")
                 except Exception:
                     context_parts.append(f"[Image {i + 1}]: (processing error)")
@@ -442,7 +442,7 @@ class CognitivePipeline:
                 transcript = resp.payload.get("transcript", "")
                 if transcript:
                     context_parts.append(f"[Audio transcript]: {transcript}")
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 context_parts.append("[Audio]: (could not transcribe)")
             except Exception:
                 context_parts.append("[Audio]: (transcription error)")

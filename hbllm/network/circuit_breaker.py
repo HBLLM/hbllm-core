@@ -18,7 +18,10 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from enum import StrEnum
+from enum import Enum
+
+class StrEnum(str, Enum):
+    pass
 from typing import Any
 
 logger = logging.getLogger(__name__)

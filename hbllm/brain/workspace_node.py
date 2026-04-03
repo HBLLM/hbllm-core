@@ -523,7 +523,7 @@ class WorkspaceNode(Node):
                             "content": f"Relevant past context:\n{memory_context}",
                         }
                     )
-            except (TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
                 logger.debug("Semantic memory retrieval failed", exc_info=True)
@@ -558,7 +558,7 @@ class WorkspaceNode(Node):
                             "content": f"Applicable learned skills:\n{skill_text}",
                         }
                     )
-            except (TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
                 logger.debug("Procedural memory retrieval failed", exc_info=True)
@@ -569,7 +569,7 @@ class WorkspaceNode(Node):
                 asyncio.gather(_try_semantic(), _try_procedural(), return_exceptions=True),
                 timeout=2.5,
             )
-        except (TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
             logger.debug("Memory context injection timed out for %s", corr_id)
 
     async def _commit_to_decision(self, corr_id: str, best_thought: dict[str, Any]):

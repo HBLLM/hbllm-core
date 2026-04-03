@@ -11,7 +11,7 @@ import hmac
 import logging
 import time
 from collections import defaultdict
-from datetime import UTC
+from datetime import timezone
 
 import redis.asyncio as redis
 
@@ -134,7 +134,7 @@ class RedisBus(MessageBus):
             # Wait for correlated response
             response = await asyncio.wait_for(future, timeout=timeout)
             return response
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             self._pending_requests.pop(message.id, None)
             raise TimeoutError(
                 f"Request {message.id} to topic '{topic}' timed out after {timeout}s"
@@ -222,7 +222,7 @@ class RedisBus(MessageBus):
                     # Dispatch to local subscribers
                     await self._dispatch_to_subscribers(topic, message)
 
-            except (TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 continue
             except redis.ConnectionError:
                 self.metrics.reconnections += 1

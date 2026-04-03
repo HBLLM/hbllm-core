@@ -304,7 +304,7 @@ async def profile_pipeline() -> BenchmarkReport:
 
     try:
         await asyncio.wait_for(received.wait(), timeout=5.0)
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         pass
 
     if latencies:

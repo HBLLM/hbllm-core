@@ -12,7 +12,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -96,7 +96,7 @@ class EpisodicMemory:
             The generated ID of the turn.
         """
         turn_id = str(uuid.uuid4())
-        now_iso = datetime.now(UTC).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         meta_str = json.dumps(metadata) if metadata else "{}"
 
         conn = self._get_conn()
@@ -254,7 +254,7 @@ class EpisodicMemory:
         """
         from datetime import timedelta
 
-        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
         conn = self._get_conn()
         if tenant_id:

@@ -44,7 +44,12 @@ async def test_world_model_safe_code(simulated_bus):
     )
 
     await bus.publish("workspace.simulate", msg)
-    await asyncio.sleep(0.1)
+
+    # Poll for response instead of hard sleep to prevent flaky CI failures
+    for _ in range(10):
+        if len(responses) > 0:
+            break
+        await asyncio.sleep(0.1)
 
     assert len(responses) == 1
     resp = responses[0]
@@ -80,7 +85,12 @@ async def test_world_model_dangerous_import(simulated_bus):
     )
 
     await bus.publish("workspace.simulate", msg)
-    await asyncio.sleep(0.1)
+
+    # Poll for response instead of hard sleep to prevent flaky CI failures
+    for _ in range(10):
+        if len(responses) > 0:
+            break
+        await asyncio.sleep(0.1)
 
     assert len(responses) == 1
     resp = responses[0]
@@ -112,7 +122,12 @@ async def test_world_model_syntax_error(simulated_bus):
     )
 
     await bus.publish("workspace.simulate", msg)
-    await asyncio.sleep(0.1)
+    
+    # Poll for response instead of hard sleep to prevent flaky CI failures
+    for _ in range(10):
+        if len(responses) > 0:
+            break
+        await asyncio.sleep(0.1)
 
     assert len(responses) == 1
     resp = responses[0]

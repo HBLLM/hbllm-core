@@ -24,7 +24,10 @@ import operator
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
+
+class StrEnum(str, Enum):
+    pass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 

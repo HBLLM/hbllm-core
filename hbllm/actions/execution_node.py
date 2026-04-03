@@ -220,7 +220,7 @@ class ExecutionNode(Node):
                     stdout, stderr = await asyncio.wait_for(
                         proc.communicate(), timeout=self.timeout
                     )
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     proc.kill()
                     await proc.communicate()
                     return {

@@ -235,7 +235,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
                         # Augment the user input seamlessly so the router and experts know what they are looking at
                         user_input = f"<image_caption>{caption}</image_caption>\n{text_query}"
-                    except TimeoutError:
+                    except (TimeoutError, asyncio.TimeoutError):
                         print("[Vision Error]: Timed out waiting for VisionNode.\n")
                         continue
                     except Exception as e:
@@ -345,7 +345,7 @@ async def async_main(args: argparse.Namespace) -> None:
                         continue
 
                     print(f"\n{search_resp.payload.get('text', '')}\n")
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     print("[Search Error]: Timed out waiting for BrowserNode.\n")
                 except Exception as e:
                     print(f"[Search Error]: {e}\n")
@@ -380,7 +380,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
                     # Store context seamlessly
                     user_input = f"<executed_code>{code}</executed_code>\n<stdout>{stdout}</stdout>\n<stderr>{stderr}</stderr>\nI executed the code above."
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     print("[Execution Error]: Timed out waiting for ExecutionNode.\n")
                     continue
                 except Exception as e:
@@ -440,7 +440,7 @@ async def async_main(args: argparse.Namespace) -> None:
                             content = res.get("content", "").replace("\n", " ")
                             print(f"  {idx + 1}. (Score: {score:.2f}) {content[:100]}...")
                         print()
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     print("[Memory Error]: Timed out waiting for MemoryNode.\n")
                 except Exception as e:
                     print(f"[Memory Error]: {e}\n")
@@ -522,7 +522,7 @@ async def async_main(args: argparse.Namespace) -> None:
             break
         except KeyboardInterrupt:
             break
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             print("\n[Error: System timed out waiting for a response]\n")
         except Exception as e:
             print(f"\n[Unexpected Error: {e}]\n")

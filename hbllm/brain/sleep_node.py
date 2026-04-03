@@ -115,7 +115,7 @@ class SleepCycleNode(Node):
                 return
             report["goals_replayed"] = await self._replay_curiosity_goals()
 
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             logger.warning("[SleepNode] Timeout during sleep cycle. Waking up.")
         except Exception as e:
             logger.error("[SleepNode] Sleep cycle interrupted by internal error: %s", e)
@@ -263,7 +263,7 @@ class SleepCycleNode(Node):
             await asyncio.wait_for(training_complete_event.wait(), timeout=900.0)
             logger.info("[SleepNode] Continuous DPO phase completed successfully.")
             return True
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             logger.warning("[SleepNode] DPO training timed out after 15 minutes.")
             return False
         except Exception as e:

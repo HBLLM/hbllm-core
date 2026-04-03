@@ -315,7 +315,7 @@ class HBLLMMcpServer:
         try:
             response = await bus.request("workspace.process", msg, timeout=60.0)
             return {"response": response.payload.get("response", ""), "message_id": response.id}
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return {"response": "Processing timed out", "error": True}
 
     async def _tool_hbllm_memory_query(self, bus: MessageBus, args: dict) -> dict:
@@ -334,7 +334,7 @@ class HBLLMMcpServer:
         try:
             response = await bus.request("memory.search", msg, timeout=30.0)
             return response.payload
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return {"results": [], "error": "Memory query timed out"}
 
     async def _tool_hbllm_memory_store(self, bus: MessageBus, args: dict) -> dict:
@@ -367,7 +367,7 @@ class HBLLMMcpServer:
         try:
             response = await bus.request("identity.query", msg, timeout=10.0)
             return response.payload
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return {"error": "Identity query timed out"}
 
     async def _tool_hbllm_identity_set(self, bus: MessageBus, args: dict) -> dict:
@@ -394,7 +394,7 @@ class HBLLMMcpServer:
         try:
             response = await bus.request("planner.plan", msg, timeout=60.0)
             return response.payload
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return {"error": "Planning timed out"}
 
     async def _tool_hbllm_feedback(self, bus: MessageBus, args: dict) -> dict:

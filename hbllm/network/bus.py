@@ -13,7 +13,7 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
-from datetime import UTC
+from datetime import timezone
 from typing import Any, Protocol, runtime_checkable
 
 from hbllm.network.messages import Message
@@ -166,7 +166,7 @@ class InProcessBus:
             # Wait for correlated response
             response = await asyncio.wait_for(future, timeout=timeout)
             return response
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             raise TimeoutError(
                 f"Request {message.id} to topic '{topic}' timed out after {timeout}s"
             )
@@ -197,7 +197,7 @@ class InProcessBus:
                 priority_key, _counter, topic, message = await asyncio.wait_for(
                     self._queue.get(), timeout=0.1
                 )
-            except (TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 continue
 
             # TTL enforcement: drop expired messages

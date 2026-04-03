@@ -261,7 +261,7 @@ class McpClientNode(Node):
 
         try:
             return await asyncio.wait_for(future, timeout=timeout)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             self._pending.pop(req_id, None)
             raise TimeoutError(f"MCP request '{method}' timed out after {timeout}s")
 
@@ -352,7 +352,7 @@ class McpClientNode(Node):
             try:
                 self._process.terminate()
                 await asyncio.wait_for(self._process.wait(), timeout=5)
-            except (TimeoutError, ProcessLookupError):
+            except (TimeoutError, asyncio.TimeoutError, ProcessLookupError):
                 self._process.kill()
             self._process = None
 

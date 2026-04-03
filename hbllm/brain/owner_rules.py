@@ -19,7 +19,7 @@ import re
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -302,7 +302,7 @@ class OwnerRuleStore:
         parsed = parse_owner_rule(text)
         rule_id = uuid.uuid4().hex[:12]
         policy_name = f"owner_{rule_id}"
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         conditions_json = json.dumps([c.to_dict() for c in parsed.conditions])
 
@@ -384,7 +384,7 @@ class OwnerRuleStore:
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE owner_rules SET enabled = ?, updated_at = ? WHERE id = ?",
-                (int(enabled), datetime.now(UTC).isoformat(), rule_id),
+                (int(enabled), datetime.now(timezone.utc).isoformat(), rule_id),
             )
             return cursor.rowcount > 0
 

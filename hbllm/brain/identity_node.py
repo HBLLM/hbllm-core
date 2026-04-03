@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +52,7 @@ class IdentityProfile:
         self.goals = goals or []
         self.constraints = constraints or []
         self.personality_traits = personality_traits or {}
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         self.created_at = created_at or now
         self.updated_at = updated_at or now
 
@@ -107,7 +107,7 @@ class IdentityStore:
 
     def upsert(self, profile: IdentityProfile) -> None:
         """Insert or update a tenant's identity profile."""
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """

@@ -15,7 +15,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -89,7 +89,7 @@ class ProceduralMemory:
         if not steps:
             raise ValueError("steps must not be empty")
 
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         # Check if skill already exists for this tenant
         with sqlite3.connect(self.db_path) as conn:
@@ -180,7 +180,7 @@ class ProceduralMemory:
                 """UPDATE skills
                    SET usage_count = ?, success_rate = ?, updated_at = ?
                    WHERE id = ?""",
-                (count, new_rate, datetime.now(UTC).isoformat(), skill_id),
+                (count, new_rate, datetime.now(timezone.utc).isoformat(), skill_id),
             )
 
     def get_most_used(self, tenant_id: str, top_k: int = 5) -> list[dict[str, Any]]:

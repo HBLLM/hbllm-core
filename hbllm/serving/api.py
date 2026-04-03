@@ -868,7 +868,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
             response_text=response_text,
             source_node=source,
         )
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         raise HTTPException(status_code=504, detail="Pipeline timed out (30s)")
     finally:
         # Always clean up subscription to prevent memory leak
@@ -956,7 +956,7 @@ async def chat_stream(request: ChatRequest):
             while True:
                 try:
                     chunk = await asyncio.wait_for(token_queue.get(), timeout=30.0)
-                except TimeoutError:
+                except (TimeoutError, asyncio.TimeoutError):
                     yield f"data: {_json.dumps({'token': '', 'done': True, 'error': 'timeout'})}\n\n"
                     break
 
@@ -1005,7 +1005,7 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20):
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         return {"session_id": session_id, "turns": []}
 
 
@@ -1081,7 +1081,7 @@ async def knowledge_neighbors(
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         return {"neighbors": [], "entity": entity}
 
 
@@ -1113,7 +1113,7 @@ async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5):
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         return {"path": None, "from": from_entity, "to": to_entity}
 
 
@@ -1145,7 +1145,7 @@ async def knowledge_subgraph(entity: str, depth: int = 2):
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         return {"subgraph": {"entities": [], "relations": []}, "entity": entity}
 
 
@@ -1177,7 +1177,7 @@ async def knowledge_stats():
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
         return result.payload
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         return {"entity_count": 0, "relation_count": 0}
 
 
@@ -1303,7 +1303,7 @@ async def chat_websocket(ws: WebSocket):
                 )
                 await bus.publish("memory.store", store_msg)
 
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 await ws.send_json({"token": "", "done": True, "error": "timeout"})
 
     except WebSocketDisconnect:

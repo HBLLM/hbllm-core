@@ -61,7 +61,7 @@ async def run_tot_benchmark() -> dict[str, Any]:
     # Wait for completion
     try:
         await asyncio.wait_for(task, timeout=15.0)
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         print("ToT execution timed out, measuring overhead to this point.")
 
     end_time = time.time()
