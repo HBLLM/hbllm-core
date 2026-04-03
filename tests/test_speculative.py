@@ -8,7 +8,7 @@ class MockModel(nn.Module):
         self.vocab_size = vocab_size
         self.always_predict = always_predict
         
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         batch, seq_len = x.shape
         logits = torch.zeros(batch, seq_len, self.vocab_size)
         # Put 100% logic on the always_predict token to make probabilities deterministic
@@ -27,7 +27,7 @@ def test_speculative_equivalence():
     input_ids = torch.tensor([[1, 2]])
     
     # 2 tokens generated + 1 free token from perfect approval
-    out = speculate_step(main_model, draft_model, input_ids, input_ids, K=2)
+    out, _, _ = speculate_step(main_model, draft_model, input_ids, input_ids, K=2)
     assert out.shape == (1, 3)
     assert out[0, 0].item() == 3
     assert out[0, 1].item() == 3
@@ -37,7 +37,7 @@ def test_speculative_equivalence():
     draft_model = MockModel(vocab_size=10, always_predict=4)
     main_model = MockModel(vocab_size=10, always_predict=7)
     
-    out = speculate_step(main_model, draft_model, input_ids, input_ids, K=2)
+    out, _, _ = speculate_step(main_model, draft_model, input_ids, input_ids, K=2)
     # The first token is drafted as 4, but target forces it to 7. 
     # Because target probability for 4 is 0.0, the draft is rejected on token 0 constraint,
     # and we get exactly 1 token (the resampled correct token).

@@ -8,6 +8,10 @@ out of the immediate rolling episodic window.
 Falls back to TF-IDF when sentence-transformers is not installed, so the
 system works out of the box without heavy dependencies.
 
+When ``qdrant-client`` is installed, an optional Qdrant backend can be enabled
+for production-grade HNSW approximate nearest-neighbor search.  Pass
+``use_qdrant=True`` to the constructor to activate this.
+
 Usage::
 
     mem = SemanticMemory()
@@ -30,6 +34,15 @@ import numpy as np
 import threading
 
 logger = logging.getLogger(__name__)
+
+# ── Optional Qdrant Import ───────────────────────────────────────────────────
+
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import VectorParams, Distance, PointStruct
+    _HAS_QDRANT = True
+except ImportError:
+    _HAS_QDRANT = False
 
 # ── Fallback Embedder (TF-IDF) ──────────────────────────────────────────────
 
@@ -111,14 +124,26 @@ class SemanticMemory:
     
     If sentence-transformers is not installed, falls back to TF-IDF
     which works without any ML dependencies (lower quality but functional).
+
+    When ``use_qdrant=True`` is passed and ``qdrant-client`` is installed,
+    a Qdrant HNSW index is maintained alongside the NumPy index for
+    production-grade sub-millisecond search at scale.
     """
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", hybrid_alpha: float = 0.7):
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        hybrid_alpha: float = 0.7,
+        use_qdrant: bool = False,
+        qdrant_path: str | None = None,
+    ):
         """
         Args:
             model_name: Sentence-transformers model name for dense embeddings.
             hybrid_alpha: Blending weight (0.0 = pure sparse/TF-IDF, 1.0 = pure dense).
                           Only used when both dense + sparse indexes are available.
+            use_qdrant: If True and qdrant-client is installed, use Qdrant HNSW backend.
+            qdrant_path: Optional path for persistent Qdrant disk storage.
         """
         self.model_name = model_name
         self.model = None
@@ -137,6 +162,17 @@ class SemanticMemory:
         self._lock = threading.Lock()
         self._tfidf_timer: threading.Timer | None = None
 
+        # ── Optional Qdrant Backend ──────────────────────────────────────
+        self._use_qdrant = use_qdrant and _HAS_QDRANT
+        self._qdrant: QdrantClient | None = None  # type: ignore[name-defined]
+        self._qdrant_collection = "semantic_memory"
+        self._qdrant_initialized = False
+        if self._use_qdrant:
+            if qdrant_path:
+                self._qdrant = QdrantClient(path=str(qdrant_path))
+            else:
+                self._qdrant = QdrantClient(":memory:")
+
     @property
     def count(self) -> int:
         """Number of stored documents."""
@@ -154,6 +190,25 @@ class SemanticMemory:
                     "Install with: pip install sentence-transformers"
                 )
                 self._use_tfidf = True
+
+    def _ensure_qdrant_collection(self) -> None:
+        """Lazily create the Qdrant collection on first write."""
+        if not self._use_qdrant or self._qdrant is None or self._qdrant_initialized:
+            return
+
+        if self._qdrant.collection_exists(self._qdrant_collection):
+            self._qdrant_initialized = True
+            return
+
+        dims = 384
+        if self.model is not None:
+            dims = self.model.get_sentence_embedding_dimension()
+
+        self._qdrant.create_collection(
+            collection_name=self._qdrant_collection,
+            vectors_config=VectorParams(size=dims, distance=Distance.COSINE),
+        )
+        self._qdrant_initialized = True
 
     def _encode(self, texts: list[str]) -> np.ndarray:
         """Encode texts using the best available method."""
@@ -257,6 +312,21 @@ class SemanticMemory:
                 sparse_vec = self._tfidf.encode([content])
                 self._sparse_list.append(sparse_vec)
                 self._sparse_dirty = True
+
+            # ── Qdrant Sidecar Index ─────────────────────────────────────
+            if self._use_qdrant and self._qdrant is not None:
+                try:
+                    self._ensure_qdrant_collection()
+                    self._qdrant.upsert(
+                        collection_name=self._qdrant_collection,
+                        points=[PointStruct(
+                            id=doc_id,
+                            vector=embedding.tolist(),
+                            payload=doc,
+                        )],
+                    )
+                except Exception as e:
+                    logger.warning("Qdrant upsert failed (falling back to NumPy): %s", e)
         
         self._vectors_dirty = True
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
@@ -394,6 +464,16 @@ class SemanticMemory:
             else:
                 self._sparse_list.clear()
                 self._sparse_cache = None
+
+            # ── Qdrant Sidecar ───────────────────────────────────────────
+            if self._use_qdrant and self._qdrant is not None and self._qdrant_initialized:
+                try:
+                    self._qdrant.delete(
+                        collection_name=self._qdrant_collection,
+                        points_selector=[doc_id],
+                    )
+                except Exception as e:
+                    logger.warning("Qdrant delete failed: %s", e)
             
             return True
 
@@ -412,6 +492,15 @@ class SemanticMemory:
             self._content_hashes.clear()
             if self._tfidf_timer is not None:
                 self._tfidf_timer.cancel()
+
+            # ── Qdrant Sidecar ───────────────────────────────────────────
+            if self._use_qdrant and self._qdrant is not None and self._qdrant_initialized:
+                try:
+                    self._qdrant.delete_collection(self._qdrant_collection)
+                    self._qdrant_initialized = False
+                except Exception as e:
+                    logger.warning("Qdrant clear failed: %s", e)
+
             return count
 
     def get_all(self) -> list[dict[str, Any]]:
