@@ -134,6 +134,7 @@ nav:
       - Configuration: guides/configuration.md
       - Custom Nodes: guides/custom-nodes.md
       - Training Pipeline: guides/training.md
+      - Robotics & IoT: guides/robotics-iot.md
       - Deployment: guides/deployment.md
   - API Reference:
       - Brain Factory: api/brain-factory.md
