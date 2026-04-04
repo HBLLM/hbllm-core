@@ -665,7 +665,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="HBLLM Cognitive API",
-    description="REST API for the Hierarchical Brain LLM — a modular cognitive architecture with multi-tenant isolation.",
+    description="REST API for the Human Brain LLM — a modular cognitive architecture with multi-tenant isolation.",
     version="1.0.0",
     lifespan=lifespan,
 )

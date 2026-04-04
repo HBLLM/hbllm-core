@@ -4,7 +4,7 @@ License text copyright (c) 2017 MariaDB Corporation Ab, MariaDB Foundation Ab an
 
 "This License" refers to version 1.1 of the Business Source License, published by MariaDB Corporation Ab.
 
-The "Licensed Work" refers to the Hierarchical Brain LLM (HBLLM) architecture and associated source code.
+The "Licensed Work" refers to the Human Brain LLM (HBLLM) architecture and associated source code.
 
 The "Licensor" refers to Dumith Salinda and contributing developers of HBLLM.
 

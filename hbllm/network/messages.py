@@ -197,6 +197,7 @@ class SpawnRequestPayload(BaseModel):
     trigger_query: str
     confidence_score: float
     tenant_id: str | None = None
+    lora_rank: int | None = None  # Override rank (4, 8, 16, 32, 64)
 
 
 class SystemImprovePayload(BaseModel):
