@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType, QueryPayload
+from hbllm.serving.auth import JWTAuthMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     """Incoming chat message from a tenant."""
 
-    tenant_id: str = Field(..., description="Unique tenant identifier")
+    tenant_id: str = Field(default="", description="Unique tenant identifier (overridden by JWT)")
     session_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()), description="Session identifier"
     )
@@ -130,6 +131,11 @@ async def _boot_brain(
         bus = RedisBus(redis_url=redis_url)
     else:
         bus = InProcessBus()
+
+    from hbllm.network.rate_limiter import RateLimitInterceptor
+
+    limiter = RateLimitInterceptor(target_rpm=60.0)
+    bus.add_interceptor(limiter.intercept)
 
     registry = ServiceRegistry()
     await bus.start()
@@ -675,6 +681,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(JWTAuthMiddleware)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -876,13 +883,14 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
 
 
 @app.post("/v1/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(api_req: Request, request: ChatRequest):
     """
     Send a message through the HBLLM system.
 
     Automatically routes to the full brain pipeline or external LLM provider
     based on system mode. Use 'provider' field to force a specific provider.
     """
+    request.tenant_id = getattr(api_req.state, "tenant_id", "default")
     mode = _state.get("mode", "provider")
 
     # Explicit provider override always uses provider path
@@ -897,7 +905,7 @@ async def chat(request: ChatRequest):
 
 
 @app.post("/v1/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(api_req: Request, request: ChatRequest):
     """
     Stream a response from the cognitive pipeline as Server-Sent Events (SSE).
 
@@ -905,6 +913,7 @@ async def chat_stream(request: ChatRequest):
         data: {"token": "...", "done": false}
         data: {"token": "", "done": true, "correlation_id": "..."}
     """
+    request.tenant_id = getattr(api_req.state, "tenant_id", "default")
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")

@@ -11,8 +11,9 @@ import hmac
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable, Coroutine
 from datetime import timezone
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 import redis.asyncio as redis
 
@@ -50,7 +51,9 @@ class RedisBus(MessageBus):
         # Message interceptors for proactive governance
         self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
 
-    def add_interceptor(self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]) -> None:
+    def add_interceptor(
+        self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]
+    ) -> None:
         """Add an interceptor to evaluate messages before queuing."""
         self._interceptors.append(interceptor)
 
@@ -117,7 +120,9 @@ class RedisBus(MessageBus):
                     return
                 message = new_msg
             except Exception as e:
-                logger.error("Interceptor failed on topic '%s', blocking message. Error: %s", topic, e)
+                logger.error(
+                    "Interceptor failed on topic '%s', blocking message. Error: %s", topic, e
+                )
                 self.metrics.record_drop(topic)
                 return
 
@@ -161,10 +166,17 @@ class RedisBus(MessageBus):
                 f"Request {message.id} to topic '{topic}' timed out after {timeout}s"
             )
 
-    async def subscribe(self, topic: str, handler: MessageHandler, tenant_id: str | None = None) -> Subscription:
+    async def subscribe(
+        self, topic: str, handler: MessageHandler, tenant_id: str | None = None
+    ) -> Subscription:
         """Subscribe a handler to a topic locally."""
         self._sub_counter += 1
-        sub = Subscription(topic=topic, handler=handler, sub_id=f"redis_sub-{self._sub_counter}", tenant_id=tenant_id)
+        sub = Subscription(
+            topic=topic,
+            handler=handler,
+            sub_id=f"redis_sub-{self._sub_counter}",
+            tenant_id=tenant_id,
+        )
         self._subscriptions[topic].append(sub)
         logger.debug("Subscribed locally to '%s' (id=%s)", topic, sub.id)
         return sub

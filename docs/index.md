@@ -14,7 +14,7 @@ description: "Open-source AGI framework that runs without massive GPU or VRAM. 2
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE)
+[![License](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
 
@@ -361,7 +361,7 @@ Please review our [Contributing Guide](contributing.md) for Pull Request guideli
 
 ## License
 
-HBLLM Core is released under the **MIT License** — free for personal, commercial, and academic research use.
+HBLLM Core is released under the **Business Source License 1.1 (BUSL-1.1)** — free for personal, academic, and internal business use. Commercial SaaS hosting requires a separate license. On April 4th, 2030, this version automatically converts to [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 <div style="text-align: center; margin-top: 3rem;">
   <p><strong>HBLLM Core</strong> — Autonomous Agent AI that thinks, not just responds.</p>

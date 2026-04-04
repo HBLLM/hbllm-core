@@ -256,7 +256,11 @@ class SemanticMemory:
         return hashlib.md5(content.encode()).hexdigest()
 
     def store(
-        self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False
+        self,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        is_priority: bool = False,
+        tenant_id: str | None = None,
     ) -> str | None:
         """
         Embed and store a document.
@@ -265,15 +269,20 @@ class SemanticMemory:
             content: Text to embed and store.
             metadata: Optional metadata dict.
             is_priority: Whether this is a high-salience priority document.
+            tenant_id: Secure namespace to partition the data under.
 
         Returns:
             UUID of the stored document, or None if skipped.
         """
         with self._lock:
-            return self._store_unsafe(content, metadata, is_priority)
+            return self._store_unsafe(content, metadata, is_priority, tenant_id)
 
     def _store_unsafe(
-        self, content: str, metadata: dict[str, Any] | None = None, is_priority: bool = False
+        self,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        is_priority: bool = False,
+        tenant_id: str | None = None,
     ) -> str | None:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
@@ -292,6 +301,7 @@ class SemanticMemory:
         meta = metadata or {}
         if is_priority:
             meta["is_priority"] = True
+        meta["tenant_id"] = tenant_id
 
         doc_id = str(uuid.uuid4())
         doc = {"id": doc_id, "content": content, "metadata": meta}
@@ -369,6 +379,7 @@ class SemanticMemory:
         top_k: int = 3,
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
+        tenant_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search for the most semantically similar documents to the query.
@@ -382,6 +393,7 @@ class SemanticMemory:
             reward_scores: Optional dict mapping doc UUID → reward score.
                            Positive rewards boost documents, negative ones penalize.
             reward_boost: How much to weight reward scores (default 0.1).
+            tenant_id: Secure namespace to query strictly within.
 
         Returns:
             List of document dicts with "score" field, sorted by relevance.
@@ -430,6 +442,16 @@ class SemanticMemory:
             for idx, doc_id in enumerate(self.ids):
                 if doc_id in reward_scores:
                     final_scores[idx] += reward_boost * reward_scores[doc_id]
+
+        # --- Security: Hard Partition Masking ---
+        if tenant_id and tenant_id != "system":
+            tenant_mask = np.array(
+                [
+                    self.documents[doc_id]["metadata"].get("tenant_id") == tenant_id
+                    for doc_id in self.ids
+                ]
+            )
+            final_scores[~tenant_mask] = -1.0  # Erase non-tenant similarity completely
 
         # Get top-k indices
         top_indices = np.argsort(final_scores)[::-1][:top_k]

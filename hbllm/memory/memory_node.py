@@ -136,8 +136,9 @@ class MemoryNode(Node):
         await asyncio.to_thread(
             self.semantic_db.store,
             pattern_content,
-            {"source": "reflection_engine", "domain": domain},
+            {"source": "reflection_engine", "domain": domain, "tenant_id": message.tenant_id},
             is_priority=False,  # Patterns grow general semantic memory
+            tenant_id=message.tenant_id,
         )
 
     async def handle_salience(self, message: Message) -> None:
@@ -159,8 +160,13 @@ class MemoryNode(Node):
             await asyncio.to_thread(
                 self.semantic_db.store,
                 content,
-                {"source": "salience_detector", "message_id": payload.get("message_id")},
+                {
+                    "source": "salience_detector",
+                    "message_id": payload.get("message_id"),
+                    "tenant_id": message.tenant_id,
+                },
                 is_priority=True,
+                tenant_id=message.tenant_id,
             )
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -298,7 +304,15 @@ class MemoryNode(Node):
             # Offload semantic storage to a background thread with error handling
             task = asyncio.create_task(
                 asyncio.to_thread(
-                    self.semantic_db.store, content, {"session_id": session_id, "role": role}
+                    self.semantic_db.store,
+                    content,
+                    {
+                        "session_id": session_id,
+                        "role": role,
+                        "tenant_id": payload.tenant_id or message.tenant_id,
+                    },
+                    is_priority=False,
+                    tenant_id=payload.tenant_id or message.tenant_id,
                 )
             )
             task.add_done_callback(self._handle_background_task_result)
@@ -351,7 +365,12 @@ class MemoryNode(Node):
             if not query:
                 return message.create_error("Missing 'query_text'")
 
-            results = await asyncio.to_thread(self.semantic_db.search, query, limit)
+            results = await asyncio.to_thread(
+                self.semantic_db.search,
+                query,
+                limit,
+                tenant_id=payload.tenant_id or message.tenant_id,
+            )
 
             return message.create_response(
                 {

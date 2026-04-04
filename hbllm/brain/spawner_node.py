@@ -55,15 +55,17 @@ class SpawnerNode(Node):
         logger.info("Spawner received request to expand into domain: '%s'", payload.topic)
 
         # Launch the spawn process in the background so we don't block the bus
-        task = asyncio.create_task(self._spawn_new_module(payload.topic))
+        task = asyncio.create_task(self._spawn_new_module(payload.topic, message.tenant_id))
         self.spawning_tasks.add(task)
         task.add_done_callback(self.spawning_tasks.discard)
 
         return None
 
-    async def _spawn_new_module(self, topic: str) -> None:
+    async def _spawn_new_module(self, topic: str, tenant_id: str | None = None) -> None:
         """The core expansion logic: resolve adapter → (or synthesize + train) → register module."""
         domain_name = topic.replace(" ", "_").lower()
+        if tenant_id and tenant_id != "system":
+            domain_name = f"{tenant_id}_{domain_name}"
         new_node_id = f"domain_{domain_name}"
 
         logger.info("--- Self-Expansion Initiated for '%s' ---", domain_name)
@@ -92,7 +94,7 @@ class SpawnerNode(Node):
                 logger.error("Data synthesis failed for %s: %s", domain_name, e)
                 return
 
-            lora_state_dict = await self._train_lora_adapter(domain_name, dataset_path)
+            lora_state_dict = await self._train_lora_adapter(domain_name, dataset_path, tenant_id)
 
         # 3. Create and Register the New Node
         try:
@@ -127,7 +129,7 @@ class SpawnerNode(Node):
         except Exception as e:
             logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
 
-    async def _train_lora_adapter(self, domain_name: str, dataset_path: str) -> dict | None:
+    async def _train_lora_adapter(self, domain_name: str, dataset_path: str, tenant_id: str | None = None) -> dict | None:
         """Train a LoRA adapter on the synthetic dataset."""
         logger.info("Training LoRA adapter for domain '%s'...", domain_name)
 
@@ -221,6 +223,17 @@ class SpawnerNode(Node):
                 save_path = save_dir / "lora_adapter.pt"
                 torch.save(adapter_state, save_path)
                 logger.info("Saved domain adapter: %s", save_path)
+
+                # Apply strictly scoped adapter immediately if using PEFT
+                if tenant_id and hasattr(train_model, "add_adapter"):
+                    try:
+                        self.model.add_adapter(tenant_id, adapter_state)
+                    except Exception as adapter_err:
+                        logger.warning(
+                            "Failed to inject live adapter for tenant '%s': %s",
+                            tenant_id,
+                            adapter_err,
+                        )
 
                 return adapter_state
 

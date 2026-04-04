@@ -196,6 +196,7 @@ class SpawnRequestPayload(BaseModel):
     topic: str
     trigger_query: str
     confidence_score: float
+    tenant_id: str | None = None
 
 
 class SystemImprovePayload(BaseModel):

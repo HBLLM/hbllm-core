@@ -32,7 +32,13 @@ class LLMInterface:
         self.tokenizer = tokenizer
         self.device = device or next(model.parameters()).device
 
-    async def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 256,
+        temperature: float = 0.7,
+        tenant_id: str | None = None,
+    ) -> str:
         """
         Generate free-form text from the model given a prompt.
 
@@ -44,9 +50,13 @@ class LLMInterface:
         Returns:
             The generated text string (excluding the prompt).
         """
-        return await asyncio.to_thread(self._generate_sync, prompt, max_tokens, temperature)
+        return await asyncio.to_thread(
+            self._generate_sync, prompt, max_tokens, temperature, tenant_id
+        )
 
-    async def generate_json(self, prompt: str, max_tokens: int = 256) -> dict[str, Any]:
+    async def generate_json(
+        self, prompt: str, max_tokens: int = 256, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         """
         Generate structured JSON from the model.
 
@@ -61,48 +71,80 @@ class LLMInterface:
             Parsed JSON dict. Returns {"error": "..."} if parsing fails.
         """
         json_prompt = f"{prompt}\n\nRespond with ONLY a valid JSON object, no other text."
-        raw_output = await self.generate(json_prompt, max_tokens=max_tokens, temperature=0.3)
+        raw_output = await self.generate(
+            json_prompt, max_tokens=max_tokens, temperature=0.3, tenant_id=tenant_id
+        )
         return self._extract_json(raw_output)
 
-    def _generate_sync(self, prompt: str, max_tokens: int, temperature: float) -> str:
+    def _generate_sync(
+        self, prompt: str, max_tokens: int, temperature: float, tenant_id: str | None = None
+    ) -> str:
         """Synchronous generation with KV-cache autoregressive decoding."""
-        tokens = list(self._generate_stream_sync(prompt, max_tokens, temperature))
+        tokens = list(self._generate_stream_sync(prompt, max_tokens, temperature, tenant_id))
         return "".join(tokens)
 
-    def _generate_stream_sync(self, prompt: str, max_tokens: int, temperature: float):
+    def _generate_stream_sync(
+        self, prompt: str, max_tokens: int, temperature: float, tenant_id: str | None = None
+    ):
         """Synchronous token-by-token generator with KV-cache decoding."""
         enc = self.tokenizer.encode(prompt)
         input_ids = torch.tensor([enc], dtype=torch.long).to(self.device)
 
-        self.model.eval()
-        past_key_values = None
+        # Dynamic LoRA Adapter Multiplexing
+        if tenant_id and hasattr(self.model, "set_adapter"):
+            try:
+                self.model.set_adapter(tenant_id)
+            except ValueError:
+                # Fallback to base model if tenant has no specific LoRA loaded
+                try:
+                    self.model.set_adapter("default")
+                except ValueError:
+                    pass
 
-        with torch.no_grad():
-            for _ in range(max_tokens):
-                model_input = input_ids[:, -1:] if past_key_values else input_ids
+        try:
+            self.model.eval()
+            past_key_values = None
 
-                outputs = self.model(model_input, past_key_values=past_key_values, use_cache=True)
+            with torch.no_grad():
+                for _ in range(max_tokens):
+                    model_input = input_ids[:, -1:] if past_key_values else input_ids
 
-                logits = outputs["logits"][:, -1, :]
-                past_key_values = outputs.get("past_key_values")
+                    outputs = self.model(
+                        model_input, past_key_values=past_key_values, use_cache=True
+                    )
 
-                # Temperature-scaled sampling
-                if temperature > 0:
-                    scaled = logits / temperature
-                    probs = torch.softmax(scaled, dim=-1)
-                    next_token = torch.multinomial(probs, num_samples=1).item()
-                else:
-                    next_token = logits.argmax().item()
+                    logits = outputs["logits"][:, -1, :]
+                    past_key_values = outputs.get("past_key_values")
 
-                input_ids = torch.cat(
-                    [input_ids, torch.tensor([[next_token]], device=self.device)], dim=1
-                )
+                    # Temperature-scaled sampling
+                    if temperature > 0:
+                        scaled = logits / temperature
+                        probs = torch.softmax(scaled, dim=-1)
+                        next_token = torch.multinomial(probs, num_samples=1).item()
+                    else:
+                        next_token = logits.argmax().item()
 
-                # Decode only the new token and yield it
-                token_text = self.tokenizer.decode_to_string([next_token])
-                yield token_text
+                    input_ids = torch.cat(
+                        [input_ids, torch.tensor([[next_token]], device=self.device)], dim=1
+                    )
 
-    async def generate_stream(self, prompt: str, max_tokens: int = 256, temperature: float = 0.7):
+                    # Decode only the new token and yield it
+                    token_text = self.tokenizer.decode_to_string([next_token])
+                    yield token_text
+        finally:
+            if hasattr(self.model, "set_adapter"):
+                try:
+                    self.model.set_adapter("default")
+                except ValueError:
+                    pass
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        max_tokens: int = 256,
+        temperature: float = 0.7,
+        tenant_id: str | None = None,
+    ):
         """
         Async generator that yields tokens one-at-a-time during decoding.
 
@@ -117,7 +159,7 @@ class LLMInterface:
 
         def _run():
             try:
-                for token in self._generate_stream_sync(prompt, max_tokens, temperature):
+                for token in self._generate_stream_sync(prompt, max_tokens, temperature, tenant_id):
                     token_queue.put(token)
             finally:
                 token_queue.put(None)  # Sentinel
