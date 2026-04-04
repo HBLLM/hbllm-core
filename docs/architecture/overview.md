@@ -1,6 +1,6 @@
 ---
 title: "Architecture Overview — HBLLM Cognitive Architecture"
-description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: cognitive nodes, async message bus, 5 memory systems, and the edge-optimized zoning model."
+description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 28+ cognitive nodes, async message bus, 6 memory systems, and the edge-optimized zoning model."
 ---
 
 # Architecture Overview
@@ -105,4 +105,4 @@ sequenceDiagram
 
 - [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
 - [Message Bus](message-bus.md) — How Pub/Sub routing works.
-- [Memory Systems](memory-systems.md) — The 5 memory types explained.
+- [Memory Systems](memory-systems.md) — The 6 memory types explained.

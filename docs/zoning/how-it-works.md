@@ -17,7 +17,7 @@ graph TD
     R -->|"Math"| M["Math LoRA ~2MB"]
     R -->|"Unknown"| S["SpawnerNode<br/>(creates new zone)"]
     
-    G --> B["Shared Base Model<br/>125M / 500M / 1.5B"]
+    G --> B["Shared Base Model<br/>125M / 500M / 1.5B (hbllm/model)"]
     C --> B
     M --> B
     S -.->|"new adapter"| B

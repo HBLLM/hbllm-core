@@ -74,6 +74,7 @@ BLOCKED_BUILTINS: frozenset[str] = frozenset(
         "breakpoint",
         "exit",
         "quit",
+        "__builtins__",
     }
 )
 
@@ -128,6 +129,11 @@ class _SecurityVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__") and node.attr.endswith("__"):
             self.violations.append(f"Line {node.lineno}: blocked dunder access '.{node.attr}'")
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in BLOCKED_BUILTINS:
+            self.violations.append(f"Line {node.lineno}: blocked built-in access '{node.id}'")
         self.generic_visit(node)
 
 

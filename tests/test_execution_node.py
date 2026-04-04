@@ -172,4 +172,4 @@ def test_validate_code_blocked_import():
 def test_validate_code_multiple_violations():
     code = "import os\nimport subprocess\nresult = eval('1+1')"
     violations = validate_code(code)
-    assert len(violations) == 3
+    assert len(violations) == 4

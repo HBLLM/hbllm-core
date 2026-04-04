@@ -25,6 +25,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,6 +126,8 @@ class Brain:
         self.owner_rules: OwnerRuleStore | None = None
         self.sentinel = None  # SentinelNode reference
 
+        self._hardware_loop_task: asyncio.Task | None = None
+
     async def process(
         self,
         text: str,
@@ -135,6 +138,10 @@ class Brain:
         import time as _time
 
         _start = _time.monotonic()
+
+        # Start hardware monitor on first query if not running
+        if not self._hardware_loop_task:
+            self._hardware_loop_task = asyncio.create_task(self._hardware_monitor_loop())
 
         # Token optimization (pre-process)
         if self.token_optimizer:
@@ -174,8 +181,45 @@ class Brain:
 
         return result
 
+    async def _hardware_monitor_loop(self) -> None:
+        """Periodic hardware health check for dynamic model offloading."""
+        try:
+            from hbllm.modules.hardware_hal import HardwareHAL
+            from hbllm.network.messages import Message, MessageType
+        except ImportError:
+            return
+
+        while True:
+            await asyncio.sleep(60)  # Check every minute
+
+            # Simulated model footprint in memory (assume dynamic tracking)
+            # Threshold: > 90%
+            try:
+                import psutil
+
+                mem_percent = psutil.virtual_memory().percent
+            except ImportError:
+                mem_percent = 50.0
+
+            if mem_percent > 90.0:
+                logger.warning(
+                    "[HardwareMonitor] System RAM >90%% (%.1f%%). Triggering memory pressure event.",
+                    mem_percent,
+                )
+                await self.bus.publish(
+                    "system.hardware.critical",
+                    Message(
+                        type=MessageType.EVENT,
+                        topic="system.hardware.critical",
+                        source_node_id="system",
+                        payload={"ram_percent": mem_percent, "action": "offload_experts_requested"},
+                    ),
+                )
+
     async def shutdown(self) -> None:
         """Stop all nodes, pipeline, and bus."""
+        if self._hardware_loop_task:
+            self._hardware_loop_task.cancel()
         await self.pipeline.stop()
         for node in reversed(self.nodes):
             try:

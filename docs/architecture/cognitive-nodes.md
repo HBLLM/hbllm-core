@@ -1,6 +1,6 @@
 ---
 title: "Cognitive Nodes — HBLLM Brain Components"
-description: "Reference documentation for all 25+ cognitive nodes in the HBLLM architecture, including Router, Planner, Critic, Learner, and Spawner."
+description: "Reference documentation for all 28+ cognitive nodes in the HBLLM architecture, including Router, Planner, Critic, Learner, and Spawner."
 ---
 
 # Cognitive Nodes Reference
@@ -161,6 +161,17 @@ The `NodeType` enum defines the categories of nodes:
 - **Type:** `NodeType.CORE`
 - **File:** `hbllm/brain/rule_extractor.py`
 - **Purpose:** Mines high-salience interactions for recurring *if→then* preferences, auto-promoting them to behavioral guardrails.
+
+### RevisionNode
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/brain/revision_node.py`
+- **Purpose:** Manages a self-critique loop that iteratively refines the response based on confidence scores and critic feedback.
+
+### HardwareHAL
+
+- **File:** `hbllm/modules/hardware_hal.py`
+- **Purpose:** Autonomous system introspection. Benchmarks disk latency, CPU threads, and VRAM bandwidth to recommend the optimal quantization policy (INT4 vs INT8) for the current device.
 
 ---
 
