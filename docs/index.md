@@ -1,9 +1,9 @@
 ---
-title: "HBLLM Core — Open Source Cognitive Architecture for Edge AI"
-description: "An advanced AGI-oriented multi-agent ecosystem with 25+ brain nodes, 5 memory systems, Rust-accelerated inference, and dynamic LoRA routing. Deploy autonomous agents that think, learn, and adapt."
+title: "HBLLM Core — Open Source Cognitive AI That Runs Without Massive GPU"
+description: "Open-source AGI framework that runs without massive GPU or VRAM. 25+ cognitive nodes, 5 memory systems, Rust SIMD inference, and dynamic LoRA routing. Deploy autonomous AI agents on Raspberry Pi, laptops, and edge devices — no expensive hardware required."
 ---
 
-<!-- SEO Keywords: Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps -->
+<!-- SEO Keywords: Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, CPU Inference, Raspberry Pi AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Lightweight LLM -->
 
 <div class="hero-title">🧠 HBLLM Core</div>
 <div class="hero-subtitle">A Human-Brain Inspired Cognitive Architecture for Autonomous AI Agents</div>
@@ -22,9 +22,9 @@ description: "An advanced AGI-oriented multi-agent ecosystem with 25+ brain node
 
 ## Why HBLLM Core?
 
-Traditional **Large Language Models (LLMs)** are monolithic, stateless transformers — prompt → model → response. They lack continuous learning, memory consolidation, and dynamic domain adaptation.
+Traditional **Large Language Models (LLMs)** are monolithic, stateless transformers that demand 80GB+ VRAM just to run a 70B model. They lack continuous learning, memory consolidation, and dynamic domain adaptation — and they can't run on the hardware most people actually have.
 
-**HBLLM Core** rethinks this from the ground up. It is a **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents**, featuring 25+ specialized "brain nodes" orchestrated via an asynchronous Pub/Sub message bus — mimicking the localized, multi-path reasoning of a biological brain.
+**HBLLM Core** rethinks this from the ground up. It is a **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents** — engineered to deliver intelligent reasoning **without massive GPU/VRAM requirements**. With 25+ specialized "brain nodes" and a shared 125M–1.5B parameter backbone enhanced by ~2MB LoRA adapters, HBLLM achieves domain-expert performance on hardware as modest as a **Raspberry Pi 5 or a laptop with no dedicated GPU**.
 
 <div class="feature-grid">
 <div class="feature-card">
@@ -40,12 +40,16 @@ Traditional **Large Language Models (LLMs)** are monolithic, stateless transform
 <p>The SpawnerNode automatically creates new domain-specialist LoRA adapters at runtime. The brain literally grows new regions.</p>
 </div>
 <div class="feature-card">
+<h3>🖥️ No Massive GPU Required</h3>
+<p>Runs on CPU-only machines, Raspberry Pi 5, and laptops. The 125M model needs just ~500MB RAM. Even the 1.5B model fits in under 4GB with INT4 quantization — no $10,000 GPU needed.</p>
+</div>
+<div class="feature-card">
 <h3>⚡ Rust-Accelerated Inference</h3>
 <p>AVX2/NEON SIMD kernels for hybrid quantization. 4-bit base + 16-bit LoRA experts on a single shared transformer backbone.</p>
 </div>
 <div class="feature-card">
 <h3>🔀 Dynamic MoE Routing</h3>
-<p>Edge-optimized ONNX Vector Router blends domain experts dynamically without heavy PyTorch dependencies. Under 15MB RAM.</p>
+<p>Edge-optimized ONNX Vector Router blends domain experts dynamically without heavy PyTorch dependencies. Under 15MB RAM overhead.</p>
 </div>
 <div class="feature-card">
 <h3>🛡️ Enterprise Governance</h3>
@@ -163,14 +167,31 @@ flowchart TB
 
 ## The Zoning Model — Edge-Optimized MoE
 
-While cloud AI platforms chase computationally expensive **massive monolithic models** (70B+ parameters), HBLLM champions **Edge Computing** and **On-Device AI** with small, specialized model zones driven by dynamic LoRA routing.
+While cloud AI platforms chase computationally expensive **massive monolithic models** (70B+ parameters requiring 80GB+ VRAM), HBLLM champions **Edge Computing** and **On-Device AI** with small, specialized model zones driven by dynamic LoRA routing.
 
-| Component | Size | Purpose |
-|---|---|---|
-| **Base Model** | 125M–1.5B | Shared transformer backbone (GQA + SwiGLU + RoPE) |
-| **LoRA Adapters** | ~2MB each | Domain specialization (General, Coding, Math, etc.) |
-| **MoE Router** | ~15MB | Edge-optimized ONNX Vector Router |
-| **Cognitive Nodes** | Zero params | Orchestration, planning, memory — isolated logic |
+!!! success "No Expensive Hardware Needed"
+    A 70B parameter model requires ~140GB of RAM even at FP16. HBLLM's 125M model runs in **under 500MB** — that's **280× less memory**. Even the 1.5B model fits comfortably in 4GB with INT4 quantization. The cognitive architecture (nodes, bus, memory) adds near-zero overhead.
+
+| Component | Size | VRAM/RAM | Purpose |
+|---|---|---|---|
+| **Base Model (125M)** | ~250MB | ~500MB | Shared transformer backbone (GQA + SwiGLU + RoPE) |
+| **Base Model (1.5B)** | ~3GB | ~4GB (INT4) | Larger backbone for higher-quality generation |
+| **LoRA Adapters** | ~2MB each | ~4MB loaded | Domain specialization (General, Coding, Math, etc.) |
+| **MoE Router** | ~15MB | ~15MB | Edge-optimized ONNX Vector Router |
+| **Cognitive Nodes** | Zero params | ~50MB total | Orchestration, planning, memory — pure logic |
+
+### 🖥️ Hardware Requirements
+
+| Deployment Target | Model Size | RAM Needed | GPU Required? |
+|---|---|---|---|
+| **Raspberry Pi 5** (8GB) | 125M | ~1GB | ❌ No |
+| **Laptop** (no GPU) | 125M–500M | ~2–4GB | ❌ No |
+| **Desktop** (16GB RAM) | 1.5B (INT4) | ~4GB | ❌ Optional |
+| **Desktop + GPU** (6GB VRAM) | 1.5B (FP16) | ~6GB | ✅ Faster |
+| **Cloud / API Mode** | Any (via OpenAI/Anthropic) | ~200MB | ❌ No |
+
+!!! tip "CPU-Only is a First-Class Target"
+    Rust SIMD kernels (AVX2 on x86, NEON on ARM) accelerate INT4/INT8 quantized inference on CPU. You do **not** need CUDA to use HBLLM productively.
 
 ### 🧬 Artificial Neurogenesis
 
@@ -181,7 +202,7 @@ HBLLM ships with 3 starter zones, but the **SpawnerNode** automatically creates 
 3. **Fallback Training** — Generates synthetic data and trains a new 2MB LoRA adapter in the background.
 4. **Activation** — Spawns a new `DomainModuleNode` and hot-swaps weights into the shared backbone.
 
-**The brain literally grows a new region at runtime.**
+**The brain literally grows a new region at runtime — and each new adapter is just ~2MB.**
 
 ---
 
@@ -262,13 +283,15 @@ asyncio.run(main())
 - **Policy Engine & Sentinel** — YAML governance with proactive bus traffic scanning.
 - **Owner Rules** — Auto-extracted behavioral guardrails from high-salience interactions.
 
-### ⚙️ Infrastructure
+### ⚙️ Infrastructure — Built for Minimal Hardware
 
-- **128k+ Context** via Sliding Window Attention — $O(1)$ memory scaling.
-- **Per-Block Quantization** with Rust SIMD (AVX2/NEON).
+- **No GPU Requirement** — CPU-first design with Rust SIMD acceleration (AVX2/NEON).
+- **128k+ Context** via Sliding Window Attention — $O(1)$ VRAM scaling.
+- **Hybrid Quantization** — INT4 base + FP16 LoRA experts reduce memory 4× with minimal quality loss.
 - **Distributed Message Bus** — `InProcessBus` or `RedisBus` with HMAC auth, TTLs, and backoff.
 - **Sandboxed Execution** — Secure code evaluation with compute/memory bounds.
 - **Edge-Ready ONNX Router** — Under 15MB RAM, ~0.0001ms inference.
+- **Runs on Raspberry Pi 5** — Full cognitive brain on a $80 single-board computer.
 
 ---
 

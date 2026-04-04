@@ -1,8 +1,9 @@
-site_name: HBLLM Core — Cognitive Architecture for Edge AI
+site_name: HBLLM Core — Cognitive AI That Runs Without Massive GPU
 site_description: >-
-  Open-source AGI framework with 25+ cognitive nodes, multi-tiered memory,
-  Graph-of-Thoughts planning, and Rust-accelerated hybrid quantization.
-  Deploy autonomous agents that think, learn, and adapt on edge devices.
+  Open-source AGI framework that runs without massive GPU or VRAM.
+  25+ cognitive nodes, multi-tiered memory, Rust SIMD inference,
+  and dynamic LoRA routing. Deploy autonomous AI agents on
+  Raspberry Pi, laptops, and edge devices — no expensive hardware required.
 site_author: HBLLM Team
 site_url: https://hbllm.github.io/hbllm-core/
 repo_url: https://github.com/hbllm/hbllm-core

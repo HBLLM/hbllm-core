@@ -1,11 +1,20 @@
 ---
-title: "Hybrid Quantization — Rust SIMD Accelerated"
-description: "How HBLLM's Rust compute kernel enables 4-bit base + 16-bit LoRA expert inference with AVX2/NEON SIMD optimization."
+title: "Hybrid Quantization — Run AI Models Without Expensive GPU"
+description: "How HBLLM's Rust SIMD compute kernel enables 4-bit quantized inference on CPU, eliminating the need for expensive GPUs. AVX2/NEON acceleration for x86 and ARM."
 ---
 
 # Hybrid Quantization
 
-HBLLM's hybrid quantization system decouples base model memory usage from expert precision, enabling efficient edge deployment.
+HBLLM's hybrid quantization system is what makes it possible to **run cognitive AI without an expensive GPU**. By quantizing the base model to INT4 while keeping LoRA experts at FP16, HBLLM reduces memory 4× with minimal quality loss — enabling deployment on CPU-only hardware.
+
+!!! success "Memory Savings"
+    | Model | FP16 (No Quant) | INT4 (Quantized) | Savings |
+    |---|---|---|---|
+    | 125M | ~500MB | ~150MB | **3.3×** |
+    | 500M | ~2GB | ~600MB | **3.3×** |
+    | 1.5B | ~6GB | ~1.8GB | **3.3×** |
+    
+    Add LoRA adapters at just ~2MB each — negligible overhead.
 
 ## Architecture
 

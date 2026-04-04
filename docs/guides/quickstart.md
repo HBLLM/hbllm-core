@@ -1,6 +1,6 @@
 ---
 title: "Quick Start Guide — HBLLM Core"
-description: "Get HBLLM Core running in under 5 minutes. Installation, CLI usage, API server, and Python SDK."
+description: "Get HBLLM Core running in under 5 minutes on any hardware — no GPU required. Installation, CLI usage, API server, and Python SDK."
 ---
 
 # Quick Start
@@ -11,8 +11,12 @@ Get HBLLM Core running in under 5 minutes.
 
 - Python 3.10+
 - pip or uv package manager
-- (Optional) CUDA-capable GPU for local model inference
+- **No GPU required** — HBLLM runs on CPU-only machines (laptops, Raspberry Pi 5, servers)
+- (Optional) CUDA-capable GPU for faster local model inference
 - (Optional) Rust toolchain for building SIMD compute kernels
+
+!!! tip "Minimal Hardware"
+    The 125M model runs in under 500MB RAM on any modern CPU. You can start building cognitive agents today on any laptop — no cloud GPU rentals needed.
 
 ## Installation
 

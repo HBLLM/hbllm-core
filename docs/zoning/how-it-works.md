@@ -1,11 +1,11 @@
 ---
-title: "Zoning Model — How Edge-Optimized MoE Works"
-description: "How HBLLM uses small specialized models with dynamic LoRA routing instead of massive monolithic LLMs."
+title: "Zoning Model — How Edge-Optimized MoE Works Without Massive GPU"
+description: "How HBLLM uses small specialized models with dynamic LoRA routing instead of massive 70B+ LLMs that require expensive GPUs. Run AI agents on a laptop or Raspberry Pi."
 ---
 
 # How the Zoning Model Works
 
-The Zoning Model is HBLLM's approach to efficient, edge-friendly AI. Instead of deploying a single massive model, HBLLM uses **one shared transformer backbone** paired with **lightweight LoRA adapters** that hot-swap at inference time.
+The Zoning Model is HBLLM's approach to **running intelligent AI without massive GPU/VRAM requirements**. Instead of deploying a single 70B+ model that demands 80GB+ VRAM, HBLLM uses **one shared transformer backbone** (125M–1.5B parameters, ~500MB–4GB RAM) paired with **lightweight ~2MB LoRA adapters** that hot-swap at inference time. The result: domain-expert intelligence on a laptop or Raspberry Pi.
 
 ## Core Principle
 

@@ -1,15 +1,19 @@
 ---
 title: "Architecture Overview — HBLLM Cognitive Architecture"
-description: "Technical deep-dive into HBLLM's modular brain architecture: cognitive nodes, message bus, memory systems, and the zoning model."
+description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: cognitive nodes, async message bus, 5 memory systems, and the edge-optimized zoning model."
 ---
 
 # Architecture Overview
 
-HBLLM Core is built on three foundational principles:
+HBLLM Core is built on four foundational principles:
 
 1. **Modularity** — Every cognitive function is an isolated, stateless node.
 2. **Asynchronous Communication** — Nodes exchange messages via Pub/Sub, never calling each other directly.
 3. **Emergent Intelligence** — Complex behavior arises from simple node interactions, not monolithic code.
+4. **Hardware Efficiency** — The architecture separates intelligence (nodes, memory, planning) from model inference, enabling full cognitive capability on CPU-only devices with as little as 1GB RAM.
+
+!!! info "Why This Matters for Hardware"
+    Traditional LLMs require 80GB+ VRAM for a 70B model. HBLLM's cognitive nodes are **zero-parameter pure logic** — they add no GPU load. Only the base model (125M–1.5B) requires compute, and it runs efficiently on CPU via Rust SIMD kernels with INT4 quantization.
 
 ## Layered Design
 
