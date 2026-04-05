@@ -72,19 +72,19 @@ async def profile_memory() -> BenchmarkReport:
     from hbllm.memory.semantic import SemanticMemory
 
     for n in [100, 1_000]:
-        mem = SemanticMemory()
-        mem._use_tfidf = True
+        sem_mem = SemanticMemory()
+        sem_mem._use_tfidf = True
 
         t0 = time.perf_counter()
         for i in range(n):
-            mem.store(f"Document about topic {i} with various keywords and content")
+            sem_mem.store(f"Document about topic {i} with various keywords and content")
         write_time = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        mem.search("topic keywords content")
+        sem_mem.search("topic keywords content")
         search_time = time.perf_counter() - t0
 
-        vec_size = sys.getsizeof(mem.vectors.tobytes()) if mem.vectors is not None else 0
+        vec_size = sys.getsizeof(sem_mem.vectors.tobytes()) if sem_mem.vectors is not None else 0
 
         report.add(
             BenchmarkResult(
@@ -115,10 +115,10 @@ async def profile_memory() -> BenchmarkReport:
     from hbllm.memory.procedural import ProceduralMemory
 
     with tempfile.TemporaryDirectory() as tmp:
-        mem = ProceduralMemory(db_path=Path(tmp) / "proc.db")
+        proc_mem = ProceduralMemory(db_path=Path(tmp) / "proc.db")
         t0 = time.perf_counter()
         for i in range(500):
-            mem.store_skill(
+            proc_mem.store_skill(
                 "t1",
                 f"skill_{i}",
                 f"trigger {i}",
@@ -136,7 +136,7 @@ async def profile_memory() -> BenchmarkReport:
         )
 
         t0 = time.perf_counter()
-        mem.find_skill("t1", "skill_250")
+        proc_mem.find_skill("t1", "skill_250")
         search_time = time.perf_counter() - t0
         report.add(
             BenchmarkResult(
@@ -173,7 +173,7 @@ async def profile_throughput() -> BenchmarkReport:
 
         count = 0
 
-        async def counter(msg):
+        async def counter(msg: Message) -> None:
             nonlocal count
             count += 1
 
@@ -285,7 +285,7 @@ async def profile_pipeline() -> BenchmarkReport:
     latencies: list[float] = []
     received = asyncio.Event()
 
-    async def measure(msg):
+    async def measure(msg: Message) -> None:
         sent_at = msg.payload.get("sent_at", 0)
         latencies.append(time.perf_counter() - sent_at)
         if len(latencies) >= 1000:
@@ -383,7 +383,7 @@ def _print_report(report: BenchmarkReport) -> None:
     print(f"\n{'=' * 70}\n")
 
 
-async def main():
+async def main() -> None:
     parser = argparse.ArgumentParser(description="HBLLM Performance Profiler")
     parser.add_argument("--suite", default="all", choices=list(PROFILE_SUITES.keys()) + ["all"])
     parser.add_argument("--output", type=str, help="Save JSON to file")

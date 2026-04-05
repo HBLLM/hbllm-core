@@ -11,9 +11,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Coroutine
+from typing import Any, TYPE_CHECKING
 
-from hbllm.network.messages import HeartbeatPayload, Message, MessageType
+from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import HealthStatus, NodeHealth
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ class HealthMonitor:
         bus: MessageBus,
         check_interval: float = 10.0,
         heartbeat_timeout: float = 5.0,
-    ):
+    ) -> None:
         self._registry = registry
         self._circuit_breakers = circuit_breakers
         self._bus = bus
@@ -47,9 +48,9 @@ class HealthMonitor:
         self._heartbeat_timeout = heartbeat_timeout
         self._running = False
         self._monitor_task: asyncio.Task[None] | None = None
-        self._on_node_unhealthy_callbacks: list[callable] = []
+        self._on_node_unhealthy_callbacks: list[Callable[[str, NodeHealth], Coroutine[Any, Any, None]]] = []
 
-    def on_node_unhealthy(self, callback: callable) -> None:
+    def on_node_unhealthy(self, callback: Callable[[str, NodeHealth], Coroutine[Any, Any, None]]) -> None:
         """Register a callback for when a node becomes unhealthy."""
         self._on_node_unhealthy_callbacks.append(callback)
 
@@ -81,7 +82,7 @@ class HealthMonitor:
             source_node_id="health_monitor",
             target_node_id=node_id,
             topic=f"node.{node_id}.heartbeat",
-            payload=HeartbeatPayload(node_id="health_monitor").model_dump(),
+            payload={"node_id": "health_monitor"},
         )
 
         start_time = time.monotonic()

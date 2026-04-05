@@ -21,7 +21,7 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from hbllm.network.tracing import trace_span
 
@@ -46,13 +46,13 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 async def _retry_api_call(
-    func,
-    *args,
+    func: Callable[..., Any],
+    *args: Any,
     max_retries: int = 3,
     initial_delay: float = 1.0,
     max_delay: float = 30.0,
-    **kwargs,
-):
+    **kwargs: Any,
+) -> Any:
     """
     Execute an async callable with exponential backoff on transient failures.
 
@@ -113,7 +113,7 @@ class LLMProvider(ABC):
         ...
 
     @abstractmethod
-    async def stream(
+    def stream(
         self,
         messages: list[dict[str, str]],
         max_tokens: int = 1024,
@@ -140,6 +140,7 @@ class LocalProvider(LLMProvider):
         self._model = model
         self._tokenizer = tokenizer
         self._device = device
+        self._draft_model: Any = None
 
     def _ensure_loaded(self) -> None:
         if self._model is None:
@@ -192,7 +193,7 @@ class LocalProvider(LLMProvider):
             },
         )
 
-    def stream(self, messages, max_tokens=1024, temperature=0.7, **kwargs):
+    async def stream(self, messages: list[dict[str, str]], max_tokens: int = 1024, temperature: float = 0.7, **kwargs: Any) -> AsyncIterator[str]:
         """Stream tokens from the local model one at a time, using Speculative Decoding if configured."""
         self._ensure_loaded()
         import torch
@@ -218,7 +219,7 @@ class LocalProvider(LLMProvider):
 
             tokens_generated = 0
             while tokens_generated < max_tokens:
-                accepted_tokens = speculate_step(
+                accepted_tokens, _, _ = speculate_step(
                     main_model=self._model,
                     draft_model=self._draft_model,
                     draft_input_ids=current_input,
@@ -264,7 +265,7 @@ class LocalProvider(LLMProvider):
                     ]
 
             with torch.no_grad():
-                next_token = None
+                next_token: Any = None
                 for step in range(max_tokens):
                     # On step 0, process the full prompt; afterwards only the new token
                     if step == 0:
@@ -376,7 +377,7 @@ class OpenAIProvider(LLMProvider):
             "llm.generate",
             {"provider": "openai", "model": self._model, "max_tokens": str(max_tokens)},
         ):
-            headers = {
+            headers: dict[str, str] = {
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             }
@@ -388,7 +389,7 @@ class OpenAIProvider(LLMProvider):
                 "top_p": top_p,
             }
 
-            async def _do_request():
+            async def _do_request() -> Any:
                 async with httpx.AsyncClient(timeout=60) as client:
                     resp = await client.post(
                         f"{self._base_url}/chat/completions",
@@ -424,7 +425,7 @@ class OpenAIProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         import httpx
 
-        headers = {
+        headers: dict[str, str] = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
@@ -502,8 +503,8 @@ class AnthropicProvider(LLMProvider):
                 else:
                     user_messages.append(m)
 
-            headers = {
-                "x-api-key": self._api_key,
+            headers: dict[str, str] = {
+                "x-api-key": str(self._api_key),
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
             }
@@ -516,7 +517,7 @@ class AnthropicProvider(LLMProvider):
             if system:
                 payload["system"] = system
 
-            async def _do_request():
+            async def _do_request() -> Any:
                 async with httpx.AsyncClient(timeout=60) as client:
                     resp = await client.post(
                         "https://api.anthropic.com/v1/messages",
@@ -543,7 +544,7 @@ class AnthropicProvider(LLMProvider):
             raw=data,
         )
 
-    async def stream(self, messages, max_tokens=1024, temperature=0.7, **kwargs):
+    async def stream(self, messages: list[dict[str, str]], max_tokens: int = 1024, temperature: float = 0.7, **kwargs: Any) -> AsyncIterator[str]:
         """Stream tokens from Anthropic's SSE API."""
         import httpx
 
@@ -555,8 +556,8 @@ class AnthropicProvider(LLMProvider):
             else:
                 user_messages.append(m)
 
-        headers = {
-            "x-api-key": self._api_key,
+        headers: dict[str, str] = {
+            "x-api-key": str(self._api_key),
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
         }

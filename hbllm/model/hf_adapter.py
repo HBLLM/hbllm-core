@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -48,7 +48,7 @@ class HFAdapterConfig:
 
 def _resolve_dtype(dtype_str: str) -> torch.dtype | str:
     """Convert string dtype to torch dtype."""
-    mapping = {
+    mapping: dict[str, torch.dtype | str] = {
         "float16": torch.float16,
         "fp16": torch.float16,
         "bfloat16": torch.bfloat16,
@@ -122,10 +122,10 @@ class HuggingFaceModelAdapter(nn.Module):
         trust_remote_code: bool,
         max_memory: dict[str, str] | None,
         attn_implementation: str | None,
-    ) -> tuple:
+    ) -> tuple[Any, Any, ModelConfig]:
         """Load a HuggingFace model, tokenizer, and build HBLLM config."""
         try:
-            from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer  # type: ignore[attr-defined]
         except ImportError:
             raise ImportError(
                 "HuggingFace transformers is required. Install with:\n"
@@ -156,9 +156,9 @@ class HuggingFaceModelAdapter(nn.Module):
 
         if load_in_4bit:
             try:
-                from transformers import BitsAndBytesConfig
+                from transformers import BitsAndBytesConfig  # type: ignore[attr-defined]
 
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(  # type: ignore[no-untyped-call]
                     load_in_4bit=True,
                     bnb_4bit_compute_dtype=torch.bfloat16,
                     bnb_4bit_quant_type="nf4",
@@ -244,7 +244,7 @@ class HuggingFaceModelAdapter(nn.Module):
         return self._config
 
     @property
-    def tokenizer(self):
+    def tokenizer(self) -> Any:
         """The loaded tokenizer."""
         return self._tokenizer
 
@@ -332,31 +332,31 @@ class HuggingFaceModelAdapter(nn.Module):
             gen_kwargs["eos_token_id"] = self._tokenizer.eos_token_id
 
         output = self._model.generate(input_ids, **gen_kwargs)
-        return output
+        return cast(torch.Tensor, output)
 
-    def named_parameters(self, **kwargs):
+    def named_parameters(self, **kwargs: Any) -> Any:  # type: ignore[override]
         """Delegate to inner model for LoRA compatibility."""
         return self._model.named_parameters(**kwargs)
 
-    def parameters(self, **kwargs):
+    def parameters(self, **kwargs: Any) -> Any:  # type: ignore[override]
         """Delegate to inner model."""
         return self._model.parameters(**kwargs)
 
-    def train(self, mode: bool = True):
+    def train(self, mode: bool = True) -> Any:
         """Set training mode."""
         self._model.train(mode)
         return self
 
-    def eval(self):
+    def eval(self) -> Any:
         """Set eval mode."""
         self._model.eval()
         return self
 
-    def state_dict(self, **kwargs):
+    def state_dict(self, **kwargs: Any) -> Any:
         """Delegate to inner model."""
         return self._model.state_dict(**kwargs)
 
-    def load_state_dict(self, state_dict, **kwargs):
+    def load_state_dict(self, state_dict: dict[str, Any], **kwargs: Any) -> Any:  # type: ignore[override]
         """Delegate to inner model."""
         return self._model.load_state_dict(state_dict, **kwargs)
 

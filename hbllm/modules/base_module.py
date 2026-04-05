@@ -73,9 +73,8 @@ class DomainModuleNode(Node):
         except Exception as e:
             return message.create_error(f"Invalid QueryPayload: {e}")
 
-        prompt = payload.get("text", "")
-
-        domain_hint = payload.get("domain_hint", "general")
+        prompt = getattr(payload, "text", "")
+        domain_hint = getattr(payload, "domain_hint", "general")
 
         # Domain eligibility check
         is_targeted = False
@@ -140,7 +139,7 @@ class DomainModuleNode(Node):
                     # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
                     await asyncio.sleep(0.001)
 
-                return self.tokenizer.decode_to_string(out_tokens)
+                return str(self.tokenizer.decode_to_string(out_tokens))
 
             response_text = await _generate_async()
             logger.info("Domain '%s' finished generating.", self.domain_name)

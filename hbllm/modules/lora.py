@@ -12,7 +12,7 @@ import contextvars
 import logging
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -21,7 +21,7 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 # Lock-Free Concurrency Context
-ACTIVE_ADAPTER = contextvars.ContextVar("active_adapter", default=None)
+ACTIVE_ADAPTER: contextvars.ContextVar[str | dict[str, float] | None] = contextvars.ContextVar("active_adapter", default=None)
 
 
 def is_quantization_enabled() -> bool:
@@ -42,7 +42,7 @@ class LoRALinear(nn.Module):
 
     def __init__(
         self,
-        base_layer: nn.Linear,
+        base_layer: Any,
         r: int = 8,
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
@@ -90,14 +90,14 @@ class LoRALinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Compute base output + LoRA output with MoE support."""
-        result = self.base_layer(x)
+        result = cast(torch.Tensor, self.base_layer(x))
 
         active_adapter = ACTIVE_ADAPTER.get()
 
         if not active_adapter or self.r == 0:
             return result
-
-        lora_out = 0.0
+        
+        lora_out: Any = 0.0
         lora_x = self.dropout(x)
 
         if isinstance(active_adapter, dict):
@@ -125,7 +125,7 @@ class LoRALinear(nn.Module):
         else:
             return result
 
-        return result + (lora_out * self.scaling)
+        return cast(torch.Tensor, result + (lora_out * self.scaling))
 
 
 class LoRAManager:
@@ -185,7 +185,7 @@ class LoRAManager:
                         if module.bias is not None and base_quant.bias_param is not None:
                             base_quant.bias_param.data.copy_(module.bias.data)
 
-                        lora_layer = HybridLinear(base_layer=base_quant, r=r)
+                        lora_layer: nn.Module = HybridLinear(base_layer=base_quant, r=r)
                         logger.info(
                             "Injected HybridLinear (r=%d, bits=%d) into %s",
                             r,
@@ -237,7 +237,7 @@ class LoRAManager:
         logger.debug("Set ContextVar ACTIVE_ADAPTER=%s", adapter_name)
 
     @staticmethod
-    def page_in(model: nn.Module, adapters: str | list[str] | dict[str, float]):
+    def page_in(model: nn.Module, adapters: str | list[str] | dict[str, float]) -> None:
         """Asynchronously stream LoRA weights to GPU."""
         if isinstance(adapters, str):
             adapters = [adapters]
@@ -265,7 +265,7 @@ class LoRAManager:
             logger.debug("Paged IN %d LoRA matrices to %s", count, device)
 
     @staticmethod
-    def page_out(model: nn.Module, adapters: str | list[str] | dict[str, float]):
+    def page_out(model: nn.Module, adapters: str | list[str] | dict[str, float]) -> None:
         """Stream LoRA weights back to CPU pinned memory to free VRAM."""
         if isinstance(adapters, str):
             adapters = [adapters]

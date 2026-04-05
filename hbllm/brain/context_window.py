@@ -34,14 +34,14 @@ class ContextBlock:
     token_estimate: int = 0
 
     # Optional tokenizer encode function for accurate counting
-    _tokenizer_encode: Callable[[str], list] | None = field(default=None, repr=False)
+    _tokenizer_encode: Callable[[str], list[Any]] | None = field(default=None, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.token_estimate == 0:
             self.token_estimate = estimate_tokens(self.content, self._tokenizer_encode)
 
 
-def estimate_tokens(text: str, tokenizer_encode: Callable[[str], list] | None = None) -> int:
+def estimate_tokens(text: str, tokenizer_encode: Callable[[str], list[Any]] | None = None) -> int:
     """Estimate token count from text.
 
     Uses actual tokenizer if provided, otherwise falls back to
@@ -73,13 +73,13 @@ class ContextWindowManager:
         # result.text is the fitted context, result.used_tokens <= 2048
     """
 
-    def __init__(self, max_tokens: int = 2048, reserve_for_output: int = 256, tokenizer=None):
+    def __init__(self, max_tokens: int = 2048, reserve_for_output: int = 256, tokenizer: Any = None) -> None:
         self.max_tokens = max_tokens
         self.reserve_for_output = reserve_for_output
         self._blocks: list[ContextBlock] = []
         # Optional tokenizer for accurate token counting
         # Accepts any object with an .encode(text) -> list method
-        self._tokenizer_encode: Callable[[str], list] | None = None
+        self._tokenizer_encode: Callable[[str], list[Any]] | None = None
         if tokenizer is not None and hasattr(tokenizer, "encode"):
             self._tokenizer_encode = tokenizer.encode
 
@@ -184,7 +184,7 @@ class ContextWindowManager:
 
         # Reconstruct in original order for natural flow
         # Group by priority for readability
-        sections = []
+        sections: list[str] = []
         for block in included:
             sections.append(block.content)
 
@@ -196,7 +196,7 @@ class ContextWindowManager:
             max_tokens=self.max_tokens,
             blocks_included=len(included),
             blocks_truncated=truncated,
-            utilization=used_tokens / self.available_tokens if self.available_tokens > 0 else 0,
+            utilization=used_tokens / self.available_tokens if self.available_tokens > 0 else 0.0,
         )
 
     def clear(self) -> None:

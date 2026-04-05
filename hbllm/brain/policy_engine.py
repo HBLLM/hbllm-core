@@ -22,21 +22,24 @@ from __future__ import annotations
 import logging
 import operator
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+# yaml might not have stubs installed in the environment
+try:
+    import yaml  # type: ignore
+except ImportError:
+    yaml = None
+
+logger = logging.getLogger(__name__)
 
 
 class StrEnum(str, Enum):
     pass
-
-
-from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
-
-import yaml
-
-logger = logging.getLogger(__name__)
 
 
 # ── Context Provider ─────────────────────────────────────────────────────────
@@ -64,15 +67,15 @@ class DefaultContextProvider:
 
 # ── Policy Condition ─────────────────────────────────────────────────────────
 
-_OPERATORS: dict[str, Any] = {
+_OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     "eq": operator.eq,
     "neq": operator.ne,
     "gt": operator.gt,
     "lt": operator.lt,
     "gte": operator.ge,
     "lte": operator.le,
-    "in": lambda a, b: a in b,
-    "not_in": lambda a, b: a not in b,
+    "in": lambda a, b: bool(a in b),
+    "not_in": lambda a, b: bool(a not in b),
 }
 
 
@@ -93,7 +96,7 @@ class PolicyCondition:
             logger.warning("Unknown operator '%s' in condition", self.operator)
             return False
         try:
-            return op_fn(context[self.key], self.value)
+            return bool(op_fn(context[self.key], self.value))
         except (TypeError, ValueError):
             return False
 
@@ -220,6 +223,10 @@ class PolicyEngine:
             logger.warning("Policy file not found: %s", path)
             return 0
 
+        if yaml is None:
+            logger.error("PyYAML is not installed. Cannot load policies from YAML.")
+            return 0
+
         with open(path) as f:
             data = yaml.safe_load(f) or {}
 
@@ -271,7 +278,7 @@ class PolicyEngine:
             PolicyResult with pass/fail, modified text, and violation details.
         """
         # Build context from provider + explicit overrides
-        ctx = self._context_provider.get_context() if self._context_provider else {}
+        ctx: dict[str, Any] = self._context_provider.get_context() if self._context_provider else {}
         if context:
             ctx.update(context)
 

@@ -83,7 +83,7 @@ class GoalManager:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS goals (
@@ -274,7 +274,7 @@ class GoalManager:
 
     # ─── Helpers ──────────────────────────────────────────────────────
 
-    def _row_to_goal(self, row: tuple) -> Goal:
+    def _row_to_goal(self, row: tuple[Any, ...]) -> Goal:
         return Goal(
             goal_id=row[0],
             name=row[1],

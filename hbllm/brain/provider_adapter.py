@@ -24,7 +24,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from hbllm.serving.provider import LLMProvider, LLMResponse
 
@@ -173,7 +173,7 @@ class ProviderLLM:
         fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
         if fence_match:
             try:
-                return json.loads(fence_match.group(1))
+                return cast(dict[str, Any], json.loads(fence_match.group(1)))
             except json.JSONDecodeError:
                 pass
 
@@ -181,7 +181,7 @@ class ProviderLLM:
         deep_match = re.search(r"\{.*\}", text, re.DOTALL)
         if deep_match:
             try:
-                return json.loads(deep_match.group(0))
+                return cast(dict[str, Any], json.loads(deep_match.group(0)))
             except json.JSONDecodeError:
                 pass
 
@@ -189,13 +189,13 @@ class ProviderLLM:
         brace_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if brace_match:
             try:
-                return json.loads(brace_match.group(0))
+                return cast(dict[str, Any], json.loads(brace_match.group(0)))
             except json.JSONDecodeError:
                 pass
 
         # Try the entire text
         try:
-            return json.loads(text.strip())
+            return cast(dict[str, Any], json.loads(text.strip()))
         except json.JSONDecodeError:
             logger.warning("[ProviderLLM] Failed to extract JSON from: %s", text[:100])
             return {"error": "Failed to parse structured output", "raw": text[:200]}

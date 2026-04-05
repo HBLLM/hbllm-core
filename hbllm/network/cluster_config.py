@@ -25,7 +25,7 @@ def _interpolate_env(value: Any) -> Any:
     """Recursively interpolate ${VAR} and ${VAR:default} in strings."""
     if isinstance(value, str):
 
-        def _replacer(m: re.Match) -> str:
+        def _replacer(m: re.Match[str]) -> str:
             var_name = m.group(1)
             default = m.group(2)
             return os.environ.get(var_name, default if default is not None else "")
@@ -164,7 +164,7 @@ def load_cluster_config(
         4. Default (single-server, all nodes)
     """
     try:
-        import yaml
+        import yaml  # type: ignore[import-untyped]
     except ImportError:
         logger.warning("PyYAML not installed — using default cluster config")
         return ClusterConfig()

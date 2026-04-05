@@ -5,12 +5,15 @@ Maps to flowchart nodes H (Experience Recorder), I (Salience Detector),
 and J (High Importance? decision).
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
 import time
 from collections import deque
 from pathlib import Path
+from typing import Any, cast
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -48,6 +51,7 @@ _SALIENCE_KEYWORDS: dict[str, tuple[list[str], float]] = {
             "alert",
             "warning",
             "timeout",
+            "exception",
         ],
         0.50,
     ),
@@ -122,12 +126,12 @@ class ExperienceNode(Node):
     def __init__(
         self,
         node_id: str,
-        llm=None,
+        llm: Any = None,
         importance_threshold: float = 0.7,
         novelty_window: int = 50,
         suppression_ttl: float = 300.0,
         reflection_dir: str = "workspace/reflection",
-    ):
+    ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
         self.llm = llm
         self.importance_threshold = importance_threshold
@@ -218,7 +222,7 @@ class ExperienceNode(Node):
 
     # ── Core scoring engine ──────────────────────────────────────────────
 
-    async def _calculate_saliency(self, content: str, payload: dict) -> float:
+    async def _calculate_saliency(self, content: str, payload: dict[str, Any]) -> float:
         """
         Multi-signal importance scoring.
 
@@ -258,7 +262,7 @@ class ExperienceNode(Node):
         best_score = 0.0
         total_boost = 0.0
 
-        for category, (keywords, weight) in _SALIENCE_KEYWORDS.items():
+        for _category, (keywords, weight) in _SALIENCE_KEYWORDS.items():
             hits = sum(1 for kw in keywords if kw in content_lower)
             if hits > 0:
                 total_boost += weight * min(hits, 3) / 3  # Cap at 3 hits per category
@@ -388,8 +392,8 @@ class ExperienceNode(Node):
             logger.info(
                 "[ExperienceNode] Deep reflection written — category=%s entities=%d rules=%d",
                 reflection.get("category", "unknown"),
-                len(reflection.get("entities", [])),
-                len(reflection.get("rules", [])),
+                len(cast(list[Any], reflection.get("entities", []))),
+                len(cast(list[Any], reflection.get("rules", []))),
             )
 
             # Publish for downstream consumers (RuleExtractor, KnowledgeGraph)
@@ -411,7 +415,7 @@ class ExperienceNode(Node):
 
     async def _generate_reflection_entry(
         self, content: str, salience_score: float, message: Message
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Generate a full structured reflection entry with multi-layer analysis.
 
@@ -462,7 +466,7 @@ class ExperienceNode(Node):
 
     def _categorize_event(self, content_lower: str) -> str:
         """Categorize the event based on content analysis."""
-        category_signals = {
+        category_signals: dict[str, list[str]] = {
             "security": [
                 "security",
                 "breach",
@@ -484,12 +488,12 @@ class ExperienceNode(Node):
             scores[cat] = sum(1 for kw in keywords if kw in content_lower)
 
         if scores:
-            best = max(scores, key=scores.get)  # type: ignore
+            best = max(scores, key=lambda k: scores[k])
             if scores[best] > 0:
                 return best
         return "general"
 
-    def _heuristic_causal_analysis(self, content: str, content_lower: str) -> dict:
+    def _heuristic_causal_analysis(self, content: str, content_lower: str) -> dict[str, Any]:
         """Heuristic causal analysis when LLM is not available."""
         # Identify potential causes using linguistic markers
         causes: list[str] = []
@@ -530,7 +534,7 @@ class ExperienceNode(Node):
             "method": "heuristic",
         }
 
-    async def _llm_causal_analysis(self, content: str) -> dict:
+    async def _llm_causal_analysis(self, content: str) -> dict[str, Any]:
         """Use LLM for deeper causal analysis."""
         try:
             result = await self.llm.generate_json(
@@ -542,13 +546,14 @@ class ExperienceNode(Node):
                 f'"confidence": 0.0-1.0, '
                 f'"reasoning": "brief explanation"}}'
             )
-            result["method"] = "llm"
-            return result
+            data = cast(dict[str, Any], result)
+            data["method"] = "llm"
+            return data
         except Exception as e:
             logger.debug("LLM causal analysis failed: %s", e)
             return self._heuristic_causal_analysis(content, content.lower())
 
-    def _heuristic_counterfactual(self, content: str, category: str) -> dict:
+    def _heuristic_counterfactual(self, content: str, category: str) -> dict[str, Any]:
         """Generate counterfactual chosen/rejected pair for DPO training."""
         # The "chosen" response acknowledges the issue and addresses it
         # The "rejected" response is dismissive or incomplete
@@ -594,7 +599,7 @@ class ExperienceNode(Node):
             "method": "heuristic",
         }
 
-    async def _llm_counterfactual(self, content: str) -> dict:
+    async def _llm_counterfactual(self, content: str) -> dict[str, Any]:
         """Use LLM to generate better counterfactual pairs for DPO."""
         try:
             result = await self.llm.generate_json(
@@ -604,14 +609,15 @@ class ExperienceNode(Node):
                 f"Output JSON: "
                 f'{{"prompt": "...", "chosen": "ideal response", "rejected": "bad response"}}'
             )
-            result["method"] = "llm"
-            return result
+            data = cast(dict[str, Any], result)
+            data["method"] = "llm"
+            return data
         except Exception as e:
             logger.debug("LLM counterfactual generation failed: %s", e)
             category = self._categorize_event(content.lower())
             return self._heuristic_counterfactual(content, category)
 
-    def _extract_key_entities(self, content: str) -> list[dict]:
+    def _extract_key_entities(self, content: str) -> list[dict[str, str]]:
         """
         Extract key entities/concepts from content for the knowledge graph.
 
@@ -620,7 +626,7 @@ class ExperienceNode(Node):
         """
         import re as _re
 
-        entities: list[dict] = []
+        entities: list[dict[str, str]] = []
         seen: set[str] = set()
 
         # Pattern 1: Capitalized multi-word phrases (proper nouns, technical terms)
@@ -676,7 +682,7 @@ class ExperienceNode(Node):
 
     def _extract_reflection_rules(
         self, content: str, content_lower: str, category: str
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         Extract actionable if→then rules from the reflection content.
 
@@ -685,7 +691,7 @@ class ExperienceNode(Node):
         """
         import re as _re
 
-        rules: list[dict] = []
+        rules: list[dict[str, Any]] = []
 
         # Pattern-based rule extraction
         rule_patterns = [
@@ -708,8 +714,9 @@ class ExperienceNode(Node):
         for pattern, base_confidence in rule_patterns:
             for match in _re.finditer(pattern, content_lower, _re.IGNORECASE):
                 condition = match.group(1).strip()
+                last_idx = match.lastindex
                 action = (
-                    match.group(2).strip() if match.lastindex >= 2 else "take appropriate action"
+                    match.group(2).strip() if last_idx is not None and last_idx >= 2 else "take appropriate action"
                 )
 
                 if len(condition) < 8 or len(action) < 8:
@@ -741,13 +748,13 @@ class ExperienceNode(Node):
         Record and score cognitive events (workspace thoughts, decisions).
         """
         payload = message.payload
-        thought_type = payload.get("type", "")
+        thought_type = str(payload.get("type", ""))
 
         # Skip meta-events to avoid recursion
         if thought_type in ("critique", "simulation_result"):
             return
 
-        content = payload.get("content", "")
+        content = str(payload.get("content", ""))
         if not content:
             return
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -43,7 +43,7 @@ class MiniEmbeddingModel(nn.Module):
         num_layers: int = 2,
         max_seq_len: int = 256,
         dropout: float = 0.1,
-    ):
+    ) -> None:
         super().__init__()
         self.embedding_dim = embedding_dim
         self.max_seq_len = max_seq_len
@@ -59,14 +59,14 @@ class MiniEmbeddingModel(nn.Module):
             batch_first=True,
             activation="gelu",
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)  # type: ignore[no-untyped-call]
 
         self.proj = nn.Linear(embedding_dim, embedding_dim)
         self.layer_norm = nn.LayerNorm(embedding_dim)
 
         self._init_weights()
 
-    def _init_weights(self):
+    def _init_weights(self) -> None:
         nn.init.normal_(self.token_embedding.weight, mean=0, std=0.02)
         nn.init.normal_(self.position_embedding.weight, mean=0, std=0.02)
         nn.init.xavier_uniform_(self.proj.weight)
@@ -157,7 +157,7 @@ class EmbeddingTrainer:
         embedding_dim: int = 384,
         vocab_size: int = 32768,
         device: str = "auto",
-    ):
+    ) -> None:
         if device == "auto":
             if torch.cuda.is_available():
                 self.device = torch.device("cuda")
@@ -201,7 +201,7 @@ class EmbeddingTrainer:
 
         self.model.train()
         total_steps = 0
-        losses = []
+        losses: list[float] = []
 
         logger.info(
             "Training embedding model: %d pairs, %d epochs, batch_size=%d",
@@ -224,7 +224,7 @@ class EmbeddingTrainer:
 
                 # Pad and stack
                 anchor_ids, positive_ids, anchor_mask, positive_mask = self._collate(
-                    [train_pairs[i] for i in batch_indices]
+                    [train_pairs[int(i)] for i in batch_indices]
                 )
 
                 anchor_emb = self.model(anchor_ids.to(self.device), anchor_mask.to(self.device))
@@ -232,14 +232,14 @@ class EmbeddingTrainer:
                     positive_ids.to(self.device), positive_mask.to(self.device)
                 )
 
-                loss = info_nce_loss(anchor_emb, positive_emb, temperature)
+                loss: torch.Tensor = info_nce_loss(anchor_emb, positive_emb, temperature)
 
                 optimizer.zero_grad()
-                loss.backward()
+                loss.backward()  # type: ignore[no-untyped-call]
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
 
-                epoch_loss += loss.item()
+                epoch_loss += float(loss.item())
                 num_batches += 1
                 total_steps += 1
 
@@ -283,11 +283,11 @@ class EmbeddingTrainer:
 
     def load(self, path: str | Path) -> None:
         """Load a previously saved embedding model."""
-        state = torch.load(path, map_location=self.device, weights_only=True)
+        state = cast(dict[str, Any], torch.load(path, map_location=self.device, weights_only=True))
         self.model.load_state_dict(state["model_state_dict"])
         logger.info("Embedding model loaded from %s", path)
 
-    def encode(self, token_ids_batch: list[list[int]]) -> np.ndarray:
+    def encode(self, token_ids_batch: list[list[int]]) -> np.ndarray[Any, Any]:
         """
         Encode a batch of token ID sequences into embeddings.
 
@@ -303,7 +303,7 @@ class EmbeddingTrainer:
         with torch.no_grad():
             embeddings = self.model(ids.to(self.device), mask.to(self.device))
 
-        return embeddings.cpu().numpy()
+        return cast(np.ndarray[Any, Any], embeddings.cpu().numpy())
 
     @staticmethod
     def _collate(

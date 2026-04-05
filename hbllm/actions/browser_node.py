@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from hbllm.network.messages import Message
 from hbllm.network.node import Node, NodeType
@@ -23,9 +24,9 @@ class BrowserNode(Node):
     Service node that acts as the model's "web browser".
     """
 
-    def __init__(self, node_id: str):
+    def __init__(self, node_id: str) -> None:
         super().__init__(
-            node_id=node_id, node_type=NodeType.ACTION, capabilities=["web_search", "web_scrape"]
+            node_id=node_id, node_type=NodeType.ACTION, capabilities=["web_search", "web_scrape"]  # type: ignore[attr-defined]
         )
 
     async def on_start(self) -> None:
@@ -56,22 +57,22 @@ class BrowserNode(Node):
         try:
             import asyncio
 
-            def _search_and_scrape():
-                import requests
-                from bs4 import BeautifulSoup
-                from duckduckgo_search import DDGS
+            def _search_and_scrape() -> list[dict[str, Any]]:
+                import requests # type: ignore
+                from bs4 import BeautifulSoup # type: ignore
+                from duckduckgo_search import DDGS # type: ignore
 
                 logger.info("Executing Web Search for: '%s'", query)
-                results = []
+                results: list[dict[str, Any]] = []
 
                 with DDGS() as ddgs:
                     # Get top N links
                     search_results = list(ddgs.text(query, max_results=max_results))
 
                     for result in search_results:
-                        url = result.get("href")
-                        title = result.get("title")
-                        snippet = result.get("body")
+                        url = str(result.get("href", ""))
+                        title = str(result.get("title", ""))
+                        snippet = str(result.get("body", ""))
                         logger.info("Scraping URL: %s", url)
 
                         try:
@@ -88,7 +89,7 @@ class BrowserNode(Node):
                             for script in soup(["script", "style", "nav", "footer", "header"]):
                                 script.extract()
 
-                            text = soup.get_text(separator=" ")
+                            text = str(soup.get_text(separator=" "))
 
                             # Clean whitespace
                             text = re.sub(r"\s+", " ", text).strip()
@@ -122,18 +123,18 @@ class BrowserNode(Node):
                 return results
 
             # Run in thread to not block the asyncio message loop
-            search_results = await asyncio.to_thread(_search_and_scrape)
+            search_results_data = await asyncio.to_thread(_search_and_scrape)
 
-            if not search_results:
+            if not search_results_data:
                 return message.create_response({"results": [], "text": "No search results found."})
 
             # Format nicely for the LLM
             formatted_text = f"Web Search Results for '{query}':\n\n"
-            for r in search_results:
+            for r in search_results_data:
                 formatted_text += f"---\n🌐 **{r['title']}**\nURL: {r['url']}\nSummary: {r['search_snippet']}\n\nContent:\n{r['page_content']}\n\n"
 
             return message.create_response(
-                {"results": search_results, "text": formatted_text, "domain": "browser"}
+                {"results": search_results_data, "text": formatted_text, "domain": "browser"}
             )
 
         except ImportError as ie:

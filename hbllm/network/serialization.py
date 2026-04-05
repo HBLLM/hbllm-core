@@ -9,6 +9,13 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from typing import Any, cast
+
+# msgpack might not have stubs installed
+try:
+    import msgpack  # type: ignore
+except ImportError:
+    msgpack = None
 
 from hbllm.network.messages import Message
 
@@ -47,34 +54,30 @@ class MsgpackSerializer(Serializer):
     """
 
     def __init__(self) -> None:
-        try:
-            import msgpack  # noqa: F401
-
+        self._fallback = JsonSerializer()
+        if msgpack is not None:
             self._has_msgpack = True
-        except ImportError:
+        else:
             logger.warning("msgpack not installed, falling back to JSON serialization")
             self._has_msgpack = False
-            self._fallback = JsonSerializer()
 
     def serialize(self, message: Message) -> bytes:
-        if not self._has_msgpack:
+        if not self._has_msgpack or msgpack is None:
             return self._fallback.serialize(message)
-        import msgpack
 
         data = message.model_dump(mode="json")
-        return msgpack.packb(data, use_bin_type=True)
+        return cast(bytes, msgpack.packb(data, use_bin_type=True))
 
     def deserialize(self, data: bytes) -> Message:
-        if not self._has_msgpack:
+        if not self._has_msgpack or msgpack is None:
             return self._fallback.deserialize(data)
-        import msgpack
 
         raw = msgpack.unpackb(data, raw=False)
         return Message.model_validate(raw)
 
 
-def get_serializer(format: str = "json") -> Serializer:
+def get_serializer(format_name: str = "json") -> Serializer:
     """Factory function to get a serializer by format name."""
-    if format == "msgpack":
+    if format_name == "msgpack":
         return MsgpackSerializer()
     return JsonSerializer()

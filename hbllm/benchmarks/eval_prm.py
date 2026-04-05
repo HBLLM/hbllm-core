@@ -66,7 +66,7 @@ async def run_prm_benchmark() -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    import yaml
+    import yaml  # type: ignore[import-untyped]
 
     results = asyncio.run(run_prm_benchmark())
     print(yaml.dump(results))

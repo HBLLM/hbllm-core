@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.actions.tool_memory import ToolMemory
+from hbllm.network.node import Node
 from hbllm.brain.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.confidence_estimator import ConfidenceEstimator
 from hbllm.brain.goal_manager import GoalManager
@@ -97,9 +98,9 @@ class Brain:
         registry: ServiceRegistry,
         pipeline: CognitivePipeline,
         llm: ProviderLLM,
-        nodes: list[Any],
+        nodes: list[Node],
         provider: LLMProvider,
-    ):
+    ) -> None:
         self.bus = bus
         self.registry = registry
         self.pipeline = pipeline
@@ -124,9 +125,9 @@ class Brain:
         self.interaction_miner: InteractionMiner | None = None
         self.policy_engine: PolicyEngine | None = None
         self.owner_rules: OwnerRuleStore | None = None
-        self.sentinel = None  # SentinelNode reference
+        self.sentinel: Any = None  # SentinelNode reference
 
-        self._hardware_loop_task: asyncio.Task | None = None
+        self._hardware_loop_task: asyncio.Task[None] | None = None
 
     async def process(
         self,
@@ -195,7 +196,7 @@ class Brain:
             # Simulated model footprint in memory (assume dynamic tracking)
             # Threshold: > 90%
             try:
-                import psutil
+                import psutil  # type: ignore[import-untyped]
 
                 mem_percent = psutil.virtual_memory().percent
             except ImportError:
@@ -235,7 +236,7 @@ class Brain:
         """Accumulated LLM usage statistics."""
         return self.llm.usage
 
-    def cognitive_stats(self) -> dict:
+    def cognitive_stats(self) -> dict[str, Any]:
         """Get stats from all cognitive subsystems."""
         stats = {}
         if self.cognitive_metrics:
@@ -321,7 +322,7 @@ class BrainFactory:
         import torch
 
         from hbllm.model.config import get_config
-        from hbllm.model.tokenizer import Tokenizer
+        from hbllm.model.tokenizer import HBLLMTokenizer
         from hbllm.model.transformer import HBLLMForCausalLM
         from hbllm.serving.provider import LocalProvider
 
@@ -341,7 +342,7 @@ class BrainFactory:
         # Load model
         model_config = get_config(model_size)
         model = HBLLMForCausalLM(model_config)
-        tokenizer = Tokenizer()
+        tokenizer = HBLLMTokenizer()
 
         # Try to load checkpoint
         ckpt_loaded = False
@@ -428,6 +429,8 @@ class BrainFactory:
 
         registry = ServiceRegistry()
         await registry.start()
+ 
+        from hbllm.network.node import Node
 
         # 3. Create cognitive nodes with LLM injected
         from hbllm.brain.collective_node import CollectiveNode
@@ -523,8 +526,6 @@ class BrainFactory:
             nodes.append(LogicNode(node_id="logic", llm=llm))
             logger.info("LogicNode wired (Z3 theorem prover)")
 
-        # Inject LLM into planner
-        nodes[1].llm = llm
 
         # 4. Start all nodes on the bus
         for node in nodes:

@@ -8,6 +8,7 @@ then constructs a dynamic scikit-fuzzy control system to compute the result.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import asyncio
 import logging
@@ -23,7 +24,7 @@ class FuzzyNode(Node):
     Service node handling continuous fuzzy membership logic.
     """
 
-    def __init__(self, node_id: str, llm=None):
+    def __init__(self, node_id: str, llm: Any = None) -> None:
         super().__init__(
             node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=["fuzzy_logic"]
         )
@@ -94,7 +95,7 @@ class FuzzyNode(Node):
         import asyncio
 
         import numpy as np
-        import skfuzzy as fuzz
+        import skfuzzy as fuzz  # type: ignore[import-untyped]
         from skfuzzy import control as ctrl
 
         # Ask the LLM to extract fuzzy modeling parameters

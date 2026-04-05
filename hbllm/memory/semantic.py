@@ -56,11 +56,11 @@ class _TfIdfEmbedder:
     Not as good as dense embeddings, but works without any ML dependencies.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._vocab: dict[str, int] = {}
         self._idf: dict[str, float] = {}
         self._doc_count = 0
-        self._doc_freqs: Counter = Counter()
+        self._doc_freqs: Counter[str] = Counter()
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -90,7 +90,7 @@ class _TfIdfEmbedder:
         # Track whether vocabulary changed (new dimensions added)
         self._vocab_changed = len(self._vocab) != old_vocab_size
 
-    def encode(self, texts: list[str]) -> np.ndarray:
+    def encode(self, texts: list[str]) -> np.ndarray[Any, Any]:
         """Encode texts into TF-IDF vectors."""
         if not self._vocab:
             return np.zeros((len(texts), 1))
@@ -114,7 +114,8 @@ class _TfIdfEmbedder:
         norms = np.where(norms == 0, 1, norms)
         vectors = vectors / norms
 
-        return vectors
+        from typing import cast
+        return cast(np.ndarray[Any, Any], vectors)
 
 
 class SemanticMemory:
@@ -148,25 +149,25 @@ class SemanticMemory:
             qdrant_path: Optional path for persistent Qdrant disk storage.
         """
         self.model_name = model_name
-        self.model = None
+        self.model: Any | None = None
         self._use_tfidf = False
         self._tfidf = _TfIdfEmbedder()  # Always maintained for hybrid sparse index
         self.hybrid_alpha = max(0.0, min(1.0, hybrid_alpha))
         self.documents: dict[str, dict[str, Any]] = {}
         self.ids: list[str] = []
-        self._vector_list: list[np.ndarray] = []  # Dense vectors (lazy stacking)
-        self._sparse_list: list[np.ndarray] = []  # Sparse TF-IDF vectors (lazy stacking)
+        self._vector_list: list[np.ndarray[Any, Any]] = []  # Dense vectors (lazy stacking)
+        self._sparse_list: list[np.ndarray[Any, Any]] = []  # Sparse TF-IDF vectors (lazy stacking)
         self._vectors_dirty = True
-        self._vectors_cache: np.ndarray | None = None
+        self._vectors_cache: np.ndarray[Any, Any] | None = None
         self._sparse_dirty = True
-        self._sparse_cache: np.ndarray | None = None
+        self._sparse_cache: np.ndarray[Any, Any] | None = None
         self._content_hashes: set[str] = set()
         self._lock = threading.Lock()
         self._tfidf_timer: threading.Timer | None = None
 
         # ── Optional Qdrant Backend ──────────────────────────────────────
         self._use_qdrant = use_qdrant and _HAS_QDRANT
-        self._qdrant: QdrantClient | None = None  # type: ignore[name-defined]
+        self._qdrant: "QdrantClient | None" = None
         self._qdrant_collection = "semantic_memory"
         self._qdrant_initialized = False
         if self._use_qdrant:
@@ -213,15 +214,18 @@ class SemanticMemory:
         )
         self._qdrant_initialized = True
 
-    def _encode(self, texts: list[str]) -> np.ndarray:
+    def _encode(self, texts: list[str]) -> np.ndarray[Any, Any]:
         """Encode texts using the best available method."""
         self._load_model()
         if self._use_tfidf:
             return self._tfidf.encode(texts)
-        return self.model.encode(texts)
+        from typing import cast
+        if self.model is None:
+            return self._tfidf.encode(texts)
+        return cast(np.ndarray[Any, Any], self.model.encode(texts))
 
     @property
-    def vectors(self) -> np.ndarray | None:
+    def vectors(self) -> np.ndarray[Any, Any] | None:
         """Lazily stack dense vectors only when needed."""
         self._flush_tfidf()
         if not self._vector_list:
@@ -232,7 +236,7 @@ class SemanticMemory:
         return self._vectors_cache
 
     @property
-    def sparse_vectors(self) -> np.ndarray | None:
+    def sparse_vectors(self) -> np.ndarray[Any, Any] | None:
         """Lazily stack sparse TF-IDF vectors only when needed."""
         self._flush_tfidf()
         if not self._sparse_list:
@@ -316,6 +320,8 @@ class SemanticMemory:
             self._schedule_tfidf_encode()
         else:
             # Dense embeddings + sparse TF-IDF for hybrid search
+            if self.model is None:
+                raise RuntimeError("Embedding model not loaded")
             embedding = self.model.encode([content])[0]
             self.documents[doc_id] = doc
             self.ids.append(doc_id)
@@ -351,12 +357,12 @@ class SemanticMemory:
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return doc_id
 
-    def _schedule_tfidf_encode(self):
+    def _schedule_tfidf_encode(self) -> None:
         """Debounces and schedules a full TF-IDF re-encoding."""
         if self._tfidf_timer is not None:
             self._tfidf_timer.cancel()
 
-        def _do_encode():
+        def _do_encode() -> None:
             with self._lock:
                 if not self.ids:
                     return
@@ -579,7 +585,7 @@ class SemanticMemory:
             logger.info("SemanticMemory saved to %s (%d docs)", save_dir, len(self.ids))
 
     @classmethod
-    def load_from_disk(cls, path: str | Path, **kwargs) -> "SemanticMemory":
+    def load_from_disk(cls, path: str | Path, **kwargs: Any) -> "SemanticMemory":
         """Load semantic memory from disk."""
         import json
         from pathlib import Path as _Path

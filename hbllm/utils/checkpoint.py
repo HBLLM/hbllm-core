@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -30,7 +30,7 @@ def load_checkpoint(
     *,
     map_location: str | torch.device = "cpu",
     strict_security: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     """
     Load a PyTorch checkpoint safely.
 
@@ -58,11 +58,11 @@ def load_checkpoint(
 
     # Try safe loading first
     try:
-        ckpt = torch.load(
+        ckpt = cast(dict[str, Any], torch.load(
             str(path),
             map_location=map_location,
             weights_only=True,
-        )
+        ))
         logger.debug("Loaded checkpoint safely (weights_only=True): %s", path.name)
         return ckpt
     except Exception as e:
@@ -79,18 +79,18 @@ def load_checkpoint(
             path.name,
             type(e).__name__,
         )
-        return torch.load(
+        return cast(dict[str, Any], torch.load(
             str(path),
             map_location=map_location,
             weights_only=False,
-        )
+        ))
 
 
-def extract_model_state(ckpt: dict) -> dict:
+def extract_model_state(ckpt: dict[str, Any]) -> dict[str, Any]:
     """
     Extract the model state dict from a checkpoint, handling both
     ``{"model_state_dict": ...}`` and bare state dict formats.
     """
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
-        return ckpt["model_state_dict"]
+        return cast(dict[str, Any], ckpt["model_state_dict"])
     return ckpt

@@ -5,6 +5,8 @@ Optionally signs messages with HMAC-SHA256 when an auth_secret is provided,
 preventing unauthorized nodes from injecting messages into the cluster.
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import hmac
@@ -15,7 +17,7 @@ from collections.abc import Callable, Coroutine
 from datetime import timezone
 from typing import Any
 
-import redis.asyncio as redis
+import redis.asyncio as redis  # type: ignore[import-not-found]
 
 from hbllm.network.bus import MessageBus, MessageHandler, Subscription
 from hbllm.network.messages import Message
@@ -33,11 +35,11 @@ class RedisBus(MessageBus):
     can correlate request-responses dynamically without explicit response-topic subscriptions.
     """
 
-    def __init__(self, redis_url: str = "redis://localhost:6379", auth_secret: str = ""):
+    def __init__(self, redis_url: str = "redis://localhost:6379", auth_secret: str = "") -> None:
         self.redis_url = redis_url
         self.auth_secret = auth_secret
-        self.client: redis.Redis | None = None
-        self.pubsub: redis.client.PubSub | None = None
+        self.client: Any | None = None
+        self.pubsub: Any | None = None
 
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
@@ -47,7 +49,7 @@ class RedisBus(MessageBus):
         self._sub_counter = 0
         self.metrics = BusMetrics()
         # Track active handler tasks to prevent unbounded memory growth
-        self._active_tasks: set[asyncio.Task] = set()
+        self._active_tasks: set[asyncio.Task[Any]] = set()
         # Message interceptors for proactive governance
         self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
 
@@ -259,17 +261,19 @@ class RedisBus(MessageBus):
 
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 continue
-            except redis.ConnectionError:
-                self.metrics.reconnections += 1
-                logger.error("Redis connection lost. Reconnecting in %.1fs...", backoff)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, max_backoff)
-                try:
-                    await self._reconnect()
-                except Exception:
-                    logger.error("Reconnection failed. Will retry.")
             except Exception as e:
-                logger.error("Error in Redis dispatch loop: %s", e)
+                # Basic catch-all to prevent loop death if some Redis error occurs
+                if "ConnectionError" in str(e.__class__):
+                   self.metrics.reconnections += 1
+                   logger.error("Redis connection lost. Reconnecting in %.1fs...", backoff)
+                   await asyncio.sleep(backoff)
+                   backoff = min(backoff * 2, max_backoff)
+                   try:
+                       await self._reconnect()
+                   except Exception:
+                       logger.error("Reconnection failed. Will retry.")
+                else:
+                   logger.error("Error in Redis dispatch loop: %s", e)
 
     async def _reconnect(self) -> None:
         """Reconnect to Redis after a connection loss."""
@@ -291,7 +295,7 @@ class RedisBus(MessageBus):
         if not self.client:
             return False
         try:
-            return await self.client.ping()
+            return bool(await self.client.ping())
         except Exception:
             return False
 
@@ -308,7 +312,7 @@ class RedisBus(MessageBus):
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run_handler(s=sub, t=topic, m=message):
+                async def _run_handler(s: Subscription = sub, t: str = topic, m: Message = message) -> None:
                     try:
                         response = await s.handler(m)
                         if response is not None:

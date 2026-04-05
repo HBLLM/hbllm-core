@@ -27,7 +27,7 @@ class SleepCycleNode(Node):
     Orchestrates Memory Consolidation and Synaptic Strengthening when idle.
     """
 
-    def __init__(self, node_id: str, idle_timeout_seconds: float = 10.0, llm: Any = None):
+    def __init__(self, node_id: str, idle_timeout_seconds: float = 10.0, llm: Any = None) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -36,7 +36,7 @@ class SleepCycleNode(Node):
         self.idle_timeout_seconds = idle_timeout_seconds
         self.is_sleeping = False
         self._last_system_activity = time.time()
-        self._monitor_task: asyncio.Task | None = None
+        self._monitor_task: asyncio.Task[None] | None = None
         self._pending_goals: list[str] = []
         self.llm = llm  # Used for local GraphRAG clustering
 
@@ -55,13 +55,17 @@ class SleepCycleNode(Node):
         logger.info("Stopping SleepCycleNode")
         if self._monitor_task:
             self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
 
     async def _collect_goal(self, message: Message) -> Message | None:
         """Accumulate curiosity goals for processing during sleep."""
-        goal = message.payload.get("goal") or message.payload.get("text", "")
+        goal = str(message.payload.get("goal") or message.payload.get("text", ""))
         if goal and goal not in self._pending_goals:
             self._pending_goals.append(goal)
             logger.debug("[SleepNode] Queued curiosity goal: %s", goal[:80])
@@ -79,7 +83,7 @@ class SleepCycleNode(Node):
 
         return None
 
-    async def _idle_monitor_loop(self):
+    async def _idle_monitor_loop(self) -> None:
         """Continuously check if the system has been inactive."""
         # We use a short interval for testing if timeout is small
         check_interval = min(2.0, self.idle_timeout_seconds / 2.0)
@@ -92,11 +96,11 @@ class SleepCycleNode(Node):
                 if idle_time > self.idle_timeout_seconds:
                     await self._enter_sleep_cycle()
 
-    async def _enter_sleep_cycle(self):
+    async def _enter_sleep_cycle(self) -> None:
         """Perform offline memory consolidation and self-improvement training."""
         self.is_sleeping = True
         cycle_start = time.time()
-        report = {"memories_consolidated": 0, "goals_replayed": 0, "training_ran": False}
+        report: dict[str, Any] = {"memories_consolidated": 0, "goals_replayed": 0, "training_ran": False}
         logger.info(
             "[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...",
             self.idle_timeout_seconds,
@@ -158,7 +162,7 @@ class SleepCycleNode(Node):
             self.is_sleeping = False
             return 0
 
-        turns = resp.payload.get("turns", [])
+        turns = list(resp.payload.get("turns", []))
 
         if len(turns) >= 4:
             logger.info(
@@ -194,10 +198,10 @@ class SleepCycleNode(Node):
                     payload={"action": "all_entities", "limit": 20},
                 )
                 kg_resp = await self.bus.request("knowledge.query", kg_msg, timeout=5.0)
-                entities = kg_resp.payload.get("entities", [])
+                entities = list(kg_resp.payload.get("entities", []))
 
                 # Filter out existing communities
-                leaf_nodes = [e["label"] for e in entities if e.get("type") != "community"]
+                leaf_nodes = [str(e.get("label", "")) for e in entities if e.get("type") != "community"]
 
                 if len(leaf_nodes) >= 5:
                     logger.info(
@@ -210,7 +214,7 @@ class SleepCycleNode(Node):
                         f'Output JSON format: {{"communities": [{{"name": "Short Title", "summary": "1 sentence desc", "members": ["concept1", "concept2"]}}]}}'
                     )
 
-                    if "error" not in cluster_json and "communities" in cluster_json:
+                    if cluster_json and "error" not in cluster_json and "communities" in cluster_json:
                         for comm in cluster_json["communities"]:
                             add_comm_msg = Message(
                                 type=MessageType.QUERY,
@@ -237,14 +241,12 @@ class SleepCycleNode(Node):
 
     async def _run_self_improvement(self) -> bool:
         """Phase 2: Trigger Lifelong Continuous DPO overnight."""
-        import asyncio
-
         logger.info("[SleepNode] Initiating Phase 2: Autonomous Continuous DPO...")
 
         # Create an event to wait for the learner node to respond
         training_complete_event = asyncio.Event()
 
-        async def _on_learning_update(msg: Message):
+        async def _on_learning_update(msg: Message) -> None:
             training_complete_event.set()
 
         sub = await self.bus.subscribe("system.learning_update", _on_learning_update)

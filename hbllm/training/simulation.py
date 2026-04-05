@@ -56,7 +56,7 @@ class SimulationEnvironment:
     4. A/B testing ("Which model config scores higher?")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._task_generators: dict[str, Any] = {
             "reasoning": self._gen_reasoning_tasks,
             "math": self._gen_math_tasks,
@@ -88,7 +88,8 @@ class SimulationEnvironment:
         gen_fn = self._task_generators.get(category)
         if not gen_fn:
             raise ValueError(f"Unknown category: {category}. Available: {self.categories}")
-        return gen_fn(count, difficulty)
+        from typing import cast
+        return cast("list[SimTask]", gen_fn(count, difficulty))
 
     async def evaluate(
         self,
@@ -283,7 +284,7 @@ class SimulationEnvironment:
 
     def _make_tasks(
         self,
-        templates: list,
+        templates: list[Any],
         category: str,
         difficulty: str,
         count: int,

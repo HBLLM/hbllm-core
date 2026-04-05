@@ -148,7 +148,7 @@ def detect_domain(text: str) -> str:
     if not scores:
         return "general"
 
-    return max(scores, key=scores.get)
+    return max(scores, key=lambda k: scores[k])
 
 
 class TrainingMemory:

@@ -37,7 +37,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -47,19 +47,19 @@ logger = logging.getLogger(__name__)
 # ── Lazy ROS2 Import ─────────────────────────────────────────────────────────
 # Only import rclpy when actually needed. The node works fine without it.
 
-_rclpy = None
+_rclpy: Any = None
 _rclpy_checked = False
 
 
-def _get_rclpy():
+def _get_rclpy() -> Any:
     """Lazy-load rclpy. Returns None if not installed."""
     global _rclpy, _rclpy_checked
     if not _rclpy_checked:
         try:
-            import rclpy
-            import rclpy.node
-            from geometry_msgs.msg import PoseStamped, Twist
-            from std_msgs.msg import String
+            import rclpy # type: ignore
+            import rclpy.node # type: ignore
+            from geometry_msgs.msg import PoseStamped, Twist # type: ignore
+            from std_msgs.msg import String # type: ignore
 
             _rclpy = rclpy
             logger.info("ROS2 (rclpy) available — real robot mode enabled")
@@ -81,13 +81,13 @@ class RobotState:
     name: str
     type: str = "mobile"  # mobile, arm, drone, humanoid
     status: str = "idle"  # idle, moving, executing, error
-    position: dict = field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
-    orientation: dict = field(default_factory=lambda: {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+    position: dict[str, float] = field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    orientation: dict[str, float] = field(default_factory=lambda: {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
     battery: float = 100.0
-    sensors: dict = field(default_factory=dict)
+    sensors: dict[str, Any] = field(default_factory=dict)
     last_seen: float = field(default_factory=time.time)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -103,7 +103,7 @@ class RobotState:
 
 # ── Robot Commands ───────────────────────────────────────────────────────────
 
-ROBOT_COMMANDS = {
+ROBOT_COMMANDS: dict[str, dict[str, str]] = {
     "mobile": {
         "move": "Send velocity command (linear_x, angular_z)",
         "navigate": "Navigate to goal pose (x, y, yaw)",
@@ -148,11 +148,6 @@ class Ros2Node(Node):
       - ros2.navigate    → Send navigation goals
       - ros2.query       → Query robot state
       - ros2.behavior    → Trigger predefined behaviors
-
-    Publishes to (HBLLM bus):
-      - ros2.event       → Robot state changes, command completions
-      - ros2.sensor      → Sensor data forwarded to brain
-      - sensory.input    → Robot context for brain awareness
     """
 
     def __init__(
@@ -162,7 +157,7 @@ class Ros2Node(Node):
         ros2_node_name: str = "hbllm_brain",
         cmd_vel_topic: str = "/cmd_vel",
         nav_goal_topic: str = "/goal_pose",
-    ):
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -180,13 +175,13 @@ class Ros2Node(Node):
 
         # Robot registry
         self.robots: dict[str, RobotState] = {}
-        self.behaviors: dict[str, list[dict]] = {}
-        self.command_log: list[dict] = []
+        self.behaviors: dict[str, list[dict[str, Any]]] = {}
+        self.command_log: list[dict[str, Any]] = []
 
         # ROS2 internals (only if enabled)
-        self._ros2_node = None
-        self._ros2_executor = None
-        self._ros2_spin_task = None
+        self._ros2_node: Any | None = None
+        self._ros2_executor: Any | None = None
+        self._ros2_spin_task: asyncio.Task[None] | None = None
         self._publishers: dict[str, Any] = {}
 
     @property
@@ -280,9 +275,9 @@ class Ros2Node(Node):
     async def _handle_command(self, message: Message) -> Message | None:
         """Execute a robot command."""
         payload = message.payload
-        robot_id = payload.get("robot_id", "default")
-        command = payload.get("command", "")
-        params = payload.get("params", {})
+        robot_id = str(payload.get("robot_id", "default"))
+        command = str(payload.get("command", ""))
+        params = cast(dict[str, Any], payload.get("params", {}))
 
         logger.info("Robot command: %s → %s %s", robot_id, command, params)
 
@@ -343,17 +338,17 @@ class Ros2Node(Node):
         await self.bus.publish("ros2.event", ack)
         return None
 
-    async def _execute_move(self, robot: RobotState, params: dict) -> None:
+    async def _execute_move(self, robot: RobotState, params: dict[str, Any]) -> None:
         """Send velocity command."""
-        linear_x = params.get("linear_x", 0.0)
-        angular_z = params.get("angular_z", 0.0)
+        linear_x = float(params.get("linear_x", 0.0))
+        angular_z = float(params.get("angular_z", 0.0))
 
         if self.is_real and "cmd_vel" in self._publishers:
             from geometry_msgs.msg import Twist
 
             twist = Twist()
-            twist.linear.x = float(linear_x)
-            twist.angular.z = float(angular_z)
+            twist.linear.x = linear_x
+            twist.angular.z = angular_z
             self._publishers["cmd_vel"].publish(twist)
             logger.info("ROS2 published Twist: linear=%.2f, angular=%.2f", linear_x, angular_z)
         else:
@@ -366,23 +361,22 @@ class Ros2Node(Node):
         await self._execute_move(robot, {"linear_x": 0.0, "angular_z": 0.0})
         robot.status = "idle"
 
-    async def _execute_navigate(self, robot: RobotState, params: dict, message: Message) -> None:
+    async def _execute_navigate(self, robot: RobotState, params: dict[str, Any], message: Message) -> None:
         """Send Nav2 goal."""
-        x = params.get("x", 0.0)
-        y = params.get("y", 0.0)
-        yaw = params.get("yaw", 0.0)
+        x = float(params.get("x", 0.0))
+        y = float(params.get("y", 0.0))
+        yaw = float(params.get("yaw", 0.0))
 
         if self.is_real and "nav_goal" in self._publishers:
             import math
-
             from geometry_msgs.msg import PoseStamped
 
             goal = PoseStamped()
             goal.header.frame_id = "map"
-            goal.pose.position.x = float(x)
-            goal.pose.position.y = float(y)
-            goal.pose.orientation.z = math.sin(float(yaw) / 2)
-            goal.pose.orientation.w = math.cos(float(yaw) / 2)
+            goal.pose.position.x = x
+            goal.pose.position.y = y
+            goal.pose.orientation.z = math.sin(yaw / 2)
+            goal.pose.orientation.w = math.cos(yaw / 2)
             self._publishers["nav_goal"].publish(goal)
             logger.info("ROS2 navigation goal: (%.2f, %.2f, yaw=%.2f)", x, y, yaw)
         else:
@@ -391,7 +385,7 @@ class Ros2Node(Node):
         robot.status = "navigating"
         robot.position = {"x": x, "y": y, "z": 0.0}
 
-    async def _execute_manipulation(self, robot: RobotState, command: str, params: dict) -> None:
+    async def _execute_manipulation(self, robot: RobotState, command: str, params: dict[str, Any]) -> None:
         """Handle arm/gripper commands."""
         if self.is_real:
             from std_msgs.msg import String
@@ -410,7 +404,7 @@ class Ros2Node(Node):
     async def _handle_navigate(self, message: Message) -> Message | None:
         """Shortcut for navigation goals."""
         payload = message.payload
-        robot_id = payload.get("robot_id", "default")
+        robot_id = str(payload.get("robot_id", "default"))
         robot = self.robots.get(robot_id)
         if not robot:
             return self._error(message, f"Unknown robot: {robot_id}")
@@ -438,14 +432,15 @@ class Ros2Node(Node):
     async def _handle_query(self, message: Message) -> Message | None:
         """Query robot states."""
         payload = message.payload
-        query_type = payload.get("type", "all")
+        query_type = str(payload.get("type", "all"))
+        data: dict[str, Any] = {}
 
         if query_type == "all":
-            data = {k: v.to_dict() for k, v in self.robots.items()}
+            data = cast(dict[str, Any], {k: v.to_dict() for k, v in self.robots.items()})
         elif query_type == "robot":
-            rid = payload.get("robot_id", "")
+            rid = str(payload.get("robot_id", ""))
             r = self.robots.get(rid)
-            data = {rid: r.to_dict()} if r else {}
+            data = cast(dict[str, Any], {rid: r.to_dict()} if r else {})
         elif query_type == "commands":
             data = {"commands": ROBOT_COMMANDS}
         elif query_type == "log":
@@ -470,10 +465,10 @@ class Ros2Node(Node):
     async def _handle_behavior(self, message: Message) -> Message | None:
         """Trigger a predefined multi-step behavior."""
         payload = message.payload
-        behavior_name = payload.get("behavior", "")
-        robot_id = payload.get("robot_id", "default")
+        behavior_name = str(payload.get("behavior", ""))
+        robot_id = str(payload.get("robot_id", "default"))
 
-        commands = payload.get("commands", [])
+        commands = cast(list[dict[str, Any]], payload.get("commands", []))
         if behavior_name and behavior_name in self.behaviors:
             commands = self.behaviors[behavior_name]
 
@@ -515,7 +510,7 @@ class Ros2Node(Node):
         )
         return robot
 
-    def register_behavior(self, name: str, commands: list[dict]) -> None:
+    def register_behavior(self, name: str, commands: list[dict[str, Any]]) -> None:
         """Register a multi-step behavior sequence."""
         self.behaviors[name] = commands
 

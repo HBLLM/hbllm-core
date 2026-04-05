@@ -1,8 +1,25 @@
+"""
+Continuous Learning Engine (Artificial Neuroplasticity).
+
+Listens for Feedback messages on the bus. When a user provides feedback
+(positive or negative) on a generation, it accumulates the sample.
+During the Sleep Cycle, it performs DPO (Direct Preference Optimization)
+to update active LoRA adapter weights — effectively "learning" from
+the day's interactions without interrupting live service.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Any
+import os
+import json
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
-import torch
+if TYPE_CHECKING:
+    import torch
+    import torch.nn
 
 from hbllm.network.messages import FeedbackPayload, Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -13,25 +30,19 @@ logger = logging.getLogger(__name__)
 class LearnerNode(Node):
     """
     Continuous Learning Engine (Artificial Neuroplasticity).
-
-    Listens for Feedback messages on the bus. When a user provides feedback
-    (positive or negative) on a generation, it accumulates the sample.
-    During the Sleep Cycle, it performs DPO (Direct Preference Optimization)
-    to update active LoRA adapter weights — effectively "learning" from
-    the day's interactions without interrupting live service.
     """
 
     def __init__(
         self,
         node_id: str,
-        model: torch.nn.Module | None = None,
+        model: Any = None,  # torch.nn.Module | None
         tokenizer: Any = None,
-        batch_size: int = 4,  # Used as limit per sleep cycle now
+        batch_size: int = 4,
         lr: float = 1e-5,
         dpo_beta: float = 0.1,
         lora_r: int = 8,
         checkpoint_dir: str = "./checkpoints/learner",
-    ):
+    ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE)
         self.node_type = NodeType.MEMORY
         self.model = model
@@ -40,7 +51,6 @@ class LearnerNode(Node):
         # Continuous Lifelong DPO: persistent queue
         self.pending_pairs: dict[str, dict[str, str | None]] = {}
         self.queue_path = "workspace/reflection/dpo_queue.json"
-        import os
 
         os.makedirs(os.path.dirname(self.queue_path), exist_ok=True)
 
@@ -49,8 +59,8 @@ class LearnerNode(Node):
         self.dpo_beta = dpo_beta
         self.lora_r = lora_r
         self.checkpoint_dir = checkpoint_dir
-        self.training_task = None
-        self._optimizer = None
+        self.training_task: asyncio.Task[None] | None = None
+        self._optimizer: Any | None = None
         self._lora_injected = False
         self._training_steps = 0
         self._lock = asyncio.Lock()
@@ -66,6 +76,10 @@ class LearnerNode(Node):
         logger.info("Stopping LearnerNode '%s'", self.node_id)
         if self.training_task and not self.training_task.done():
             self.training_task.cancel()
+            try:
+                await self.training_task
+            except asyncio.CancelledError:
+                pass
 
     async def handle_message(self, message: Message) -> Message | None:
         """Process incoming feedback."""
@@ -105,9 +119,6 @@ class LearnerNode(Node):
 
             pair = self.pending_pairs[prompt]
             if pair["chosen"] and pair["rejected"]:
-                import json
-                from pathlib import Path
-
                 # Append to persistent JSON array
                 queue = []
                 p = Path(self.queue_path)
@@ -132,8 +143,6 @@ class LearnerNode(Node):
                     )
                 except OSError as e:
                     logger.error("Failed to write to dpo_queue.json: %s", e)
-                    # Don't delete from pending_pairs so we can retry or at least not lose it
-                    # but actually we probably should just log and continue for now
 
                 del self.pending_pairs[prompt]
 
@@ -141,9 +150,6 @@ class LearnerNode(Node):
 
     async def handle_sleep_trigger(self, message: Message) -> Message | None:
         """Triggered by SleepNode when user is idle for background DPO processing."""
-        import json
-        import os
-
         if not os.path.exists(self.queue_path):
             await self._broadcast_complete()
             return None
@@ -180,7 +186,8 @@ class LearnerNode(Node):
         """Execute DPO training in a background thread."""
         logger.info("LearnerNode starting DPO training on %d perfect pairs...", len(batch))
 
-        def _train():
+        def _train() -> None:
+            import torch
             if self.model is None or self.tokenizer is None:
                 logger.warning("No model/tokenizer available. Skipping DPO training.")
                 return
@@ -203,9 +210,6 @@ class LearnerNode(Node):
                     chosen_ids, rejected_ids = pair
 
                     # ── Reference log-probs: base model with LoRA disabled ──
-                    # Temporarily disable LoRA adapters to get the frozen
-                    # reference model's log-probabilities. This ensures the
-                    # DPO loss produces a non-zero gradient signal.
                     from hbllm.modules.lora import LoRAManager
 
                     LoRAManager.set_active_adapter(self.model, None)
@@ -229,7 +233,6 @@ class LearnerNode(Node):
                     LoRAManager.set_active_adapter(self.model, "default")
 
                     # ── Policy log-probs: model with LoRA active ──
-                    # Forward pass — policy model
                     chosen_out = self.model(chosen_ids)
                     rejected_out = self.model(rejected_ids)
 
@@ -252,18 +255,19 @@ class LearnerNode(Node):
                     )
 
                     loss = losses.mean()
-                    loss.backward()
+                    loss.backward()  # type: ignore[no-untyped-call]
 
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                    self._optimizer.step()
-                    self._optimizer.zero_grad()
+                    if self._optimizer:
+                        self._optimizer.step()
+                        self._optimizer.zero_grad()
                     self._training_steps += 1
 
-                    reward_margin = (chosen_rewards - rejected_rewards).mean().item()
+                    reward_margin = float((chosen_rewards - rejected_rewards).mean().item())
                     logger.info(
                         "  DPO step %d: loss=%.4f reward_margin=%.4f",
                         self._training_steps,
-                        loss.item(),
+                        float(loss.item()),
                         reward_margin,
                     )
 
@@ -287,7 +291,7 @@ class LearnerNode(Node):
             logger.error("LearnerNode background DPO task failed: %s", e)
             await self._broadcast_complete()
 
-    async def _broadcast_complete(self):
+    async def _broadcast_complete(self) -> None:
         update_msg = Message(
             type=MessageType.LEARNING_UPDATE,
             source_node_id=self.node_id,
@@ -302,13 +306,14 @@ class LearnerNode(Node):
         prompt_text: str,
         chosen_text: str,
         rejected_text: str,
-        device: torch.device,
-    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        device: Any, # torch.device
+    ) -> tuple[Any, Any] | None:
         """Build a chosen/rejected tensor pair."""
         if not prompt_text or not chosen_text or not rejected_text:
             return None
 
         try:
+            import torch
             # Tokenize combined prompt+response for chosen
             full_chosen = f"{prompt_text}\n{chosen_text}"
             c_ids = self.tokenizer.encode(full_chosen)[:512]
@@ -345,6 +350,7 @@ class LearnerNode(Node):
         if self._optimizer is not None:
             return
 
+        import torch
         lora_params = [
             p for n, p in self.model.named_parameters() if "lora_" in n and p.requires_grad
         ]
@@ -356,6 +362,7 @@ class LearnerNode(Node):
     def _save_adapter(self) -> None:
         """Save the trained LoRA adapter."""
         from pathlib import Path
+        import torch
 
         try:
             from hbllm.modules.lora import LoRAManager

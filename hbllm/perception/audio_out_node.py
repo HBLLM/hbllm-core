@@ -32,19 +32,19 @@ class AudioOutputNode(Node):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.processor = None
-        self.model = None
-        self.vocoder = None
-        self.default_speaker_embeddings = None
+        self.processor: Any = None
+        self.model: Any = None
+        self.vocoder: Any = None
+        self.default_speaker_embeddings: Any = None
         # Cache of tenant-specific speaker embeddings
         self._tenant_voices: dict[str, Any] = {}
 
-    def _load_model(self):
+    def _load_model(self) -> None:
         if self.model is None:
             logger.info("Loading SpeechT5 TTS models for AudioOutput...")
             import torch
-            from datasets import load_dataset
-            from transformers import SpeechT5ForTextToSpeech, SpeechT5HifiGan, SpeechT5Processor
+            from datasets import load_dataset  # type: ignore[import-untyped]
+            from transformers import SpeechT5ForTextToSpeech, SpeechT5HifiGan, SpeechT5Processor  # type: ignore[attr-defined]
 
             self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
             self.model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts")
@@ -56,7 +56,7 @@ class AudioOutputNode(Node):
                 embeddings_dataset[7306]["xvector"]
             ).unsqueeze(0)
 
-    def _get_speaker_embedding(self, tenant_id: str, payload: dict) -> Any:
+    def _get_speaker_embedding(self, tenant_id: str, payload: dict[str, Any]) -> Any:
         """Get speaker embedding: custom per-tenant or default."""
         import torch
 
@@ -110,9 +110,9 @@ class AudioOutputNode(Node):
             import asyncio
 
             import numpy as np
-            import soundfile as sf
+            import soundfile as sf  # type: ignore[import-not-found]
 
-            def _synthesize():
+            def _synthesize() -> str:
                 import torch
 
                 self._load_model()

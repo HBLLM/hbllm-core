@@ -108,7 +108,7 @@ class ProceduralMemory:
                     (json.dumps(steps), trigger_pattern, source_node, now, existing[0]),
                 )
                 logger.info("Updated skill '%s' for tenant '%s'", skill_name, tenant_id)
-                return existing[0]
+                return str(existing[0])
             else:
                 skill_id = uuid.uuid4().hex[:12]
                 conn.execute(

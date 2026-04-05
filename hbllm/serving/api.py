@@ -89,11 +89,11 @@ _state: dict[str, Any] = {}
 
 async def _boot_brain(
     model_size: str = "125M", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
-):
+) -> None:
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
     import torch
-    from hbllm_tokenizer_rs import Vocab
+    from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
 
     from hbllm.actions.api_node import ApiNode
     from hbllm.actions.browser_node import BrowserNode
@@ -127,6 +127,8 @@ async def _boot_brain(
     from hbllm.perception.vision_node import VisionNode
 
     # 1. Bus
+    from hbllm.network.bus import MessageBus
+    bus: MessageBus
     if bus_type == "redis":
         bus = RedisBus(redis_url=redis_url)
     else:
@@ -167,8 +169,8 @@ async def _boot_brain(
         # Core cognitive pipeline
         RouterNode(node_id="router_01", llm=llm_interface),
         PlannerNode(node_id="planner_01"),
-        CriticNode(node_id="critic_01", llm=llm_interface),
-        DecisionNode(node_id="decision_01", llm=llm_interface),
+        CriticNode(node_id="critic_01", llm=llm_interface),  # type: ignore[arg-type]
+        DecisionNode(node_id="decision_01", llm=llm_interface),  # type: ignore[arg-type]
         WorkspaceNode(node_id="workspace_01"),
         # Experience & meta-cognitive
         ExperienceNode(node_id="experience_01", llm=llm_interface),
@@ -216,7 +218,7 @@ async def _boot_brain(
     logger.info("Brain pipeline booted with %d nodes.", len(nodes))
 
 
-async def _shutdown_brain():
+async def _shutdown_brain() -> None:
     """Gracefully shutdown all nodes and the bus."""
     nodes = _state.get("nodes", [])
     for node in reversed(nodes):
@@ -232,7 +234,7 @@ async def _shutdown_brain():
 # ─── FastAPI Application ──────────────────────────────────────────────────────
 
 
-async def _boot_provider_mode():
+async def _boot_provider_mode() -> None:
     """Lightweight mode: use external LLM providers without the full brain."""
     import os
 
@@ -254,7 +256,7 @@ async def _boot_provider_mode():
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> Any:
     """Boot the brain on startup, fall back to provider mode if it fails."""
     try:
         await _boot_brain()
@@ -266,9 +268,9 @@ async def lifespan(app: FastAPI):
     # ── Cloud features (SaaS layer) — graceful fallback for OSS mode ──
     try:
         from fastapi.staticfiles import StaticFiles
-        from hbllm_cloud.admin_api import create_admin_router
-        from hbllm_cloud.dashboard.routes import create_dashboard_router
-        from hbllm_cloud.tenant_manager import TenantManager
+        from hbllm_cloud.admin_api import create_admin_router  # type: ignore[import-not-found]
+        from hbllm_cloud.dashboard.routes import create_dashboard_router  # type: ignore[import-not-found]
+        from hbllm_cloud.tenant_manager import TenantManager  # type: ignore[import-not-found]
 
         from hbllm.brain.policy_engine import PolicyEngine
         from hbllm.serving.security import ApiKeyManager
@@ -294,19 +296,19 @@ async def lifespan(app: FastAPI):
         # Static files
         from pathlib import Path
 
-        import hbllm_cloud.dashboard as _dash_pkg
+        import hbllm_cloud.dashboard as _dash_pkg  # type: ignore[import-not-found]
 
         static_dir = Path(_dash_pkg.__file__).parent / "static"
         if static_dir.exists():
             app.mount("/admin/static", StaticFiles(directory=str(static_dir)), name="admin-static")
 
         # Auth middleware (protects /admin/* except /admin/login and /admin/static)
-        from hbllm_cloud.dashboard.auth import DashboardAuthMiddleware
+        from hbllm_cloud.dashboard.auth import DashboardAuthMiddleware  # type: ignore[import-not-found]
 
         app.add_middleware(DashboardAuthMiddleware)
 
         # API security middleware (protects /v1/* with API key auth + rate limiting)
-        from hbllm_cloud.api_middleware import ApiSecurityMiddleware
+        from hbllm_cloud.api_middleware import ApiSecurityMiddleware  # type: ignore[import-not-found]
 
         from hbllm.serving.security import RateLimiter
 
@@ -326,12 +328,12 @@ async def lifespan(app: FastAPI):
 
     # ── Knowledge Base + Usage + Billing ──
     try:
-        from hbllm_cloud.billing import BillingManager
-        from hbllm_cloud.knowledge.api import create_knowledge_router
-        from hbllm_cloud.knowledge.embeddings import EmbeddingsService
-        from hbllm_cloud.knowledge.processor import DocumentProcessor
-        from hbllm_cloud.knowledge.vector_store import VectorStore
-        from hbllm_cloud.usage import UsageTracker
+        from hbllm_cloud.billing import BillingManager  # type: ignore[import-not-found]
+        from hbllm_cloud.knowledge.api import create_knowledge_router  # type: ignore[import-not-found]
+        from hbllm_cloud.knowledge.embeddings import EmbeddingsService  # type: ignore[import-not-found]
+        from hbllm_cloud.knowledge.processor import DocumentProcessor  # type: ignore[import-not-found]
+        from hbllm_cloud.knowledge.vector_store import VectorStore  # type: ignore[import-not-found]
+        from hbllm_cloud.usage import UsageTracker  # type: ignore[import-not-found]
 
         embeddings_svc = EmbeddingsService(provider=os.getenv("HBLLM_EMBEDDING_PROVIDER", "openai"))
         vector_store = VectorStore(db_path="data/vectors.db")
@@ -351,19 +353,19 @@ async def lifespan(app: FastAPI):
 
         # Usage & Billing endpoints
         @app.get("/v1/usage/{tenant_id}")
-        async def get_usage(tenant_id: str, days: int = 30):
+        async def get_usage(tenant_id: str, days: int = 30) -> Any:
             return usage_tracker.get_tenant_usage(tenant_id, days)
 
         @app.get("/v1/usage/{tenant_id}/daily")
-        async def get_daily_usage(tenant_id: str, days: int = 30):
+        async def get_daily_usage(tenant_id: str, days: int = 30) -> Any:
             return {"daily": usage_tracker.get_daily_usage(tenant_id, days)}
 
         @app.get("/v1/billing/plans")
-        async def list_plans():
+        async def list_plans() -> Any:
             return {"plans": billing.list_plans()}
 
         @app.get("/v1/billing/{tenant_id}")
-        async def get_billing(tenant_id: str, days: int = 30):
+        async def get_billing(tenant_id: str, days: int = 30) -> Any:
             usage = usage_tracker.get_tenant_usage(tenant_id, days)
             cost = usage_tracker.estimate_cost(tenant_id, days)
             return {"usage": usage, "cost": cost}
@@ -375,7 +377,7 @@ async def lifespan(app: FastAPI):
     # ── Tenant Portal (self-service UI) ──
     try:
         from fastapi.staticfiles import StaticFiles as SF2
-        from hbllm_cloud.portal.routes import create_portal_router
+        from hbllm_cloud.portal.routes import create_portal_router  # type: ignore[import-not-found]
 
         portal_router = create_portal_router(
             tenant_manager=_state.get("tenant_manager"),
@@ -388,7 +390,7 @@ async def lifespan(app: FastAPI):
         )
         app.include_router(portal_router, prefix="/portal")
 
-        import hbllm_cloud.portal as _portal_pkg
+        import hbllm_cloud.portal as _portal_pkg  # type: ignore[import-not-found]
 
         portal_static = Path(_portal_pkg.__file__).parent / "static"
         if portal_static.exists():
@@ -400,10 +402,10 @@ async def lifespan(app: FastAPI):
 
     # ── High-Value Platform Features ──
     try:
-        from hbllm_cloud.agents import AgentRegistry
-        from hbllm_cloud.extraction import DataExtractor
-        from hbllm_cloud.multilang import MultiLanguageService
-        from hbllm_cloud.workflows import WorkflowEngine
+        from hbllm_cloud.agents import AgentRegistry  # type: ignore[import-not-found]
+        from hbllm_cloud.extraction import DataExtractor  # type: ignore[import-not-found]
+        from hbllm_cloud.multilang import MultiLanguageService  # type: ignore[import-not-found]
+        from hbllm_cloud.workflows import WorkflowEngine  # type: ignore[import-not-found]
 
         provider = _state.get("provider")
         workflow_engine = WorkflowEngine(provider=provider)
@@ -418,11 +420,11 @@ async def lifespan(app: FastAPI):
 
         # ── Workflow Endpoints ──
         @app.get("/v1/workflows/templates")
-        async def list_workflow_templates():
+        async def list_workflow_templates() -> Any:
             return {"templates": workflow_engine.list_templates()}
 
         @app.post("/v1/workflows/run")
-        async def run_workflow(request: Request):
+        async def run_workflow(request: Request) -> Any:
             body = await request.json()
             result = await workflow_engine.run(
                 template_id=body.get("template_id"),
@@ -439,11 +441,11 @@ async def lifespan(app: FastAPI):
 
         # ── Data Extraction Endpoints ──
         @app.get("/v1/extract/schemas")
-        async def list_extraction_schemas():
+        async def list_extraction_schemas() -> Any:
             return {"schemas": extractor.list_schemas()}
 
         @app.post("/v1/extract")
-        async def extract_data(request: Request):
+        async def extract_data(request: Request) -> Any:
             body = await request.json()
             result = await extractor.extract(
                 text=body["text"],
@@ -459,7 +461,7 @@ async def lifespan(app: FastAPI):
             }
 
         @app.post("/v1/classify")
-        async def classify_text(request: Request):
+        async def classify_text(request: Request) -> Any:
             body = await request.json()
             return await extractor.classify(
                 text=body["text"],
@@ -469,7 +471,7 @@ async def lifespan(app: FastAPI):
 
         # ── Agent Endpoints ──
         @app.post("/v1/agents")
-        async def create_agent(request: Request):
+        async def create_agent(request: Request) -> Any:
             body = await request.json()
             agent = agent_registry.create_agent(
                 tenant_id=body["tenant_id"],
@@ -480,16 +482,16 @@ async def lifespan(app: FastAPI):
             return {"agent_id": agent.agent_id, "name": agent.name}
 
         @app.get("/v1/agents/{tenant_id}")
-        async def list_agents(tenant_id: str):
+        async def list_agents(tenant_id: str) -> Any:
             agents = agent_registry.list_agents(tenant_id)
             return {"agents": [{"agent_id": a.agent_id, "name": a.name} for a in agents]}
 
         @app.get("/v1/agents/{tenant_id}/tools")
-        async def list_agent_tools(tenant_id: str):
+        async def list_agent_tools(tenant_id: str) -> Any:
             return {"tools": agent_registry.list_tools(tenant_id)}
 
         @app.post("/v1/agents/{agent_id}/run")
-        async def run_agent(agent_id: str, request: Request):
+        async def run_agent(agent_id: str, request: Request) -> Any:
             body = await request.json()
             context = {
                 "vector_store": _state.get("vector_store"),
@@ -510,7 +512,7 @@ async def lifespan(app: FastAPI):
             }
 
         @app.post("/v1/agents/{tenant_id}/tools")
-        async def register_tool(tenant_id: str, request: Request):
+        async def register_tool(tenant_id: str, request: Request) -> Any:
             body = await request.json()
             tool = agent_registry.register_webhook_tool(
                 tenant_id=tenant_id,
@@ -523,13 +525,13 @@ async def lifespan(app: FastAPI):
 
         # ── Multi-language Endpoints ──
         @app.post("/v1/detect-language")
-        async def detect_language(request: Request):
+        async def detect_language(request: Request) -> Any:
             body = await request.json()
             lang = await multilang.detect_language(body["text"])
             return {"language": lang, "name": multilang.SUPPORTED_LANGUAGES.get(lang, lang)}
 
         @app.post("/v1/translate")
-        async def translate_text(request: Request):
+        async def translate_text(request: Request) -> Any:
             body = await request.json()
             result = await multilang.translate(
                 text=body["text"],
@@ -544,17 +546,17 @@ async def lifespan(app: FastAPI):
             }
 
         @app.get("/v1/languages")
-        async def list_languages():
+        async def list_languages() -> Any:
             return {"languages": multilang.list_languages()}
 
         # ── Embeddable Widget ──
-        import hbllm_cloud.widget as _widget_pkg
+        import hbllm_cloud.widget as _widget_pkg  # type: ignore[import-not-found]
         from fastapi.responses import FileResponse
 
         widget_path = Path(_widget_pkg.__file__).parent / "hbllm-widget.js"
 
         @app.get("/widget/hbllm-widget.js")
-        async def serve_widget():
+        async def serve_widget() -> Any:
             return FileResponse(
                 str(widget_path),
                 media_type="application/javascript",
@@ -572,8 +574,8 @@ async def lifespan(app: FastAPI):
 
     # ── AGI Differentiators: Multi-Perspective Analysis + XAI ──
     try:
-        from hbllm_cloud.multi_perspective import MultiPerspectiveAnalyzer
-        from hbllm_cloud.xai import ExplainabilityEngine
+        from hbllm_cloud.multi_perspective import MultiPerspectiveAnalyzer  # type: ignore[import-not-found]
+        from hbllm_cloud.xai import ExplainabilityEngine  # type: ignore[import-not-found]
 
         provider = _state.get("provider")
         mpa = MultiPerspectiveAnalyzer(provider=provider)
@@ -584,11 +586,11 @@ async def lifespan(app: FastAPI):
 
         # ── Multi-Perspective Analysis ──
         @app.get("/v1/analyze/lenses")
-        async def list_lenses():
+        async def list_lenses() -> Any:
             return {"lenses": mpa.list_lenses()}
 
         @app.post("/v1/analyze")
-        async def multi_perspective_analyze(request: Request):
+        async def multi_perspective_analyze(request: Request) -> Any:
             body = await request.json()
             result = await mpa.analyze(
                 query=body["query"],
@@ -618,7 +620,7 @@ async def lifespan(app: FastAPI):
             }
 
         @app.post("/v1/analyze/quick")
-        async def quick_analyze(request: Request):
+        async def quick_analyze(request: Request) -> Any:
             body = await request.json()
             return await mpa.quick_analyze(
                 query=body["query"],
@@ -627,22 +629,22 @@ async def lifespan(app: FastAPI):
 
         # ── Explainable AI (XAI) ──
         @app.get("/v1/xai/{tenant_id}/traces")
-        async def get_traces(tenant_id: str, limit: int = 50):
+        async def get_traces(tenant_id: str, limit: int = 50) -> Any:
             return {"traces": xai.get_tenant_traces(tenant_id, limit)}
 
         @app.get("/v1/xai/trace/{trace_id}")
-        async def get_trace(trace_id: str):
+        async def get_trace(trace_id: str) -> Any:
             trace = xai.get_trace(trace_id)
             if not trace:
                 raise HTTPException(status_code=404, detail="Trace not found")
             return trace
 
         @app.get("/v1/xai/{tenant_id}/audit")
-        async def get_audit_log(tenant_id: str, limit: int = 100):
+        async def get_audit_log(tenant_id: str, limit: int = 100) -> Any:
             return {"audit_log": xai.get_audit_log(tenant_id, limit)}
 
         @app.get("/v1/xai/{tenant_id}/compliance")
-        async def compliance_report(tenant_id: str, days: int = 30):
+        async def compliance_report(tenant_id: str, days: int = 30) -> Any:
             return xai.get_compliance_report(tenant_id, days)
 
         logger.info("🧠 AGI features enabled (multi-perspective analysis, explainable AI)")
@@ -685,7 +687,7 @@ app.add_middleware(JWTAuthMiddleware)
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health_check():
+async def health_check() -> HealthResponse:
     """Check server health and node count."""
     node_count = len(_state.get("nodes", []))
     mode = _state.get("mode", "unknown")
@@ -699,7 +701,7 @@ async def health_check():
 
 
 @app.get("/metrics")
-async def metrics():
+async def metrics() -> Any:
     """Return real-time MessageBus performance metrics."""
     bus = _state.get("bus")
     if not bus or not hasattr(bus, "metrics"):
@@ -811,9 +813,9 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     bus = _state["bus"]
     correlation_id = str(uuid.uuid4())
 
-    response_future: asyncio.Future = asyncio.get_running_loop().create_future()
+    response_future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
 
-    async def output_handler(msg: Message):
+    async def output_handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
@@ -883,7 +885,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
 
 
 @app.post("/v1/chat", response_model=ChatResponse)
-async def chat(api_req: Request, request: ChatRequest):
+async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
     """
     Send a message through the HBLLM system.
 
@@ -905,7 +907,7 @@ async def chat(api_req: Request, request: ChatRequest):
 
 
 @app.post("/v1/chat/stream")
-async def chat_stream(api_req: Request, request: ChatRequest):
+async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingResponse:
     """
     Stream a response from the cognitive pipeline as Server-Sent Events (SSE).
 
@@ -920,9 +922,9 @@ async def chat_stream(api_req: Request, request: ChatRequest):
 
     correlation_id = str(uuid.uuid4())
 
-    token_queue: asyncio.Queue = asyncio.Queue()
+    token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    async def output_handler(msg: Message):
+    async def output_handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id:
             text = msg.payload.get("text", "")
             await token_queue.put(text)
@@ -958,7 +960,7 @@ async def chat_stream(api_req: Request, request: ChatRequest):
     )
     await bus.publish("router.query", query_msg)
 
-    async def event_generator():
+    async def event_generator() -> Any:
         import json as _json
 
         try:
@@ -985,16 +987,16 @@ async def chat_stream(api_req: Request, request: ChatRequest):
 
 
 @app.get("/v1/memory/{tenant_id}/{session_id}")
-async def get_memory(tenant_id: str, session_id: str, limit: int = 20):
+async def get_memory(tenant_id: str, session_id: str, limit: int = 20) -> Any:
     """Retrieve recent conversation history for a tenant's session."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
     correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-    async def memory_handler(msg: Message):
+    async def memory_handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
@@ -1019,7 +1021,7 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20):
 
 
 @app.post("/v1/feedback")
-async def submit_feedback(request: FeedbackRequest):
+async def submit_feedback(request: FeedbackRequest) -> Any:
     """
     Submit user feedback on a response for RLHF / DPO continuous learning.
 
@@ -1058,16 +1060,16 @@ async def submit_feedback(request: FeedbackRequest):
 @app.get("/v1/knowledge/{entity}")
 async def knowledge_neighbors(
     entity: str, direction: str = "both", relation_type: str | None = None
-):
+) -> Any:
     """Query KnowledgeGraph neighbors for an entity."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
     correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-    async def handler(msg: Message):
+    async def handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
@@ -1095,16 +1097,16 @@ async def knowledge_neighbors(
 
 
 @app.get("/v1/knowledge/path")
-async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5):
+async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5) -> Any:
     """Find shortest path between two entities in the KnowledgeGraph."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
     correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-    async def handler(msg: Message):
+    async def handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
@@ -1127,16 +1129,16 @@ async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5):
 
 
 @app.get("/v1/knowledge/subgraph/{entity}")
-async def knowledge_subgraph(entity: str, depth: int = 2):
+async def knowledge_subgraph(entity: str, depth: int = 2) -> Any:
     """Extract a subgraph around an entity."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
     correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-    async def handler(msg: Message):
+    async def handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
@@ -1159,16 +1161,16 @@ async def knowledge_subgraph(entity: str, depth: int = 2):
 
 
 @app.get("/v1/knowledge/stats")
-async def knowledge_stats():
+async def knowledge_stats() -> Any:
     """Get KnowledgeGraph statistics."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
     correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-    async def handler(msg: Message):
+    async def handler(msg: Message) -> None:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
@@ -1194,7 +1196,7 @@ async def knowledge_stats():
 
 
 @app.get("/v1/rules")
-async def list_rules():
+async def list_rules() -> Any:
     """List extracted if→then rules from the RuleExtractorNode."""
     # Find the rule extractor node in the running nodes
     nodes = _state.get("nodes", [])
@@ -1211,7 +1213,7 @@ async def list_rules():
 
 
 @app.websocket("/v1/chat/ws")
-async def chat_websocket(ws: WebSocket):
+async def chat_websocket(ws: WebSocket) -> None:
     """
     Bidirectional WebSocket for real-time chat streaming.
 
@@ -1247,9 +1249,9 @@ async def chat_websocket(ws: WebSocket):
                 continue
 
             correlation_id = str(uuid.uuid4())
-            response_future: asyncio.Future = asyncio.get_event_loop().create_future()
+            response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-            async def output_handler(msg: Message):
+            async def output_handler(msg: Message) -> None:
                 if msg.correlation_id == correlation_id and not response_future.done():
                     response_future.set_result(msg)
 
@@ -1328,7 +1330,7 @@ async def chat_websocket(ws: WebSocket):
 # ─── CLI Entry Point ──────────────────────────────────────────────────────────
 
 
-def main():
+def main() -> None:
     """Run the FastAPI server with uvicorn."""
     import uvicorn
 

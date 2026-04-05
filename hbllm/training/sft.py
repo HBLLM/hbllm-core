@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # ─── Instruction Dataset ─────────────────────────────────────────────────────
 
 
-class InstructionDataset(Dataset):
+class InstructionDataset(Dataset[dict[str, torch.Tensor]]):
     """
     Dataset for instruction fine-tuning.
 
@@ -34,7 +34,7 @@ class InstructionDataset(Dataset):
 
     def __init__(
         self,
-        data: list[dict],
+        data: list[dict[str, Any]],
         tokenizer: Any,
         max_length: int = 2048,
     ):
@@ -42,7 +42,7 @@ class InstructionDataset(Dataset):
         self.max_length = max_length
         self.examples = self._prepare(data)
 
-    def _prepare(self, data: list[dict]) -> list[dict]:
+    def _prepare(self, data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert raw data to tokenized examples."""
         examples = []
         for item in data:
@@ -77,7 +77,7 @@ class InstructionDataset(Dataset):
         logger.info("Prepared %d SFT examples (from %d raw)", len(examples), len(data))
         return examples
 
-    def _to_messages(self, item: dict) -> list[dict[str, str]]:
+    def _to_messages(self, item: dict[str, Any]) -> list[dict[str, str]]:
         """Convert item to messages format."""
         # Alpaca format
         if "instruction" in item:
@@ -100,7 +100,8 @@ class InstructionDataset(Dataset):
 
         # Direct messages format
         if "messages" in item:
-            return item["messages"]
+            from typing import cast
+            return cast(list[dict[str, str]], item["messages"])
 
         return []
 
@@ -136,7 +137,7 @@ def collate_sft(batch: list[dict[str, torch.Tensor]], pad_id: int = 0) -> dict[s
 # ─── Dataset Loaders ─────────────────────────────────────────────────────────
 
 
-def load_sft_data(name: str, max_samples: int | None = None) -> list[dict]:
+def load_sft_data(name: str, max_samples: int | None = None) -> list[dict[str, Any]]:
     """Load instruction-following data from HuggingFace or local files."""
 
     if name == "alpaca":
@@ -149,10 +150,10 @@ def load_sft_data(name: str, max_samples: int | None = None) -> list[dict]:
         raise ValueError(f"Unknown SFT dataset: {name}. Use 'alpaca', 'sharegpt', or a file path.")
 
 
-def _load_alpaca(max_samples: int | None = None) -> list[dict]:
+def _load_alpaca(max_samples: int | None = None) -> list[dict[str, Any]]:
     """Load Stanford Alpaca dataset from HuggingFace."""
     try:
-        from datasets import load_dataset
+        from datasets import load_dataset  # type: ignore[import-untyped]
 
         ds = load_dataset("tatsu-lab/alpaca", split="train")
         data = list(ds)
@@ -165,7 +166,7 @@ def _load_alpaca(max_samples: int | None = None) -> list[dict]:
         return []
 
 
-def _load_sharegpt(max_samples: int | None = None) -> list[dict]:
+def _load_sharegpt(max_samples: int | None = None) -> list[dict[str, Any]]:
     """Load ShareGPT dataset."""
     try:
         from datasets import load_dataset
@@ -181,7 +182,7 @@ def _load_sharegpt(max_samples: int | None = None) -> list[dict]:
         return []
 
 
-def _load_local(path: str, max_samples: int | None = None) -> list[dict]:
+def _load_local(path: str, max_samples: int | None = None) -> list[dict[str, Any]]:
     """Load from a local JSONL or JSON file."""
     file_path = Path(path)
     data = []
@@ -291,7 +292,7 @@ def run_sft_training(
     train_config = TrainingConfig(
         learning_rate=lr,
         max_steps=max_steps,
-        batch_size=batch_size,
+        micro_batch_size=batch_size,
         gradient_accumulation_steps=1,
         checkpoint_dir=checkpoint_dir,
     )

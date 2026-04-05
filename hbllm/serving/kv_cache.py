@@ -8,6 +8,8 @@ Features:
   - Optional 8-bit key quantization to further reduce memory footprint
 """
 
+from __future__ import annotations
+
 import torch
 
 
@@ -38,7 +40,7 @@ class KVCache:
         sliding_window: int | None = None,
         attention_sinks: int = 4,
         cpu_offload: bool = False,
-    ):
+    ) -> None:
         self.max_seq_len = max_seq_len
         self.device = device
         self.quantize_k = quantize_k
@@ -62,6 +64,7 @@ class KVCache:
         # Pre-allocate buffers: [batch_size, num_kv_heads, buffer_size, head_dim]
         shape = (batch_size, num_kv_heads, self.buffer_size, head_dim)
 
+        self.key_scales: torch.Tensor | None
         if quantize_k:
             self.key_cache = torch.zeros(shape, dtype=torch.int8, device=device)
             self.key_scales = torch.zeros(
@@ -76,6 +79,10 @@ class KVCache:
         self.value_cache = torch.zeros(shape, dtype=dtype, device=device)
 
         # CPU Offload Tensors for holding evicted history beyond the VRAM sliding window
+        self.cpu_key_cache: torch.Tensor
+        self.cpu_value_cache: torch.Tensor
+        self.cpu_key_scales: torch.Tensor | None = None
+
         if self.cpu_offload:
             cpu_shape = (batch_size, num_kv_heads, max_seq_len, head_dim)
             if quantize_k:
@@ -154,6 +161,7 @@ class KVCache:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sliding window update with attention sink preservation."""
         window = self.sliding_window
+        assert window is not None
         sinks = self.attention_sinks
 
         # Phase 1: Determine if we need to evict
@@ -279,7 +287,8 @@ class KVCache:
             scale = keys.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-5) / 127.0
             q_keys = (keys / scale).round().to(torch.int8)
             self.key_cache[:, :, start:end, :] = q_keys
-            self.key_scales[:, :, start:end, :] = scale
+            if self.key_scales is not None:
+                self.key_scales[:, :, start:end, :] = scale
         else:
             self.key_cache[:, :, start:end, :] = keys.to(self.dtype)
 
@@ -289,7 +298,7 @@ class KVCache:
         """Return the currently valid portion of the cache, dequantizing if needed."""
         if self.quantize_k:
             k_slice = self.key_cache[:, :, : self.seq_len, :].to(self.dtype)
-            s_slice = self.key_scales[:, :, : self.seq_len, :]
+            s_slice = self.key_scales[:, :, : self.seq_len, :] if self.key_scales is not None else 1.0
             final_keys = k_slice * s_slice
         else:
             final_keys = self.key_cache[:, :, : self.seq_len, :]
@@ -327,7 +336,7 @@ class KVCache:
 
     def get_full_cache_cpu(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns the fully assembled KV history sequence located on the CPU."""
-        if not getattr(self, "cpu_offload", False):
+        if not self.cpu_offload:
             raise ValueError("cpu_offload must be enabled to retrieve the full cache.")
 
         active_len = self.seq_len
@@ -363,9 +372,7 @@ class KVCache:
 
         # Ensure all async copies to CPU finish before providing CPU tensor access
         if self.device != torch.device("cpu"):
-            torch.cuda.current_stream(
-                self.device
-            ).synchronize() if self.device.type == "cuda" else None
+            torch.cuda.current_stream(self.device).synchronize() if self.device.type == "cuda" else None  # type: ignore[no-untyped-call]
 
         return (
             self.cpu_key_cache[:, :, :total_tokens, :],

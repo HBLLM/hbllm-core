@@ -56,7 +56,7 @@ class RewardModel:
     4. Feeds preference pairs to DPO/PPO optimizers
     """
 
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = "data") -> None:
         self._db_path = Path(data_dir) / "reward_model.db"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -67,7 +67,7 @@ class RewardModel:
             "coherence": 0.2,
         }
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS rewards (
@@ -153,7 +153,7 @@ class RewardModel:
             reward += 0.3
 
         # Time-based: quick dismissal = bad, reading = good
-        read_time = signals.get("time_on_response", 0)
+        read_time: float = float(signals.get("time_on_response", 0.0))
         if read_time > 5:
             reward += min(0.3, read_time / 60)
 
@@ -215,11 +215,14 @@ class RewardModel:
                 "ORDER BY created_at DESC LIMIT 100",
                 (pattern,),
             ).fetchone()
-        return row[0] if row and row[0] is not None else None
+        
+        if row and row[0] is not None:
+            return float(row[0])
+        return None
 
     # ─── Export for Training ─────────────────────────────────────────
 
-    def export_preferences(self, min_margin: float = 0.5, limit: int = 10000) -> list[dict]:
+    def export_preferences(self, min_margin: float = 0.5, limit: int = 10000) -> list[dict[str, Any]]:
         """Export preference pairs for DPO/RLHF training."""
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(
@@ -229,7 +232,7 @@ class RewardModel:
             ).fetchall()
         return [{"query": r[0], "chosen": r[1], "rejected": r[2], "margin": r[3]} for r in rows]
 
-    def export_rewards(self, min_reward: float = 0.0, limit: int = 10000) -> list[dict]:
+    def export_rewards(self, min_reward: float = 0.0, limit: int = 10000) -> list[dict[str, Any]]:
         """Export high-reward interactions for SFT training."""
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(
@@ -242,11 +245,13 @@ class RewardModel:
     def stats(self) -> dict[str, Any]:
         """Return reward model statistics."""
         with sqlite3.connect(str(self._db_path)) as conn:
-            reward_count = conn.execute("SELECT COUNT(*) FROM rewards").fetchone()[0]
-            pref_count = conn.execute("SELECT COUNT(*) FROM preferences").fetchone()[0]
-            avg_reward = conn.execute("SELECT AVG(reward) FROM rewards").fetchone()[0]
+            reward_count: int = conn.execute("SELECT COUNT(*) FROM rewards").fetchone()[0]
+            pref_count: int = conn.execute("SELECT COUNT(*) FROM preferences").fetchone()[0]
+            avg_reward_row = conn.execute("SELECT AVG(reward) FROM rewards").fetchone()
+            avg_reward: float = float(avg_reward_row[0]) if avg_reward_row and avg_reward_row[0] is not None else 0.0
+            
         return {
             "total_rewards": reward_count,
             "total_preferences": pref_count,
-            "avg_reward": round(avg_reward or 0, 3),
+            "avg_reward": round(avg_reward, 3),
         }

@@ -62,7 +62,7 @@ class CognitionRouter:
     - Routes via network bus for distributed execution
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._workers: dict[str, CognitionWorker] = {}
         self._task_history: list[CognitionTask] = []
         self._domain_map: dict[str, str] = {}  # domain → preferred worker_id

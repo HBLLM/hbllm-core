@@ -52,7 +52,7 @@ class InteractionMiner:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
@@ -231,7 +231,7 @@ class InteractionMiner:
         output_path: str | None = None,
         min_reward: float = 0.3,
         format: str = "jsonl",
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Export mined data as a training dataset."""
         samples = self.mine_sft_samples(min_reward=min_reward)
         dataset = [

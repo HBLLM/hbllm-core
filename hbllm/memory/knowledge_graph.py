@@ -34,7 +34,7 @@ class Entity:
     attributes: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.id)
 
 

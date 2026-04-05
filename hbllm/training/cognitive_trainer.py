@@ -23,6 +23,8 @@ from typing import Any
 
 import torch
 
+from hbllm.model.transformer import HBLLMForCausalLM
+
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
@@ -81,7 +83,7 @@ class CognitiveTrainer:
 
     def __init__(
         self,
-        model: torch.nn.Module,
+        model: HBLLMForCausalLM,
         train_config: TrainingConfig,
         cognitive_config: CognitiveConfig,
         device: torch.device,
@@ -124,28 +126,28 @@ class CognitiveTrainer:
 
         # ─── Cognitive subsystems ─────────────────────────────────────
         if cognitive_config.build_knowledge_graph:
-            self.knowledge_graph = KnowledgeGraphBuilder(
+            self.knowledge_graph: KnowledgeGraphBuilder | None = KnowledgeGraphBuilder(
                 max_entities=cognitive_config.max_entities,
             )
         else:
             self.knowledge_graph = None
 
         if cognitive_config.track_training_memory:
-            self.training_memory = TrainingMemory(
+            self.training_memory: TrainingMemory | None = TrainingMemory(
                 max_records=cognitive_config.max_memory_records,
             )
         else:
             self.training_memory = None
 
         if cognitive_config.extract_concepts:
-            self.concept_extractor = ConceptExtractor(
+            self.concept_extractor: ConceptExtractor | None = ConceptExtractor(
                 min_frequency=cognitive_config.min_concept_frequency,
             )
         else:
             self.concept_extractor = None
 
         if cognitive_config.detect_skills:
-            self.skill_registry = SkillRegistry(
+            self.skill_registry: SkillRegistry | None = SkillRegistry(
                 data_dir=str(self.output_dir),
             )
         else:
@@ -354,11 +356,11 @@ class CognitiveTrainer:
         logger.info("Cognitive checkpoint complete: %s", ckpt_dir)
         return ckpt_dir
 
-    def _build_cognitive_stats(self) -> dict:
+    def _build_cognitive_stats(self) -> dict[str, Any]:
         """Build summary statistics for the training run."""
         elapsed = time.time() - self._start_time
 
-        stats = {
+        stats: dict[str, Any] = {
             "training": {
                 "total_steps": self._step_count,
                 "cognitive_steps": self._cognitive_step_count,

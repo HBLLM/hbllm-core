@@ -33,7 +33,7 @@ class ModelEvaluator:
         model: torch.nn.Module,
         tokenizer: Any,
         device: torch.device | None = None,
-    ):
+    ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.device = device or torch.device("cpu")
@@ -46,7 +46,7 @@ class ModelEvaluator:
         self,
         dataloader: Any,
         max_batches: int = 100,
-    ) -> dict[str, float]:
+    ) -> dict[str, Any]:
         """
         Compute perplexity on evaluation data.
 
@@ -71,8 +71,8 @@ class ModelEvaluator:
             outputs = self.model(input_ids=input_ids, labels=labels)
             loss = outputs if isinstance(outputs, torch.Tensor) else outputs["loss"]
 
-            batch_tokens = (labels != -100).sum().item()
-            total_loss += loss.item() * batch_tokens
+            batch_tokens = int((labels != -100).sum().item())
+            total_loss += float(loss.item()) * batch_tokens
             total_tokens += batch_tokens
             num_batches += 1
 
@@ -91,9 +91,9 @@ class ModelEvaluator:
     @torch.no_grad()
     def evaluate_hellaswag(
         self,
-        examples: list[dict] | None = None,
+        examples: list[dict[str, Any]] | None = None,
         max_examples: int = 200,
-    ) -> dict[str, float]:
+    ) -> dict[str, Any]:
         """
         HellaSwag common-sense reasoning benchmark.
 
@@ -114,8 +114,8 @@ class ModelEvaluator:
         total = 0
 
         for ex in examples[:max_examples]:
-            context = ex.get("ctx", ex.get("context", ""))
-            endings = ex.get("endings", [])
+            context = str(ex.get("ctx", ex.get("context", "")))
+            endings = list(ex.get("endings", []))
             label = int(ex.get("label", 0))
 
             if not endings or not context:
@@ -124,13 +124,13 @@ class ModelEvaluator:
             # Score each continuation
             scores = []
             for ending in endings:
-                full_text = context + " " + ending
+                full_text = context + " " + str(ending)
                 ids = self.tokenizer.encode(full_text)
                 input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
 
                 outputs = self.model(input_ids=input_ids, labels=input_ids)
                 loss = outputs if isinstance(outputs, torch.Tensor) else outputs["loss"]
-                scores.append(loss.item())
+                scores.append(float(loss.item()))
 
             # Lowest loss = best continuation
             prediction = scores.index(min(scores))
@@ -145,13 +145,13 @@ class ModelEvaluator:
             "total": total,
         }
 
-    def _load_hellaswag(self, max_examples: int) -> list[dict]:
+    def _load_hellaswag(self, max_examples: int) -> list[dict[str, Any]]:
         """Load HellaSwag from HuggingFace."""
         try:
-            from datasets import load_dataset
+            from datasets import load_dataset  # type: ignore[import-untyped]
 
             ds = load_dataset("Rowan/hellaswag", split="validation", streaming=True)
-            examples = []
+            examples: list[dict[str, Any]] = []
             for item in ds:
                 examples.append(item)
                 if len(examples) >= max_examples:
@@ -197,7 +197,7 @@ class ModelEvaluator:
                     top_k=50,
                     top_p=0.9,
                 )
-                generated = self.tokenizer.decode(output[0].tolist())
+                generated = str(self.tokenizer.decode(output[0].tolist()))
             except Exception as e:
                 generated = f"[Error: {e}]"
 

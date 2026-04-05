@@ -5,26 +5,29 @@ Ensures that all requests to the API are authenticated with a valid JWT.
 The resolved `tenant_id` is securely injected into `request.state.tenant_id`.
 """
 
+from __future__ import annotations
+
 import os
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import jwt
-from fastapi import Request
+from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, secret_key: str | None = None):
+    def __init__(self, app: Any, secret_key: str | None = None) -> None:
         super().__init__(app)
         self.secret_key = secret_key or os.environ.get(
             "HBLLM_JWT_SECRET", "default_insecure_secret"
         )
-        self.algorithms = ["HS256"]
+        self.algorithms: list[str] = ["HS256"]
 
     async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[JSONResponse]]
-    ) -> JSONResponse:
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         # Pass-through for health checks and static files
         if request.url.path in [
             "/health",

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -33,12 +34,12 @@ logger = logging.getLogger(__name__)
 class McpTool:
     """Metadata for a discovered external MCP tool."""
 
-    def __init__(self, name: str, description: str, input_schema: dict):
+    def __init__(self, name: str, description: str, input_schema: dict[str, Any]) -> None:
         self.name = name
         self.description = description
         self.input_schema = input_schema
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
@@ -64,7 +65,7 @@ class McpClientNode(Node):
         server_command: str,
         server_args: list[str] | None = None,
         server_env: dict[str, str] | None = None,
-    ):
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.META,
@@ -77,8 +78,8 @@ class McpClientNode(Node):
         self._process: asyncio.subprocess.Process | None = None
         self._tools: dict[str, McpTool] = {}
         self._request_id_counter = 0
-        self._pending: dict[int, asyncio.Future] = {}
-        self._read_task: asyncio.Task | None = None
+        self._pending: dict[int, asyncio.Future[Any]] = {}
+        self._read_task: asyncio.Task[None] | None = None
 
     @property
     def tools(self) -> dict[str, McpTool]:
@@ -109,7 +110,7 @@ class McpClientNode(Node):
 
     async def handle_message(self, message: Message) -> Message | None:
         """Handle bus messages by forwarding to the MCP server."""
-        tool_name = message.payload.get("tool_name", "")
+        tool_name = str(message.payload.get("tool_name", ""))
 
         if not tool_name:
             # Extract tool name from topic: mcp.<node_id>.<tool_name>
@@ -201,7 +202,7 @@ class McpClientNode(Node):
 
         logger.info("Discovered %d MCP tools: %s", len(self._tools), list(self._tools.keys()))
 
-    async def _call_tool(self, tool_name: str, arguments: dict) -> dict:
+    async def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call a tool on the external MCP server."""
         try:
             result = await self._send_request(
@@ -236,7 +237,7 @@ class McpClientNode(Node):
 
     # ─── JSON-RPC Transport ───────────────────────────────────────────────
 
-    async def _send_request(self, method: str, params: dict, timeout: float = 30.0) -> dict:
+    async def _send_request(self, method: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
         if not self._process or not self._process.stdin:
             raise RuntimeError("MCP server not running")
@@ -251,7 +252,7 @@ class McpClientNode(Node):
             "params": params,
         }
 
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
         self._pending[req_id] = future
 
         body = json.dumps(request).encode()
@@ -260,12 +261,13 @@ class McpClientNode(Node):
         await self._process.stdin.drain()
 
         try:
-            return await asyncio.wait_for(future, timeout=timeout)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return json.loads(json.dumps(result)) if not isinstance(result, dict) else result
         except (TimeoutError, asyncio.TimeoutError):
             self._pending.pop(req_id, None)
             raise TimeoutError(f"MCP request '{method}' timed out after {timeout}s")
 
-    async def _send_notification(self, method: str, params: dict) -> None:
+    async def _send_notification(self, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
         if not self._process or not self._process.stdin:
             return
@@ -352,10 +354,11 @@ class McpClientNode(Node):
             try:
                 self._process.terminate()
                 await asyncio.wait_for(self._process.wait(), timeout=5)
-            except (TimeoutError, asyncio.TimeoutError, ProcessLookupError):
-                self._process.kill()
+            except (TimeoutError, asyncio.IncompleteReadError, asyncio.TimeoutError, ProcessLookupError):
+                if self._process:
+                    self._process.kill()
             self._process = None
 
-    async def list_tools(self) -> list[dict]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         """Return all discovered tools as dicts."""
         return [t.to_dict() for t in self._tools.values()]

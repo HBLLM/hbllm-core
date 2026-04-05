@@ -12,7 +12,9 @@ import asyncio
 import json
 import logging
 import time
+from typing import Any
 
+from hbllm.network.bus import MessageBus
 from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
 from hbllm.network.registry import ServiceRegistry
 
@@ -44,24 +46,25 @@ class RedisRegistry(ServiceRegistry):
         ttl: int = _DEFAULT_TTL,
         health_check_interval: float = 10.0,
         node_timeout: float = 30.0,
-    ):
+    ) -> None:
         super().__init__(
             health_check_interval=health_check_interval,
             node_timeout=node_timeout,
         )
         self.redis_url = redis_url
         self.ttl = ttl
-        self._redis = None
-        self._listener_task: asyncio.Task | None = None
+        self._redis: Any | None = None
+        self._listener_task: asyncio.Task[Any] | None = None
 
-    async def start(self, bus=None) -> None:
+    async def start(self, bus: MessageBus | None = None) -> None:
         """Connect to Redis and start health check loop."""
         try:
-            import redis.asyncio as aioredis
+            import redis.asyncio as aioredis # type: ignore
 
             self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
-            await self._redis.ping()
-            logger.info("RedisRegistry connected to %s", self.redis_url)
+            if self._redis:
+                await self._redis.ping()
+                logger.info("RedisRegistry connected to %s", self.redis_url)
         except Exception as e:
             logger.warning(
                 "RedisRegistry failed to connect to Redis (%s), "
@@ -182,6 +185,9 @@ class RedisRegistry(ServiceRegistry):
         healthy_only: bool,
     ) -> list[NodeInfo]:
         """Query Redis for matching nodes."""
+        if not self._redis:
+            return []
+
         all_nodes_raw = await self._redis.hgetall(_NODES_KEY)
         all_health_raw = await self._redis.hgetall(_HEALTH_KEY)
 

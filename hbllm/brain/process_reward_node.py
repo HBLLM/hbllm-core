@@ -9,6 +9,7 @@ likelihood that the step is correct or leads to a correct answer.
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -34,8 +35,8 @@ class ProcessRewardNode(Node):
         checkpoint_dir: str = "cognitive_checkpoints",
         model_name: str = "125m",
         device: str = "cpu",
-        llm=None,  # Fallback LLM if PRM is not fully trained
-    ):
+        llm: Any | None = None,  # Fallback LLM if PRM is not fully trained
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,

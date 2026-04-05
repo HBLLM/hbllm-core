@@ -206,7 +206,7 @@ class Trainer:
         # Mixed precision
         self.scaler = None
         if config.precision == "fp16" and self.device.type == "cuda":
-            self.scaler = torch.amp.GradScaler()
+            self.scaler = torch.amp.GradScaler()  # type: ignore[attr-defined]
 
         # Checkpoint manager
         self.checkpoint_mgr = CheckpointManager(config.checkpoint_dir, config.max_checkpoints)
@@ -219,7 +219,7 @@ class Trainer:
         self._wandb_run = None
         if config.wandb_project:
             try:
-                import wandb
+                import wandb  # type: ignore[import-not-found]
 
                 self._wandb_run = wandb.init(
                     project=config.wandb_project, entity=config.wandb_entity, config=config.__dict__
@@ -263,12 +263,12 @@ class Trainer:
             eps=self.config.eps,
         )
 
-    def _get_amp_context(self):
+    def _get_amp_context(self) -> Any:
         """Get the appropriate autocast context for mixed precision."""
         if self.config.precision == "bf16" and self.device.type == "cuda":
-            return torch.amp.autocast("cuda", dtype=torch.bfloat16)
+            return torch.amp.autocast("cuda", dtype=torch.bfloat16)  # type: ignore[attr-defined]
         elif self.config.precision == "fp16" and self.device.type == "cuda":
-            return torch.amp.autocast("cuda", dtype=torch.float16)
+            return torch.amp.autocast("cuda", dtype=torch.float16)  # type: ignore[attr-defined]
         else:
             import contextlib
 

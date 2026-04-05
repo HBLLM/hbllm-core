@@ -35,7 +35,7 @@ class Skill:
     steps: list[str]  # ordered execution steps
     tools_used: list[str]  # which tools the skill uses
     success_criteria: str
-    examples: list[dict[str, str]] = field(default_factory=list)
+    examples: list[dict[str, Any]] = field(default_factory=list)
     success_rate: float = 1.0
     invocations: int = 0
     avg_latency_ms: float = 0.0
@@ -59,7 +59,7 @@ class SkillRegistry:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS skills (
@@ -226,7 +226,7 @@ class SkillRegistry:
         words = description.split()[:5]
         return " ".join(w.capitalize() for w in words)
 
-    def _row_to_skill(self, row: tuple) -> Skill:
+    def _row_to_skill(self, row: tuple[Any, ...]) -> Skill:
         return Skill(
             skill_id=row[0],
             name=row[1],
