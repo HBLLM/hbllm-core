@@ -55,7 +55,8 @@ class VisionNode(Node):
             if torch.backends.mps.is_available() and device == -1:
                 # pipeline device=-1 means CPU. pipeline currently drops support for strings like 'mps' in some versions unless passed explicitly as a torch.device
                 device = "mps"
-            self.pipeline = pipeline(
+            pipeline_fn: Any = pipeline
+            self.pipeline = pipeline_fn(
                 "image-to-text",
                 model="Salesforce/blip-image-captioning-base",
                 device=device,
