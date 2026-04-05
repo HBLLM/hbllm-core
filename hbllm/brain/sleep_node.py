@@ -4,8 +4,8 @@ System 4 Sleep Cycle Node (Offline Consolidation).
 Monitored system activity. If the user stops interacting with the API/CLI
 for a configurable duration, it triggers a `system.sleep` event.
 During sleep, it performs biologically-inspired memory consolidation:
-compressing raw episodic logs into semantic summaries, clustering 
-knowledge graphs, and triggering artificial neuroplasticity (DPO) 
+compressing raw episodic logs into semantic summaries, clustering
+knowledge graphs, and triggering artificial neuroplasticity (DPO)
 if performance gaps were detected.
 """
 

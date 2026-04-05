@@ -17,7 +17,7 @@ class LearnerNode(Node):
     Listens for Feedback messages on the bus. When a user provides feedback
     (positive or negative) on a generation, it accumulates the sample.
     During the Sleep Cycle, it performs DPO (Direct Preference Optimization)
-    to update active LoRA adapter weights — effectively "learning" from 
+    to update active LoRA adapter weights — effectively "learning" from
     the day's interactions without interrupting live service.
     """
 

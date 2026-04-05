@@ -121,6 +121,7 @@ nav:
   - Architecture:
       - Overview: architecture/overview.md
       - Cognitive Nodes: architecture/cognitive-nodes.md
+      - Sleep Cycle: architecture/sleep-cycle.md
       - Message Bus: architecture/message-bus.md
       - Memory Systems: architecture/memory-systems.md
   - Zoning Model:
