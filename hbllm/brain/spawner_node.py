@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import logging
+import os
 from typing import Any
 
 from hbllm.data.synthesizer import DataSynthesizer
@@ -9,6 +10,78 @@ from hbllm.network.messages import Message, MessageType, SpawnRequestPayload
 from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
+
+# Domain complexity tiers for automatic LoRA rank selection
+_HEAVY_DOMAINS: frozenset[str] = frozenset(
+    {
+        "medical",
+        "medicine",
+        "healthcare",
+        "clinical",
+        "diagnosis",
+        "legal",
+        "law",
+        "compliance",
+        "regulatory",
+        "coding",
+        "programming",
+        "software",
+        "engineering",
+        "mathematics",
+        "math",
+        "statistics",
+        "calculus",
+        "science",
+        "physics",
+        "chemistry",
+        "biology",
+        "finance",
+        "accounting",
+        "trading",
+        "economics",
+    }
+)
+
+_MEDIUM_DOMAINS: frozenset[str] = frozenset(
+    {
+        "writing",
+        "creative",
+        "marketing",
+        "education",
+        "history",
+        "geography",
+        "philosophy",
+        "psychology",
+        "cooking",
+        "nutrition",
+        "fitness",
+        "sports",
+    }
+)
+
+
+def _classify_domain_rank(domain: str, default_rank: int = 8) -> int:
+    """
+    Automatically select LoRA rank based on domain complexity.
+
+    Heavy domains (medical, legal, coding, math) get higher rank for
+    deeper specialization. Light domains (style, tone) get lower rank.
+
+    Args:
+        domain: The domain name to classify.
+        default_rank: Fallback rank for unrecognized domains.
+
+    Returns:
+        Recommended LoRA rank (4, 8, 16, 32, or 64).
+    """
+    domain_lower = domain.lower().replace("_", " ")
+    tokens = set(domain_lower.split())
+
+    if tokens & _HEAVY_DOMAINS:
+        return 32
+    if tokens & _MEDIUM_DOMAINS:
+        return 16
+    return default_rank
 
 
 class SpawnerNode(Node):
@@ -22,7 +95,12 @@ class SpawnerNode(Node):
     """
 
     def __init__(
-        self, node_id: str, model: Any, tokenizer: Any, adapter_registry: Any | None = None
+        self,
+        node_id: str,
+        model: Any,
+        tokenizer: Any,
+        adapter_registry: Any | None = None,
+        default_lora_rank: int | None = None,
     ):
         super().__init__(node_id=node_id, node_type=NodeType.SPAWNER)
         self.model = model
@@ -30,6 +108,10 @@ class SpawnerNode(Node):
         self.synthesizer = DataSynthesizer(model=model, tokenizer=tokenizer)
         self.spawning_tasks = set()
         self.adapter_registry = adapter_registry
+        # Priority: constructor arg > env var > auto-classify per domain
+        self.default_lora_rank = (
+            default_lora_rank or int(os.environ.get("HBLLM_LORA_RANK", "0")) or None
+        )
 
     async def on_start(self) -> None:
         """Subscribe to spawn requests."""
@@ -54,16 +136,28 @@ class SpawnerNode(Node):
 
         logger.info("Spawner received request to expand into domain: '%s'", payload.topic)
 
+        # Resolve LoRA rank: request override > global default > auto-classify
+        lora_rank = (
+            payload.lora_rank or self.default_lora_rank or _classify_domain_rank(payload.topic)
+        )
+        logger.info("Selected LoRA rank r=%d for domain '%s'", lora_rank, payload.topic)
+
         # Launch the spawn process in the background so we don't block the bus
-        task = asyncio.create_task(self._spawn_new_module(payload.topic))
+        task = asyncio.create_task(
+            self._spawn_new_module(payload.topic, message.tenant_id, lora_rank)
+        )
         self.spawning_tasks.add(task)
         task.add_done_callback(self.spawning_tasks.discard)
 
         return None
 
-    async def _spawn_new_module(self, topic: str) -> None:
+    async def _spawn_new_module(
+        self, topic: str, tenant_id: str | None = None, lora_rank: int = 8
+    ) -> None:
         """The core expansion logic: resolve adapter → (or synthesize + train) → register module."""
         domain_name = topic.replace(" ", "_").lower()
+        if tenant_id and tenant_id != "system":
+            domain_name = f"{tenant_id}_{domain_name}"
         new_node_id = f"domain_{domain_name}"
 
         logger.info("--- Self-Expansion Initiated for '%s' ---", domain_name)
@@ -92,7 +186,9 @@ class SpawnerNode(Node):
                 logger.error("Data synthesis failed for %s: %s", domain_name, e)
                 return
 
-            lora_state_dict = await self._train_lora_adapter(domain_name, dataset_path)
+            lora_state_dict = await self._train_lora_adapter(
+                domain_name, dataset_path, tenant_id, lora_rank
+            )
 
         # 3. Create and Register the New Node
         try:
@@ -127,9 +223,15 @@ class SpawnerNode(Node):
         except Exception as e:
             logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
 
-    async def _train_lora_adapter(self, domain_name: str, dataset_path: str) -> dict | None:
+    async def _train_lora_adapter(
+        self,
+        domain_name: str,
+        dataset_path: str,
+        tenant_id: str | None = None,
+        lora_rank: int = 8,
+    ) -> dict | None:
         """Train a LoRA adapter on the synthetic dataset."""
-        logger.info("Training LoRA adapter for domain '%s'...", domain_name)
+        logger.info("Training LoRA adapter for domain '%s' (rank=%d)...", domain_name, lora_rank)
 
         def _train():
             try:
@@ -160,8 +262,12 @@ class SpawnerNode(Node):
                 import torch
 
                 train_model = copy.deepcopy(self.model)
-                injected = LoRAManager.inject(train_model, r=8)
-                logger.info("Injected LoRA into %d modules (on isolated copy)", len(injected))
+                injected = LoRAManager.inject(train_model, r=lora_rank)
+                logger.info(
+                    "Injected LoRA (r=%d) into %d modules (on isolated copy)",
+                    lora_rank,
+                    len(injected),
+                )
 
                 # Optimizer targeting only LoRA parameters
                 lora_params = [
@@ -221,6 +327,17 @@ class SpawnerNode(Node):
                 save_path = save_dir / "lora_adapter.pt"
                 torch.save(adapter_state, save_path)
                 logger.info("Saved domain adapter: %s", save_path)
+
+                # Apply strictly scoped adapter immediately if using PEFT
+                if tenant_id and hasattr(train_model, "add_adapter"):
+                    try:
+                        self.model.add_adapter(tenant_id, adapter_state)
+                    except Exception as adapter_err:
+                        logger.warning(
+                            "Failed to inject live adapter for tenant '%s': %s",
+                            tenant_id,
+                            adapter_err,
+                        )
 
                 return adapter_state
 

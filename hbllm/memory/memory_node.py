@@ -17,7 +17,13 @@ from hbllm.memory.knowledge_graph import KnowledgeGraph
 from hbllm.memory.procedural import ProceduralMemory
 from hbllm.memory.semantic import SemanticMemory
 from hbllm.memory.value_memory import ValueMemory
-from hbllm.network.messages import Message, MessageType
+from hbllm.network.messages import (
+    MemoryRetrievePayload,
+    MemorySearchPayload,
+    MemoryStorePayload,
+    Message,
+    MessageType,
+)
 from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
@@ -130,8 +136,9 @@ class MemoryNode(Node):
         await asyncio.to_thread(
             self.semantic_db.store,
             pattern_content,
-            {"source": "reflection_engine", "domain": domain},
+            {"source": "reflection_engine", "domain": domain, "tenant_id": message.tenant_id},
             is_priority=False,  # Patterns grow general semantic memory
+            tenant_id=message.tenant_id,
         )
 
     async def handle_salience(self, message: Message) -> None:
@@ -153,8 +160,13 @@ class MemoryNode(Node):
             await asyncio.to_thread(
                 self.semantic_db.store,
                 content,
-                {"source": "salience_detector", "message_id": payload.get("message_id")},
+                {
+                    "source": "salience_detector",
+                    "message_id": payload.get("message_id"),
+                    "tenant_id": message.tenant_id,
+                },
                 is_priority=True,
+                tenant_id=message.tenant_id,
             )
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -273,35 +285,34 @@ class MemoryNode(Node):
     async def handle_store(self, message: Message) -> Message | None:
         """
         Handles `memory.store` topics.
-        Expected payload:
-            session_id: str
-            role: "user" | "assistant"
-            content: str
-            domain: Optional[str]
-            metadata: Optional[dict]
         """
         try:
-            payload = message.payload
-            session_id = payload.get("session_id", "default_session")
-            role = payload.get("role")
-            content = payload.get("content")
-
-            if not role or not content:
-                return message.create_error("Missing 'role' or 'content' in store payload")
+            payload = MemoryStorePayload(**message.payload)
+            session_id = payload.session_id
+            role = payload.role
+            content = payload.content
 
             turn_id = self.db.store_turn(
                 session_id=session_id,
                 role=role,
                 content=content,
-                domain=payload.get("domain"),
-                metadata=payload.get("metadata"),
-                tenant_id=payload.get("tenant_id", message.tenant_id or "default"),
+                domain=payload.domain,
+                metadata=payload.metadata,
+                tenant_id=payload.tenant_id or (message.tenant_id or "default"),
             )
 
             # Offload semantic storage to a background thread with error handling
             task = asyncio.create_task(
                 asyncio.to_thread(
-                    self.semantic_db.store, content, {"session_id": session_id, "role": role}
+                    self.semantic_db.store,
+                    content,
+                    {
+                        "session_id": session_id,
+                        "role": role,
+                        "tenant_id": payload.tenant_id or message.tenant_id,
+                    },
+                    is_priority=False,
+                    tenant_id=payload.tenant_id or message.tenant_id,
                 )
             )
             task.add_done_callback(self._handle_background_task_result)
@@ -319,19 +330,16 @@ class MemoryNode(Node):
     async def handle_retrieve(self, message: Message) -> Message | None:
         """
         Handles `memory.retrieve_recent` topics.
-        Expected payload:
-            session_id: str
-            limit: int (default = 10)
         """
         try:
-            payload = message.payload
-            session_id = payload.get("session_id", "default_session")
-            limit = int(payload.get("limit", 10))
+            payload = MemoryRetrievePayload(**message.payload)
+            session_id = payload.session_id
+            limit = payload.limit
 
             turns = self.db.retrieve_recent(
                 session_id,
                 limit=limit,
-                tenant_id=payload.get("tenant_id", message.tenant_id or "default"),
+                tenant_id=payload.tenant_id or (message.tenant_id or "default"),
             )
 
             return message.create_response(
@@ -348,19 +356,21 @@ class MemoryNode(Node):
     async def handle_search(self, message: Message) -> Message | None:
         """
         Handles `memory.search` topics for long-term semantic RAG.
-        Expected payload:
-            query_text: str
-            limit: int (default = 3)
         """
         try:
-            payload = message.payload
-            query = payload.get("query_text")
-            limit = int(payload.get("limit", 3))
+            payload = MemorySearchPayload(**message.payload)
+            query = payload.query_text
+            limit = payload.top_k
 
             if not query:
                 return message.create_error("Missing 'query_text'")
 
-            results = await asyncio.to_thread(self.semantic_db.search, query, limit)
+            results = await asyncio.to_thread(
+                self.semantic_db.search,
+                query,
+                limit,
+                tenant_id=payload.tenant_id or message.tenant_id,
+            )
 
             return message.create_response(
                 {

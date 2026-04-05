@@ -252,7 +252,7 @@ Traditional home automation uses **static rules** ("if motion detected, turn on 
 | **Latency** | 200-2000ms (network round-trip) | <50ms (local inference) |
 | **Privacy** | Sensor data sent to cloud | All data stays on-device |
 | **Reliability** | Fails without internet | Works offline |
-| **Cost** | Per-token API charges | Free (MIT license) |
+| **Cost** | Per-token API charges | Free (BUSL-1.1 license) |
 | **Memory** | Stateless per request | 5 memory systems for learning |
 | **Hardware** | Requires cloud GPU | Runs on Raspberry Pi (no GPU) |
 | **Adaptation** | No on-device learning | Continuous DPO + sleep consolidation |

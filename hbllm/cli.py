@@ -110,8 +110,8 @@ def run_info(args):
 {"=" * 50}
 
 Architecture: Human-Brain Inspired Cognitive Architecture
-Nodes:        23 specialized brain nodes
-Memory:       5 systems (Episodic, Semantic, Procedural, Value, Working)
+Nodes:        28 specialized brain nodes
+Memory:       6 systems (Episodic, Semantic, Procedural, Value, Working, KG)
 Model:        Zoning — shared base + LoRA domain adapters
 Sizes:        125M / 500M / 1.5B parameters
 
@@ -159,6 +159,11 @@ def run_nodes(args):
         ("🌀 Fuzzy", "actions", "Fuzzy Logic — uncertainty"),
         ("🔌 MCP", "actions", "Model Context Protocol — tools"),
         ("📡 IoT/MQTT", "actions", "Home Automation — MQTT devices"),
+        ("🔄 Revision", "brain", "Self-Correction — iterative refinement"),
+        ("🛡️ Sentinel", "brain", "Policy Enforcement — governance"),
+        ("⚖️ Policy", "brain", "Compliance Engine — YAML guards"),
+        ("📝 OwnerRules", "brain", "Behavioral Guardrails — auto-mining"),
+        ("🔧 SkillReg", "brain", "Procedural Skills — skill lifecycle"),
     ]
 
     print(f"\n🧠 HBLLM Brain Nodes ({len(nodes)} cognitive modules)\n")

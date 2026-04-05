@@ -4,7 +4,7 @@ import pytest
 
 from hbllm.network.messages import Message, MessageType, QueryPayload
 
-redis = pytest.importorskip("redis", reason="redis not installed (optional dependency)")
+_ = pytest.importorskip("redis", reason="redis not installed (optional dependency)")
 import redis.asyncio as redis
 
 from hbllm.network.redis_bus import RedisBus

@@ -28,10 +28,13 @@ MessageHandler = Callable[[Message], Coroutine[Any, Any, Message | None]]
 class Subscription:
     """Represents an active subscription to a topic."""
 
-    def __init__(self, topic: str, handler: MessageHandler, sub_id: str):
+    def __init__(
+        self, topic: str, handler: MessageHandler, sub_id: str, tenant_id: str | None = None
+    ):
         self.topic = topic
         self.handler = handler
         self.id = sub_id
+        self.tenant_id = tenant_id
         self._active = True
 
     @property
@@ -59,8 +62,16 @@ class MessageBus(Protocol):
         """Send a request and wait for a correlated response."""
         ...
 
-    async def subscribe(self, topic: str, handler: MessageHandler) -> Subscription:
+    async def subscribe(
+        self, topic: str, handler: MessageHandler, tenant_id: str | None = None
+    ) -> Subscription:
         """Subscribe to messages on a topic."""
+        ...
+
+    def add_interceptor(
+        self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]
+    ) -> None:
+        """Add a proactive message interceptor."""
         ...
 
     async def unsubscribe(self, subscription: Subscription) -> None:
@@ -102,6 +113,14 @@ class InProcessBus:
         self._handler_semaphore = asyncio.Semaphore(max_concurrent_handlers)
         # Track active handler tasks for graceful shutdown
         self._active_tasks: set[asyncio.Task] = set()
+        # Message interceptors for proactive governance
+        self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
+
+    def add_interceptor(
+        self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]
+    ) -> None:
+        """Add an interceptor to evaluate messages before queuing."""
+        self._interceptors.append(interceptor)
 
     async def start(self) -> None:
         """Start the message dispatch loop."""
@@ -146,6 +165,22 @@ class InProcessBus:
                 self._queue_size,
             )
 
+        # ── Proactive Interceptor Chain ──
+        for interceptor in self._interceptors:
+            try:
+                new_msg = await interceptor(message)
+                if new_msg is None:
+                    # Message blocked by interceptor
+                    self.metrics.record_drop(topic)
+                    return
+                message = new_msg
+            except Exception as e:
+                logger.error(
+                    "Interceptor failed on topic '%s', blocking message. Error: %s", topic, e
+                )
+                self.metrics.record_drop(topic)
+                return
+
         self.metrics.record_publish(topic)
         # Priority queue: lower number = higher priority. Negate message priority value.
         # Use a monotonic counter as tiebreaker to preserve FIFO order within same priority.
@@ -173,10 +208,14 @@ class InProcessBus:
         finally:
             self._pending_requests.pop(message.id, None)
 
-    async def subscribe(self, topic: str, handler: MessageHandler) -> Subscription:
+    async def subscribe(
+        self, topic: str, handler: MessageHandler, tenant_id: str | None = None
+    ) -> Subscription:
         """Subscribe a handler to a topic."""
         self._sub_counter += 1
-        sub = Subscription(topic=topic, handler=handler, sub_id=f"sub-{self._sub_counter}")
+        sub = Subscription(
+            topic=topic, handler=handler, sub_id=f"sub-{self._sub_counter}", tenant_id=tenant_id
+        )
         self._subscriptions[topic].append(sub)
         self.metrics.record_subscribe()
         logger.debug("Subscribed to '%s' (id=%s)", topic, sub.id)
@@ -231,6 +270,10 @@ class InProcessBus:
         for match_topic in matching_topics:
             for sub in self._subscriptions.get(match_topic, []):
                 if not sub.active:
+                    continue
+
+                # Tenant Isolation check
+                if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
                 async def _run_handler(s=sub, t=topic, m=message):

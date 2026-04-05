@@ -46,8 +46,8 @@ hbllm info
 Expected output:
 ```
 🧠 HBLLM Core v0.1.0
-Nodes:   23 specialized brain nodes
-Memory:  5 systems (Episodic, Semantic, Procedural, Value, Working)
+Nodes:   28 specialized brain nodes
+Memory:  6 systems (Episodic, Semantic, Procedural, Value, Working, KG)
 Model:   Zoning — shared base + LoRA domain adapters
 Sizes:   125M / 500M / 1.5B parameters
 ```

@@ -11,7 +11,9 @@ import hmac
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable, Coroutine
 from datetime import timezone
+from typing import Any
 
 import redis.asyncio as redis
 
@@ -46,6 +48,14 @@ class RedisBus(MessageBus):
         self.metrics = BusMetrics()
         # Track active handler tasks to prevent unbounded memory growth
         self._active_tasks: set[asyncio.Task] = set()
+        # Message interceptors for proactive governance
+        self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
+
+    def add_interceptor(
+        self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]
+    ) -> None:
+        """Add an interceptor to evaluate messages before queuing."""
+        self._interceptors.append(interceptor)
 
     def _sign(self, payload_json: str) -> str:
         """Compute HMAC-SHA256 signature for a message payload."""
@@ -100,6 +110,22 @@ class RedisBus(MessageBus):
             logger.warning("Bus is not running, message dropped: %s", message.id)
             return
 
+        # ── Proactive Interceptor Chain ──
+        for interceptor in self._interceptors:
+            try:
+                new_msg = await interceptor(message)
+                if new_msg is None:
+                    # Message blocked by interceptor
+                    self.metrics.record_drop(topic)
+                    return
+                message = new_msg
+            except Exception as e:
+                logger.error(
+                    "Interceptor failed on topic '%s', blocking message. Error: %s", topic, e
+                )
+                self.metrics.record_drop(topic)
+                return
+
         payload_json = message.model_dump_json()
 
         # Sign if auth is configured
@@ -140,10 +166,17 @@ class RedisBus(MessageBus):
                 f"Request {message.id} to topic '{topic}' timed out after {timeout}s"
             )
 
-    async def subscribe(self, topic: str, handler: MessageHandler) -> Subscription:
+    async def subscribe(
+        self, topic: str, handler: MessageHandler, tenant_id: str | None = None
+    ) -> Subscription:
         """Subscribe a handler to a topic locally."""
         self._sub_counter += 1
-        sub = Subscription(topic=topic, handler=handler, sub_id=f"redis_sub-{self._sub_counter}")
+        sub = Subscription(
+            topic=topic,
+            handler=handler,
+            sub_id=f"redis_sub-{self._sub_counter}",
+            tenant_id=tenant_id,
+        )
         self._subscriptions[topic].append(sub)
         logger.debug("Subscribed locally to '%s' (id=%s)", topic, sub.id)
         return sub
@@ -269,6 +302,10 @@ class RedisBus(MessageBus):
         for match_topic in matching_topics:
             for sub in self._subscriptions.get(match_topic, []):
                 if not sub.active:
+                    continue
+
+                # Tenant Isolation check
+                if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
                 async def _run_handler(s=sub, t=topic, m=message):

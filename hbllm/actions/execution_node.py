@@ -74,6 +74,7 @@ BLOCKED_BUILTINS: frozenset[str] = frozenset(
         "breakpoint",
         "exit",
         "quit",
+        "__builtins__",
     }
 )
 
@@ -128,6 +129,11 @@ class _SecurityVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__") and node.attr.endswith("__"):
             self.violations.append(f"Line {node.lineno}: blocked dunder access '.{node.attr}'")
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in BLOCKED_BUILTINS:
+            self.violations.append(f"Line {node.lineno}: blocked built-in access '{node.id}'")
         self.generic_visit(node)
 
 
@@ -193,10 +199,20 @@ class ExecutionNode(Node):
         return message.create_response(result)
 
     async def _execute_python(self, code: str) -> dict[str, Any]:
-        """Write to temp file and run in a restricted subprocess."""
+        """Write to temp file and run in a restricted subprocess with POSIX resource limits."""
         temp_script = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
         try:
-            temp_script.write(code)
+            # Inject strict OS-level hardware quotas
+            bound_wrapper = (
+                "import resource\n"
+                "try:\n"
+                "    resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))\n"
+                f"    resource.setrlimit(resource.RLIMIT_CPU, ({int(self.timeout)}, {int(self.timeout)}))\n"
+                "except BaseException:\n"
+                "    pass\n\n"
+            )
+
+            temp_script.write(bound_wrapper + code)
             temp_script.close()  # Close so subprocess can read it
 
             try:

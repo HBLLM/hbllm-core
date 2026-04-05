@@ -91,4 +91,4 @@ cargo check --manifest-path rust/compute_kernel/Cargo.toml
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Business Source License 1.1 (BUSL-1.1), the same license as the project.

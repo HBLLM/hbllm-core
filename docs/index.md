@@ -1,6 +1,6 @@
 ---
 title: "HBLLM Core — Open Source Cognitive AI That Runs Without Massive GPU"
-description: "Open-source AGI framework that runs without massive GPU or VRAM. 25+ cognitive nodes, 5 memory systems, Rust SIMD inference, and dynamic LoRA routing. Deploy autonomous AI agents on Raspberry Pi, laptops, and edge devices — no expensive hardware required."
+description: "Open-source AGI framework that runs without massive GPU or VRAM. 28+ cognitive nodes, 6 memory systems, Rust SIMD inference, and dynamic LoRA routing. Deploy autonomous AI agents on Raspberry Pi, laptops, and edge devices — no expensive hardware required."
 ---
 
 <!-- SEO Keywords: Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, CPU Inference, Raspberry Pi AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Lightweight LLM -->
@@ -13,8 +13,8 @@ description: "Open-source AGI framework that runs without massive GPU or VRAM. 2
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-1099%20passing-brightgreen.svg)](#)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
+[![License](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
 
@@ -24,16 +24,16 @@ description: "Open-source AGI framework that runs without massive GPU or VRAM. 2
 
 Traditional **Large Language Models (LLMs)** are monolithic, stateless transformers that demand 80GB+ VRAM just to run a 70B model. They lack continuous learning, memory consolidation, and dynamic domain adaptation — and they can't run on the hardware most people actually have.
 
-**HBLLM Core** rethinks this from the ground up. It is a **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents** — engineered to deliver intelligent reasoning **without massive GPU/VRAM requirements**. With 25+ specialized "brain nodes" and a shared 125M–1.5B parameter backbone enhanced by ~2MB LoRA adapters, HBLLM achieves domain-expert performance on hardware as modest as a **Raspberry Pi 5 or a laptop with no dedicated GPU**.
+**HBLLM Core** rethinks this from the ground up. It is a **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents** — engineered to deliver intelligent reasoning **without massive GPU/VRAM requirements**. With 28+ specialized "brain nodes" and a shared 125M–1.5B parameter backbone enhanced by ~2MB LoRA adapters, HBLLM achieves domain-expert performance on hardware as modest as a **Raspberry Pi 5 or a laptop with no dedicated GPU**.
 
 <div class="feature-grid">
 <div class="feature-card">
-<h3>🧠 25+ Cognitive Nodes</h3>
+<h3>🧠 28+ Cognitive Nodes</h3>
 <p>Router, Planner, Critic, Decision, Learner, Curiosity, Identity, World Model, Sleep Cycle, and more — each running as an isolated, asynchronous service.</p>
 </div>
 <div class="feature-card">
-<h3>💾 5 Memory Systems</h3>
-<p>Working, Episodic, Semantic, Procedural, and Knowledge Graph — mirroring human cognitive psychology for lifelong learning.</p>
+<h3>💾 6 Memory Systems</h3>
+<p>Working, Episodic, Semantic, Procedural, Value, and Knowledge Graph — mirroring human cognitive psychology for lifelong learning.</p>
 </div>
 <div class="feature-card">
 <h3>🧬 Self-Expanding Zones</h3>
@@ -106,13 +106,14 @@ flowchart TB
         WORLD["🌍 World Model"]
     end
 
-    subgraph MEMORY["💾 Memory Systems (5 types)"]
+    subgraph MEMORY["💾 Memory Systems (6 types)"]
         direction LR
         EPISODIC["📖 Episodic\n(events)"]
         SEMANTIC["📚 Semantic\n(hybrid search)"]
         PROCEDURAL["🔧 Procedural\n(skills)"]
         VALUE["❤️ Value\n(preferences)"]
         WORKING["📋 Working\n(context)"]
+        KG["🔗 Graph\n(concepts)"]
     end
 
     subgraph ACTIONS["⚡ Action Layer"]
@@ -360,7 +361,7 @@ Please review our [Contributing Guide](contributing.md) for Pull Request guideli
 
 ## License
 
-HBLLM Core is released under the **MIT License** — free for personal, commercial, and academic research use.
+HBLLM Core is released under the **Business Source License 1.1 (BUSL-1.1)** — free for personal, academic, and internal business use. Commercial SaaS hosting requires a separate license. On April 4th, 2030, this version automatically converts to [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 <div style="text-align: center; margin-top: 3rem;">
   <p><strong>HBLLM Core</strong> — Autonomous Agent AI that thinks, not just responds.</p>

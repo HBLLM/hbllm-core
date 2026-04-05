@@ -1,6 +1,6 @@
 ---
 title: "Memory Systems — Multi-Tier Cognitive Memory"
-description: "Deep-dive into HBLLM's memory systems: Episodic, Semantic, Procedural, Value, and Knowledge Graph memory."
+description: "Deep-dive into HBLLM's memory systems: Working, Episodic, Semantic, Procedural, Value, and Knowledge Graph memory."
 ---
 
 # Memory Systems
@@ -16,11 +16,13 @@ graph LR
     PM["🔧 Procedural Memory<br/>(learned skills)"]
     VM["❤️ Value Memory<br/>(preferences)"]
     KG["🔗 Knowledge Graph<br/>(entity relations)"]
+    WM["📋 Working Memory<br/>(context window)"]
     
     EM --> SM
     SM --> KG
     PM --> SM
     VM --> SM
+    WM --> SM
 ```
 
 ## Memory Module Structure

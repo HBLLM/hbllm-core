@@ -143,9 +143,29 @@ class Node(ABC):
         """
         Handle an incoming message.
 
-        Returns a response Message, or None if no response is needed.
+        Subclasses implement this. Instead of subscribing to handle_message
+        directly, nodes should ideally subscribe to `process_message` which
+        wraps this method with `pre_handle` and `post_handle` hooks.
         """
         ...
+
+    async def process_message(self, message: Message) -> Message | None:
+        """
+        Wrapper around handle_message that invokes lifecycle hooks.
+        Nodes should subscribe to this method to enable telemetry/security hooks.
+        """
+        await self.pre_handle(message)
+        response = await self.handle_message(message)
+        await self.post_handle(message, response)
+        return response
+
+    async def pre_handle(self, message: Message) -> None:
+        """Hook called before handle_message. Override for custom tracing or security."""
+        pass
+
+    async def post_handle(self, message: Message, response: Message | None) -> None:
+        """Hook called after handle_message. Override for custom telemetry."""
+        pass
 
     async def health_check(self) -> NodeHealth:
         """

@@ -86,6 +86,7 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     correlation_id: str | None = None  # Links request → response
     ttl_seconds: float | None = None  # Time-to-live
+    is_security_cleared: bool = False  # Set by proactive interceptors
 
     def create_response(
         self,
@@ -149,6 +150,25 @@ class MemorySearchPayload(BaseModel):
     domain_filter: str | None = None
 
 
+class MemoryStorePayload(BaseModel):
+    """Payload for memory storage requests."""
+
+    session_id: str = "default_session"
+    role: str  # "user" or "assistant"
+    content: str
+    domain: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tenant_id: str | None = None
+
+
+class MemoryRetrievePayload(BaseModel):
+    """Payload for memory retrieval requests."""
+
+    session_id: str = "default_session"
+    limit: int = 10
+    tenant_id: str | None = None
+
+
 class FeedbackPayload(BaseModel):
     """Payload for user feedback on responses."""
 
@@ -176,6 +196,8 @@ class SpawnRequestPayload(BaseModel):
     topic: str
     trigger_query: str
     confidence_score: float
+    tenant_id: str | None = None
+    lora_rank: int | None = None  # Override rank (4, 8, 16, 32, 64)
 
 
 class SystemImprovePayload(BaseModel):

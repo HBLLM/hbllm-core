@@ -29,7 +29,7 @@ def load_checkpoint(
     path: str | Path,
     *,
     map_location: str | torch.device = "cpu",
-    strict_security: bool = False,
+    strict_security: bool = True,
 ) -> dict:
     """
     Load a PyTorch checkpoint safely.

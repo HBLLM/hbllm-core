@@ -93,7 +93,49 @@ class SentinelNode(Node):
     async def on_start(self) -> None:
         logger.info("Starting SentinelNode (poll_interval=%.1fs)", self.poll_interval)
         await self.bus.subscribe("context.update", self._on_context_update)
+        self.bus.add_interceptor(self._interceptor)
         self._poll_task = asyncio.create_task(self._poll_loop())
+
+    async def _interceptor(self, message: Message) -> Message | None:
+        """Proactively evaluate messages against the policy engine before delivery."""
+        if not self.policy_engine or message.is_security_cleared:
+            return message
+
+        # Extract text to evaluate
+        text_to_eval = ""
+        if "text" in message.payload:
+            text_to_eval = message.payload["text"]
+        elif "code" in message.payload:
+            text_to_eval = message.payload["code"]
+        elif "command" in message.payload:
+            text_to_eval = str(message.payload["command"])
+
+        if text_to_eval:
+            result = self.policy_engine.evaluate(
+                text=text_to_eval,
+                tenant_id=message.tenant_id,
+                context=self._current_context,
+            )
+            if not result.passed:
+                violation = result.violations[0] if result.violations else "Policy violation"
+                logger.warning(
+                    "[Sentinel] Interceptor BLOCKED message %s: %s", message.id, violation
+                )
+
+                # Send an error back if it was a query
+                if message.type == MessageType.QUERY:
+                    error_msg = message.create_error(
+                        f"BLOCKED BY SENTINEL: {violation}", code="POLICY_DENY"
+                    )
+                    asyncio.create_task(self.bus.publish(error_msg.topic, error_msg))
+
+                # Drop the original message
+                return None
+
+            # Message is safe
+            message.is_security_cleared = True
+
+        return message
 
     async def on_stop(self) -> None:
         logger.info("Stopping SentinelNode")
