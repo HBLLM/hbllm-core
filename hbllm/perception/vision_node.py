@@ -56,7 +56,7 @@ class VisionNode(Node):
                 # pipeline device=-1 means CPU. pipeline currently drops support for strings like 'mps' in some versions unless passed explicitly as a torch.device
                 device = "mps"
             self.pipeline = pipeline(
-                "image-to-text", model="Salesforce/blip-image-captioning-base", device=device
+                "image-to-text", model="Salesforce/blip-image-captioning-base", device=device  # type: ignore[call-overload]
             )
         except Exception as e:
             logger.error("Failed to load vision model: %s", e)
