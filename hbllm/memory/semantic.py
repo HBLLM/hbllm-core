@@ -115,6 +115,7 @@ class _TfIdfEmbedder:
         vectors = vectors / norms
 
         from typing import cast
+
         return cast(np.ndarray[Any, Any], vectors)
 
 
@@ -167,7 +168,7 @@ class SemanticMemory:
 
         # ── Optional Qdrant Backend ──────────────────────────────────────
         self._use_qdrant = use_qdrant and _HAS_QDRANT
-        self._qdrant: "QdrantClient | None" = None
+        self._qdrant: QdrantClient | None = None
         self._qdrant_collection = "semantic_memory"
         self._qdrant_initialized = False
         if self._use_qdrant:
@@ -220,6 +221,7 @@ class SemanticMemory:
         if self._use_tfidf:
             return self._tfidf.encode(texts)
         from typing import cast
+
         if self.model is None:
             return self._tfidf.encode(texts)
         return cast(np.ndarray[Any, Any], self.model.encode(texts))

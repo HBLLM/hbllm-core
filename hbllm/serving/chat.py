@@ -61,6 +61,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     # 1. Initialize Network Layer
     from hbllm.network.bus import MessageBus
+
     bus: MessageBus
     if args.bus == "redis":
         bus = RedisBus(redis_url=args.redis_url)

@@ -18,10 +18,10 @@ import logging
 import sqlite3
 import time
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, cast, Callable
+from typing import Any, cast
 
 from hbllm.network.bus import InProcessBus, MessageBus, MessageHandler, Subscription
 from hbllm.network.messages import Message, MessageType

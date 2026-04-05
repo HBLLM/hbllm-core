@@ -44,7 +44,11 @@ class AudioOutputNode(Node):
             logger.info("Loading SpeechT5 TTS models for AudioOutput...")
             import torch
             from datasets import load_dataset  # type: ignore[import-untyped]
-            from transformers import SpeechT5ForTextToSpeech, SpeechT5HifiGan, SpeechT5Processor  # type: ignore[attr-defined]
+            from transformers import (  # type: ignore[attr-defined]
+                SpeechT5ForTextToSpeech,
+                SpeechT5HifiGan,
+                SpeechT5Processor,
+            )
 
             self.processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
             self.model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts")

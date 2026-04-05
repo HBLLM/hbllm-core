@@ -285,7 +285,9 @@ class HBLLMMcpServer:
 
         try:
             # Type detection here is a bit tricky, treat handler as a generic callable
-            handler_func: Callable[[MessageBus, dict[str, Any]], Awaitable[dict[str, Any]]] = handler
+            handler_func: Callable[[MessageBus, dict[str, Any]], Awaitable[dict[str, Any]]] = (
+                handler
+            )
             result = await handler_func(bus, arguments)
             return {
                 "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
@@ -321,7 +323,9 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"response": "Processing timed out", "error": True}
 
-    async def _tool_hbllm_memory_query(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
+    async def _tool_hbllm_memory_query(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Search memory systems."""
         msg = Message(
             type=MessageType.QUERY,
@@ -340,7 +344,9 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"results": [], "error": "Memory query timed out"}
 
-    async def _tool_hbllm_memory_store(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
+    async def _tool_hbllm_memory_store(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Store in memory."""
         memory_type = str(args.get("memory_type", "semantic"))
         topic = f"memory.{memory_type}.store" if memory_type != "skill" else "memory.skill.store"
@@ -358,7 +364,9 @@ class HBLLMMcpServer:
         await bus.publish(topic, msg)
         return {"stored": True, "memory_type": memory_type}
 
-    async def _tool_hbllm_identity_get(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
+    async def _tool_hbllm_identity_get(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Get identity profile."""
         msg = Message(
             type=MessageType.QUERY,
@@ -373,7 +381,9 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"error": "Identity query timed out"}
 
-    async def _tool_hbllm_identity_set(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
+    async def _tool_hbllm_identity_set(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Update identity profile."""
         msg = Message(
             type=MessageType.EVENT,
@@ -426,8 +436,6 @@ class HBLLMMcpServer:
 
 
 # ─── Stdio Transport ──────────────────────────────────────────────────────────
-
-
 
 
 async def run_stdio(server: HBLLMMcpServer) -> None:

@@ -120,14 +120,15 @@ async def _boot_brain(
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.modules.base_module import DomainModuleNode
+
+    # 1. Bus
+    from hbllm.network.bus import MessageBus
     from hbllm.network.redis_bus import RedisBus
     from hbllm.network.registry import ServiceRegistry
     from hbllm.perception.audio_in_node import AudioInputNode
     from hbllm.perception.audio_out_node import AudioOutputNode
     from hbllm.perception.vision_node import VisionNode
 
-    # 1. Bus
-    from hbllm.network.bus import MessageBus
     bus: MessageBus
     if bus_type == "redis":
         bus = RedisBus(redis_url=redis_url)
@@ -269,7 +270,9 @@ async def lifespan(app: FastAPI) -> Any:
     try:
         from fastapi.staticfiles import StaticFiles
         from hbllm_cloud.admin_api import create_admin_router  # type: ignore[import-not-found]
-        from hbllm_cloud.dashboard.routes import create_dashboard_router  # type: ignore[import-not-found]
+        from hbllm_cloud.dashboard.routes import (  # type: ignore[import-not-found]
+            create_dashboard_router,
+        )
         from hbllm_cloud.tenant_manager import TenantManager  # type: ignore[import-not-found]
 
         from hbllm.brain.policy_engine import PolicyEngine
@@ -303,12 +306,16 @@ async def lifespan(app: FastAPI) -> Any:
             app.mount("/admin/static", StaticFiles(directory=str(static_dir)), name="admin-static")
 
         # Auth middleware (protects /admin/* except /admin/login and /admin/static)
-        from hbllm_cloud.dashboard.auth import DashboardAuthMiddleware  # type: ignore[import-not-found]
+        from hbllm_cloud.dashboard.auth import (  # type: ignore[import-not-found]
+            DashboardAuthMiddleware,
+        )
 
         app.add_middleware(DashboardAuthMiddleware)
 
         # API security middleware (protects /v1/* with API key auth + rate limiting)
-        from hbllm_cloud.api_middleware import ApiSecurityMiddleware  # type: ignore[import-not-found]
+        from hbllm_cloud.api_middleware import (  # type: ignore[import-not-found]
+            ApiSecurityMiddleware,
+        )
 
         from hbllm.serving.security import RateLimiter
 
@@ -329,9 +336,15 @@ async def lifespan(app: FastAPI) -> Any:
     # ── Knowledge Base + Usage + Billing ──
     try:
         from hbllm_cloud.billing import BillingManager  # type: ignore[import-not-found]
-        from hbllm_cloud.knowledge.api import create_knowledge_router  # type: ignore[import-not-found]
-        from hbllm_cloud.knowledge.embeddings import EmbeddingsService  # type: ignore[import-not-found]
-        from hbllm_cloud.knowledge.processor import DocumentProcessor  # type: ignore[import-not-found]
+        from hbllm_cloud.knowledge.api import (  # type: ignore[import-not-found]
+            create_knowledge_router,
+        )
+        from hbllm_cloud.knowledge.embeddings import (  # type: ignore[import-not-found]
+            EmbeddingsService,
+        )
+        from hbllm_cloud.knowledge.processor import (  # type: ignore[import-not-found]
+            DocumentProcessor,
+        )
         from hbllm_cloud.knowledge.vector_store import VectorStore  # type: ignore[import-not-found]
         from hbllm_cloud.usage import UsageTracker  # type: ignore[import-not-found]
 
@@ -574,7 +587,9 @@ async def lifespan(app: FastAPI) -> Any:
 
     # ── AGI Differentiators: Multi-Perspective Analysis + XAI ──
     try:
-        from hbllm_cloud.multi_perspective import MultiPerspectiveAnalyzer  # type: ignore[import-not-found]
+        from hbllm_cloud.multi_perspective import (  # type: ignore[import-not-found]
+            MultiPerspectiveAnalyzer,
+        )
         from hbllm_cloud.xai import ExplainabilityEngine  # type: ignore[import-not-found]
 
         provider = _state.get("provider")

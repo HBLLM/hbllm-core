@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 class StrEnum(str, Enum):
     """Base class for string-based enums."""
+
     pass
 
 
@@ -82,7 +83,9 @@ class Node(ABC):
     extends this class. Nodes communicate exclusively via the MessageBus.
     """
 
-    def __init__(self, node_id: str, node_type: NodeType, capabilities: list[str] | None = None) -> None:
+    def __init__(
+        self, node_id: str, node_type: NodeType, capabilities: list[str] | None = None
+    ) -> None:
         self.node_id = node_id
         self.node_type = node_type
         self.capabilities = capabilities or []

@@ -23,10 +23,9 @@ from typing import Any
 
 import torch
 
-from hbllm.model.transformer import HBLLMForCausalLM
-
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.memory.concept_extractor import ConceptExtractor
+from hbllm.model.transformer import HBLLMForCausalLM
 from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
 from hbllm.training.trainer import Trainer, TrainingConfig
 from hbllm.training.training_memory import TrainingMemory, detect_domain

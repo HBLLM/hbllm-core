@@ -59,7 +59,7 @@ class RedisRegistry(ServiceRegistry):
     async def start(self, bus: MessageBus | None = None) -> None:
         """Connect to Redis and start health check loop."""
         try:
-            import redis.asyncio as aioredis # type: ignore
+            import redis.asyncio as aioredis  # type: ignore
 
             self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
             if self._redis:

@@ -11,11 +11,11 @@ the day's interactions without interrupting live service.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
-import json
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import torch
@@ -188,6 +188,7 @@ class LearnerNode(Node):
 
         def _train() -> None:
             import torch
+
             if self.model is None or self.tokenizer is None:
                 logger.warning("No model/tokenizer available. Skipping DPO training.")
                 return
@@ -306,7 +307,7 @@ class LearnerNode(Node):
         prompt_text: str,
         chosen_text: str,
         rejected_text: str,
-        device: Any, # torch.device
+        device: Any,  # torch.device
     ) -> tuple[Any, Any] | None:
         """Build a chosen/rejected tensor pair."""
         if not prompt_text or not chosen_text or not rejected_text:
@@ -314,6 +315,7 @@ class LearnerNode(Node):
 
         try:
             import torch
+
             # Tokenize combined prompt+response for chosen
             full_chosen = f"{prompt_text}\n{chosen_text}"
             c_ids = self.tokenizer.encode(full_chosen)[:512]
@@ -351,6 +353,7 @@ class LearnerNode(Node):
             return
 
         import torch
+
         lora_params = [
             p for n, p in self.model.named_parameters() if "lora_" in n and p.requires_grad
         ]
@@ -362,6 +365,7 @@ class LearnerNode(Node):
     def _save_adapter(self) -> None:
         """Save the trained LoRA adapter."""
         from pathlib import Path
+
         import torch
 
         try:

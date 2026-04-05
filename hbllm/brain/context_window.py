@@ -73,7 +73,9 @@ class ContextWindowManager:
         # result.text is the fitted context, result.used_tokens <= 2048
     """
 
-    def __init__(self, max_tokens: int = 2048, reserve_for_output: int = 256, tokenizer: Any = None) -> None:
+    def __init__(
+        self, max_tokens: int = 2048, reserve_for_output: int = 256, tokenizer: Any = None
+    ) -> None:
         self.max_tokens = max_tokens
         self.reserve_for_output = reserve_for_output
         self._blocks: list[ContextBlock] = []

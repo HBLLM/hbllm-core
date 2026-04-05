@@ -58,11 +58,14 @@ def load_checkpoint(
 
     # Try safe loading first
     try:
-        ckpt = cast(dict[str, Any], torch.load(
-            str(path),
-            map_location=map_location,
-            weights_only=True,
-        ))
+        ckpt = cast(
+            dict[str, Any],
+            torch.load(
+                str(path),
+                map_location=map_location,
+                weights_only=True,
+            ),
+        )
         logger.debug("Loaded checkpoint safely (weights_only=True): %s", path.name)
         return ckpt
     except Exception as e:
@@ -79,11 +82,14 @@ def load_checkpoint(
             path.name,
             type(e).__name__,
         )
-        return cast(dict[str, Any], torch.load(
-            str(path),
-            map_location=map_location,
-            weights_only=False,
-        ))
+        return cast(
+            dict[str, Any],
+            torch.load(
+                str(path),
+                map_location=map_location,
+                weights_only=False,
+            ),
+        )
 
 
 def extract_model_state(ckpt: dict[str, Any]) -> dict[str, Any]:

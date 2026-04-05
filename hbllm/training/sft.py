@@ -101,6 +101,7 @@ class InstructionDataset(Dataset[dict[str, torch.Tensor]]):
         # Direct messages format
         if "messages" in item:
             from typing import cast
+
             return cast(list[dict[str, str]], item["messages"])
 
         return []

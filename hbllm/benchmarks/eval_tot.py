@@ -45,7 +45,8 @@ async def run_tot_benchmark() -> dict[str, Any]:
                 usage={},
             )
 
-    from typing import cast, Any
+    from typing import Any, cast
+
     planner.llm = cast(Any, MockProvider())
 
     await prm_node.start(bus)

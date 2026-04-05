@@ -237,7 +237,9 @@ class McpClientNode(Node):
 
     # ─── JSON-RPC Transport ───────────────────────────────────────────────
 
-    async def _send_request(self, method: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+    async def _send_request(
+        self, method: str, params: dict[str, Any], timeout: float = 30.0
+    ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
         if not self._process or not self._process.stdin:
             raise RuntimeError("MCP server not running")
@@ -354,7 +356,12 @@ class McpClientNode(Node):
             try:
                 self._process.terminate()
                 await asyncio.wait_for(self._process.wait(), timeout=5)
-            except (TimeoutError, asyncio.IncompleteReadError, asyncio.TimeoutError, ProcessLookupError):
+            except (
+                TimeoutError,
+                asyncio.IncompleteReadError,
+                asyncio.TimeoutError,
+                ProcessLookupError,
+            ):
                 if self._process:
                     self._process.kill()
             self._process = None

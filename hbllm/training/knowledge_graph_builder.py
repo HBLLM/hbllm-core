@@ -170,10 +170,36 @@ class KnowledgeGraphBuilder:
     def get_topic_clusters(self, top_n: int = 20) -> list[dict[str, Any]]:
         """Get top topic clusters from keyword frequency."""
         stopwords = {
-            "that", "this", "with", "from", "have", "been", "were", "will", "would",
-            "could", "should", "their", "which", "about", "there", "other", "some",
-            "when", "them", "then", "than", "also", "into", "more", "very", "just",
-            "each", "only", "between", "such",
+            "that",
+            "this",
+            "with",
+            "from",
+            "have",
+            "been",
+            "were",
+            "will",
+            "would",
+            "could",
+            "should",
+            "their",
+            "which",
+            "about",
+            "there",
+            "other",
+            "some",
+            "when",
+            "them",
+            "then",
+            "than",
+            "also",
+            "into",
+            "more",
+            "very",
+            "just",
+            "each",
+            "only",
+            "between",
+            "such",
         }
         filtered = [
             (word, count)
@@ -192,7 +218,9 @@ class KnowledgeGraphBuilder:
             "entity_types": dict(type_counts),
             "top_entities": [
                 {"name": e.name, "type": e.entity_type, "freq": e.frequency}
-                for e in sorted(self.entities.values(), key=lambda x: x.frequency, reverse=True)[:10]
+                for e in sorted(self.entities.values(), key=lambda x: x.frequency, reverse=True)[
+                    :10
+                ]
             ],
         }
 

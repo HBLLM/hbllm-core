@@ -47,7 +47,8 @@ class AudioInputNode(Node):
     def _load_model(self) -> None:
         if self.model is None:
             try:
-                import whisper # type: ignore
+                import whisper  # type: ignore
+
                 logger.info("Loading Whisper %s model for AudioInput...", self.model_size)
                 self.model = whisper.load_model(self.model_size)
             except ImportError:

@@ -56,10 +56,10 @@ def _get_rclpy() -> Any:
     global _rclpy, _rclpy_checked
     if not _rclpy_checked:
         try:
-            import rclpy # type: ignore
-            import rclpy.node # type: ignore
-            from geometry_msgs.msg import PoseStamped, Twist # type: ignore
-            from std_msgs.msg import String # type: ignore
+            import rclpy  # type: ignore
+            import rclpy.node  # type: ignore
+            from geometry_msgs.msg import PoseStamped, Twist  # type: ignore
+            from std_msgs.msg import String  # type: ignore
 
             _rclpy = rclpy
             logger.info("ROS2 (rclpy) available — real robot mode enabled")
@@ -82,7 +82,9 @@ class RobotState:
     type: str = "mobile"  # mobile, arm, drone, humanoid
     status: str = "idle"  # idle, moving, executing, error
     position: dict[str, float] = field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
-    orientation: dict[str, float] = field(default_factory=lambda: {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+    orientation: dict[str, float] = field(
+        default_factory=lambda: {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+    )
     battery: float = 100.0
     sensors: dict[str, Any] = field(default_factory=dict)
     last_seen: float = field(default_factory=time.time)
@@ -361,7 +363,9 @@ class Ros2Node(Node):
         await self._execute_move(robot, {"linear_x": 0.0, "angular_z": 0.0})
         robot.status = "idle"
 
-    async def _execute_navigate(self, robot: RobotState, params: dict[str, Any], message: Message) -> None:
+    async def _execute_navigate(
+        self, robot: RobotState, params: dict[str, Any], message: Message
+    ) -> None:
         """Send Nav2 goal."""
         x = float(params.get("x", 0.0))
         y = float(params.get("y", 0.0))
@@ -369,6 +373,7 @@ class Ros2Node(Node):
 
         if self.is_real and "nav_goal" in self._publishers:
             import math
+
             from geometry_msgs.msg import PoseStamped
 
             goal = PoseStamped()
@@ -385,7 +390,9 @@ class Ros2Node(Node):
         robot.status = "navigating"
         robot.position = {"x": x, "y": y, "z": 0.0}
 
-    async def _execute_manipulation(self, robot: RobotState, command: str, params: dict[str, Any]) -> None:
+    async def _execute_manipulation(
+        self, robot: RobotState, command: str, params: dict[str, Any]
+    ) -> None:
         """Handle arm/gripper commands."""
         if self.is_real:
             from std_msgs.msg import String

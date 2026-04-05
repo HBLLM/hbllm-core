@@ -15,13 +15,15 @@ from typing import Any
 tiktoken: Any
 try:
     import tiktoken as _tiktoken
+
     tiktoken = _tiktoken
 except ImportError:
     tiktoken = None
 
 Vocab: Any
 try:
-    from hbllm_tokenizer_rs import Vocab as _Vocab # type: ignore
+    from hbllm_tokenizer_rs import Vocab as _Vocab  # type: ignore
+
     Vocab = _Vocab
 except ImportError:
     Vocab = None
@@ -83,7 +85,9 @@ class HBLLMTokenizer:
                 self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
                 if self._tiktoken:
                     self.vocab_size = self._tiktoken.n_vocab
-                    logger.info("Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size)
+                    logger.info(
+                        "Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size
+                    )
             except Exception as e:
                 logger.warning("Failed to initialize tiktoken fallback: %s", e)
         else:
@@ -104,7 +108,7 @@ class HBLLMTokenizer:
                 return cls(vocab=vocab)
             except Exception as e:
                 logger.warning("Failed to load Rust vocab: %s. Falling back to tiktoken.", e)
-        
+
         logger.warning("Rust tokenizer not available, using tiktoken fallback")
         return cls()
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import numpy as np
@@ -137,7 +137,7 @@ class RouterNode(Node):
         import numpy as np
 
         if self._tokenizer is None or self.encoder is None:
-            return np.zeros(384) # Default dimension for MiniLM
+            return np.zeros(384)  # Default dimension for MiniLM
 
         enc = self._tokenizer.encode(text)
         ort_inputs = {
@@ -443,7 +443,10 @@ class RouterNode(Node):
 
         # Inject context directly into the text for the next agent to read
         history_text = "\n".join(
-            [f"- [{h.get('node', 'unknown')}]: {h.get('type', 'event')} (confidence: {h.get('confidence', 0.0)})" for h in history]
+            [
+                f"- [{h.get('node', 'unknown')}]: {h.get('type', 'event')} (confidence: {h.get('confidence', 0.0)})"
+                for h in history
+            ]
         )
         workspace_payload["text"] = (
             f"[SWARM TRANSFER] The previous agent transferred this to you ({target_domain}).\n\nPrevious Agent Work:\n{history_text}\n\nOriginal Request:\n{original_query.get('text', '')}"

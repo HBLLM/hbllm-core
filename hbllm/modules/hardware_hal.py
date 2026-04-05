@@ -12,8 +12,8 @@ import os
 import platform
 import time
 from dataclasses import dataclass
-from typing import Any
 from enum import Enum
+from typing import Any
 
 import torch
 

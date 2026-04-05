@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import HealthStatus, NodeHealth
@@ -48,9 +48,13 @@ class HealthMonitor:
         self._heartbeat_timeout = heartbeat_timeout
         self._running = False
         self._monitor_task: asyncio.Task[None] | None = None
-        self._on_node_unhealthy_callbacks: list[Callable[[str, NodeHealth], Coroutine[Any, Any, None]]] = []
+        self._on_node_unhealthy_callbacks: list[
+            Callable[[str, NodeHealth], Coroutine[Any, Any, None]]
+        ] = []
 
-    def on_node_unhealthy(self, callback: Callable[[str, NodeHealth], Coroutine[Any, Any, None]]) -> None:
+    def on_node_unhealthy(
+        self, callback: Callable[[str, NodeHealth], Coroutine[Any, Any, None]]
+    ) -> None:
         """Register a callback for when a node becomes unhealthy."""
         self._on_node_unhealthy_callbacks.append(callback)
 

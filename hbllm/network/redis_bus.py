@@ -264,16 +264,16 @@ class RedisBus(MessageBus):
             except Exception as e:
                 # Basic catch-all to prevent loop death if some Redis error occurs
                 if "ConnectionError" in str(e.__class__):
-                   self.metrics.reconnections += 1
-                   logger.error("Redis connection lost. Reconnecting in %.1fs...", backoff)
-                   await asyncio.sleep(backoff)
-                   backoff = min(backoff * 2, max_backoff)
-                   try:
-                       await self._reconnect()
-                   except Exception:
-                       logger.error("Reconnection failed. Will retry.")
+                    self.metrics.reconnections += 1
+                    logger.error("Redis connection lost. Reconnecting in %.1fs...", backoff)
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, max_backoff)
+                    try:
+                        await self._reconnect()
+                    except Exception:
+                        logger.error("Reconnection failed. Will retry.")
                 else:
-                   logger.error("Error in Redis dispatch loop: %s", e)
+                    logger.error("Error in Redis dispatch loop: %s", e)
 
     async def _reconnect(self) -> None:
         """Reconnect to Redis after a connection loss."""
@@ -312,7 +312,9 @@ class RedisBus(MessageBus):
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run_handler(s: Subscription = sub, t: str = topic, m: Message = message) -> None:
+                async def _run_handler(
+                    s: Subscription = sub, t: str = topic, m: Message = message
+                ) -> None:
                     try:
                         response = await s.handler(m)
                         if response is not None:

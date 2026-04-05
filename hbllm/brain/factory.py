@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.actions.tool_memory import ToolMemory
-from hbllm.network.node import Node
 from hbllm.brain.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.confidence_estimator import ConfidenceEstimator
 from hbllm.brain.goal_manager import GoalManager
@@ -49,6 +48,7 @@ from hbllm.data.interaction_miner import InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
+from hbllm.network.node import Node
 from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
 from hbllm.serving.provider import LLMProvider, get_provider
@@ -429,8 +429,6 @@ class BrainFactory:
 
         registry = ServiceRegistry()
         await registry.start()
- 
-        from hbllm.network.node import Node
 
         # 3. Create cognitive nodes with LLM injected
         from hbllm.brain.collective_node import CollectiveNode
@@ -449,6 +447,7 @@ class BrainFactory:
         from hbllm.brain.workspace_node import WorkspaceNode
         from hbllm.brain.world_model_node import WorldModelNode
         from hbllm.memory.memory_node import MemoryNode
+        from hbllm.network.node import Node
 
         # Create PolicyEngine for governance
         policy_engine = None
@@ -525,7 +524,6 @@ class BrainFactory:
 
             nodes.append(LogicNode(node_id="logic", llm=llm))
             logger.info("LogicNode wired (Z3 theorem prover)")
-
 
         # 4. Start all nodes on the bus
         for node in nodes:

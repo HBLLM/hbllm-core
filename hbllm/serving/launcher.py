@@ -87,6 +87,7 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
         module = importlib.import_module(module_path)
         node_class = getattr(module, class_name)
         from typing import cast
+
         return cast(Node, node_class(node_id=node_id))
     except Exception as e:
         logger.error("Failed to create node '%s': %s", node_id, e)

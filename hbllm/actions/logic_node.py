@@ -104,7 +104,7 @@ class LogicNode(Node):
         import asyncio
 
         try:
-            import z3 # type: ignore
+            import z3  # type: ignore
         except ImportError:
             logger.error("[LogicNode] z3-solver not installed.")
             return None

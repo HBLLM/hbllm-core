@@ -215,14 +215,16 @@ class RewardModel:
                 "ORDER BY created_at DESC LIMIT 100",
                 (pattern,),
             ).fetchone()
-        
+
         if row and row[0] is not None:
             return float(row[0])
         return None
 
     # ─── Export for Training ─────────────────────────────────────────
 
-    def export_preferences(self, min_margin: float = 0.5, limit: int = 10000) -> list[dict[str, Any]]:
+    def export_preferences(
+        self, min_margin: float = 0.5, limit: int = 10000
+    ) -> list[dict[str, Any]]:
         """Export preference pairs for DPO/RLHF training."""
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(
@@ -248,8 +250,12 @@ class RewardModel:
             reward_count: int = conn.execute("SELECT COUNT(*) FROM rewards").fetchone()[0]
             pref_count: int = conn.execute("SELECT COUNT(*) FROM preferences").fetchone()[0]
             avg_reward_row = conn.execute("SELECT AVG(reward) FROM rewards").fetchone()
-            avg_reward: float = float(avg_reward_row[0]) if avg_reward_row and avg_reward_row[0] is not None else 0.0
-            
+            avg_reward: float = (
+                float(avg_reward_row[0])
+                if avg_reward_row and avg_reward_row[0] is not None
+                else 0.0
+            )
+
         return {
             "total_rewards": reward_count,
             "total_preferences": pref_count,

@@ -26,7 +26,9 @@ class BrowserNode(Node):
 
     def __init__(self, node_id: str) -> None:
         super().__init__(
-            node_id=node_id, node_type=NodeType.ACTION, capabilities=["web_search", "web_scrape"]  # type: ignore[attr-defined]
+            node_id=node_id,
+            node_type=NodeType.ACTION,  # type: ignore[attr-defined]
+            capabilities=["web_search", "web_scrape"],
         )
 
     async def on_start(self) -> None:
@@ -58,9 +60,9 @@ class BrowserNode(Node):
             import asyncio
 
             def _search_and_scrape() -> list[dict[str, Any]]:
-                import requests # type: ignore
-                from bs4 import BeautifulSoup # type: ignore
-                from duckduckgo_search import DDGS # type: ignore
+                import requests  # type: ignore
+                from bs4 import BeautifulSoup  # type: ignore
+                from duckduckgo_search import DDGS  # type: ignore
 
                 logger.info("Executing Web Search for: '%s'", query)
                 results: list[dict[str, Any]] = []

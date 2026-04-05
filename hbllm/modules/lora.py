@@ -21,7 +21,9 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 # Lock-Free Concurrency Context
-ACTIVE_ADAPTER: contextvars.ContextVar[str | dict[str, float] | None] = contextvars.ContextVar("active_adapter", default=None)
+ACTIVE_ADAPTER: contextvars.ContextVar[str | dict[str, float] | None] = contextvars.ContextVar(
+    "active_adapter", default=None
+)
 
 
 def is_quantization_enabled() -> bool:
@@ -96,7 +98,7 @@ class LoRALinear(nn.Module):
 
         if not active_adapter or self.r == 0:
             return result
-        
+
         lora_out: Any = 0.0
         lora_x = self.dropout(x)
 

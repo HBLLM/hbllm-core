@@ -137,7 +137,9 @@ class CognitiveMetrics:
             total_queries=int(reasoning["count"] + tool["count"]),
         )
 
-    def get_trend(self, metric: str, periods: int = 7, period_hours: int = 24) -> list[dict[str, Any]]:
+    def get_trend(
+        self, metric: str, periods: int = 7, period_hours: int = 24
+    ) -> list[dict[str, Any]]:
         """Get metric trend over multiple periods."""
         now = time.time()
         trend = []

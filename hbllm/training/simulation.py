@@ -89,6 +89,7 @@ class SimulationEnvironment:
         if not gen_fn:
             raise ValueError(f"Unknown category: {category}. Available: {self.categories}")
         from typing import cast
+
         return cast("list[SimTask]", gen_fn(count, difficulty))
 
     async def evaluate(

@@ -125,7 +125,11 @@ class HuggingFaceModelAdapter(nn.Module):
     ) -> tuple[Any, Any, ModelConfig]:
         """Load a HuggingFace model, tokenizer, and build HBLLM config."""
         try:
-            from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer  # type: ignore[attr-defined]
+            from transformers import (  # type: ignore[attr-defined]
+                AutoConfig,
+                AutoModelForCausalLM,
+                AutoTokenizer,
+            )
         except ImportError:
             raise ImportError(
                 "HuggingFace transformers is required. Install with:\n"

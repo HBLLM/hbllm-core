@@ -10,9 +10,9 @@ redundant recomputation of previous positions.
 """
 
 import logging
+from typing import Any
 
 import torch
-from typing import Any
 import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)

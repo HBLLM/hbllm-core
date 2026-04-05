@@ -8,10 +8,10 @@ then constructs a dynamic scikit-fuzzy control system to compute the result.
 """
 
 from __future__ import annotations
-from typing import Any
 
 import asyncio
 import logging
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
