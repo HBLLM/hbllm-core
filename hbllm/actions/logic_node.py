@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -24,7 +25,7 @@ class LogicNode(Node):
     Service node that represents slow, methodical 'System 2' logical deduction.
     """
 
-    def __init__(self, node_id: str, llm=None):
+    def __init__(self, node_id: str, llm: Any = None) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -48,7 +49,7 @@ class LogicNode(Node):
         Triggered when a new query lands on the Global Workspace Blackboard.
         """
         payload = message.payload
-        text = payload.get("text", "")
+        text = str(payload.get("text", ""))
 
         # 1. Intent Detection — use LLM to determine if this is a logic problem
         if not self.llm:
@@ -102,7 +103,11 @@ class LogicNode(Node):
         """
         import asyncio
 
-        import z3
+        try:
+            import z3  # type: ignore
+        except ImportError:
+            logger.error("[LogicNode] z3-solver not installed.")
+            return None
 
         # Ask the LLM to write Z3 code
         loop = asyncio.new_event_loop()
@@ -136,7 +141,7 @@ class LogicNode(Node):
         logger.info("[LogicNode] Executing LLM-generated Z3 code:\n%s", z3_code[:200])
 
         # 3. Execute in a restricted sandbox
-        sandbox_globals = {
+        sandbox_globals: dict[str, Any] = {
             "__builtins__": {
                 "print": print,
                 "range": range,
@@ -154,7 +159,7 @@ class LogicNode(Node):
             },
             "z3": z3,
         }
-        sandbox_locals: dict = {}
+        sandbox_locals: dict[str, Any] = {}
 
         # Inject common z3 names into the sandbox
         for name in dir(z3):

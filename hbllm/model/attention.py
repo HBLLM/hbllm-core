@@ -12,6 +12,8 @@ When 1 < num_kv_heads < num_attention_heads → Grouped Query Attention
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -60,7 +62,7 @@ class GroupedQueryAttention(nn.Module):
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
-        past_key_value: tuple[torch.Tensor, torch.Tensor] | None = None,
+        past_key_value: Any | None = None,
         use_cache: bool = False,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | None]:
         """

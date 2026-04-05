@@ -106,7 +106,7 @@ class SpawnerNode(Node):
         self.model = model
         self.tokenizer = tokenizer
         self.synthesizer = DataSynthesizer(model=model, tokenizer=tokenizer)
-        self.spawning_tasks = set()
+        self.spawning_tasks: set[asyncio.Task[Any]] = set()
         self.adapter_registry = adapter_registry
         # Priority: constructor arg > env var > auto-classify per domain
         self.default_lora_rank = (
@@ -229,11 +229,11 @@ class SpawnerNode(Node):
         dataset_path: str,
         tenant_id: str | None = None,
         lora_rank: int = 8,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Train a LoRA adapter on the synthetic dataset."""
         logger.info("Training LoRA adapter for domain '%s' (rank=%d)...", domain_name, lora_rank)
 
-        def _train():
+        def _train() -> dict[str, Any] | None:
             try:
                 import torch
 
@@ -301,7 +301,7 @@ class SpawnerNode(Node):
                             ignore_index=-100,
                         )
 
-                        loss.backward()
+                        loss.backward()  # type: ignore[no-untyped-call]
                         torch.nn.utils.clip_grad_norm_(lora_params, 1.0)
                         optimizer.step()
                         optimizer.zero_grad()

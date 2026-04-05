@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import time
-from typing import Any
+from typing import Any, cast
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -33,23 +33,26 @@ class AudioInputNode(Node):
     Supports both file-based and streaming audio input.
     """
 
-    def __init__(self, node_id: str, model_size: str = "tiny.en"):
+    def __init__(self, node_id: str, model_size: str = "tiny.en") -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PERCEPTION,
             capabilities=["speech_to_text", "audio_streaming"],
         )
         self.model_size = model_size
-        self.model = None
+        self.model: Any | None = None
         # Streaming buffers: session_id -> {"chunks": [bytes], "start": float, "last_chunk": float}
         self._stream_buffers: dict[str, dict[str, Any]] = {}
 
-    def _load_model(self):
+    def _load_model(self) -> None:
         if self.model is None:
-            import whisper
+            try:
+                import whisper  # type: ignore
 
-            logger.info("Loading Whisper %s model for AudioInput...", self.model_size)
-            self.model = whisper.load_model(self.model_size)
+                logger.info("Loading Whisper %s model for AudioInput...", self.model_size)
+                self.model = whisper.load_model(self.model_size)
+            except ImportError:
+                logger.error("Whisper library not found. Audio transcription will fail.")
 
     async def on_start(self) -> None:
         """Subscribe to sensory audio streams, streaming input, and workspace evaluation."""
@@ -81,11 +84,13 @@ class AudioInputNode(Node):
             import asyncio
 
             # Offload heavy whisper STT inference to thread
-            def _transcribe():
+            def _transcribe() -> str:
                 self._load_model()
+                if self.model is None:
+                    raise RuntimeError("Whisper model not loaded")
                 logger.info("Transcribing audio file: %s", file_path)
                 result = self.model.transcribe(file_path, fp16=False)
-                return result["text"].strip()
+                return str(result["text"]).strip()
 
             transcription = await asyncio.to_thread(_transcribe)
             logger.info("Transcribed text: '%s'", transcription)
@@ -102,8 +107,6 @@ class AudioInputNode(Node):
                 correlation_id=message.id,  # Maintain chain
             )
             # Fire and forget the internal brain query
-            import asyncio
-
             asyncio.create_task(self.bus.publish("router.query", query_msg))
 
             return resp
@@ -124,8 +127,8 @@ class AudioInputNode(Node):
         """
         payload = message.payload
         session_id = message.session_id or "default"
-        chunk_hex = payload.get("chunk", "")
-        is_final = payload.get("is_final", False)
+        chunk_hex = str(payload.get("chunk", ""))
+        is_final = bool(payload.get("is_final", False))
 
         if not chunk_hex and not is_final:
             return None
@@ -176,9 +179,9 @@ class AudioInputNode(Node):
             import os
 
             combined = b"".join(buf["chunks"])
-            sample_rate = buf.get("sample_rate", 16000)
+            sample_rate = int(buf.get("sample_rate", 16000))
 
-            def _transcribe_bytes():
+            def _transcribe_bytes() -> str:
                 # Write raw PCM to a temp wav file
                 import wave
 
@@ -191,8 +194,10 @@ class AudioInputNode(Node):
                         wf.writeframes(combined)
 
                     self._load_model()
+                    if self.model is None:
+                        raise RuntimeError("Whisper model not loaded")
                     result = self.model.transcribe(tmp.name, fp16=False)
-                    return result["text"].strip()
+                    return str(result["text"]).strip()
                 finally:
                     os.unlink(tmp.name)
 
@@ -221,7 +226,7 @@ class AudioInputNode(Node):
         transcribe it and post a speech_perception thought to the blackboard.
         """
         payload = message.payload
-        audio_path = payload.get("audio_path") or payload.get("file_path")
+        audio_path = str(payload.get("audio_path") or payload.get("file_path") or "")
 
         if not audio_path:
             return None  # Not an audio-relevant query
@@ -229,10 +234,12 @@ class AudioInputNode(Node):
         try:
             import asyncio
 
-            def _transcribe():
+            def _transcribe() -> str:
                 self._load_model()
+                if self.model is None:
+                    raise RuntimeError("Whisper model not loaded")
                 result = self.model.transcribe(audio_path, fp16=False)
-                return result["text"].strip()
+                return str(result["text"]).strip()
 
             transcription = await asyncio.to_thread(_transcribe)
 

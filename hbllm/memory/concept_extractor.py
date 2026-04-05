@@ -164,9 +164,9 @@ class ConceptExtractor:
 
     # ─── Internals ───────────────────────────────────────────────────
 
-    def _count_keywords(self, texts: list[str]) -> Counter:
+    def _count_keywords(self, texts: list[str]) -> Counter[str]:
         """Count significant keywords across texts."""
-        keywords: Counter = Counter()
+        keywords: Counter[str] = Counter()
         for text in texts:
             words = re.findall(r"\b[a-z]{3,}\b", text.lower())
             filtered = [w for w in words if w not in self._stopwords]
@@ -176,7 +176,7 @@ class ConceptExtractor:
     def _cluster_keywords(
         self,
         queries: list[str],
-        keyword_freq: Counter,
+        keyword_freq: Counter[str],
     ) -> list[tuple[list[str], list[str]]]:
         """Cluster queries by co-occurring keywords."""
         # Get significant keywords

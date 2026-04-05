@@ -2,7 +2,7 @@ import time
 from typing import Any
 
 import torch
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForCausalLM
@@ -33,16 +33,16 @@ def run_speculative_benchmark() -> dict[str, Any]:
 
     # Create dummy tokenizer
     class MockTokenizer:
-        def __init__(self):
+        def __init__(self) -> None:
             self.eos_id = 1
 
-        def encode(self, text, **kwargs):
+        def encode(self, text: str, **kwargs: Any) -> list[int]:
             return [10, 20, 30, 40, 50]
 
-        def decode(self, token_ids):
+        def decode(self, token_ids: list[int]) -> str:
             return " " + " ".join(str(x) for x in token_ids)
 
-        def apply_chat_template(self, msgs, **kwargs):
+        def apply_chat_template(self, msgs: list[dict[str, str]], **kwargs: Any) -> str:
             return msgs[0]["content"]
 
     tokenizer = MockTokenizer()

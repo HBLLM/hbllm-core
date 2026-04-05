@@ -22,7 +22,7 @@ import logging
 import signal
 import sys
 
-from hbllm.network.bus import InProcessBus
+from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry
 from hbllm.network.cluster_config import ClusterConfig, load_cluster_config
 from hbllm.network.health import HealthMonitor
@@ -52,7 +52,9 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
 
         return DomainModuleNode(
             node_id=f"domain_{domain_name}",
-            domain=domain_name,
+            domain_name=domain_name,
+            model=None,  # type: ignore[arg-type]
+            tokenizer=None,
         )
 
     # Standard nodes
@@ -84,7 +86,9 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
 
         module = importlib.import_module(module_path)
         node_class = getattr(module, class_name)
-        return node_class(node_id=node_id)
+        from typing import cast
+
+        return cast(Node, node_class(node_id=node_id))
     except Exception as e:
         logger.error("Failed to create node '%s': %s", node_id, e)
         return None
@@ -105,7 +109,7 @@ class ServerInstance:
     ):
         self.server_name = server_name
         self.config = config
-        self.bus = None
+        self.bus: MessageBus | None = None
         self.registry: ServiceRegistry | None = None
         self.circuit_breakers = CircuitBreakerRegistry(
             failure_threshold=config.node_defaults.circuit_breaker_threshold,
@@ -186,6 +190,9 @@ class ServerInstance:
             node_ids = server_config.nodes
 
         # ── 5. Create and start nodes ──
+        if self.bus is None:
+            raise RuntimeError("MessageBus failed to initialize.")
+
         for node_id in node_ids:
             node = _create_node(node_id, self.config)
             if node is not None:
@@ -268,7 +275,7 @@ async def _run_server(server_name: str, config_path: str | None) -> None:
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
 
-    def _signal_handler():
+    def _signal_handler() -> None:
         logger.info("Received shutdown signal")
         shutdown_event.set()
 

@@ -11,6 +11,23 @@ import logging
 from pathlib import Path
 from typing import Any
 
+# Optional dependencies
+tiktoken: Any
+try:
+    import tiktoken as _tiktoken
+
+    tiktoken = _tiktoken
+except ImportError:
+    tiktoken = None
+
+Vocab: Any
+try:
+    from hbllm_tokenizer_rs import Vocab as _Vocab  # type: ignore
+
+    Vocab = _Vocab
+except ImportError:
+    Vocab = None
+
 logger = logging.getLogger(__name__)
 
 # Special token strings
@@ -35,9 +52,9 @@ class HBLLMTokenizer:
         prompt = tok.apply_chat_template([{'role': 'user', 'content': 'Hi'}])
     """
 
-    def __init__(self, vocab: Any = None, vocab_size: int = 32768):
+    def __init__(self, vocab: Any | None = None, vocab_size: int = 32768) -> None:
         self._vocab = vocab  # Rust Vocab object or None
-        self._tiktoken = None
+        self._tiktoken: Any | None = None
         self._special_ids: dict[str, int] = {}
         self.vocab_size = vocab_size
 
@@ -60,16 +77,20 @@ class HBLLMTokenizer:
 
     def _init_fallback(self) -> None:
         """Fallback: use tiktoken for encoding (cached)."""
-        try:
-            import tiktoken
-
-            cache_key = "cl100k_base"
-            if cache_key not in HBLLMTokenizer._tiktoken_cache:
-                HBLLMTokenizer._tiktoken_cache[cache_key] = tiktoken.get_encoding(cache_key)
-            self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
-            self.vocab_size = self._tiktoken.n_vocab
-            logger.info("Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size)
-        except ImportError:
+        if tiktoken is not None:
+            try:
+                cache_key = "cl100k_base"
+                if cache_key not in HBLLMTokenizer._tiktoken_cache:
+                    HBLLMTokenizer._tiktoken_cache[cache_key] = tiktoken.get_encoding(cache_key)
+                self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
+                if self._tiktoken:
+                    self.vocab_size = self._tiktoken.n_vocab
+                    logger.info(
+                        "Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size
+                    )
+            except Exception as e:
+                logger.warning("Failed to initialize tiktoken fallback: %s", e)
+        else:
             logger.warning("No tokenizer backend available. Encode/decode will fail.")
 
         # Reserve special IDs at end
@@ -81,14 +102,15 @@ class HBLLMTokenizer:
     @classmethod
     def from_vocab(cls, path: str | Path) -> HBLLMTokenizer:
         """Load from a Rust vocab JSON file."""
-        try:
-            from hbllm_tokenizer_rs import Vocab
+        if Vocab is not None:
+            try:
+                vocab = Vocab.load(str(path))
+                return cls(vocab=vocab)
+            except Exception as e:
+                logger.warning("Failed to load Rust vocab: %s. Falling back to tiktoken.", e)
 
-            vocab = Vocab.load(str(path))
-            return cls(vocab=vocab)
-        except ImportError:
-            logger.warning("Rust tokenizer not available, using tiktoken fallback")
-            return cls()
+        logger.warning("Rust tokenizer not available, using tiktoken fallback")
+        return cls()
 
     @classmethod
     def from_tiktoken(cls) -> HBLLMTokenizer:
@@ -119,12 +141,13 @@ class HBLLMTokenizer:
     def decode(self, ids: list[int]) -> str:
         """Decode token IDs to text."""
         # Filter out special tokens
-        filtered = [i for i in ids if i not in self._special_ids.values()]
+        special_values = set(self._special_ids.values())
+        filtered = [i for i in ids if i not in special_values]
 
         if self._vocab is not None:
-            return self._vocab.decode_to_string(filtered)
+            return str(self._vocab.decode_to_string(filtered))
         elif self._tiktoken is not None:
-            return self._tiktoken.decode(filtered)
+            return str(self._tiktoken.decode(filtered))
         else:
             raise RuntimeError("No tokenizer backend available")
 

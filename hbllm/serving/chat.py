@@ -13,7 +13,7 @@ import sys
 import uuid
 
 # And the tokenizer
-from hbllm_tokenizer_rs import Vocab
+from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
 
 from hbllm.actions.api_node import ApiNode
 from hbllm.actions.browser_node import BrowserNode
@@ -60,6 +60,9 @@ async def async_main(args: argparse.Namespace) -> None:
     print(f"Initializing HBLLM ({args.model_size}) Brain Interface...\n")
 
     # 1. Initialize Network Layer
+    from hbllm.network.bus import MessageBus
+
+    bus: MessageBus
     if args.bus == "redis":
         bus = RedisBus(redis_url=args.redis_url)
     else:
@@ -116,8 +119,8 @@ async def async_main(args: argparse.Namespace) -> None:
         WorkspaceNode(node_id="workspace_01"),
         WorldModelNode(node_id="world_model_01"),
         SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=20.0, llm=llm_interface),
-        CriticNode(node_id="critic_01", llm=llm_interface),
-        DecisionNode(node_id="decision_01", llm=llm_interface),
+        CriticNode(node_id="critic_01", llm=llm_interface),  # type: ignore[arg-type]
+        DecisionNode(node_id="decision_01", llm=llm_interface),  # type: ignore[arg-type]
         ApiNode(node_id="api_01", llm=llm_interface),
         # Domain Modules — shared base model with optional per-domain LoRA adapters
         DomainModuleNode(
@@ -153,7 +156,7 @@ async def async_main(args: argparse.Namespace) -> None:
     user_node_id = "user_cli"
 
     # Async queue to print out-of-band system messages (like SPAWN_COMPLETE)
-    system_messages = asyncio.Queue()
+    system_messages: asyncio.Queue[str] = asyncio.Queue()
 
     async def spawn_complete_handler(msg: Message) -> Message | None:
         if msg.type == MessageType.SPAWN_COMPLETE:
@@ -178,8 +181,8 @@ async def async_main(args: argparse.Namespace) -> None:
     # Global Output Listener
     # Because of the new Workspace -> Decision architecture, the CLI should passively
     # listen for `sensory.output` events instead of blocking synchronously on requests.
-    async def listen_for_output():
-        async def on_output(message: Message):
+    async def listen_for_output() -> None:
+        async def on_output(message: Message) -> None:
             if message.payload:
                 text = message.payload.get("text")
                 source = message.payload.get("source", "system")
@@ -532,7 +535,7 @@ async def async_main(args: argparse.Namespace) -> None:
         await node.stop()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="HBLLM Distributed Brain CLI")
     parser.add_argument(
         "--model-size",

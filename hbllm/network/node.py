@@ -10,19 +10,19 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-
-
-class StrEnum(str, Enum):
-    pass
-
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
     from hbllm.network.messages import Message
+
+
+class StrEnum(str, Enum):
+    """Base class for string-based enums."""
+
+    pass
 
 
 class NodeType(StrEnum):
@@ -83,7 +83,9 @@ class Node(ABC):
     extends this class. Nodes communicate exclusively via the MessageBus.
     """
 
-    def __init__(self, node_id: str, node_type: NodeType, capabilities: list[str] | None = None):
+    def __init__(
+        self, node_id: str, node_type: NodeType, capabilities: list[str] | None = None
+    ) -> None:
         self.node_id = node_id
         self.node_type = node_type
         self.capabilities = capabilities or []

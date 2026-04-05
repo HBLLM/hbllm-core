@@ -13,7 +13,11 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
-from datasets import load_dataset
+# datasets might not have stubs installed
+try:
+    from datasets import load_dataset  # type: ignore
+except ImportError:
+    load_dataset = None
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ class DatasetSource:
         text_column: str = "text",
         streaming: bool = True,
         max_samples: int | None = None,
-    ):
+    ) -> None:
         self.name = name
         self.dataset_id = dataset_id
         self.split = split
@@ -44,7 +48,7 @@ class DatasetSource:
 
 
 # Pre-configured sources for HBLLM training
-PREDEFINED_SOURCES = {
+PREDEFINED_SOURCES: dict[str, DatasetSource] = {
     # ── General ────────────────────────────────────────────────────────
     "fineweb": DatasetSource(
         name="fineweb",
@@ -116,7 +120,7 @@ PREDEFINED_SOURCES = {
 
 
 # Domain tags — used by cognitive training to label data provenance
-DATASET_DOMAINS = {
+DATASET_DOMAINS: dict[str, str] = {
     "fineweb": "general",
     "wikipedia": "factual",
     "the_stack_v2": "code",
@@ -142,7 +146,7 @@ class DatasetDownloader:
     - Saving raw text to disk in JSONL format
     """
 
-    def __init__(self, output_dir: str | Path, sources: list[DatasetSource] | None = None):
+    def __init__(self, output_dir: str | Path, sources: list[DatasetSource] | None = None) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sources = sources or []
@@ -169,13 +173,13 @@ class DatasetDownloader:
         Yields one document (string) at a time, never loading the full
         dataset into memory.
 
-        Handles special formats:
-        - conversations: list of {"from": role, "value": text} dicts
-        - query+response: MetaMath-style Q&A pairs
-
         Retries on network errors with exponential backoff.
         """
         import time as _time
+
+        if load_dataset is None:
+            logger.error("HuggingFace datasets library is not installed. Cannot stream.")
+            return
 
         logger.info("Streaming from %s (%s)", source.name, source.dataset_id)
 
@@ -188,6 +192,7 @@ class DatasetDownloader:
             kwargs["name"] = source.config
 
         max_retries = 3
+        ds: Any = None
         for attempt in range(max_retries + 1):
             try:
                 ds = load_dataset(**kwargs)
@@ -203,7 +208,7 @@ class DatasetDownloader:
                         e,
                         wait,
                     )
-                    _time.sleep(wait)
+                    _time.sleep(float(wait))
                 else:
                     logger.error(
                         "  %s: load failed after %d retries: %s", source.name, max_retries, e
@@ -213,30 +218,31 @@ class DatasetDownloader:
                 raise  # Don't retry on non-network errors
 
         count = 0
-        for sample in ds:
-            try:
-                text = self._extract_text(sample, source)
-            except Exception as e:
-                logger.debug("  %s: skipping bad sample: %s", source.name, e)
-                continue
+        if ds is not None:
+            for sample in ds:
+                try:
+                    text = self._extract_text(sample, source)
+                except Exception as e:
+                    logger.debug("  %s: skipping bad sample: %s", source.name, e)
+                    continue
 
-            if not text or not isinstance(text, str) or len(text.strip()) < 10:
-                continue
+                if not text or not isinstance(text, str) or len(text.strip()) < 10:
+                    continue
 
-            yield text
-            count += 1
+                yield text
+                count += 1
 
-            if count % 10000 == 0:
-                logger.info("  %s: streamed %d documents", source.name, count)
+                if count % 10000 == 0:
+                    logger.info("  %s: streamed %d documents", source.name, count)
 
-            if source.max_samples and count >= source.max_samples:
-                logger.info("  %s: reached max_samples=%d", source.name, source.max_samples)
-                break
+                if source.max_samples and count >= source.max_samples:
+                    logger.info("  %s: reached max_samples=%d", source.name, source.max_samples)
+                    break
 
         logger.info("  %s: finished with %d documents", source.name, count)
 
     @staticmethod
-    def _extract_text(sample: dict, source: DatasetSource) -> str:
+    def _extract_text(sample: dict[str, Any], source: DatasetSource) -> str:
         """Extract text from a sample, handling special column formats."""
         col = source.text_column
 
@@ -244,11 +250,11 @@ class DatasetDownloader:
         if col == "conversations":
             convos = sample.get("conversations", [])
             if isinstance(convos, list):
-                parts = []
+                parts: list[str] = []
                 for turn in convos:
                     if isinstance(turn, dict):
-                        role = turn.get("from", turn.get("role", ""))
-                        value = turn.get("value", turn.get("content", ""))
+                        role = str(turn.get("from", turn.get("role", "")))
+                        value = str(turn.get("value", turn.get("content", "")))
                         if not role or not value:
                             continue  # Skip malformed turns
                         parts.append(f"{role}: {value}")
@@ -264,7 +270,7 @@ class DatasetDownloader:
             return f"Question: {query}\nAnswer: {response}" if query else ""
 
         # Standard text column
-        return sample.get(col, "")
+        return str(sample.get(col, ""))
 
     def stream_all(self) -> Generator[str, None, None]:
         """Stream texts from all configured sources."""
@@ -326,14 +332,14 @@ def iter_jsonl(path: Path) -> Generator[str, None, None]:
     """Iterate over text documents in a JSONL file."""
     with open(path, encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
+            stripped_line = line.strip()
+            if not stripped_line:
                 continue
             try:
-                data = json.loads(line)
+                data = json.loads(stripped_line)
                 text = data.get("text", "")
                 if text:
-                    yield text
+                    yield str(text)
             except json.JSONDecodeError:
                 logger.warning("Skipping malformed JSONL line in %s", path)
                 continue

@@ -5,7 +5,10 @@ Uses a lightweight Vision Transformer to extract semantic descriptions
 from images, allowing the text-based cognitive architecture to "see".
 """
 
+from __future__ import annotations
+
 import logging
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -19,15 +22,15 @@ class VisionNode(Node):
     and extracts text via OCR, bridging visual perception to the LLM.
     """
 
-    def __init__(self, node_id: str):
+    def __init__(self, node_id: str) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PERCEPTION,
             capabilities=["multimodal_processing", "image_captioning", "ocr"],
         )
         self.topic_sub = "vision.process"
-        self.pipeline = None
-        self._ocr_reader = None
+        self.pipeline: Any = None
+        self._ocr_reader: Any = None
 
     async def on_start(self) -> None:
         logger.info("Starting VisionNode. Loading ViT model...")
@@ -43,17 +46,20 @@ class VisionNode(Node):
             "VisionNode Ready. Subscribed to %s + vision.ocr + module.evaluate", self.topic_sub
         )
 
-    def _load_model(self):
+    def _load_model(self) -> None:
         try:
             import torch
-            from transformers import pipeline
+            from transformers import pipeline  # type: ignore
 
-            device = 0 if torch.cuda.is_available() else -1
+            device: Any = 0 if torch.cuda.is_available() else -1
             if torch.backends.mps.is_available() and device == -1:
                 # pipeline device=-1 means CPU. pipeline currently drops support for strings like 'mps' in some versions unless passed explicitly as a torch.device
                 device = "mps"
-            self.pipeline = pipeline(
-                "image-to-text", model="Salesforce/blip-image-captioning-base", device=device
+            pipeline_fn: Any = pipeline
+            self.pipeline = pipeline_fn(
+                "image-to-text",
+                model="Salesforce/blip-image-captioning-base",
+                device=device,
             )
         except Exception as e:
             logger.error("Failed to load vision model: %s", e)
@@ -65,9 +71,9 @@ class VisionNode(Node):
         if message.type != MessageType.QUERY:
             return None
 
-        image_path = message.payload.get("image_path")
-        if not image_path:
-            return message.create_error("No 'image_path' provided in payload.")
+        image_data = message.payload.get("image_path") or message.payload.get("image_data")
+        if not image_data:
+            return message.create_error("No 'image_path' or 'image_data' provided in payload.")
 
         if not self.pipeline:
             return message.create_error("Vision pipeline not initialized.")
@@ -75,40 +81,62 @@ class VisionNode(Node):
         try:
             import asyncio
 
-            caption = await asyncio.to_thread(self._process_image, image_path)
+            caption = await asyncio.to_thread(self._process_image, str(image_data))
             return message.create_response({"text": caption, "domain": "vision"})
         except Exception as e:
             logger.error("Vision processing error: %s", e)
             return message.create_error(f"Vision failure: {e}")
 
-    def _process_image(self, path: str) -> str:
-        from PIL import Image
+    def _process_image(self, path_or_hex: str) -> str:
+        import io
 
-        image = Image.open(path).convert("RGB")
+        from PIL import Image  # type: ignore
+
+        # Handle hex encoded data or path
+        try:
+            if len(path_or_hex) > 512:  # Likely hex
+                image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex))).convert("RGB")
+            else:
+                image = Image.open(path_or_hex).convert("RGB")
+        except Exception:
+            # Fallback to path
+            image = Image.open(path_or_hex).convert("RGB")
+
         res = self.pipeline(image)
-        return res[0]["generated_text"]
+        return str(res[0]["generated_text"])
 
-    def _extract_text_ocr(self, path: str) -> str:
+    def _extract_text_ocr(self, path_or_hex: str) -> str:
         """Extract text from image using OCR (EasyOCR with fallback)."""
         # Try EasyOCR first
         try:
             if self._ocr_reader is None:
-                import easyocr
+                import easyocr  # type: ignore
 
                 self._ocr_reader = easyocr.Reader(["en"], gpu=False)
 
-            results = self._ocr_reader.readtext(path, detail=0)
+            # EasyOCR can take bytes, ndarray, or path
+            data: Any = path_or_hex
+            if len(path_or_hex) > 512:
+                data = bytes.fromhex(path_or_hex)
+
+            results = self._ocr_reader.readtext(data, detail=0)
             return "\n".join(results) if results else ""
         except ImportError:
             pass
 
         # Fallback: try pytesseract
         try:
-            import pytesseract
+            import io
+
+            import pytesseract  # type: ignore
             from PIL import Image
 
-            image = Image.open(path)
-            return pytesseract.image_to_string(image).strip()
+            if len(path_or_hex) > 512:
+                image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex)))
+            else:
+                image = Image.open(path_or_hex)
+
+            return str(pytesseract.image_to_string(image).strip())
         except ImportError:
             pass
 
@@ -121,22 +149,26 @@ class VisionNode(Node):
 
         Payload expects:
             image_path: str -> path to image file
+            or
+            image_data: str -> hex encoded image
 
         Returns:
             caption: str, ocr_text: str, combined: str
         """
-        image_path = message.payload.get("image_path")
-        if not image_path:
-            return message.create_error("No 'image_path' provided.")
+        image_data = message.payload.get("image_path") or message.payload.get("image_data")
+        if not image_data:
+            return message.create_error("No 'image_path' or 'image_data' provided.")
 
         try:
             import asyncio
 
+            data_str = str(image_data)
+
             # Run caption + OCR in parallel threads
             caption_task = (
-                asyncio.to_thread(self._process_image, image_path) if self.pipeline else None
+                asyncio.to_thread(self._process_image, data_str) if self.pipeline else None
             )
-            ocr_task = asyncio.to_thread(self._extract_text_ocr, image_path)
+            ocr_task = asyncio.to_thread(self._extract_text_ocr, data_str)
 
             tasks = [t for t in [caption_task, ocr_task] if t is not None]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -145,12 +177,14 @@ class VisionNode(Node):
             ocr_text = ""
 
             if caption_task is not None:
-                caption = results[0] if not isinstance(results[0], Exception) else ""
+                caption = str(results[0]) if not isinstance(results[0], Exception) else ""
                 ocr_text = (
-                    results[1] if len(results) > 1 and not isinstance(results[1], Exception) else ""
+                    str(results[1])
+                    if len(results) > 1 and not isinstance(results[1], Exception)
+                    else ""
                 )
             else:
-                ocr_text = results[0] if not isinstance(results[0], Exception) else ""
+                ocr_text = str(results[0]) if not isinstance(results[0], Exception) else ""
 
             combined = caption
             if ocr_text:
@@ -174,19 +208,21 @@ class VisionNode(Node):
         post a vision_perception thought (with OCR if available) to the blackboard.
         """
         payload = message.payload
-        image_path = payload.get("image_path")
+        image_data = payload.get("image_path") or payload.get("image_data")
 
-        if not image_path or not self.pipeline:
+        if not image_data or not self.pipeline:
             return None  # Not a vision-relevant query
 
         try:
             import asyncio
 
+            data_str = str(image_data)
+
             # Caption + OCR
-            caption = await asyncio.to_thread(self._process_image, image_path)
+            caption = await asyncio.to_thread(self._process_image, data_str)
             ocr_text = ""
             try:
-                ocr_text = await asyncio.to_thread(self._extract_text_ocr, image_path)
+                ocr_text = await asyncio.to_thread(self._extract_text_ocr, data_str)
             except Exception:
                 pass
 

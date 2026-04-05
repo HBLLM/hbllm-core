@@ -182,7 +182,7 @@ class ConfidenceEstimator:
         else:
             length_consistency = 0.5
 
-        return repetition_ratio * 0.6 + length_consistency * 0.4
+        return float(repetition_ratio * 0.6 + length_consistency * 0.4)
 
     def _score_factuality_risk(self, response: str) -> float:
         """Estimate risk of factual hallucination."""

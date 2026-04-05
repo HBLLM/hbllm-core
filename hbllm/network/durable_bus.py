@@ -18,21 +18,19 @@ import logging
 import sqlite3
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, cast
+
+from hbllm.network.bus import InProcessBus, MessageBus, MessageHandler, Subscription
+from hbllm.network.messages import Message, MessageType
+
+logger = logging.getLogger(__name__)
 
 
 class StrEnum(str, Enum):
     pass
-
-
-from typing import Any
-
-from hbllm.network.bus import InProcessBus, MessageBus
-from hbllm.network.messages import Message, MessageType
-
-logger = logging.getLogger(__name__)
 
 
 class MessageStatus(StrEnum):
@@ -79,14 +77,14 @@ class DurableBus(MessageBus):
         max_retries: int = 3,
         base_delay: float = 1.0,
         max_delay: float = 60.0,
-    ):
+    ) -> None:
         self._inner = inner or InProcessBus()
         self._db_path = db_path
         self._max_retries = max_retries
         self._base_delay = base_delay
         self._max_delay = max_delay
         self._conn: sqlite3.Connection | None = None
-        self._retry_task: asyncio.Task | None = None
+        self._retry_task: asyncio.Task[None] | None = None
         self._running = False
         self._seen_ids: set[str] = set()
 
@@ -162,25 +160,29 @@ class DurableBus(MessageBus):
             logger.warning("Publish failed for %s, will retry: %s", msg_id, e)
 
     async def subscribe(
-        self,
-        topic: str,
-        handler: Callable[[Message], Awaitable[Message | None]],
-    ) -> str:
+        self, topic: str, handler: MessageHandler, tenant_id: str | None = None
+    ) -> Subscription:
         """Subscribe via inner bus."""
-        return await self._inner.subscribe(topic, handler)
+        return await self._inner.subscribe(topic, handler, tenant_id=tenant_id)
 
-    async def unsubscribe(self, subscription_id: str) -> None:
+    async def unsubscribe(self, subscription: Subscription) -> None:
         """Unsubscribe via inner bus."""
-        await self._inner.unsubscribe(subscription_id)
+        await self._inner.unsubscribe(subscription)
 
     async def request(
         self,
         topic: str,
         message: Message,
-        timeout: float = 10.0,
+        timeout: float = 30.0,
     ) -> Message:
         """Request/reply via inner bus (not journaled — synchronous)."""
         return await self._inner.request(topic, message, timeout)
+
+    def add_interceptor(
+        self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]
+    ) -> None:
+        """Add a proactive message interceptor to the inner bus."""
+        self._inner.add_interceptor(interceptor)
 
     # ─── Persistence ──────────────────────────────────────────────────────
 
@@ -326,7 +328,7 @@ class DurableBus(MessageBus):
         if not self._conn:
             return 0
         row = self._conn.execute("SELECT COUNT(*) FROM messages WHERE status='dead'").fetchone()
-        return row[0] if row else 0
+        return cast(int, row[0] if row else 0)
 
     def pending_count(self) -> int:
         """Count of pending/failed (retryable) messages."""
@@ -335,7 +337,7 @@ class DurableBus(MessageBus):
         row = self._conn.execute(
             "SELECT COUNT(*) FROM messages WHERE status IN ('pending', 'failed')"
         ).fetchone()
-        return row[0] if row else 0
+        return cast(int, row[0] if row else 0)
 
     def stats(self) -> dict[str, Any]:
         """Get bus durability stats."""

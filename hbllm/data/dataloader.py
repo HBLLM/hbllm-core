@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -24,7 +25,7 @@ from hbllm.data.sharder import ShardReader
 logger = logging.getLogger(__name__)
 
 
-class PretrainingDataset(Dataset):
+class PretrainingDataset(Dataset[dict[str, torch.Tensor]]):
     """
     Map-style dataset backed by memory-mapped shards.
 
@@ -74,7 +75,7 @@ class PretrainingDataset(Dataset):
         }
 
 
-class StreamingPretrainingDataset(IterableDataset):
+class StreamingPretrainingDataset(IterableDataset[dict[str, torch.Tensor]]):
     """
     Streaming dataset that reads shards sequentially.
 
@@ -107,7 +108,7 @@ class StreamingPretrainingDataset(IterableDataset):
 
         if self.shuffle_shards:
             rng = np.random.default_rng(self.seed)
-            rng.shuffle(shard_paths)
+            rng.shuffle(shard_paths)  # type: ignore[arg-type]
 
         if worker_info is not None:
             # Multi-worker: each worker handles a subset of shards
@@ -143,7 +144,7 @@ def create_dataloader(
     streaming: bool = False,
     shuffle: bool = True,
     seed: int = 42,
-) -> DataLoader:
+) -> DataLoader[Any]:
     """
     Create a DataLoader for pre-training.
 
@@ -162,7 +163,7 @@ def create_dataloader(
     if streaming:
         dataset = StreamingPretrainingDataset(
             shard_dir=shard_dir,
-            sequence_length=sequence_length,
+            sequence_length=sequence_length if sequence_length else 2048,
             shuffle_shards=shuffle,
             seed=seed,
         )
@@ -173,12 +174,12 @@ def create_dataloader(
             pin_memory=True,
         )
     else:
-        dataset = PretrainingDataset(
+        map_dataset = PretrainingDataset(
             shard_dir=shard_dir,
             sequence_length=sequence_length,
         )
         return DataLoader(
-            dataset,
+            map_dataset,
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers,

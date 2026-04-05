@@ -21,7 +21,8 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.messages import Message, MessageType
@@ -31,15 +32,15 @@ logger = logging.getLogger(__name__)
 # ─── JSON-RPC Helpers ─────────────────────────────────────────────────────────
 
 
-def _jsonrpc_response(id: Any, result: Any) -> dict:
+def _jsonrpc_response(id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": id, "result": result}
 
 
-def _jsonrpc_error(id: Any, code: int, message: str) -> dict:
+def _jsonrpc_error(id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}
 
 
-def _jsonrpc_notification(method: str, params: Any = None) -> dict:
+def _jsonrpc_notification(method: str, params: Any = None) -> dict[str, Any]:
     msg = {"jsonrpc": "2.0", "method": method}
     if params is not None:
         msg["params"] = params
@@ -48,7 +49,7 @@ def _jsonrpc_notification(method: str, params: Any = None) -> dict:
 
 # ─── Tool Definitions ────────────────────────────────────────────────────────
 
-HBLLM_TOOLS = [
+HBLLM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "hbllm_chat",
         "description": "Send a query through the full HBLLM cognitive pipeline (workspace → reasoning → critic → decision). Returns the final response.",
@@ -194,7 +195,7 @@ class HBLLMMcpServer:
     Tools map to HBLLM MessageBus topics.
     """
 
-    def __init__(self, bus: MessageBus | None = None):
+    def __init__(self, bus: MessageBus | None = None) -> None:
         self.bus = bus
         self._initialized = False
         self._server_info = {
@@ -209,12 +210,12 @@ class HBLLMMcpServer:
             await self.bus.start()
         return self.bus
 
-    async def handle_request(self, request: dict) -> dict | None:
+    async def handle_request(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """
         Handle an incoming JSON-RPC request and return a response.
         Returns None for notifications (no response expected).
         """
-        method = request.get("method", "")
+        method = str(request.get("method", ""))
         params = request.get("params", {})
         req_id = request.get("id")
 
@@ -223,7 +224,7 @@ class HBLLMMcpServer:
 
         try:
             if method == "initialize":
-                result = await self._handle_initialize(params)
+                result: Any = await self._handle_initialize(params)
             elif method == "initialized":
                 self._initialized = True
                 return None  # notification
@@ -252,7 +253,7 @@ class HBLLMMcpServer:
                 return None
             return _jsonrpc_error(req_id, -32603, str(e))
 
-    async def _handle_initialize(self, params: dict) -> dict:
+    async def _handle_initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle MCP initialize handshake."""
         return {
             "protocolVersion": "2024-11-05",
@@ -264,26 +265,30 @@ class HBLLMMcpServer:
             "serverInfo": self._server_info,
         }
 
-    async def _handle_tools_list(self, params: dict) -> dict:
+    async def _handle_tools_list(self, params: dict[str, Any]) -> dict[str, Any]:
         """List all available HBLLM tools."""
         return {"tools": HBLLM_TOOLS}
 
-    async def _handle_tools_call(self, params: dict) -> dict:
+    async def _handle_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Execute an HBLLM tool by dispatching to the MessageBus."""
-        tool_name = params.get("name", "")
+        tool_name = str(params.get("name", ""))
         arguments = params.get("arguments", {})
 
         bus = await self.ensure_bus()
 
         handler = getattr(self, f"_tool_{tool_name}", None)
-        if handler is None:
+        if handler is None or not callable(handler):
             return {
                 "content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}],
                 "isError": True,
             }
 
         try:
-            result = await handler(bus, arguments)
+            # Type detection here is a bit tricky, treat handler as a generic callable
+            handler_func: Callable[[MessageBus, dict[str, Any]], Awaitable[dict[str, Any]]] = (
+                handler
+            )
+            result = await handler_func(bus, arguments)
             return {
                 "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
                 "isError": False,
@@ -294,22 +299,22 @@ class HBLLMMcpServer:
                 "isError": True,
             }
 
-    async def _handle_resources_list(self, params: dict) -> dict:
+    async def _handle_resources_list(self, params: dict[str, Any]) -> dict[str, Any]:
         return {"resources": []}
 
-    async def _handle_prompts_list(self, params: dict) -> dict:
+    async def _handle_prompts_list(self, params: dict[str, Any]) -> dict[str, Any]:
         return {"prompts": []}
 
     # ─── Tool Implementations ─────────────────────────────────────────────
 
-    async def _tool_hbllm_chat(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_chat(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """Full cognitive pipeline inference."""
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="workspace.process",
-            tenant_id=args.get("tenant_id", "default"),
-            session_id=args.get("session_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
+            session_id=str(args.get("session_id", "default")),
             payload={"text": args["text"]},
         )
         try:
@@ -318,13 +323,15 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"response": "Processing timed out", "error": True}
 
-    async def _tool_hbllm_memory_query(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_memory_query(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Search memory systems."""
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="memory.search",
-            tenant_id=args.get("tenant_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
             payload={
                 "query": args["query"],
                 "memory_type": args.get("memory_type", "all"),
@@ -337,16 +344,18 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"results": [], "error": "Memory query timed out"}
 
-    async def _tool_hbllm_memory_store(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_memory_store(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Store in memory."""
-        memory_type = args.get("memory_type", "semantic")
+        memory_type = str(args.get("memory_type", "semantic"))
         topic = f"memory.{memory_type}.store" if memory_type != "skill" else "memory.skill.store"
 
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="mcp_server",
             topic=topic,
-            tenant_id=args.get("tenant_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
             payload={
                 "content": args["content"],
                 "metadata": args.get("metadata", {}),
@@ -355,13 +364,15 @@ class HBLLMMcpServer:
         await bus.publish(topic, msg)
         return {"stored": True, "memory_type": memory_type}
 
-    async def _tool_hbllm_identity_get(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_identity_get(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Get identity profile."""
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="identity.query",
-            tenant_id=args.get("tenant_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
             payload={},
         )
         try:
@@ -370,25 +381,27 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"error": "Identity query timed out"}
 
-    async def _tool_hbllm_identity_set(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_identity_set(
+        self, bus: MessageBus, args: dict[str, Any]
+    ) -> dict[str, Any]:
         """Update identity profile."""
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="mcp_server",
             topic="identity.update",
-            tenant_id=args.get("tenant_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
             payload={k: v for k, v in args.items() if k != "tenant_id"},
         )
         await bus.publish("identity.update", msg)
         return {"updated": True}
 
-    async def _tool_hbllm_plan(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_plan(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """GoT planning."""
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="planner.plan",
-            tenant_id=args.get("tenant_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
             payload={"query": args["query"]},
         )
         try:
@@ -397,13 +410,13 @@ class HBLLMMcpServer:
         except (TimeoutError, asyncio.TimeoutError):
             return {"error": "Planning timed out"}
 
-    async def _tool_hbllm_feedback(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_feedback(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """Submit RLHF feedback."""
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="mcp_server",
             topic="system.feedback",
-            tenant_id=args.get("tenant_id", "default"),
+            tenant_id=str(args.get("tenant_id", "default")),
             payload={
                 "message_id": args["message_id"],
                 "rating": args["rating"],
@@ -413,7 +426,7 @@ class HBLLMMcpServer:
         await bus.publish("system.feedback", msg)
         return {"recorded": True}
 
-    async def _tool_hbllm_health(self, bus: MessageBus, args: dict) -> dict:
+    async def _tool_hbllm_health(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """System health."""
         return {
             "status": "healthy",
@@ -454,11 +467,11 @@ async def run_stdio(server: HBLLMMcpServer) -> None:
                 await reader.readline()
                 # Read body
                 body = await reader.readexactly(content_length)
-                request = json.loads(body.decode())
+                request = cast(dict[str, Any], json.loads(body.decode()))
             else:
                 # Try plain JSON (one per line)
                 if header_str:
-                    request = json.loads(header_str)
+                    request = cast(dict[str, Any], json.loads(header_str))
                 else:
                     continue
 
@@ -466,8 +479,8 @@ async def run_stdio(server: HBLLMMcpServer) -> None:
 
             if response is not None:
                 response_bytes = json.dumps(response).encode()
-                header = f"Content-Length: {len(response_bytes)}\r\n\r\n".encode()
-                writer.write(header + response_bytes)
+                header_out = f"Content-Length: {len(response_bytes)}\r\n\r\n".encode()
+                writer.write(header_out + response_bytes)
                 await writer.drain()
 
         except (json.JSONDecodeError, asyncio.IncompleteReadError):

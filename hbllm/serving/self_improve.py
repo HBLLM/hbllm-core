@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger("self_improve")
 
 
-def _load_reflection_data(ds_path: str) -> tuple[str, list[dict]]:
+def _load_reflection_data(ds_path: str) -> tuple[str, list[dict[str, Any]]]:
     """Load a reflection JSONL file and return (domain, samples)."""
     domain = "unknown"
     samples = []
@@ -43,7 +43,7 @@ def _load_reflection_data(ds_path: str) -> tuple[str, list[dict]]:
     return domain, samples
 
 
-def _convert_to_sft_format(samples: list[dict]) -> list[dict]:
+def _convert_to_sft_format(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert reflection data to instruction-tuning format."""
     sft_data = []
     for s in samples:
@@ -145,7 +145,7 @@ def run_improvement_cycle(
 
 def _train_on_domain(
     domain: str,
-    sft_data: list[dict],
+    sft_data: list[dict[str, Any]],
     model_size: str,
     checkpoint_dir: str,
     use_lora: bool,
@@ -159,7 +159,7 @@ def _train_on_domain(
     from torch.utils.data import DataLoader
 
     from hbllm.model.config import get_config
-    from hbllm.model.tokenizer import Tokenizer
+    from hbllm.model.tokenizer import HBLLMTokenizer as Tokenizer
     from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.training.sft import InstructionDataset, collate_sft
     from hbllm.training.trainer import Trainer, TrainingConfig
@@ -211,7 +211,7 @@ def _train_on_domain(
     train_config = TrainingConfig(
         learning_rate=lr,
         max_steps=max_steps,
-        batch_size=batch_size,
+        micro_batch_size=batch_size,
         gradient_accumulation_steps=1,
         checkpoint_dir=domain_ckpt_dir,
         log_interval_steps=5,

@@ -4,6 +4,7 @@ import logging
 import os
 import uuid
 from collections import defaultdict
+from typing import Any
 
 from hbllm.network.messages import FeedbackPayload, Message, MessageType, SystemImprovePayload
 from hbllm.network.node import Node, NodeType
@@ -21,11 +22,11 @@ class MetaReasoningNode(Node):
     dataset and signaling the admin/system bus to trigger heavy offline fine-tuning.
     """
 
-    def __init__(self, node_id: str):
+    def __init__(self, node_id: str) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
 
         # Buffer to store negative feedback by domain
-        self.negative_feedback_buffer = defaultdict(list)
+        self.negative_feedback_buffer: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
         # Threshold: if we get 3 negative feedbacks for a domain, we trigger reflection
         self.weakness_threshold = 3
@@ -56,7 +57,7 @@ class MetaReasoningNode(Node):
             await self._trigger_reflection(
                 domain="high_salience",
                 reason=f"High saliency score detected: {payload.get('score')}",
-                content=payload.get("content"),
+                content=str(payload.get("content", "")),
             )
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -106,13 +107,13 @@ class MetaReasoningNode(Node):
         if not dataset and content:
             dataset = [{"content": content, "domain": domain}]
 
-        reason = (
+        effective_reason = (
             reason or f"Accumulated {self.weakness_threshold} negative feedback events recently."
         )
 
         try:
             # Thread file IO
-            def _write():
+            def _write() -> None:
                 with open(filepath, "w") as f:
                     for item in dataset:
                         f.write(json.dumps(item) + "\n")
@@ -131,7 +132,7 @@ class MetaReasoningNode(Node):
             target_node_id="",
             topic="system.improve",
             payload=SystemImprovePayload(
-                domain=domain, reasoning=reason, dataset_path=filepath
+                domain=domain, reasoning=effective_reason, dataset_path=filepath
             ).model_dump(),
         )
         await self.bus.publish("system.improve", improve_msg)

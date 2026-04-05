@@ -18,18 +18,22 @@ import logging
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from opentelemetry.metrics import Meter
+    from opentelemetry.trace import Tracer
 
 logger = logging.getLogger(__name__)
 
 # ── Feature flag ──────────────────────────────────────────────────────────────
 
 _OTEL_ENABLED = os.environ.get("OTEL_ENABLED", "0") == "1"
-_tracer = None
-_meter = None
+_tracer: Any | None = None
+_meter: Any | None = None
 
 
-def _init_otel():
+def _init_otel() -> None:
     """Lazily initialize OpenTelemetry SDK."""
     global _tracer, _meter
     if _tracer is not None:
@@ -52,11 +56,12 @@ def _init_otel():
         # Trace provider
         tracer_provider = TracerProvider(resource=resource)
 
-        # Try OTLP exporter, fall back to console
         try:
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-not-found]
+                OTLPSpanExporter,
+            )
 
-            exporter = OTLPSpanExporter()
+            exporter: Any = OTLPSpanExporter()
         except ImportError:
             from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 
@@ -75,17 +80,16 @@ def _init_otel():
 
     except ImportError:
         logger.warning("OpenTelemetry SDK not installed. Tracing disabled.")
-        _OTEL_ENABLED_RUNTIME = False
 
 
-def get_tracer():
+def get_tracer() -> Any | None:
     """Get the HBLLM tracer (may be None if OTEL is disabled)."""
     if _OTEL_ENABLED:
         _init_otel()
     return _tracer
 
 
-def get_meter():
+def get_meter() -> Any | None:
     """Get the HBLLM meter (may be None if OTEL is disabled)."""
     if _OTEL_ENABLED:
         _init_otel()
@@ -103,7 +107,7 @@ class BusMetrics:
     that the /health and /metrics endpoints can expose.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.messages_published: int = 0
         self.messages_delivered: int = 0
         self.messages_dropped: int = 0

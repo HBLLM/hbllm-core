@@ -12,6 +12,7 @@ import logging
 import struct
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -39,7 +40,7 @@ class ShardWriter:
         shard_size_mb: int = 256,
         sequence_length: int = 2048,
         dtype: str = "uint16",
-    ):
+    ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.shard_size_bytes = shard_size_mb * 1024 * 1024
@@ -123,10 +124,10 @@ class ShardReader:
     for the training data loader.
     """
 
-    def __init__(self, shard_dir: str | Path):
+    def __init__(self, shard_dir: str | Path) -> None:
         self.shard_dir = Path(shard_dir)
         self._shard_paths = sorted(self.shard_dir.glob("shard_*.bin"))
-        self._shards: list[np.ndarray] = []
+        self._shards: list[np.ndarray[Any, Any] | None] = []
         self._shard_sizes: list[int] = []
         self._total_tokens = 0
         self._sequence_length = 0
@@ -150,9 +151,9 @@ class ShardReader:
                 if version != SHARD_VERSION:
                     raise ValueError(f"Unsupported shard version {version} in {path}")
 
-                self._sequence_length = seq_len
-                self._shard_sizes.append(num_tokens)
-                self._total_tokens += num_tokens
+                self._sequence_length = int(seq_len)
+                self._shard_sizes.append(int(num_tokens))
+                self._total_tokens += int(num_tokens)
 
         logger.info(
             "Found %d shards with %d total tokens",
@@ -160,13 +161,13 @@ class ShardReader:
             self._total_tokens,
         )
 
-    def _load_shard(self, idx: int) -> np.ndarray:
+    def _load_shard(self, idx: int) -> np.ndarray[Any, Any]:
         """Memory-map a specific shard."""
-        if idx >= len(self._shards) or self._shards[idx] is None:
-            # Ensure list is large enough
-            while len(self._shards) <= idx:
-                self._shards.append(None)
+        # Ensure list is large enough
+        while len(self._shards) <= idx:
+            self._shards.append(None)
 
+        if self._shards[idx] is None:
             path = self._shard_paths[idx]
             # Memory-map the data portion (skip header)
             data = np.memmap(
@@ -178,9 +179,12 @@ class ShardReader:
             )
             self._shards[idx] = data
 
-        return self._shards[idx]
+        shard = self._shards[idx]
+        if shard is None:
+            raise RuntimeError(f"Failed to load shard {idx}")
+        return shard
 
-    def get_sequence(self, global_idx: int) -> np.ndarray:
+    def get_sequence(self, global_idx: int) -> np.ndarray[Any, Any]:
         """
         Get a sequence of tokens by global index.
 
@@ -200,7 +204,7 @@ class ShardReader:
                 # Handle cross-shard boundaries
                 end_idx = local_idx + self._sequence_length
                 if end_idx <= len(shard):
-                    return shard[local_idx:end_idx].copy()
+                    return np.array(shard[local_idx:end_idx].copy())
                 else:
                     # Need tokens from next shard
                     result = np.zeros(self._sequence_length, dtype=np.uint16)
@@ -219,7 +223,9 @@ class ShardReader:
 
         raise IndexError(f"Global index {global_idx} out of range (total={self._total_tokens})")
 
-    def iter_sequences(self, stride: int | None = None) -> Generator[np.ndarray, None, None]:
+    def iter_sequences(
+        self, stride: int | None = None
+    ) -> Generator[np.ndarray[Any, Any], None, None]:
         """
         Iterate over all sequences in the dataset.
 

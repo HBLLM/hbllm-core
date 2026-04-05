@@ -11,6 +11,10 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from hbllm.network.messages import (
     Message,
@@ -30,8 +34,12 @@ class RouterNode(Node):
     """
 
     def __init__(
-        self, node_id: str, default_domain: str = "general", llm=None, use_vectors: bool = True
-    ):
+        self,
+        node_id: str,
+        default_domain: str = "general",
+        llm: Any = None,
+        use_vectors: bool = True,
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.ROUTER,
@@ -64,25 +72,27 @@ class RouterNode(Node):
         # Self-expansion tracking
         self.unknown_threshold = 0.3
         self.spawn_trigger_count = 2
-        self.unknown_counts = defaultdict(int)
+        self.unknown_counts: dict[str, int] = defaultdict(int)
 
         # Idle tracking for SleepNode
         self.last_activity_time = time.time()
 
         # Vector Routing Setup
         self.use_vectors = use_vectors
-        self.domain_centroids = {}
-        self.encoder = None
+        self.domain_centroids: dict[str, Any] = {}
+        self.encoder: Any | None = None
+        self._tokenizer: Any | None = None
+        self._onnx_inputs: list[str] = []
 
-    def _bootstrap_centroids(self):
+    def _bootstrap_centroids(self) -> None:
         """Bootstrap default domain embeddings to initialize the vector space."""
         if not self.use_vectors:
             return
 
         if self.encoder is None:
-            import onnxruntime as ort
+            import onnxruntime as ort  # type: ignore[import-untyped]
             from huggingface_hub import hf_hub_download
-            from tokenizers import Tokenizer
+            from tokenizers import Tokenizer  # type: ignore[import-untyped]
 
             logger.info("Initializing ONNX Edge Vector Model (paraphrase-MiniLM-L3-v2)")
 
@@ -95,12 +105,14 @@ class RouterNode(Node):
             )
 
             self._tokenizer = Tokenizer.from_file(tokenizer_path)
-            self._tokenizer.enable_truncation(max_length=128)
-            self._tokenizer.enable_padding(length=128)
+            if self._tokenizer:
+                self._tokenizer.enable_truncation(max_length=128)
+                self._tokenizer.enable_padding(length=128)
 
             # Start strict C++ CPU Execution Provider
             self.encoder = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-            self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
+            if self.encoder:
+                self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
 
         for d in self.known_domains:
             # Synthetic query generation
@@ -120,9 +132,12 @@ class RouterNode(Node):
             emb = self._encode_text(text_repr)
             self.domain_centroids[d] = emb
 
-    def _encode_text(self, text: str):
+    def _encode_text(self, text: str) -> Any:
         """Encodes text using the ONNX lightweight CPU architecture natively."""
         import numpy as np
+
+        if self._tokenizer is None or self.encoder is None:
+            return np.zeros(384)  # Default dimension for MiniLM
 
         enc = self._tokenizer.encode(text)
         ort_inputs = {
@@ -176,7 +191,7 @@ class RouterNode(Node):
         self.last_activity_time = time.time()
 
         # 1. Similarity-Based Classification
-        target_domain = self.default_domain
+        target_domain: Any = self.default_domain
         confidence = 0.5
         intent = "general_knowledge"
 
@@ -190,8 +205,8 @@ class RouterNode(Node):
 
             scores = {}
             for domain, centroid in self.domain_centroids.items():
-                norm_q = np.linalg.norm(query_emb)
-                norm_c = np.linalg.norm(centroid)
+                norm_q = float(np.linalg.norm(query_emb))
+                norm_c = float(np.linalg.norm(centroid))
                 if norm_q > 0 and norm_c > 0:
                     scores[domain] = float(np.dot(query_emb, centroid) / (norm_q * norm_c))
 
@@ -246,7 +261,7 @@ class RouterNode(Node):
                     f'Output JSON: {{"domain": "...", "intent": "...", "confidence": 0.0-1.0}}'
                 )
 
-                if "error" not in classification:
+                if classification and "error" not in classification:
                     target_domain = classification.get("domain", self.default_domain)
                     intent = classification.get("intent", "general_knowledge")
                     try:
@@ -278,7 +293,8 @@ class RouterNode(Node):
                         f'Query: "{text}"\n'
                         f'Output JSON: {{"topic": "one_word_domain_name"}}'
                     )
-                    topic_guess = topic_result.get("topic", topic_guess)
+                    if topic_result:
+                        topic_guess = topic_result.get("topic", str(topic_guess))
 
                 spawn_req = Message(
                     type=MessageType.SPAWN_REQUEST,
@@ -334,9 +350,9 @@ class RouterNode(Node):
         Positive feedback → lower unknown_threshold (more permissive).
         Negative feedback → raise threshold (more cautious, trigger spawns sooner).
         """
-        rating = message.payload.get("rating", 0)
-        domain = message.payload.get("domain", "")
-        prompt = message.payload.get("prompt", "")
+        rating: int = int(message.payload.get("rating", 0))
+        domain: str = str(message.payload.get("domain", ""))
+        prompt: str = str(message.payload.get("prompt", ""))
 
         # Self-Learning Embedding Update
         if self.use_vectors and domain in self.domain_centroids and prompt:
@@ -366,7 +382,7 @@ class RouterNode(Node):
                 new_centroid = current_centroid
 
             # Normalize vector
-            norm = np.linalg.norm(new_centroid)
+            norm = float(np.linalg.norm(new_centroid))
             if norm > 0:
                 new_centroid = new_centroid / norm
             self.domain_centroids[domain] = new_centroid
@@ -395,7 +411,7 @@ class RouterNode(Node):
 
     async def _handle_domain_registered(self, message: Message) -> Message | None:
         """Auto-learn new domains when SpawnerNode creates them."""
-        domain = message.payload.get("domain", "")
+        domain: str = str(message.payload.get("domain", ""))
         if domain and domain not in self.known_domains:
             self.known_domains.add(domain)
             logger.info("RouterNode registered new domain: %s", domain)
@@ -409,13 +425,13 @@ class RouterNode(Node):
         Receive historical context, update target domain, and republish to the Workspace
         under the same correlation_id so the user session never drops.
         """
-        target_domain = message.payload.get("target_domain", self.default_domain)
-        original_query = message.payload.get("original_query", {})
-        history = message.payload.get("history", [])
+        target_domain: str = str(message.payload.get("target_domain", self.default_domain))
+        original_query: dict[str, Any] = dict(message.payload.get("original_query", {}))
+        history: list[dict[str, Any]] = list(message.payload.get("history", []))
 
         logger.info(
             "Router executing Swarm Handoff. Bouncing session %s from Workspace back to domain '%s'",
-            message.correlation_id,
+            str(message.correlation_id),
             target_domain,
         )
 
@@ -427,7 +443,10 @@ class RouterNode(Node):
 
         # Inject context directly into the text for the next agent to read
         history_text = "\n".join(
-            [f"- [{h['node']}]: {h['type']} (confidence: {h['confidence']})" for h in history]
+            [
+                f"- [{h.get('node', 'unknown')}]: {h.get('type', 'event')} (confidence: {h.get('confidence', 0.0)})"
+                for h in history
+            ]
         )
         workspace_payload["text"] = (
             f"[SWARM TRANSFER] The previous agent transferred this to you ({target_domain}).\n\nPrevious Agent Work:\n{history_text}\n\nOriginal Request:\n{original_query.get('text', '')}"

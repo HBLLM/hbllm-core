@@ -52,7 +52,7 @@ class CognitiveMetrics:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
@@ -134,10 +134,12 @@ class CognitiveMetrics:
             memory_hit_rate=memory["avg"],
             avg_confidence=1.0 - confidence["avg"],  # invert error to score
             avg_latency_ms=latency["avg"],
-            total_queries=reasoning["count"] + tool["count"],
+            total_queries=int(reasoning["count"] + tool["count"]),
         )
 
-    def get_trend(self, metric: str, periods: int = 7, period_hours: int = 24) -> list[dict]:
+    def get_trend(
+        self, metric: str, periods: int = 7, period_hours: int = 24
+    ) -> list[dict[str, Any]]:
         """Get metric trend over multiple periods."""
         now = time.time()
         trend = []

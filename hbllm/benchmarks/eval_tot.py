@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from hbllm.brain.planner_node import PlannerNode
 from hbllm.brain.process_reward_node import ProcessRewardNode
@@ -15,7 +15,7 @@ async def run_tot_benchmark() -> dict[str, Any]:
 
     # Shared nodes
     prm_node = ProcessRewardNode(node_id="prm")
-    planner = PlannerNode(node_id="tot_planner", model_name="125m")
+    planner = PlannerNode(node_id="tot_planner")
 
     # Mock models for speed
     from hbllm.model.config import get_config
@@ -33,10 +33,10 @@ async def run_tot_benchmark() -> dict[str, Any]:
 
     # Needs a local provider mock for the planner
     class MockProvider:
-        def __init__(self):
+        def __init__(self) -> None:
             self.name = "local"
 
-        async def generate(self, messages, **kwargs):
+        async def generate(self, messages: Any, **kwargs: Any) -> Any:
             from hbllm.serving.provider import LLMResponse
 
             return LLMResponse(
@@ -45,18 +45,20 @@ async def run_tot_benchmark() -> dict[str, Any]:
                 usage={},
             )
 
-    planner.provider = MockProvider()
+    from typing import Any, cast
+
+    planner.llm = cast(Any, MockProvider())
 
     await prm_node.start(bus)
     await planner.start(bus)
 
     # We evaluate ToT latency for a simple objective
     # (By setting max_budget low, we measure overhead of MCTS structure)
-    planner.max_budget = 10
-    planner.batch_size = 5
+    planner.max_budget = 10  # type: ignore[attr-defined]
+    planner.batch_size = 5  # type: ignore[attr-defined]
 
     start_time = time.time()
-    task = asyncio.create_task(planner.execute_objective("Calculate the square root of 25."))
+    task = asyncio.create_task(planner.execute_objective("Calculate the square root of 25."))  # type: ignore[attr-defined]
 
     # Wait for completion
     try:
@@ -66,7 +68,7 @@ async def run_tot_benchmark() -> dict[str, Any]:
 
     end_time = time.time()
 
-    summary = planner.memory.summary()
+    summary = planner.memory.summary()  # type: ignore[attr-defined]
     total_nodes = summary.get("total_nodes", 0)
 
     await planner.stop()

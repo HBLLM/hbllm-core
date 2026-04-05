@@ -112,7 +112,7 @@ class ModelExporter:
         cpu_model = self.model.cpu()
         cpu_model.eval()
 
-        quantized = torch.quantization.quantize_dynamic(
+        quantized = torch.quantization.quantize_dynamic(  # type: ignore[attr-defined]
             cpu_model,
             {nn.Linear},
             dtype=dtype,

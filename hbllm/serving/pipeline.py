@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.network.bus import MessageBus
+from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.registry import ServiceRegistry
 
@@ -90,12 +90,12 @@ class CognitivePipeline:
         bus: MessageBus,
         registry: ServiceRegistry | None = None,
         config: PipelineConfig | None = None,
-    ):
+    ) -> None:
         self.bus = bus
         self.registry = registry
         self.config = config or PipelineConfig()
         self._response_futures: dict[str, asyncio.Future[Message]] = {}
-        self._subscription = None
+        self._subscription: Subscription | None = None
 
     async def start(self) -> None:
         """Subscribe to decision output to capture final responses."""
@@ -163,9 +163,9 @@ class CognitivePipeline:
             latency_ms = (time.monotonic() - start_time) * 1000
 
             return PipelineResult(
-                text=response.get("text", response.get("response", "")),
+                text=str(response.get("text", response.get("response", ""))),
                 correlation_id=correlation_id,
-                source_node=response.get("source_node", "decision"),
+                source_node=str(response.get("source_node", "decision")),
                 confidence=float(response.get("confidence", 0.0)),
                 tenant_id=tenant_id,
                 session_id=session_id,
@@ -417,7 +417,7 @@ class CognitivePipeline:
                         self.bus.request("vision.caption", caption_msg, timeout=10.0),
                         timeout=10.0,
                     )
-                    caption = resp.payload.get("caption", "")
+                    caption = str(resp.payload.get("caption", ""))
                     if caption:
                         context_parts.append(f"[Image {i + 1}]: {caption}")
                 except (TimeoutError, asyncio.TimeoutError):
@@ -439,7 +439,7 @@ class CognitivePipeline:
                     self.bus.request("audio.transcribe", audio_msg, timeout=15.0),
                     timeout=15.0,
                 )
-                transcript = resp.payload.get("transcript", "")
+                transcript = str(resp.payload.get("transcript", ""))
                 if transcript:
                     context_parts.append(f"[Audio transcript]: {transcript}")
             except (TimeoutError, asyncio.TimeoutError):

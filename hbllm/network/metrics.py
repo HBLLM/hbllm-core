@@ -4,16 +4,6 @@ Prometheus Metrics Collector for HBLLM.
 Provides counters, histograms, and gauges for monitoring the cognitive
 pipeline in production. Falls back to in-memory counters when the
 prometheus_client library is not installed.
-
-Usage:
-    metrics = MetricsCollector.get_instance()
-    metrics.record_request("router.query", tenant_id="t1")
-
-    with metrics.measure_latency("workspace"):
-        await do_work()
-
-    # Expose at /metrics for Prometheus scraping
-    app.mount("/metrics", metrics.asgi_app())
 """
 
 from __future__ import annotations
@@ -30,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import prometheus_client, fall back to in-memory
 try:
-    from prometheus_client import (
+    from prometheus_client import (  # type: ignore
         CONTENT_TYPE_LATEST,
         REGISTRY,
         CollectorRegistry,
@@ -60,6 +50,23 @@ class MetricsCollector:
     _lock = threading.Lock()
 
     def __init__(self) -> None:
+        self._backend: str = "unknown"
+        # In-memory storage
+        self._mem_counters: dict[str, float] = defaultdict(float)
+        self._mem_histograms: dict[str, list[float]] = defaultdict(list)
+        self._mem_gauges: dict[str, float] = defaultdict(float)
+
+        # Prometheus metrics (initialized in _init_prometheus)
+        self._requests_total: Any = None
+        self._messages_total: Any = None
+        self._errors_total: Any = None
+        self._request_duration: Any = None
+        self._node_latency: Any = None
+        self._active_nodes: Any = None
+        self._healthy_nodes: Any = None
+        self._active_requests: Any = None
+        self._info: Any = None
+
         if HAS_PROMETHEUS:
             self._init_prometheus()
         else:
@@ -135,9 +142,6 @@ class MetricsCollector:
 
     def _init_inmemory(self) -> None:
         self._backend = "inmemory"
-        self._mem_counters: dict[str, float] = defaultdict(float)
-        self._mem_histograms: dict[str, list[float]] = defaultdict(list)
-        self._mem_gauges: dict[str, float] = defaultdict(float)
         logger.info(
             "MetricsCollector initialized with in-memory backend (install prometheus_client for full metrics)"
         )
@@ -155,66 +159,68 @@ class MetricsCollector:
         status: str = "success",
     ) -> None:
         """Record a request (counter increment)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._requests_total:
             self._requests_total.labels(topic=topic, tenant_id=tenant_id, status=status).inc()
         else:
             self._mem_counters[f"requests:{topic}:{status}"] += 1
 
     def record_message(self, topic: str, message_type: str = "event") -> None:
         """Record a bus message (counter increment)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._messages_total:
             self._messages_total.labels(topic=topic, message_type=message_type).inc()
         else:
             self._mem_counters[f"messages:{topic}:{message_type}"] += 1
 
     def record_error(self, node_id: str, error_type: str = "exception") -> None:
         """Record an error (counter increment)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._errors_total:
             self._errors_total.labels(node_id=node_id, error_type=error_type).inc()
         else:
             self._mem_counters[f"errors:{node_id}:{error_type}"] += 1
 
     def observe_duration(self, stage: str, duration_seconds: float) -> None:
         """Record a request duration (histogram observation)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._request_duration:
             self._request_duration.labels(stage=stage).observe(duration_seconds)
         else:
             self._mem_histograms[f"duration:{stage}"].append(duration_seconds)
 
     def observe_node_latency(self, node_id: str, latency_seconds: float) -> None:
         """Record per-node latency (histogram observation)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._node_latency:
             self._node_latency.labels(node_id=node_id).observe(latency_seconds)
         else:
             self._mem_histograms[f"latency:{node_id}"].append(latency_seconds)
 
     def set_active_nodes(self, count: int) -> None:
         """Set the active node count (gauge)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._active_nodes:
             self._active_nodes.set(count)
         else:
-            self._mem_gauges["active_nodes"] = count
+            self._mem_gauges["active_nodes"] = float(count)
 
     def set_healthy_nodes(self, count: int) -> None:
         """Set the healthy node count (gauge)."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._healthy_nodes:
             self._healthy_nodes.set(count)
         else:
-            self._mem_gauges["healthy_nodes"] = count
+            self._mem_gauges["healthy_nodes"] = float(count)
 
     def inc_active_requests(self) -> None:
         """Increment active requests gauge."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._active_requests:
             self._active_requests.inc()
         else:
             self._mem_gauges["active_requests"] += 1
 
     def dec_active_requests(self) -> None:
         """Decrement active requests gauge."""
-        if HAS_PROMETHEUS:
+        if HAS_PROMETHEUS and self._active_requests:
             self._active_requests.dec()
         else:
-            self._mem_gauges["active_requests"] = max(0, self._mem_gauges["active_requests"] - 1)
+            self._mem_gauges["active_requests"] = max(
+                0.0, self._mem_gauges["active_requests"] - 1.0
+            )
 
     @contextlib.contextmanager
     def measure_latency(self, stage: str) -> Generator[None, None, None]:
@@ -229,9 +235,9 @@ class MetricsCollector:
     def get_metrics_text(self) -> str:
         """Generate Prometheus-format metrics text."""
         if HAS_PROMETHEUS:
-            return generate_latest(REGISTRY).decode()
+            return str(generate_latest(REGISTRY).decode())
         else:
-            lines = []
+            lines: list[str] = []
             for key, val in sorted(self._mem_counters.items()):
                 lines.append(f"# COUNTER {key} {val}")
             for key, vals in sorted(self._mem_histograms.items()):

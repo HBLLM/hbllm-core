@@ -14,7 +14,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from datetime import timezone
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from hbllm.network.messages import Message
 from hbllm.network.tracing import BusMetrics, trace_span
@@ -30,7 +30,7 @@ class Subscription:
 
     def __init__(
         self, topic: str, handler: MessageHandler, sub_id: str, tenant_id: str | None = None
-    ):
+    ) -> None:
         self.topic = topic
         self.handler = handler
         self.id = sub_id
@@ -95,7 +95,7 @@ class InProcessBus:
     This is the default for Phase 1-2. In Phase 3+, swap to GrpcBus/NatsBus.
     """
 
-    def __init__(self, queue_size: int = 1000, max_concurrent_handlers: int = 1000):
+    def __init__(self, queue_size: int = 1000, max_concurrent_handlers: int = 1000) -> None:
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
         self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = asyncio.PriorityQueue(
@@ -112,7 +112,7 @@ class InProcessBus:
         # Concurrency control: limit simultaneous handler tasks to prevent OOM
         self._handler_semaphore = asyncio.Semaphore(max_concurrent_handlers)
         # Track active handler tasks for graceful shutdown
-        self._active_tasks: set[asyncio.Task] = set()
+        self._active_tasks: set[asyncio.Task[Any]] = set()
         # Message interceptors for proactive governance
         self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
 
@@ -186,12 +186,12 @@ class InProcessBus:
         # Use a monotonic counter as tiebreaker to preserve FIFO order within same priority.
         self._msg_counter += 1
         priority_key = -message.priority.value  # CRITICAL=3 → -3 (highest)
-        await self._queue.put((priority_key, self._msg_counter, topic, message))
+        await self._queue.put((priority_key, float(self._msg_counter), topic, message))
 
     async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         # Create a future for the response
-        future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
         self._pending_requests[message.id] = future
 
         # Publish the request
@@ -254,9 +254,9 @@ class InProcessBus:
 
             # Check if this is a response to a pending request
             if message.correlation_id and message.correlation_id in self._pending_requests:
-                future = self._pending_requests.pop(message.correlation_id)
-                if not future.done():
-                    future.set_result(message)
+                pending_f = self._pending_requests.pop(message.correlation_id)
+                if not pending_f.done():
+                    pending_f.set_result(message)
                 continue
 
             # Dispatch to topic subscribers
@@ -276,7 +276,9 @@ class InProcessBus:
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run_handler(s=sub, t=topic, m=message):
+                async def _run_handler(
+                    s: Subscription = sub, t: str = topic, m: Message = message
+                ) -> None:
                     async with self._handler_semaphore:
                         _start = time.monotonic()
                         try:

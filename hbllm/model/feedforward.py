@@ -14,6 +14,8 @@ for the same total parameter count.
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -61,7 +63,7 @@ class SwiGLUFFN(nn.Module):
 
         output = self.down_proj(hidden)
         output = self.dropout(output)
-        return output
+        return cast(torch.Tensor, output)
 
 
 class MoEFFN(nn.Module):

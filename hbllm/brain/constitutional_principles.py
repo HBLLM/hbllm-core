@@ -41,7 +41,7 @@ CONSTITUTION = {
 }
 
 
-def get_principles(names: list[str] = None) -> list[Principle]:
+def get_principles(names: list[str] | None = None) -> list[Principle]:
     """Retrieves specific principles, or all if none provided."""
     if not names:
         return list(CONSTITUTION.values())

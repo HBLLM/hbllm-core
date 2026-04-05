@@ -12,14 +12,16 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from hbllm.data.downloader import DatasetDownloader, iter_jsonl_dir
 from hbllm.data.scorer import QualityScorer
 from hbllm.data.sharder import ShardWriter
 
+# Rust extensions might not have stubs
 try:
-    from hbllm_data_tools_rs import Deduplicator, fast_clean_batch
-    from hbllm_tokenizer_rs import Trainer, Vocab
+    from hbllm_data_tools_rs import Deduplicator, fast_clean_batch  # type: ignore
+    from hbllm_tokenizer_rs import Trainer, Vocab  # type: ignore
 
     RUST_AVAILABLE = True
 except ImportError:
@@ -35,7 +37,7 @@ class DataPipeline:
     4. Train BPE (Rust)  5. Shard
     """
 
-    def __init__(self, work_dir: str | Path):
+    def __init__(self, work_dir: str | Path) -> None:
         self.work_dir = Path(work_dir)
         self.raw_dir = self.work_dir / "raw"
         self.shard_dir = self.work_dir / "shards"
@@ -67,21 +69,21 @@ class DataPipeline:
             samples_list = [max_samples // len(dataset_names)] * len(dataset_names)
         for ds_name, ds_samples in zip(dataset_names, samples_list):
             self._step_download(ds_name, ds_samples)
-        clean_docs = []
+        clean_docs: list[str] = []
         for ds_name in dataset_names:
             clean_docs.extend(self._step_clean_and_dedup(ds_name))
         vocab = self._step_train_tokenizer(clean_docs, vocab_size)
         self._step_shard(clean_docs, vocab, sequence_length)
         logger.info("Pipeline completed in %.2fs!", time.time() - start)
 
-    def _step_download(self, dataset_name, max_samples):
+    def _step_download(self, dataset_name: str, max_samples: int) -> None:
         logger.info("Step 1: Downloading %s...", dataset_name)
         dl = DatasetDownloader(self.raw_dir)
         dl.add_predefined(dataset_name, max_samples=max_samples)
         for src in dl.sources:
             dl.download_to_jsonl(src)
 
-    def _step_clean_and_dedup(self, dataset_name):
+    def _step_clean_and_dedup(self, dataset_name: str) -> list[str]:
         logger.info("Step 2-3: Cleaning and deduplicating...")
         dedup = Deduplicator(num_perm=128, threshold=0.8, shingle_size=5)
         docs = list(iter_jsonl_dir(self.raw_dir / dataset_name))
@@ -90,16 +92,16 @@ class DataPipeline:
         hq = [d for d in cleaned if scorer.is_high_quality(d)]
         unique = dedup.deduplicate(hq)
         logger.info("Kept %d unique docs from %d raw", len(unique), len(docs))
-        return unique
+        return list(unique)
 
-    def _step_train_tokenizer(self, docs, vocab_size):
+    def _step_train_tokenizer(self, docs: list[str], vocab_size: int) -> Any:
         logger.info("Step 4: Training BPE Tokenizer...")
         trainer = Trainer(vocab_size=vocab_size, min_frequency=2)
         vocab = trainer.train_from_text(" ".join(docs))
         vocab.save(str(self.vocab_path))
         return vocab
 
-    def _step_shard(self, docs, vocab, sequence_length):
+    def _step_shard(self, docs: list[str], vocab: Any, sequence_length: int) -> None:
         logger.info("Step 5: Tokenizing and sharding...")
         writer = ShardWriter(self.shard_dir, shard_size_mb=256, sequence_length=sequence_length)
         for i, text in enumerate(docs):
@@ -145,7 +147,7 @@ class PurePythonPipeline:
     # tiktoken cl100k_base vocab size
     TIKTOKEN_VOCAB_SIZE = 100277
 
-    def __init__(self, work_dir: str | Path):
+    def __init__(self, work_dir: str | Path) -> None:
         self.work_dir = Path(work_dir)
         self.shard_dir = self.work_dir / "shards"
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -164,7 +166,7 @@ class PurePythonPipeline:
         min_doc_tokens: int = 64,
         shard_size_mb: int = 64,
         data_weights: list[float] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Run the full pipeline: stream -> clean -> tokenize -> shard.
 
@@ -174,7 +176,11 @@ class PurePythonPipeline:
         Samples are split by weights (if provided) or evenly.
         Returns dict with pipeline statistics.
         """
-        import tiktoken
+        try:
+            import tiktoken
+        except ImportError:
+            logger.error("tiktoken not installed. Cannot run PurePythonPipeline.")
+            return {}
 
         # Parse multi-dataset names
         dataset_names = [d.strip() for d in dataset_name.replace(",", "+").split("+") if d.strip()]
@@ -226,13 +232,13 @@ class PurePythonPipeline:
             logger.info("Streaming from %s...", source.name)
             for text in downloader.stream_texts(source):
                 # Clean
-                text = _clean_text(text)
-                if len(text) < 100:
+                clean_text_str = _clean_text(text)
+                if len(clean_text_str) < 100:
                     skipped += 1
                     continue
 
                 # Tokenize
-                tokens = enc.encode(text, disallowed_special=())
+                tokens = enc.encode(clean_text_str, disallowed_special=())
 
                 # Filter short docs
                 if len(tokens) < min_doc_tokens:

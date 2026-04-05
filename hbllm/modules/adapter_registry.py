@@ -20,7 +20,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from pydantic import BaseModel, Field
@@ -61,7 +61,7 @@ def verify_sha256(file_path: str | Path, expected_hash: str) -> bool:
 
 def safe_torch_load(path: str | Path) -> dict[str, Any]:
     """Load a torch checkpoint safely (no arbitrary code execution)."""
-    return torch.load(path, map_location="cpu", weights_only=True)
+    return cast(dict[str, Any], torch.load(path, map_location="cpu", weights_only=True))
 
 
 # --- Configuration Models ---
@@ -166,7 +166,7 @@ class AdapterRegistry:
 
     def list_cached(self) -> list[str]:
         """List all domains that have adapters in the local cache."""
-        cached = []
+        cached: list[str] = []
         if not self.cache_dir.exists():
             return cached
 
@@ -253,8 +253,8 @@ class AdapterRegistry:
         """Handles both raw state_dicts and our internal metadata-wrapped format."""
         if isinstance(payload, dict):
             if "state_dict" in payload:
-                return payload["state_dict"]
-            return payload
+                return cast(dict[str, torch.Tensor], payload["state_dict"])
+            return cast(dict[str, torch.Tensor], payload)
         return {}
 
     async def _download_and_cache(self, source: AdapterSource) -> dict[str, torch.Tensor] | None:
@@ -478,5 +478,5 @@ class AdapterRegistry:
         # load with weights_only=True still allows the metadata dict
         payload = torch.load(path, map_location="cpu", weights_only=True)
         if isinstance(payload, dict) and ADAPTER_METADATA_KEY in payload:
-            return payload[ADAPTER_METADATA_KEY]
+            return cast(dict[str, Any], payload[ADAPTER_METADATA_KEY])
         return {}

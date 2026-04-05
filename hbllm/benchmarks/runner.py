@@ -42,7 +42,7 @@ class BenchmarkResult:
     unit: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "metric": self.metric,
@@ -59,12 +59,12 @@ class BenchmarkReport:
     suite: str
     timestamp: float = field(default_factory=time.time)
     results: list[BenchmarkResult] = field(default_factory=list)
-    comparisons: list[dict] = field(default_factory=list)
+    comparisons: list[dict[str, Any]] = field(default_factory=list)
 
-    def add(self, result: BenchmarkResult):
+    def add(self, result: BenchmarkResult) -> None:
         self.results.append(result)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "suite": self.suite,
             "timestamp": self.timestamp,
@@ -72,7 +72,7 @@ class BenchmarkReport:
             "comparisons": self.comparisons,
         }
 
-    def print_report(self):
+    def print_report(self) -> None:
         print(f"\n{'=' * 70}")
         print(f"  HBLLM Benchmark Report — {self.suite}")
         print(f"{'=' * 70}\n")
@@ -90,7 +90,7 @@ class BenchmarkReport:
 
         print(f"\n{'=' * 70}\n")
 
-    def save(self, path: str | Path):
+    def save(self, path: str | Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=2))
@@ -116,7 +116,7 @@ class LatencyBenchmark:
         received = asyncio.Event()
         t_start = 0.0
 
-        async def on_msg(msg):
+        async def on_msg(msg: Message) -> None:
             nonlocal t_start
             latencies.append(time.perf_counter() - t_start)
             received.set()
@@ -176,7 +176,7 @@ class LatencyBenchmark:
         count = 0
         t0 = time.perf_counter()
 
-        async def count_msg(msg):
+        async def count_msg(msg: Message) -> None:
             nonlocal count
             count += 1
 
@@ -362,7 +362,9 @@ class SpecializationBenchmark:
             for domain, keywords in routing_keywords.items():
                 score = sum(1 for kw in keywords if kw.lower() in query.lower())
                 scores[domain] = score
-            predicted = max(scores, key=scores.get) if max(scores.values()) > 0 else "general"
+            predicted = (
+                max(scores, key=lambda k: scores[k]) if max(scores.values()) > 0 else "general"
+            )
             if predicted == expected:
                 correct += 1
 
@@ -432,9 +434,9 @@ class MultiTenantBenchmark:
         await bus.start()
 
         # Simulate 10 concurrent tenants
-        tenant_messages: dict[str, list] = {f"tenant_{i}": [] for i in range(10)}
+        tenant_messages: dict[str, list[Message]] = {f"tenant_{i}": [] for i in range(10)}
 
-        async def route(msg):
+        async def route(msg: Message) -> None:
             tid = msg.tenant_id or "unknown"
             if tid in tenant_messages:
                 tenant_messages[tid].append(msg)
@@ -522,7 +524,7 @@ class MultiTenantBenchmark:
 
 # ── Runner ───────────────────────────────────────────────────────────────────
 
-SUITES = {
+SUITES: dict[str, Any] = {
     "latency": LatencyBenchmark,
     "memory": MemoryBenchmark,
     "specialization": SpecializationBenchmark,
@@ -534,8 +536,10 @@ async def run_suite(suite_name: str) -> BenchmarkReport:
     """Run a single benchmark suite."""
     if suite_name not in SUITES:
         raise ValueError(f"Unknown suite: {suite_name}. Available: {list(SUITES.keys())}")
-    bench = SUITES[suite_name]()
-    return await bench.run()
+    bench: Any = SUITES[suite_name]()
+    from typing import cast
+
+    return cast(BenchmarkReport, await bench.run())
 
 
 async def run_all() -> list[BenchmarkReport]:
@@ -543,14 +547,14 @@ async def run_all() -> list[BenchmarkReport]:
     reports = []
     for name, cls in SUITES.items():
         logger.info("Running benchmark: %s", name)
-        bench = cls()
+        bench: Any = cls()
         report = await bench.run()
         report.print_report()
         reports.append(report)
     return reports
 
 
-def main():
+def main() -> None:
     """CLI entry point."""
     import argparse
 

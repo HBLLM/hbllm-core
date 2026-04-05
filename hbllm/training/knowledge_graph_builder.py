@@ -4,8 +4,6 @@ Knowledge Graph Builder — constructs a knowledge graph during training.
 As the model processes training documents, this module extracts entities,
 relationships, and topic clusters, building a structured graph that can
 be used at inference time by the Brain for retrieval and reasoning.
-
-Output: knowledge_graph.json with entities, edges, and topic clusters.
 """
 
 from __future__ import annotations
@@ -73,11 +71,11 @@ class KnowledgeGraphBuilder:
         r"\b(?:classification|regression|clustering|segmentation)\b",
     ]
 
-    def __init__(self, max_entities: int = 10000, max_contexts_per_entity: int = 5):
+    def __init__(self, max_entities: int = 10000, max_contexts_per_entity: int = 5) -> None:
         self.entities: dict[str, Entity] = {}
         self.edges: list[Relationship] = []
         self._cooccurrence: dict[tuple[str, str], int] = defaultdict(int)
-        self._topic_keywords: Counter = Counter()
+        self._topic_keywords: Counter[str] = Counter()
         self._doc_count = 0
         self._max_entities = max_entities
         self._max_contexts = max_contexts_per_entity
@@ -116,7 +114,10 @@ class KnowledgeGraphBuilder:
         unique = list(set(found_entities))
         for i in range(len(unique)):
             for j in range(i + 1, len(unique)):
-                pair = tuple(sorted([unique[i], unique[j]]))
+                e1, e2 = unique[i], unique[j]
+                if e1 > e2:
+                    e1, e2 = e2, e1
+                pair: tuple[str, str] = (e1, e2)
                 self._cooccurrence[pair] += 1
 
         # Track topic keywords
@@ -166,7 +167,7 @@ class KnowledgeGraphBuilder:
         self.edges.sort(key=lambda e: e.weight, reverse=True)
         return self.edges
 
-    def get_topic_clusters(self, top_n: int = 20) -> list[dict]:
+    def get_topic_clusters(self, top_n: int = 20) -> list[dict[str, Any]]:
         """Get top topic clusters from keyword frequency."""
         stopwords = {
             "that",

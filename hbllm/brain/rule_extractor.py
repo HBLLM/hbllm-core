@@ -145,7 +145,7 @@ class RuleExtractorNode(Node):
         self._priority_buffer: list[dict[str, Any]] = []
         self._rules: dict[str, ExtractedRule] = {}
         self._promoted: set[str] = set()  # Rule IDs already promoted
-        self._extraction_task: asyncio.Task | None = None
+        self._extraction_task: asyncio.Task[Any] | None = None
 
     @property
     def rules(self) -> list[ExtractedRule]:

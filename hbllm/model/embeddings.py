@@ -8,6 +8,8 @@ Used in LLaMA, Mistral, and most modern LLMs.
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 
@@ -21,7 +23,7 @@ class TokenEmbedding(nn.Module):
         nn.init.normal_(self.embedding.weight, mean=0.0, std=initializer_range)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        return self.embedding(input_ids)
+        return cast(torch.Tensor, self.embedding(input_ids))
 
 
 class RotaryEmbedding(nn.Module):
@@ -72,7 +74,7 @@ class RotaryEmbedding(nn.Module):
         Returns:
             (cos, sin) each of shape [batch_size, seq_len, dim]
         """
-        seq_len = position_ids.max().item() + 1
+        seq_len = int(position_ids.max().item()) + 1
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len)
 

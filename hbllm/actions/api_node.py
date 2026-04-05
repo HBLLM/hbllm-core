@@ -9,6 +9,7 @@ synthesize structured JSON representations and posts them back to the Blackboard
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -22,7 +23,7 @@ class ApiNode(Node):
     using the base LLM for dynamic extraction.
     """
 
-    def __init__(self, node_id: str, llm=None):
+    def __init__(self, node_id: str, llm: Any = None) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -45,7 +46,7 @@ class ApiNode(Node):
         Triggered when a new query lands on the Global Workspace Blackboard.
         """
         payload = message.payload
-        text = payload.get("text", "")
+        text = str(payload.get("text", ""))
 
         if not self.llm:
             return None
@@ -65,7 +66,7 @@ class ApiNode(Node):
 
         # 2. LLM-Based Schema Generation
         try:
-            request_type = classification.get("request_type", "schema")
+            request_type = str(classification.get("request_type", "schema"))
             schema_content = await self._synthesize_schema(text, request_type)
 
             if not schema_content:
@@ -121,7 +122,7 @@ class ApiNode(Node):
         }
 
         prompt = prompts.get(request_type, prompts["schema"])
-        raw = await self.llm.generate(prompt, max_tokens=512, temperature=0.3)
+        raw = cast(str, await self.llm.generate(prompt, max_tokens=512, temperature=0.3))
 
         if not raw or not raw.strip():
             return None

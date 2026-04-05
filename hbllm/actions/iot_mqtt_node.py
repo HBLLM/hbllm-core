@@ -18,7 +18,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ── Device Categories ────────────────────────────────────────────────────────
 
-DEVICE_TYPES = {
+DEVICE_TYPES: dict[str, dict[str, list[str]]] = {
     "light": {"actions": ["on", "off", "brightness", "color", "toggle"]},
     "thermostat": {"actions": ["set_temp", "mode", "schedule"]},
     "lock": {"actions": ["lock", "unlock", "status"]},
@@ -52,17 +52,17 @@ class DeviceState:
         name: str,
         type: str = "unknown",
         room: str = "unknown",
-        state: dict | None = None,
-    ):
+        state: dict[str, Any] | None = None,
+    ) -> None:
         self.id = id
         self.name = name
         self.type = type
         self.room = room
-        self.state = state or {}
+        self.state: dict[str, Any] = state or {}
         self.last_seen = time.time()
         self.attributes: dict[str, Any] = {}
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -106,7 +106,7 @@ class MqttIoTNode(Node):
         password: str | None = None,
         topic_prefix: str = "hbllm",
         ha_discovery: bool = True,
-    ):
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -121,12 +121,12 @@ class MqttIoTNode(Node):
 
         # Device registry
         self.devices: dict[str, DeviceState] = {}
-        self.scenes: dict[str, list[dict]] = {}
-        self.sensor_callbacks: dict[str, list[Callable]] = {}
+        self.scenes: dict[str, list[dict[str, Any]]] = {}
+        self.sensor_callbacks: dict[str, list[Callable[..., Any]]] = {}
 
         # MQTT client (lazy loaded)
-        self._mqtt_client = None
-        self._mqtt_loop_task = None
+        self._mqtt_client: Any | None = None
+        self._mqtt_loop_task: asyncio.Task[None] | None = None
         self._connected = False
 
     async def on_start(self) -> None:
@@ -163,7 +163,7 @@ class MqttIoTNode(Node):
     async def _connect_mqtt(self) -> None:
         """Connect to MQTT broker with auto-reconnect."""
         try:
-            import paho.mqtt.client as mqtt
+            import paho.mqtt.client as mqtt  # type: ignore
         except ImportError:
             logger.warning(
                 "paho-mqtt not installed. IoT node running in simulation mode. "
@@ -191,7 +191,9 @@ class MqttIoTNode(Node):
         except Exception as e:
             logger.error("MQTT connection failed: %s", e)
 
-    def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None) -> None:
+    def _on_mqtt_connect(
+        self, client: Any, userdata: Any, flags: Any, rc: Any, properties: Any = None
+    ) -> None:
         """Called when MQTT connection is established."""
         self._connected = True
         logger.info("MQTT connected to broker (rc=%s)", rc)
@@ -207,11 +209,11 @@ class MqttIoTNode(Node):
         # Zigbee2MQTT
         client.subscribe("zigbee2mqtt/+")
 
-    def _on_mqtt_message(self, client, userdata, msg) -> None:
+    def _on_mqtt_message(self, client: Any, userdata: Any, msg: Any) -> None:
         """Process incoming MQTT messages."""
-        topic = msg.topic
+        topic = str(msg.topic)
         try:
-            payload = json.loads(msg.payload.decode())
+            payload = cast(dict[str, Any], json.loads(msg.payload.decode()))
         except (json.JSONDecodeError, UnicodeDecodeError):
             payload = {"raw": msg.payload.decode(errors="replace")}
 
@@ -227,13 +229,15 @@ class MqttIoTNode(Node):
         elif topic.startswith("zigbee2mqtt/"):
             self._handle_zigbee_message(topic, payload)
 
-    def _on_mqtt_disconnect(self, client, userdata, flags, rc, properties=None) -> None:
+    def _on_mqtt_disconnect(
+        self, client: Any, userdata: Any, flags: Any, rc: Any, properties: Any = None
+    ) -> None:
         self._connected = False
         logger.warning("MQTT disconnected (rc=%s). Will auto-reconnect.", rc)
 
     # ── Device Management ────────────────────────────────────────────────
 
-    def _update_device_state(self, device_id: str, state: dict) -> None:
+    def _update_device_state(self, device_id: str, state: dict[str, Any]) -> None:
         """Update local device registry with new state."""
         if device_id in self.devices:
             self.devices[device_id].state.update(state)
@@ -242,9 +246,9 @@ class MqttIoTNode(Node):
             # Auto-discover new device
             dev = DeviceState(
                 id=device_id,
-                name=state.get("friendly_name", device_id),
-                type=state.get("type", "unknown"),
-                room=state.get("room", "unknown"),
+                name=str(state.get("friendly_name", device_id)),
+                type=str(state.get("type", "unknown")),
+                room=str(state.get("room", "unknown")),
                 state=state,
             )
             self.devices[device_id] = dev
@@ -253,30 +257,30 @@ class MqttIoTNode(Node):
             # Notify brain of new device
             asyncio.create_task(self._publish_discovery(dev))
 
-    def _process_sensor_data(self, sensor_id: str, data: dict) -> None:
+    def _process_sensor_data(self, sensor_id: str, data: dict[str, Any]) -> None:
         """Process sensor readings and forward to brain."""
         self._update_device_state(sensor_id, {**data, "type": "sensor"})
 
         # Forward significant sensor events to the brain
         asyncio.create_task(self._publish_sensor_event(sensor_id, data))
 
-    def _handle_ha_discovery(self, topic: str, payload: dict) -> None:
+    def _handle_ha_discovery(self, topic: str, payload: dict[str, Any]) -> None:
         """Process Home Assistant MQTT auto-discovery messages."""
         parts = topic.split("/")
         if len(parts) >= 4 and parts[-1] == "config":
             component = parts[1]  # e.g., light, switch, sensor
             device_id = parts[2]
-            name = payload.get("name", device_id)
+            name = str(payload.get("name", device_id))
             dev = DeviceState(
                 id=device_id,
                 name=name,
                 type=component,
-                room=payload.get("room", "unknown"),
+                room=str(payload.get("room", "unknown")),
             )
             self.devices[device_id] = dev
             logger.info("HA discovery: %s (%s)", name, component)
 
-    def _handle_zigbee_message(self, topic: str, payload: dict) -> None:
+    def _handle_zigbee_message(self, topic: str, payload: dict[str, Any]) -> None:
         """Process Zigbee2MQTT device messages."""
         device_name = topic.split("/")[-1]
         if device_name not in ("bridge", ""):
@@ -287,9 +291,9 @@ class MqttIoTNode(Node):
     async def _handle_command(self, message: Message) -> Message | None:
         """Execute an IoT device command from the brain."""
         payload = message.payload
-        device_id = payload.get("device_id", "")
-        action = payload.get("action", "")
-        params = payload.get("params", {})
+        device_id = str(payload.get("device_id", ""))
+        action = str(payload.get("action", ""))
+        params = cast(dict[str, Any], payload.get("params", {}))
 
         logger.info("IoT command: %s → %s %s", device_id, action, params)
 
@@ -341,19 +345,20 @@ class MqttIoTNode(Node):
     async def _handle_query(self, message: Message) -> Message | None:
         """Query device states for the brain."""
         payload = message.payload
-        query_type = payload.get("type", "all")
+        query_type = str(payload.get("type", "all"))
+        devices: dict[str, Any] = {}
 
         if query_type == "all":
             devices = {k: v.to_dict() for k, v in self.devices.items()}
         elif query_type == "room":
-            room = payload.get("room", "")
+            room = str(payload.get("room", ""))
             devices = {k: v.to_dict() for k, v in self.devices.items() if v.room == room}
         elif query_type == "device":
-            device_id = payload.get("device_id", "")
+            device_id = str(payload.get("device_id", ""))
             dev = self.devices.get(device_id)
             devices = {device_id: dev.to_dict()} if dev else {}
         elif query_type == "type":
-            dev_type = payload.get("device_type", "")
+            dev_type = str(payload.get("device_type", ""))
             devices = {k: v.to_dict() for k, v in self.devices.items() if v.type == dev_type}
         else:
             devices = {}
@@ -373,8 +378,8 @@ class MqttIoTNode(Node):
     async def _handle_scene(self, message: Message) -> Message | None:
         """Activate a multi-device scene."""
         payload = message.payload
-        scene_name = payload.get("scene", "")
-        commands = payload.get("commands", [])
+        scene_name = str(payload.get("scene", ""))
+        commands = cast(list[dict[str, Any]], payload.get("commands", []))
 
         if scene_name and scene_name in self.scenes:
             commands = self.scenes[scene_name]
@@ -400,7 +405,7 @@ class MqttIoTNode(Node):
 
     # ── Scene Management ─────────────────────────────────────────────────
 
-    def register_scene(self, name: str, commands: list[dict]) -> None:
+    def register_scene(self, name: str, commands: list[dict[str, Any]]) -> None:
         """Register a multi-device scene."""
         self.scenes[name] = commands
         logger.info("Registered scene '%s' with %d commands", name, len(commands))
@@ -429,7 +434,7 @@ class MqttIoTNode(Node):
         )
         await self.bus.publish("iot.discovery", msg)
 
-    async def _publish_sensor_event(self, sensor_id: str, data: dict) -> None:
+    async def _publish_sensor_event(self, sensor_id: str, data: dict[str, Any]) -> None:
         """Forward sensor data to brain for contextual awareness."""
         msg = Message(
             type=MessageType.EVENT,

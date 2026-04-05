@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import uuid
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,12 @@ class DataSynthesizer:
     template-based generation.
     """
 
-    def __init__(self, model=None, tokenizer=None):
+    def __init__(self, model: Any = None, tokenizer: Any = None) -> None:
         self.model = model
         self.tokenizer = tokenizer
-        self._llm = None
+        self._llm: Any = None
 
-    def _get_llm(self):
+    def _get_llm(self) -> Any:
         """Lazily construct LLMInterface from model + tokenizer."""
         if self._llm is not None:
             return self._llm
@@ -65,7 +66,7 @@ class DataSynthesizer:
         topic: str,
         num_samples: int = 5,
         output_dir: str = "workspace/synthetic",
-        few_shot_examples: list[dict] | None = None,
+        few_shot_examples: list[dict[str, Any]] | None = None,
     ) -> str:
         """
         Generate a synthetic dataset for the given topic.
@@ -102,11 +103,11 @@ class DataSynthesizer:
 
     def _generate_with_llm(
         self,
-        llm,
+        llm: Any,
         topic: str,
         num_samples: int,
-        few_shot_examples: list[dict] | None = None,
-    ) -> list[dict]:
+        few_shot_examples: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         """Generate data using the actual LLM model."""
         import asyncio
 
@@ -208,7 +209,7 @@ class DataSynthesizer:
 
         return question, answer
 
-    def _generate_with_templates(self, topic: str, num_samples: int) -> list[dict]:
+    def _generate_with_templates(self, topic: str, num_samples: int) -> list[dict[str, Any]]:
         """Fallback: generate data from templates."""
         dataset = []
         for i in range(num_samples):

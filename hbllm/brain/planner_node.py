@@ -18,10 +18,14 @@ import re
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+
+if TYPE_CHECKING:
+    from hbllm.brain.policy_engine import PolicyEngine
+    from hbllm.brain.provider_adapter import ProviderLLM
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,7 @@ class ThoughtGraph:
     - Merge: Combine complementary sibling thoughts into a synthesis (fan-in)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.nodes: dict[str, ThoughtNode] = {}
         self.root_ids: list[str] = []
 
@@ -256,9 +260,9 @@ class PlannerNode(Node):
         node_id: str,
         branch_factor: int = 3,
         max_depth: int = 2,
-        policy_engine=None,
+        policy_engine: PolicyEngine | None = None,
         cache_ttl_seconds: float = 3600.0,
-    ):
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PLANNER,
@@ -272,6 +276,7 @@ class PlannerNode(Node):
         self._response_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
+        self.llm: ProviderLLM | None = None
 
     async def on_start(self) -> None:
         """Subscribe to planning requests and workspace updates."""
@@ -489,7 +494,7 @@ class PlannerNode(Node):
         )
         try:
             resp = await self.request("domain.general.query", req, timeout=30.0)
-            return resp.payload.get("text", "")
+            return str(resp.payload.get("text", ""))
         except Exception as e:
             logger.warning("[GoT] Branch %d generation failed: %s", branch_id, e)
             return ""
@@ -654,7 +659,7 @@ class PlannerNode(Node):
         )
         try:
             resp = await self.request("domain.general.query", req, timeout=30.0)
-            return resp.payload.get("text", "")
+            return str(resp.payload.get("text", ""))
         except Exception as e:
             logger.warning("[GoT] Merge failed: %s", e)
             return ""

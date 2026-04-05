@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+
+if TYPE_CHECKING:
+    from hbllm.brain.policy_engine import PolicyEngine
+    from hbllm.brain.provider_adapter import ProviderLLM
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +32,12 @@ class DecisionNode(Node):
     before dispatching to the appropriate execution channel.
     """
 
-    def __init__(self, node_id: str, llm=None, policy_engine=None):
+    def __init__(
+        self,
+        node_id: str,
+        llm: ProviderLLM | None = None,
+        policy_engine: PolicyEngine | None = None,
+    ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.CORE)
         self.llm = llm  # LLMInterface instance
         self.policy_engine = policy_engine  # PolicyEngine instance
@@ -132,7 +142,12 @@ class DecisionNode(Node):
         return None
 
     async def _route_to_execution(
-        self, message: Message, intent: str, content: str, thought_type: str, original_query: dict
+        self,
+        message: Message,
+        intent: str,
+        content: str,
+        thought_type: str,
+        original_query: dict[str, Any],
     ) -> None:
         """Route the approved thought to the appropriate execution channel."""
         tenant_id = message.tenant_id
@@ -140,7 +155,7 @@ class DecisionNode(Node):
         correlation_id = message.correlation_id
 
         def _make_msg(
-            topic: str, payload: dict, msg_type: MessageType = MessageType.EVENT
+            topic: str, payload: dict[str, Any], msg_type: MessageType = MessageType.EVENT
         ) -> Message:
             return Message(
                 type=msg_type,

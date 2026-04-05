@@ -12,7 +12,8 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
+from collections.abc import AsyncIterator, Iterator
+from typing import Any, cast
 
 import torch
 
@@ -85,7 +86,7 @@ class LLMInterface:
 
     def _generate_stream_sync(
         self, prompt: str, max_tokens: int, temperature: float, tenant_id: str | None = None
-    ):
+    ) -> Iterator[str]:
         """Synchronous token-by-token generator with KV-cache decoding."""
         enc = self.tokenizer.encode(prompt)
         input_ids = torch.tensor([enc], dtype=torch.long).to(self.device)
@@ -144,7 +145,7 @@ class LLMInterface:
         max_tokens: int = 256,
         temperature: float = 0.7,
         tenant_id: str | None = None,
-    ):
+    ) -> AsyncIterator[str]:
         """
         Async generator that yields tokens one-at-a-time during decoding.
 
@@ -157,7 +158,7 @@ class LLMInterface:
 
         token_queue: queue.Queue[str | None] = queue.Queue()
 
-        def _run():
+        def _run() -> None:
             try:
                 for token in self._generate_stream_sync(prompt, max_tokens, temperature, tenant_id):
                     token_queue.put(token)
@@ -188,7 +189,7 @@ class LLMInterface:
         fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
         if fence_match:
             try:
-                return json.loads(fence_match.group(1))
+                return cast(dict[str, Any], json.loads(fence_match.group(1)))
             except json.JSONDecodeError:
                 pass
 
@@ -196,13 +197,13 @@ class LLMInterface:
         brace_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if brace_match:
             try:
-                return json.loads(brace_match.group(0))
+                return cast(dict[str, Any], json.loads(brace_match.group(0)))
             except json.JSONDecodeError:
                 pass
 
         # Try the entire text
         try:
-            return json.loads(text.strip())
+            return cast(dict[str, Any], json.loads(text.strip()))
         except json.JSONDecodeError:
             logger.warning("[LLMInterface] Failed to extract JSON from: %s", text[:100])
             return {"error": "Failed to parse structured output from LLM", "raw": text[:200]}

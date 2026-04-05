@@ -45,7 +45,7 @@ class PolicyOptimizer:
         clip_range: float = 0.2,
         max_grad_norm: float = 1.0,
         temperature: float = 1.0,
-    ):
+    ) -> None:
         self.lr = learning_rate
         self.kl_coeff = kl_coeff
         self.clip_range = clip_range
@@ -178,8 +178,8 @@ class PolicyOptimizer:
 
         Returns (advantages, returns).
         """
-        advantages = []
-        returns_list = []
+        advantages: list[float] = []
+        returns_list: list[float] = []
         gae = 0.0
 
         for t in reversed(range(len(rewards))):

@@ -18,6 +18,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -310,15 +311,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: Any,
         api_keys: ApiKeyManager | None = None,
         rate_limiter: RateLimiter | None = None,
-    ):
+    ) -> None:
         super().__init__(app)
         self.api_keys = api_keys or ApiKeyManager()
         self.rate_limiter = rate_limiter or RateLimiter()
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
         path = request.url.path
 
         # Skip auth for health/docs

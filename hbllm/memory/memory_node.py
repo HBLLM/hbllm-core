@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 from hbllm.memory.episodic import EpisodicMemory
 from hbllm.memory.knowledge_graph import KnowledgeGraph
@@ -70,7 +71,7 @@ class MemoryNode(Node):
             else KnowledgeGraph()
         )
         # Track background tasks for graceful shutdown
-        self._pending_tasks: set[asyncio.Task] = set()
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
 
     async def on_start(self) -> None:
         """Subscribe to memory lifecycle verbs."""
@@ -105,7 +106,7 @@ class MemoryNode(Node):
             logger.error("Failed to persist memory to disk: %s", e)
 
     @staticmethod
-    def _handle_background_task_result(task: asyncio.Task) -> None:
+    def _handle_background_task_result(task: asyncio.Task[Any]) -> None:
         """Callback for fire-and-forget tasks to log errors instead of swallowing them."""
         try:
             exc = task.exception()
@@ -369,7 +370,7 @@ class MemoryNode(Node):
                 self.semantic_db.search,
                 query,
                 limit,
-                tenant_id=payload.tenant_id or message.tenant_id,
+                tenant_id=message.tenant_id,
             )
 
             return message.create_response(

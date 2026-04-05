@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -193,7 +194,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
         try:
             from hbllm.data.pipeline import DataPipeline
 
-            pipeline = DataPipeline(data_dir)
+            pipeline: Any = DataPipeline(data_dir)
             pipeline.run_all(
                 dataset_name=args.data,
                 max_samples=args.max_samples,
@@ -243,7 +244,7 @@ def run_pretrain(args: argparse.Namespace) -> None:
     trainer = Trainer(model, train_config, device=device)
 
     if args.resume:
-        ckpt = trainer.ckpt_manager.load_latest()
+        ckpt = trainer.ckpt_manager.load_latest()  # type: ignore[attr-defined]
         if ckpt:
             trainer.load_checkpoint(ckpt)
 
@@ -393,7 +394,7 @@ def run_cognitive_pretrain(args: argparse.Namespace) -> None:
         try:
             from hbllm.data.pipeline import DataPipeline
 
-            pipeline = DataPipeline(args.data_dir)
+            pipeline: Any = DataPipeline(args.data_dir)
             pipeline.run(args.data, max_samples=args.max_samples)
         except RuntimeError:
             logger.info("Rust pipeline unavailable, using PurePythonPipeline...")
@@ -662,7 +663,7 @@ def run_dpo(args: argparse.Namespace) -> None:
 def run_eval(args: argparse.Namespace) -> None:
     """Run model evaluation."""
     from hbllm.model.config import get_config
-    from hbllm.model.tokenizer import Tokenizer
+    from hbllm.model.tokenizer import HBLLMTokenizer as Tokenizer
     from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.training.evaluator import ModelEvaluator
 
@@ -705,7 +706,7 @@ def run_export(args: argparse.Namespace) -> None:
     """Export trained model to various formats."""
     from hbllm.model.config import get_config
     from hbllm.model.export import ModelExporter
-    from hbllm.model.tokenizer import Tokenizer
+    from hbllm.model.tokenizer import HBLLMTokenizer as Tokenizer
     from hbllm.model.transformer import HBLLMForCausalLM
 
     logger.info("=== Model Export (%s) ===", args.export)
@@ -757,7 +758,7 @@ def run_serve_local(args: argparse.Namespace) -> None:
     """Start a local brain for interactive use."""
     import asyncio
 
-    async def _serve():
+    async def _serve() -> None:
         from hbllm.brain.factory import BrainFactory
 
         brain = await BrainFactory.create_local(
@@ -803,9 +804,9 @@ def run_embed(args: argparse.Namespace) -> None:
     model = model.to(device)
 
     trainer = EmbeddingTrainer(
-        model=model,
         embedding_dim=args.embed_dim,
-        device=device,
+        device=str(device),
+        vocab_size=config.vocab_size,
     )
 
     if args.embed_data:
@@ -822,12 +823,12 @@ def run_embed(args: argparse.Namespace) -> None:
         triplets = []
 
     if triplets:
-        trainer.train(triplets, max_steps=args.max_steps, lr=args.lr)
+        trainer.train(triplets, epochs=args.max_steps, lr=args.lr)
 
     # Save embedding head
     save_path = Path(args.checkpoint_dir) / "embedding_head.pt"
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(trainer.projection.state_dict(), str(save_path))
+    torch.save(trainer.model.proj.state_dict(), str(save_path))
     logger.info("Embedding head saved to %s", save_path)
 
 

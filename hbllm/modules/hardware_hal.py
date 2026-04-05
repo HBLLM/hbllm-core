@@ -13,6 +13,7 @@ import platform
 import time
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 import torch
 
@@ -55,7 +56,7 @@ class HardwareHAL:
 
         # RAM Detection (psutil is enterprise standard)
         try:
-            import psutil
+            import psutil  # type: ignore[import-untyped]
 
             ram_gb = psutil.virtual_memory().total / (1024**3)
         except ImportError:
@@ -104,7 +105,7 @@ class HardwareHAL:
             return 10.0  # Default high latency if disk is protected
 
     @staticmethod
-    def recommend_policy(model_params_billions: float) -> dict[str, any]:
+    def recommend_policy(model_params_billions: float) -> dict[str, Any]:
         """
         Autonomous policy generation based on hardware profile.
         """

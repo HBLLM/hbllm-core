@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+
+if TYPE_CHECKING:
+    from hbllm.brain.provider_adapter import ProviderLLM
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,7 @@ class CriticNode(Node):
     # Maximum number of queries to keep in the LRU cache
     MAX_CACHE_SIZE = 500
 
-    def __init__(self, node_id: str, llm=None):
+    def __init__(self, node_id: str, llm: ProviderLLM | None = None) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,

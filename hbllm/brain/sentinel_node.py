@@ -67,7 +67,7 @@ class SentinelNode(Node):
         policy_engine: PolicyEngine | None = None,
         poll_interval: float = 60.0,
         max_history: int = 100,
-    ):
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -79,7 +79,7 @@ class SentinelNode(Node):
 
         self._current_context: dict[str, Any] = {}
         self._alert_history: list[SentinelAlert] = []
-        self._poll_task: asyncio.Task | None = None
+        self._poll_task: asyncio.Task[None] | None = None
         self._triggered_rules: set[str] = set()  # Prevent repeated alerts
 
     @property
@@ -113,7 +113,7 @@ class SentinelNode(Node):
         if text_to_eval:
             result = self.policy_engine.evaluate(
                 text=text_to_eval,
-                tenant_id=message.tenant_id,
+                tenant_id=message.tenant_id or "default",
                 context=self._current_context,
             )
             if not result.passed:
@@ -306,7 +306,7 @@ class SentinelNode(Node):
             self._alert_history = self._alert_history[-self.max_history :]
 
         logger.warning(
-            "[Sentinel] VIOLATION: %s → action: %s",
+            "[Sentinel] VIOLATION: %s \u2192 action: %s",
             violation,
             corrective_action["type"],
         )

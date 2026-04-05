@@ -10,6 +10,7 @@ redundant recomputation of previous positions.
 """
 
 import logging
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -54,8 +55,8 @@ def sample(
 def _model_forward(
     model: torch.nn.Module,
     input_ids: torch.Tensor,
-    past_key_values: list | None = None,
-) -> tuple[torch.Tensor, list | None]:
+    past_key_values: list[Any] | None = None,
+) -> tuple[torch.Tensor, list[Any] | None]:
     """
     Unified model forward that handles both dict and tuple return formats.
 
@@ -63,7 +64,7 @@ def _model_forward(
         (logits, past_key_values) — logits are [batch, seq, vocab],
         past_key_values may be None if the model doesn't support caching.
     """
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
     if past_key_values is not None:
         kwargs["past_key_values"] = past_key_values
     kwargs["use_cache"] = True
@@ -91,9 +92,9 @@ def speculate_step(
     K: int = 4,
     temperature: float = 0.7,
     top_p: float = 0.9,
-    draft_past_kv: list | None = None,
-    main_past_kv: list | None = None,
-) -> tuple[torch.Tensor, list | None, list | None]:
+    draft_past_kv: list[Any] | None = None,
+    main_past_kv: list[Any] | None = None,
+) -> tuple[torch.Tensor, list[Any] | None, list[Any] | None]:
     """
     Performs one chunk step of speculative decoding with KV cache support.
 

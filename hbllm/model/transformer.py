@@ -16,6 +16,8 @@ Architecture follows LLaMA 3 / Mistral design:
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,6 +48,7 @@ class TransformerBlock(nn.Module):
 
         # Attention and FFN
         self.self_attn = GroupedQueryAttention(config, layer_idx=layer_idx)
+        self.mlp: nn.Module
         if getattr(config, "use_moe", False):
             self.mlp = MoEFFN(config)
         else:
@@ -138,7 +141,7 @@ class HBLLMModel(nn.Module):
         input_ids: torch.Tensor,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
-        past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
+        past_key_values: Any | None = None,
         use_cache: bool = False,
     ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]] | None, torch.Tensor]:
         """
@@ -163,7 +166,7 @@ class HBLLMModel(nn.Module):
         if position_ids is None:
             if past_key_values:
                 if hasattr(past_key_values[0], "seq_len"):
-                    past_len = past_key_values[0].seq_len
+                    past_len = getattr(past_key_values[0], "seq_len")
                 else:
                     past_len = past_key_values[0][0].shape[2]
             else:
@@ -180,7 +183,7 @@ class HBLLMModel(nn.Module):
             past_len = 0
             if past_key_values is not None:
                 if hasattr(past_key_values[0], "seq_len"):
-                    past_len = past_key_values[0].seq_len
+                    past_len = getattr(past_key_values[0], "seq_len")
                 else:
                     past_len = past_key_values[0][0].shape[2]
 
@@ -197,7 +200,9 @@ class HBLLMModel(nn.Module):
                 )
 
         # Forward through all layers
-        new_past_key_values: list[tuple[torch.Tensor, torch.Tensor]] = [] if use_cache else None
+        new_past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = (
+            [] if use_cache else None
+        )
         total_load_balancing_loss = torch.tensor(0.0, device=hidden_states.device)
 
         for i, layer in enumerate(self.layers):
@@ -210,7 +215,7 @@ class HBLLMModel(nn.Module):
                 use_cache=use_cache,
             )
             total_load_balancing_loss += layer_lb_loss
-            if use_cache:
+            if use_cache and new_past_key_values is not None:
                 new_past_key_values.append(new_kv)
 
         # Final normalization
@@ -334,9 +339,9 @@ class HBLLMForCausalLM(nn.Module):
         labels: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
-        past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
+        past_key_values: Any | None = None,
         use_cache: bool = False,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Any]:
         """
         Forward pass with optional loss computation.
 
@@ -361,7 +366,7 @@ class HBLLMForCausalLM(nn.Module):
 
         logits = self.lm_head(hidden_states)
 
-        result = {"logits": logits}
+        result: dict[str, Any] = {"logits": logits}
 
         if labels is not None:
             # Shift logits and labels for next-token prediction
@@ -420,14 +425,14 @@ class HBLLMForCausalLM(nn.Module):
             else:
                 model_input = input_ids
 
-            outputs = self.forward(
+            out_dict = self.forward(
                 input_ids=model_input,
                 past_key_values=past_key_values,
                 use_cache=True,
             )
 
-            logits = outputs["logits"][:, -1, :]  # Last token logits
-            past_key_values = outputs.get("past_key_values")
+            logits = out_dict["logits"][:, -1, :]  # Last token logits
+            past_key_values = out_dict.get("past_key_values")
 
             # Sample using helper
             next_token = self._sample_logits(logits, temperature, top_k, top_p)
@@ -624,7 +629,7 @@ class HBLLMForCausalLM(nn.Module):
             # (excluding the final newly appended token to be processed next) has length:
             cache_keep_len = input_ids.shape[1] - 1
 
-            def truncate_kv_cache(pkv, keep_len):
+            def truncate_kv_cache(pkv: Any, keep_len: int) -> Any:
                 if pkv is None:
                     return None
                 new_pkv = []
@@ -678,7 +683,7 @@ class HBLLMForProcessReward(nn.Module):
         labels: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Any]:
         """
         Forward pass for the Process Reward Model.
 
@@ -715,7 +720,7 @@ class HBLLMForProcessReward(nn.Module):
         # Map logit to [0, 1] probability
         scores = torch.sigmoid(logits)
 
-        result = {
+        result: dict[str, Any] = {
             "logits": logits,
             "scores": scores,
         }

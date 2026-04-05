@@ -12,6 +12,7 @@ while maintaining near-identical inference speed.
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -19,7 +20,7 @@ import torch.nn.functional as F
 
 # Try to import our Rust accelerated kernel
 try:
-    from hbllm_compute import UniversalEngine
+    from hbllm_compute import UniversalEngine  # type: ignore[import-not-found]
 
     rust_engine = UniversalEngine()
 except ImportError:
@@ -120,7 +121,7 @@ class QuantizedLinear(nn.Module):
         scale_expanded = scale_expanded[:, : self.in_features]
         bias_expanded = bias_expanded[:, : self.in_features]
 
-        return w * scale_expanded + bias_expanded
+        return cast(torch.Tensor, w * scale_expanded + bias_expanded)
 
     @staticmethod
     def quantize_weight(
@@ -200,7 +201,7 @@ class HybridLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Single call: LoRALinear.forward() handles base pass + LoRA delta + MoE blending
-        return self.lora_sidecar(x)
+        return cast(torch.Tensor, self.lora_sidecar(x))
 
     # Expose adapter management for convenience
     def add_adapter(self, name: str) -> None:
