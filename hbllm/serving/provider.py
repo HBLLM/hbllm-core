@@ -19,9 +19,9 @@ import logging
 import os
 import random
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from hbllm.network.tracing import trace_span
 
@@ -193,7 +193,13 @@ class LocalProvider(LLMProvider):
             },
         )
 
-    async def stream(self, messages: list[dict[str, str]], max_tokens: int = 1024, temperature: float = 0.7, **kwargs: Any) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
         """Stream tokens from the local model one at a time, using Speculative Decoding if configured."""
         self._ensure_loaded()
         import torch
@@ -544,7 +550,13 @@ class AnthropicProvider(LLMProvider):
             raw=data,
         )
 
-    async def stream(self, messages: list[dict[str, str]], max_tokens: int = 1024, temperature: float = 0.7, **kwargs: Any) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
         """Stream tokens from Anthropic's SSE API."""
         import httpx
 

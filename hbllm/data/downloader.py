@@ -15,7 +15,7 @@ from typing import Any
 
 # datasets might not have stubs installed
 try:
-    from datasets import load_dataset # type: ignore
+    from datasets import load_dataset  # type: ignore
 except ImportError:
     load_dataset = None
 

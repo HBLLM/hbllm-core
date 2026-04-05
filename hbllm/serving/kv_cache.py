@@ -298,7 +298,9 @@ class KVCache:
         """Return the currently valid portion of the cache, dequantizing if needed."""
         if self.quantize_k:
             k_slice = self.key_cache[:, :, : self.seq_len, :].to(self.dtype)
-            s_slice = self.key_scales[:, :, : self.seq_len, :] if self.key_scales is not None else 1.0
+            s_slice = (
+                self.key_scales[:, :, : self.seq_len, :] if self.key_scales is not None else 1.0
+            )
             final_keys = k_slice * s_slice
         else:
             final_keys = self.key_cache[:, :, : self.seq_len, :]
@@ -372,7 +374,9 @@ class KVCache:
 
         # Ensure all async copies to CPU finish before providing CPU tensor access
         if self.device != torch.device("cpu"):
-            torch.cuda.current_stream(self.device).synchronize() if self.device.type == "cuda" else None  # type: ignore[no-untyped-call]
+            torch.cuda.current_stream(
+                self.device
+            ).synchronize() if self.device.type == "cuda" else None  # type: ignore[no-untyped-call]
 
         return (
             self.cpu_key_cache[:, :, :total_tokens, :],

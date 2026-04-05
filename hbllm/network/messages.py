@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 class StrEnum(str, Enum):
     """Base class for string-based enums."""
+
     pass
 
 

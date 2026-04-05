@@ -362,7 +362,9 @@ class SpecializationBenchmark:
             for domain, keywords in routing_keywords.items():
                 score = sum(1 for kw in keywords if kw.lower() in query.lower())
                 scores[domain] = score
-            predicted = max(scores, key=lambda k: scores[k]) if max(scores.values()) > 0 else "general"
+            predicted = (
+                max(scores, key=lambda k: scores[k]) if max(scores.values()) > 0 else "general"
+            )
             if predicted == expected:
                 correct += 1
 
@@ -536,6 +538,7 @@ async def run_suite(suite_name: str) -> BenchmarkReport:
         raise ValueError(f"Unknown suite: {suite_name}. Available: {list(SUITES.keys())}")
     bench: Any = SUITES[suite_name]()
     from typing import cast
+
     return cast(BenchmarkReport, await bench.run())
 
 

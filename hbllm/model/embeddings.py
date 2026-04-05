@@ -8,9 +8,10 @@ Used in LLaMA, Mistral, and most modern LLMs.
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
-from typing import cast
 
 
 class TokenEmbedding(nn.Module):

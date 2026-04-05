@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch

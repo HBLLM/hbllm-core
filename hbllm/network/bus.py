@@ -14,7 +14,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from datetime import timezone
-from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from hbllm.network.messages import Message
 from hbllm.network.tracing import BusMetrics, trace_span
@@ -276,7 +276,9 @@ class InProcessBus:
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run_handler(s: Subscription = sub, t: str = topic, m: Message = message) -> None:
+                async def _run_handler(
+                    s: Subscription = sub, t: str = topic, m: Message = message
+                ) -> None:
                     async with self._handler_semaphore:
                         _start = time.monotonic()
                         try:

@@ -200,7 +200,9 @@ class HBLLMModel(nn.Module):
                 )
 
         # Forward through all layers
-        new_past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = [] if use_cache else None
+        new_past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = (
+            [] if use_cache else None
+        )
         total_load_balancing_loss = torch.tensor(0.0, device=hidden_states.device)
 
         for i, layer in enumerate(self.layers):

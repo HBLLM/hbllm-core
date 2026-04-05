@@ -49,7 +49,7 @@ class VisionNode(Node):
     def _load_model(self) -> None:
         try:
             import torch
-            from transformers import pipeline # type: ignore
+            from transformers import pipeline  # type: ignore
 
             device: int | str = 0 if torch.cuda.is_available() else -1
             if torch.backends.mps.is_available() and device == -1:
@@ -85,12 +85,13 @@ class VisionNode(Node):
             return message.create_error(f"Vision failure: {e}")
 
     def _process_image(self, path_or_hex: str) -> str:
-        from PIL import Image # type: ignore
         import io
+
+        from PIL import Image  # type: ignore
 
         # Handle hex encoded data or path
         try:
-            if len(path_or_hex) > 512: # Likely hex
+            if len(path_or_hex) > 512:  # Likely hex
                 image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex))).convert("RGB")
             else:
                 image = Image.open(path_or_hex).convert("RGB")
@@ -106,7 +107,7 @@ class VisionNode(Node):
         # Try EasyOCR first
         try:
             if self._ocr_reader is None:
-                import easyocr # type: ignore
+                import easyocr  # type: ignore
 
                 self._ocr_reader = easyocr.Reader(["en"], gpu=False)
 
@@ -122,15 +123,16 @@ class VisionNode(Node):
 
         # Fallback: try pytesseract
         try:
-            import pytesseract # type: ignore
-            from PIL import Image
             import io
+
+            import pytesseract  # type: ignore
+            from PIL import Image
 
             if len(path_or_hex) > 512:
                 image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex)))
             else:
                 image = Image.open(path_or_hex)
-                
+
             return str(pytesseract.image_to_string(image).strip())
         except ImportError:
             pass
@@ -156,6 +158,7 @@ class VisionNode(Node):
 
         try:
             import asyncio
+
             data_str = str(image_data)
 
             # Run caption + OCR in parallel threads
@@ -173,7 +176,9 @@ class VisionNode(Node):
             if caption_task is not None:
                 caption = str(results[0]) if not isinstance(results[0], Exception) else ""
                 ocr_text = (
-                    str(results[1]) if len(results) > 1 and not isinstance(results[1], Exception) else ""
+                    str(results[1])
+                    if len(results) > 1 and not isinstance(results[1], Exception)
+                    else ""
                 )
             else:
                 ocr_text = str(results[0]) if not isinstance(results[0], Exception) else ""
@@ -207,6 +212,7 @@ class VisionNode(Node):
 
         try:
             import asyncio
+
             data_str = str(image_data)
 
             # Caption + OCR

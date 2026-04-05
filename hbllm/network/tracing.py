@@ -18,11 +18,11 @@ import logging
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from opentelemetry.trace import Tracer
     from opentelemetry.metrics import Meter
+    from opentelemetry.trace import Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,9 @@ def _init_otel() -> None:
         tracer_provider = TracerProvider(resource=resource)
 
         try:
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter # type: ignore
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter,  # type: ignore
+            )
 
             exporter: Any = OTLPSpanExporter()
         except ImportError:

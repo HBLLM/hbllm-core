@@ -163,7 +163,7 @@ class MqttIoTNode(Node):
     async def _connect_mqtt(self) -> None:
         """Connect to MQTT broker with auto-reconnect."""
         try:
-            import paho.mqtt.client as mqtt # type: ignore
+            import paho.mqtt.client as mqtt  # type: ignore
         except ImportError:
             logger.warning(
                 "paho-mqtt not installed. IoT node running in simulation mode. "
@@ -191,7 +191,9 @@ class MqttIoTNode(Node):
         except Exception as e:
             logger.error("MQTT connection failed: %s", e)
 
-    def _on_mqtt_connect(self, client: Any, userdata: Any, flags: Any, rc: Any, properties: Any = None) -> None:
+    def _on_mqtt_connect(
+        self, client: Any, userdata: Any, flags: Any, rc: Any, properties: Any = None
+    ) -> None:
         """Called when MQTT connection is established."""
         self._connected = True
         logger.info("MQTT connected to broker (rc=%s)", rc)
@@ -227,7 +229,9 @@ class MqttIoTNode(Node):
         elif topic.startswith("zigbee2mqtt/"):
             self._handle_zigbee_message(topic, payload)
 
-    def _on_mqtt_disconnect(self, client: Any, userdata: Any, flags: Any, rc: Any, properties: Any = None) -> None:
+    def _on_mqtt_disconnect(
+        self, client: Any, userdata: Any, flags: Any, rc: Any, properties: Any = None
+    ) -> None:
         self._connected = False
         logger.warning("MQTT disconnected (rc=%s). Will auto-reconnect.", rc)
 

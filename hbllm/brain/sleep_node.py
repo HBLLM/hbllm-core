@@ -100,7 +100,11 @@ class SleepCycleNode(Node):
         """Perform offline memory consolidation and self-improvement training."""
         self.is_sleeping = True
         cycle_start = time.time()
-        report: dict[str, Any] = {"memories_consolidated": 0, "goals_replayed": 0, "training_ran": False}
+        report: dict[str, Any] = {
+            "memories_consolidated": 0,
+            "goals_replayed": 0,
+            "training_ran": False,
+        }
         logger.info(
             "[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...",
             self.idle_timeout_seconds,
@@ -201,7 +205,9 @@ class SleepCycleNode(Node):
                 entities = list(kg_resp.payload.get("entities", []))
 
                 # Filter out existing communities
-                leaf_nodes = [str(e.get("label", "")) for e in entities if e.get("type") != "community"]
+                leaf_nodes = [
+                    str(e.get("label", "")) for e in entities if e.get("type") != "community"
+                ]
 
                 if len(leaf_nodes) >= 5:
                     logger.info(
@@ -214,7 +220,11 @@ class SleepCycleNode(Node):
                         f'Output JSON format: {{"communities": [{{"name": "Short Title", "summary": "1 sentence desc", "members": ["concept1", "concept2"]}}]}}'
                     )
 
-                    if cluster_json and "error" not in cluster_json and "communities" in cluster_json:
+                    if (
+                        cluster_json
+                        and "error" not in cluster_json
+                        and "communities" in cluster_json
+                    ):
                         for comm in cluster_json["communities"]:
                             add_comm_msg = Message(
                                 type=MessageType.QUERY,

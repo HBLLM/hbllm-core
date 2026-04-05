@@ -223,7 +223,9 @@ class ShardReader:
 
         raise IndexError(f"Global index {global_idx} out of range (total={self._total_tokens})")
 
-    def iter_sequences(self, stride: int | None = None) -> Generator[np.ndarray[Any, Any], None, None]:
+    def iter_sequences(
+        self, stride: int | None = None
+    ) -> Generator[np.ndarray[Any, Any], None, None]:
         """
         Iterate over all sequences in the dataset.
 

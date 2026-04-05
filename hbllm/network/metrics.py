@@ -55,7 +55,7 @@ class MetricsCollector:
         self._mem_counters: dict[str, float] = defaultdict(float)
         self._mem_histograms: dict[str, list[float]] = defaultdict(list)
         self._mem_gauges: dict[str, float] = defaultdict(float)
-        
+
         # Prometheus metrics (initialized in _init_prometheus)
         self._requests_total: Any = None
         self._messages_total: Any = None
@@ -218,7 +218,9 @@ class MetricsCollector:
         if HAS_PROMETHEUS and self._active_requests:
             self._active_requests.dec()
         else:
-            self._mem_gauges["active_requests"] = max(0.0, self._mem_gauges["active_requests"] - 1.0)
+            self._mem_gauges["active_requests"] = max(
+                0.0, self._mem_gauges["active_requests"] - 1.0
+            )
 
     @contextlib.contextmanager
     def measure_latency(self, stage: str) -> Generator[None, None, None]:

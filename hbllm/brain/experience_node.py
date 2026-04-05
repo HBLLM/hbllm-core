@@ -716,7 +716,9 @@ class ExperienceNode(Node):
                 condition = match.group(1).strip()
                 last_idx = match.lastindex
                 action = (
-                    match.group(2).strip() if last_idx is not None and last_idx >= 2 else "take appropriate action"
+                    match.group(2).strip()
+                    if last_idx is not None and last_idx >= 2
+                    else "take appropriate action"
                 )
 
                 if len(condition) < 8 or len(action) < 8:
