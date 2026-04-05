@@ -51,12 +51,14 @@ class VisionNode(Node):
             import torch
             from transformers import pipeline  # type: ignore
 
-            device: int | str = 0 if torch.cuda.is_available() else -1
+            device: Any = 0 if torch.cuda.is_available() else -1
             if torch.backends.mps.is_available() and device == -1:
                 # pipeline device=-1 means CPU. pipeline currently drops support for strings like 'mps' in some versions unless passed explicitly as a torch.device
                 device = "mps"
             self.pipeline = pipeline(
-                "image-to-text", model="Salesforce/blip-image-captioning-base", device=device  # type: ignore[call-overload]
+                "image-to-text",
+                model="Salesforce/blip-image-captioning-base",
+                device=device,
             )
         except Exception as e:
             logger.error("Failed to load vision model: %s", e)
