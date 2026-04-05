@@ -1,11 +1,12 @@
 """
 System 4 Sleep Cycle Node (Offline Consolidation).
 
-Monitors system activity. If the user stops interacting with the API/CLI
+Monitored system activity. If the user stops interacting with the API/CLI
 for a configurable duration, it triggers a `system.sleep` event.
-During sleep, it accesses the MemoryNode to compress raw verbose logs
-into semantic summaries and triggers LoRA training if weakness was
-detected throughout the day.
+During sleep, it performs biologically-inspired memory consolidation:
+compressing raw episodic logs into semantic summaries, clustering 
+knowledge graphs, and triggering artificial neuroplasticity (DPO) 
+if performance gaps were detected.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class SleepCycleNode(Node):
     """
-    Background process that orchestrates Memory Consolidation when idle.
+    Orchestrates Memory Consolidation and Synaptic Strengthening when idle.
     """
 
     def __init__(self, node_id: str, idle_timeout_seconds: float = 10.0, llm: Any = None):

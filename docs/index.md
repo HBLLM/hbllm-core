@@ -32,6 +32,10 @@ Traditional **Large Language Models (LLMs)** are monolithic, stateless transform
 <p>Router, Planner, Critic, Decision, Learner, Curiosity, Identity, World Model, Sleep Cycle, and more — each running as an isolated, asynchronous service.</p>
 </div>
 <div class="feature-card">
+<h3>💤 Sleep Cycle Consolidation</h3>
+<p>3-phase memory consolidation (Replay → Prune → Strengthen) inspired by biological sleep. Refines model weights and compresses knowledge while idle. [Architecture &rarr;](architecture/sleep-cycle.md)</p>
+</div>
+<div class="feature-card">
 <h3>💾 6 Memory Systems</h3>
 <p>Working, Episodic, Semantic, Procedural, Value, and Knowledge Graph — mirroring human cognitive psychology for lifelong learning.</p>
 </div>
@@ -102,6 +106,9 @@ flowchart TB
         EXPERIENCE["🎥 Experience\n(salience)"]
         IDENTITY["🛡️ Identity\n(ethics)"]
         SLEEP["💤 Sleep Cycle\n(3-phase consolidation)"]
+        CLICK["[Read the Deep Dive]"]
+        SLEEP -.-> CLICK
+        click CLICK "architecture/sleep-cycle.md" "Learn how HBLLM sleeps"
         COLLECTIVE["📊 Collective"]
         WORLD["🌍 World Model"]
     end

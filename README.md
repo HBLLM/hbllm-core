@@ -1,8 +1,8 @@
 <!-- SEO Keywords: Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, Graph of Thoughts, LoRA Tuning, Python 3.10 AI Framework, Rust AI Inference, Autonomous Agents, LLMOps -->
 
 <div align="center">
-  <h1>🧠 HBLLM Core: Open Source Cognitive Architecture for Edge AI</h1>
-  <p><b>A Human-Brain Inspired Agentic Framework for Large Language Models (LLMs)</b></p>
+  <h1>🧠 HBLLM Core: Human Brain LLM Cognitive Architecture</h1>
+  <p><b>A Biologically-Inspired Agentic Framework for Large Language Models (LLMs)</b></p>
   <p><em>An advanced AGI-oriented multi-agent ecosystem that thinks, learns, and adapts — moving beyond stateless chat interfaces.</em></p>
 
   [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -116,6 +116,7 @@ flowchart TB
         EXPERIENCE["🎥 Experience\n(salience)"]
         IDENTITY["🛡️ Identity\n(ethics)"]
         SLEEP["💤 Sleep Cycle\n(3-phase consolidation)"]
+        click SLEEP "docs/architecture/sleep-cycle.md" "Learn how HBLLM consolidates memory"
         COLLECTIVE["📊 Collective"]
         WORLD["🌍 World Model"]
     end
@@ -182,7 +183,7 @@ HBLLM Core isn't just a wrapper; it's a deeply engineered cognitive backend capa
 ### 🧠 Agentic Reasoning & Evaluation
 - **Lock-Free LoRA Concurrency:** Isolated `ContextVars` allow asynchronous domain modules to share a single GPU lock-free, streaming tiny ~2MB adapters strictly during forward passes over the PCIe bus without blocking other cognitive nodes.
 - **Secure Adapter Registry**: A hardened runtime system for resolving and downloading domain-specific LoRA adapters from the HuggingFace Hub with mandatory SHA-256 integrity checks and `weights_only=True` loading.
-- **Continuous Lifetime Learning:** The `LearnerNode` implements contrastive DPO (Direct Preference Optimization) using a persistent, atomic JSON queue. It "sleeps" to consolidate feedback into permanent model updates without interrupting the main serving loop.
+- **Continuous Lifetime Learning:** The `LearnerNode` implements contrastive DPO (Direct Preference Optimization) using a persistent, atomic JSON queue. It utilizes [biologically inspired Sleep Cycles](docs/architecture/sleep-cycle.md) to consolidate feedback into permanent model updates without interrupting the main serving loop.
 - **Dynamic MoE Blending:** Queries overlapping multiple domains (e.g., Coding + Math) mathematically synthesize custom blend-weights at runtime, forming custom experts out of base adapters globally across all layers.
 - **Graph-of-Thoughts (GoT) Planning:** The `PlannerNode` breaks complex goals into dynamic, directed acyclic graphs of reasoning steps.
 - **Process Reward Models (PRM):** The `ProcessRewardNode` provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.

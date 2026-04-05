@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 class LearnerNode(Node):
     """
-    Continuous Learning Engine.
+    Continuous Learning Engine (Artificial Neuroplasticity).
 
     Listens for Feedback messages on the bus. When a user provides feedback
     (positive or negative) on a generation, it accumulates the sample.
-    Once enough samples are gathered, it performs DPO (Direct Preference Optimization)
-    in a background thread to update the active LoRA adapter weights, then
-    broadcasts that the weights have been updated.
+    During the Sleep Cycle, it performs DPO (Direct Preference Optimization)
+    to update active LoRA adapter weights — effectively "learning" from 
+    the day's interactions without interrupting live service.
     """
 
     def __init__(
