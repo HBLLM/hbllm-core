@@ -258,13 +258,16 @@ class SpawnerNode(Node):
                     collate_fn=collate_sft,
                 )
 
-                # Inject LoRA into a deep copy to avoid mutating the shared model
+                # Inject LoRA directly into the shared model (memory-efficient PEFT)
                 import torch
 
-                train_model = copy.deepcopy(self.model)
+                train_model = self.model
                 injected = LoRAManager.inject(train_model, r=lora_rank)
+                LoRAManager.add_adapter(train_model, domain_name)
+                LoRAManager.set_active_adapter(train_model, domain_name)
+
                 logger.info(
-                    "Injected LoRA (r=%d) into %d modules (on isolated copy)",
+                    "Injected LoRA (r=%d) into %d modules directly",
                     lora_rank,
                     len(injected),
                 )
@@ -338,6 +341,9 @@ class SpawnerNode(Node):
                             tenant_id,
                             adapter_err,
                         )
+
+                # Reset active adapter context variable
+                LoRAManager.set_active_adapter(train_model, None)
 
                 return adapter_state
 
