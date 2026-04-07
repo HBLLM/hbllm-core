@@ -119,7 +119,8 @@ class CriticNode(Node):
 
         except Exception as e:
             logger.warning(
-                "[CriticNode] LLM constitutional evaluation failed, defaulting to FAIL (System Blocked): %s", e
+                "[CriticNode] LLM constitutional evaluation failed, defaulting to FAIL (System Blocked): %s",
+                e,
             )
             status = "FAIL"
             reason = f"Critic evaluation blocked due to internal system/LLM error: {e}"

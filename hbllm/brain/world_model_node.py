@@ -73,7 +73,10 @@ class WorldModelNode(Node):
             await self.bus.publish("workspace.thought", sim_msg)
 
         elif action_type in ("bash_command", "browser_action"):
-            prediction = {"status": "SUCCESS", "reason": f"Heuristic prediction: {action_type} seems safe in sandbox."}
+            prediction = {
+                "status": "SUCCESS",
+                "reason": f"Heuristic prediction: {action_type} seems safe in sandbox.",
+            }
             sim_msg = Message(
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
