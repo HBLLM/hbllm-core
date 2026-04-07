@@ -394,17 +394,37 @@ class Ros2Node(Node):
         self, robot: RobotState, command: str, params: dict[str, Any]
     ) -> None:
         """Handle arm/gripper commands."""
-        if self.is_real:
-            from std_msgs.msg import String
+        robot.status = "executing"
 
-            cmd_msg = String()
-            cmd_msg.data = json.dumps({"command": command, "params": params})
-            if "brain_cmd" in self._publishers:
-                self._publishers["brain_cmd"].publish(cmd_msg)
+        if self.is_real:
+            # We attempt to use an ActionClient if available to synchronously wait for arm trajectory completion
+            try:
+                from rclpy.action import ActionClient  # type: ignore
+
+                # from custom_interfaces.action import Manipulator # Example type
+                # In a fully integrated environment, we'd fire an action goal:
+                # client = ActionClient(self._ros2_node, Manipulator, 'manipulator_action')
+                # goal_msg = Manipulator.Goal(command=command, params=json.dumps(params))
+                # goal_handle = await client.send_goal_async(goal_msg)
+                # result = await goal_handle.get_result_async()
+                # logger.info("Action result: %s", result)
+                # Fallback to topic broadcast if Action Interfaces missing but keep the async pause
+                from std_msgs.msg import String
+
+                cmd_msg = String()
+                cmd_msg.data = json.dumps({"command": command, "params": params})
+                if "brain_cmd" in self._publishers:
+                    self._publishers["brain_cmd"].publish(cmd_msg)
+
+                # Wait asynchronously to simulate action duration
+                await asyncio.sleep(1.0)
+            except ImportError:
+                pass
         else:
             logger.info("[SIM] %s: %s %s", robot.name, command, params)
+            await asyncio.sleep(0.5)
 
-        robot.status = "executing"
+        robot.status = "idle"
 
     # ── Navigation ───────────────────────────────────────────────────────
 

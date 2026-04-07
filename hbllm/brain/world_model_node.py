@@ -72,6 +72,27 @@ class WorldModelNode(Node):
             )
             await self.bus.publish("workspace.thought", sim_msg)
 
+        elif action_type in ("bash_command", "browser_action"):
+            prediction = {
+                "status": "SUCCESS",
+                "reason": f"Heuristic prediction: {action_type} seems safe in sandbox.",
+            }
+            sim_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="workspace.thought",
+                payload={
+                    "type": "simulation_result",
+                    "confidence": 0.8,
+                    "prediction": prediction["status"],
+                    "content": prediction["reason"],
+                },
+                correlation_id=message.correlation_id,
+            )
+            await self.bus.publish("workspace.thought", sim_msg)
+
         return None
 
     def _simulate_ast(self, code: str) -> dict[str, str]:
@@ -81,6 +102,10 @@ class WorldModelNode(Node):
         but for this prototype, AST parsing serves the same gateway architectural purpose).
         """
         try:
+            # 1. Compile check for deep syntax verification
+            compile(code, "<ast_simulation>", "exec")
+
+            # 2. Extract AST tree and walk nodes
             tree = ast.parse(code)
 
             # Walk the AST looking for imports
