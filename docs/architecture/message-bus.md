@@ -1,6 +1,6 @@
 ---
-title: "API Reference — Network Layer"
-description: "API documentation for HBLLM's message bus, messages, and circuit breaker."
+title: "Message Bus Architecture — Async Pub/Sub Communication"
+description: "Architecture deep-dive into HBLLM's async message bus — topic-based routing, distributed deployment with RedisBus, circuit breakers, and message correlation patterns."
 ---
 
 # Network API

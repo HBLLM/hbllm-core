@@ -5,10 +5,10 @@
   <p><b>A Biologically-Inspired Agentic Framework for Large Language Models (LLMs)</b></p>
   <p><em>An advanced AGI-oriented multi-agent ecosystem that thinks, learns, and adapts — moving beyond stateless chat interfaces.</em></p>
 
-  [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+  [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-1057%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
   [![License](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE.md)
 </div>
 
@@ -18,7 +18,7 @@
 
 Traditional **Large Language Models (LLMs)** behave as monolithic, stateless transformers: prompt → model → response. They lack continuous learning, memory consolidation, and dynamic domain adaptation.
 
-**HBLLM Core** disrupts this paradigm. It is a highly optimized, **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents**. Featuring 25+ specialized "brain nodes" orchestrated via an asynchronous Pub/Sub message bus, HBLLM mimics the localized, multi-path reasoning of a biological brain.
+**HBLLM Core** disrupts this paradigm. It is a highly optimized, **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents**. Featuring 28+ specialized "brain nodes" orchestrated via an asynchronous Pub/Sub message bus, HBLLM mimics the localized, multi-path reasoning of a biological brain.
 
 ```text
                         ┌─────────────────────────────────────────┐
@@ -189,7 +189,7 @@ HBLLM Core isn't just a wrapper; it's a deeply engineered cognitive backend capa
 - **Process Reward Models (PRM):** The `ProcessRewardNode` provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.
 
 ### 💾 Multi-Tiered Memory Systems
-HBLLM operates **5 distinct memory types** mirroring human cognitive psychology:
+HBLLM operates **6 distinct memory types** mirroring human cognitive psychology:
 1. **Working Memory:** Adaptive Context Windows employing middle-out truncation to maintain huge reasoning trajectories without OOMs.
 2. **Episodic Memory:** Event-based timelines mapping user interactions per session.
 3. **Semantic Memory:** Fact and pattern extraction powered by hybrid dense/sparse (TF-IDF) vector search with deterministic UUID stability.
@@ -233,7 +233,7 @@ export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics Integration (Requires rclpy)
 hbllm info               # View active brain architecture
 hbllm nodes              # List 25+ loaded cognitive nodes
 hbllm serve --port 8000  # Start the FastAPI + MCP Server
-hbllm train --size 125m  # Kickoff local reinforcement loops
+hbllm train --model-size 125m  # Kickoff local reinforcement loops
 ```
 
 ### Server & API Modes
@@ -261,7 +261,7 @@ async def main():
     result = await brain.process("Analyze our server logs and design a firewall rule.")
     
     print(f"Decision: {result.text}")
-    print(f"Nodes Activated: {result.path}")
+    print(f"Stages: {result.stages_completed}")
     print(f"Latency: {result.latency_ms:.0f}ms")
     
     await brain.shutdown()
