@@ -10,7 +10,7 @@ repo_url: https://github.com/hbllm/hbllm-core
 repo_name: hbllm/hbllm-core
 edit_uri: edit/master/core/docs/
 
-copyright: Copyright &copy; 2024–2026 HBLLM Team — MIT License
+copyright: Copyright &copy; 2024–2026 HBLLM Team — BUSL-1.1 License
 
 theme:
   name: material
@@ -124,6 +124,7 @@ nav:
       - Sleep Cycle: architecture/sleep-cycle.md
       - Message Bus: architecture/message-bus.md
       - Memory Systems: architecture/memory-systems.md
+      - Network Resilience: architecture/network-resilience.md
   - Zoning Model:
       - How It Works: zoning/how-it-works.md
       - LoRA Routing: zoning/lora-routing.md
@@ -137,7 +138,12 @@ nav:
       - Deployment: guides/deployment.md
   - API Reference:
       - Brain Factory: api/brain-factory.md
+      - Brain Subsystems: api/brain-subsystems.md
+      - Model Internals: api/model.md
       - Serving & REST API: api/serving.md
       - Tokenizer: api/tokenizer.md
       - Network: api/network.md
+      - Data Pipeline: api/data-pipeline.md
+      - Benchmarks & Profiling: api/benchmarks.md
+      - Rust Kernels: api/rust-kernels.md
   - Contributing: contributing.md

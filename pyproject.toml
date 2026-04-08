@@ -79,7 +79,7 @@ ros = [
 ]
 
 [project.scripts]
-hbllm = "hbllm.main:app"
+hbllm = "hbllm.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

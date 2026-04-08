@@ -20,7 +20,7 @@ HBLLM is designed to run on **any hardware** — from a Raspberry Pi 5 to a Kube
 
 ## CPU-Only Deployment (No GPU)
 
-The simplest production deployment — runs on any machine with Python 3.10+:
+The simplest production deployment — runs on any machine with Python 3.11+:
 
 ```bash
 # Install and serve (CPU-only, ~1GB RAM for 125M model)
@@ -36,7 +36,7 @@ HBLLM_PROVIDER=local hbllm serve --port 8000
 ## Docker
 
 ```dockerfile
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 COPY . .
@@ -97,7 +97,7 @@ python -m hbllm.serving.api
 HBLLM_BUS_TYPE=redis \
 HBLLM_REDIS_URL=redis://redis-host:6379 \
 HBLLM_REDIS_HMAC_KEY=your-secret-key \
-python -m hbllm.serving.worker
+python -m hbllm.serving.api --worker-mode
 ```
 
 ## Monitoring

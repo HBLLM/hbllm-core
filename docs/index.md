@@ -10,7 +10,7 @@ description: "Open-source AGI framework that runs without massive GPU or VRAM. 2
 
 <div class="badges" markdown>
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)

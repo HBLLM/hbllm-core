@@ -9,7 +9,7 @@ Get HBLLM Core running in under 5 minutes.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - pip or uv package manager
 - **No GPU required** — HBLLM runs on CPU-only machines (laptops, Raspberry Pi 5, servers)
 - (Optional) CUDA-capable GPU for faster local model inference
