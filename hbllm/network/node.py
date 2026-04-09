@@ -38,6 +38,7 @@ class NodeType(StrEnum):
     SPAWNER = "spawner"
     META = "meta"
     PERCEPTION = "perception"
+    ACTION = "action"
 
 
 class HealthStatus(StrEnum):

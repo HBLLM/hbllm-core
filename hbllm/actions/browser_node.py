@@ -27,7 +27,7 @@ class BrowserNode(Node):
     def __init__(self, node_id: str) -> None:
         super().__init__(
             node_id=node_id,
-            node_type=NodeType.ACTION,  # type: ignore[attr-defined]
+            node_type=NodeType.ACTION,
             capabilities=["web_search", "web_scrape"],
         )
 

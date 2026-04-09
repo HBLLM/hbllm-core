@@ -100,18 +100,23 @@ async def _boot_brain(
     from hbllm.actions.execution_node import ExecutionNode
     from hbllm.actions.fuzzy_node import FuzzyNode
     from hbllm.actions.logic_node import LogicNode
+    from hbllm.brain.attention_manager import AttentionManager
     from hbllm.brain.collective_node import CollectiveNode
     from hbllm.brain.critic_node import CriticNode
     from hbllm.brain.curiosity_node import CuriosityNode
     from hbllm.brain.decision_node import DecisionNode
+    from hbllm.brain.evaluation_node import EvaluationNode
     from hbllm.brain.experience_node import ExperienceNode
     from hbllm.brain.identity_node import IdentityNode
     from hbllm.brain.learner_node import LearnerNode
     from hbllm.brain.llm_interface import LLMInterface
+    from hbllm.brain.load_manager import LoadManager
     from hbllm.brain.meta_node import MetaReasoningNode
     from hbllm.brain.planner_node import PlannerNode
+    from hbllm.brain.reflection_node import ReflectionNode
     from hbllm.brain.router_node import RouterNode
     from hbllm.brain.rule_extractor import RuleExtractorNode
+    from hbllm.brain.skill_compiler_node import SkillCompilerNode
     from hbllm.brain.sleep_node import SleepCycleNode
     from hbllm.brain.spawner_node import SpawnerNode
     from hbllm.brain.workspace_node import WorkspaceNode
@@ -181,6 +186,12 @@ async def _boot_brain(
         CuriosityNode(node_id="curiosity_01"),
         IdentityNode(node_id="identity_01"),
         CollectiveNode(node_id="collective_01"),
+        # Intelligence feedback loop
+        EvaluationNode(node_id="eval_01"),
+        AttentionManager(node_id="attention_01"),
+        LoadManager(node_id="load_01"),
+        ReflectionNode(node_id="reflection_01"),
+        SkillCompilerNode(node_id="skill_compiler_01"),
         # Learning
         LearnerNode(node_id="learner_01"),
         SpawnerNode(node_id="spawner_01", model=model, tokenizer=vocab),
@@ -748,8 +759,8 @@ async def studio_stats() -> Any:
         node_health.append({
             "id": info.node_id,
             "name": type(node).__name__.replace("Node", "").replace("Manager", " Mgr"),
-            "status": "healthy" if info.healthy else "unhealthy",
-            "type": getattr(info, "node_type", "core"),
+            "status": "healthy" if node._running else "unhealthy",
+            "type": info.node_type.value if hasattr(info.node_type, "value") else str(info.node_type),
         })
     result["nodes"] = node_health
 
