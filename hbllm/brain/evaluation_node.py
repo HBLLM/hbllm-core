@@ -370,9 +370,7 @@ class EvaluationNode(Node):
 
     # ── Feedback Loop Integration ────────────────────────────────────
 
-    async def _publish_evaluation(
-        self, report: EvaluationReport, original: Message
-    ) -> None:
+    async def _publish_evaluation(self, report: EvaluationReport, original: Message) -> None:
         """Publish evaluation and trigger downstream loop."""
         # 1. Publish evaluation event
         eval_msg = Message(
@@ -394,9 +392,9 @@ class EvaluationNode(Node):
 
         # 3. Update self-model
         if self.self_model:
-            domain = self._pending_contexts.get(
-                report.correlation_id, {}
-            ).get("thought_type", "general")
+            domain = self._pending_contexts.get(report.correlation_id, {}).get(
+                "thought_type", "general"
+            )
             self.self_model.record_outcome(
                 domain=domain,
                 success=report.overall_score > 0.6,
@@ -460,24 +458,12 @@ class EvaluationNode(Node):
         return {
             "total_evaluated": self._total_evaluated,
             "total_flagged": self._total_flagged,
-            "avg_overall_score": round(
-                sum(e.overall_score for e in recent) / len(recent), 3
-            ),
-            "avg_task_success": round(
-                sum(e.task_success for e in recent) / len(recent), 3
-            ),
-            "avg_plan_validity": round(
-                sum(e.plan_validity for e in recent) / len(recent), 3
-            ),
-            "avg_tool_accuracy": round(
-                sum(e.tool_accuracy for e in recent) / len(recent), 3
-            ),
-            "avg_memory_usage": round(
-                sum(e.memory_usage for e in recent) / len(recent), 3
-            ),
-            "avg_confidence_error": round(
-                sum(e.confidence_error for e in recent) / len(recent), 3
-            ),
+            "avg_overall_score": round(sum(e.overall_score for e in recent) / len(recent), 3),
+            "avg_task_success": round(sum(e.task_success for e in recent) / len(recent), 3),
+            "avg_plan_validity": round(sum(e.plan_validity for e in recent) / len(recent), 3),
+            "avg_tool_accuracy": round(sum(e.tool_accuracy for e in recent) / len(recent), 3),
+            "avg_memory_usage": round(sum(e.memory_usage for e in recent) / len(recent), 3),
+            "avg_confidence_error": round(sum(e.confidence_error for e in recent) / len(recent), 3),
             "flag_rate": round(self._total_flagged / max(self._total_evaluated, 1), 3),
             "window_size": len(recent),
         }

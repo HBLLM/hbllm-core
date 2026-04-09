@@ -258,8 +258,7 @@ class CollectiveNode(Node):
 
     async def on_stop(self) -> None:
         logger.info(
-            "Stopping CollectiveNode — sent=%d, received=%d, "
-            "votes_requested=%d, delegations=%d",
+            "Stopping CollectiveNode — sent=%d, received=%d, votes_requested=%d, delegations=%d",
             self._stats["broadcasts_sent"],
             self._stats["digests_received"],
             self._stats["votes_requested"],
@@ -387,9 +386,7 @@ class CollectiveNode(Node):
                         topic="system.spawn",
                         payload={
                             "topic": digest.domain,
-                            "trigger_query": (
-                                f"Integrated from peer {digest.source_instance_id}"
-                            ),
+                            "trigger_query": (f"Integrated from peer {digest.source_instance_id}"),
                             "confidence_score": 0.0,
                             "adapter_path": data.get("adapter_path", ""),
                             "from_collective": True,
@@ -478,9 +475,7 @@ class CollectiveNode(Node):
                 "stats": self._stats,
                 "recent_received": recent_received,
                 "recent_broadcast": recent_broadcast,
-                "peers": {
-                    pid: p.to_dict() for pid, p in self.peer_profiles.items()
-                },
+                "peers": {pid: p.to_dict() for pid, p in self.peer_profiles.items()},
             }
         )
 
@@ -498,9 +493,7 @@ class CollectiveNode(Node):
             self.local_profile.performance = performance
         if capabilities:
             self.local_profile.capabilities = capabilities
-        logger.info(
-            "Registered specialization: domains=%s", domains
-        )
+        logger.info("Registered specialization: domains=%s", domains)
 
     async def broadcast_profile(self) -> None:
         """Broadcast this instance's specialization profile to peers."""
@@ -664,9 +657,7 @@ class CollectiveNode(Node):
 
         if self._vote_handler:
             try:
-                response_text, confidence = await self._vote_handler(
-                    query, domain
-                )
+                response_text, confidence = await self._vote_handler(query, domain)
             except Exception as e:
                 logger.warning("Vote handler failed: %s", e)
                 response_text = ""
@@ -765,14 +756,10 @@ class CollectiveNode(Node):
                 response_counts[key].append(v)
 
             # Find the group with the most votes
-            best_group = max(
-                response_counts.values(), key=lambda g: len(g)
-            )
+            best_group = max(response_counts.values(), key=lambda g: len(g))
             # Use the highest-confidence response from the winning group
             best_vote = max(best_group, key=lambda v: v.confidence)
-            avg_confidence = sum(v.confidence for v in best_group) / len(
-                best_group
-            )
+            avg_confidence = sum(v.confidence for v in best_group) / len(best_group)
 
             return {
                 "consensus": best_vote.response,
@@ -942,9 +929,7 @@ class CollectiveNode(Node):
 
         if self._vote_handler:
             try:
-                response_text, confidence = await self._vote_handler(
-                    query, domain
-                )
+                response_text, confidence = await self._vote_handler(query, domain)
             except Exception as e:
                 logger.warning("Delegation handler failed: %s", e)
 

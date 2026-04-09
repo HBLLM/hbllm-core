@@ -363,12 +363,14 @@ class LearnerNode(Node):
         # Path 1: Low-scoring → queue for micro-correction
         if overall_score < self.micro_learn_threshold:
             if len(self._micro_learn_queue) < self._max_micro_queue:
-                self._micro_learn_queue.append({
-                    "query": query,
-                    "bad_response": response,
-                    "score": overall_score,
-                    "dimensions": payload.get("dimensions", {}),
-                })
+                self._micro_learn_queue.append(
+                    {
+                        "query": query,
+                        "bad_response": response,
+                        "score": overall_score,
+                        "dimensions": payload.get("dimensions", {}),
+                    }
+                )
                 logger.debug(
                     "[LearnerNode] Queued low-score interaction for micro-learning "
                     "(score=%.2f, queue=%d)",
@@ -379,10 +381,12 @@ class LearnerNode(Node):
         # Path 2: High-scoring → distillation bank
         elif overall_score > self.distillation_threshold:
             if len(self._distillation_bank) < self._max_distillation_bank:
-                self._distillation_bank.append({
-                    "query": query,
-                    "response": response,
-                })
+                self._distillation_bank.append(
+                    {
+                        "query": query,
+                        "response": response,
+                    }
+                )
                 self._distillation_count += 1
                 logger.debug(
                     "[LearnerNode] Banked high-confidence response for distillation "

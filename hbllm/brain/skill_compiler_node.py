@@ -119,9 +119,9 @@ class SkillCompilerNode(Node):
             "intent": payload.get("intent", "answer"),
             "thought_type": payload.get("thought_type", ""),
             "tools": payload.get("tools_used", []),
-            "content_hash": hashlib.md5(
-                payload.get("text", "")[:200].lower().encode()
-            ).hexdigest()[:8],
+            "content_hash": hashlib.md5(payload.get("text", "")[:200].lower().encode()).hexdigest()[
+                :8
+            ],
             "query": payload.get("text", "")[:200],
             "timestamp": time.time(),
             "success": True,  # assumed until evaluation says otherwise
@@ -157,9 +157,7 @@ class SkillCompilerNode(Node):
                 condition = rule.get("condition", "")
                 action_str = rule.get("action", "")
 
-                pattern_hash = hashlib.md5(
-                    f"{condition}|{action_str}".encode()
-                ).hexdigest()[:12]
+                pattern_hash = hashlib.md5(f"{condition}|{action_str}".encode()).hexdigest()[:12]
 
                 if pattern_hash not in self._patterns:
                     self._patterns[pattern_hash] = ActionPattern(

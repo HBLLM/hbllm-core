@@ -489,7 +489,11 @@ class TestPhase2FactoryIntegration:
                 return "mock"
 
             async def generate(self, messages, **kw) -> LLMResponse:
-                return LLMResponse(content="Mock", model="mock", usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
+                return LLMResponse(
+                    content="Mock",
+                    model="mock",
+                    usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                )
 
             async def stream(self, messages, **kw) -> AsyncIterator[str]:
                 yield "Mock"
@@ -527,7 +531,11 @@ class TestPhase2FactoryIntegration:
                 return "mock"
 
             async def generate(self, messages, **kw) -> LLMResponse:
-                return LLMResponse(content="Mock", model="mock", usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
+                return LLMResponse(
+                    content="Mock",
+                    model="mock",
+                    usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                )
 
             async def stream(self, messages, **kw) -> AsyncIterator[str]:
                 yield "Mock"

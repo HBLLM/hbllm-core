@@ -33,8 +33,10 @@ pytestmark = pytest.mark.asyncio
 
 async def _make_handler(response: str, confidence: float):
     """Create a simple vote handler that returns a fixed response."""
+
     async def handler(query: str, domain: str) -> tuple[str, float]:
         return response, confidence
+
     return handler
 
 
@@ -158,7 +160,8 @@ class TestAgentSpecialization:
     async def test_profile_exchange_between_peers(self, bus):
         """Broadcasting profiles makes peers discover each other."""
         nodes = await _setup_cluster(
-            bus, count=3,
+            bus,
+            count=3,
             domains=[["coding"], ["math"], ["writing"]],
         )
 
@@ -174,7 +177,8 @@ class TestAgentSpecialization:
     async def test_get_peers_for_domain(self, bus):
         """Peers specialized in a domain are found and ranked."""
         nodes = await _setup_cluster(
-            bus, count=3,
+            bus,
+            count=3,
             domains=[["coding"], ["coding", "math"], ["math"]],
             performances=[
                 {"coding": 0.70},
@@ -195,7 +199,8 @@ class TestAgentSpecialization:
     async def test_stale_peers_filtered(self, bus):
         """Peers not seen recently should be excluded."""
         nodes = await _setup_cluster(
-            bus, count=2,
+            bus,
+            count=2,
             domains=[["coding"], ["coding"]],
         )
 
@@ -242,7 +247,8 @@ class TestConsensusVoting:
     async def test_confidence_weighted_voting(self, bus):
         """Confidence-weighted strategy picks highest-confidence response."""
         nodes = await _setup_cluster(
-            bus, count=3,
+            bus,
+            count=3,
             domains=[["coding"], ["coding"], ["coding"]],
             responses=[
                 ("answer_A", 0.6),
@@ -267,7 +273,8 @@ class TestConsensusVoting:
     async def test_best_of_n_voting(self, bus):
         """Best-of-N picks the single highest-confidence response."""
         nodes = await _setup_cluster(
-            bus, count=3,
+            bus,
+            count=3,
             domains=[["math"], ["math"], ["math"]],
             responses=[
                 ("42", 0.5),
@@ -292,7 +299,8 @@ class TestConsensusVoting:
     async def test_majority_voting(self, bus):
         """Majority strategy picks the most common response."""
         nodes = await _setup_cluster(
-            bus, count=4,
+            bus,
+            count=4,
             domains=[["gen"], ["gen"], ["gen"], ["gen"]],
             responses=[
                 ("yes", 0.7),  # node 0 (requester, won't vote on own)
@@ -318,7 +326,8 @@ class TestConsensusVoting:
     async def test_vote_timeout_returns_partial(self, bus):
         """Timeout returns whatever votes arrived."""
         nodes = await _setup_cluster(
-            bus, count=2,
+            bus,
+            count=2,
             domains=[["coding"], ["coding"]],
             responses=[
                 ("local", 0.5),
@@ -358,7 +367,8 @@ class TestConsensusVoting:
     async def test_stats_track_voting(self, bus):
         """Stats should count vote requests and responses."""
         nodes = await _setup_cluster(
-            bus, count=2,
+            bus,
+            count=2,
             domains=[["gen"], ["gen"]],
             responses=[("a", 0.5), ("b", 0.7)],
         )
@@ -391,7 +401,8 @@ class TestTaskDelegation:
     async def test_delegate_to_best_peer(self, bus):
         """Delegation routes to the highest-scoring peer."""
         nodes = await _setup_cluster(
-            bus, count=3,
+            bus,
+            count=3,
             domains=[["general"], ["coding"], ["coding"]],
             performances=[
                 {"general": 0.5},
@@ -436,7 +447,8 @@ class TestTaskDelegation:
     async def test_delegation_timeout(self, bus):
         """Delegation respects timeout."""
         nodes = await _setup_cluster(
-            bus, count=2,
+            bus,
+            count=2,
             domains=[["gen"], ["gen"]],
         )
         # Don't set vote handler on node 1 — it will respond with default
@@ -495,7 +507,8 @@ class TestTaskDelegation:
     async def test_select_best_peer(self, bus):
         """select_best_peer picks the optimal peer."""
         nodes = await _setup_cluster(
-            bus, count=3,
+            bus,
+            count=3,
             domains=[["general"], ["coding"], ["coding"]],
             performances=[
                 {"general": 0.5},
@@ -514,7 +527,8 @@ class TestTaskDelegation:
     async def test_delegation_stats_tracked(self, bus):
         """Delegation stats should be tracked."""
         nodes = await _setup_cluster(
-            bus, count=2,
+            bus,
+            count=2,
             domains=[["gen"], ["coding"]],
             performances=[{"gen": 0.5}, {"coding": 0.9}],
             responses=[("gen_ans", 0.5), ("code_ans", 0.9)],

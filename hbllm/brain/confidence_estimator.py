@@ -238,9 +238,7 @@ class ConfidenceEstimator:
 
     # ─── v2: Calibration & Uncertainty ────────────────────────────────
 
-    def record_outcome(
-        self, predicted: float, actual: float, domain: str = "general"
-    ) -> None:
+    def record_outcome(self, predicted: float, actual: float, domain: str = "general") -> None:
         """
         Record a predicted-vs-actual outcome for calibration tracking.
 
@@ -266,9 +264,7 @@ class ConfidenceEstimator:
         current = self._domain_adjustments[domain]
         self._domain_adjustments[domain] = current * (1 - alpha) + bias * alpha
 
-    def calibrated_score(
-        self, query: str, response: str, domain: str = "general"
-    ) -> float:
+    def calibrated_score(self, query: str, response: str, domain: str = "general") -> float:
         """
         Return a calibration-adjusted confidence score.
 
@@ -314,9 +310,7 @@ class ConfidenceEstimator:
             "total_feedback": self._total_feedback,
             "calibration_error": round(self.calibration_error(), 4),
             "history_size": len(self._calibration_history),
-            "domain_adjustments": {
-                d: round(v, 4) for d, v in self._domain_adjustments.items()
-            },
+            "domain_adjustments": {d: round(v, 4) for d, v in self._domain_adjustments.items()},
             "domain_errors": {
                 d: round(self.calibration_error(d), 4)
                 for d in set(e["domain"] for e in self._calibration_history)

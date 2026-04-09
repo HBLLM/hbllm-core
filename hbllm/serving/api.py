@@ -756,58 +756,70 @@ async def studio_stats() -> Any:
     node_health = []
     for node in nodes:
         info = node.get_info()
-        node_health.append({
-            "id": info.node_id,
-            "name": type(node).__name__.replace("Node", "").replace("Manager", " Mgr"),
-            "status": "healthy" if node._running else "unhealthy",
-            "type": info.node_type.value if hasattr(info.node_type, "value") else str(info.node_type),
-        })
+        node_health.append(
+            {
+                "id": info.node_id,
+                "name": type(node).__name__.replace("Node", "").replace("Manager", " Mgr"),
+                "status": "healthy" if node._running else "unhealthy",
+                "type": info.node_type.value
+                if hasattr(info.node_type, "value")
+                else str(info.node_type),
+            }
+        )
     result["nodes"] = node_health
 
     # ── Cognitive metrics ──
     from hbllm.brain.cognitive_metrics import CognitiveMetrics
+
     cm = node_map.get("CognitiveMetrics")
     if cm and isinstance(cm, CognitiveMetrics):
         result["metrics"] = cm.get_dashboard_metrics()
 
     # ── Self model ──
     from hbllm.brain.self_model import SelfModel
+
     sm = node_map.get("SelfModel")
     if sm and isinstance(sm, SelfModel):
         result["self_model"] = sm.get_metrics()
 
     # ── Skill registry ──
     from hbllm.brain.skill_registry import SkillRegistry
+
     sr = node_map.get("SkillRegistry")
     if sr and isinstance(sr, SkillRegistry):
         result["skills"] = sr.stats()
 
     # ── Goals ──
     from hbllm.brain.goal_manager import GoalManager
+
     gm = node_map.get("GoalManager")
     if gm and isinstance(gm, GoalManager):
         result["goals"] = gm.stats()
 
     # ── Evaluation ──
     from hbllm.brain.evaluation_node import EvaluationNode
+
     ev = node_map.get("EvaluationNode")
     if ev and isinstance(ev, EvaluationNode):
         result["evaluation"] = ev.stats()
 
     # ── Attention ──
     from hbllm.brain.attention_manager import AttentionManager
+
     am = node_map.get("AttentionManager")
     if am and isinstance(am, AttentionManager):
         result["attention"] = am.stats()
 
     # ── Load manager ──
     from hbllm.brain.load_manager import LoadManager
+
     lm = node_map.get("LoadManager")
     if lm and isinstance(lm, LoadManager):
         result["load_manager"] = lm.stats()
 
     # ── Collective ──
     from hbllm.brain.collective_node import CollectiveNode
+
     cn = node_map.get("CollectiveNode")
     if cn and isinstance(cn, CollectiveNode):
         collective_stats = cn.stats
@@ -828,12 +840,14 @@ async def studio_stats() -> Any:
 
     # ── Reflection ──
     from hbllm.brain.reflection_node import ReflectionNode
+
     rn = node_map.get("ReflectionNode")
     if rn and isinstance(rn, ReflectionNode):
         result["reflection"] = rn.stats()
 
     # ── Skill compiler ──
     from hbllm.brain.skill_compiler_node import SkillCompilerNode
+
     sc = node_map.get("SkillCompilerNode")
     if sc and isinstance(sc, SkillCompilerNode):
         result["skill_compiler"] = sc.stats()

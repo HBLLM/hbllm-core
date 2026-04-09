@@ -140,7 +140,11 @@ class TestEvaluationNode:
 
     async def test_task_success_scoring(self, eval_node: EvaluationNode):
         """Long, intent-aligned content should score higher than empty."""
-        good = {"content": "Here is a detailed response with code ```python\\nprint()\\n``` and explanation.", "intent": "code", "confidence": 0.8}
+        good = {
+            "content": "Here is a detailed response with code ```python\\nprint()\\n``` and explanation.",
+            "intent": "code",
+            "confidence": 0.8,
+        }
         bad = {"content": "Hmm", "intent": "answer", "confidence": 0.2}
 
         good_score = EvaluationNode._score_task_success(good)
@@ -160,12 +164,9 @@ class TestEvaluationNode:
         """High confidence + hedging language = high error."""
         miscalibrated = {
             "confidence": 0.95,
-            "content": "Maybe I think this is perhaps the answer, possibly correct."
+            "content": "Maybe I think this is perhaps the answer, possibly correct.",
         }
-        calibrated = {
-            "confidence": 0.7,
-            "content": "The answer is 42 based on the calculation."
-        }
+        calibrated = {"confidence": 0.7, "content": "The answer is 42 based on the calculation."}
 
         misc_error = EvaluationNode._score_confidence_error(miscalibrated)
         cal_error = EvaluationNode._score_confidence_error(calibrated)
@@ -373,7 +374,14 @@ class TestReflectionNode:
         evals = []
         for i in range(20):
             score = 0.8 - (i * 0.03)  # declining
-            evals.append({"task_success": score, "plan_validity": 0.7, "tool_accuracy": 0.7, "memory_usage": 0.6})
+            evals.append(
+                {
+                    "task_success": score,
+                    "plan_validity": 0.7,
+                    "tool_accuracy": 0.7,
+                    "memory_usage": 0.6,
+                }
+            )
 
         insights = reflection._analyze_performance_trends(evals)
         # Should detect declining task_success
@@ -382,10 +390,7 @@ class TestReflectionNode:
 
     async def test_detects_failure_patterns(self, reflection: ReflectionNode):
         """Recurring flags should produce failure pattern insights."""
-        evals = [
-            {"flags": ["low_task_success"], "overall_score": 0.3}
-            for _ in range(10)
-        ]
+        evals = [{"flags": ["low_task_success"], "overall_score": 0.3} for _ in range(10)]
 
         insights = reflection._detect_failure_patterns(evals)
         assert len(insights) >= 1
@@ -468,7 +473,11 @@ class TestV2FactoryIntegration:
                 return "mock"
 
             async def generate(self, messages, **kw) -> LLMResponse:
-                return LLMResponse(content="Mock", model="mock", usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
+                return LLMResponse(
+                    content="Mock",
+                    model="mock",
+                    usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                )
 
             async def stream(self, messages, **kw) -> AsyncIterator[str]:
                 yield "Mock"
@@ -514,7 +523,11 @@ class TestV2FactoryIntegration:
                 return "mock"
 
             async def generate(self, messages, **kw) -> LLMResponse:
-                return LLMResponse(content="Mock", model="mock", usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
+                return LLMResponse(
+                    content="Mock",
+                    model="mock",
+                    usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                )
 
             async def stream(self, messages, **kw) -> AsyncIterator[str]:
                 yield "Mock"
@@ -542,10 +555,12 @@ class TestBenchmarkTaskDatasets:
     @pytest.fixture
     def tasks_dir(self):
         from pathlib import Path
+
         return Path(__file__).parent.parent / "hbllm" / "benchmarks" / "tasks"
 
     def test_reasoning_tasks_loadable(self, tasks_dir):
         import json
+
         path = tasks_dir / "reasoning.json"
         assert path.exists(), f"Missing {path}"
         tasks = json.loads(path.read_text())
@@ -557,6 +572,7 @@ class TestBenchmarkTaskDatasets:
 
     def test_coding_tasks_loadable(self, tasks_dir):
         import json
+
         path = tasks_dir / "coding.json"
         assert path.exists()
         tasks = json.loads(path.read_text())
@@ -564,6 +580,7 @@ class TestBenchmarkTaskDatasets:
 
     def test_planning_tasks_loadable(self, tasks_dir):
         import json
+
         path = tasks_dir / "planning.json"
         assert path.exists()
         tasks = json.loads(path.read_text())
@@ -571,6 +588,7 @@ class TestBenchmarkTaskDatasets:
 
     def test_memory_tasks_loadable(self, tasks_dir):
         import json
+
         path = tasks_dir / "memory.json"
         assert path.exists()
         tasks = json.loads(path.read_text())
@@ -578,6 +596,7 @@ class TestBenchmarkTaskDatasets:
 
     def test_all_tasks_have_grading_rubric(self, tasks_dir):
         import json
+
         for fname in ["reasoning.json", "coding.json", "planning.json", "memory.json"]:
             tasks = json.loads((tasks_dir / fname).read_text())
             for t in tasks:

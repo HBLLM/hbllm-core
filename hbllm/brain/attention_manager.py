@@ -99,8 +99,7 @@ class AttentionManager(Node):
             "value": 100,
         }
         self._budgets: dict[str, MemoryBudget] = {
-            name: MemoryBudget(memory_type=name, max_items=limit)
-            for name, limit in limits.items()
+            name: MemoryBudget(memory_type=name, max_items=limit) for name, limit in limits.items()
         }
 
         # Focus allocations (dynamic per domain)
@@ -175,19 +174,15 @@ class AttentionManager(Node):
           - Relevance: how relevant to current goals?
           - Emotional weight: salience from experience node
         """
-        score = (
-            0.3 * recency
-            + 0.3 * frequency
-            + 0.25 * relevance
-            + 0.15 * emotional_weight
-        )
+        score = 0.3 * recency + 0.3 * frequency + 0.25 * relevance + 0.15 * emotional_weight
         score = max(self.min_importance, min(1.0, score))
 
         self._importance_scores[memory_id] = score
         if len(self._importance_scores) > self._max_tracked:
             # Prune lowest scores
             sorted_ids = sorted(
-                self._importance_scores, key=self._importance_scores.get  # type: ignore[arg-type]
+                self._importance_scores,
+                key=self._importance_scores.get,  # type: ignore[arg-type]
             )
             for mid in sorted_ids[: len(sorted_ids) // 4]:
                 del self._importance_scores[mid]
@@ -198,9 +193,7 @@ class AttentionManager(Node):
         """Get cached importance score for a memory."""
         return self._importance_scores.get(memory_id, 0.5)
 
-    def get_pruning_candidates(
-        self, memory_type: str, count: int = 10
-    ) -> list[tuple[str, float]]:
+    def get_pruning_candidates(self, memory_type: str, count: int = 10) -> list[tuple[str, float]]:
         """Get lowest-importance memory IDs for pruning."""
         # Filter to memories of this type (by prefix convention)
         candidates = [

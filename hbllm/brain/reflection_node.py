@@ -272,9 +272,7 @@ class ReflectionNode(Node):
 
     # ── Analysis Passes ──────────────────────────────────────────────
 
-    def _analyze_performance_trends(
-        self, evals: list[dict[str, Any]]
-    ) -> list[ReflectionInsight]:
+    def _analyze_performance_trends(self, evals: list[dict[str, Any]]) -> list[ReflectionInsight]:
         """Detect performance trends (improving, declining, or plateau)."""
         insights: list[ReflectionInsight] = []
 
@@ -324,9 +322,7 @@ class ReflectionNode(Node):
 
         return insights
 
-    def _detect_failure_patterns(
-        self, evals: list[dict[str, Any]]
-    ) -> list[ReflectionInsight]:
+    def _detect_failure_patterns(self, evals: list[dict[str, Any]]) -> list[ReflectionInsight]:
         """Detect recurring failure categories."""
         insights: list[ReflectionInsight] = []
 
@@ -397,9 +393,7 @@ class ReflectionNode(Node):
 
         return insights
 
-    def _deep_strategy_analysis(
-        self, evals: list[dict[str, Any]]
-    ) -> list[ReflectionInsight]:
+    def _deep_strategy_analysis(self, evals: list[dict[str, Any]]) -> list[ReflectionInsight]:
         """Deep analysis during sleep — reviews full history."""
         insights: list[ReflectionInsight] = []
 
@@ -472,9 +466,7 @@ class ReflectionNode(Node):
 
     # ── Action Execution ─────────────────────────────────────────────
 
-    async def _act_on_insights(
-        self, insights: list[ReflectionInsight]
-    ) -> list[str]:
+    async def _act_on_insights(self, insights: list[ReflectionInsight]) -> list[str]:
         """Take automated actions based on reflection insights."""
         actions: list[str] = []
 
