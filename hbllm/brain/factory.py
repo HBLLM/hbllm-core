@@ -32,14 +32,23 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.actions.tool_memory import ToolMemory
+
+# v2: Resource Intelligence
+from hbllm.brain.attention_manager import AttentionManager
 from hbllm.brain.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.confidence_estimator import ConfidenceEstimator
+
+# v2: Intelligence Feedback Loop
+from hbllm.brain.evaluation_node import EvaluationNode
 from hbllm.brain.goal_manager import GoalManager
+from hbllm.brain.load_manager import LoadManager
 from hbllm.brain.owner_rules import OwnerRuleStore
 from hbllm.brain.policy_engine import PolicyEngine
 from hbllm.brain.provider_adapter import ProviderLLM
+from hbllm.brain.reflection_node import ReflectionNode
 from hbllm.brain.revision_node import RevisionNode
 from hbllm.brain.self_model import SelfModel
+from hbllm.brain.skill_compiler_node import SkillCompilerNode
 
 # New cognitive modules
 from hbllm.brain.skill_registry import SkillRegistry
@@ -75,6 +84,11 @@ class BrainConfig:
     inject_policy_engine: bool = True  # Governance policy enforcement
     inject_owner_rules: bool = True  # Owner-defined behavioral rules
     inject_sentinel: bool = True  # Proactive governance monitoring
+    inject_evaluation: bool = True  # v2: Intelligence feedback loop
+    inject_reflection: bool = True  # v2: Periodic batch reflection
+    inject_skill_compiler: bool = True  # v2: Auto-skill extraction
+    inject_attention: bool = True  # v2: Attention budget management
+    inject_load_manager: bool = True  # v2: Cognitive load management
     inject_fuzzy_logic: bool = False  # Fuzzy reasoning (requires scikit-fuzzy)
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
     total_timeout: float = 60.0
@@ -126,6 +140,15 @@ class Brain:
         self.policy_engine: PolicyEngine | None = None
         self.owner_rules: OwnerRuleStore | None = None
         self.sentinel: Any = None  # SentinelNode reference
+
+        # v2: Intelligence Feedback Loop
+        self.evaluation_node: EvaluationNode | None = None
+        self.reflection_node: ReflectionNode | None = None
+        self.skill_compiler_node: SkillCompilerNode | None = None
+
+        # v2: Resource Intelligence
+        self.attention_manager: AttentionManager | None = None
+        self.load_manager: LoadManager | None = None
 
         self._hardware_loop_task: asyncio.Task[None] | None = None
 
@@ -612,8 +635,125 @@ class BrainFactory:
         if cfg.inject_sentinel and sentinel_node:
             brain.sentinel = sentinel_node
 
+        # v2: Intelligence Feedback Loop — wire evaluation, reflection, skill compiler
+        if cfg.inject_evaluation:
+            eval_node = EvaluationNode(
+                node_id="evaluation",
+                cognitive_metrics=brain.cognitive_metrics,
+                goal_manager=brain.goal_manager,
+                self_model=brain.self_model,
+                skill_registry=brain.skill_registry,
+            )
+            await eval_node.start(message_bus)
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
+
+            await registry.register(
+                NodeInfo(
+                    node_id=eval_node.node_id,
+                    node_type=eval_node.node_type,
+                    capabilities=eval_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=eval_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.evaluation_node = eval_node
+            nodes.append(eval_node)
+            logger.info("v2: EvaluationNode wired (intelligence feedback loop)")
+
+        if cfg.inject_reflection:
+            refl_node = ReflectionNode(
+                node_id="reflection",
+                cognitive_metrics=brain.cognitive_metrics,
+                goal_manager=brain.goal_manager,
+                self_model=brain.self_model,
+                skill_registry=brain.skill_registry,
+            )
+            await refl_node.start(message_bus)
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
+
+            await registry.register(
+                NodeInfo(
+                    node_id=refl_node.node_id,
+                    node_type=refl_node.node_type,
+                    capabilities=refl_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=refl_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.reflection_node = refl_node
+            nodes.append(refl_node)
+            logger.info("v2: ReflectionNode wired (periodic batch reflection)")
+
+        if cfg.inject_skill_compiler:
+            compiler_node = SkillCompilerNode(
+                node_id="skill_compiler",
+                skill_registry=brain.skill_registry,
+            )
+            await compiler_node.start(message_bus)
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
+
+            await registry.register(
+                NodeInfo(
+                    node_id=compiler_node.node_id,
+                    node_type=compiler_node.node_type,
+                    capabilities=compiler_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=compiler_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.skill_compiler_node = compiler_node
+            nodes.append(compiler_node)
+            logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
+
+        # v2: Resource Intelligence — wire attention and load managers
+        if cfg.inject_attention:
+            attn_node = AttentionManager(node_id="attention")
+            await attn_node.start(message_bus)
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
+
+            await registry.register(
+                NodeInfo(
+                    node_id=attn_node.node_id,
+                    node_type=attn_node.node_type,
+                    capabilities=attn_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=attn_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.attention_manager = attn_node
+            nodes.append(attn_node)
+            logger.info("v2: AttentionManager wired (memory budgets & focus)")
+
+        if cfg.inject_load_manager:
+            load_node = LoadManager(
+                node_id="load_manager",
+                monitor_interval=60.0,
+            )
+            await load_node.start(message_bus)
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
+
+            await registry.register(
+                NodeInfo(
+                    node_id=load_node.node_id,
+                    node_type=load_node.node_type,
+                    capabilities=load_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=load_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.load_manager = load_node
+            nodes.append(load_node)
+            logger.info("v2: LoadManager wired (resource monitoring & degradation)")
+
         logger.info(
-            "Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, policy engine, owner rules, sentinel"
+            "Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, "
+            "policy engine, owner rules, sentinel, evaluation, reflection, skill_compiler, "
+            "attention, load_manager"
         )
 
         return brain

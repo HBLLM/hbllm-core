@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,7 @@ class ConfidenceEstimator:
         self,
         hallucination_threshold: float = 0.6,
         weights: dict[str, float] | None = None,
+        calibration_window: int = 200,
     ):
         self.hallucination_threshold = hallucination_threshold
         self.weights = weights or {
@@ -78,6 +82,13 @@ class ConfidenceEstimator:
             "uncertainty": 0.15,
             "detail": 0.15,
         }
+
+        # v2: Calibration tracking
+        self._calibration_window = calibration_window
+        self._calibration_history: list[dict[str, Any]] = []
+        self._domain_adjustments: dict[str, float] = defaultdict(lambda: 0.0)
+        self._total_predictions = 0
+        self._total_feedback = 0
 
     def estimate(self, query: str, response: str) -> ConfidenceReport:
         """
@@ -224,3 +235,90 @@ class ConfidenceEstimator:
         if word_count < 100:
             return 0.7
         return 0.9
+
+    # ─── v2: Calibration & Uncertainty ────────────────────────────────
+
+    def record_outcome(
+        self, predicted: float, actual: float, domain: str = "general"
+    ) -> None:
+        """
+        Record a predicted-vs-actual outcome for calibration tracking.
+
+        Called by EvaluationNode when user feedback arrives.
+        Over time this adjusts future confidence estimates per domain.
+        """
+        entry = {
+            "predicted": predicted,
+            "actual": actual,
+            "domain": domain,
+            "error": abs(predicted - actual),
+            "timestamp": time.time(),
+        }
+        self._calibration_history.append(entry)
+        if len(self._calibration_history) > self._calibration_window:
+            self._calibration_history = self._calibration_history[-self._calibration_window :]
+
+        self._total_feedback += 1
+
+        # Update domain adjustment (exponential moving average of error direction)
+        bias = predicted - actual  # positive = overconfident, negative = underconfident
+        alpha = 0.1
+        current = self._domain_adjustments[domain]
+        self._domain_adjustments[domain] = current * (1 - alpha) + bias * alpha
+
+    def calibrated_score(
+        self, query: str, response: str, domain: str = "general"
+    ) -> float:
+        """
+        Return a calibration-adjusted confidence score.
+
+        Uses historical over/under-confidence data per domain to
+        correct the raw confidence estimate.
+        """
+        raw = self.score(query, response)
+        self._total_predictions += 1
+
+        # Apply domain-specific calibration adjustment
+        adjustment = self._domain_adjustments.get(domain, 0.0)
+        calibrated = raw - adjustment  # subtract bias to correct
+
+        return max(0.05, min(0.95, round(calibrated, 3)))
+
+    def calibration_error(self, domain: str | None = None) -> float:
+        """
+        Compute Expected Calibration Error (ECE) over recent history.
+
+        Lower is better. 0.0 = perfectly calibrated.
+        """
+        entries = self._calibration_history
+        if domain:
+            entries = [e for e in entries if e["domain"] == domain]
+
+        if not entries:
+            return 0.0
+
+        return sum(e["error"] for e in entries) / len(entries)
+
+    def calibration_stats(self) -> dict[str, Any]:
+        """Return calibration statistics."""
+        if not self._calibration_history:
+            return {
+                "total_predictions": self._total_predictions,
+                "total_feedback": self._total_feedback,
+                "calibration_error": 0.0,
+                "domain_adjustments": {},
+            }
+
+        return {
+            "total_predictions": self._total_predictions,
+            "total_feedback": self._total_feedback,
+            "calibration_error": round(self.calibration_error(), 4),
+            "history_size": len(self._calibration_history),
+            "domain_adjustments": {
+                d: round(v, 4) for d, v in self._domain_adjustments.items()
+            },
+            "domain_errors": {
+                d: round(self.calibration_error(d), 4)
+                for d in set(e["domain"] for e in self._calibration_history)
+            },
+        }

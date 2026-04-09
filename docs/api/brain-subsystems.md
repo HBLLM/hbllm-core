@@ -1,6 +1,6 @@
 ---
 title: "Brain Subsystems — Cognitive Intelligence APIs"
-description: "API reference for HBLLM's cognitive subsystems — Skill Registry, Goal Manager, Self Model, Confidence Estimator, Cognitive Metrics, World Simulator, Policy Engine, Owner Rules, and Token Optimizer."
+description: "API reference for HBLLM's cognitive subsystems — Skill Registry, Goal Manager, Self Model, Confidence Estimator, Cognitive Metrics, World Simulator, Policy Engine, Owner Rules, Token Optimizer, and v2 Intelligence Feedback Loop."
 ---
 
 # Brain Subsystems
@@ -25,6 +25,11 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | `PolicyEngine` | `policy_engine.py` | `inject_policy_engine` | YAML-based governance policy enforcement |
 | `OwnerRuleStore` | `owner_rules.py` | `inject_owner_rules` | Auto-extracted behavioral guardrails |
 | `TokenOptimizer` | `token_optimizer.py` | `inject_cost_optimizer` | Reduce token usage for cost optimization |
+| `EvaluationNode` | `evaluation_node.py` | `inject_evaluation` | Per-interaction quality scoring (v2) |
+| `SkillCompilerNode` | `skill_compiler_node.py` | `inject_skill_compiler` | Automatic skill extraction from patterns (v2) |
+| `ReflectionNode` | `reflection_node.py` | `inject_reflection` | Periodic batch performance analysis (v2) |
+| `AttentionManager` | `attention_manager.py` | `inject_attention` | Memory budgets and focus allocation (v2) |
+| `LoadManager` | `load_manager.py` | `inject_load_manager` | Cognitive load monitoring & degradation (v2) |
 
 ---
 
@@ -160,6 +165,156 @@ rules = brain.owner_rules
 
 ---
 
+## v2: Intelligence Feedback Loop
+
+!!! info "New in v2"
+    These subsystems close the evaluate → improve → retry feedback loop, enabling HBLLM to scientifically iterate on its own performance.
+
+```mermaid
+graph LR
+    A[DecisionNode] -->|output| B[EvaluationNode]
+    B -->|scores| C[ReflectionNode]
+    B -->|patterns| D[SkillCompilerNode]
+    C -->|goals| E[GoalManager]
+    D -->|skills| F[SkillRegistry]
+```
+
+### Evaluation Node
+
+**Module:** `hbllm.brain.evaluation_node.EvaluationNode`  
+**Config:** `inject_evaluation = True`
+
+Runs after every `DecisionNode` output, scoring interactions across 5 cognitive dimensions:
+
+| Dimension | What it measures |
+|-----------|-----------------|
+| `task_success` | Did the response address the query? |
+| `plan_validity` | Was the execution plan well-structured? |
+| `tool_accuracy` | Did tool invocations succeed? |
+| `memory_usage` | Was context retrieval relevant? |
+| `confidence_error` | How calibrated was the confidence estimate? |
+
+Subscribes to `system.experience`, `sensory.output`, `system.feedback`. Publishes `system.evaluation` events that drive the rest of the feedback loop.
+
+### Skill Compiler Node
+
+**Module:** `hbllm.brain.skill_compiler_node.SkillCompilerNode`  
+**Config:** `inject_skill_compiler = True`
+
+Automatically detects recurring successful action patterns using n-gram analysis on experience traces. When a pattern exceeds occurrence + success thresholds, it compiles the pattern into a reusable `Skill` in the `SkillRegistry`.
+
+Subscribes to `system.experience`, `system.evaluation`, `system.reflection`. Publishes `skill.extracted` events.
+
+### Reflection Node
+
+**Module:** `hbllm.brain.reflection_node.ReflectionNode`  
+**Config:** `inject_reflection = True`
+
+Performs periodic batch analysis of accumulated evaluation reports. Runs 4 analysis passes:
+
+1. **Performance trend detection** — improving, declining, or plateau
+2. **Failure pattern detection** — recurring quality flags
+3. **Capability gap analysis** — weak domains via SelfModel
+4. **Deep strategy analysis** — overall health and calibration (sleep-only)
+
+Generates `ReflectionInsight` objects and autonomously creates improvement goals in `GoalManager`.
+
+---
+
+## v2: Resource Intelligence
+
+!!! info "New in v2"
+    These subsystems manage cognitive resource distribution and ensure graceful degradation under load — critical for HBLLM's edge/CPU deployment target.
+
+### Attention Manager
+
+**Module:** `hbllm.brain.attention_manager.AttentionManager`  
+**Config:** `inject_attention = True`
+
+Manages importance-weighted memory retention and focus allocation:
+
+- **Memory budgets** — max items per memory type (episodic, semantic, procedural, value)
+- **Importance scoring** — combines recency, frequency, relevance, and emotional weight
+- **Focus allocation** — distributes context window tokens across active domains
+- **Pruning orchestration** — triggers cleanup during sleep cycle
+
+```python
+stats = brain.attention_manager.stats()
+# {
+#   "total_context_budget": 4096,
+#   "memory_budgets": {"episodic": {"utilization": 0.72}, ...},
+#   "focus_allocations": {"coding": {"priority": 0.8, "context_tokens": 2048}},
+#   "tracked_memories": 342,
+# }
+```
+
+### Load Manager
+
+**Module:** `hbllm.brain.load_manager.LoadManager`  
+**Config:** `inject_load_manager = True`
+
+Monitors CPU, memory, and task queue pressure. Implements 4-level graceful degradation:
+
+| Level | Context Tokens | Simulation | Model | Max Tasks |
+|-------|---------------|------------|-------|-----------|
+| `normal` | 4096 | ✅ | large | 8 |
+| `elevated` | 2048 | ✅ | large | 4 |
+| `high` | 1024 | ❌ | small | 2 |
+| `critical` | 512 | ❌ | tiny | 1 |
+
+```python
+policy = brain.load_manager.current_policy
+# DegradationPolicy(level="normal", max_context_tokens=4096, ...)
+
+# Check if system can handle more tasks
+can_accept = brain.load_manager.can_accept_task()
+```
+
+### Confidence Estimator v2
+
+**Module:** `hbllm.brain.confidence_estimator.ConfidenceEstimator`
+
+Enhanced with calibration tracking in v2:
+
+- **`record_outcome()`** — records predicted vs actual confidence per domain
+- **`calibrated_score()`** — adjusts raw confidence using historical bias data
+- **`calibration_error()`** — computes Expected Calibration Error (ECE)
+
+```python
+# Record feedback for calibration
+brain.confidence_estimator.record_outcome(
+    predicted=0.9, actual=0.6, domain="coding"
+)
+
+# Get calibration-adjusted score
+score = brain.confidence_estimator.calibrated_score(
+    query, response, domain="coding"
+)
+```
+
+### Micro-Learning (LearnerNode v2)
+
+**Module:** `hbllm.brain.learner_node.LearnerNode`
+
+Enhanced with real-time learning between tasks:
+
+- **Low-score queueing** — interactions below threshold are queued for micro-correction
+- **Knowledge distillation** — high-confidence responses are banked for sleep-cycle reinforcement
+- **`micro_learn()`** — single-step DPO correction when better responses arrive
+
+```python
+stats = brain.learner.micro_learning_stats()
+# {
+#   "enabled": true,
+#   "micro_learn_steps": 12,
+#   "distillation_count": 45,
+#   "micro_queue_depth": 3,
+#   "distillation_bank_size": 45,
+# }
+```
+
+---
+
 ## Accessing Subsystem Stats
 
 All subsystems are aggregated via `brain.cognitive_stats()`:
@@ -174,5 +329,9 @@ stats = brain.cognitive_stats()
 #   "tool_memory": {...},
 #   "token_optimizer": {...},
 #   "rewards": {...},
+#   "evaluation": {...},     # v2
+#   "attention": {...},       # v2
+#   "load_manager": {...},    # v2
 # }
 ```
+

@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "planning_001",
+    "category": "planning",
+    "difficulty": "medium",
+    "prompt": "Plan a 3-course dinner for 8 people with one vegetarian, one gluten-free guest, and a budget of $100.",
+    "expected_behavior": "Should produce structured plan with courses, dietary accommodations, and budget breakdown",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.4, "relevance": 0.3, "accuracy": 0.1, "safety": 0.2}
+  },
+  {
+    "task_id": "planning_002",
+    "category": "planning",
+    "difficulty": "hard",
+    "prompt": "Create a project plan to migrate a monolithic web application to microservices. Include phases, risks, and resource estimates.",
+    "expected_behavior": "Should provide phased migration plan with risk assessment and team requirements",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.4, "relevance": 0.3, "accuracy": 0.1, "safety": 0.2}
+  },
+  {
+    "task_id": "planning_003",
+    "category": "planning",
+    "difficulty": "easy",
+    "prompt": "I need to move to a new apartment in 2 weeks. Create a moving checklist.",
+    "expected_behavior": "Should produce a time-ordered checklist covering packing, utilities, logistics",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.4, "relevance": 0.3, "accuracy": 0.1, "safety": 0.2}
+  },
+  {
+    "task_id": "planning_004",
+    "category": "planning",
+    "difficulty": "medium",
+    "prompt": "Design a testing strategy for a payment processing system. Cover unit, integration, and end-to-end testing.",
+    "expected_behavior": "Should provide layered testing strategy with specific test categories and tools",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.4, "relevance": 0.3, "accuracy": 0.1, "safety": 0.2}
+  },
+  {
+    "task_id": "planning_005",
+    "category": "planning",
+    "difficulty": "hard",
+    "prompt": "Plan a disaster recovery strategy for a SaaS application with 99.9% uptime SLA. Cover data backup, failover, and communication.",
+    "expected_behavior": "Should address RPO/RTO, multi-region failover, data replication, incident response",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.4, "relevance": 0.3, "accuracy": 0.1, "safety": 0.2}
+  }
+]
