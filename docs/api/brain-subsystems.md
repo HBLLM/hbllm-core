@@ -30,6 +30,7 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | `ReflectionNode` | `reflection_node.py` | `inject_reflection` | Periodic batch performance analysis (v2) |
 | `AttentionManager` | `attention_manager.py` | `inject_attention` | Memory budgets and focus allocation (v2) |
 | `LoadManager` | `load_manager.py` | `inject_load_manager` | Cognitive load monitoring & degradation (v2) |
+| `CollectiveNode` | `collective_node.py` | Always on | Multi-agent voting, delegation & knowledge sharing (v2) |
 
 ---
 
@@ -312,6 +313,89 @@ stats = brain.learner.micro_learning_stats()
 #   "distillation_bank_size": 45,
 # }
 ```
+
+---
+
+## v2: Multi-Agent Ecology
+
+!!! info "New in v2"
+    Extends the CollectiveNode with agent specialization, consensus voting, and intelligent task delegation — enabling multi-instance HBLLM deployments to collaborate on complex queries.
+
+```mermaid
+graph TD
+    A["Instance A (coding)"] -->|vote request| B["Instance B (math)"]
+    A -->|vote request| C["Instance C (coding)"]
+    B -->|vote response| A
+    C -->|vote response| A
+    A -->|tally votes| D[Consensus Result]
+    A -->|delegate task| C
+```
+
+### Agent Specialization
+
+**Module:** `hbllm.brain.collective_node.CollectiveNode`
+
+Each instance declares its domain expertise via `AgentProfile`. Profiles are exchanged over the bus, building a live peer registry.
+
+```python
+# Declare this instance's expertise
+brain.collective.register_specialization(
+    domains=["coding", "debugging"],
+    performance={"coding": 0.95, "debugging": 0.88},
+)
+
+# Broadcast to peers
+await brain.collective.broadcast_profile()
+
+# Query peers for a domain
+coding_peers = brain.collective.get_peers_for_domain("coding")
+# [AgentProfile(instance_id="peer_1", performance={"coding": 0.92}), ...]
+```
+
+### Consensus Voting
+
+Multiple instances answer the same query and reach consensus via one of 3 strategies:
+
+| Strategy | Algorithm | Best for |
+|----------|-----------|----------|
+| `confidence_weighted` | Picks highest-confidence response | General queries |
+| `majority` | Most common answer wins | Factual / deterministic questions |
+| `best_of_n` | Single highest-confidence pick | Creative / open-ended tasks |
+
+```python
+result = await brain.collective.request_votes(
+    query="What is the time complexity of quicksort?",
+    domain="coding",
+    strategy=VotingStrategy.MAJORITY,
+)
+# {
+#   "consensus": "O(n log n) average, O(n²) worst case",
+#   "confidence": 0.92,
+#   "vote_count": 3,
+#   "majority_count": 2,
+#   "strategy": "majority",
+# }
+```
+
+### Task Delegation
+
+Routes tasks to the most qualified peer based on `expertise × (1 - load) × specialization_bonus`:
+
+```python
+result = await brain.collective.delegate_task(
+    query="Write a Python decorator for caching",
+    domain="coding",
+    timeout=5.0,
+)
+# DelegationResult(
+#   delegated=True,
+#   target_instance="coding_expert_01",
+#   score=0.95,
+#   response={"text": "...", "confidence": 0.95},
+# )
+```
+
+Falls back gracefully when no suitable peer is available or on timeout.
 
 ---
 
