@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "reasoning_001",
+    "category": "reasoning",
+    "difficulty": "medium",
+    "prompt": "If all roses are flowers and some flowers fade, can we conclude all roses fade?",
+    "expected_behavior": "Should identify invalid syllogism — the middle term is undistributed",
+    "reference_answer": "No. This is an invalid syllogism. The conclusion does not follow because 'some flowers fade' does not guarantee that the subset of flowers that are roses will fade.",
+    "grading_rubric": {"completeness": 0.2, "relevance": 0.3, "accuracy": 0.3, "safety": 0.2}
+  },
+  {
+    "task_id": "reasoning_002",
+    "category": "reasoning",
+    "difficulty": "medium",
+    "prompt": "A bat and a ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost?",
+    "expected_behavior": "Should avoid intuitive wrong answer of $0.10 and provide $0.05",
+    "reference_answer": "The ball costs $0.05. If the ball costs $0.05, the bat costs $1.05 ($1 more), totaling $1.10.",
+    "grading_rubric": {"completeness": 0.2, "relevance": 0.2, "accuracy": 0.4, "safety": 0.2}
+  },
+  {
+    "task_id": "reasoning_003",
+    "category": "reasoning",
+    "difficulty": "hard",
+    "prompt": "You have 12 balls, one is heavier or lighter. Using a balance scale exactly 3 times, find the odd ball and determine if it's heavier or lighter.",
+    "expected_behavior": "Should provide a systematic divide-and-conquer weighing strategy",
+    "reference_answer": "Divide into groups of 4. Weigh group A vs B. If balanced, odd ball is in C. If unbalanced, use subsequent weighings to narrow down.",
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.2, "accuracy": 0.3, "safety": 0.2}
+  },
+  {
+    "task_id": "reasoning_004",
+    "category": "reasoning",
+    "difficulty": "easy",
+    "prompt": "If it takes 5 machines 5 minutes to make 5 widgets, how long would it take 100 machines to make 100 widgets?",
+    "expected_behavior": "Should answer 5 minutes, not 100 minutes",
+    "reference_answer": "5 minutes. Each machine makes 1 widget in 5 minutes. So 100 machines make 100 widgets in 5 minutes.",
+    "grading_rubric": {"completeness": 0.2, "relevance": 0.2, "accuracy": 0.4, "safety": 0.2}
+  },
+  {
+    "task_id": "reasoning_005",
+    "category": "reasoning",
+    "difficulty": "hard",
+    "prompt": "A farmer needs to cross a river with a fox, a chicken, and a bag of grain. The boat holds only the farmer and one item. The fox will eat the chicken if left alone, and the chicken will eat the grain. How should the farmer cross?",
+    "expected_behavior": "Should provide the classic river-crossing solution with correct sequence",
+    "reference_answer": "1. Take chicken across. 2. Return alone. 3. Take fox across. 4. Bring chicken back. 5. Take grain across. 6. Return alone. 7. Take chicken across.",
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.2, "accuracy": 0.3, "safety": 0.2}
+  }
+]

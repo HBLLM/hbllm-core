@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "coding_001",
+    "category": "coding",
+    "difficulty": "easy",
+    "prompt": "Write a Python function that reverses a string without using slicing.",
+    "expected_behavior": "Should provide correct Python code using a loop or recursion",
+    "reference_answer": "def reverse(s):\n    result = ''\n    for char in s:\n        result = char + result\n    return result",
+    "grading_rubric": {"completeness": 0.2, "relevance": 0.2, "accuracy": 0.4, "safety": 0.2}
+  },
+  {
+    "task_id": "coding_002",
+    "category": "coding",
+    "difficulty": "medium",
+    "prompt": "Implement a function to check if a binary tree is balanced. A balanced tree has height difference of at most 1 between left and right subtrees at every node.",
+    "expected_behavior": "Should provide O(n) recursive solution checking height difference",
+    "reference_answer": "def is_balanced(root):\n    def check(node):\n        if not node: return 0\n        left = check(node.left)\n        right = check(node.right)\n        if left == -1 or right == -1 or abs(left-right) > 1: return -1\n        return max(left, right) + 1\n    return check(root) != -1",
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.2, "accuracy": 0.3, "safety": 0.2}
+  },
+  {
+    "task_id": "coding_003",
+    "category": "coding",
+    "difficulty": "medium",
+    "prompt": "Find the bug in this code:\ndef merge_sorted(a, b):\n    result = []\n    i = j = 0\n    while i < len(a) and j < len(b):\n        if a[i] <= b[j]:\n            result.append(a[i])\n            i += 1\n        else:\n            result.append(b[j])\n            j += 1\n    return result",
+    "expected_behavior": "Should identify missing remaining elements after the while loop",
+    "reference_answer": "The function doesn't append remaining elements. Add: result.extend(a[i:]) and result.extend(b[j:]) after the while loop.",
+    "grading_rubric": {"completeness": 0.2, "relevance": 0.3, "accuracy": 0.3, "safety": 0.2}
+  },
+  {
+    "task_id": "coding_004",
+    "category": "coding",
+    "difficulty": "hard",
+    "prompt": "Implement an LRU cache with O(1) get and put operations.",
+    "expected_behavior": "Should use OrderedDict or doubly-linked list with hash map",
+    "reference_answer": "from collections import OrderedDict\nclass LRUCache:\n    def __init__(self, cap):\n        self.cache = OrderedDict()\n        self.cap = cap\n    def get(self, key):\n        if key not in self.cache: return -1\n        self.cache.move_to_end(key)\n        return self.cache[key]\n    def put(self, key, val):\n        if key in self.cache: self.cache.move_to_end(key)\n        self.cache[key] = val\n        if len(self.cache) > self.cap: self.cache.popitem(last=False)",
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.2, "accuracy": 0.3, "safety": 0.2}
+  },
+  {
+    "task_id": "coding_005",
+    "category": "coding",
+    "difficulty": "easy",
+    "prompt": "What is the time complexity of binary search? Explain why.",
+    "expected_behavior": "Should answer O(log n) with clear explanation of halving the search space",
+    "reference_answer": "O(log n). Each comparison eliminates half the remaining elements, so for n elements you need at most log2(n) comparisons.",
+    "grading_rubric": {"completeness": 0.2, "relevance": 0.3, "accuracy": 0.3, "safety": 0.2}
+  }
+]

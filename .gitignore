@@ -29,6 +29,9 @@ env/
 /checkpoints/
 /memory/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.sqlite3
 
 # Rust build artifacts
@@ -56,8 +59,11 @@ wheels/
 *.onnx
 *.gguf
 /hbllm/__pycache__
+
+# Runtime workspace artifacts
+/workspace/
 workspace/reflection/
-/workspace
+test_workspace/
 /semantic/
 /knowledge_graph.json
 
@@ -67,3 +73,6 @@ semantic/
 
 # MkDocs build output
 site/
+
+# Logs
+*.log

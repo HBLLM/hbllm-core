@@ -88,7 +88,7 @@ _state: dict[str, Any] = {}
 
 
 async def _boot_brain(
-    model_size: str = "125M", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
+    model_size: str = "125m", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
 ) -> None:
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
@@ -100,18 +100,23 @@ async def _boot_brain(
     from hbllm.actions.execution_node import ExecutionNode
     from hbllm.actions.fuzzy_node import FuzzyNode
     from hbllm.actions.logic_node import LogicNode
+    from hbllm.brain.attention_manager import AttentionManager
     from hbllm.brain.collective_node import CollectiveNode
     from hbllm.brain.critic_node import CriticNode
     from hbllm.brain.curiosity_node import CuriosityNode
     from hbllm.brain.decision_node import DecisionNode
+    from hbllm.brain.evaluation_node import EvaluationNode
     from hbllm.brain.experience_node import ExperienceNode
     from hbllm.brain.identity_node import IdentityNode
     from hbllm.brain.learner_node import LearnerNode
     from hbllm.brain.llm_interface import LLMInterface
+    from hbllm.brain.load_manager import LoadManager
     from hbllm.brain.meta_node import MetaReasoningNode
     from hbllm.brain.planner_node import PlannerNode
+    from hbllm.brain.reflection_node import ReflectionNode
     from hbllm.brain.router_node import RouterNode
     from hbllm.brain.rule_extractor import RuleExtractorNode
+    from hbllm.brain.skill_compiler_node import SkillCompilerNode
     from hbllm.brain.sleep_node import SleepCycleNode
     from hbllm.brain.spawner_node import SpawnerNode
     from hbllm.brain.workspace_node import WorkspaceNode
@@ -123,7 +128,6 @@ async def _boot_brain(
 
     # 1. Bus
     from hbllm.network.bus import MessageBus
-    from hbllm.network.redis_bus import RedisBus
     from hbllm.network.registry import ServiceRegistry
     from hbllm.perception.audio_in_node import AudioInputNode
     from hbllm.perception.audio_out_node import AudioOutputNode
@@ -131,6 +135,8 @@ async def _boot_brain(
 
     bus: MessageBus
     if bus_type == "redis":
+        from hbllm.network.redis_bus import RedisBus
+
         bus = RedisBus(redis_url=redis_url)
     else:
         bus = InProcessBus()
@@ -158,7 +164,7 @@ async def _boot_brain(
 
     # 3. Tokenizer
     logger.info("Loading tokenizer...")
-    vocab = Vocab.from_file("test_workspace/vocab.json")
+    vocab = Vocab.load("test_workspace/vocab.json")
 
     # 4. LLM Interface
     llm_interface = LLMInterface(model=model, tokenizer=vocab, device=device)
@@ -180,6 +186,12 @@ async def _boot_brain(
         CuriosityNode(node_id="curiosity_01"),
         IdentityNode(node_id="identity_01"),
         CollectiveNode(node_id="collective_01"),
+        # Intelligence feedback loop
+        EvaluationNode(node_id="eval_01"),
+        AttentionManager(node_id="attention_01"),
+        LoadManager(node_id="load_01"),
+        ReflectionNode(node_id="reflection_01"),
+        SkillCompilerNode(node_id="skill_compiler_01"),
         # Learning
         LearnerNode(node_id="learner_01"),
         SpawnerNode(node_id="spawner_01", model=model, tokenizer=vocab),
@@ -688,7 +700,8 @@ app = FastAPI(
 )
 
 _cors_origins = os.environ.get(
-    "HBLLM_CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+    "HBLLM_CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8080,http://127.0.0.1:3000",
 ).split(",")
 
 app.add_middleware(
@@ -722,6 +735,129 @@ async def metrics() -> Any:
     if not bus or not hasattr(bus, "metrics"):
         return {"error": "Bus not initialized or metrics unavailable"}
     return bus.metrics.snapshot()
+
+
+@app.get("/studio/stats")
+async def studio_stats() -> Any:
+    """Aggregated cognitive subsystem stats for HBLLM Studio dashboard."""
+    nodes = _state.get("nodes", [])
+    result: dict[str, Any] = {
+        "mode": _state.get("mode", "unknown"),
+        "node_count": len(nodes),
+    }
+
+    # Build a lookup by node class name for targeted extraction
+    node_map: dict[str, Any] = {}
+    for node in nodes:
+        cls_name = type(node).__name__
+        node_map[cls_name] = node
+
+    # ── Node health ──
+    node_health = []
+    for node in nodes:
+        info = node.get_info()
+        node_health.append(
+            {
+                "id": info.node_id,
+                "name": type(node).__name__.replace("Node", "").replace("Manager", " Mgr"),
+                "status": "healthy" if node._running else "unhealthy",
+                "type": info.node_type.value
+                if hasattr(info.node_type, "value")
+                else str(info.node_type),
+            }
+        )
+    result["nodes"] = node_health
+
+    # ── Cognitive metrics ──
+    from hbllm.brain.cognitive_metrics import CognitiveMetrics
+
+    cm = node_map.get("CognitiveMetrics")
+    if cm and isinstance(cm, CognitiveMetrics):
+        result["metrics"] = cm.get_dashboard_metrics()
+
+    # ── Self model ──
+    from hbllm.brain.self_model import SelfModel
+
+    sm = node_map.get("SelfModel")
+    if sm and isinstance(sm, SelfModel):
+        result["self_model"] = sm.get_metrics()
+
+    # ── Skill registry ──
+    from hbllm.brain.skill_registry import SkillRegistry
+
+    sr = node_map.get("SkillRegistry")
+    if sr and isinstance(sr, SkillRegistry):
+        result["skills"] = sr.stats()
+
+    # ── Goals ──
+    from hbllm.brain.goal_manager import GoalManager
+
+    gm = node_map.get("GoalManager")
+    if gm and isinstance(gm, GoalManager):
+        result["goals"] = gm.stats()
+
+    # ── Evaluation ──
+    from hbllm.brain.evaluation_node import EvaluationNode
+
+    ev = node_map.get("EvaluationNode")
+    if ev and isinstance(ev, EvaluationNode):
+        result["evaluation"] = ev.stats()
+
+    # ── Attention ──
+    from hbllm.brain.attention_manager import AttentionManager
+
+    am = node_map.get("AttentionManager")
+    if am and isinstance(am, AttentionManager):
+        result["attention"] = am.stats()
+
+    # ── Load manager ──
+    from hbllm.brain.load_manager import LoadManager
+
+    lm = node_map.get("LoadManager")
+    if lm and isinstance(lm, LoadManager):
+        result["load_manager"] = lm.stats()
+
+    # ── Collective ──
+    from hbllm.brain.collective_node import CollectiveNode
+
+    cn = node_map.get("CollectiveNode")
+    if cn and isinstance(cn, CollectiveNode):
+        collective_stats = cn.stats
+        result["collective"] = {
+            "instance_id": cn.instance_id,
+            "stats": dict(collective_stats),
+            "peers": [
+                {
+                    "instance_id": p.instance_id,
+                    "domains": p.domains,
+                    "load": p.load,
+                    "performance": p.performance,
+                }
+                for p in cn.peer_profiles.values()
+            ],
+            "recent_activity": [],  # Future: wire to event log
+        }
+
+    # ── Reflection ──
+    from hbllm.brain.reflection_node import ReflectionNode
+
+    rn = node_map.get("ReflectionNode")
+    if rn and isinstance(rn, ReflectionNode):
+        result["reflection"] = rn.stats()
+
+    # ── Skill compiler ──
+    from hbllm.brain.skill_compiler_node import SkillCompilerNode
+
+    sc = node_map.get("SkillCompilerNode")
+    if sc and isinstance(sc, SkillCompilerNode):
+        result["skill_compiler"] = sc.stats()
+
+    # ── Bus metrics ──
+    bus = _state.get("bus")
+    if bus and hasattr(bus, "metrics"):
+        result["bus_metrics"] = bus.metrics.snapshot()
+
+    return result
 
 
 # ─── Provider-based Chat (lightweight) ────────────────────────────────────────

@@ -28,13 +28,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Pass-through for health checks and static files
+        # Pass-through for health checks, studio dashboard, and static files
         if request.url.path in [
             "/health",
             "/metrics",
             "/docs",
             "/openapi.json",
-        ] or request.url.path.startswith("/admin/static"):
+        ] or request.url.path.startswith(("/admin/static", "/studio/")):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization")

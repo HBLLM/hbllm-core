@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "memory_001",
+    "category": "memory",
+    "difficulty": "easy",
+    "prompt": "My name is Alex and I prefer dark mode. Remember this for future conversations.",
+    "expected_behavior": "Should acknowledge and store user preference in memory",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.3, "accuracy": 0.2, "safety": 0.2}
+  },
+  {
+    "task_id": "memory_002",
+    "category": "memory",
+    "difficulty": "medium",
+    "prompt": "Earlier I told you my favorite programming language is Rust. What project structure would you recommend for me?",
+    "expected_behavior": "Should attempt to recall previous context and tailor recommendation to Rust",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.3, "accuracy": 0.2, "safety": 0.2}
+  },
+  {
+    "task_id": "memory_003",
+    "category": "memory",
+    "difficulty": "hard",
+    "prompt": "Based on our last 5 conversations about machine learning, summarize the key topics we've covered and what I should learn next.",
+    "expected_behavior": "Should retrieve and synthesize information from multiple past sessions",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.4, "relevance": 0.3, "accuracy": 0.1, "safety": 0.2}
+  },
+  {
+    "task_id": "memory_004",
+    "category": "memory",
+    "difficulty": "medium",
+    "prompt": "I previously asked you to help with a Flask API. Now I want to add authentication. Continue from where we left off.",
+    "expected_behavior": "Should retrieve previous project context and continue coherently",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.4, "accuracy": 0.1, "safety": 0.2}
+  },
+  {
+    "task_id": "memory_005",
+    "category": "memory",
+    "difficulty": "easy",
+    "prompt": "What did we discuss in our last conversation?",
+    "expected_behavior": "Should retrieve and summarize the most recent conversation or indicate no prior context",
+    "reference_answer": null,
+    "grading_rubric": {"completeness": 0.3, "relevance": 0.3, "accuracy": 0.2, "safety": 0.2}
+  }
+]
