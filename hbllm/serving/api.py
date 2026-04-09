@@ -88,7 +88,7 @@ _state: dict[str, Any] = {}
 
 
 async def _boot_brain(
-    model_size: str = "125M", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
+    model_size: str = "125m", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
 ) -> None:
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
@@ -123,7 +123,6 @@ async def _boot_brain(
 
     # 1. Bus
     from hbllm.network.bus import MessageBus
-    from hbllm.network.redis_bus import RedisBus
     from hbllm.network.registry import ServiceRegistry
     from hbllm.perception.audio_in_node import AudioInputNode
     from hbllm.perception.audio_out_node import AudioOutputNode
@@ -131,6 +130,8 @@ async def _boot_brain(
 
     bus: MessageBus
     if bus_type == "redis":
+        from hbllm.network.redis_bus import RedisBus
+
         bus = RedisBus(redis_url=redis_url)
     else:
         bus = InProcessBus()
@@ -158,7 +159,7 @@ async def _boot_brain(
 
     # 3. Tokenizer
     logger.info("Loading tokenizer...")
-    vocab = Vocab.from_file("test_workspace/vocab.json")
+    vocab = Vocab.load("test_workspace/vocab.json")
 
     # 4. LLM Interface
     llm_interface = LLMInterface(model=model, tokenizer=vocab, device=device)
