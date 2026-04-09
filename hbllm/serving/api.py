@@ -688,7 +688,8 @@ app = FastAPI(
 )
 
 _cors_origins = os.environ.get(
-    "HBLLM_CORS_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000"
+    "HBLLM_CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://localhost:8080,http://127.0.0.1:3000",
 ).split(",")
 
 app.add_middleware(
@@ -722,6 +723,115 @@ async def metrics() -> Any:
     if not bus or not hasattr(bus, "metrics"):
         return {"error": "Bus not initialized or metrics unavailable"}
     return bus.metrics.snapshot()
+
+
+@app.get("/studio/stats")
+async def studio_stats() -> Any:
+    """Aggregated cognitive subsystem stats for HBLLM Studio dashboard."""
+    nodes = _state.get("nodes", [])
+    result: dict[str, Any] = {
+        "mode": _state.get("mode", "unknown"),
+        "node_count": len(nodes),
+    }
+
+    # Build a lookup by node class name for targeted extraction
+    node_map: dict[str, Any] = {}
+    for node in nodes:
+        cls_name = type(node).__name__
+        node_map[cls_name] = node
+
+    # ── Node health ──
+    node_health = []
+    for node in nodes:
+        info = node.get_info()
+        node_health.append({
+            "id": info.node_id,
+            "name": type(node).__name__.replace("Node", "").replace("Manager", " Mgr"),
+            "status": "healthy" if info.healthy else "unhealthy",
+            "type": getattr(info, "node_type", "core"),
+        })
+    result["nodes"] = node_health
+
+    # ── Cognitive metrics ──
+    from hbllm.brain.cognitive_metrics import CognitiveMetrics
+    cm = node_map.get("CognitiveMetrics")
+    if cm and isinstance(cm, CognitiveMetrics):
+        result["metrics"] = cm.get_dashboard_metrics()
+
+    # ── Self model ──
+    from hbllm.brain.self_model import SelfModel
+    sm = node_map.get("SelfModel")
+    if sm and isinstance(sm, SelfModel):
+        result["self_model"] = sm.get_metrics()
+
+    # ── Skill registry ──
+    from hbllm.brain.skill_registry import SkillRegistry
+    sr = node_map.get("SkillRegistry")
+    if sr and isinstance(sr, SkillRegistry):
+        result["skills"] = sr.stats()
+
+    # ── Goals ──
+    from hbllm.brain.goal_manager import GoalManager
+    gm = node_map.get("GoalManager")
+    if gm and isinstance(gm, GoalManager):
+        result["goals"] = gm.stats()
+
+    # ── Evaluation ──
+    from hbllm.brain.evaluation_node import EvaluationNode
+    ev = node_map.get("EvaluationNode")
+    if ev and isinstance(ev, EvaluationNode):
+        result["evaluation"] = ev.stats()
+
+    # ── Attention ──
+    from hbllm.brain.attention_manager import AttentionManager
+    am = node_map.get("AttentionManager")
+    if am and isinstance(am, AttentionManager):
+        result["attention"] = am.stats()
+
+    # ── Load manager ──
+    from hbllm.brain.load_manager import LoadManager
+    lm = node_map.get("LoadManager")
+    if lm and isinstance(lm, LoadManager):
+        result["load_manager"] = lm.stats()
+
+    # ── Collective ──
+    from hbllm.brain.collective_node import CollectiveNode
+    cn = node_map.get("CollectiveNode")
+    if cn and isinstance(cn, CollectiveNode):
+        collective_stats = cn.stats
+        result["collective"] = {
+            "instance_id": cn.instance_id,
+            "stats": dict(collective_stats),
+            "peers": [
+                {
+                    "instance_id": p.instance_id,
+                    "domains": p.domains,
+                    "load": p.load,
+                    "performance": p.performance,
+                }
+                for p in cn.peer_profiles.values()
+            ],
+            "recent_activity": [],  # Future: wire to event log
+        }
+
+    # ── Reflection ──
+    from hbllm.brain.reflection_node import ReflectionNode
+    rn = node_map.get("ReflectionNode")
+    if rn and isinstance(rn, ReflectionNode):
+        result["reflection"] = rn.stats()
+
+    # ── Skill compiler ──
+    from hbllm.brain.skill_compiler_node import SkillCompilerNode
+    sc = node_map.get("SkillCompilerNode")
+    if sc and isinstance(sc, SkillCompilerNode):
+        result["skill_compiler"] = sc.stats()
+
+    # ── Bus metrics ──
+    bus = _state.get("bus")
+    if bus and hasattr(bus, "metrics"):
+        result["bus_metrics"] = bus.metrics.snapshot()
+
+    return result
 
 
 # ─── Provider-based Chat (lightweight) ────────────────────────────────────────
