@@ -10,6 +10,9 @@ HBLLM doesn't ship one massive model that tries to do everything. Instead, it us
 !!! success "Why This Matters"
     Traditional domain adaptation requires full fine-tuning (6GB+ for a 1.5B model) and manual deployment. HBLLM downloads a 2MB file, verifies its integrity, and hot-swaps it in under 10ms — **no retraining, no downtime, no massive downloads**.
 
+!!! tip "Read-Only Security"
+    To protect expertise from "catastrophic forgetting", **all downloaded adapters are loaded as strictly `read-only` in memory**. Continuous learning and DPO operations update a separate, dedicated `personalization` adapter, ensuring domain knowledge is never degraded by daily conversational drift.
+
 ---
 
 ## How Automatic Resolution Works

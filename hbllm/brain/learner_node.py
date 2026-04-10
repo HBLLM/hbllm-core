@@ -53,11 +53,13 @@ class LearnerNode(Node):
         enable_micro_learning: bool = True,
         micro_learn_threshold: float = 0.3,
         distillation_threshold: float = 0.85,
+        learning_adapter: str = "personalization",
     ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE)
         self.node_type = NodeType.MEMORY
         self.model = model
         self.tokenizer = tokenizer
+        self.learning_adapter = learning_adapter
 
         # Continuous Lifelong DPO: persistent queue
         self.pending_pairs: dict[str, dict[str, str | None]] = {}
@@ -248,10 +250,19 @@ class LearnerNode(Node):
 
                     chosen_ids, rejected_ids = pair
 
-                    # ── Reference log-probs: base model with LoRA disabled ──
-                    from hbllm.modules.lora import LoRAManager
+                    # ── Reference log-probs: base model with learning adapter disabled ──
+                    from hbllm.modules.lora import ACTIVE_ADAPTER, LoRAManager
 
-                    LoRAManager.set_active_adapter(self.model, None)
+                    current_active = ACTIVE_ADAPTER.get()
+
+                    ref_active = current_active
+                    if isinstance(ref_active, dict) and self.learning_adapter in ref_active:
+                        ref_active = dict(ref_active)
+                        del ref_active[self.learning_adapter]
+                    elif ref_active == self.learning_adapter:
+                        ref_active = None
+
+                    LoRAManager.set_active_adapter(self.model, ref_active)
 
                     with torch.no_grad():
                         ref_chosen_out = self.model(chosen_ids)
@@ -269,7 +280,17 @@ class LearnerNode(Node):
                         ref_chosen_logps = get_batch_logps(ref_chosen_logits, chosen_ids)
                         ref_rejected_logps = get_batch_logps(ref_rejected_logits, rejected_ids)
 
-                    LoRAManager.set_active_adapter(self.model, "default")
+                    # ── Policy log-probs: model with learning adapter active ──
+                    pol_active = current_active
+                    if pol_active is None:
+                        pol_active = self.learning_adapter
+                    elif isinstance(pol_active, str) and pol_active != self.learning_adapter:
+                        pol_active = {pol_active: 1.0, self.learning_adapter: 1.0}
+                    elif isinstance(pol_active, dict) and self.learning_adapter not in pol_active:
+                        pol_active = dict(pol_active)
+                        pol_active[self.learning_adapter] = 1.0
+
+                    LoRAManager.set_active_adapter(self.model, pol_active)
 
                     # ── Policy log-probs: model with LoRA active ──
                     chosen_out = self.model(chosen_ids)
@@ -515,15 +536,28 @@ class LearnerNode(Node):
         return None
 
     def _ensure_lora(self) -> None:
-        """Inject LoRA if not already done."""
+        """Inject LoRA if not already done, and bind to the specific learning adapter."""
         if self._lora_injected:
             return
         try:
             from hbllm.modules.lora import LoRAManager
 
             injected = LoRAManager.inject(self.model, r=self.lora_r)
+
+            # Ensure the specific learning adapter exists
+            LoRAManager.add_adapter(self.model, self.learning_adapter)
+
+            # Freeze the 'default' adapter if it was created natively by inject
+            for module in self.model.modules():
+                if hasattr(module, "lora_A") and "default" in module.lora_A:
+                    module.lora_A["default"].requires_grad = False
+                    module.lora_B["default"].requires_grad = False
+
             logger.info(
-                "LearnerNode injected LoRA (r=%d) into %d modules", self.lora_r, len(injected)
+                "LearnerNode injected LoRA (r=%d) into %d modules, active learning adapter='%s'",
+                self.lora_r,
+                len(injected),
+                self.learning_adapter,
             )
             self._lora_injected = True
         except Exception as e:
@@ -537,9 +571,14 @@ class LearnerNode(Node):
         import torch
 
         lora_params = [
-            p for n, p in self.model.named_parameters() if "lora_" in n and p.requires_grad
+            p
+            for n, p in self.model.named_parameters()
+            if f".{self.learning_adapter}" in n and p.requires_grad
         ]
         if not lora_params:
+            logger.warning(
+                "No requires_grad parameters found matching '.%s'", self.learning_adapter
+            )
             lora_params = [p for p in self.model.parameters() if p.requires_grad]
 
         self._optimizer = torch.optim.AdamW(lora_params, lr=self.lr, weight_decay=0.01)
@@ -553,11 +592,15 @@ class LearnerNode(Node):
         try:
             from hbllm.modules.lora import LoRAManager
 
-            adapter_state = LoRAManager.get_lora_state_dict(self.model)
+            adapter_state = LoRAManager.get_lora_state_dict(
+                self.model, adapter_name=self.learning_adapter
+            )
             save_dir = Path(self.checkpoint_dir)
             save_dir.mkdir(parents=True, exist_ok=True)
-            save_path = save_dir / "learner_lora_adapter.pt"
+            save_path = save_dir / f"{self.learning_adapter}_adapter.pt"
             torch.save(adapter_state, save_path)
-            logger.info("LearnerNode saved LoRA adapter to %s", save_path)
+            logger.info(
+                "LearnerNode saved LoRA adapter '%s' to %s", self.learning_adapter, save_path
+            )
         except Exception as e:
             logger.warning("Failed to save LoRA adapter: %s", e)

@@ -29,8 +29,9 @@ During the day, the **Episodic Memory** (System 2) records raw interaction logs.
 
 This is where the brain's weights actually change.
 - **DPO Queue:** Feedback from the `CriticNode` and `ValueMemory` is collected into an atomic JSON queue throughout the day.
-- **Contrastive Learning:** The `LearnerNode` triggers a **Direct Preference Optimization (DPO)** loop, penalizing "rejected" (criticized) paths and strengthening "chosen" (validated) paths within the tenant's specific LoRA adapter.
-- **Isolation:** This training happens locally on the tenant's isolated LoRA, ensuring their private learning never leaks to other users.
+- **Contrastive Learning:** The `LearnerNode` triggers a **Direct Preference Optimization (DPO)** loop, penalizing "rejected" (criticized) paths and strengthening "chosen" (validated) paths.
+- **Read-Only Preservation (Zero Catastrophic Forgetting):** To prevent breaking the core model, the base model and *all downloaded domain adapters* are kept strictly **read-only**.
+- **Isolation:** DPO training happens locally and exclusively on a dynamically created `personalization` adapter, ensuring that private learning never leaks to other users or corrupts established domains.
 
 ### Phase 3: Curiosity-Driven Exploration
 **Code:** `_replay_curiosity_goals()`
