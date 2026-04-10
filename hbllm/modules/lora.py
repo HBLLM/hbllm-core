@@ -377,5 +377,20 @@ class LoRAManager:
         LoRAManager.add_adapter(model, target_name)
         LoRAManager.load_lora_state_dict(model, state_dict, adapter_name=target_name)
 
-        logger.info("Loaded LoRA adapter '%s' from %s", target_name, path)
+        # Freeze the loaded adapter parameters to prevent catastrophic forgetting
+        frozen_count = 0
+        for module in model.modules():
+            if isinstance(module, LoRALinear):
+                if target_name in module.lora_A:
+                    module.lora_A[target_name].requires_grad = False
+                if target_name in module.lora_B:
+                    module.lora_B[target_name].requires_grad = False
+                frozen_count += 1
+
+        logger.info(
+            "Loaded and frozen read-only LoRA adapter '%s' from %s (applied to %d layers)",
+            target_name,
+            path,
+            frozen_count,
+        )
         return metadata
