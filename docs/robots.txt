@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://hbllm.github.io/hbllm-core/sitemap.xml
+Sitemap: https://hbllm.github.io/hbllm-core/sitemap.xml.gz
