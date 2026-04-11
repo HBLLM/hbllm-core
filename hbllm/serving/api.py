@@ -102,7 +102,10 @@ _state: dict[str, Any] = {}
 
 
 async def _boot_brain(
-    model_size: str = "125m", bus_type: str = "inprocess", redis_url: str = "redis://localhost:6379"
+    app: Any = None,
+    model_size: str = "125m",
+    bus_type: str = "inprocess",
+    redis_url: str = "redis://localhost:6379",
 ) -> None:
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
@@ -236,8 +239,19 @@ async def _boot_brain(
         await registry.register(node.get_info())
         await node.start(bus)
 
+    # 6. Load External Plugins
+    import pathlib
+
+    from hbllm.network.plugin_manager import PluginManager
+
+    plugin_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "plugins"
+    pm = PluginManager(plugin_dirs=[plugin_dir], bus=bus, registry=registry, app=app)
+    pm.discover()
+    await pm.load_all()
+
     _state["bus"] = bus
     _state["registry"] = registry
+    _state["plugin_manager"] = pm
     _state["nodes"] = nodes
     _state["bus_type"] = bus_type
 
@@ -286,7 +300,7 @@ async def _boot_provider_mode() -> None:
 async def lifespan(app: FastAPI) -> Any:
     """Boot the brain on startup, fall back to provider mode if it fails."""
     try:
-        await _boot_brain()
+        await _boot_brain(app=app)
         logger.info("Full brain pipeline active")
     except Exception as e:
         logger.warning("Full brain boot failed (%s). Falling back to provider mode.", e)

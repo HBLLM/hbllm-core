@@ -232,6 +232,7 @@ export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics Integration (Requires rclpy)
 ```bash
 hbllm info               # View active brain architecture
 hbllm nodes              # List 25+ loaded cognitive nodes
+hbllm plugins            # List dynamically installed plugins
 hbllm serve --port 8000  # Start the FastAPI + MCP Server
 hbllm train --model-size 125m  # Kickoff local reinforcement loops
 ```
@@ -311,6 +312,36 @@ class TemperatureSensorNode(Node):
             source_node_id=self.node_id,
             payload={"celsius": temp},
         ))
+```
+
+```
+
+### 📦 Plugin Ecosystem
+
+HBLLM supports a dynamic, hot-loadable plugin registry. You can drop custom integrations into the `plugins/` directory, and they will be automatically discovered avoiding hardcoded bootstrappers.
+
+```python
+# plugins/my_custom_integration/__init__.py
+__plugin__ = {
+    "name": "my_custom_integration",
+    "version": "1.0.0"
+}
+
+async def register(bus, registry, app):
+    # 'bus' allows communication with the cognitive layer
+    # 'app' is the FastAPI instance (dynamically injected if requested), allowing you to mount REST endpoints!
+    
+    node = TemperatureSensorNode("temp_1", "0x5A")
+    await node.start(bus)
+    
+    app.post("/my-custom-webhook")(node.trigger_external_event)
+    
+    return node
+```
+
+Manage your installed plugins natively:
+```bash
+hbllm plugins
 ```
 
 ---

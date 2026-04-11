@@ -67,7 +67,11 @@ class WeatherNode(Node):
 
 ## Registering Your Node
 
-Add your node to the brain via `BrainFactory`:
+There are two primary ways to register your custom node.
+
+### 1. Via Python Scripts
+
+Add your node to the brain manually via `BrainFactory`:
 
 ```python
 from hbllm.brain.factory import BrainFactory
@@ -78,6 +82,32 @@ brain = await BrainFactory.create("openai/gpt-4o")
 weather = WeatherNode(api_key="your-key")
 await weather.start(brain.bus)
 ```
+
+### 2. Via the Dynamic Plugin Registry
+
+For production environments, you can automatically load your Custom Node by dropping it into the `plugins/` directory alongside a simple `register` hook.
+
+```python
+# plugins/my_weather_plugin/__init__.py
+from my_weather import WeatherNode
+
+__plugin__ = {
+    "name": "weather_node",
+    "version": "1.0.0"
+}
+
+# The lifecycle loader injects the requested arguments natively!
+async def register(bus, registry, app):
+    node = WeatherNode(api_key="your-key")
+    await node.start(bus)
+    
+    # You can also mount native REST endpoints on the FastAPI server
+    app.post("/weather-webhook")(node.trigger_update)
+    
+    return node
+```
+
+You can view installed plugins natively via the CLI using `hbllm plugins`.
 
 ## Best Practices
 

@@ -174,6 +174,33 @@ def run_nodes(args):
     print()
 
 
+def run_plugins(args):
+    """List dynamically installed plugins."""
+    from pathlib import Path
+
+    from hbllm.network.plugin_manager import PluginManager
+
+    plugin_dir = Path(__file__).resolve().parent.parent / "plugins"
+    print(f"\n📦 Scanning for installed HBLLM plugins in {plugin_dir}...")
+    pm = PluginManager(plugin_dirs=[plugin_dir])
+    discovered = pm.discover()
+
+    if not discovered:
+        print(f"   No plugins found in {plugin_dir}/")
+        print("   Drop a python node file or package into that directory to install it.")
+        return
+
+    print(f"\n📦 Found {len(discovered)} plugins:\n")
+    print(f"{'Plugin Name':<25} {'Version':<10} {'Description'}")
+    print("─" * 70)
+    for p in discovered:
+        name = p.name if p.name else Path(p.path).stem
+        ver = p.version if p.version else "unknown"
+        desc = p.description if p.description else "No description provided."
+        print(f"{name:<25} {ver:<10} {desc}")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="hbllm",
@@ -206,7 +233,8 @@ def main():
 
     # Info / Nodes
     subparsers.add_parser("info", help="Show system architecture info")
-    subparsers.add_parser("nodes", help="List all brain nodes")
+    subparsers.add_parser("nodes", help="List all core brain nodes")
+    subparsers.add_parser("plugins", help="List all installed dynamic plugins")
 
     args = parser.parse_args()
 
@@ -216,6 +244,7 @@ def main():
         "serve": run_serve,
         "info": run_info,
         "nodes": run_nodes,
+        "plugins": run_plugins,
     }
     dispatch[args.command](args)
 
