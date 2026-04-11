@@ -62,6 +62,20 @@ class ChatResponse(BaseModel):
     usage: dict[str, int] | None = None
 
 
+class OpenAIMessage(BaseModel):
+    role: str
+    content: str
+    name: str | None = None
+
+
+class OpenAICompletionRequest(BaseModel):
+    model: str = "hbllm-125m"
+    messages: list[OpenAIMessage]
+    stream: bool = False
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
 class HealthResponse(BaseModel):
     """Server health check response."""
 
@@ -1135,6 +1149,136 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ─── OpenAI Compatible API ───────────────────────────────────────────────────
+
+import time
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -> Any:
+    """
+    OpenAI-compatible chat completions endpoint for AI coding assistants like Cursor, Claude Code, etc.
+    """
+    tenant_id = getattr(api_req.state, "tenant_id", "default")
+    session_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+
+    # Flatten the messages list into a single prompt for HBLLM
+    text_prompt = ""
+    for msg in request.messages:
+        text_prompt += f"{msg.role.capitalize()}: {msg.content}\n\n"
+
+    text_prompt += "Assistant:"
+
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    if not request.stream:
+        response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
+
+        async def output_handler(msg: Message) -> None:
+            if msg.correlation_id == correlation_id and not response_future.done():
+                response_future.set_result(msg)
+
+        sub = await bus.subscribe("sensory.output", output_handler)
+
+        query_msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="api_server",
+            tenant_id=tenant_id,
+            session_id=session_id,
+            topic="router.query",
+            payload=QueryPayload(text=text_prompt).model_dump(),
+            correlation_id=correlation_id,
+        )
+        await bus.publish("router.query", query_msg)
+
+        try:
+            result_msg = await asyncio.wait_for(response_future, timeout=60.0)
+            response_text = result_msg.payload.get("text", "")
+
+            return {
+                "id": f"chatcmpl-{correlation_id}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": request.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": response_text},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": len(text_prompt) // 4,
+                    "completion_tokens": len(response_text) // 4,
+                    "total_tokens": (len(text_prompt) + len(response_text)) // 4,
+                },
+            }
+        except (TimeoutError, asyncio.TimeoutError):
+            raise HTTPException(status_code=504, detail="Pipeline timed out (60s)")
+        finally:
+            await bus.unsubscribe(sub)
+
+    else:
+        # Stream=True handling
+        token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def stream_handler(msg: Message) -> None:
+            if msg.correlation_id == correlation_id:
+                text = msg.payload.get("text", "")
+                await token_queue.put(text)
+                await token_queue.put(None)  # Signal completion
+
+        await bus.subscribe("sensory.output", stream_handler)
+
+        query_msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="api_server",
+            tenant_id=tenant_id,
+            session_id=session_id,
+            topic="router.query",
+            payload=QueryPayload(text=text_prompt).model_dump(),
+            correlation_id=correlation_id,
+        )
+        await bus.publish("router.query", query_msg)
+
+        async def event_generator() -> Any:
+            import json as _json
+
+            try:
+                # Issue initial chunk
+                yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(token_queue.get(), timeout=30.0)
+                    except (TimeoutError, asyncio.TimeoutError):
+                        yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': request.model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'timeout'}]})}\n\n"
+                        break
+
+                    if chunk is None:
+                        yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': request.model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                        yield "data: [DONE]\n\n"
+                        break
+                    else:
+                        # Stream tokens naturally
+                        tokens = chunk.split(" ")
+                        for idx, tok in enumerate(tokens):
+                            piece = tok if idx == 0 else " " + tok
+                            yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': request.model, 'choices': [{'index': 0, 'delta': {'content': piece}, 'finish_reason': None}]})}\n\n"
+
+            except asyncio.CancelledError:
+                pass
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
 
 @app.get("/v1/memory/{tenant_id}/{session_id}")
