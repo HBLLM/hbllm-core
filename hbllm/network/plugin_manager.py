@@ -70,10 +70,21 @@ class PluginManager:
         plugin_dirs: list[str | Path] | None = None,
         bus: MessageBus | None = None,
         registry: ServiceRegistry | None = None,
+        app: Any | None = None,
     ):
+        """
+        Initialize the plugin manager.
+
+        Args:
+            plugin_dirs: List of directories to scan for plugins.
+            bus: Default message bus to pass to plugins.
+            registry: Default service registry.
+            app: Default FastAPI app instance to pass to plugins desiring API endpoints.
+        """
         self._plugin_dirs = [Path(d) for d in (plugin_dirs or ["plugins"])]
         self._bus = bus
         self._registry = registry
+        self._app = app
         self._plugins: dict[str, PluginInfo] = {}
         self._loaded_nodes: list[Any] = []
 
@@ -191,14 +202,19 @@ class PluginManager:
                     results.append(info)
                     continue
 
-                # Call register(bus, registry) or register(bus)
+                # Call register() with dynamic injection
                 import inspect
 
                 sig = inspect.signature(register_fn)
-                if len(sig.parameters) >= 2 and registry:
-                    nodes = await register_fn(bus, registry)
-                else:
-                    nodes = await register_fn(bus)
+                kwargs = {}
+                if "bus" in sig.parameters:
+                    kwargs["bus"] = bus
+                if "registry" in sig.parameters and registry is not None:
+                    kwargs["registry"] = registry
+                if "app" in sig.parameters and self._app is not None:
+                    kwargs["app"] = self._app
+
+                nodes = await register_fn(**kwargs)
 
                 if nodes:
                     if isinstance(nodes, list):
