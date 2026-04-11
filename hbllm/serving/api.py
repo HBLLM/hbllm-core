@@ -222,8 +222,19 @@ async def _boot_brain(
         await registry.register(node.get_info())
         await node.start(bus)
 
+    # 6. Load External Plugins
+    import pathlib
+
+    from hbllm.network.plugin_manager import PluginManager
+
+    plugin_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "plugins"
+    pm = PluginManager(plugin_dirs=[plugin_dir], bus=bus, registry=registry)
+    pm.discover()
+    await pm.load_all()
+
     _state["bus"] = bus
     _state["registry"] = registry
+    _state["plugin_manager"] = pm
     _state["nodes"] = nodes
     _state["bus_type"] = bus_type
 

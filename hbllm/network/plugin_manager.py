@@ -99,11 +99,19 @@ class PluginManager:
                 logger.debug("Plugin directory does not exist: %s", plugin_dir)
                 continue
 
-            for py_file in sorted(plugin_dir.glob("*.py")):
-                if py_file.name.startswith("_"):
+            for item in sorted(plugin_dir.iterdir()):
+                if item.name.startswith("_"):
                     continue
 
-                plugin_name = py_file.stem
+                if item.is_file() and item.suffix == ".py":
+                    py_file = item
+                    plugin_name = item.stem
+                elif item.is_dir() and (item / "__init__.py").exists():
+                    py_file = item / "__init__.py"
+                    plugin_name = item.name
+                else:
+                    continue
+
                 info = PluginInfo(
                     name=plugin_name,
                     path=str(py_file),
