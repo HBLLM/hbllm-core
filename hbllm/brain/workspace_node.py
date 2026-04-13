@@ -30,7 +30,7 @@ class WorkspaceNode(Node):
     def __init__(
         self,
         node_id: str,
-        thinking_deadline: float = 4.0,
+        thinking_deadline: float = 60.0,
         max_concurrent_boards: int = 100,
         max_board_age: float = 300.0,
     ) -> None:
@@ -122,7 +122,7 @@ class WorkspaceNode(Node):
             "deadline": time.time() + self._thinking_deadline,
             "resolved": False,
             "turn_count": 1,  # Track internal monologue turns
-            "absolute_deadline": time.time() + 30.0,  # Hard cap: 30s max monologue time
+            "absolute_deadline": time.time() + 120.0,  # Hard cap: 120s for CPU inference
         }
 
         # Broadcast the context to ALL subjective thinking modules simultaneously

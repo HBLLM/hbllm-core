@@ -28,8 +28,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Pass-through for health checks, studio dashboard, and static files
-        if request.url.path in [
+        # Pass-through for health checks, studio dashboard, static files, and CORS preflight
+        if request.method == "OPTIONS" or request.url.path in [
             "/health",
             "/metrics",
             "/docs",

@@ -198,7 +198,15 @@ def _train_on_domain(
             LoRAManager.load_lora_state_dict(model, state)
 
     # Build dataset and dataloader
-    dataset = InstructionDataset(sft_data, tokenizer, max_length=512)
+    import random
+    random.shuffle(sft_data)
+
+    # Split into 90% train, 10% validation (minimum 1 validation sample if > 1)
+    val_size = max(1, len(sft_data) // 10) if len(sft_data) > 1 else 0
+    val_data = sft_data[:val_size]
+    train_data = sft_data[val_size:] if val_size > 0 else sft_data
+
+    dataset = InstructionDataset(train_data, tokenizer, max_length=512)
     pad_id = getattr(tokenizer, "pad_id", 0)
     loader = DataLoader(
         dataset,
@@ -206,6 +214,17 @@ def _train_on_domain(
         shuffle=True,
         collate_fn=lambda b: collate_sft(b, pad_id=pad_id),
     )
+
+    if val_data:
+        val_dataset = InstructionDataset(val_data, tokenizer, max_length=512)
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=lambda b: collate_sft(b, pad_id=pad_id),
+        )
+    else:
+        val_loader = None
 
     # Configure training
     train_config = TrainingConfig(
@@ -263,18 +282,52 @@ def _train_on_domain(
         from hbllm.modules.lora import LoRAManager
 
         adapter_state = LoRAManager.get_lora_state_dict(model)
-        save_path = Path(domain_ckpt_dir) / "lora_adapter.pt"
-        torch.save(adapter_state, save_path)
-        logger.info("Saved LoRA adapter to %s (%d params)", save_path, len(adapter_state))
+        pending_path = Path(domain_ckpt_dir) / "lora_adapter.pending.pt"
+        torch.save(adapter_state, pending_path)
+        logger.info("Saved pending LoRA adapter to %s for validation", pending_path)
+
+        # --- LORA VALIDATION GATE ---
+        logger.info("Initializing Validation Gate for Domain '%s'...", domain)
+        from hbllm.training.evaluator import ModelEvaluator
+
+        # Make sure model uses pending weights for evaluation (it already has them loaded)
+        evaluator = ModelEvaluator(model, tokenizer, device=torch.device("cpu"))
+
+        val_metrics = {}
+        if val_loader:
+            logger.info("Computing validation perplexity on held-out data...")
+            val_metrics = evaluator.compute_perplexity(val_loader, max_batches=50)
+            logger.info("Validation Perplexity: %.2f | Avg Loss: %.4f", val_metrics.get("perplexity", 0), val_metrics.get("avg_loss", 0))
+
+        logger.info("Running HellaSwag common-sense reasoning safety check...")
+        hs_results = evaluator.evaluate_hellaswag(max_examples=50)
+        accuracy = hs_results.get("accuracy", 0.0)
+        logger.info("HellaSwag Safety Score: %.1f%%", accuracy * 100)
+
+        # Scoring Logic
+        # Accept if accuracy >= 30% OR (if offline HellaSwag failed to load and we have validation drops)
+        if accuracy >= 0.30 or (accuracy == 0 and val_loader and val_metrics.get("avg_loss", 99.0) < 5.0):
+            final_path = Path(domain_ckpt_dir) / "lora_adapter.pt"
+            if pending_path.exists():
+                os.rename(pending_path, final_path)
+            logger.info("✅ VALIDATION PASSED: Promoted pending weights to active production LoRA state.")
+            status = "activated"
+        else:
+            if pending_path.exists():
+                os.remove(pending_path)
+            logger.error("🚨 VALIDATION FAILED: Cognitive corruption detected. Rejected pending LoRA weights.")
+            status = "rejected"
     else:
         trainer.save_checkpoint(loss=losses[-1] if losses else 0.0)
+        status = "base_checkpoint_saved"
 
     avg_loss = total_loss / max(step, 1)
     logger.info(
-        "Training complete for domain '%s': %d steps, avg_loss=%.4f",
+        "Training complete for domain '%s': %d steps, avg_loss=%.4f [%s]",
         domain,
         step,
         avg_loss,
+        status
     )
 
     return {
@@ -282,8 +335,9 @@ def _train_on_domain(
         "steps": step,
         "avg_loss": round(avg_loss, 4),
         "final_loss": round(losses[-1], 4) if losses else 0.0,
-        "samples": len(sft_data),
+        "samples": len(train_data),
         "lora": use_lora,
+        "status": status,
     }
 
 

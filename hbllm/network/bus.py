@@ -58,7 +58,7 @@ class MessageBus(Protocol):
         """Publish a message to a topic (fire-and-forget)."""
         ...
 
-    async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
+    async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Send a request and wait for a correlated response."""
         ...
 
@@ -188,7 +188,7 @@ class InProcessBus:
         priority_key = -message.priority.value  # CRITICAL=3 → -3 (highest)
         await self._queue.put((priority_key, float(self._msg_counter), topic, message))
 
-    async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
+    async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Send a request and wait for a correlated response."""
         # Create a future for the response
         future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()

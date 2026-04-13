@@ -89,6 +89,9 @@ class LLMInterface:
     ) -> Iterator[str]:
         """Synchronous token-by-token generator with KV-cache decoding."""
         enc = self.tokenizer.encode(prompt)
+        # HF tokenizers return list[int]; native returns list[int] too but may differ
+        if hasattr(enc, 'ids'):
+            enc = enc.ids  # native tokenizer wrapper
         input_ids = torch.tensor([enc], dtype=torch.long).to(self.device)
 
         # Dynamic LoRA Adapter Multiplexing
@@ -130,7 +133,10 @@ class LLMInterface:
                     )
 
                     # Decode only the new token and yield it
-                    token_text = self.tokenizer.decode_to_string([next_token])
+                    if hasattr(self.tokenizer, 'decode_to_string'):
+                        token_text = self.tokenizer.decode_to_string([next_token])
+                    else:
+                        token_text = self.tokenizer.decode([next_token], skip_special_tokens=True)
                     yield token_text
         finally:
             if hasattr(self.model, "set_adapter"):
@@ -171,7 +177,7 @@ class LLMInterface:
         while True:
             # Poll the queue without blocking the event loop
             try:
-                token = await asyncio.to_thread(token_queue.get, timeout=30.0)
+                token = await asyncio.to_thread(token_queue.get, timeout=90.0)
             except Exception:
                 break
             if token is None:
