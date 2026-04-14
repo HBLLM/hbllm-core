@@ -195,3 +195,70 @@ sequenceDiagram
     DM-->>W: workspace.thought
     W->>W: Consensus → Decision → Response
 ```
+
+---
+
+## Advanced Router Features
+
+The Router includes several zero-cost improvements that enhance routing quality without impacting inference latency.
+
+### Dynamic Temperature
+
+The softmax temperature **auto-adjusts** based on score spread:
+
+- **Clear winner** (high spread) → low τ (0.05) → near-argmax, single domain
+- **Ambiguous query** (low spread) → high τ (0.5) → broad blending across domains
+
+```python
+# Automatic — no configuration needed
+# High spread: τ=0.05 → {coding: 0.98, math: 0.02} → single domain
+# Low spread:  τ=0.50 → {coding: 0.55, math: 0.45} → balanced blend
+```
+
+### Contextual Routing
+
+The Router encodes the **last 3 messages** alongside the current query for session-aware routing. This prevents context-switching thrash in multi-turn conversations:
+
+```
+Turn 1: "What's a list comprehension?" → coding
+Turn 2: "Show me an example"           → coding (context: list comprehension)
+Turn 3: "Now explain its time complexity" → coding + math (context aware)
+```
+
+### Confidence Calibration
+
+Raw cosine similarity scores are passed through **Platt scaling** (`sigmoid(5.0 × score - 2.0)`) to produce well-calibrated probabilities. This prevents erratic blending from poorly-scaled raw scores.
+
+### Router Distillation
+
+Every routing decision is emitted as a `system.router_decision` event on the message bus. The `SleepNode` can consume these events during idle periods to build a training dataset for fine-tuning the ONNX router encoder — enabling the router to learn from its own decisions over time.
+
+### Negative Contrastive Feedback
+
+When feedback includes a `correct_domain` field, the Router performs **bidirectional centroid adjustment**:
+
+1. **Push** the wrong domain's centroid **away** from the query
+2. **Pull** the correct domain's centroid **toward** the query
+
+This is more effective than the previous one-directional approach.
+
+```python
+# Feedback payload for contrastive correction
+await bus.publish("system.feedback", Message(
+    payload={
+        "rating": -1,
+        "domain": "math",              # Domain that was incorrectly chosen
+        "correct_domain": "coding",     # Where it should have gone
+        "prompt": "Fix this Python bug",
+    }
+))
+```
+
+### Persistent Centroids
+
+Learned centroid embeddings are saved to `data/router_centroids.json` on shutdown and restored on startup. This means routing quality **improves over time** and survives restarts.
+
+The file stores:
+- All domain centroid vectors (384-dim)
+- Current `unknown_threshold`
+- Platt calibration parameters (`a`, `b`)
