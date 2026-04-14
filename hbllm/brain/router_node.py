@@ -233,15 +233,17 @@ class RouterNode(Node):
                 self._session_history[session_id].append(text[:200])
 
             scores = {}
+            raw_scores_map: dict[str, float] = {}
             for domain, centroid in self.domain_centroids.items():
                 norm_q = float(np.linalg.norm(query_emb))
                 norm_c = float(np.linalg.norm(centroid))
                 if norm_q > 0 and norm_c > 0:
                     raw_score = float(np.dot(query_emb, centroid) / (norm_q * norm_c))
-                    # [Improvement 5] Platt Confidence Calibration
+                    raw_scores_map[domain] = raw_score
+                    # [Improvement 5] Platt Confidence Calibration (for routing decisions)
                     scores[domain] = self._calibrate(raw_score)
 
-            # Sort domains by score
+            # Sort domains by calibrated score
             sorted_domains = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
             if not sorted_domains:
@@ -249,7 +251,8 @@ class RouterNode(Node):
                 confidence = 0.5
             else:
                 top_domain, top_score = sorted_domains[0]
-                confidence = top_score
+                # Use raw score for confidence (monotonic with centroid distance)
+                confidence = raw_scores_map.get(top_domain, top_score)
 
                 if top_score > self.unknown_threshold:
                     # Filter domains above noise floor
