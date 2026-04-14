@@ -67,6 +67,8 @@ def _classify_domain_rank(domain: str, default_rank: int = 8) -> int:
     Heavy domains (medical, legal, coding, math) get higher rank for
     deeper specialization. Light domains (style, tone) get lower rank.
 
+    Supports hierarchical sub-domains: ``coding.python`` matches ``coding``.
+
     Args:
         domain: The domain name to classify.
         default_rank: Fallback rank for unrecognized domains.
@@ -74,8 +76,11 @@ def _classify_domain_rank(domain: str, default_rank: int = 8) -> int:
     Returns:
         Recommended LoRA rank (4, 8, 16, 32, or 64).
     """
-    domain_lower = domain.lower().replace("_", " ")
-    tokens = set(domain_lower.split())
+    # Split on dots for sub-domain hierarchy, then also split on underscores/spaces
+    domain_lower = domain.lower()
+    tokens = set()
+    for part in domain_lower.replace(".", " ").replace("_", " ").split():
+        tokens.add(part)
 
     if tokens & _HEAVY_DOMAINS:
         return 32
@@ -155,10 +160,11 @@ class SpawnerNode(Node):
         self, topic: str, tenant_id: str | None = None, lora_rank: int = 8
     ) -> None:
         """The core expansion logic: resolve adapter → (or synthesize + train) → register module."""
+        # Support hierarchical sub-domains (e.g., "coding.python" stays as-is)
         domain_name = topic.replace(" ", "_").lower()
         if tenant_id and tenant_id != "system":
             domain_name = f"{tenant_id}_{domain_name}"
-        new_node_id = f"domain_{domain_name}"
+        new_node_id = f"domain_{domain_name.replace('.', '_')}"
 
         logger.info("--- Self-Expansion Initiated for '%s' ---", domain_name)
 
@@ -206,7 +212,7 @@ class SpawnerNode(Node):
 
             logger.info("--- Self-Expansion COMPLETE for '%s' ---", domain_name)
 
-            # 4. Announce completion
+            # 4. Announce completion with centroid_text for Router
             completion_msg = Message(
                 type=MessageType.SPAWN_COMPLETE,
                 source_node_id=self.node_id,
@@ -219,6 +225,20 @@ class SpawnerNode(Node):
                 },
             )
             await self.bus.publish("system.spawn.complete", completion_msg)
+
+            # 5. Notify Router to register the new domain with centroid
+            centroid_text = f"Topics relating to {domain_name.replace('.', ' ').replace('_', ' ')}"
+            domain_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                target_node_id="",
+                topic="system.domain_registered",
+                payload={
+                    "domain": domain_name,
+                    "centroid_text": centroid_text,
+                },
+            )
+            await self.bus.publish("system.domain_registered", domain_msg)
 
         except Exception as e:
             logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
@@ -322,7 +342,7 @@ class SpawnerNode(Node):
                 # Extract LoRA state dict
                 adapter_state = LoRAManager.get_lora_state_dict(train_model)
 
-                # Save adapter
+                # Save adapter with hierarchical path support
                 from pathlib import Path
 
                 save_dir = Path(f"./checkpoints/domains/{domain_name}")

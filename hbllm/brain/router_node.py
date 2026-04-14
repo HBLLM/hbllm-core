@@ -8,9 +8,11 @@ If the query spans multiple domains, it delegates to the PlannerNode.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -39,6 +41,7 @@ class RouterNode(Node):
         default_domain: str = "general",
         llm: Any = None,
         use_vectors: bool = True,
+        domain_registry: Any | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -49,15 +52,15 @@ class RouterNode(Node):
         self.topic_sub = "router.query"
         self.llm = llm  # LLMInterface instance
 
-        # Dynamic domain registry (updated by SpawnerNode when new modules are created)
-        self.known_domains: set[str] = {
-            "general",
-            "coding",
-            "math",
-            "planner",
-            "api_synth",
-            "fuzzy",
-        }
+        # Hierarchical domain registry
+        if domain_registry is None:
+            from hbllm.modules.domain_registry import DomainRegistry
+
+            domain_registry = DomainRegistry()
+        self.domain_registry = domain_registry
+
+        # Derive known_domains from registry for backward compatibility
+        self.known_domains: set[str] = set(self.domain_registry.all_domains)
         self.known_intents: set[str] = {
             "general_knowledge",
             "code_generation",
@@ -84,8 +87,30 @@ class RouterNode(Node):
         self._tokenizer: Any | None = None
         self._onnx_inputs: list[str] = []
 
+        # Weighted routing config
+        self._softmax_temperature: float = 0.1
+        self._max_blend_domains: int = 3
+        self._min_blend_weight: float = 0.05
+
+        # [Improvement 1] Dynamic Temperature — auto-adjusts based on score spread
+        self._dynamic_temperature: bool = True
+        self._temp_min: float = 0.05  # Very sharp (near-argmax)
+        self._temp_max: float = 0.5  # Broad blending for ambiguous queries
+
+        # [Improvement 2] Contextual Routing — use conversation history
+        self._context_window: int = 3  # Number of recent messages to include
+        self._session_history: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=10))
+
+        # [Improvement 5] Confidence Calibration — Platt scaling params
+        # sigmoid(a * score + b) — trained via feedback, defaults are identity-ish
+        self._platt_a: float = 5.0  # Steepness
+        self._platt_b: float = -2.0  # Shift (so 0.4 raw → ~0.5 calibrated)
+
+        # [Improvement 8] Persistent Centroids — survive restarts
+        self._centroids_path: Path | None = None  # Set by factory
+
     def _bootstrap_centroids(self) -> None:
-        """Bootstrap default domain embeddings to initialize the vector space."""
+        """Bootstrap domain embeddings from the DomainRegistry."""
         if not self.use_vectors:
             return
 
@@ -114,23 +139,13 @@ class RouterNode(Node):
             if self.encoder:
                 self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
 
-        for d in self.known_domains:
-            # Synthetic query generation
-            if d == "general":
-                text_repr = "Hello, can you help me with a general question about daily life, chatting, or common facts?"
-            elif d == "coding":
-                text_repr = "Write a python script, fix this bug, create an HTML React component, explain this logic error."
-            elif d == "math":
-                text_repr = "Calculate the integral, solve this equation, what is the square root, number theory."
-            elif d == "planner":
-                text_repr = "Can you design a multi-step plan, architect a system layout, or outline the workflow?"
-            elif d == "api_synth":
-                text_repr = "Make a POST request, fetch data from the REST backend, build an endpoint payload."
-            else:
-                text_repr = f"I have a specific query regarding {d} topics."
+        # Bootstrap from registry centroid texts
+        for domain_name, centroid_text in self.domain_registry.centroid_texts().items():
+            emb = self._encode_text(centroid_text)
+            self.domain_centroids[domain_name] = emb
 
-            emb = self._encode_text(text_repr)
-            self.domain_centroids[d] = emb
+        # [Improvement 8] Load persisted centroids (overwrite bootstrapped ones)
+        self._load_centroids()
 
     def _encode_text(self, text: str) -> Any:
         """Encodes text using the ONNX lightweight CPU architecture natively."""
@@ -173,7 +188,9 @@ class RouterNode(Node):
         await self.bus.subscribe("system.swarm.transfer", self._handle_swarm_transfer)
 
     async def on_stop(self) -> None:
+        """Save learned centroids on shutdown."""
         logger.info("Stopping RouterNode")
+        self._save_centroids()
 
     async def handle_message(self, message: Message) -> Message | None:
         """Route the incoming query to the appropriate subsystem."""
@@ -201,16 +218,32 @@ class RouterNode(Node):
 
             import numpy as np
 
-            query_emb = self._encode_text(text)
+            # [Improvement 2] Contextual Routing — encode with conversation history
+            session_id = message.session_id or ""
+            context_text = text
+            if session_id and session_id in self._session_history:
+                recent = list(self._session_history[session_id])[-self._context_window :]
+                if recent:
+                    context_text = " | ".join(recent) + " | " + text
+
+            query_emb = self._encode_text(context_text)
+
+            # Store this query in session history for future context
+            if session_id:
+                self._session_history[session_id].append(text[:200])
 
             scores = {}
+            raw_scores_map: dict[str, float] = {}
             for domain, centroid in self.domain_centroids.items():
                 norm_q = float(np.linalg.norm(query_emb))
                 norm_c = float(np.linalg.norm(centroid))
                 if norm_q > 0 and norm_c > 0:
-                    scores[domain] = float(np.dot(query_emb, centroid) / (norm_q * norm_c))
+                    raw_score = float(np.dot(query_emb, centroid) / (norm_q * norm_c))
+                    raw_scores_map[domain] = raw_score
+                    # [Improvement 5] Platt Confidence Calibration (for routing decisions)
+                    scores[domain] = self._calibrate(raw_score)
 
-            # Sort domains by score
+            # Sort domains by calibrated score
             sorted_domains = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
             if not sorted_domains:
@@ -218,34 +251,57 @@ class RouterNode(Node):
                 confidence = 0.5
             else:
                 top_domain, top_score = sorted_domains[0]
-                confidence = top_score
+                # Use raw score for confidence (monotonic with centroid distance)
+                confidence = raw_scores_map.get(top_domain, top_score)
 
                 if top_score > self.unknown_threshold:
-                    # Check if second place is close enough for MoE blending
-                    if len(sorted_domains) > 1:
-                        second_domain, second_score = sorted_domains[1]
-                        # Only blend if second score is also very high and relatively close
-                        if (
-                            second_score > self.unknown_threshold
-                            and (top_score - second_score) < 0.15
-                        ):
-                            total = top_score + second_score
-                            target_domain = {
-                                top_domain: round(top_score / total, 3),
-                                second_domain: round(second_score / total, 3),
-                            }
-                            logger.info(
-                                "Vector Router triggered MoE Hybrid mapping: %s", target_domain
-                            )
-                        else:
-                            target_domain = top_domain
-                    else:
+                    # Filter domains above noise floor
+                    eligible = [(d, s) for d, s in sorted_domains if s > self.unknown_threshold]
+
+                    if len(eligible) <= 1:
                         target_domain = top_domain
+                    else:
+                        # [Improvement 1] Dynamic Temperature
+                        temperature = self._softmax_temperature
+                        if self._dynamic_temperature and len(eligible) >= 2:
+                            score_spread = eligible[0][1] - eligible[-1][1]
+                            # Low spread = ambiguous → higher temp → more blending
+                            # High spread = clear winner → lower temp → sharper
+                            temperature = self._temp_min + (
+                                (self._temp_max - self._temp_min)
+                                * (1.0 - min(score_spread / 0.3, 1.0))
+                            )
+
+                        # Softmax-weighted top-2 (max 3) blend
+                        top_n = eligible[: self._max_blend_domains]
+                        raw_scores = np.array([s for _, s in top_n])
+
+                        # Temperature-scaled softmax
+                        exp_scores = np.exp((raw_scores - raw_scores.max()) / temperature)
+                        weights = exp_scores / exp_scores.sum()
+
+                        # Build blend dict, pruning domains below 5%
+                        blend: dict[str, float] = {}
+                        for (d, _), w in zip(top_n, weights):
+                            if float(w) >= self._min_blend_weight:
+                                blend[d] = round(float(w), 3)
+
+                        if len(blend) <= 1:
+                            target_domain = top_domain
+                        else:
+                            target_domain = blend
+                            logger.info(
+                                "Vector Router softmax blend (top-%d): %s",
+                                len(blend),
+                                target_domain,
+                            )
                 else:
                     target_domain = "general"
 
             logger.debug(
-                "Vector Router chose domain '%s' with confidence %.3f", target_domain, confidence
+                "Vector Router chose domain '%s' with confidence %.3f",
+                target_domain,
+                confidence,
             )
         elif self.llm:
             # Fallback to LLM if vector encoder isn't available
@@ -342,6 +398,26 @@ class RouterNode(Node):
         )
         await self.bus.publish("workspace.update", routed_query)
 
+        # [Improvement 4] Router Distillation — emit routing decision for SleepNode
+        try:
+            distill_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="system.router_decision",
+                payload={
+                    "query": text[:200],
+                    "domain": target_domain if isinstance(target_domain, str) else target_domain,
+                    "confidence": confidence,
+                    "intent": intent,
+                },
+                correlation_id=message.correlation_id or message.id,
+            )
+            await self.bus.publish("system.router_decision", distill_msg)
+        except Exception:
+            pass  # Non-critical — don't fail routing over telemetry
+
         return None
 
     async def _handle_feedback(self, message: Message) -> Message | None:
@@ -372,12 +448,28 @@ class RouterNode(Node):
                     domain,
                 )
             elif rating < 0:
-                # Push centroid away from the unsuccessful query
+                # [Improvement 6] Negative Contrastive — push AWAY from wrong domain
                 new_centroid = current_centroid - (alpha * query_emb)
                 logger.info(
                     "RouterNode pushed centroid for domain '%s' away from query (Negative Rating)",
                     domain,
                 )
+
+                # Also push the query TOWARDS the correct domain if provided
+                correct_domain: str = str(message.payload.get("correct_domain", ""))
+                if correct_domain and correct_domain in self.domain_centroids:
+                    correct_centroid = self.domain_centroids[correct_domain]
+                    self.domain_centroids[correct_domain] = (
+                        1 - alpha
+                    ) * correct_centroid + alpha * query_emb
+                    # Normalize the corrected centroid
+                    c_norm = float(np.linalg.norm(self.domain_centroids[correct_domain]))
+                    if c_norm > 0:
+                        self.domain_centroids[correct_domain] /= c_norm
+                    logger.info(
+                        "RouterNode pulled centroid for '%s' towards query (Contrastive Correction)",
+                        correct_domain,
+                    )
             else:
                 new_centroid = current_centroid
 
@@ -386,6 +478,9 @@ class RouterNode(Node):
             if norm > 0:
                 new_centroid = new_centroid / norm
             self.domain_centroids[domain] = new_centroid
+
+            # [Improvement 8] Persist updated centroids
+            self._save_centroids()
 
         # Threshold logic
         if rating > 0:
@@ -402,6 +497,9 @@ class RouterNode(Node):
             # Negative: routing may have been wrong, become slightly more cautious
             self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
 
+        # Keep known_domains in sync with registry
+        self.known_domains = set(self.domain_registry.all_domains)
+
         logger.debug(
             "RouterNode threshold adjusted to %.2f after feedback (rating=%d)",
             self.unknown_threshold,
@@ -411,12 +509,16 @@ class RouterNode(Node):
 
     async def _handle_domain_registered(self, message: Message) -> Message | None:
         """Auto-learn new domains when SpawnerNode creates them."""
+        from hbllm.modules.domain_registry import DomainSpec
+
         domain: str = str(message.payload.get("domain", ""))
-        if domain and domain not in self.known_domains:
-            self.known_domains.add(domain)
+        if domain and not self.domain_registry.exists(domain):
+            centroid = str(message.payload.get("centroid_text", f"Topics relating to {domain}"))
+            self.domain_registry.register(DomainSpec(name=domain, centroid_text=centroid))
+            self.known_domains = set(self.domain_registry.all_domains)
             logger.info("RouterNode registered new domain: %s", domain)
             if self.use_vectors:
-                self.domain_centroids[domain] = self._encode_text(f"Topics relating to {domain}")
+                self.domain_centroids[domain] = self._encode_text(centroid)
         return None
 
     async def _handle_swarm_transfer(self, message: Message) -> Message | None:
@@ -464,3 +566,84 @@ class RouterNode(Node):
         await self.bus.publish("workspace.update", routed_query)
 
         return None
+
+    # ── Helper Methods ────────────────────────────────────────────────────
+
+    def _calibrate(self, raw_score: float) -> float:
+        """
+        [Improvement 5] Platt Confidence Calibration.
+
+        Converts raw cosine similarity into a calibrated probability via
+        sigmoid(a * score + b).  This produces better-calibrated confidence
+        values for downstream blending decisions.
+        """
+        import math
+
+        return 1.0 / (1.0 + math.exp(-(self._platt_a * raw_score + self._platt_b)))
+
+    def _save_centroids(self) -> None:
+        """
+        [Improvement 8] Persist learned centroids to disk.
+
+        Saves as a JSON file mapping domain names to centroid vectors.
+        Called on shutdown and after feedback-driven centroid updates.
+        """
+        if self._centroids_path is None or not self.domain_centroids:
+            return
+
+        try:
+            import numpy as np
+
+            data = {
+                "version": 2,
+                "timestamp": time.time(),
+                "threshold": self.unknown_threshold,
+                "platt_a": self._platt_a,
+                "platt_b": self._platt_b,
+                "centroids": {
+                    name: centroid.tolist() if isinstance(centroid, np.ndarray) else centroid
+                    for name, centroid in self.domain_centroids.items()
+                },
+            }
+            self._centroids_path.parent.mkdir(parents=True, exist_ok=True)
+            self._centroids_path.write_text(json.dumps(data), encoding="utf-8")
+            logger.debug(
+                "Saved %d centroids to %s", len(self.domain_centroids), self._centroids_path
+            )
+        except Exception as e:
+            logger.warning("Failed to save centroids: %s", e)
+
+    def _load_centroids(self) -> None:
+        """
+        [Improvement 8] Load persisted centroids from disk.
+
+        Overwrites bootstrapped centroids with learned ones.
+        """
+        if self._centroids_path is None or not self._centroids_path.exists():
+            return
+
+        try:
+            import numpy as np
+
+            data = json.loads(self._centroids_path.read_text(encoding="utf-8"))
+
+            if data.get("version", 1) >= 2:
+                # Restore calibration params
+                self.unknown_threshold = data.get("threshold", self.unknown_threshold)
+                self._platt_a = data.get("platt_a", self._platt_a)
+                self._platt_b = data.get("platt_b", self._platt_b)
+
+            centroids = data.get("centroids", {})
+            loaded = 0
+            for name, vec in centroids.items():
+                self.domain_centroids[name] = np.array(vec, dtype=np.float32)
+                loaded += 1
+
+            logger.info(
+                "Loaded %d persisted centroids from %s (threshold=%.2f)",
+                loaded,
+                self._centroids_path,
+                self.unknown_threshold,
+            )
+        except Exception as e:
+            logger.warning("Failed to load centroids: %s", e)

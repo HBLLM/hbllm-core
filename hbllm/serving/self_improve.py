@@ -171,8 +171,9 @@ def _train_on_domain(
     model = HBLLMForCausalLM(config)
     tokenizer = Tokenizer()
 
-    # Check for existing checkpoint
+    # Check for existing checkpoint (supports hierarchical sub-domains like "coding.python")
     domain_ckpt_dir = os.path.join(checkpoint_dir, domain)
+    os.makedirs(domain_ckpt_dir, exist_ok=True)
     base_ckpt = Path(checkpoint_dir) / "base"
     if base_ckpt.exists():
         latest = sorted(base_ckpt.glob("step_*.pt"))
