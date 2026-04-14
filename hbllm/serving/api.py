@@ -110,7 +110,11 @@ async def _boot_brain(
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
     import torch
-    from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
+
+    try:
+        from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
+    except ImportError:
+        Vocab = None  # type: ignore[assignment,misc]
 
     from hbllm.actions.api_node import ApiNode
     from hbllm.actions.browser_node import BrowserNode
@@ -167,21 +171,27 @@ async def _boot_brain(
     await bus.start()
 
     # 2. Model
-    logger.info("Loading base transformer model (%s)...", model_size)
-    config = get_config(model_size)
-    model = HBLLMForCausalLM(config)
-    device = torch.device(
+    logger.info("Loading base model (%s)...", model_size)
+    from hbllm.model.model_loader import load_model
+
+    device_str = (
         "cuda"
         if torch.cuda.is_available()
         else "mps"
         if torch.backends.mps.is_available()
         else "cpu"
     )
-    model.to(device)
+    model = load_model(source=model_size, device=device_str)
+
+    device = torch.device(device_str)
 
     # 3. Tokenizer
     logger.info("Loading tokenizer...")
-    vocab = Vocab.load("test_workspace/vocab.json")
+    vocab = getattr(model, "tokenizer", None)
+    if vocab is None and Vocab is not None:
+        vocab = Vocab.load("test_workspace/vocab.json")
+    if vocab is None:
+        raise RuntimeError("No tokenizer available — model must provide one")
 
     # 4. LLM Interface
     llm_interface = LLMInterface(model=model, tokenizer=vocab, device=device)
@@ -299,8 +309,11 @@ async def _boot_provider_mode() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     """Boot the brain on startup, fall back to provider mode if it fails."""
+    import os
+
+    model_size = os.getenv("HBLLM_MODEL_SIZE", "125m")
     try:
-        await _boot_brain(app=app)
+        await _boot_brain(app=app, model_size=model_size)
         logger.info("Full brain pipeline active")
     except Exception as e:
         logger.warning("Full brain boot failed (%s). Falling back to provider mode.", e)
@@ -888,6 +901,173 @@ async def studio_stats() -> Any:
     return result
 
 
+@app.get("/studio/memory")
+async def studio_memory() -> Any:
+    """Memory subsystem stats for Studio — episodic, semantic, procedural, value."""
+    nodes = _state.get("nodes", [])
+    node_map: dict[str, Any] = {}
+    for node in nodes:
+        node_map[type(node).__name__] = node
+
+    result: dict[str, Any] = {}
+
+    from hbllm.memory.memory_node import MemoryNode
+
+    mem = node_map.get("MemoryNode")
+    if mem and isinstance(mem, MemoryNode):
+        # Episodic
+        try:
+            ep_stats = mem.db.stats() if hasattr(mem.db, "stats") else {}
+            result["episodic"] = (
+                ep_stats
+                if ep_stats
+                else {
+                    "db_path": str(mem.db.db_path),
+                    "status": "active",
+                }
+            )
+        except Exception:
+            result["episodic"] = {"status": "active"}
+
+        # Semantic
+        try:
+            sem = mem.semantic_db
+            result["semantic"] = {
+                "total_entries": len(sem._entries) if hasattr(sem, "_entries") else 0,
+                "priority_entries": sum(
+                    1
+                    for e in (sem._entries if hasattr(sem, "_entries") else [])
+                    if getattr(e, "is_priority", False)
+                ),
+                "status": "active",
+            }
+        except Exception:
+            result["semantic"] = {"status": "active", "total_entries": 0}
+
+        # Procedural
+        try:
+            proc = mem.procedural_db
+            result["procedural"] = {
+                "db_path": str(proc.db_path) if hasattr(proc, "db_path") else "N/A",
+                "status": "active",
+            }
+        except Exception:
+            result["procedural"] = {"status": "active"}
+
+        # Value
+        try:
+            val = mem.value_db
+            result["value"] = {
+                "db_path": str(val.db_path) if hasattr(val, "db_path") else "N/A",
+                "status": "active",
+            }
+        except Exception:
+            result["value"] = {"status": "active"}
+
+        # Knowledge Graph summary
+        try:
+            kg = mem.knowledge_graph
+            result["knowledge_graph"] = {
+                "entity_count": kg.entity_count,
+                "relation_count": kg.relation_count,
+            }
+        except Exception:
+            result["knowledge_graph"] = {"entity_count": 0, "relation_count": 0}
+
+    return result
+
+
+@app.get("/studio/knowledge")
+async def studio_knowledge() -> Any:
+    """Knowledge Graph contents for Studio — entities, relations, subgraphs."""
+    nodes = _state.get("nodes", [])
+    node_map: dict[str, Any] = {}
+    for node in nodes:
+        node_map[type(node).__name__] = node
+
+    result: dict[str, Any] = {"entities": [], "relations": [], "stats": {}}
+
+    from hbllm.memory.memory_node import MemoryNode
+
+    mem = node_map.get("MemoryNode")
+    if mem and isinstance(mem, MemoryNode):
+        kg = mem.knowledge_graph
+        result["stats"] = {
+            "entity_count": kg.entity_count,
+            "relation_count": kg.relation_count,
+        }
+        # Entities
+        if hasattr(kg, "_entities"):
+            result["entities"] = [
+                {
+                    "id": e.id,
+                    "label": e.label,
+                    "type": e.entity_type,
+                }
+                for e in list(kg._entities.values())[:100]
+            ]
+        # Relations
+        if hasattr(kg, "_relations"):
+            result["relations"] = [
+                {
+                    "source": r.source_id,
+                    "target": r.target_id,
+                    "type": r.relation_type,
+                    "weight": r.weight,
+                }
+                for r in list(kg._relations)[:200]
+            ]
+
+    return result
+
+
+@app.get("/studio/lora")
+async def studio_lora() -> Any:
+    """LoRA adapter status for Studio — pending, active, rejected."""
+    import glob
+
+    data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
+    lora_dir = os.path.join(data_dir, "lora")
+
+    result: dict[str, Any] = {
+        "lora_dir": lora_dir,
+        "active_adapters": [],
+        "pending_adapters": [],
+        "rejected_count": 0,
+        "self_improve_status": "idle",
+    }
+
+    # Scan for LoRA files
+    if os.path.exists(lora_dir):
+        for pt_file in glob.glob(os.path.join(lora_dir, "**/*.pt"), recursive=True):
+            name = os.path.basename(pt_file)
+            size_mb = os.path.getsize(pt_file) / (1024 * 1024)
+            mtime = os.path.getmtime(pt_file)
+            entry = {
+                "name": name,
+                "path": pt_file,
+                "size_mb": round(size_mb, 2),
+                "modified": mtime,
+            }
+            if name.endswith(".pending.pt"):
+                result["pending_adapters"].append(entry)
+            else:
+                result["active_adapters"].append(entry)
+
+    # Check self-improve worker status
+    nodes = _state.get("nodes", [])
+    for node in nodes:
+        if type(node).__name__ == "SleepNode":
+            result["self_improve_status"] = "active" if node._running else "idle"
+            if hasattr(node, "_dpo_cycles"):
+                result["dpo_cycles"] = node._dpo_cycles
+            if hasattr(node, "_consolidation_cycles"):
+                result["consolidation_cycles"] = node._consolidation_cycles
+            break
+
+    return result
+
+
 # ─── Provider-based Chat (lightweight) ────────────────────────────────────────
 
 
@@ -1029,7 +1209,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     await bus.publish("router.query", query_msg)
 
     try:
-        result_msg = await asyncio.wait_for(response_future, timeout=30.0)
+        result_msg = await asyncio.wait_for(response_future, timeout=120.0)
         response_text = result_msg.payload.get("text", "")
         source = result_msg.payload.get("source", "decision")
 
@@ -1596,7 +1776,7 @@ async def chat_websocket(ws: WebSocket) -> None:
 
             # Wait for response and stream it
             try:
-                result_msg = await asyncio.wait_for(response_future, timeout=30.0)
+                result_msg = await asyncio.wait_for(response_future, timeout=120.0)
                 response_text = result_msg.payload.get("text", "")
 
                 # Stream token-by-token for a natural feel

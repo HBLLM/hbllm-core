@@ -493,7 +493,7 @@ class PlannerNode(Node):
             payload={"text": prompt},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=30.0)
+            resp = await self.request("domain.general.query", req, timeout=90.0)
             return str(resp.payload.get("text", ""))
         except Exception as e:
             logger.warning("[GoT] Branch %d generation failed: %s", branch_id, e)
@@ -548,7 +548,7 @@ class PlannerNode(Node):
                 payload={"tool_name": tool_name, "arguments": tool_args_str},
             )
             try:
-                resp = await self.request("action.tool_call", req, timeout=30.0)
+                resp = await self.request("action.tool_call", req, timeout=90.0)
                 if resp.type == MessageType.ERROR:
                     err = resp.payload.get("error", "Unknown tool error")
                     obs_content = f"Observation: Error: {err}"
@@ -635,7 +635,7 @@ class PlannerNode(Node):
             payload={"text": prompt},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=30.0)
+            resp = await self.request("domain.general.query", req, timeout=90.0)
             content = resp.payload.get("text", "")
             if content:
                 graph.branch(parent.id, content)
@@ -658,7 +658,7 @@ class PlannerNode(Node):
             payload={"text": prompt},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=30.0)
+            resp = await self.request("domain.general.query", req, timeout=90.0)
             return str(resp.payload.get("text", ""))
         except Exception as e:
             logger.warning("[GoT] Merge failed: %s", e)

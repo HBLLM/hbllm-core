@@ -364,51 +364,59 @@ class BrainFactory:
             dev = device
 
         # Load model
-        model_config = get_config(model_size)
-        model = HBLLMForCausalLM(model_config)
-        tokenizer = HBLLMTokenizer()
+        from hbllm.model.model_loader import load_model
 
-        # Try to load checkpoint
+        model = load_model(source=model_size, device=dev)
+
+        tokenizer = getattr(model, "tokenizer", None)
+        if tokenizer is None:
+            from hbllm.model.tokenizer import HBLLMTokenizer
+
+            tokenizer = HBLLMTokenizer()
+
+        is_native = type(model).__name__ == "HBLLMForCausalLM"
+
+        # Try to load checkpoint (ONLY for native models)
         ckpt_loaded = False
         search_paths = []
 
-        if checkpoint_path:
-            search_paths.append(Path(checkpoint_path))
-        else:
-            # Search default locations
-            search_paths.extend(
-                [
-                    Path("./checkpoints/sft"),
-                    Path("./checkpoints/self_improve"),
-                    Path("./checkpoints"),
-                ]
-            )
+        if is_native:
+            if checkpoint_path:
+                search_paths.append(Path(checkpoint_path))
+            else:
+                # Search default locations
+                search_paths.extend(
+                    [
+                        Path("./checkpoints/sft"),
+                        Path("./checkpoints/self_improve"),
+                        Path("./checkpoints"),
+                    ]
+                )
 
-        for ckpt_dir in search_paths:
-            if ckpt_dir.is_file() and ckpt_dir.suffix == ".pt":
-                logger.info("Loading checkpoint: %s", ckpt_dir)
-                from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
-
-                ckpt = load_checkpoint(ckpt_dir)
-                model.load_state_dict(extract_model_state(ckpt), strict=False)
-                ckpt_loaded = True
-                break
-            elif ckpt_dir.is_dir():
-                pts = sorted(ckpt_dir.rglob("step_*.pt"))
-                if pts:
-                    logger.info("Loading latest checkpoint: %s", pts[-1])
+            for ckpt_dir in search_paths:
+                if ckpt_dir.is_file() and ckpt_dir.suffix == ".pt":
+                    logger.info("Loading checkpoint: %s", ckpt_dir)
                     from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
 
-                    ckpt = load_checkpoint(pts[-1])
+                    ckpt = load_checkpoint(ckpt_dir)
                     model.load_state_dict(extract_model_state(ckpt), strict=False)
                     ckpt_loaded = True
                     break
+                elif ckpt_dir.is_dir():
+                    pts = sorted(ckpt_dir.rglob("step_*.pt"))
+                    if pts:
+                        logger.info("Loading latest checkpoint: %s", pts[-1])
+                        from hbllm.utils.checkpoint import extract_model_state, load_checkpoint
 
-        if not ckpt_loaded:
+                        ckpt = load_checkpoint(pts[-1])
+                        model.load_state_dict(extract_model_state(ckpt), strict=False)
+                        ckpt_loaded = True
+                        break
+
+        if is_native and not ckpt_loaded:
             logger.warning(
-                "No checkpoint found — using randomly initialized %s model. "
-                "Train a model first with `hbllm sft` or `hbllm train`.",
-                model_config.name,
+                "No checkpoint found — using randomly initialized native model. "
+                "Train a model first with `hbllm sft` or `hbllm train`."
             )
 
         # Load LoRA adapter if specified
@@ -426,10 +434,9 @@ class BrainFactory:
         model.eval()
 
         logger.info(
-            "Local model ready: %s on %s (%s params)",
-            model_config.name,
+            "Local model ready: %s on %s",
+            model_size,
             dev,
-            f"{model_config.num_params_estimate:,}",
         )
 
         # Create LocalProvider

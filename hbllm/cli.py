@@ -86,7 +86,12 @@ def run_train(args):
 
 def run_serve(args):
     """Start the HBLLM API server."""
-    logging.info("Starting HBLLM server on %s:%d...", args.host, args.port)
+    import os
+
+    os.environ["HBLLM_MODEL_SIZE"] = args.model_size
+    logging.info(
+        "Starting HBLLM server on %s:%d with model %s...", args.host, args.port, args.model_size
+    )
     try:
         import uvicorn
 
@@ -230,6 +235,9 @@ def main():
     serve_parser.add_argument("--host", default="0.0.0.0")
     serve_parser.add_argument("--port", type=int, default=8000)
     serve_parser.add_argument("--workers", type=int, default=1)
+    serve_parser.add_argument(
+        "--model-size", type=str, default="125m", help="Native preset or HuggingFace model repo"
+    )
 
     # Info / Nodes
     subparsers.add_parser("info", help="Show system architecture info")

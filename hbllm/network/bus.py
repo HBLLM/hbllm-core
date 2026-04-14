@@ -58,7 +58,7 @@ class MessageBus(Protocol):
         """Publish a message to a topic (fire-and-forget)."""
         ...
 
-    async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
+    async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Send a request and wait for a correlated response."""
         ...
 
@@ -138,6 +138,14 @@ class InProcessBus:
                 future.cancel()
         self._pending_requests.clear()
 
+        # Cancel all active handler tasks to prevent event-loop hang
+        for task in list(self._active_tasks):
+            if not task.done():
+                task.cancel()
+        if self._active_tasks:
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+        self._active_tasks.clear()
+
         # Stop dispatch loop
         if self._dispatch_task and not self._dispatch_task.done():
             self._dispatch_task.cancel()
@@ -188,10 +196,10 @@ class InProcessBus:
         priority_key = -message.priority.value  # CRITICAL=3 → -3 (highest)
         await self._queue.put((priority_key, float(self._msg_counter), topic, message))
 
-    async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
+    async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Send a request and wait for a correlated response."""
         # Create a future for the response
-        future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
 
         # Publish the request

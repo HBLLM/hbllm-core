@@ -34,7 +34,7 @@ jobs:
         
     - name: Run tests with pytest
       run: |
-        pytest tests/ -v
+        pytest tests/ -v --timeout=120 -x
 
   rust-lint-and-test:
     runs-on: ubuntu-latest

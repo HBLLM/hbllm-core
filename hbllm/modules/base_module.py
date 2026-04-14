@@ -138,6 +138,8 @@ class DomainModuleNode(Node):
 
             async def _generate_async() -> str:
                 enc = self.tokenizer.encode(prompt)
+                if hasattr(enc, "ids"):
+                    enc = enc.ids
                 input_ids = torch.tensor([enc], dtype=torch.long).to(device)
 
                 self.model.eval()
@@ -167,7 +169,10 @@ class DomainModuleNode(Node):
                     # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
                     await asyncio.sleep(0.001)
 
-                return str(self.tokenizer.decode_to_string(out_tokens))
+                if hasattr(self.tokenizer, "decode_to_string"):
+                    return str(self.tokenizer.decode_to_string(out_tokens))
+                else:
+                    return self.tokenizer.decode(out_tokens, skip_special_tokens=True)
 
             response_text = await _generate_async()
             logger.info("Domain '%s' finished generating.", self.domain_name)
