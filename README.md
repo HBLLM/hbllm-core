@@ -56,7 +56,9 @@ HBLLM uses **one highly-optimized base model** (e.g., 125M, 500M, or 1.5B parame
 | ------------------- | ----------- | ---------------------------------------------------- |
 | **Base Model**      | 125M–1.5B   | Shared transformer backbone (GQA + SwiGLU + RoPE)    |
 | **LoRA Adapters**   | ~2MB each   | Domain specialization (General, Coding, Math, etc.)  |
-| **MoE Router**      | ~15MB       | Edge-optimized ONNX Vector Router. Blends domain experts dynamically without heavy PyTorch dependencies. |
+| **Sub-Domain LoRA** | ~2MB each   | Fine-grained specialization (coding.python, math.calculus) |
+| **MoE Router**      | ~15MB       | Edge-optimized ONNX Vector Router with softmax-weighted domain blending (top-2, max 3). |
+| **Domain Registry** | Zero params | Hierarchical domain tree with adapter fallback resolution |
 | **Cognitive Nodes** | Zero params | Orchestration, planning, memory — isolated logic     |
 
 ### 🧬 Artificial Neurogenesis (Self-Expanding Zones)
@@ -142,15 +144,17 @@ flowchart TB
         ROS["🤖 ROS2"]
     end
 
-    subgraph ZONING["🧪 Zoning Model (Self-Expanding)"]
+    subgraph ZONING["🧪 Zoning Model (Hierarchical Domains)"]
         direction LR
         BASE["Shared Base\n125M / 500M / 1.5B"]
         GEN["General LoRA\n~2MB"]
         CODE["Coding LoRA\n~2MB"]
+        CODEPY["coding.python\n~2MB"]
         MATH["Math LoRA\n~2MB"]
         NEW["??? LoRA\n(auto-spawned)"]
         BASE --- GEN
         BASE --- CODE
+        CODE --- CODEPY
         BASE --- MATH
         BASE -.->|"SpawnerNode"| NEW
     end
@@ -184,7 +188,8 @@ HBLLM Core isn't just a wrapper; it's a deeply engineered cognitive backend capa
 - **Lock-Free LoRA Concurrency:** Isolated `ContextVars` allow asynchronous domain modules to share a single GPU lock-free, streaming tiny ~2MB adapters strictly during forward passes over the PCIe bus without blocking other cognitive nodes.
 - **Secure Adapter Registry**: A hardened runtime system for resolving and downloading domain-specific LoRA adapters from the HuggingFace Hub with mandatory SHA-256 integrity checks and `weights_only=True` loading.
 - **Continuous Lifetime Learning:** The `LearnerNode` implements contrastive DPO (Direct Preference Optimization) using a persistent, atomic JSON queue. It utilizes [biologically inspired Sleep Cycles](docs/architecture/sleep-cycle.md) to consolidate feedback into permanent model updates without interrupting the main serving loop.
-- **Dynamic MoE Blending:** Queries overlapping multiple domains (e.g., Coding + Math) mathematically synthesize custom blend-weights at runtime, forming custom experts out of base adapters globally across all layers.
+- **Dynamic MoE Blending:** Queries overlapping multiple domains use softmax-weighted blending (top-2, max 3) to mathematically synthesize custom experts at runtime.
+- **Hierarchical Domain Registry:** Domains use dot-notation (`coding.python`, `math.calculus`) with automatic adapter fallback chains — `coding.python.django` → `coding.python` → `coding` → `default`.
 - **Graph-of-Thoughts (GoT) Planning:** The `PlannerNode` breaks complex goals into dynamic, directed acyclic graphs of reasoning steps.
 - **Process Reward Models (PRM):** The `ProcessRewardNode` provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.
 
