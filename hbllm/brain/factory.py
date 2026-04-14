@@ -499,9 +499,12 @@ class BrainFactory:
                     )
                     logger.info("Auto-discovered sub-domain LoRA: %s", adapter_dir.name)
 
+        router_node = RouterNode(node_id="router", llm=llm, domain_registry=domain_registry)
+        router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
+
         nodes = [
             # Core cognitive pipeline
-            RouterNode(node_id="router", llm=llm, domain_registry=domain_registry),
+            router_node,
             PlannerNode(
                 node_id="planner",
                 branch_factor=cfg.planner_branch_factor,
