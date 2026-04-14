@@ -90,7 +90,7 @@ class LLMInterface:
         """Synchronous token-by-token generator with KV-cache decoding."""
         enc = self.tokenizer.encode(prompt)
         # HF tokenizers return list[int]; native returns list[int] too but may differ
-        if hasattr(enc, 'ids'):
+        if hasattr(enc, "ids"):
             enc = enc.ids  # native tokenizer wrapper
         input_ids = torch.tensor([enc], dtype=torch.long).to(self.device)
 
@@ -133,7 +133,7 @@ class LLMInterface:
                     )
 
                     # Decode only the new token and yield it
-                    if hasattr(self.tokenizer, 'decode_to_string'):
+                    if hasattr(self.tokenizer, "decode_to_string"):
                         token_text = self.tokenizer.decode_to_string([next_token])
                     else:
                         token_text = self.tokenizer.decode([next_token], skip_special_tokens=True)

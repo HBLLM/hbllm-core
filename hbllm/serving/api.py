@@ -110,6 +110,7 @@ async def _boot_brain(
     """Initialize the full brain pipeline."""
     # Lazy imports — keeps module importable without the full ML stack
     import torch
+
     try:
         from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
     except ImportError:
@@ -172,7 +173,14 @@ async def _boot_brain(
     # 2. Model
     logger.info("Loading base model (%s)...", model_size)
     from hbllm.model.model_loader import load_model
-    device_str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+    device_str = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     model = load_model(source=model_size, device=device_str)
 
     device = torch.device(device_str)
@@ -302,6 +310,7 @@ async def _boot_provider_mode() -> None:
 async def lifespan(app: FastAPI) -> Any:
     """Boot the brain on startup, fall back to provider mode if it fails."""
     import os
+
     model_size = os.getenv("HBLLM_MODEL_SIZE", "125m")
     try:
         await _boot_brain(app=app, model_size=model_size)
@@ -909,10 +918,14 @@ async def studio_memory() -> Any:
         # Episodic
         try:
             ep_stats = mem.db.stats() if hasattr(mem.db, "stats") else {}
-            result["episodic"] = ep_stats if ep_stats else {
-                "db_path": str(mem.db.db_path),
-                "status": "active",
-            }
+            result["episodic"] = (
+                ep_stats
+                if ep_stats
+                else {
+                    "db_path": str(mem.db.db_path),
+                    "status": "active",
+                }
+            )
         except Exception:
             result["episodic"] = {"status": "active"}
 
@@ -922,7 +935,8 @@ async def studio_memory() -> Any:
             result["semantic"] = {
                 "total_entries": len(sem._entries) if hasattr(sem, "_entries") else 0,
                 "priority_entries": sum(
-                    1 for e in (sem._entries if hasattr(sem, "_entries") else [])
+                    1
+                    for e in (sem._entries if hasattr(sem, "_entries") else [])
                     if getattr(e, "is_priority", False)
                 ),
                 "status": "active",

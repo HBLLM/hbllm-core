@@ -199,6 +199,7 @@ def _train_on_domain(
 
     # Build dataset and dataloader
     import random
+
     random.shuffle(sft_data)
 
     # Split into 90% train, 10% validation (minimum 1 validation sample if > 1)
@@ -297,7 +298,11 @@ def _train_on_domain(
         if val_loader:
             logger.info("Computing validation perplexity on held-out data...")
             val_metrics = evaluator.compute_perplexity(val_loader, max_batches=50)
-            logger.info("Validation Perplexity: %.2f | Avg Loss: %.4f", val_metrics.get("perplexity", 0), val_metrics.get("avg_loss", 0))
+            logger.info(
+                "Validation Perplexity: %.2f | Avg Loss: %.4f",
+                val_metrics.get("perplexity", 0),
+                val_metrics.get("avg_loss", 0),
+            )
 
         logger.info("Running HellaSwag common-sense reasoning safety check...")
         hs_results = evaluator.evaluate_hellaswag(max_examples=50)
@@ -306,16 +311,22 @@ def _train_on_domain(
 
         # Scoring Logic
         # Accept if accuracy >= 30% OR (if offline HellaSwag failed to load and we have validation drops)
-        if accuracy >= 0.30 or (accuracy == 0 and val_loader and val_metrics.get("avg_loss", 99.0) < 5.0):
+        if accuracy >= 0.30 or (
+            accuracy == 0 and val_loader and val_metrics.get("avg_loss", 99.0) < 5.0
+        ):
             final_path = Path(domain_ckpt_dir) / "lora_adapter.pt"
             if pending_path.exists():
                 os.rename(pending_path, final_path)
-            logger.info("✅ VALIDATION PASSED: Promoted pending weights to active production LoRA state.")
+            logger.info(
+                "✅ VALIDATION PASSED: Promoted pending weights to active production LoRA state."
+            )
             status = "activated"
         else:
             if pending_path.exists():
                 os.remove(pending_path)
-            logger.error("🚨 VALIDATION FAILED: Cognitive corruption detected. Rejected pending LoRA weights.")
+            logger.error(
+                "🚨 VALIDATION FAILED: Cognitive corruption detected. Rejected pending LoRA weights."
+            )
             status = "rejected"
     else:
         trainer.save_checkpoint(loss=losses[-1] if losses else 0.0)
@@ -327,7 +338,7 @@ def _train_on_domain(
         domain,
         step,
         avg_loss,
-        status
+        status,
     )
 
     return {

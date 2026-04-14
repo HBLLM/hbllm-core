@@ -364,11 +364,13 @@ class BrainFactory:
 
         # Load model
         from hbllm.model.model_loader import load_model
+
         model = load_model(source=model_size, device=dev)
 
         tokenizer = getattr(model, "tokenizer", None)
         if tokenizer is None:
             from hbllm.model.tokenizer import HBLLMTokenizer
+
             tokenizer = HBLLMTokenizer()
 
         is_native = type(model).__name__ == "HBLLMForCausalLM"
