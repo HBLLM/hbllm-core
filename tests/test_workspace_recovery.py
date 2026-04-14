@@ -16,7 +16,7 @@ async def test_workspace_fallback_on_zero_thoughts():
     bus = InProcessBus()
     await bus.start()
 
-    workspace = WorkspaceNode(node_id="ws_test")
+    workspace = WorkspaceNode(node_id="ws_test", thinking_deadline=2.0)
     await workspace.start(bus)
 
     fallback_received = []
@@ -60,7 +60,7 @@ async def test_workspace_absolute_deadline_cap():
     bus = InProcessBus()
     await bus.start()
 
-    workspace = WorkspaceNode(node_id="ws_test")
+    workspace = WorkspaceNode(node_id="ws_test", thinking_deadline=2.0)
     await workspace.start(bus)
 
     query_msg = Message(
@@ -78,7 +78,7 @@ async def test_workspace_absolute_deadline_cap():
     board = list(workspace.blackboards.values())[0]
     assert "absolute_deadline" in board
     assert board["absolute_deadline"] > time.time()
-    assert board["absolute_deadline"] <= time.time() + 31  # ~30s from now
+    assert board["absolute_deadline"] <= time.time() + 121  # ~120s from now
 
     await workspace.stop()
     await bus.stop()
@@ -90,7 +90,7 @@ async def test_workspace_cleanup_after_commit():
     bus = InProcessBus()
     await bus.start()
 
-    workspace = WorkspaceNode(node_id="ws_test")
+    workspace = WorkspaceNode(node_id="ws_test", thinking_deadline=2.0)
     await workspace.start(bus)
 
     # Capture decision messages

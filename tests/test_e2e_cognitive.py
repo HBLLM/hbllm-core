@@ -38,7 +38,7 @@ async def cognitive_system():
 
     # Create nodes with MockLLM injected where applicable
     router = RouterNode(node_id="router", llm=llm, use_vectors=False)
-    workspace = WorkspaceNode(node_id="workspace")
+    workspace = WorkspaceNode(node_id="workspace", thinking_deadline=3.0)
     planner = PlannerNode(node_id="planner", branch_factor=2, max_depth=1)
     planner.llm = llm
     critic = CriticNode(node_id="critic", llm=llm)
