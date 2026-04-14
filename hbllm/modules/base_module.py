@@ -76,19 +76,47 @@ class DomainModuleNode(Node):
         prompt = getattr(payload, "text", "")
         domain_hint = getattr(payload, "domain_hint", "general")
 
-        # Domain eligibility check
+        # Domain eligibility check (supports hierarchical sub-domains)
         is_targeted = False
         if isinstance(domain_hint, dict):
-            # For MoE blends, the domain with the highest weight is elected to run the blended inference
-            # to prevent multiple nodes computing the exact same sequence.
-            highest_domain = max(domain_hint.items(), key=lambda x: x[1])[0]
-            if self.domain_name == highest_domain:
-                is_targeted = True
-                logger.info(
-                    "Domain '%s' elected to process MoE Hybrid %s", self.domain_name, domain_hint
-                )
-        elif domain_hint == self.domain_name or self.domain_name == "general":
-            is_targeted = True
+            # Weighted MoE: check if this domain (or ancestor) appears in the blend
+            for hint_domain in domain_hint:
+                if (
+                    self.domain_name == hint_domain
+                    or hint_domain.startswith(self.domain_name + ".")
+                    or self.domain_name.startswith(hint_domain + ".")
+                ):
+                    is_targeted = True
+                    break
+            # For MoE, only the highest-weighted matching domain runs inference
+            if is_targeted:
+                matching = {
+                    d: w
+                    for d, w in domain_hint.items()
+                    if d == self.domain_name
+                    or d.startswith(self.domain_name + ".")
+                    or self.domain_name.startswith(d + ".")
+                }
+                if matching:
+                    best = max(matching.items(), key=lambda x: x[1])[0]
+                    # Only the closest matching domain should actually run
+                    is_targeted = best == self.domain_name or best.startswith(
+                        self.domain_name + "."
+                    )
+                    if is_targeted:
+                        logger.info(
+                            "Domain '%s' elected for MoE blend %s",
+                            self.domain_name,
+                            domain_hint,
+                        )
+        elif isinstance(domain_hint, str):
+            # Hierarchical: "coding" matches "coding.python", and vice versa
+            is_targeted = (
+                domain_hint == self.domain_name
+                or domain_hint.startswith(self.domain_name + ".")
+                or self.domain_name.startswith(domain_hint + ".")
+                or self.domain_name == "general"
+            )
 
         if not is_targeted:
             return None

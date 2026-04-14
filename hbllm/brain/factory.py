@@ -96,6 +96,7 @@ class BrainConfig:
     planner_max_depth: int = 2
     data_dir: str = "data"
     system_prompt: str = "You are a helpful AI assistant."
+    domain_registry: Any | None = None  # Hierarchical domain registry
 
 
 class Brain:
@@ -478,9 +479,29 @@ class BrainFactory:
             policy_engine = PolicyEngine()
             logger.info("PolicyEngine created for governance")
 
+        # Create hierarchical domain registry
+        from hbllm.modules.domain_registry import DomainRegistry
+
+        domain_registry = cfg.domain_registry or DomainRegistry()
+
+        # Auto-discover sub-domain LoRA adapters from data/lora/
+        lora_dir = Path(cfg.data_dir) / "lora"
+        if lora_dir.is_dir():
+            from hbllm.modules.domain_registry import DomainSpec
+
+            for adapter_dir in sorted(lora_dir.iterdir()):
+                if adapter_dir.is_dir() and not domain_registry.exists(adapter_dir.name):
+                    domain_registry.register(
+                        DomainSpec(
+                            name=adapter_dir.name,
+                            centroid_text=f"Topics relating to {adapter_dir.name.replace('.', ' ')}",
+                        )
+                    )
+                    logger.info("Auto-discovered sub-domain LoRA: %s", adapter_dir.name)
+
         nodes = [
             # Core cognitive pipeline
-            RouterNode(node_id="router", llm=llm),
+            RouterNode(node_id="router", llm=llm, domain_registry=domain_registry),
             PlannerNode(
                 node_id="planner",
                 branch_factor=cfg.planner_branch_factor,

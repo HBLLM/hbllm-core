@@ -39,6 +39,7 @@ class RouterNode(Node):
         default_domain: str = "general",
         llm: Any = None,
         use_vectors: bool = True,
+        domain_registry: Any | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -49,15 +50,15 @@ class RouterNode(Node):
         self.topic_sub = "router.query"
         self.llm = llm  # LLMInterface instance
 
-        # Dynamic domain registry (updated by SpawnerNode when new modules are created)
-        self.known_domains: set[str] = {
-            "general",
-            "coding",
-            "math",
-            "planner",
-            "api_synth",
-            "fuzzy",
-        }
+        # Hierarchical domain registry
+        if domain_registry is None:
+            from hbllm.modules.domain_registry import DomainRegistry
+
+            domain_registry = DomainRegistry()
+        self.domain_registry = domain_registry
+
+        # Derive known_domains from registry for backward compatibility
+        self.known_domains: set[str] = set(self.domain_registry.all_domains)
         self.known_intents: set[str] = {
             "general_knowledge",
             "code_generation",
@@ -84,8 +85,13 @@ class RouterNode(Node):
         self._tokenizer: Any | None = None
         self._onnx_inputs: list[str] = []
 
+        # Weighted routing config
+        self._softmax_temperature: float = 0.1
+        self._max_blend_domains: int = 3
+        self._min_blend_weight: float = 0.05
+
     def _bootstrap_centroids(self) -> None:
-        """Bootstrap default domain embeddings to initialize the vector space."""
+        """Bootstrap domain embeddings from the DomainRegistry."""
         if not self.use_vectors:
             return
 
@@ -114,23 +120,10 @@ class RouterNode(Node):
             if self.encoder:
                 self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
 
-        for d in self.known_domains:
-            # Synthetic query generation
-            if d == "general":
-                text_repr = "Hello, can you help me with a general question about daily life, chatting, or common facts?"
-            elif d == "coding":
-                text_repr = "Write a python script, fix this bug, create an HTML React component, explain this logic error."
-            elif d == "math":
-                text_repr = "Calculate the integral, solve this equation, what is the square root, number theory."
-            elif d == "planner":
-                text_repr = "Can you design a multi-step plan, architect a system layout, or outline the workflow?"
-            elif d == "api_synth":
-                text_repr = "Make a POST request, fetch data from the REST backend, build an endpoint payload."
-            else:
-                text_repr = f"I have a specific query regarding {d} topics."
-
-            emb = self._encode_text(text_repr)
-            self.domain_centroids[d] = emb
+        # Bootstrap from registry centroid texts
+        for domain_name, centroid_text in self.domain_registry.centroid_texts().items():
+            emb = self._encode_text(centroid_text)
+            self.domain_centroids[domain_name] = emb
 
     def _encode_text(self, text: str) -> Any:
         """Encodes text using the ONNX lightweight CPU architecture natively."""
@@ -221,31 +214,44 @@ class RouterNode(Node):
                 confidence = top_score
 
                 if top_score > self.unknown_threshold:
-                    # Check if second place is close enough for MoE blending
-                    if len(sorted_domains) > 1:
-                        second_domain, second_score = sorted_domains[1]
-                        # Only blend if second score is also very high and relatively close
-                        if (
-                            second_score > self.unknown_threshold
-                            and (top_score - second_score) < 0.15
-                        ):
-                            total = top_score + second_score
-                            target_domain = {
-                                top_domain: round(top_score / total, 3),
-                                second_domain: round(second_score / total, 3),
-                            }
-                            logger.info(
-                                "Vector Router triggered MoE Hybrid mapping: %s", target_domain
-                            )
-                        else:
-                            target_domain = top_domain
-                    else:
+                    # Filter domains above noise floor
+                    eligible = [(d, s) for d, s in sorted_domains if s > self.unknown_threshold]
+
+                    if len(eligible) <= 1:
                         target_domain = top_domain
+                    else:
+                        # Softmax-weighted top-2 (max 3) blend
+                        top_n = eligible[: self._max_blend_domains]
+                        raw_scores = np.array([s for _, s in top_n])
+
+                        # Temperature-scaled softmax
+                        exp_scores = np.exp(
+                            (raw_scores - raw_scores.max()) / self._softmax_temperature
+                        )
+                        weights = exp_scores / exp_scores.sum()
+
+                        # Build blend dict, pruning domains below 5%
+                        blend: dict[str, float] = {}
+                        for (d, _), w in zip(top_n, weights):
+                            if float(w) >= self._min_blend_weight:
+                                blend[d] = round(float(w), 3)
+
+                        if len(blend) <= 1:
+                            target_domain = top_domain
+                        else:
+                            target_domain = blend
+                            logger.info(
+                                "Vector Router softmax blend (top-%d): %s",
+                                len(blend),
+                                target_domain,
+                            )
                 else:
                     target_domain = "general"
 
             logger.debug(
-                "Vector Router chose domain '%s' with confidence %.3f", target_domain, confidence
+                "Vector Router chose domain '%s' with confidence %.3f",
+                target_domain,
+                confidence,
             )
         elif self.llm:
             # Fallback to LLM if vector encoder isn't available
@@ -402,6 +408,9 @@ class RouterNode(Node):
             # Negative: routing may have been wrong, become slightly more cautious
             self.unknown_threshold = min(0.6, self.unknown_threshold + 0.02)
 
+        # Keep known_domains in sync with registry
+        self.known_domains = set(self.domain_registry.all_domains)
+
         logger.debug(
             "RouterNode threshold adjusted to %.2f after feedback (rating=%d)",
             self.unknown_threshold,
@@ -411,12 +420,16 @@ class RouterNode(Node):
 
     async def _handle_domain_registered(self, message: Message) -> Message | None:
         """Auto-learn new domains when SpawnerNode creates them."""
+        from hbllm.modules.domain_registry import DomainSpec
+
         domain: str = str(message.payload.get("domain", ""))
-        if domain and domain not in self.known_domains:
-            self.known_domains.add(domain)
+        if domain and not self.domain_registry.exists(domain):
+            centroid = str(message.payload.get("centroid_text", f"Topics relating to {domain}"))
+            self.domain_registry.register(DomainSpec(name=domain, centroid_text=centroid))
+            self.known_domains = set(self.domain_registry.all_domains)
             logger.info("RouterNode registered new domain: %s", domain)
             if self.use_vectors:
-                self.domain_centroids[domain] = self._encode_text(f"Topics relating to {domain}")
+                self.domain_centroids[domain] = self._encode_text(centroid)
         return None
 
     async def _handle_swarm_transfer(self, message: Message) -> Message | None:
