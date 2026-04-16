@@ -94,3 +94,21 @@ async def test_sleep_cycle_interrupted_by_user(simulated_sleep_env):
 
     # Now it should trigger
     assert len(memory.store_calls) > 0
+
+
+@pytest.mark.asyncio
+async def test_sleep_phase_transitions(simulated_sleep_env):
+    bus, sleep_node, memory = simulated_sleep_env
+    from hbllm.brain.sleep_node import SleepPhase
+
+    # Initially awake
+    assert sleep_node.current_phase == SleepPhase.AWAKE
+    assert not sleep_node.is_sleeping
+
+    # Explicitly force cycle entry
+    await sleep_node._enter_sleep_cycle()
+
+    # The cycle method tracks internal transitions.
+    # At completion, it resets to AWAKE
+    assert sleep_node.current_phase == SleepPhase.AWAKE
+    assert not sleep_node.is_sleeping

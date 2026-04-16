@@ -22,6 +22,15 @@ from hbllm.network.node import Node, NodeType
 logger = logging.getLogger(__name__)
 
 
+from enum import Enum
+
+
+class SleepPhase(str, Enum):
+    AWAKE = "awake"
+    NREM = "nrem"  # Deep sleep: memory compression & clustering
+    REM = "rem"  # REM sleep: neuroplasticity, curiosity replays
+
+
 class SleepCycleNode(Node):
     """
     Orchestrates Memory Consolidation and Synaptic Strengthening when idle.
@@ -34,11 +43,20 @@ class SleepCycleNode(Node):
             capabilities=["sleep_cycle", "memory_consolidation"],
         )
         self.idle_timeout_seconds = idle_timeout_seconds
-        self.is_sleeping = False
+        self.current_phase = SleepPhase.AWAKE
         self._last_system_activity = time.time()
         self._monitor_task: asyncio.Task[None] | None = None
         self._pending_goals: list[str] = []
         self.llm = llm  # Used for local GraphRAG clustering
+
+    @property
+    def is_sleeping(self) -> bool:
+        return self.current_phase != SleepPhase.AWAKE
+
+    @is_sleeping.setter
+    def is_sleeping(self, value: bool) -> None:
+        if not value:
+            self.current_phase = SleepPhase.AWAKE
 
     async def on_start(self) -> None:
         logger.info("Starting SleepCycleNode (Idle timeout: %s seconds)", self.idle_timeout_seconds)
@@ -79,7 +97,7 @@ class SleepCycleNode(Node):
             logger.info(
                 "[SleepNode] User input detected! Waking up immediately. Aborting deep sleep."
             )
-            self.is_sleeping = False
+            self.current_phase = SleepPhase.AWAKE
 
         return None
 
@@ -98,7 +116,7 @@ class SleepCycleNode(Node):
 
     async def _enter_sleep_cycle(self) -> None:
         """Perform offline memory consolidation and self-improvement training."""
-        self.is_sleeping = True
+        self.current_phase = SleepPhase.NREM
         cycle_start = time.time()
         report: dict[str, Any] = {
             "memories_consolidated": 0,
@@ -106,17 +124,22 @@ class SleepCycleNode(Node):
             "training_ran": False,
         }
         logger.info(
-            "[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (Consolidation Mode)...",
+            "[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (NREM Phase)...",
             self.idle_timeout_seconds,
         )
 
         try:
-            # ── Phase 1: Memory Consolidation ────────────────────────────
+            # ── Phase 1: NREM (Memory Consolidation) ────────────────────
             report["memories_consolidated"] = await self._consolidate_memory()
 
-            # ── Phase 2: Self-Improvement Training ───────────────────────
             if not self.is_sleeping:
-                return  # User woke up during consolidation
+                return
+
+            # Transition to REM sleep
+            self.current_phase = SleepPhase.REM
+            logger.info("[SleepNode] Transitioning to REM Phase...")
+
+            # ── Phase 2: REM (Self-Improvement Training) ────────────────
             report["training_ran"] = await self._run_self_improvement()
 
             # ── Phase 3: Curiosity Goal Replay ───────────────────────────

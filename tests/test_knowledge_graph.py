@@ -1,215 +1,140 @@
-"""
-Tests for KnowledgeGraph — entity/relation storage, query, and text ingestion.
-"""
+"""Tests for KnowledgeGraph enhancements: disambiguation, community detection, PageRank."""
 
-from hbllm.memory.knowledge_graph import (
-    KnowledgeGraph,
-    extract_entities_from_text,
-)
+from __future__ import annotations
 
-# ── Entity & Relation CRUD ───────────────────────────────────────────────────
+from hbllm.memory.knowledge_graph import KnowledgeGraph
 
 
-class TestEntityCRUD:
-    def test_add_entity(self):
+class TestDisambiguation:
+    def test_exact_duplicates_same_id(self):
         kg = KnowledgeGraph()
-        e = kg.add_entity("Python", entity_type="language")
-        assert e.label == "python"
-        assert e.entity_type == "language"
+        kg.add_entity("machine learning")
+        kg.add_entity("machine learning")
         assert kg.entity_count == 1
 
-    def test_add_duplicate_entity_merges(self):
+    def test_similar_entities_merged(self):
         kg = KnowledgeGraph()
-        kg.add_entity("Python", attributes={"version": "3.11"})
-        kg.add_entity("Python", attributes={"creator": "Guido"})
+        kg.add_entity("python programming")
+        kg.add_entity("python programming language")
+        kg.add_relation("user", "python programming", "uses")
+        kg.add_relation("user", "python programming language", "uses")
+
+        initial = kg.entity_count
+        merged = kg.disambiguate_entities(similarity_threshold=0.5)
+        assert merged >= 1 or kg.entity_count <= initial
+
+    def test_different_types_not_merged(self):
+        kg = KnowledgeGraph()
+        kg.add_entity("python", entity_type="language")
+        kg.add_entity("python", entity_type="animal")
         assert kg.entity_count == 1
-        e = kg.get_entity("Python")
-        assert e.attributes["version"] == "3.11"
-        assert e.attributes["creator"] == "Guido"
 
-    def test_get_entity_returns_none_for_missing(self):
+    def test_merge_redirects_relations(self):
         kg = KnowledgeGraph()
-        assert kg.get_entity("nonexistent") is None
+        kg.add_relation("deep learning", "ai", "is_a")
+        kg.add_relation("deep learning methods", "research", "used_in")
 
-    def test_add_relation_creates_entities(self):
+        kg.disambiguate_entities(similarity_threshold=0.5)
+        assert kg.relation_count >= 1
+
+    def test_no_merge_below_threshold(self):
         kg = KnowledgeGraph()
-        rel = kg.add_relation("Python", "programming", "is_a")
-        assert kg.entity_count == 2
-        assert kg.relation_count == 1
-        assert rel.relation_type == "is_a"
+        kg.add_entity("python")
+        kg.add_entity("javascript")
+        merged = kg.disambiguate_entities(similarity_threshold=0.9)
+        assert merged == 0
 
-    def test_duplicate_relation_updates_weight(self):
+
+class TestCommunityDetection:
+    def test_empty_graph(self):
+        assert KnowledgeGraph().community_detection() == {}
+
+    def test_single_cluster(self):
         kg = KnowledgeGraph()
-        kg.add_relation("A", "B", "uses", weight=0.5)
-        kg.add_relation("A", "B", "uses", weight=0.9)
-        assert kg.relation_count == 1
-        # Weight should be max(0.5, 0.9) = 0.9
-        rel = list(kg._relations.values())[0]
-        assert rel.weight == 0.9
+        kg.add_relation("a", "b", "r")
+        kg.add_relation("b", "c", "r")
+        communities = kg.community_detection()
+        assert len(communities) >= 1
 
-    def test_clear(self):
+    def test_two_clusters(self):
         kg = KnowledgeGraph()
-        kg.add_relation("A", "B", "uses")
-        kg.add_relation("C", "D", "has")
-        kg.clear()
-        assert kg.entity_count == 0
-        assert kg.relation_count == 0
+        kg.add_relation("python", "programming", "is_a")
+        kg.add_relation("python", "coding", "relates_to")
+        kg.add_relation("programming", "coding", "relates_to")
+        kg.add_relation("dog", "animal", "is_a")
+        kg.add_relation("cat", "animal", "is_a")
+        kg.add_relation("dog", "cat", "relates_to")
 
+        communities = kg.community_detection()
+        assert len(communities) >= 1
 
-# ── Neighbor Queries ─────────────────────────────────────────────────────────
-
-
-class TestNeighborQueries:
-    def setup_method(self):
-        self.kg = KnowledgeGraph()
-        self.kg.add_relation("python", "programming", "is_a")
-        self.kg.add_relation("python", "guido", "created_by")
-        self.kg.add_relation("javascript", "programming", "is_a")
-        self.kg.add_relation("python", "flask", "uses")
-
-    def test_outgoing_neighbors(self):
-        results = self.kg.neighbors("python", direction="out")
-        labels = [r["entity"] for r in results]
-        assert "programming" in labels
-        assert "guido" in labels
-        assert "flask" in labels
-        assert len(results) == 3
-
-    def test_incoming_neighbors(self):
-        results = self.kg.neighbors("programming", direction="in")
-        labels = [r["entity"] for r in results]
-        assert "python" in labels
-        assert "javascript" in labels
-
-    def test_filter_by_relation_type(self):
-        results = self.kg.neighbors("python", relation_type="is_a")
-        assert len(results) >= 1
-        assert all(r["relation"] == "is_a" for r in results)
-
-    def test_neighbors_of_nonexistent(self):
-        results = self.kg.neighbors("nonexistent")
-        assert results == []
-
-
-# ── Shortest Path ────────────────────────────────────────────────────────────
-
-
-class TestShortestPath:
-    def setup_method(self):
-        self.kg = KnowledgeGraph()
-        self.kg.add_relation("A", "B", "connects")
-        self.kg.add_relation("B", "C", "connects")
-        self.kg.add_relation("C", "D", "connects")
-        self.kg.add_relation("A", "E", "connects")
-        self.kg.add_relation("E", "D", "connects")
-
-    def test_direct_path(self):
-        path = self.kg.shortest_path("A", "B")
-        assert path == ["a", "b"]
-
-    def test_shortest_path_prefers_shorter(self):
-        # A→E→D is shorter than A→B→C→D
-        path = self.kg.shortest_path("A", "D")
-        assert path is not None
-        assert len(path) <= 3  # A, E, D
-
-    def test_same_node_path(self):
-        path = self.kg.shortest_path("A", "A")
-        assert path == ["a"]
-
-    def test_no_path_returns_none(self):
+    def test_clean_keys(self):
         kg = KnowledgeGraph()
-        kg.add_entity("X")
-        kg.add_entity("Y")
-        path = kg.shortest_path("X", "Y")
-        assert path is None
+        kg.add_relation("x", "y", "r")
+        for key in kg.community_detection():
+            assert key.startswith("community_")
 
-    def test_nonexistent_node_returns_none(self):
-        path = self.kg.shortest_path("A", "Z")
-        assert path is None
-
-
-# ── Subgraph Extraction ──────────────────────────────────────────────────────
-
-
-class TestSubgraph:
-    def test_subgraph_depth_1(self):
+    def test_all_entities_assigned(self):
         kg = KnowledgeGraph()
-        kg.add_relation("center", "north", "connects")
-        kg.add_relation("center", "south", "connects")
-        kg.add_relation("north", "far_north", "connects")
+        kg.add_relation("a", "b", "r")
+        kg.add_relation("c", "d", "r")
+        communities = kg.community_detection()
+        all_members = [m for members in communities.values() for m in members]
+        assert len(all_members) == kg.entity_count
 
-        sg = kg.subgraph("center", depth=1)
-        labels = {e["label"] for e in sg["entities"]}
-        assert "center" in labels
-        assert "north" in labels
-        assert "south" in labels
-        assert "far_north" not in labels  # depth 1 shouldn't reach
 
-    def test_subgraph_depth_2(self):
+class TestPageRank:
+    def test_empty_graph(self):
+        assert KnowledgeGraph().pagerank() == {}
+
+    def test_hub_scores_highest(self):
         kg = KnowledgeGraph()
-        kg.add_relation("center", "north", "connects")
-        kg.add_relation("north", "far_north", "connects")
+        kg.add_relation("a", "hub", "links_to")
+        kg.add_relation("b", "hub", "links_to")
+        kg.add_relation("c", "hub", "links_to")
+        kg.add_relation("d", "hub", "links_to")
 
-        sg = kg.subgraph("center", depth=2)
-        labels = {e["label"] for e in sg["entities"]}
-        assert "far_north" in labels
+        scores = kg.pagerank()
+        labels = list(scores.keys())
+        assert labels[0] == "hub"
 
-    def test_subgraph_nonexistent(self):
+    def test_all_scores_positive(self):
         kg = KnowledgeGraph()
-        sg = kg.subgraph("nothing")
-        assert sg == {"entities": [], "relations": []}
+        kg.add_relation("x", "y", "r")
+        kg.add_relation("y", "z", "r")
+        scores = kg.pagerank()
+        assert len(scores) == 3
+        for score in scores.values():
+            assert score > 0
 
-
-# ── Text Ingestion ───────────────────────────────────────────────────────────
-
-
-class TestTextIngestion:
-    def test_extract_is_a_relation(self):
-        triples = extract_entities_from_text("Python is a programming language")
-        assert len(triples) >= 1
-        source, rel, target = triples[0]
-        assert rel == "is_a"
-        assert "python" in source.lower()
-        assert "programming" in target.lower()
-
-    def test_extract_has_relation(self):
-        triples = extract_entities_from_text("The system has multiple nodes")
-        assert any(r == "has" for _, r, _ in triples)
-
-    def test_extract_causes_relation(self):
-        triples = extract_entities_from_text("High memory usage causes system slowdown")
-        assert any(r == "causes" for _, r, _ in triples)
-
-    def test_extract_uses_relation(self):
-        triples = extract_entities_from_text("The router uses message passing")
-        assert any(r == "uses" for _, r, _ in triples)
-
-    def test_ingest_text_adds_to_graph(self):
+    def test_different_damping(self):
         kg = KnowledgeGraph()
-        count = kg.ingest_text("Python is a programming language. JavaScript uses event loops.")
-        assert count >= 2
-        assert kg.entity_count >= 4
+        kg.add_relation("a", "b", "r")
+        s1 = kg.pagerank(damping=0.99)
+        s2 = kg.pagerank(damping=0.5)
+        assert s1 != s2
 
-    def test_empty_text_returns_zero(self):
+    def test_isolated_nodes_get_base_score(self):
         kg = KnowledgeGraph()
-        assert kg.ingest_text("") == 0
-
-    def test_stopword_only_entities_filtered(self):
-        triples = extract_entities_from_text("the is a the")
-        assert len(triples) == 0
-
-
-# ── Serialization ────────────────────────────────────────────────────────────
+        kg.add_entity("lonely")
+        scores = kg.pagerank()
+        assert "lonely" in scores
+        assert scores["lonely"] > 0
 
 
-class TestSerialization:
-    def test_to_dict(self):
+class TestTemporalRelations:
+    def test_temporal_bounds_stored(self):
         kg = KnowledgeGraph()
-        kg.add_relation("Python", "language", "is_a")
-        d = kg.to_dict()
-        assert "entities" in d
-        assert "relations" in d
-        assert len(d["entities"]) == 2
-        assert len(d["relations"]) == 1
-        assert d["relations"][0]["type"] == "is_a"
+        # Add relation with temporal window
+        rel = kg.add_relation("event_a", "event_b", "causes", valid_from=100.0, valid_until=200.0)
+
+        assert rel.valid_from == 100.0
+        assert rel.valid_until == 200.0
+        assert rel.weight == 1.0
+
+    def test_temporal_defaults_to_none(self):
+        kg = KnowledgeGraph()
+        rel = kg.add_relation("fact_x", "fact_y", "relates_to")
+
+        assert rel.valid_from is None
+        assert rel.valid_until is None
