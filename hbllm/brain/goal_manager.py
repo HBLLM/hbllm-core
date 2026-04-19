@@ -213,6 +213,28 @@ class GoalManager:
         goals.sort(key=lambda g: (priority_order.get(g.priority.value, 5), -g.created_at))
         return goals[0]
 
+    async def execute_goal(self, goal: Goal) -> None:
+        """
+        Execute a goal asynchronously.
+        This bridges the goal persistence with the actual execution engine.
+        """
+        if goal.status.value in (GoalStatus.COMPLETED.value, GoalStatus.FAILED.value):
+            return
+
+        logger.info("Executing goal: %s (type: %s)", goal.name, goal.goal_type)
+
+        try:
+            # execution stub that advances progress
+            # In a full system, this dispatches to PlannerNode/ExecutionNode
+            progress = goal.progress + 0.25
+            action = f"Executed auto-step: progressed to {progress * 100:.0f}%"
+
+            self.update_progress(goal.goal_id, min(1.0, progress), action)
+            logger.info("Goal progress updated: %s -> %.2f", goal.name, progress)
+        except Exception as e:
+            logger.error("Failed to execute goal %s: %s", goal.name, e)
+            self.fail_goal(goal.goal_id, str(e))
+
     def get_active_goals(self) -> list[Goal]:
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(

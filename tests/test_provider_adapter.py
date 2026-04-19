@@ -181,3 +181,17 @@ async def test_extract_json_nested():
     result = await llm.generate_json("Nested JSON")
     assert result["outer"]["inner"] == "value"
     assert result["list"] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_ollama_provider_init():
+    from hbllm.serving.provider import OllamaProvider
+
+    # Defaults
+    provider = OllamaProvider()
+    assert provider.name == "ollama/llama3"
+    assert provider._base_url == "http://localhost:11434/api"
+
+    # Custom model
+    provider = OllamaProvider(model="mixtral:8x7b")
+    assert provider.name == "ollama/mixtral:8x7b"

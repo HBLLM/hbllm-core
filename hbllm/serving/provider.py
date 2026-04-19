@@ -349,6 +349,19 @@ class LocalProvider(LLMProvider):
             self._model.set_lora_active(active)
             logger.info("LocalProvider LoRA active=%s", active)
 
+    def load_draft_model(self, draft_model: Any) -> None:
+        """
+        Load a smaller draft model to enable Speculative Decoding.
+        The draft model generates token proposals which the main model verifies in parallel.
+        """
+        self._ensure_loaded()
+        if not hasattr(draft_model, "generate"):
+            raise ValueError(
+                "Draft model must be a valid HuggingFace/HBLLM model with a generate method."
+            )
+        self._draft_model = draft_model
+        logger.info("LocalProvider: Speculative Decoding draft model loaded and enabled.")
+
 
 # ─── OpenAI Provider ─────────────────────────────────────────────────────────
 
@@ -611,12 +624,121 @@ class AnthropicProvider(LLMProvider):
         return f"anthropic/{self._model}"
 
 
+# ─── Ollama Provider ─────────────────────────────────────────────────────────
+
+
+class OllamaProvider(LLMProvider):
+    """Calls local Ollama API."""
+
+    def __init__(
+        self,
+        model: str = "llama3",
+        base_url: str = "http://localhost:11434/api",
+        **kwargs: Any,
+    ):
+        self._model = model
+        self._base_url = base_url
+
+    async def generate(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        import httpx
+
+        with trace_span(
+            "llm.generate",
+            {"provider": "ollama", "model": self._model, "max_tokens": str(max_tokens)},
+        ):
+            payload = {
+                "model": self._model,
+                "messages": messages,
+                "options": {
+                    "num_predict": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                },
+                "stream": False,
+            }
+
+            async def _do_request() -> Any:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/chat",
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+            data = await _retry_api_call(_do_request)
+
+        usage_info = {
+            "prompt_tokens": data.get("prompt_eval_count", 0),
+            "completion_tokens": data.get("eval_count", 0),
+            "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
+        }
+
+        return LLMResponse(
+            content=data.get("message", {}).get("content", ""),
+            model=data.get("model", self._model),
+            usage=usage_info,
+            finish_reason="stop",
+            raw=data,
+        )
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        import httpx
+
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+            },
+            "stream": True,
+        }
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                f"{self._base_url}/chat",
+                json=payload,
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        content = data.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+                        if data.get("done"):
+                            break
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+
+    @property
+    def name(self) -> str:
+        return f"ollama/{self._model}"
+
+
 # ─── Registry ────────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, type[LLMProvider]] = {
     "local": LocalProvider,
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
+    "ollama": OllamaProvider,
 }
 
 
