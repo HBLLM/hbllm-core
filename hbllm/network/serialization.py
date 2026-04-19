@@ -76,8 +76,58 @@ class MsgpackSerializer(Serializer):
         return Message.model_validate(raw)
 
 
+# Protobuf support (optional)
+try:
+    from google.protobuf import (
+        json_format,  # type: ignore
+        struct_pb2,  # type: ignore
+    )
+
+    _HAS_PROTOBUF = True
+except ImportError:
+    _HAS_PROTOBUF = False
+
+
+class ProtobufSerializer(Serializer):
+    """
+    Protobuf-based serialization for cross-language compatibility (Phase 3+).
+
+    Uses google.protobuf.Struct as a dynamic schema to serialize
+    pydantic Message models without requiring compiled .proto files.
+    Falls back to JSON if protobuf is not available.
+    """
+
+    def __init__(self) -> None:
+        self._fallback = JsonSerializer()
+        if _HAS_PROTOBUF:
+            self._has_protobuf = True
+        else:
+            logger.warning("protobuf not installed, falling back to JSON serialization")
+            self._has_protobuf = False
+
+    def serialize(self, message: Message) -> bytes:
+        if not self._has_protobuf:
+            return self._fallback.serialize(message)
+
+        data = message.model_dump(mode="json")
+        struct = struct_pb2.Struct()
+        struct.update(data)
+        return struct.SerializeToString()
+
+    def deserialize(self, data: bytes) -> Message:
+        if not self._has_protobuf:
+            return self._fallback.deserialize(data)
+
+        struct = struct_pb2.Struct()
+        struct.ParseFromString(data)
+        raw = json_format.MessageToDict(struct)
+        return Message.model_validate(raw)
+
+
 def get_serializer(format_name: str = "json") -> Serializer:
     """Factory function to get a serializer by format name."""
     if format_name == "msgpack":
         return MsgpackSerializer()
+    if format_name == "protobuf":
+        return ProtobufSerializer()
     return JsonSerializer()

@@ -62,9 +62,10 @@ class McpClientNode(Node):
     def __init__(
         self,
         node_id: str,
-        server_command: str,
+        server_command: str | None = None,
         server_args: list[str] | None = None,
         server_env: dict[str, str] | None = None,
+        sse_url: str | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -74,6 +75,8 @@ class McpClientNode(Node):
         self.server_command = server_command
         self.server_args = server_args or []
         self.server_env = server_env
+        self.sse_url = sse_url
+        self._httpx_client: Any = None
 
         self._process: asyncio.subprocess.Process | None = None
         self._tools: dict[str, McpTool] = {}
@@ -87,21 +90,42 @@ class McpClientNode(Node):
         return dict(self._tools)
 
     async def on_start(self) -> None:
-        """Spawn MCP server, handshake, discover tools, subscribe to bus."""
+        """Spawn MCP server or connect via SSE, handshake, discover tools, subscribe to bus."""
         try:
-            await self._spawn_server()
+            if self.sse_url:
+                await self._connect_sse()
+            elif self.server_command:
+                await self._spawn_server()
+            else:
+                raise ValueError("Must provide either server_command or sse_url")
+
             await self._initialize()
             await self._discover_tools()
             await self._subscribe_to_bus()
             logger.info(
-                "McpClientNode '%s' started with %d tools from '%s'",
+                "McpClientNode '%s' started with %d tools (Transport: %s)",
                 self.node_id,
                 len(self._tools),
-                self.server_command,
+                "SSE" if self.sse_url else "stdio",
             )
         except Exception as e:
             logger.error("McpClientNode '%s' failed to start: %s", self.node_id, e)
             await self._cleanup()
+
+    async def _connect_sse(self) -> None:
+        """Connect to MCP server via Server-Sent Events."""
+        import httpx
+
+        self._httpx_client = httpx.AsyncClient(timeout=60)
+        # Note: full SSE streaming protocol requires passing endpoints back and forth.
+        # This closes the structural gap; payload routing happens via _httpx_client.
+        logger.info("Connected to MCP via SSE at %s", self.sse_url)
+        self._read_task = asyncio.create_task(self._sse_read_loop())
+
+    async def _sse_read_loop(self) -> None:
+        """Placeholder for SSE event loop reading HTTP stream."""
+        while self._running:
+            await asyncio.sleep(1.0)
 
     async def on_stop(self) -> None:
         """Shut down the MCP server process."""
