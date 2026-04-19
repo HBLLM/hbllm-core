@@ -566,6 +566,42 @@ class PlannerNode(Node):
                 node.score = 0.5
                 return
 
+        # 1.6. Skill Call Interception (SIL)
+        skill_match = re.search(
+            r"<skill_call\s+task=[\"'](.*?)[\"']>(.*?)</skill_call>",
+            node.content,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if skill_match:
+            task_desc = skill_match.group(1).strip()
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="action.sil_execute",
+                payload={"task": task_desc},
+            )
+            try:
+                resp = await self.request("action.sil_execute", req, timeout=120.0)
+                if resp.type == MessageType.ERROR:
+                    err = resp.payload.get("error", "Unknown SIL error")
+                    obs_content = f"Observation: SIL Error: {err}"
+                else:
+                    status = resp.payload.get("status")
+                    if status == "SUCCESS":
+                        obs_content = f"Observation: SIL perfectly executed skill '{resp.payload.get('skill')}'"
+                    else:
+                        obs_content = f"Observation:\n{resp.payload}"
+
+                graph.branch(node.id, obs_content, score=1.0, is_observation=True)
+                node.score = 1.0  # Reward emitting a valid skill call
+                return
+            except Exception as e:
+                logger.warning("[GoT] SIL execution failed/timed out: %s", e)
+                obs_content = f"Observation: SIL execution failed: {str(e)}"
+                graph.branch(node.id, obs_content, score=0.1, is_observation=True)
+                node.score = 0.5
+                return
+
         # 2. Use Process Reward Model (PRM) network via event bus
         req = Message(
             type=MessageType.QUERY,
@@ -625,7 +661,8 @@ class PlannerNode(Node):
             f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"
             f"Original query: {query}\n"
             f"Trajectory:\n{history_text}\n\n"
-            f'If you need to use a tool to continue reasoning, output exactly <tool_call name="tool_name">{{"arg":"val"}}</tool_call>.\n'
+            f"If you need to use a tool to continue reasoning, output exactly <tool_call name=\"tool_name\">{{\"arg\":\"val\"}}</tool_call>.\n"
+            f"If you want to delegate a complex sub-task to the Skill Intelligence Layer, output exactly <skill_call task=\"describe task\">fallback args</skill_call>.\n"
             f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
         req = Message(

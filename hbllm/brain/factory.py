@@ -95,7 +95,8 @@ class BrainConfig:
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
     data_dir: str = "data"
-    system_prompt: str = "You are a helpful AI assistant."
+    inject_sil: bool = True  # Skill Intelligence Layer
+    inject_failure_analyzer: bool = True  # Automatic skill repair
     domain_registry: Any | None = None  # Hierarchical domain registry
 
 
@@ -146,6 +147,8 @@ class Brain:
         self.evaluation_node: EvaluationNode | None = None
         self.reflection_node: ReflectionNode | None = None
         self.skill_compiler_node: SkillCompilerNode | None = None
+        self.skill_intelligence_node: Any | None = None
+        self.failure_analyzer_node: Any | None = None
 
         # v2: Resource Intelligence
         self.attention_manager: AttentionManager | None = None
@@ -735,9 +738,28 @@ class BrainFactory:
             await registry.update_health(
                 NodeHealth(node_id=compiler_node.node_id, status=HealthStatus.HEALTHY)
             )
-            brain.skill_compiler_node = compiler_node
             nodes.append(compiler_node)
             logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
+
+        if cfg.inject_failure_analyzer:
+            from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
+            fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
+            await fail_node.start(message_bus)
+            await registry.register(NodeInfo(node_id=fail_node.node_id, node_type=fail_node.node_type, capabilities=fail_node.capabilities))
+            await registry.update_health(NodeHealth(node_id=fail_node.node_id, status=HealthStatus.HEALTHY))
+            brain.failure_analyzer_node = fail_node
+            nodes.append(fail_node)
+            logger.info("FailureAnalyzerNode wired (automated skill repair)")
+
+        if cfg.inject_sil:
+            from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
+            sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
+            await sil_node.start(message_bus)
+            await registry.register(NodeInfo(node_id=sil_node.node_id, node_type=sil_node.node_type, capabilities=sil_node.capabilities))
+            await registry.update_health(NodeHealth(node_id=sil_node.node_id, status=HealthStatus.HEALTHY))
+            brain.skill_intelligence_node = sil_node
+            nodes.append(sil_node)
+            logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")
 
         # v2: Resource Intelligence — wire attention and load managers
         if cfg.inject_attention:

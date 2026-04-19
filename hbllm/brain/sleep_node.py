@@ -119,6 +119,10 @@ class SleepCycleNode(Node):
                 return  # User woke up during consolidation
             report["training_ran"] = await self._run_self_improvement()
 
+            if not self.is_sleeping:
+                return
+            report["skills_optimized"] = await self._optimize_skills()
+
             # ── Phase 3: Curiosity Goal Replay ───────────────────────────
             if not self.is_sleeping:
                 return
@@ -284,6 +288,23 @@ class SleepCycleNode(Node):
             return False
         finally:
             await self.bus.unsubscribe(sub)
+
+    async def _optimize_skills(self) -> int:
+        """Phase 2b: Replay and optimize flaky or inefficient skills."""
+        logger.info("[SleepNode] Initiating Phase 2b: Skill Optimization...")
+        try:
+            # Emit event to trigger skill optimization in SIL / SkillRegistry
+            opt_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="system.sleep.skill_optimize",
+                payload={}
+            )
+            await self.bus.publish("system.sleep.skill_optimize", opt_msg)
+            return 1
+        except Exception as e:
+            logger.warning("[SleepNode] Skill optimization failed: %s", e)
+            return 0
 
     async def _replay_curiosity_goals(self) -> int:
         """
