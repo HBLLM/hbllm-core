@@ -512,6 +512,8 @@ class BrainFactory:
         router_node = RouterNode(node_id="router", llm=llm, domain_registry=domain_registry)
         router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
 
+        skill_registry = SkillRegistry(data_dir=cfg.data_dir)
+
         nodes = [
             # Core cognitive pipeline
             router_node,
@@ -533,7 +535,7 @@ class BrainFactory:
             # Curiosity-driven goal generation
             CuriosityNode(node_id="curiosity"),
             # Collective intelligence (multi-instance knowledge sharing)
-            CollectiveNode(node_id="collective"),
+            CollectiveNode(node_id="collective", skill_registry=skill_registry),
             # Online learning from feedback (DPO)
             LearnerNode(node_id="learner"),
             # World model (code simulation & sandboxed execution)
@@ -634,7 +636,7 @@ class BrainFactory:
         data_dir = cfg.data_dir
 
         # Always-on subsystems
-        brain.skill_registry = SkillRegistry(data_dir=data_dir)
+        brain.skill_registry = skill_registry
         brain.tool_memory = ToolMemory(data_dir=data_dir)
         brain.concept_extractor = ConceptExtractor()
         brain.world_simulator = WorldSimulator()
@@ -724,6 +726,7 @@ class BrainFactory:
             compiler_node = SkillCompilerNode(
                 node_id="skill_compiler",
                 skill_registry=brain.skill_registry,
+                llm=llm,
             )
             await compiler_node.start(message_bus)
             from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo

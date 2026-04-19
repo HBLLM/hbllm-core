@@ -99,6 +99,11 @@ async def test_skill_intelligence_node(skill_registry):
         return msg.create_response({"status": "SUCCESS", "output": "ok"})
     await bus.subscribe("action.execute_code", mock_execute)
 
+    # Needs a mock simulation handler for marginal confidence skills
+    async def mock_simulate(msg: Message) -> Message:
+        return msg.create_response({"status": "SUCCESS", "prediction": "SUCCESS"})
+    await bus.subscribe("workspace.simulate", mock_simulate)
+
     node = SkillIntelligenceNode("sil", skill_registry=skill_registry)
     await node.start(bus)
 

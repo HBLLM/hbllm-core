@@ -182,6 +182,7 @@ class CollectiveNode(Node):
         min_voters: int = 2,
         default_strategy: VotingStrategy = VotingStrategy.CONFIDENCE_WEIGHTED,
         peer_stale_seconds: float = 300.0,
+        skill_registry: Any = None,
     ):
         super().__init__(
             node_id=node_id,
@@ -215,6 +216,7 @@ class CollectiveNode(Node):
         self._pending_votes: dict[str, list[VoteResponse]] = {}
         self._vote_events: dict[str, asyncio.Event] = {}
         self._vote_handler: Any = None  # callable for local vote generation
+        self.skill_registry = skill_registry
 
         # Stats
         self._stats = {
@@ -244,6 +246,7 @@ class CollectiveNode(Node):
         # Knowledge sharing
         await self.bus.subscribe("system.learning_update", self._handle_learning_update)
         await self.bus.subscribe("collective.sync", self._handle_sync)
+        await self.bus.subscribe("collective.sync_skills", self._handle_sync_skills)
         await self.bus.subscribe("collective.query", self._handle_query)
 
         # v2: Specialization
@@ -315,6 +318,64 @@ class CollectiveNode(Node):
             digest.capability,
             digest.checksum,
         )
+        return None
+
+    async def _handle_sync_skills(self, message: Message) -> Message | None:
+        """Promote highly-confident local skills to the global tier and broadcast to peers."""
+        if not self.skill_registry:
+            return None
+
+        # Fetch highly confident skills that are NOT already global
+        tenant_id = message.payload.get("tenant_id", "default")
+        # We find top 20 skills
+        local_skills = self.skill_registry.list_skills(limit=100, tenant_id=tenant_id)
+
+        promoted_count = 0
+        for skill in local_skills:
+            # If skill is highly confident, locally isolated, we promote it
+            cost = skill.cost_score
+            conf = skill.confidence_score
+            is_global = (skill.tenant_id == "global")
+
+            if conf > 0.95 and not is_global:
+                # 1. Promote locally
+                self.skill_registry.promote_skill(skill.skill_id)
+                
+                # 2. Re-fetch or manually update the skill tenant_id for the payload
+                skill.tenant_id = "global"
+
+                # 3. Create generic digest
+                digest = KnowledgeDigest(
+                    source_instance_id=self.instance_id,
+                    domain=skill.category,
+                    capability=skill.name,
+                    artifact_type="skill",
+                    artifact_data={
+                        "steps": skill.steps,
+                        "description": skill.description
+                    },
+                )
+                digest.compute_checksum()
+
+                if digest.checksum not in self.seen_checksums:
+                    self.seen_checksums.add(digest.checksum)
+                    self.broadcast_log.append(digest)
+                    self._stats["broadcasts_sent"] += 1
+
+                    await self.publish(
+                        "collective.broadcast",
+                        Message(
+                            type=MessageType.EVENT,
+                            source_node_id=self.node_id,
+                            topic="collective.broadcast",
+                            payload=digest.to_dict(),
+                        ),
+                    )
+                promoted_count += 1
+
+        if promoted_count > 0:
+            logger.info("Promoted and broadcast %d elite skills for tenant %s", promoted_count, tenant_id)
+
         return None
 
     async def _handle_sync(self, message: Message) -> Message | None:

@@ -46,6 +46,7 @@ class Skill:
     cost_score: float = 0.0
     failure_types: list[str] = field(default_factory=list)
     confidence_score: float = 0.8
+    tenant_id: str = "global"
 
 
 class SkillRegistry:
@@ -81,7 +82,8 @@ class SkillRegistry:
                     invocations INTEGER DEFAULT 0,
                     avg_latency_ms REAL DEFAULT 0.0,
                     created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
+                    updated_at REAL NOT NULL,
+                    tenant_id TEXT DEFAULT 'global'
                 )
             """)
 
@@ -101,8 +103,11 @@ class SkillRegistry:
                 conn.execute("ALTER TABLE skills ADD COLUMN failure_types TEXT DEFAULT '[]'")
             if "confidence_score" not in columns:
                 conn.execute("ALTER TABLE skills ADD COLUMN confidence_score REAL DEFAULT 0.8")
+            if "tenant_id" not in columns:
+                conn.execute("ALTER TABLE skills ADD COLUMN tenant_id TEXT DEFAULT 'global'")
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_cat ON skills(category)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_tenant ON skills(tenant_id)")
 
     # ─── Skill Extraction ────────────────────────────────────────────
 
@@ -113,6 +118,7 @@ class SkillRegistry:
         tools_used: list[str],
         success: bool,
         category: str = "general",
+        tenant_id: str = "global",
     ) -> Skill | None:
         """
         Extract a reusable skill from a successful task execution.
@@ -149,6 +155,7 @@ class SkillRegistry:
             tools_used=tools_used,
             success_criteria=f"Successfully completed: {task_description}",
             examples=[{"input": task_description, "steps": steps}],
+            tenant_id=tenant_id,
         )
 
         self._store(skill)
@@ -164,8 +171,8 @@ class SkillRegistry:
                 (skill_id, name, description, category, steps, tools_used,
                  success_criteria, examples, success_rate, invocations,
                  avg_latency_ms, created_at, updated_at,
-                 version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     skill.skill_id,
@@ -187,24 +194,25 @@ class SkillRegistry:
                     skill.cost_score,
                     json.dumps(skill.failure_types),
                     skill.confidence_score,
+                    skill.tenant_id,
                 ),
             )
 
     # ─── Skill Lookup ────────────────────────────────────────────────
 
-    def find_skill(self, query: str, category: str | None = None, top_k: int = 5) -> list[Skill]:
+    def find_skill(self, query: str, category: str | None = None, top_k: int = 5, tenant_id: str = "global") -> list[Skill]:
         """Find skills matching a query by keyword similarity."""
-        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score"
+        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             if category:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills WHERE category = ? ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
-                    (category, top_k * 3),
+                    f"SELECT {select_cols} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
+                    (category, tenant_id, top_k * 3),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
-                    (top_k * 3,),
+                    f"SELECT {select_cols} FROM skills WHERE tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
+                    (tenant_id, top_k * 3),
                 ).fetchall()
 
         skills = [self._row_to_skill(r) for r in rows]
@@ -222,7 +230,7 @@ class SkillRegistry:
         return [s for _, s in scored[:top_k]]
 
     def get_skill(self, skill_id: str) -> Skill | None:
-        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score"
+        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             row = conn.execute(f"SELECT {select_cols} FROM skills WHERE skill_id = ?", (skill_id,)).fetchone()
         return self._row_to_skill(row) if row else None
@@ -266,6 +274,14 @@ class SkillRegistry:
                 (invocations, new_rate, new_latency, new_tokens, new_conf, json.dumps(failures), time.time(), skill_id),
             )
 
+    def promote_skill(self, skill_id: str) -> None:
+        """Promote a high-confidence skill to the global tier."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "UPDATE skills SET tenant_id = 'global', updated_at = ? WHERE skill_id = ?",
+                (time.time(), skill_id),
+            )
+
     def version_skill(self, skill_id: str, new_steps: list[str], test_latency_ms: float = 0.0, new_tools: list[str] | None = None) -> Skill | None:
         """Create a new version of a skill, usually after a failure fix."""
         old_skill = self.get_skill(skill_id)
@@ -291,6 +307,7 @@ class SkillRegistry:
             tokens_used=old_skill.tokens_used,
             cost_score=old_skill.cost_score,
             confidence_score=0.9, # new fix starts confident
+            tenant_id=old_skill.tenant_id,
         )
         self._store(new_skill)
         logger.info("Versioned skill %s to v%d (%s)", old_skill.name, new_skill.version, new_skill_id)
@@ -322,20 +339,21 @@ class SkillRegistry:
             cost_score=row[15],
             failure_types=json.loads(row[16]),
             confidence_score=row[17],
+            tenant_id=row[18] if len(row) > 18 else "global",
         )
 
-    def list_skills(self, category: str | None = None, limit: int = 50) -> list[Skill]:
-        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score"
+    def list_skills(self, category: str | None = None, limit: int = 50, tenant_id: str = "global") -> list[Skill]:
+        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             if category:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills WHERE category = ? ORDER BY invocations DESC LIMIT ?",
-                    (category, limit),
+                    f"SELECT {select_cols} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
+                    (category, tenant_id, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills ORDER BY invocations DESC LIMIT ?",
-                    (limit,),
+                    f"SELECT {select_cols} FROM skills WHERE tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
+                    (tenant_id, limit),
                 ).fetchall()
         return [self._row_to_skill(r) for r in rows]
 

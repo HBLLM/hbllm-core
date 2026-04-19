@@ -10,6 +10,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -55,7 +56,8 @@ class SkillIntelligenceNode(Node):
         skills = self.skill_registry.find_skill(query, top_k=3)
 
         # Filter for acceptable confidence (>0.7) and pick best by cost_score or success_rate
-        viable_skills = [s for s in skills if s.confidence_score >= 0.7 and s.success_rate > 0.5]
+        tenant_id = message.tenant_id or "global"
+        viable_skills = [s for s in skills if s.confidence_score >= 0.7 and s.success_rate > 0.5 and (s.tenant_id == tenant_id or s.tenant_id == "global")]
 
         if not viable_skills:
             # Fallback to direct raw execution, letting SkillCompiler capture it on success later.
@@ -66,6 +68,21 @@ class SkillIntelligenceNode(Node):
 
         logger.info("SIL selected skill '%s' (v%d) with confidence %.2f for task: %s",
                     best_skill.name, getattr(best_skill, 'version', 1), getattr(best_skill, 'confidence_score', 0.8), query)
+
+        # 1.5 Execution Dry Run (Simulation) for marginal trust
+        if 0.7 <= best_skill.confidence_score < 0.85:
+            sim_req = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="workspace.simulate",
+                payload={"action_type": "simulate_skill", "steps": best_skill.steps}
+            )
+            sim_resp = await self.request("workspace.simulate", sim_req, timeout=10.0)
+            if sim_resp and sim_resp.payload.get("prediction") == "FAILURE":
+                logger.warning("SIL Simulation failed for skill '%s'. Failing early to avoid side-effects.", best_skill.name)
+                return message.create_error(f"Dry-run simulation failed: {sim_resp.payload.get('content')}")
 
         # 2. Execution Delegation
         start_time = time.time()
@@ -122,16 +139,42 @@ class SkillIntelligenceNode(Node):
         """Simulate executing skill steps by routing to existing primitives."""
         trace: list[dict[str, Any]] = []
         for step_idx, step in enumerate(skill.steps):
-            req = Message(
-                type=MessageType.QUERY,
-                source_node_id=self.node_id,
-                topic="action.execute_code",
-                payload={"code": step},
-                tenant_id=origin_message.tenant_id,
-                session_id=origin_message.session_id,
-            )
+            
+            # Hierarchical execution check
+            is_sil = False
+            task_query = ""
+            if isinstance(step, str) and '"action"' in step and 'sil_execute' in step:
+                try:
+                    parsed = json.loads(step)
+                    if parsed.get("action") == "sil_execute":
+                        is_sil = True
+                        task_query = parsed.get("task", "")
+                except Exception:
+                    pass
+
+            if is_sil:
+                req = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    topic="action.sil_execute",
+                    payload={"task": task_query},
+                    tenant_id=origin_message.tenant_id,
+                    session_id=origin_message.session_id,
+                )
+                topic = "action.sil_execute"
+            else:
+                req = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    topic="action.execute_code",
+                    payload={"code": step},
+                    tenant_id=origin_message.tenant_id,
+                    session_id=origin_message.session_id,
+                )
+                topic = "action.execute_code"
+
             try:
-                resp = await self.request("action.execute_code", req, timeout=20.0)
+                resp = await self.request(topic, req, timeout=30.0)
                 if resp.type == MessageType.ERROR:
                     trace.append({"step": step, "status": "failed", "error": str(resp.payload.get("error"))})
                     return False, str(resp.payload.get("error", "Execution error")), trace
