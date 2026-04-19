@@ -166,6 +166,7 @@ class SleepCycleNode(Node):
 
         # Reset activity timer so we don't immediately go back to sleep unless idle again
         self._last_system_activity = time.time()
+        self.current_phase = SleepPhase.AWAKE
         self.is_sleeping = False
 
     async def _consolidate_memory(self) -> int:

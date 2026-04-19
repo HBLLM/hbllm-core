@@ -16,6 +16,7 @@ class MockMemoryNode:
     async def start(self):
         await self.bus.subscribe("memory.retrieve_recent", self.handle_retrieve)
         await self.bus.subscribe("memory.store", self.handle_store)
+        await self.bus.subscribe("system.sleep.dpo_trigger", self.handle_dpo_trigger)
 
     async def handle_retrieve(self, msg: Message):
         # Return 5 dummy turns to trigger the Sleep Node compression
@@ -24,6 +25,17 @@ class MockMemoryNode:
 
     async def handle_store(self, msg: Message):
         self.store_calls.append(msg)
+        return None
+
+    async def handle_dpo_trigger(self, msg: Message):
+        # Immediately fire the learning_update event so sleep cycle doesn't hang
+        update_msg = Message(
+            type=MessageType.EVENT,
+            source_node_id="mock_learner",
+            topic="system.learning_update",
+            payload={"status": "complete"},
+        )
+        await self.bus.publish("system.learning_update", update_msg)
         return None
 
 
