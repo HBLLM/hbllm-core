@@ -31,6 +31,7 @@ CLI:
     hbllm backup list
     hbllm backup push --bucket hbllm-backups
 """
+
 from __future__ import annotations
 
 import gzip
@@ -113,7 +114,9 @@ class BackupManager:
         backup_dir: str | Path | None = None,
     ):
         self.data_dir = Path(data_dir) if data_dir else _DEFAULT_DATA_DIR
-        self.backup_dir = Path(backup_dir) if backup_dir else self.data_dir.parent / _BACKUP_DIR_NAME
+        self.backup_dir = (
+            Path(backup_dir) if backup_dir else self.data_dir.parent / _BACKUP_DIR_NAME
+        )
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
         # Cloud config
@@ -146,11 +149,13 @@ class BackupManager:
             for path in self.data_dir.glob(pattern):
                 if path.is_file():
                     file_paths.append(path)
-                    files_info.append({
-                        "name": path.name,
-                        "size": path.stat().st_size,
-                        "checksum": self._file_checksum(path),
-                    })
+                    files_info.append(
+                        {
+                            "name": path.name,
+                            "size": path.stat().st_size,
+                            "checksum": self._file_checksum(path),
+                        }
+                    )
 
         # Also backup training subdirectory if it exists
         training_dir = self.data_dir / "training"
@@ -159,11 +164,13 @@ class BackupManager:
                 if path.is_file():
                     rel = path.relative_to(self.data_dir)
                     file_paths.append(path)
-                    files_info.append({
-                        "name": str(rel),
-                        "size": path.stat().st_size,
-                        "checksum": self._file_checksum(path),
-                    })
+                    files_info.append(
+                        {
+                            "name": str(rel),
+                            "size": path.stat().st_size,
+                            "checksum": self._file_checksum(path),
+                        }
+                    )
 
         if not file_paths:
             logger.warning("No files found to backup in %s", self.data_dir)
@@ -209,7 +216,9 @@ class BackupManager:
 
         return archive_path
 
-    def restore(self, backup_path: str | Path, target_dir: str | Path | None = None) -> BackupManifest:
+    def restore(
+        self, backup_path: str | Path, target_dir: str | Path | None = None
+    ) -> BackupManifest:
         """
         Restore from a backup archive.
 
@@ -267,19 +276,23 @@ class BackupManager:
                 stat = path.stat()
                 # Try to read manifest from archive
                 manifest = self._read_manifest(path)
-                backups.append({
-                    "path": str(path),
-                    "name": path.name,
-                    "size": stat.st_size,
-                    "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "files": len(manifest.files) if manifest else "?",
-                })
+                backups.append(
+                    {
+                        "path": str(path),
+                        "name": path.name,
+                        "size": stat.st_size,
+                        "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "files": len(manifest.files) if manifest else "?",
+                    }
+                )
             except Exception:
-                backups.append({
-                    "path": str(path),
-                    "name": path.name,
-                    "size": path.stat().st_size,
-                })
+                backups.append(
+                    {
+                        "path": str(path),
+                        "name": path.name,
+                        "size": path.stat().st_size,
+                    }
+                )
         return backups
 
     def verify_backup(self, backup_path: str | Path) -> dict[str, Any]:
@@ -348,7 +361,10 @@ class BackupManager:
             Upload result dict
         """
         if not self._cloud_config:
-            return {"status": "error", "error": "Cloud not configured. Call configure_cloud() first."}
+            return {
+                "status": "error",
+                "error": "Cloud not configured. Call configure_cloud() first.",
+            }
 
         if backup_path is None:
             backups = sorted(self.backup_dir.glob("backup_*.tar.gz"), reverse=True)
@@ -374,7 +390,9 @@ class BackupManager:
             key = f"hbllm-backups/{backup_path.name}"
             s3.upload_file(str(backup_path), self._cloud_config["bucket"], key)
 
-            logger.info("Pushed %s → s3://%s/%s", backup_path.name, self._cloud_config["bucket"], key)
+            logger.info(
+                "Pushed %s → s3://%s/%s", backup_path.name, self._cloud_config["bucket"], key
+            )
             return {
                 "status": "success",
                 "bucket": self._cloud_config["bucket"],
