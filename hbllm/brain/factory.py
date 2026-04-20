@@ -57,7 +57,7 @@ from hbllm.data.interaction_miner import InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
-from hbllm.network.node import Node
+from hbllm.network.node import HealthStatus, Node, NodeHealth, NodeInfo
 from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
 from hbllm.serving.provider import LLMProvider, get_provider
@@ -89,6 +89,7 @@ class BrainConfig:
     inject_skill_compiler: bool = True  # v2: Auto-skill extraction
     inject_attention: bool = True  # v2: Attention budget management
     inject_load_manager: bool = True  # v2: Cognitive load management
+    inject_scheduler: bool = True  # v3: Proactive agent capabilities
     inject_fuzzy_logic: bool = False  # Fuzzy reasoning (requires scikit-fuzzy)
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
     total_timeout: float = 60.0
@@ -155,6 +156,9 @@ class Brain:
         self.attention_manager: AttentionManager | None = None
         self.load_manager: LoadManager | None = None
 
+        # v3: Proactive Execution
+        self.scheduler_node: Any = None
+
         self._hardware_loop_task: asyncio.Task[None] | None = None
 
     async def process(
@@ -213,7 +217,6 @@ class Brain:
     async def _hardware_monitor_loop(self) -> None:
         """Periodic hardware health check for dynamic model offloading."""
         try:
-            from hbllm.modules.hardware_hal import HardwareHAL
             from hbllm.network.messages import Message, MessageType
         except ImportError:
             return
@@ -284,6 +287,18 @@ class Brain:
         return stats
 
 
+async def _register_node(registry: Any, node: Node) -> None:
+    """Helper to register a node and mark it healthy upon startup."""
+    await registry.register(
+        NodeInfo(
+            node_id=node.node_id,
+            node_type=node.node_type,
+            capabilities=node.capabilities,
+        )
+    )
+    await registry.update_health(NodeHealth(node_id=node.node_id, status=HealthStatus.HEALTHY))
+
+
 class BrainFactory:
     """
     Factory for creating a fully wired Brain with one line.
@@ -349,9 +364,7 @@ class BrainFactory:
         """
         import torch
 
-        from hbllm.model.config import get_config
         from hbllm.model.tokenizer import HBLLMTokenizer
-        from hbllm.model.transformer import HBLLMForCausalLM
         from hbllm.serving.provider import LocalProvider
 
         cfg = config or BrainConfig()
@@ -482,7 +495,6 @@ class BrainFactory:
         from hbllm.brain.workspace_node import WorkspaceNode
         from hbllm.brain.world_model_node import WorldModelNode
         from hbllm.memory.memory_node import MemoryNode
-        from hbllm.network.node import Node
 
         # Create PolicyEngine for governance
         policy_engine = None
@@ -588,21 +600,7 @@ class BrainFactory:
         # 4. Start all nodes on the bus
         for node in nodes:
             await node.start(message_bus)
-            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-
-            await registry.register(
-                NodeInfo(
-                    node_id=node.node_id,
-                    node_type=node.node_type,
-                    capabilities=node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(
-                    node_id=node.node_id,
-                    status=HealthStatus.HEALTHY,
-                )
-            )
+            await _register_node(registry, node)
 
         # 5. Create and start pipeline
         pipeline_config = PipelineConfig(
@@ -682,18 +680,7 @@ class BrainFactory:
                 skill_registry=brain.skill_registry,
             )
             await eval_node.start(message_bus)
-            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-
-            await registry.register(
-                NodeInfo(
-                    node_id=eval_node.node_id,
-                    node_type=eval_node.node_type,
-                    capabilities=eval_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=eval_node.node_id, status=HealthStatus.HEALTHY)
-            )
+            await _register_node(registry, eval_node)
             brain.evaluation_node = eval_node
             nodes.append(eval_node)
             logger.info("v2: EvaluationNode wired (intelligence feedback loop)")
@@ -707,18 +694,7 @@ class BrainFactory:
                 skill_registry=brain.skill_registry,
             )
             await refl_node.start(message_bus)
-            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-
-            await registry.register(
-                NodeInfo(
-                    node_id=refl_node.node_id,
-                    node_type=refl_node.node_type,
-                    capabilities=refl_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=refl_node.node_id, status=HealthStatus.HEALTHY)
-            )
+            await _register_node(registry, refl_node)
             brain.reflection_node = refl_node
             nodes.append(refl_node)
             logger.info("v2: ReflectionNode wired (periodic batch reflection)")
@@ -730,20 +706,9 @@ class BrainFactory:
                 llm=llm,
             )
             await compiler_node.start(message_bus)
-            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-
-            await registry.register(
-                NodeInfo(
-                    node_id=compiler_node.node_id,
-                    node_type=compiler_node.node_type,
-                    capabilities=compiler_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=compiler_node.node_id, status=HealthStatus.HEALTHY)
-            )
-            nodes.append(compiler_node)
+            await _register_node(registry, compiler_node)
             brain.skill_compiler_node = compiler_node
+            nodes.append(compiler_node)
             logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
 
         if cfg.inject_failure_analyzer:
@@ -751,16 +716,7 @@ class BrainFactory:
 
             fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
             await fail_node.start(message_bus)
-            await registry.register(
-                NodeInfo(
-                    node_id=fail_node.node_id,
-                    node_type=fail_node.node_type,
-                    capabilities=fail_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=fail_node.node_id, status=HealthStatus.HEALTHY)
-            )
+            await _register_node(registry, fail_node)
             brain.failure_analyzer_node = fail_node
             nodes.append(fail_node)
             logger.info("FailureAnalyzerNode wired (automated skill repair)")
@@ -770,16 +726,7 @@ class BrainFactory:
 
             sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
             await sil_node.start(message_bus)
-            await registry.register(
-                NodeInfo(
-                    node_id=sil_node.node_id,
-                    node_type=sil_node.node_type,
-                    capabilities=sil_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=sil_node.node_id, status=HealthStatus.HEALTHY)
-            )
+            await _register_node(registry, sil_node)
             brain.skill_intelligence_node = sil_node
             nodes.append(sil_node)
             logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")
@@ -788,18 +735,7 @@ class BrainFactory:
         if cfg.inject_attention:
             attn_node = AttentionManager(node_id="attention")
             await attn_node.start(message_bus)
-            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-
-            await registry.register(
-                NodeInfo(
-                    node_id=attn_node.node_id,
-                    node_type=attn_node.node_type,
-                    capabilities=attn_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=attn_node.node_id, status=HealthStatus.HEALTHY)
-            )
+            await _register_node(registry, attn_node)
             brain.attention_manager = attn_node
             nodes.append(attn_node)
             logger.info("v2: AttentionManager wired (memory budgets & focus)")
@@ -810,21 +746,24 @@ class BrainFactory:
                 monitor_interval=60.0,
             )
             await load_node.start(message_bus)
-            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
-
-            await registry.register(
-                NodeInfo(
-                    node_id=load_node.node_id,
-                    node_type=load_node.node_type,
-                    capabilities=load_node.capabilities,
-                )
-            )
-            await registry.update_health(
-                NodeHealth(node_id=load_node.node_id, status=HealthStatus.HEALTHY)
-            )
+            await _register_node(registry, load_node)
             brain.load_manager = load_node
             nodes.append(load_node)
             logger.info("v2: LoadManager wired (resource monitoring & degradation)")
+
+        # v3: Proactive Execution — wire the scheduler node
+        if cfg.inject_scheduler:
+            from hbllm.brain.scheduler_node import SchedulerNode
+
+            sched_node = SchedulerNode(
+                node_id="scheduler",
+                data_dir=data_dir,
+            )
+            await sched_node.start(message_bus)
+            await _register_node(registry, sched_node)
+            brain.scheduler_node = sched_node
+            nodes.append(sched_node)
+            logger.info("v3: SchedulerNode wired (proactive autonomous task execution)")
 
         logger.info(
             "Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, "

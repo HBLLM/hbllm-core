@@ -77,8 +77,8 @@ async def test_workspace_absolute_deadline_cap():
     # Verify the absolute deadline is set
     board = list(workspace.blackboards.values())[0]
     assert "absolute_deadline" in board
-    assert board["absolute_deadline"] > time.time()
-    assert board["absolute_deadline"] <= time.time() + 121  # ~120s from now
+    assert board["absolute_deadline"] > time.monotonic()
+    assert board["absolute_deadline"] <= time.monotonic() + 121  # ~120s from now
 
     await workspace.stop()
     await bus.stop()

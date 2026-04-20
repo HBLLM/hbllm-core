@@ -23,19 +23,33 @@ def _force_gc_after_test():
     gc.collect()
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Force-close any lingering asyncio event loops at session end."""
+import pytest_asyncio
+
+from hbllm.network.bus import InProcessBus
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _force_task_cleanup():
+    """Cancel all stray tasks at the end of each async test to prevent hanging."""
+    yield
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.stop()
-        if not loop.is_closed():
-            # Cancel all pending tasks
-            pending = asyncio.all_tasks(loop) if hasattr(asyncio, "all_tasks") else []
-            for task in pending:
-                task.cancel()
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            loop.close()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        pass  # No event loop to clean up
+        return
+
+    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+    for task in tasks:
+        task.cancel()
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest_asyncio.fixture
+async def bus():
+    """A standard InProcessBus that is cleanly shut down after the test."""
+    test_bus = InProcessBus()
+    await test_bus.start()
+    yield test_bus
+    await test_bus.stop()

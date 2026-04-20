@@ -9,16 +9,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
-
-
-class StrEnum(str, Enum):
-    """Base class for string-based enums."""
-
-    pass
 
 
 class MessageType(StrEnum):

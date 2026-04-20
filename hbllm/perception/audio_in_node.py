@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import time
-from typing import Any, cast
+from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType

@@ -21,9 +21,7 @@ logger = logging.getLogger(__name__)
 # Try to import prometheus_client, fall back to in-memory
 try:
     from prometheus_client import (  # type: ignore
-        CONTENT_TYPE_LATEST,
         REGISTRY,
-        CollectorRegistry,
         Counter,
         Gauge,
         Histogram,

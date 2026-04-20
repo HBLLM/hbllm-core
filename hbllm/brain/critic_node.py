@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType

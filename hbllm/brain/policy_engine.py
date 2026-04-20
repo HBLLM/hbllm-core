@@ -25,7 +25,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -36,10 +36,6 @@ except ImportError:
     yaml = None
 
 logger = logging.getLogger(__name__)
-
-
-class StrEnum(str, Enum):
-    pass
 
 
 # ── Context Provider ─────────────────────────────────────────────────────────

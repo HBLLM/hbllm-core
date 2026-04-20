@@ -23,8 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import torch
-    import torch.nn
+    pass
 
 from hbllm.network.messages import FeedbackPayload, Message, MessageType
 from hbllm.network.node import Node, NodeType

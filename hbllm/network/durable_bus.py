@@ -20,17 +20,13 @@ import time
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, cast
 
 from hbllm.network.bus import InProcessBus, MessageBus, MessageHandler, Subscription
 from hbllm.network.messages import Message, MessageType
 
 logger = logging.getLogger(__name__)
-
-
-class StrEnum(str, Enum):
-    pass
 
 
 class MessageStatus(StrEnum):
@@ -183,6 +179,10 @@ class DurableBus(MessageBus):
     ) -> None:
         """Add a proactive message interceptor to the inner bus."""
         self._inner.add_interceptor(interceptor)
+
+    def has_subscribers(self, topic: str) -> bool:
+        """Check if a topic has any active subscribers."""
+        return self._inner.has_subscribers(topic)
 
     # ─── Persistence ──────────────────────────────────────────────────────
 

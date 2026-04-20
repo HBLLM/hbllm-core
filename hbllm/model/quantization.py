@@ -39,6 +39,11 @@ class QuantizedLinear(nn.Module):
     overhead minimal (1 scale + 1 bias per block per output row).
     """
 
+    weight_shards: torch.Tensor
+    scale: torch.Tensor
+    q_bias: torch.Tensor
+    bias_param: torch.nn.Parameter | None
+
     def __init__(
         self,
         in_features: int,

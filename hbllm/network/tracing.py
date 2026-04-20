@@ -21,8 +21,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from opentelemetry.metrics import Meter
-    from opentelemetry.trace import Tracer
+    pass
 
 logger = logging.getLogger(__name__)
 

@@ -9,20 +9,14 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import TYPE_CHECKING, Any
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
     from hbllm.network.messages import Message
-
-
-class StrEnum(str, Enum):
-    """Base class for string-based enums."""
-
-    pass
 
 
 class NodeType(StrEnum):

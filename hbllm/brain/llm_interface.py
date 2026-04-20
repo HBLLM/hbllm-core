@@ -97,11 +97,11 @@ class LLMInterface:
         # Dynamic LoRA Adapter Multiplexing
         if tenant_id and hasattr(self.model, "set_adapter"):
             try:
-                self.model.set_adapter(tenant_id)
+                self.model.set_adapter(tenant_id)  # type: ignore[operator]
             except ValueError:
                 # Fallback to base model if tenant has no specific LoRA loaded
                 try:
-                    self.model.set_adapter("default")
+                    self.model.set_adapter("default")  # type: ignore[operator]
                 except ValueError:
                     pass
 
@@ -141,7 +141,7 @@ class LLMInterface:
         finally:
             if hasattr(self.model, "set_adapter"):
                 try:
-                    self.model.set_adapter("default")
+                    self.model.set_adapter("default")  # type: ignore[operator]
                 except ValueError:
                     pass
 

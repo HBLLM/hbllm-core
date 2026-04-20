@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -488,14 +489,27 @@ class TestPhase2FactoryIntegration:
             def name(self) -> str:
                 return "mock"
 
-            async def generate(self, messages, **kw) -> LLMResponse:
+            async def generate(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                top_p: float = 0.95,
+                **kwargs: Any,
+            ) -> LLMResponse:
                 return LLMResponse(
                     content="Mock",
                     model="mock",
                     usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
                 )
 
-            async def stream(self, messages, **kw) -> AsyncIterator[str]:
+            async def stream(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                **kwargs: Any,
+            ) -> AsyncIterator[str]:
                 yield "Mock"
 
         config = BrainConfig(
@@ -530,14 +544,27 @@ class TestPhase2FactoryIntegration:
             def name(self) -> str:
                 return "mock"
 
-            async def generate(self, messages, **kw) -> LLMResponse:
+            async def generate(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                top_p: float = 0.95,
+                **kwargs: Any,
+            ) -> LLMResponse:
                 return LLMResponse(
                     content="Mock",
                     model="mock",
                     usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
                 )
 
-            async def stream(self, messages, **kw) -> AsyncIterator[str]:
+            async def stream(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                **kwargs: Any,
+            ) -> AsyncIterator[str]:
                 yield "Mock"
 
         config = BrainConfig(

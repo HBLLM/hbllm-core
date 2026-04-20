@@ -24,7 +24,6 @@ from hbllm.network.tracing import BusMetrics
 logger = logging.getLogger(__name__)
 
 try:
-    import nats as nats_client
     from nats.aio.client import Client as NatsClient
 
     _HAS_NATS = True
@@ -217,3 +216,7 @@ class NatsBus:
             await nats_sub.unsubscribe()
 
         self.metrics.record_unsubscribe()
+
+    def has_subscribers(self, topic: str) -> bool:
+        """Check if a topic has any active NATS subscriptions."""
+        return bool(self._subscriptions.get(topic))
