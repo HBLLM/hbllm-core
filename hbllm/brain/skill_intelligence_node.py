@@ -139,7 +139,7 @@ class SkillIntelligenceNode(Node):
         """Simulate executing skill steps by routing to existing primitives."""
         trace: list[dict[str, Any]] = []
         for step_idx, step in enumerate(skill.steps):
-            
+
             # Hierarchical execution check
             is_sil = False
             task_query = ""

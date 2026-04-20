@@ -105,7 +105,7 @@ class WorldModelNode(Node):
                         overall_status = "FAILURE"
                         reasons.append(pred["reason"])
                         break
-            
+
             if overall_status == "SUCCESS":
                 reason = "All skill steps passed dry-run heuristic and AST checks safely."
             else:

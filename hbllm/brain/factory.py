@@ -98,6 +98,7 @@ class BrainConfig:
     inject_sil: bool = True  # Skill Intelligence Layer
     inject_failure_analyzer: bool = True  # Automatic skill repair
     domain_registry: Any | None = None  # Hierarchical domain registry
+    system_prompt: str = "You are a helpful AI assistant."
 
 
 class Brain:
@@ -742,6 +743,7 @@ class BrainFactory:
                 NodeHealth(node_id=compiler_node.node_id, status=HealthStatus.HEALTHY)
             )
             nodes.append(compiler_node)
+            brain.skill_compiler_node = compiler_node
             logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
 
         if cfg.inject_failure_analyzer:
