@@ -13,6 +13,7 @@ from hbllm.network.messages import Message, MessageType
 
 class MiniMockLLM:
     """Mock LLM for testing failure repair without importing entire MockLLM."""
+
     async def generate_json(self, prompt: str) -> dict[str, Any]:
         return {"new_steps": ["step1", "repaired_step2"]}
 
@@ -31,15 +32,12 @@ async def test_skill_registry_versioning(skill_registry):
         [{"action": "open_file"}, {"action": "read_data"}],
         ["file_tool"],
         True,
-        "general"
+        "general",
     )
     assert skill.version == 1
 
     # Version
-    new_skill = skill_registry.version_skill(
-        skill.skill_id,
-        ["open_file", "secure_read_data"]
-    )
+    new_skill = skill_registry.version_skill(skill.skill_id, ["open_file", "secure_read_data"])
     assert new_skill is not None
     assert new_skill.version == 2
     assert new_skill.parent_skill_id == skill.skill_id
@@ -64,8 +62,8 @@ async def test_failure_analyzer_node():
             "skill_name": "BrokenSkill",
             "steps": ["step1", "broken_step2"],
             "execution_trace": [],
-            "error_message": "Timeout on step2"
-        }
+            "error_message": "Timeout on step2",
+        },
     )
 
     resp = await bus.request("action.analyze_failure", req)
@@ -87,21 +85,19 @@ async def test_skill_intelligence_node(skill_registry):
 
     # Store a highly confident skill
     skill = skill_registry.extract_and_store(
-        "Do complex task",
-        [{"action": "a"}, {"action": "b"}],
-        [],
-        True,
-        "general"
+        "Do complex task", [{"action": "a"}, {"action": "b"}], [], True, "general"
     )
 
     # Needs a mock execute handler for action.execute_code to succeed
     async def mock_execute(msg: Message) -> Message:
         return msg.create_response({"status": "SUCCESS", "output": "ok"})
+
     await bus.subscribe("action.execute_code", mock_execute)
 
     # Needs a mock simulation handler for marginal confidence skills
     async def mock_simulate(msg: Message) -> Message:
         return msg.create_response({"status": "SUCCESS", "prediction": "SUCCESS"})
+
     await bus.subscribe("workspace.simulate", mock_simulate)
 
     node = SkillIntelligenceNode("sil", skill_registry=skill_registry)
@@ -111,7 +107,7 @@ async def test_skill_intelligence_node(skill_registry):
         type=MessageType.QUERY,
         source_node_id="test",
         topic="action.sil_execute",
-        payload={"task": "Do complex task"}
+        payload={"task": "Do complex task"},
     )
 
     resp = await bus.request("action.sil_execute", req)
@@ -215,11 +211,13 @@ async def test_dry_run_simulation_blocks_on_failure(skill_registry):
 
     # Mock simulate to return FAILURE
     async def mock_simulate_fail(msg: Message) -> Message:
-        return msg.create_response({
-            "status": "FAILURE",
-            "prediction": "FAILURE",
-            "content": "Detected unsafe import in step",
-        })
+        return msg.create_response(
+            {
+                "status": "FAILURE",
+                "prediction": "FAILURE",
+                "content": "Detected unsafe import in step",
+            }
+        )
 
     await bus.subscribe("workspace.simulate", mock_simulate_fail)
 
@@ -380,6 +378,7 @@ async def test_collective_sync_skills(skill_registry):
 
     # Wait for the async handler to process
     import asyncio
+
     await asyncio.sleep(0.1)
 
     # Verify the skill was promoted to global
@@ -483,4 +482,3 @@ async def test_promote_skill(skill_registry):
     promoted = skill_registry.get_skill(skill.skill_id)
     assert promoted is not None
     assert promoted.tenant_id == "global"
-

@@ -322,7 +322,7 @@ class SleepCycleNode(Node):
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
                 topic="system.sleep.skill_optimize",
-                payload={}
+                payload={},
             )
             await self.bus.publish("system.sleep.skill_optimize", opt_msg)
             return 1

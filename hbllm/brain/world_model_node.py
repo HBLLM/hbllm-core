@@ -99,7 +99,9 @@ class WorldModelNode(Node):
             reasons = []
 
             for step in steps:
-                if isinstance(step, str) and ("import" in step or "def " in step or "print(" in step):
+                if isinstance(step, str) and (
+                    "import" in step or "def " in step or "print(" in step
+                ):
                     pred = self._simulate_ast(step)
                     if pred["status"] == "FAILURE":
                         overall_status = "FAILURE"
@@ -111,11 +113,9 @@ class WorldModelNode(Node):
             else:
                 reason = f"Skill Simulation Failed: {reasons[0]}"
 
-            return message.create_response({
-                "status": "simulation_result",
-                "prediction": overall_status,
-                "content": reason
-            })
+            return message.create_response(
+                {"status": "simulation_result", "prediction": overall_status, "content": reason}
+            )
 
         return None
 

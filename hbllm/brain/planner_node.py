@@ -661,8 +661,8 @@ class PlannerNode(Node):
             f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"
             f"Original query: {query}\n"
             f"Trajectory:\n{history_text}\n\n"
-            f"If you need to use a tool to continue reasoning, output exactly <tool_call name=\"tool_name\">{{\"arg\":\"val\"}}</tool_call>.\n"
-            f"If you want to delegate a complex sub-task to the Skill Intelligence Layer, output exactly <skill_call task=\"describe task\">fallback args</skill_call>.\n"
+            f'If you need to use a tool to continue reasoning, output exactly <tool_call name="tool_name">{{"arg":"val"}}</tool_call>.\n'
+            f'If you want to delegate a complex sub-task to the Skill Intelligence Layer, output exactly <skill_call task="describe task">fallback args</skill_call>.\n'
             f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
         req = Message(

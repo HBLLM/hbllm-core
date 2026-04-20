@@ -334,7 +334,7 @@ class CollectiveNode(Node):
         for skill in local_skills:
             # If skill is highly confident, locally isolated, we promote it
             conf = skill.confidence_score
-            is_global = (skill.tenant_id == "global")
+            is_global = skill.tenant_id == "global"
 
             if conf > 0.95 and not is_global:
                 # 1. Promote locally
@@ -349,10 +349,7 @@ class CollectiveNode(Node):
                     domain=skill.category,
                     capability=skill.name,
                     artifact_type="skill",
-                    artifact_data={
-                        "steps": skill.steps,
-                        "description": skill.description
-                    },
+                    artifact_data={"steps": skill.steps, "description": skill.description},
                 )
                 digest.compute_checksum()
 
@@ -373,7 +370,9 @@ class CollectiveNode(Node):
                 promoted_count += 1
 
         if promoted_count > 0:
-            logger.info("Promoted and broadcast %d elite skills for tenant %s", promoted_count, tenant_id)
+            logger.info(
+                "Promoted and broadcast %d elite skills for tenant %s", promoted_count, tenant_id
+            )
 
         return None
 

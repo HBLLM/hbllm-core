@@ -151,14 +151,22 @@ class SkillCompilerNode(Node):
 
                 if isinstance(optimized_steps, list) and len(optimized_steps) > 0:
                     # Version it as a repaired/optimized skill
-                    logger.info("Skill '%s' successfully optimized. Old steps: %d, New steps: %d", skill.name, len(skill.steps), len(optimized_steps))
+                    logger.info(
+                        "Skill '%s' successfully optimized. Old steps: %d, New steps: %d",
+                        skill.name,
+                        len(skill.steps),
+                        len(optimized_steps),
+                    )
                     self.skill_registry.version_skill(skill.skill_id, new_steps=optimized_steps)
                     optimized_count += 1
             except Exception as e:
                 logger.debug("Failed to optimize skill '%s': %s", skill.name, e)
 
         if optimized_count > 0:
-            logger.info("DERIVED Pillar completed. Optimized %d skills based on historical inefficiency", optimized_count)
+            logger.info(
+                "DERIVED Pillar completed. Optimized %d skills based on historical inefficiency",
+                optimized_count,
+            )
         return None
 
     async def _handle_experience(self, message: Message) -> None:

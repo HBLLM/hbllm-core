@@ -748,20 +748,38 @@ class BrainFactory:
 
         if cfg.inject_failure_analyzer:
             from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
+
             fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
             await fail_node.start(message_bus)
-            await registry.register(NodeInfo(node_id=fail_node.node_id, node_type=fail_node.node_type, capabilities=fail_node.capabilities))
-            await registry.update_health(NodeHealth(node_id=fail_node.node_id, status=HealthStatus.HEALTHY))
+            await registry.register(
+                NodeInfo(
+                    node_id=fail_node.node_id,
+                    node_type=fail_node.node_type,
+                    capabilities=fail_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=fail_node.node_id, status=HealthStatus.HEALTHY)
+            )
             brain.failure_analyzer_node = fail_node
             nodes.append(fail_node)
             logger.info("FailureAnalyzerNode wired (automated skill repair)")
 
         if cfg.inject_sil:
             from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
+
             sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
             await sil_node.start(message_bus)
-            await registry.register(NodeInfo(node_id=sil_node.node_id, node_type=sil_node.node_type, capabilities=sil_node.capabilities))
-            await registry.update_health(NodeHealth(node_id=sil_node.node_id, status=HealthStatus.HEALTHY))
+            await registry.register(
+                NodeInfo(
+                    node_id=sil_node.node_id,
+                    node_type=sil_node.node_type,
+                    capabilities=sil_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=sil_node.node_id, status=HealthStatus.HEALTHY)
+            )
             brain.skill_intelligence_node = sil_node
             nodes.append(sil_node)
             logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")

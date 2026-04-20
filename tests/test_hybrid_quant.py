@@ -15,6 +15,7 @@ def test_verify_hal():
     assert recommendation is not None
     assert "quantization" in recommendation
 
+
 def test_verify_hybrid_model():
     # Small test config
     config = ModelConfig(
@@ -23,7 +24,7 @@ def test_verify_hybrid_model():
         num_attention_heads=8,
         num_kv_heads=2,
         intermediate_size=512,
-        quantization_level=8, # 8 corresponds to INT8 in hardware_hal QuantizationPolicy
+        quantization_level=8,  # 8 corresponds to INT8 in hardware_hal QuantizationPolicy
     )
 
     model = HBLLMModel(config)

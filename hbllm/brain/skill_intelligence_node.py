@@ -21,12 +21,14 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
 class SkillIntelligenceNode(Node):
     """
     Skill Intelligence Layer (SIL).
     Governs task execution by choosing and invoking learned skills,
     detecting failures, and triggering automated skill repair.
     """
+
     def __init__(self, node_id: str, skill_registry: SkillRegistry) -> None:
         super().__init__(
             node_id=node_id,
@@ -57,7 +59,13 @@ class SkillIntelligenceNode(Node):
 
         # Filter for acceptable confidence (>0.7) and pick best by cost_score or success_rate
         tenant_id = message.tenant_id or "global"
-        viable_skills = [s for s in skills if s.confidence_score >= 0.7 and s.success_rate > 0.5 and (s.tenant_id == tenant_id or s.tenant_id == "global")]
+        viable_skills = [
+            s
+            for s in skills
+            if s.confidence_score >= 0.7
+            and s.success_rate > 0.5
+            and (s.tenant_id == tenant_id or s.tenant_id == "global")
+        ]
 
         if not viable_skills:
             # Fallback to direct raw execution, letting SkillCompiler capture it on success later.
@@ -66,8 +74,13 @@ class SkillIntelligenceNode(Node):
         # Sort by confidence + success_rate
         best_skill = max(viable_skills, key=lambda s: (s.confidence_score, s.success_rate))
 
-        logger.info("SIL selected skill '%s' (v%d) with confidence %.2f for task: %s",
-                    best_skill.name, getattr(best_skill, 'version', 1), getattr(best_skill, 'confidence_score', 0.8), query)
+        logger.info(
+            "SIL selected skill '%s' (v%d) with confidence %.2f for task: %s",
+            best_skill.name,
+            getattr(best_skill, "version", 1),
+            getattr(best_skill, "confidence_score", 0.8),
+            query,
+        )
 
         # 1.5 Execution Dry Run (Simulation) for marginal trust
         if 0.7 <= best_skill.confidence_score < 0.85:
@@ -77,12 +90,17 @@ class SkillIntelligenceNode(Node):
                 tenant_id=message.tenant_id,
                 session_id=message.session_id,
                 topic="workspace.simulate",
-                payload={"action_type": "simulate_skill", "steps": best_skill.steps}
+                payload={"action_type": "simulate_skill", "steps": best_skill.steps},
             )
             sim_resp = await self.request("workspace.simulate", sim_req, timeout=10.0)
             if sim_resp and sim_resp.payload.get("prediction") == "FAILURE":
-                logger.warning("SIL Simulation failed for skill '%s'. Failing early to avoid side-effects.", best_skill.name)
-                return message.create_error(f"Dry-run simulation failed: {sim_resp.payload.get('content')}")
+                logger.warning(
+                    "SIL Simulation failed for skill '%s'. Failing early to avoid side-effects.",
+                    best_skill.name,
+                )
+                return message.create_error(
+                    f"Dry-run simulation failed: {sim_resp.payload.get('content')}"
+                )
 
         # 2. Execution Delegation
         start_time = time.time()
@@ -94,12 +112,12 @@ class SkillIntelligenceNode(Node):
             logger.info("SIL successfully executed skill '%s'", best_skill.name)
             # Rough estimate of tokens used during skill execution
             tokens_used = len("".join(best_skill.steps)) // 4
-            self.skill_registry.record_execution(best_skill.skill_id, True, latency_ms, tokens=tokens_used)
-            return message.create_response({
-                "status": "SUCCESS",
-                "skill": best_skill.name,
-                "execution_trace": trace
-            })
+            self.skill_registry.record_execution(
+                best_skill.skill_id, True, latency_ms, tokens=tokens_used
+            )
+            return message.create_response(
+                {"status": "SUCCESS", "skill": best_skill.name, "execution_trace": trace}
+            )
         else:
             logger.warning("SIL failed executing skill '%s': %s", best_skill.name, error_msg)
             # Route to Failure Analyzer
@@ -111,8 +129,8 @@ class SkillIntelligenceNode(Node):
                     "skill_name": best_skill.name,
                     "steps": best_skill.steps,
                     "execution_trace": trace,
-                    "error_message": error_msg
-                }
+                    "error_message": error_msg,
+                },
             )
             repair_resp = await self.request("action.analyze_failure", repair_req, timeout=120.0)
 
@@ -125,25 +143,32 @@ class SkillIntelligenceNode(Node):
                     new_skill = self.skill_registry.version_skill(
                         skill_id=best_skill.skill_id,
                         new_steps=rt_payload.get("new_steps"),
-                        test_latency_ms=latency_ms
+                        test_latency_ms=latency_ms,
                     )
                     if new_skill:
-                        logger.info("SIL autogenerated new skill version: %s v%d", new_skill.name, getattr(new_skill, 'version', 1))
+                        logger.info(
+                            "SIL autogenerated new skill version: %s v%d",
+                            new_skill.name,
+                            getattr(new_skill, "version", 1),
+                        )
 
             # Record failure against the old skill
-            self.skill_registry.record_execution(best_skill.skill_id, False, latency_ms, failure_type=failure_type)
+            self.skill_registry.record_execution(
+                best_skill.skill_id, False, latency_ms, failure_type=failure_type
+            )
 
             return message.create_error(f"Execution failed: {error_msg}")
 
-    async def _execute_skill(self, skill: Any, origin_message: Message) -> tuple[bool, str, list[dict[str, Any]]]:
+    async def _execute_skill(
+        self, skill: Any, origin_message: Message
+    ) -> tuple[bool, str, list[dict[str, Any]]]:
         """Simulate executing skill steps by routing to existing primitives."""
         trace: list[dict[str, Any]] = []
         for step_idx, step in enumerate(skill.steps):
-
             # Hierarchical execution check
             is_sil = False
             task_query = ""
-            if isinstance(step, str) and '"action"' in step and 'sil_execute' in step:
+            if isinstance(step, str) and '"action"' in step and "sil_execute" in step:
                 try:
                     parsed = json.loads(step)
                     if parsed.get("action") == "sil_execute":
@@ -176,12 +201,18 @@ class SkillIntelligenceNode(Node):
             try:
                 resp = await self.request(topic, req, timeout=30.0)
                 if resp.type == MessageType.ERROR:
-                    trace.append({"step": step, "status": "failed", "error": str(resp.payload.get("error"))})
+                    trace.append(
+                        {"step": step, "status": "failed", "error": str(resp.payload.get("error"))}
+                    )
                     return False, str(resp.payload.get("error", "Execution error")), trace
                 elif resp.payload.get("status") != "SUCCESS":
-                    trace.append({"step": step, "status": "failed", "error": str(resp.payload.get("error"))})
+                    trace.append(
+                        {"step": step, "status": "failed", "error": str(resp.payload.get("error"))}
+                    )
                     return False, str(resp.payload.get("error", "Sub-process failed")), trace
-                trace.append({"step": step, "status": "success", "output": resp.payload.get("output")})
+                trace.append(
+                    {"step": step, "status": "success", "output": resp.payload.get("output")}
+                )
             except Exception as e:
                 trace.append({"step": step, "status": "failed", "error": str(e)})
                 return False, str(e), trace
@@ -190,8 +221,10 @@ class SkillIntelligenceNode(Node):
     async def _fallback_raw_execution(self, message: Message, query: str) -> Message | None:
         """Fallback to raw planner logic if we had no skill."""
         logger.info("SIL fallback: No matched skill found. Delegating back to raw reasoning tools.")
-        return message.create_response({
-            "status": "NO_SKILL",
-            "reason": "No high confidence skill available for this task. Fallback requested.",
-            "execution_trace": []
-        })
+        return message.create_response(
+            {
+                "status": "NO_SKILL",
+                "reason": "No high confidence skill available for this task. Fallback requested.",
+                "execution_trace": [],
+            }
+        )

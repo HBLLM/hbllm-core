@@ -17,6 +17,7 @@ from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
 class FailureAnalyzerNode(Node):
     """Diagnoses execution failures and proposes repaired action steps."""
 
@@ -52,12 +53,14 @@ class FailureAnalyzerNode(Node):
         failure_type = self._classify_failure(error_msg)
 
         if not self.llm:
-            return message.create_response({
-                "failure_type": failure_type,
-                "repaired": False,
-                "reason": "No LLM available for repair",
-                "new_steps": steps
-            })
+            return message.create_response(
+                {
+                    "failure_type": failure_type,
+                    "repaired": False,
+                    "reason": "No LLM available for repair",
+                    "new_steps": steps,
+                }
+            )
 
         # Ask LLM to generate a fixed step list
         prompt = (
@@ -67,7 +70,7 @@ class FailureAnalyzerNode(Node):
             f"Original Steps:\n{steps}\n"
             f"Execution Trace so far:\n{trace}\n"
             f"Please analyze the failure and provide an updated JSON list of steps that fixes this issue.\n"
-            f"Respond ONLY with valid JSON formatting like `{{\"new_steps\": [\"step 1\", \"step 2\"]}}`."
+            f'Respond ONLY with valid JSON formatting like `{{"new_steps": ["step 1", "step 2"]}}`.'
         )
 
         try:
@@ -76,12 +79,16 @@ class FailureAnalyzerNode(Node):
 
             repaired = new_steps != steps
 
-            return message.create_response({
-                "failure_type": failure_type,
-                "repaired": repaired,
-                "new_steps": new_steps,
-                "reason": "Automated LLM repair strategy applied." if repaired else "Could not find a differing repair strategy."
-            })
+            return message.create_response(
+                {
+                    "failure_type": failure_type,
+                    "repaired": repaired,
+                    "new_steps": new_steps,
+                    "reason": "Automated LLM repair strategy applied."
+                    if repaired
+                    else "Could not find a differing repair strategy.",
+                }
+            )
         except Exception as e:
             logger.error("Failed to generate repair strategy: %s", e)
             return message.create_error(f"Repair generation failed: {e}")

@@ -200,7 +200,9 @@ class SkillRegistry:
 
     # ─── Skill Lookup ────────────────────────────────────────────────
 
-    def find_skill(self, query: str, category: str | None = None, top_k: int = 5, tenant_id: str = "global") -> list[Skill]:
+    def find_skill(
+        self, query: str, category: str | None = None, top_k: int = 5, tenant_id: str = "global"
+    ) -> list[Skill]:
         """Find skills matching a query by keyword similarity."""
         select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
@@ -232,12 +234,21 @@ class SkillRegistry:
     def get_skill(self, skill_id: str) -> Skill | None:
         select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
-            row = conn.execute(f"SELECT {select_cols} FROM skills WHERE skill_id = ?", (skill_id,)).fetchone()
+            row = conn.execute(
+                f"SELECT {select_cols} FROM skills WHERE skill_id = ?", (skill_id,)
+            ).fetchone()
         return self._row_to_skill(row) if row else None
 
     # ─── Skill Execution Tracking ────────────────────────────────────
 
-    def record_execution(self, skill_id: str, success: bool, latency_ms: float, tokens: int = 0, failure_type: str | None = None) -> None:
+    def record_execution(
+        self,
+        skill_id: str,
+        success: bool,
+        latency_ms: float,
+        tokens: int = 0,
+        failure_type: str | None = None,
+    ) -> None:
         """Record a skill execution for performance tracking."""
         with sqlite3.connect(str(self._db_path)) as conn:
             row = conn.execute(
@@ -264,14 +275,23 @@ class SkillRegistry:
             if success:
                 new_conf = min(1.0, old_conf + 0.05)
             else:
-                new_conf = max(0.0, old_conf - 0.2) # penalize failure
+                new_conf = max(0.0, old_conf - 0.2)  # penalize failure
                 if failure_type and failure_type not in failures:
                     failures.append(failure_type)
 
             conn.execute(
                 "UPDATE skills SET invocations = ?, success_rate = ?, avg_latency_ms = ?, tokens_used = ?, confidence_score = ?, failure_types = ?, updated_at = ? "
                 "WHERE skill_id = ?",
-                (invocations, new_rate, new_latency, new_tokens, new_conf, json.dumps(failures), time.time(), skill_id),
+                (
+                    invocations,
+                    new_rate,
+                    new_latency,
+                    new_tokens,
+                    new_conf,
+                    json.dumps(failures),
+                    time.time(),
+                    skill_id,
+                ),
             )
 
     def promote_skill(self, skill_id: str) -> None:
@@ -282,7 +302,13 @@ class SkillRegistry:
                 (time.time(), skill_id),
             )
 
-    def version_skill(self, skill_id: str, new_steps: list[str], test_latency_ms: float = 0.0, new_tools: list[str] | None = None) -> Skill | None:
+    def version_skill(
+        self,
+        skill_id: str,
+        new_steps: list[str],
+        test_latency_ms: float = 0.0,
+        new_tools: list[str] | None = None,
+    ) -> Skill | None:
         """Create a new version of a skill, usually after a failure fix."""
         old_skill = self.get_skill(skill_id)
         if not old_skill:
@@ -306,11 +332,13 @@ class SkillRegistry:
             parent_skill_id=old_skill.skill_id,
             tokens_used=old_skill.tokens_used,
             cost_score=old_skill.cost_score,
-            confidence_score=0.9, # new fix starts confident
+            confidence_score=0.9,  # new fix starts confident
             tenant_id=old_skill.tenant_id,
         )
         self._store(new_skill)
-        logger.info("Versioned skill %s to v%d (%s)", old_skill.name, new_skill.version, new_skill_id)
+        logger.info(
+            "Versioned skill %s to v%d (%s)", old_skill.name, new_skill.version, new_skill_id
+        )
         return new_skill
 
     # ─── Helpers ─────────────────────────────────────────────────────
@@ -342,7 +370,9 @@ class SkillRegistry:
             tenant_id=row[18] if len(row) > 18 else "global",
         )
 
-    def list_skills(self, category: str | None = None, limit: int = 50, tenant_id: str = "global") -> list[Skill]:
+    def list_skills(
+        self, category: str | None = None, limit: int = 50, tenant_id: str = "global"
+    ) -> list[Skill]:
         select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             if category:
