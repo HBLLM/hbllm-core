@@ -50,7 +50,7 @@ async def test_process_reward_node_fallback():
     await bus.start()
 
     node = ProcessRewardNode(node_id="prm", model_name="125m")
-    
+
     # Replace heavy model with tiny one to prevent PyTorch timeout in tests
     config = get_config("125m")
     config.vocab_size = 500
@@ -58,7 +58,7 @@ async def test_process_reward_node_fallback():
     config.num_layers = 1
     config.num_attention_heads = 2
     node.prm_model = HBLLMForProcessReward(config)
-    
+
     await node.start(bus)
 
     # Query it via bus
