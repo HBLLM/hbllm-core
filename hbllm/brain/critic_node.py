@@ -84,6 +84,7 @@ class CriticNode(Node):
         # LLM Self-Reflection Evaluation (fail-open: default to PASS on error)
         status = "PASS"
         reason = ""
+        confidence = 0.5  # Default when no evaluation runs
         try:
             from hbllm.brain.constitutional_principles import (
                 format_principles_for_prompt,
@@ -111,9 +112,13 @@ class CriticNode(Node):
 
             if violations and isinstance(violations, list) and len(violations) > 0:
                 status = "FAIL"
+                # Confidence scales with violation count (more violations = higher certainty of failure)
+                confidence = min(0.7 + len(violations) * 0.1, 1.0)
                 reason = f"Violated principles: {', '.join(str(v) for v in violations)}. Details: {reason}"
             else:
                 status = "PASS"
+                # LLM explicitly found no violations — high confidence
+                confidence = 0.95
                 if not reason:
                     reason = "Passed all constitutional principles."
 
@@ -123,6 +128,8 @@ class CriticNode(Node):
                 e,
             )
             status = "FAIL"
+            # Low confidence since we couldn't actually evaluate
+            confidence = 0.4
             reason = f"Critic evaluation blocked due to internal system/LLM error: {e}"
 
         if status == "FAIL":
@@ -147,7 +154,7 @@ class CriticNode(Node):
                 "target_node": message.source_node_id,
                 "status": status,
                 "reason": reason,
-                "confidence": 1.0,
+                "confidence": confidence,
                 "original_content": proposal.get("content"),
             },
             correlation_id=message.correlation_id,

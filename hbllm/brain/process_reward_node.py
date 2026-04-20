@@ -64,12 +64,13 @@ class ProcessRewardNode(Node):
                 state_dict = torch.load(self.prm_path, map_location=self.device, weights_only=True)
                 self.prm_model.load_state_dict(state_dict, strict=False)
                 self.prm_is_trained = True
-                logger.info(f"[ProcessRewardNode] Loaded PRM weights from {self.prm_path}")
+                logger.info("[ProcessRewardNode] Loaded PRM weights from %s", self.prm_path)
             except Exception as e:
-                logger.warning(f"[ProcessRewardNode] Failed to load PRM weights: {e}")
+                logger.warning("[ProcessRewardNode] Failed to load PRM weights: %s", e)
         else:
             logger.info(
-                f"[ProcessRewardNode] No PRM weights found at {self.prm_path}. Will use fallback heuristic/LLM."
+                "[ProcessRewardNode] No PRM weights found at %s. Will use fallback heuristic/LLM.",
+                self.prm_path,
             )
 
         self.prm_model.to(self.device)
@@ -92,15 +93,27 @@ class ProcessRewardNode(Node):
         if not thought_content:
             return message.create_response({"score": 0.5, "source": "empty"})
 
-        score = await self.score_thought(thought_content)
+        score, confidence = await self.score_thought(thought_content)
 
-        logger.debug(f"[ProcessRewardNode] Scored thought: {score:.3f}")
+        logger.debug(
+            "[ProcessRewardNode] Scored thought: %.3f (confidence: %.2f)", score, confidence
+        )
         return message.create_response(
-            {"score": score, "source": "prm_network" if self.prm_is_trained else "fallback"}
+            {
+                "score": score,
+                "confidence": confidence,
+                "source": "prm_network" if self.prm_is_trained else "fallback",
+            }
         )
 
-    async def score_thought(self, content: str) -> float:
-        """Run the PRM model or fallback on the thought content."""
+    async def score_thought(self, content: str) -> tuple[float, float]:
+        """Run the PRM model or fallback on the thought content.
+
+        Returns:
+            Tuple of (score, confidence) where confidence indicates how
+            reliable the score is (1.0 = trained PRM, 0.6 = LLM fallback,
+            0.2 = heuristic default).
+        """
         if not self.prm_is_trained and self.llm:
             # Fallback to LLM if PRM isn't trained yet
             try:
@@ -110,9 +123,11 @@ class ProcessRewardNode(Node):
                     f"Step: {content[:300]}\n\n"
                     f'Output JSON: {{"score": 0.0-1.0}}'
                 )
-                return float(result.get("score", 0.5))
+                return float(result.get("score", 0.5)), 0.6
             except Exception:
-                pass
+                logger.warning(
+                    "[ProcessRewardNode] LLM fallback scoring failed, using heuristic 0.5"
+                )
 
         # If PRM is "trained" (or we are forcing it for tests), run the neural net
         try:
@@ -126,7 +141,7 @@ class ProcessRewardNode(Node):
 
             # Extract score from sigmoid output
             score: float = outputs["scores"].item()
-            return min(max(score, 0.0), 1.0)
+            return min(max(score, 0.0), 1.0), 1.0
         except Exception as e:
-            logger.error(f"[ProcessRewardNode] PRM inference failed: {e}")
-            return 0.5
+            logger.error("[ProcessRewardNode] PRM inference failed: %s", e)
+            return 0.5, 0.2

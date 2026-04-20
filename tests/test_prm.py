@@ -97,7 +97,9 @@ async def test_process_reward_node_neural():
     node.prm_is_trained = True  # Force to True for test
 
     # Simulate a thought
-    score = await node.score_thought("This is a logical deduction.")
+    score, confidence = await node.score_thought("This is a logical deduction.")
 
     assert isinstance(score, float)
     assert 0.0 <= score <= 1.0
+    assert isinstance(confidence, float)
+    assert 0.0 <= confidence <= 1.0
