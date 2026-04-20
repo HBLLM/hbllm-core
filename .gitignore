@@ -76,3 +76,4 @@ site/
 
 # Logs
 *.log
+cognitive_checkpoints/
