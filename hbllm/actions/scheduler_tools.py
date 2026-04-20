@@ -106,7 +106,7 @@ class ScheduleRecurringTool:
                 payload={
                     "task_id": task_id,
                     "tenant_id": getattr(env, "tenant_id", "default"),
-                    "trigger_time": time.time(), # immediate evaluation context
+                    "trigger_time": time.time(),  # immediate evaluation context
                     "cron_expression": kwargs["cron_expression"],
                     "route_topic": kwargs["route_topic"],
                     "payload": kwargs["payload"],

@@ -29,9 +29,6 @@ from hbllm.network.messages import Message, MessageType
 logger = logging.getLogger(__name__)
 
 
-
-
-
 class MessageStatus(StrEnum):
     PENDING = "pending"
     DELIVERED = "delivered"

@@ -32,7 +32,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             if os.environ.get("HBLLM_ENV", "").lower() == "production":
                 raise ValueError(
                     "HBLLM_JWT_SECRET must be set in production. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                    'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
                 )
             # In development, generate a random ephemeral secret per boot.
             self.secret_key = secrets.token_urlsafe(32)

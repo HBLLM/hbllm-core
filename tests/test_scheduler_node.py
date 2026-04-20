@@ -13,7 +13,6 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestSchedulerNode:
-
     @pytest.fixture
     async def bus(self):
         bus = InProcessBus()
@@ -124,7 +123,9 @@ class TestSchedulerNode:
         # Should have updated status back to pending, and shifted the trigger time
         with sqlite3.connect(scheduler.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("SELECT status, trigger_time FROM scheduled_tasks WHERE task_id = 't4'")
+            cursor = conn.execute(
+                "SELECT status, trigger_time FROM scheduled_tasks WHERE task_id = 't4'"
+            )
             row = cursor.fetchone()
 
         assert row["status"] == "pending"
@@ -143,7 +144,7 @@ class TestSchedulerNode:
                 "trigger_time": time.time() + 10.0,
                 "route_topic": "dummy",
                 "payload": {"data": 123},
-            }
+            },
         )
         await bus.publish("system.scheduler.schedule", schedule_msg)
         await asyncio.sleep(0.1)
@@ -159,7 +160,7 @@ class TestSchedulerNode:
             type=MessageType.EVENT,
             source_node_id="tool",
             topic="system.scheduler.cancel",
-            payload={"task_id": "bus_t1"}
+            payload={"task_id": "bus_t1"},
         )
         await bus.publish("system.scheduler.cancel", cancel_msg)
         await asyncio.sleep(0.1)

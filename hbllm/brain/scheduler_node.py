@@ -54,7 +54,9 @@ class SchedulerNode(Node):
                 )
                 """
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_trigger_time ON scheduled_tasks(trigger_time)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trigger_time ON scheduled_tasks(trigger_time)"
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON scheduled_tasks(status)")
 
     async def start(self, bus: Any) -> None:
@@ -194,7 +196,7 @@ class SchedulerNode(Node):
                     if task["cron_expression"]:
                         # Basic future calculation for next trigger (e.g., simplistic +interval for now)
                         # We'll rely on the actual caller to reset specific complex windows or implement croniter logic later.
-                        pass # To be handled properly in cron processing
+                        pass  # To be handled properly in cron processing
                     conn.execute(
                         "UPDATE scheduled_tasks SET status = 'completed' WHERE task_id = ?",
                         (task["task_id"],),

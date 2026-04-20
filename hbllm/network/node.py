@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from hbllm.network.messages import Message
 
 
-
-
 class NodeType(StrEnum):
     """Types of nodes in the HBLLM network."""
 
