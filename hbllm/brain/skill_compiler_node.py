@@ -125,7 +125,7 @@ class SkillCompilerNode(Node):
         # Fetch skills that are confident and heavily used but could be optimized
         tenant_id = message.payload.get("tenant_id", "global")
         all_skills = self.skill_registry.list_skills(limit=50, tenant_id=tenant_id)
-        
+
         # Filter for "clunky" skills
         clunky_skills = []
         for s in all_skills:
@@ -146,8 +146,8 @@ class SkillCompilerNode(Node):
             )
 
             try:
-                result = await self.llm.agenerate(prompt)
-                optimized_steps = json.loads(result.text)
+                result = await self.llm.generate(prompt)
+                optimized_steps = json.loads(result)
 
                 if isinstance(optimized_steps, list) and len(optimized_steps) > 0:
                     # Version it as a repaired/optimized skill

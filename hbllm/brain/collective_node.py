@@ -333,14 +333,13 @@ class CollectiveNode(Node):
         promoted_count = 0
         for skill in local_skills:
             # If skill is highly confident, locally isolated, we promote it
-            cost = skill.cost_score
             conf = skill.confidence_score
             is_global = (skill.tenant_id == "global")
 
             if conf > 0.95 and not is_global:
                 # 1. Promote locally
                 self.skill_registry.promote_skill(skill.skill_id)
-                
+
                 # 2. Re-fetch or manually update the skill tenant_id for the payload
                 skill.tenant_id = "global"
 
