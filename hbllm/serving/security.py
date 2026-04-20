@@ -10,11 +10,11 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
 import re
-import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -162,6 +162,8 @@ class RateLimiter:
     Default: 60 requests/minute per tenant.
     Uses LRU eviction to prevent unbounded bucket growth from DDoS
     with random tenant IDs.
+
+    Note: Uses asyncio.Lock — must only be called from async context.
     """
 
     def __init__(
@@ -174,10 +176,10 @@ class RateLimiter:
         self.burst_size = burst_size
         self.max_tenants = max_tenants
         self._buckets: OrderedDict[str, TokenBucket] = OrderedDict()
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._enabled = True
 
-    def check(self, tenant_id: str) -> tuple[bool, float]:
+    async def check(self, tenant_id: str) -> tuple[bool, float]:
         """
         Check if request is allowed for a tenant.
 
@@ -187,7 +189,7 @@ class RateLimiter:
         if not self._enabled:
             return True, 0.0
 
-        with self._lock:
+        async with self._lock:
             if tenant_id not in self._buckets:
                 # Evict oldest bucket if at capacity
                 if len(self._buckets) >= self.max_tenants:
@@ -206,9 +208,9 @@ class RateLimiter:
             allowed = bucket.consume()
             return allowed, bucket.wait_time if not allowed else 0.0
 
-    def reset(self, tenant_id: str) -> None:
+    async def reset(self, tenant_id: str) -> None:
         """Reset rate limit for a tenant."""
-        with self._lock:
+        async with self._lock:
             self._buckets.pop(tenant_id, None)
 
     @property
@@ -349,7 +351,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # ── Rate Limiting ──
         if self.rate_limiter.enabled:
             tenant_id = getattr(request.state, "tenant_id", "anonymous")
-            allowed, retry_after = self.rate_limiter.check(tenant_id)
+            allowed, retry_after = await self.rate_limiter.check(tenant_id)
 
             if not allowed:
                 return JSONResponse(

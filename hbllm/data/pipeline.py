@@ -21,7 +21,7 @@ from hbllm.data.sharder import ShardWriter
 # Rust extensions might not have stubs
 try:
     from hbllm_data_tools_rs import Deduplicator, fast_clean_batch  # type: ignore
-    from hbllm_tokenizer_rs import Trainer, Vocab  # type: ignore
+    from hbllm_tokenizer_rs import Trainer  # type: ignore
 
     RUST_AVAILABLE = True
 except ImportError:

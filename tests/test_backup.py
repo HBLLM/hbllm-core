@@ -1,7 +1,5 @@
 """Tests for the HBLLM backup system."""
 
-import json
-import os
 import sqlite3
 import tempfile
 from pathlib import Path

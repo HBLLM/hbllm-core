@@ -14,7 +14,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from datetime import timezone
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from hbllm.network.messages import Message
 from hbllm.network.tracing import BusMetrics, trace_span
@@ -84,6 +84,10 @@ class MessageBus(Protocol):
 
     async def stop(self) -> None:
         """Stop the bus and clean up."""
+        ...
+
+    def has_subscribers(self, topic: str) -> bool:
+        """Check if a topic has any active subscribers."""
         ...
 
 
@@ -232,10 +236,15 @@ class InProcessBus:
     async def unsubscribe(self, subscription: Subscription) -> None:
         """Remove a subscription."""
         subscription.cancel()
-        subs = self._subscriptions.get(subscription.topic, [])
-        self._subscriptions[subscription.topic] = [s for s in subs if s.id != subscription.id]
+        subs = self._subscriptions[subscription.topic]
+        if subscription in subs:
+            subs.remove(subscription)
         self.metrics.record_unsubscribe()
         logger.debug("Unsubscribed '%s' from '%s'", subscription.id, subscription.topic)
+
+    def has_subscribers(self, topic: str) -> bool:
+        """Check if a topic has any active subscribers."""
+        return bool(self._subscriptions.get(topic))
 
     async def _dispatch_loop(self) -> None:
         """Main loop: dequeue messages by priority and dispatch to subscribers."""

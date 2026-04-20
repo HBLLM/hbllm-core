@@ -20,7 +20,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType, QueryPayload
 from hbllm.serving.auth import JWTAuthMiddleware
 
@@ -108,51 +107,8 @@ async def _boot_brain(
     redis_url: str = "redis://localhost:6379",
 ) -> None:
     """Initialize the full brain pipeline."""
-    # Lazy imports — keeps module importable without the full ML stack
-    import torch
-
-    try:
-        from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
-    except ImportError:
-        Vocab = None  # type: ignore[assignment,misc]
-
-    from hbllm.actions.api_node import ApiNode
-    from hbllm.actions.browser_node import BrowserNode
-    from hbllm.actions.execution_node import ExecutionNode
-    from hbllm.actions.fuzzy_node import FuzzyNode
-    from hbllm.actions.logic_node import LogicNode
-    from hbllm.brain.attention_manager import AttentionManager
-    from hbllm.brain.collective_node import CollectiveNode
-    from hbllm.brain.critic_node import CriticNode
-    from hbllm.brain.curiosity_node import CuriosityNode
-    from hbllm.brain.decision_node import DecisionNode
-    from hbllm.brain.evaluation_node import EvaluationNode
-    from hbllm.brain.experience_node import ExperienceNode
-    from hbllm.brain.identity_node import IdentityNode
-    from hbllm.brain.learner_node import LearnerNode
-    from hbllm.brain.llm_interface import LLMInterface
-    from hbllm.brain.load_manager import LoadManager
-    from hbllm.brain.meta_node import MetaReasoningNode
-    from hbllm.brain.planner_node import PlannerNode
-    from hbllm.brain.reflection_node import ReflectionNode
-    from hbllm.brain.router_node import RouterNode
-    from hbllm.brain.rule_extractor import RuleExtractorNode
-    from hbllm.brain.skill_compiler_node import SkillCompilerNode
-    from hbllm.brain.sleep_node import SleepCycleNode
-    from hbllm.brain.spawner_node import SpawnerNode
-    from hbllm.brain.workspace_node import WorkspaceNode
-    from hbllm.brain.world_model_node import WorldModelNode
-    from hbllm.memory.memory_node import MemoryNode
-    from hbllm.model.config import get_config
-    from hbllm.model.transformer import HBLLMForCausalLM
-    from hbllm.modules.base_module import DomainModuleNode
-
     # 1. Bus
     from hbllm.network.bus import MessageBus
-    from hbllm.network.registry import ServiceRegistry
-    from hbllm.perception.audio_in_node import AudioInputNode
-    from hbllm.perception.audio_out_node import AudioOutputNode
-    from hbllm.perception.vision_node import VisionNode
 
     bus: MessageBus
     if bus_type == "redis":
@@ -160,124 +116,55 @@ async def _boot_brain(
 
         bus = RedisBus(redis_url=redis_url)
     else:
+        from hbllm.network.bus import InProcessBus
+
         bus = InProcessBus()
 
     from hbllm.network.rate_limiter import RateLimitInterceptor
 
     limiter = RateLimitInterceptor(target_rpm=60.0)
     bus.add_interceptor(limiter.intercept)
-
-    registry = ServiceRegistry()
     await bus.start()
 
-    # 2. Model
-    logger.info("Loading base model (%s)...", model_size)
-    from hbllm.model.model_loader import load_model
+    # 2. Delegate cognitive loading to unified factory
+    from hbllm.brain.factory import BrainConfig, BrainFactory
 
-    device_str = (
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
+    # We use create_local for overarching OSS usage by default
+    config = BrainConfig(
+        inject_memory=True,
+        inject_identity=True,
+        inject_curiosity=True,
+        inject_perception=True,
+        inject_fuzzy_logic=True,
+        inject_symbolic_logic=True,
     )
-    model = load_model(source=model_size, device=device_str)
 
-    device = torch.device(device_str)
+    logger.info("Initializing Brain factory with model: %s", model_size)
+    brain = await BrainFactory.create_local(model_size=model_size, config=config, bus=bus)
 
-    # 3. Tokenizer
-    logger.info("Loading tokenizer...")
-    vocab = getattr(model, "tokenizer", None)
-    if vocab is None and Vocab is not None:
-        vocab = Vocab.load("test_workspace/vocab.json")
-    if vocab is None:
-        raise RuntimeError("No tokenizer available — model must provide one")
-
-    # 4. LLM Interface
-    llm_interface = LLMInterface(model=model, tokenizer=vocab, device=device)
-
-    # 5. Nodes — all cognitive, memory, perception, and action nodes
-    nodes = [
-        # Memory + Knowledge Graph
-        MemoryNode(node_id="memory_01", db_path="chat_memory.db"),
-        # Core cognitive pipeline
-        RouterNode(node_id="router_01", llm=llm_interface),
-        PlannerNode(node_id="planner_01"),
-        CriticNode(node_id="critic_01", llm=llm_interface),  # type: ignore[arg-type]
-        DecisionNode(node_id="decision_01", llm=llm_interface),  # type: ignore[arg-type]
-        WorkspaceNode(node_id="workspace_01"),
-        # Experience & meta-cognitive
-        ExperienceNode(node_id="experience_01", llm=llm_interface),
-        MetaReasoningNode(node_id="meta_01"),
-        RuleExtractorNode(node_id="rule_extractor_01"),
-        CuriosityNode(node_id="curiosity_01"),
-        IdentityNode(node_id="identity_01"),
-        CollectiveNode(node_id="collective_01"),
-        # Intelligence feedback loop
-        EvaluationNode(node_id="eval_01"),
-        AttentionManager(node_id="attention_01"),
-        LoadManager(node_id="load_01"),
-        ReflectionNode(node_id="reflection_01"),
-        SkillCompilerNode(node_id="skill_compiler_01"),
-        # Learning
-        LearnerNode(node_id="learner_01"),
-        SpawnerNode(node_id="spawner_01", model=model, tokenizer=vocab),
-        # Perception
-        VisionNode(node_id="vision_01"),
-        AudioInputNode(node_id="audio_in_01", model_size="tiny"),
-        AudioOutputNode(node_id="audio_out_01"),
-        # Simulation & actions
-        WorldModelNode(node_id="world_model_01"),
-        ExecutionNode(node_id="exec_01"),
-        BrowserNode(node_id="browser_01"),
-        LogicNode(node_id="logic_01", llm=llm_interface),
-        FuzzyNode(node_id="fuzzy_01", llm=llm_interface),
-        ApiNode(node_id="api_01", llm=llm_interface),
-        # Consolidation
-        SleepCycleNode(node_id="sleep_01", idle_timeout_seconds=60.0, llm=llm_interface),
-        # Domain experts
-        DomainModuleNode(
-            node_id="domain_general", domain_name="general", model=model, tokenizer=vocab
-        ),
-        DomainModuleNode(
-            node_id="domain_coding", domain_name="coding", model=model, tokenizer=vocab
-        ),
-        DomainModuleNode(node_id="domain_math", domain_name="math", model=model, tokenizer=vocab),
-    ]
-
-    for node in nodes:
-        await registry.register(node.get_info())
-        await node.start(bus)
-
-    # 6. Load External Plugins
+    # 3. Load External Plugins
     import pathlib
 
     from hbllm.network.plugin_manager import PluginManager
 
     plugin_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "plugins"
-    pm = PluginManager(plugin_dirs=[plugin_dir], bus=bus, registry=registry, app=app)
+    pm = PluginManager(plugin_dirs=[plugin_dir], bus=brain.bus, registry=brain.registry, app=app)
     pm.discover()
     await pm.load_all()
 
-    _state["bus"] = bus
-    _state["registry"] = registry
+    _state["brain"] = brain
     _state["plugin_manager"] = pm
-    _state["nodes"] = nodes
     _state["bus_type"] = bus_type
-
     _state["mode"] = "full"
-    logger.info("Brain pipeline booted with %d nodes.", len(nodes))
+
+    logger.info("Brain pipeline booted via factory.")
 
 
 async def _shutdown_brain() -> None:
     """Gracefully shutdown all nodes and the bus."""
-    nodes = _state.get("nodes", [])
-    for node in reversed(nodes):
-        await node.stop()
-
-    bus = _state.get("bus")
-    if bus:
-        await bus.stop()
+    brain = _state.get("brain")
+    if brain:
+        await brain.shutdown()
 
     logger.info("Brain pipeline shutdown complete.")
 
@@ -310,6 +197,17 @@ async def _boot_provider_mode() -> None:
 async def lifespan(app: FastAPI) -> Any:
     """Boot the brain on startup, fall back to provider mode if it fails."""
     import os
+
+    workers = int(os.getenv("WEB_CONCURRENCY", os.getenv("WORKERS", "1")))
+    if workers > 1:
+        logger.error(
+            "HBLLM cannot launch with multiple workers in full brain mode. Found %d workers.",
+            workers,
+        )
+        raise RuntimeError(
+            "HBLLM memory architecture is stateful. You must run with exactly 1 worker "
+            "(e.g., uvicorn --workers 1 or WEB_CONCURRENCY=1)."
+        )
 
     model_size = os.getenv("HBLLM_MODEL_SIZE", "125m")
     try:
@@ -758,7 +656,8 @@ app.add_middleware(JWTAuthMiddleware)
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Check server health and node count."""
-    node_count = len(_state.get("nodes", []))
+    brain = _state.get("brain")
+    node_count = len(brain.nodes) if brain else 0
     mode = _state.get("mode", "unknown")
     _state.get("provider")
     return HealthResponse(
@@ -772,16 +671,17 @@ async def health_check() -> HealthResponse:
 @app.get("/metrics")
 async def metrics() -> Any:
     """Return real-time MessageBus performance metrics."""
-    bus = _state.get("bus")
-    if not bus or not hasattr(bus, "metrics"):
+    brain = _state.get("brain")
+    if not brain or not hasattr(brain.bus, "metrics"):
         return {"error": "Bus not initialized or metrics unavailable"}
-    return bus.metrics.snapshot()
+    return brain.bus.metrics.snapshot()
 
 
 @app.get("/studio/stats")
 async def studio_stats() -> Any:
     """Aggregated cognitive subsystem stats for HBLLM Studio dashboard."""
-    nodes = _state.get("nodes", [])
+    brain = _state.get("brain")
+    nodes = getattr(brain, "nodes", [])
     result: dict[str, Any] = {
         "mode": _state.get("mode", "unknown"),
         "node_count": len(nodes),
@@ -894,7 +794,8 @@ async def studio_stats() -> Any:
         result["skill_compiler"] = sc.stats()
 
     # ── Bus metrics ──
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if bus and hasattr(bus, "metrics"):
         result["bus_metrics"] = bus.metrics.snapshot()
 
@@ -904,7 +805,8 @@ async def studio_stats() -> Any:
 @app.get("/studio/memory")
 async def studio_memory() -> Any:
     """Memory subsystem stats for Studio — episodic, semantic, procedural, value."""
-    nodes = _state.get("nodes", [])
+    brain = _state.get("brain")
+    nodes = getattr(brain, "nodes", [])
     node_map: dict[str, Any] = {}
     for node in nodes:
         node_map[type(node).__name__] = node
@@ -980,7 +882,8 @@ async def studio_memory() -> Any:
 @app.get("/studio/knowledge")
 async def studio_knowledge() -> Any:
     """Knowledge Graph contents for Studio — entities, relations, subgraphs."""
-    nodes = _state.get("nodes", [])
+    brain = _state.get("brain")
+    nodes = getattr(brain, "nodes", [])
     node_map: dict[str, Any] = {}
     for node in nodes:
         node_map[type(node).__name__] = node
@@ -1055,7 +958,8 @@ async def studio_lora() -> Any:
                 result["active_adapters"].append(entry)
 
     # Check self-improve worker status
-    nodes = _state.get("nodes", [])
+    brain = _state.get("brain")
+    nodes = getattr(brain, "nodes", [])
     for node in nodes:
         if type(node).__name__ == "SleepNode":
             result["self_improve_status"] = "active" if node._running else "idle"
@@ -1259,7 +1163,7 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
         return await _chat_via_provider(request)
 
     # Route based on mode
-    if mode == "full" and _state.get("bus"):
+    if mode == "full" and _state.get("brain"):
         return await _chat_via_brain(request)
     else:
         return await _chat_via_provider(request)
@@ -1275,7 +1179,8 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
         data: {"token": "", "done": true, "correlation_id": "..."}
     """
     request.tenant_id = getattr(api_req.state, "tenant_id", "default")
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1366,7 +1271,8 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
 
     text_prompt += "Assistant:"
 
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1478,7 +1384,8 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
 @app.get("/v1/memory/{tenant_id}/{session_id}")
 async def get_memory(tenant_id: str, session_id: str, limit: int = 20) -> Any:
     """Retrieve recent conversation history for a tenant's session."""
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1517,7 +1424,8 @@ async def submit_feedback(request: FeedbackRequest) -> Any:
     Feedback is published to the LearnerNode which accumulates samples
     and triggers DPO training once a batch threshold is reached.
     """
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1551,7 +1459,8 @@ async def knowledge_neighbors(
     entity: str, direction: str = "both", relation_type: str | None = None
 ) -> Any:
     """Query KnowledgeGraph neighbors for an entity."""
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1588,7 +1497,8 @@ async def knowledge_neighbors(
 @app.get("/v1/knowledge/path")
 async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5) -> Any:
     """Find shortest path between two entities in the KnowledgeGraph."""
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1620,7 +1530,8 @@ async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5) -
 @app.get("/v1/knowledge/subgraph/{entity}")
 async def knowledge_subgraph(entity: str, depth: int = 2) -> Any:
     """Extract a subgraph around an entity."""
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1652,7 +1563,8 @@ async def knowledge_subgraph(entity: str, depth: int = 2) -> Any:
 @app.get("/v1/knowledge/stats")
 async def knowledge_stats() -> Any:
     """Get KnowledgeGraph statistics."""
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
@@ -1688,7 +1600,8 @@ async def knowledge_stats() -> Any:
 async def list_rules() -> Any:
     """List extracted if→then rules from the RuleExtractorNode."""
     # Find the rule extractor node in the running nodes
-    nodes = _state.get("nodes", [])
+    brain = _state.get("brain")
+    nodes = getattr(brain, "nodes", [])
     for node in nodes:
         if hasattr(node, "rules"):
             return {
@@ -1713,7 +1626,8 @@ async def chat_websocket(ws: WebSocket) -> None:
     await ws.accept()
     import json as _json
 
-    bus = _state.get("bus")
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
     if not bus:
         await ws.send_json({"error": "Brain pipeline not initialized"})
         await ws.close(code=1011)

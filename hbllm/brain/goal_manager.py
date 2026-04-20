@@ -18,13 +18,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from enum import Enum
-
-
-class StrEnum(str, Enum):
-    pass
-
-
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 

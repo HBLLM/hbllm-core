@@ -299,6 +299,10 @@ class RedisBus(MessageBus):
         except Exception:
             return False
 
+    def has_subscribers(self, topic: str) -> bool:
+        """Check if a topic has any active local subscriptions."""
+        return len(self._subscriptions.get(topic, [])) > 0
+
     async def _dispatch_to_subscribers(self, topic: str, message: Message) -> None:
         """Dispatch a message to all active local subscribers for a topic."""
         matching_topics = self._get_matching_topics(topic)

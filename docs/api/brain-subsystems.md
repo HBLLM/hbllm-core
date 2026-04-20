@@ -31,6 +31,7 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | `AttentionManager` | `attention_manager.py` | `inject_attention` | Memory budgets and focus allocation (v2) |
 | `LoadManager` | `load_manager.py` | `inject_load_manager` | Cognitive load monitoring & degradation (v2) |
 | `CollectiveNode` | `collective_node.py` | Always on | Multi-agent voting, delegation & knowledge sharing (v2) |
+| `SchedulerNode` | `scheduler_node.py` | `inject_scheduler` | Proactive scheduling and background execution via SQLite (v2) |
 
 ---
 
@@ -396,6 +397,32 @@ result = await brain.collective.delegate_task(
 ```
 
 Falls back gracefully when no suitable peer is available or on timeout.
+
+---
+
+## v2: Proactive Scheduler
+
+!!! info "New in v2"
+    Allows the agent to act proactively on the environment by scheduling future tasks via the `ScheduleEventTool` and `ScheduleRecurringTool`.
+
+**Module:** `hbllm.brain.scheduler_node.SchedulerNode`
+**Config:** `inject_scheduler = True`
+
+Maintains a robust SQLite background database for asynchronous scheduling. The LLM can request actions to trigger instantly or on intervals without holding up inference.
+
+```python
+# The LLM schedules a background task via the injected schedule_event tool:
+{
+    "name": "schedule_event",
+    "parameters": {
+        "delay_seconds": 3600,
+        "route_topic": "robot.move",
+        "payload": {"location": "living_room"}
+    }
+}
+# The SchedulerNode automatically writes this to SQLite and emits to the 
+# MessageBus when the delay elapses.
+```
 
 ---
 

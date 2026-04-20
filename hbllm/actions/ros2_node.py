@@ -58,8 +58,6 @@ def _get_rclpy() -> Any:
         try:
             import rclpy  # type: ignore
             import rclpy.node  # type: ignore
-            from geometry_msgs.msg import PoseStamped, Twist  # type: ignore
-            from std_msgs.msg import String  # type: ignore
 
             _rclpy = rclpy
             logger.info("ROS2 (rclpy) available — real robot mode enabled")
@@ -399,8 +397,7 @@ class Ros2Node(Node):
         if self.is_real:
             # We attempt to use an ActionClient if available to synchronously wait for arm trajectory completion
             try:
-                from rclpy.action import ActionClient  # type: ignore
-
+                pass
                 # from custom_interfaces.action import Manipulator # Example type
                 # In a fully integrated environment, we'd fire an action goal:
                 # client = ActionClient(self._ros2_node, Manipulator, 'manipulator_action')

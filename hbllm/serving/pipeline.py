@@ -225,7 +225,7 @@ class CognitivePipeline:
                     topic="memory.search",
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    payload={"query": text, "limit": 20},
+                    payload={"query_text": text, "top_k": 20},
                 )
                 mem_resp = await asyncio.wait_for(
                     self.bus.request("memory.search", mem_msg, timeout=5.0),

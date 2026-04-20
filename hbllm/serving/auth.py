@@ -7,7 +7,9 @@ The resolved `tenant_id` is securely injected into `request.state.tenant_id`.
 
 from __future__ import annotations
 
+import logging
 import os
+import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -16,13 +18,29 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+logger = logging.getLogger(__name__)
+
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: Any, secret_key: str | None = None) -> None:
         super().__init__(app)
-        self.secret_key = secret_key or os.environ.get(
-            "HBLLM_JWT_SECRET", "default_insecure_secret"
-        )
+        self.secret_key = secret_key or os.environ.get("HBLLM_JWT_SECRET", "")
+
+        if not self.secret_key:
+            # In production (HBLLM_ENV=production), refuse to start without
+            # an explicit secret to prevent accidental insecure deployments.
+            if os.environ.get("HBLLM_ENV", "").lower() == "production":
+                raise ValueError(
+                    "HBLLM_JWT_SECRET must be set in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
+            # In development, generate a random ephemeral secret per boot.
+            self.secret_key = secrets.token_urlsafe(32)
+            logger.warning(
+                "⚠️  HBLLM_JWT_SECRET is not set — using a random ephemeral secret. "
+                "JWTs will NOT survive server restarts. Set HBLLM_JWT_SECRET for persistence."
+            )
+
         self.algorithms: list[str] = ["HS256"]
 
     async def dispatch(
@@ -40,6 +58,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             ]
             or request.url.path.startswith(("/admin/static", "/studio/"))
         ):
+            return await call_next(request)
+        # If an upstream cloud middleware (e.g. ApiSecurityMiddleware) has already
+        # authenticated the request and injected the tenant context, skip JWT verification.
+        if hasattr(request.state, "tenant_id") and request.state.tenant_id:
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization")

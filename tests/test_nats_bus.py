@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.network.messages import Message, MessageType
-
 
 class TestNatsBusImport:
     def test_module_imports(self):

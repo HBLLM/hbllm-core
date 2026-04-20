@@ -117,12 +117,13 @@ class WorkspaceNode(Node):
             "session_id": message.session_id,
             "original_query": payload,
             "thoughts": [],
-            "start_time": time.time(),
+            "start_time": time.monotonic(),
+            "last_update": time.monotonic(),
             # Configurable deadline for cognitive modules to think and post proposals
-            "deadline": time.time() + self._thinking_deadline,
+            "deadline": time.monotonic() + self._thinking_deadline,
             "resolved": False,
-            "turn_count": 1,  # Track internal monologue turns
-            "absolute_deadline": time.time() + 120.0,  # Hard cap: 120s for CPU inference
+            "turn_count": 0,  # Track internal monologue turns
+            "absolute_deadline": time.monotonic() + 120.0,  # Hard cap: 120s for CPU inference
         }
 
         # Broadcast the context to ALL subjective thinking modules simultaneously
@@ -193,7 +194,7 @@ class WorkspaceNode(Node):
 
                 board["turn_count"] += 1
                 # Extend deadline to allow Intuition node to read the proof and generate text
-                board["deadline"] = time.time() + self._thinking_deadline
+                board["deadline"] = time.monotonic() + self._thinking_deadline
 
                 # Re-publish as context update for the Intuition Engine
                 broadcast_msg = Message(
@@ -230,7 +231,7 @@ class WorkspaceNode(Node):
 
                 board["turn_count"] += 1
                 board["resolved"] = False  # Un-resolve it so thinking continues
-                board["deadline"] = time.time() + self._thinking_deadline
+                board["deadline"] = time.monotonic() + self._thinking_deadline
 
                 self._spawn_watcher(corr_id)
 
@@ -281,7 +282,7 @@ class WorkspaceNode(Node):
 
                 board["turn_count"] += 1
                 board["deadline"] = (
-                    time.time() + self._thinking_deadline
+                    time.monotonic() + self._thinking_deadline
                 )  # Give them time to redo it
                 board["resolved"] = False  # Make sure it's unresolved
 
@@ -314,9 +315,9 @@ class WorkspaceNode(Node):
             return
 
         try:
-            while time.time() < float(board["deadline"]) and not bool(board["resolved"]):
+            while time.monotonic() < float(board["deadline"]) and not bool(board["resolved"]):
                 # Enforce absolute ceiling: never wait more than 30s total
-                if time.time() >= float(board.get("absolute_deadline", float("inf"))):
+                if time.monotonic() >= float(board.get("absolute_deadline", float("inf"))):
                     logger.warning("Workspace absolute deadline reached for %s.", corr_id)
                     break
                 await asyncio.sleep(0.1)
@@ -435,7 +436,7 @@ class WorkspaceNode(Node):
 
                     board["turn_count"] += 1
                     board["resolved"] = False
-                    board["deadline"] = time.time() + self._thinking_deadline
+                    board["deadline"] = time.monotonic() + self._thinking_deadline
 
                     self._spawn_watcher(corr_id)
 
@@ -494,9 +495,8 @@ class WorkspaceNode(Node):
             return
 
         # Check which memory services are available by inspecting bus subscriptions
-        bus_subs = getattr(self.bus, "_subscriptions", {})
-        has_semantic = bool(bus_subs.get("memory.search"))
-        has_procedural = bool(bus_subs.get("memory.skill.find"))
+        has_semantic = self.bus.has_subscribers("memory.search")
+        has_procedural = self.bus.has_subscribers("memory.skill.find")
 
         if not has_semantic and not has_procedural:
             return  # No memory services available
@@ -680,7 +680,7 @@ class WorkspaceNode(Node):
         while True:
             try:
                 await asyncio.sleep(10.0)  # Check every 10 seconds
-                now = time.time()
+                now = time.monotonic()
                 stale_ids = [
                     cid
                     for cid, board in self.blackboards.items()

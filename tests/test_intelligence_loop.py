@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
 from hbllm.brain.cognitive_metrics import CognitiveMetrics
-from hbllm.brain.evaluation_node import EvaluationNode, EvaluationReport
+from hbllm.brain.evaluation_node import EvaluationNode
 from hbllm.brain.goal_manager import GoalManager
 from hbllm.brain.reflection_node import ReflectionInsight, ReflectionNode
 from hbllm.brain.self_model import SelfModel
@@ -472,14 +473,27 @@ class TestV2FactoryIntegration:
             def name(self) -> str:
                 return "mock"
 
-            async def generate(self, messages, **kw) -> LLMResponse:
+            async def generate(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                top_p: float = 0.95,
+                **kwargs: Any,
+            ) -> LLMResponse:
                 return LLMResponse(
                     content="Mock",
                     model="mock",
                     usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
                 )
 
-            async def stream(self, messages, **kw) -> AsyncIterator[str]:
+            async def stream(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                **kwargs: Any,
+            ) -> AsyncIterator[str]:
                 yield "Mock"
 
         config = BrainConfig(
@@ -522,14 +536,27 @@ class TestV2FactoryIntegration:
             def name(self) -> str:
                 return "mock"
 
-            async def generate(self, messages, **kw) -> LLMResponse:
+            async def generate(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                top_p: float = 0.95,
+                **kwargs: Any,
+            ) -> LLMResponse:
                 return LLMResponse(
                     content="Mock",
                     model="mock",
                     usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
                 )
 
-            async def stream(self, messages, **kw) -> AsyncIterator[str]:
+            async def stream(
+                self,
+                messages: list[dict[str, str]],
+                max_tokens: int = 1000,
+                temperature: float = 0.7,
+                **kwargs: Any,
+            ) -> AsyncIterator[str]:
                 yield "Mock"
 
         config = BrainConfig(
