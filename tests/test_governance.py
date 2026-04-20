@@ -69,38 +69,38 @@ class TestApiKeyManager:
 
 
 class TestRateLimiter:
-    def test_allows_within_limit(self):
+    async def test_allows_within_limit(self):
         rl = RateLimiter(requests_per_minute=60, burst_size=10)
-        allowed, _ = rl.check("t1")
+        allowed, _ = await rl.check("t1")
         assert allowed is True
 
-    def test_blocks_over_limit(self):
+    async def test_blocks_over_limit(self):
         rl = RateLimiter(requests_per_minute=60, burst_size=2)
-        rl.check("t1")
-        rl.check("t1")
-        allowed, retry = rl.check("t1")
+        await rl.check("t1")
+        await rl.check("t1")
+        allowed, retry = await rl.check("t1")
         assert allowed is False
         assert retry > 0
 
-    def test_tenant_isolation(self):
+    async def test_tenant_isolation(self):
         rl = RateLimiter(burst_size=1)
-        rl.check("t1")
-        allowed, _ = rl.check("t2")  # different tenant
+        await rl.check("t1")
+        allowed, _ = await rl.check("t2")  # different tenant
         assert allowed is True
 
-    def test_disabled(self):
+    async def test_disabled(self):
         rl = RateLimiter(burst_size=1)
         rl.enabled = False
         for _ in range(100):
-            allowed, _ = rl.check("t1")
+            allowed, _ = await rl.check("t1")
             assert allowed
 
-    def test_reset(self):
+    async def test_reset(self):
         rl = RateLimiter(burst_size=1)
-        rl.check("t1")
-        rl.check("t1")
-        rl.reset("t1")
-        allowed, _ = rl.check("t1")
+        await rl.check("t1")
+        await rl.check("t1")
+        await rl.reset("t1")
+        allowed, _ = await rl.check("t1")
         assert allowed
 
 
