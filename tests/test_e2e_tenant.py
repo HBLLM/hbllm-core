@@ -73,40 +73,40 @@ class TestApiKeyAuth:
 class TestRateLimiting:
     """Test per-tenant rate limiting."""
 
-    def test_allows_within_limit(self):
+    async def test_allows_within_limit(self):
         rl = RateLimiter(requests_per_minute=60, burst_size=10)
         for _ in range(10):
-            allowed, _ = rl.check("acme")
+            allowed, _ = await rl.check("acme")
             assert allowed is True
 
-    def test_blocks_over_limit(self):
+    async def test_blocks_over_limit(self):
         rl = RateLimiter(requests_per_minute=60, burst_size=3)
         # Use up burst
         for _ in range(3):
-            rl.check("acme")
+            await rl.check("acme")
 
         # Next should be blocked
-        allowed, retry_after = rl.check("acme")
+        allowed, retry_after = await rl.check("acme")
         assert allowed is False
         assert retry_after > 0
 
-    def test_separate_tenant_limits(self):
+    async def test_separate_tenant_limits(self):
         rl = RateLimiter(requests_per_minute=60, burst_size=2)
-        rl.check("acme")
-        rl.check("acme")
+        await rl.check("acme")
+        await rl.check("acme")
 
         # Acme is at limit, but Globex should be fine
-        allowed_globex, _ = rl.check("globex")
+        allowed_globex, _ = await rl.check("globex")
         assert allowed_globex is True
 
-    def test_reset(self):
+    async def test_reset(self):
         rl = RateLimiter(requests_per_minute=60, burst_size=1)
-        rl.check("acme")
-        allowed, _ = rl.check("acme")
+        await rl.check("acme")
+        allowed, _ = await rl.check("acme")
         assert allowed is False
 
-        rl.reset("acme")
-        allowed, _ = rl.check("acme")
+        await rl.reset("acme")
+        allowed, _ = await rl.check("acme")
         assert allowed is True
 
 
@@ -248,7 +248,7 @@ class TestFullTenantJourney:
         if os.path.exists(self.db_path):
             os.unlink(self.db_path)
 
-    def test_full_journey(self):
+    async def test_full_journey(self):
         """Simulate a full tenant lifecycle using core modules."""
         tenant_id = "acme-corp"
         raw_key = "sk-acme-prod-key-2024"
@@ -264,7 +264,7 @@ class TestFullTenantJourney:
         assert self.akm.validate("sk-wrong-key") is None
 
         # 3. Rate limiting
-        allowed, _ = self.rl.check(tenant_id)
+        allowed, _ = await self.rl.check(tenant_id)
         assert allowed is True
 
         # 4. Input sanitization
