@@ -190,7 +190,7 @@ class ModelEvaluator:
             input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
 
             try:
-                output = self.model.generate(
+                output = self.model.generate(  # type: ignore[operator]
                     input_ids=input_ids,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,

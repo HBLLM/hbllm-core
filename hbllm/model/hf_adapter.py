@@ -335,7 +335,7 @@ class HuggingFaceModelAdapter(nn.Module):
         elif self._tokenizer and self._tokenizer.eos_token_id:
             gen_kwargs["eos_token_id"] = self._tokenizer.eos_token_id
 
-        output = self._model.generate(input_ids, **gen_kwargs)
+        output = self._model.generate(input_ids, **gen_kwargs)  # type: ignore[operator]
         return cast(torch.Tensor, output)
 
     def named_parameters(self, **kwargs: Any) -> Any:  # type: ignore[override]
