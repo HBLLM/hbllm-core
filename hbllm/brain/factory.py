@@ -95,8 +95,10 @@ class BrainConfig:
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
     data_dir: str = "data"
-    system_prompt: str = "You are a helpful AI assistant."
+    inject_sil: bool = True  # Skill Intelligence Layer
+    inject_failure_analyzer: bool = True  # Automatic skill repair
     domain_registry: Any | None = None  # Hierarchical domain registry
+    system_prompt: str = "You are a helpful AI assistant."
 
 
 class Brain:
@@ -146,6 +148,8 @@ class Brain:
         self.evaluation_node: EvaluationNode | None = None
         self.reflection_node: ReflectionNode | None = None
         self.skill_compiler_node: SkillCompilerNode | None = None
+        self.skill_intelligence_node: Any | None = None
+        self.failure_analyzer_node: Any | None = None
 
         # v2: Resource Intelligence
         self.attention_manager: AttentionManager | None = None
@@ -509,6 +513,8 @@ class BrainFactory:
         router_node = RouterNode(node_id="router", llm=llm, domain_registry=domain_registry)
         router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
 
+        skill_registry = SkillRegistry(data_dir=cfg.data_dir)
+
         nodes = [
             # Core cognitive pipeline
             router_node,
@@ -530,7 +536,7 @@ class BrainFactory:
             # Curiosity-driven goal generation
             CuriosityNode(node_id="curiosity"),
             # Collective intelligence (multi-instance knowledge sharing)
-            CollectiveNode(node_id="collective"),
+            CollectiveNode(node_id="collective", skill_registry=skill_registry),
             # Online learning from feedback (DPO)
             LearnerNode(node_id="learner"),
             # World model (code simulation & sandboxed execution)
@@ -631,7 +637,7 @@ class BrainFactory:
         data_dir = cfg.data_dir
 
         # Always-on subsystems
-        brain.skill_registry = SkillRegistry(data_dir=data_dir)
+        brain.skill_registry = skill_registry
         brain.tool_memory = ToolMemory(data_dir=data_dir)
         brain.concept_extractor = ConceptExtractor()
         brain.world_simulator = WorldSimulator()
@@ -721,6 +727,7 @@ class BrainFactory:
             compiler_node = SkillCompilerNode(
                 node_id="skill_compiler",
                 skill_registry=brain.skill_registry,
+                llm=llm,
             )
             await compiler_node.start(message_bus)
             from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo
@@ -735,9 +742,47 @@ class BrainFactory:
             await registry.update_health(
                 NodeHealth(node_id=compiler_node.node_id, status=HealthStatus.HEALTHY)
             )
-            brain.skill_compiler_node = compiler_node
             nodes.append(compiler_node)
+            brain.skill_compiler_node = compiler_node
             logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
+
+        if cfg.inject_failure_analyzer:
+            from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
+
+            fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
+            await fail_node.start(message_bus)
+            await registry.register(
+                NodeInfo(
+                    node_id=fail_node.node_id,
+                    node_type=fail_node.node_type,
+                    capabilities=fail_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=fail_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.failure_analyzer_node = fail_node
+            nodes.append(fail_node)
+            logger.info("FailureAnalyzerNode wired (automated skill repair)")
+
+        if cfg.inject_sil:
+            from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
+
+            sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
+            await sil_node.start(message_bus)
+            await registry.register(
+                NodeInfo(
+                    node_id=sil_node.node_id,
+                    node_type=sil_node.node_type,
+                    capabilities=sil_node.capabilities,
+                )
+            )
+            await registry.update_health(
+                NodeHealth(node_id=sil_node.node_id, status=HealthStatus.HEALTHY)
+            )
+            brain.skill_intelligence_node = sil_node
+            nodes.append(sil_node)
+            logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")
 
         # v2: Resource Intelligence — wire attention and load managers
         if cfg.inject_attention:

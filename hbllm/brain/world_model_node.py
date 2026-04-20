@@ -93,6 +93,30 @@ class WorldModelNode(Node):
             )
             await self.bus.publish("workspace.thought", sim_msg)
 
+        elif action_type == "simulate_skill":
+            steps = payload.get("steps", [])
+            overall_status = "SUCCESS"
+            reasons = []
+
+            for step in steps:
+                if isinstance(step, str) and (
+                    "import" in step or "def " in step or "print(" in step
+                ):
+                    pred = self._simulate_ast(step)
+                    if pred["status"] == "FAILURE":
+                        overall_status = "FAILURE"
+                        reasons.append(pred["reason"])
+                        break
+
+            if overall_status == "SUCCESS":
+                reason = "All skill steps passed dry-run heuristic and AST checks safely."
+            else:
+                reason = f"Skill Simulation Failed: {reasons[0]}"
+
+            return message.create_response(
+                {"status": "simulation_result", "prediction": overall_status, "content": reason}
+            )
+
         return None
 
     def _simulate_ast(self, code: str) -> dict[str, str]:

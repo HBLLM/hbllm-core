@@ -15,6 +15,7 @@ This transforms HBLLM from a system that executes tasks to one that
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from collections import defaultdict
@@ -40,6 +41,7 @@ class ActionPattern:
     first_seen: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
     example_queries: list[str] = field(default_factory=list)
+    tenant_id: str = "global"
 
     @property
     def success_rate(self) -> float:
@@ -64,6 +66,7 @@ class SkillCompilerNode(Node):
         self,
         node_id: str,
         skill_registry: Any = None,
+        llm: Any = None,
         min_occurrences: int = 3,
         min_success_rate: float = 0.7,
         pattern_window: int = 200,
@@ -75,6 +78,7 @@ class SkillCompilerNode(Node):
             capabilities=["skill_compilation", "pattern_detection"],
         )
         self.skill_registry = skill_registry
+        self.llm = llm
         self.min_occurrences = min_occurrences
         self.min_success_rate = min_success_rate
         self.pattern_window = pattern_window
@@ -98,6 +102,7 @@ class SkillCompilerNode(Node):
         await self.bus.subscribe("system.reflection", self._handle_reflection)
         await self.bus.subscribe("system.evaluation", self._handle_evaluation)
         await self.bus.subscribe("system.experience", self._handle_experience)
+        await self.bus.subscribe("system.sleep.skill_optimize", self._handle_skill_optimize)
         await self.bus.subscribe("skill_compiler.query", self._handle_query)
 
     async def on_stop(self) -> None:
@@ -112,6 +117,58 @@ class SkillCompilerNode(Node):
 
     # ── Event Handlers ───────────────────────────────────────────────
 
+    async def _handle_skill_optimize(self, message: Message) -> Message | None:
+        """DERIVED Pillar: Offline skill optimization during sleep."""
+        if not self.skill_registry or not self.llm:
+            return None
+
+        # Fetch skills that are confident and heavily used but could be optimized
+        tenant_id = message.payload.get("tenant_id", "global")
+        all_skills = self.skill_registry.list_skills(limit=50, tenant_id=tenant_id)
+
+        # Filter for "clunky" skills
+        clunky_skills = []
+        for s in all_skills:
+            if s.confidence_score >= 0.8:
+                if s.cost_score > 0.8 or s.avg_latency_ms > 2000.0 or s.tokens_used > 5000:
+                    clunky_skills.append(s)
+
+        optimized_count = 0
+        for skill in clunky_skills:
+            prompt = (
+                f"You are the HBLLM Skill Compiler Optimization Engine.\n"
+                f"Analyze the following skill execution trace and rewrite the steps to be more token-efficient and faster.\n"
+                f"Remove redundant checks, combine overlapping tool calls if possible, "
+                f"and return ONLY the raw JSON array of optimized steps.\n\n"
+                f"Skill Name: {skill.name}\n"
+                f"Description: {skill.description}\n"
+                f"Current Steps: {json.dumps(skill.steps, indent=2)}\n"
+            )
+
+            try:
+                result = await self.llm.generate(prompt)
+                optimized_steps = json.loads(result)
+
+                if isinstance(optimized_steps, list) and len(optimized_steps) > 0:
+                    # Version it as a repaired/optimized skill
+                    logger.info(
+                        "Skill '%s' successfully optimized. Old steps: %d, New steps: %d",
+                        skill.name,
+                        len(skill.steps),
+                        len(optimized_steps),
+                    )
+                    self.skill_registry.version_skill(skill.skill_id, new_steps=optimized_steps)
+                    optimized_count += 1
+            except Exception as e:
+                logger.debug("Failed to optimize skill '%s': %s", skill.name, e)
+
+        if optimized_count > 0:
+            logger.info(
+                "DERIVED Pillar completed. Optimized %d skills based on historical inefficiency",
+                optimized_count,
+            )
+        return None
+
     async def _handle_experience(self, message: Message) -> None:
         """Record raw action from decision output."""
         payload = message.payload
@@ -125,6 +182,7 @@ class SkillCompilerNode(Node):
             "query": payload.get("text", "")[:200],
             "timestamp": time.time(),
             "success": True,  # assumed until evaluation says otherwise
+            "tenant_id": message.tenant_id or "global",
         }
 
         self._action_history.append(action)
@@ -227,6 +285,7 @@ class SkillCompilerNode(Node):
                     actions=all_actions,
                     tools=list(set(all_tools)),
                     category=category,
+                    tenant_id=window[0].get("tenant_id", "global"),
                 )
                 self._patterns_detected += 1
 
@@ -267,6 +326,7 @@ class SkillCompilerNode(Node):
                 tools_used=pattern.tools,
                 success=True,
                 category=pattern.category,
+                tenant_id=pattern.tenant_id,
             )
 
         self._compiled_hashes.add(pattern.pattern_hash)
