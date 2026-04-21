@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
+import time
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -22,16 +24,62 @@ class MetaReasoningNode(Node):
     dataset and signaling the admin/system bus to trigger heavy offline fine-tuning.
     """
 
-    def __init__(self, node_id: str) -> None:
+    def __init__(
+        self,
+        node_id: str,
+        weakness_threshold: int = 3,
+        cooldown_seconds: float = 300.0,
+    ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
 
-        # Buffer to store negative feedback by domain
-        self.negative_feedback_buffer: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # Configurable threshold and cooldown
+        self.weakness_threshold = weakness_threshold
+        self.cooldown_seconds = cooldown_seconds
 
-        # Threshold: if we get 3 negative feedbacks for a domain, we trigger reflection
-        self.weakness_threshold = 3
+        # In-memory buffer (fast access) + persistence
+        self.negative_feedback_buffer: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._last_reflection_time: dict[str, float] = {}
+
         self.reflection_dir = "workspace/reflection"
         os.makedirs(self.reflection_dir, exist_ok=True)
+
+        # SQLite persistence for feedback buffer
+        self._db_path = os.path.join(self.reflection_dir, "meta_feedback.db")
+        self._init_db()
+        self._load_from_db()
+
+    def _init_db(self) -> None:
+        """Initialize SQLite schema for persistent feedback storage."""
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negative_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    domain TEXT NOT NULL,
+                    instruction TEXT,
+                    response TEXT,
+                    created_at REAL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_nf_domain ON negative_feedback(domain)")
+
+    def _load_from_db(self) -> None:
+        """Restore in-memory buffer from SQLite on startup."""
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT domain, instruction, response FROM negative_feedback"
+            ).fetchall()
+            for row in rows:
+                self.negative_feedback_buffer[row["domain"]].append(
+                    {
+                        "instruction": row["instruction"],
+                        "response": row["response"],
+                        "rejected": True,
+                        "domain": row["domain"],
+                    }
+                )
 
     async def on_start(self) -> None:
         """Subscribe to feedback and salience broadcasts."""
@@ -86,9 +134,27 @@ class MetaReasoningNode(Node):
                 }
                 self.negative_feedback_buffer[domain].append(sample)
 
+                # Persist to SQLite
+                try:
+                    with sqlite3.connect(self._db_path) as conn:
+                        conn.execute(
+                            "INSERT INTO negative_feedback (domain, instruction, response, created_at) VALUES (?, ?, ?, ?)",
+                            (domain, payload.prompt, payload.response, time.time()),
+                        )
+                except Exception as e:
+                    logger.warning("Failed to persist feedback to SQLite: %s", e)
+
                 # Check if this crosses the systemic weakness threshold
                 if len(self.negative_feedback_buffer[domain]) >= self.weakness_threshold:
-                    await self._trigger_reflection(domain)
+                    # Enforce cooldown to prevent rapid-fire reflection
+                    last = self._last_reflection_time.get(domain, 0.0)
+                    if time.time() - last < self.cooldown_seconds:
+                        logger.info(
+                            "MetaReasoningNode: cooldown active for domain '%s', skipping reflection",
+                            domain,
+                        )
+                    else:
+                        await self._trigger_reflection(domain)
 
         return None
 
@@ -137,5 +203,20 @@ class MetaReasoningNode(Node):
         )
         await self.bus.publish("system.improve", improve_msg)
 
-        # 3. Clear the buffer to prevent spamming
+        # 3. Clear the buffer (both in-memory and on disk)
         self.negative_feedback_buffer[domain] = []
+        self._last_reflection_time[domain] = time.time()
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("DELETE FROM negative_feedback WHERE domain = ?", (domain,))
+        except Exception as e:
+            logger.warning("Failed to clear SQLite feedback for domain '%s': %s", domain, e)
+
+    def stats(self) -> dict[str, Any]:
+        """Return meta-reasoning statistics."""
+        return {
+            "buffered_domains": {k: len(v) for k, v in self.negative_feedback_buffer.items() if v},
+            "weakness_threshold": self.weakness_threshold,
+            "cooldown_seconds": self.cooldown_seconds,
+            "last_reflections": dict(self._last_reflection_time),
+        }

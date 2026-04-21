@@ -278,8 +278,6 @@ class SpawnerNode(Node):
                 )
 
                 # Inject LoRA directly into the shared model (memory-efficient PEFT)
-                import torch
-
                 train_model = self.model
                 injected = LoRAManager.inject(train_model, r=lora_rank)
                 LoRAManager.add_adapter(train_model, domain_name)
