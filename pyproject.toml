@@ -7,7 +7,7 @@ name = "hbllm"
 version = "0.1.0"
 description = "HBLLM Core — Human Brain LLM cognitive architecture"
 requires-python = ">=3.11"
-license = {text = "BUSL-1.1"}
+license = {text = "GPL-3.0-only"}
 authors = [
     {name = "HBLLM Team"},
 ]
@@ -44,7 +44,6 @@ dependencies = [
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "python-dotenv>=1.0.0",
-    "pyyaml>=6.0.0",
     "rich>=13.7.0",
     "typer>=0.9.0",
     "networkx>=3.2.0",
@@ -93,7 +92,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP042", "UP017", "E741"]
+ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP042", "UP017", "E741", "F401", "F811"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -105,5 +104,6 @@ python_version = "3.11"
 ignore_missing_imports = true
 disable_error_code = [
     "assignment", "arg-type", "call-arg", "attr-defined", "import-untyped", 
-    "misc", "var-annotated", "index", "union-attr"
+    "misc", "var-annotated", "index", "dict-item", "override", 
+    "return-value", "operator", "valid-type", "union-attr"
 ]

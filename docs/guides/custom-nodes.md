@@ -5,6 +5,9 @@ description: "Step-by-step guide to creating custom cognitive nodes for HBLLM's 
 
 # Writing Custom Nodes
 
+!!! info "Use the Plugin SDK for Extensions"
+    While this guide focuses on the low-level `Node` architecture, most developers should use the [Plugin SDK](plugins.md) to build extensions. It provides declarative decorators, CLI scaffolding, and auto-discovery.
+
 HBLLM's architecture is designed for extensibility. Any new capability — sensors, APIs, reasoning engines — is added as a **Node**.
 
 ## Node Anatomy
@@ -85,29 +88,33 @@ await weather.start(brain.bus)
 
 ### 2. Via the Dynamic Plugin Registry
 
-For production environments, you can automatically load your Custom Node by dropping it into the `plugins/` directory alongside a simple `register` hook.
+For production environments, you can automatically load your Custom Node by dropping it into the `plugins/` directory. 
+
+While you can still use the legacy `async def register()` hook (see below), we recommend using the `HBLLMPlugin` SDK for most use cases:
 
 ```python
-# plugins/my_weather_plugin/__init__.py
+# plugins/my_weather/__init__.py
+from hbllm.plugin.sdk import HBLLMPlugin, subscribe
 from my_weather import WeatherNode
 
-__plugin__ = {
-    "name": "weather_node",
-    "version": "1.0.0"
-}
+class WeatherPlugin(HBLLMPlugin):
+    @subscribe("query.weather")
+    async def on_query(self, message):
+         # ... handle weather logic ...
+         pass
+```
 
-# The lifecycle loader injects the requested arguments natively!
+#### Legacy Registration Hook
+If you need manual control over the registration process, you can use a `register` function:
+
+```python
 async def register(bus, registry, app):
     node = WeatherNode(api_key="your-key")
     await node.start(bus)
-    
-    # You can also mount native REST endpoints on the FastAPI server
-    app.post("/weather-webhook")(node.trigger_update)
-    
     return node
 ```
 
-You can view installed plugins natively via the CLI using `hbllm plugins`.
+You can view installed plugins natively via the CLI using `hbllm plugin list`.
 
 ## Best Practices
 

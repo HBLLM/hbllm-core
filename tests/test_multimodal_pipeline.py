@@ -37,7 +37,7 @@ class MockBusWithRequest(InProcessBus):
 
 
 @pytest.mark.asyncio
-async def test_multimodal_image_caption_injected():
+async def test_multimodal_image_caption_injected() -> None:
     """Image bytes are captioned and injected as context."""
     bus = MockBusWithRequest()
     await bus.start()

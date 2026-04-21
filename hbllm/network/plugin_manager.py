@@ -131,8 +131,14 @@ class PluginManager:
                 # Try to extract __plugin__ metadata without full import
                 try:
                     source = py_file.read_text()
-                    if "def register" not in source and "async def register" not in source:
-                        logger.debug("Skipping %s — no register() function", py_file)
+                    if (
+                        "def register" not in source
+                        and "async def register" not in source
+                        and "HBLLMPlugin" not in source
+                    ):
+                        logger.debug(
+                            "Skipping %s — no register() function or SDK subclass", py_file
+                        )
                         continue
 
                     # Extract __plugin__ dict if present
@@ -196,35 +202,46 @@ class PluginManager:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
+                import inspect
+
+                from hbllm.plugin.sdk import HBLLMPlugin
+
+                nodes = []
                 register_fn = getattr(module, "register", None)
-                if not register_fn:
-                    info.error = "No register() function found"
+
+                if register_fn:
+                    # Call register() with dynamic injection
+                    sig = inspect.signature(register_fn)
+                    kwargs = {}
+                    if "bus" in sig.parameters:
+                        kwargs["bus"] = bus
+                    if "registry" in sig.parameters and registry is not None:
+                        kwargs["registry"] = registry
+                    if "app" in sig.parameters and self._app is not None:
+                        kwargs["app"] = self._app
+
+                    res = await register_fn(**kwargs)
+                    if res:
+                        nodes.extend(res if isinstance(res, list) else [res])
+
+                # New System: Find HBLLMPlugin subclasses
+                for obj_name, obj in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(obj, HBLLMPlugin) and obj is not HBLLMPlugin:
+                        instance = obj(node_id=f"{name}_{obj_name.lower()}")
+                        await instance.start(bus)
+                        nodes.append(instance)
+
+                if not nodes:
+                    info.error = "No register() hook or SDK subclasses found"
                     results.append(info)
                     continue
 
-                # Call register() with dynamic injection
-                import inspect
-
-                sig = inspect.signature(register_fn)
-                kwargs = {}
-                if "bus" in sig.parameters:
-                    kwargs["bus"] = bus
-                if "registry" in sig.parameters and registry is not None:
-                    kwargs["registry"] = registry
-                if "app" in sig.parameters and self._app is not None:
-                    kwargs["app"] = self._app
-
-                nodes = await register_fn(**kwargs)
-
                 if nodes:
-                    if isinstance(nodes, list):
-                        self._loaded_nodes.extend(nodes)
-                    else:
-                        self._loaded_nodes.append(nodes)
+                    self._loaded_nodes.extend(nodes)
 
                     # Register with service registry
                     if registry:
-                        for node in nodes if isinstance(nodes, list) else [nodes]:
+                        for node in nodes:
                             if hasattr(node, "get_info"):
                                 await registry.register(node.get_info())
 

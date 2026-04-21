@@ -10,7 +10,7 @@ repo_url: https://github.com/hbllm/hbllm-core
 repo_name: hbllm/hbllm-core
 edit_uri: edit/master/core/docs/
 
-copyright: Copyright &copy; 2024–2026 HBLLM Team — BUSL-1.1 License
+copyright: Copyright &copy; 2024–2026 HBLLM Team — GNU GPLv3 License
 
 theme:
   name: material
@@ -134,6 +134,7 @@ nav:
       - Quick Start: guides/quickstart.md
       - Configuration: guides/configuration.md
       - Custom Nodes: guides/custom-nodes.md
+      - Plugin SDK: guides/plugins.md
       - Training Pipeline: guides/training.md
       - Robotics & IoT: guides/robotics-iot.md
       - Deployment: guides/deployment.md

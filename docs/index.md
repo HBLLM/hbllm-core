@@ -14,7 +14,7 @@ description: "Open-source AGI framework that runs without massive GPU or VRAM. 2
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
-[![License](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
+[![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
 
@@ -233,6 +233,8 @@ export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics (requires rclpy)
 ```bash
 hbllm info                         # View active brain architecture
 hbllm nodes                        # List all loaded cognitive nodes
+hbllm plugin list                  # List installed plugins
+hbllm plugin new my-plugin         # Scaffold a new custom plugin
 hbllm serve --port 8000            # Start the FastAPI + MCP Server
 hbllm train --model-size 125m      # Start local pre-training loop
 hbllm data --dataset fineweb       # Run data preparation pipeline
@@ -368,7 +370,7 @@ Please review our [Contributing Guide](contributing.md) for Pull Request guideli
 
 ## License
 
-HBLLM Core is released under the **Business Source License 1.1 (BUSL-1.1)** — free for personal, academic, and internal business use. Commercial SaaS hosting requires a separate license. On April 4th, 2030, this version automatically converts to [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+HBLLM Core is released under the **GNU General Public License v3.0 (GPLv3)** — the world's most popular copyleft license. This ensures that the system remains free and open-source, and that all improvements made by the community must also be shared back under the same terms.
 
 <div style="text-align: center; margin-top: 3rem;">
   <p><strong>HBLLM Core</strong> — Autonomous Agent AI that thinks, not just responds.</p>
