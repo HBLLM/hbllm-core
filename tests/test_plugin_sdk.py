@@ -28,13 +28,14 @@ async def test_plugin_auto_subscribe():
         type=MessageType.EVENT,
         source_node_id="test_harness",
         topic="test.topic",
-        payload={"k": "v"}
+        payload={"k": "v"},
     )
 
     await bus.publish("test.topic", msg)
 
     # Allow async queue to process
     import asyncio
+
     await asyncio.sleep(0.1)
 
     assert plugin.received is True, "Plugin did not automatically receive @subscribe message"
