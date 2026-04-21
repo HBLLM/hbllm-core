@@ -9,7 +9,7 @@
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
   [![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
-  [![License](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE.md)
+  [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
 <br/>
@@ -363,7 +363,7 @@ Please review our [CONTRIBUTING.md](CONTRIBUTING.md) for Pull Request guidelines
 
 ## 📄 License
 
-HBLLM Core is released under the **Business Source License 1.1 (BUSL-1.1)** — free for personal, academic, and internal business use. Commercial SaaS hosting requires a separate license. On April 4th, 2030, the code automatically converts to [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+HBLLM Core is released under the **GNU General Public License v3.0 (GPLv3)**. You are free to use, modify, and distribute this software, but any derivative works or modifications must also be released and distributed under the same open-source GPLv3 license.
 
 ---
 
