@@ -121,6 +121,7 @@ class QueryPayload(BaseModel):
 
     text: str
     context: list[dict[str, Any]] = Field(default_factory=list)  # Conversation history
+    media: list[dict[str, Any]] = Field(default_factory=list)  # Multimodal items (images/audio)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

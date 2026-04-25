@@ -115,24 +115,29 @@ class CognitivePipeline:
         self._response_futures.clear()
         logger.info("CognitivePipeline stopped")
 
+    async def _emit_thought(self, text: str, correlation_id: str, tenant_id: str) -> None:
+        """Emit an internal thought to the bus for observability."""
+        msg = Message(
+            type=MessageType.EVENT,
+            source_node_id="pipeline",
+            topic="system.thought",
+            tenant_id=tenant_id,
+            payload={"text": text},
+            correlation_id=correlation_id,
+        )
+        await self.bus.publish("system.thought", msg)
+        logger.debug("[Thought] %s", text)
+
     async def process(
         self,
         text: str,
         tenant_id: str = "default",
         session_id: str = "default",
         model_size: str = "125M",
+        media: list[dict[str, Any]] | None = None,
     ) -> PipelineResult:
         """
-        Process a user query through the full cognitive pipeline.
-
-        Args:
-            text: The user's query text
-            tenant_id: Tenant for multi-tenant isolation
-            session_id: Session for conversation continuity
-            model_size: Model size hint
-
-        Returns:
-            PipelineResult with the final response text, latency, and metadata.
+        Process a query (optionally with media) through the full cognitive pipeline.
         """
         start_time = time.monotonic()
         correlation_id = str(uuid.uuid4())
@@ -140,10 +145,18 @@ class CognitivePipeline:
 
         try:
             # ── Stage 1: Pre-processing (memory + identity injection) ──
+            await self._emit_thought(
+                "Initializing cognitive pre-processing...", correlation_id, tenant_id
+            )
             context = await self._pre_process(text, tenant_id, session_id, correlation_id)
             stages.append("pre_process")
 
             # ── Stage 2: Route through cognitive pipeline ──
+            await self._emit_thought(
+                f"Routing task to specialized experts (media: {len(media) if media else 0} items)...",
+                correlation_id,
+                tenant_id,
+            )
             response = await self._route_and_wait(
                 text=text,
                 context=context,
@@ -151,12 +164,16 @@ class CognitivePipeline:
                 session_id=session_id,
                 correlation_id=correlation_id,
                 model_size=model_size,
+                media=media,
             )
             stages.append("route")
             stages.append("workspace")
             stages.append("decision")
 
             # ── Stage 3: Post-processing (memory storage) ──
+            await self._emit_thought(
+                "Consolidating interaction into long-term memory...", correlation_id, tenant_id
+            )
             await self._post_process(text, response, tenant_id, session_id, correlation_id)
             stages.append("post_process")
 
@@ -288,6 +305,7 @@ class CognitivePipeline:
         session_id: str,
         correlation_id: str,
         model_size: str,
+        media: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         Send query to the router and wait for the decision output.
@@ -308,6 +326,7 @@ class CognitivePipeline:
                 "text": text,
                 "model_size": model_size,
                 "context": context,
+                "media": media or [],
             },
         )
 

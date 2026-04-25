@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,9 @@ class MemoryNode(Node):
         await self.bus.subscribe("system.improve", self.handle_improvement)
         await self.bus.subscribe("system.reflection", self.handle_reflection)
         await self.bus.subscribe("knowledge.query", self.handle_knowledge_query)
+        await self.bus.subscribe("memory.browse", self.handle_browse)
+        await self.bus.subscribe("memory.forget", self.handle_forget)
+        await self.bus.subscribe("memory.stats", self.handle_stats)
 
     async def on_stop(self) -> None:
         """Persist in-memory data to disk and clean up."""
@@ -491,4 +495,239 @@ class MemoryNode(Node):
 
         except Exception as e:
             logger.error("Reward query failed: %s", e)
+            return message.create_error(str(e))
+
+    async def handle_browse(self, message: Message) -> Message | None:
+        """
+        Handles `memory.browse` — paginated episodic memory retrieval.
+
+        Expected payload:
+            offset: int (default 0)
+            limit: int (default 20)
+            session_id: Optional[str]
+            tenant_id: Optional[str]
+        """
+        try:
+            payload = message.payload
+            offset = int(payload.get("offset", 0))
+            limit = min(int(payload.get("limit", 20)), 100)
+            session_id = payload.get("session_id")
+            tenant_id = payload.get("tenant_id") or message.tenant_id or "default"
+
+            conn = self.db._get_conn()
+            conn.row_factory = sqlite3.Row
+
+            if session_id:
+                rows = conn.execute(
+                    "SELECT * FROM turns WHERE tenant_id = ? AND session_id = ? "
+                    "ORDER BY timestamp_iso DESC LIMIT ? OFFSET ?",
+                    (tenant_id, session_id, limit, offset),
+                ).fetchall()
+                total_row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM turns WHERE tenant_id = ? AND session_id = ?",
+                    (tenant_id, session_id),
+                ).fetchone()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM turns WHERE tenant_id = ? "
+                    "ORDER BY timestamp_iso DESC LIMIT ? OFFSET ?",
+                    (tenant_id, limit, offset),
+                ).fetchall()
+                total_row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM turns WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()
+
+            conn.row_factory = None
+            import json as _json
+
+            entries = []
+            for row in rows:
+                entries.append(
+                    {
+                        "id": row["id"],
+                        "session_id": row["session_id"],
+                        "role": row["role"],
+                        "content": row["content"],
+                        "domain": row["domain"],
+                        "timestamp": row["timestamp_iso"],
+                        "metadata": _json.loads(row["metadata"]) if row["metadata"] else {},
+                    }
+                )
+
+            total = total_row["cnt"] if total_row else 0
+            return message.create_response(
+                {
+                    "entries": entries,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
+
+        except Exception as e:
+            logger.error("Memory browse failed: %s", e)
+            return message.create_error(str(e))
+
+    async def handle_forget(self, message: Message) -> Message | None:
+        """
+        Handles `memory.forget` — selective amnesia.
+
+        Expected payload:
+            query: Optional[str] — content substring to match and delete
+            session_id: Optional[str] — delete all turns in this session
+            before: Optional[str] — ISO timestamp, delete turns older than this
+            after: Optional[str] — ISO timestamp, delete turns newer than this
+            entry_ids: Optional[list[str]] — specific turn IDs to delete
+            forget_semantic: bool — also purge matching semantic docs (default True)
+        """
+        try:
+            payload = message.payload
+            tenant_id = payload.get("tenant_id") or message.tenant_id or "default"
+            query = payload.get("query")
+            session_id = payload.get("session_id")
+            before = payload.get("before")
+            after = payload.get("after")
+            entry_ids = payload.get("entry_ids", [])
+            forget_semantic = payload.get("forget_semantic", True)
+
+            conn = self.db._get_conn()
+            deleted_episodic = 0
+            deleted_semantic = 0
+
+            # Delete specific entries by ID
+            if entry_ids:
+                placeholders = ",".join("?" * len(entry_ids))
+                cursor = conn.execute(
+                    f"DELETE FROM turns WHERE tenant_id = ? AND id IN ({placeholders})",
+                    [tenant_id] + list(entry_ids),
+                )
+                deleted_episodic += cursor.rowcount
+                conn.commit()
+
+            # Delete by session
+            if session_id:
+                deleted_episodic += self.db.clear_session(session_id, tenant_id)
+
+            # Delete by content query
+            if query:
+                # First find matching IDs for reporting
+                conn.row_factory = sqlite3.Row
+                matches = conn.execute(
+                    "SELECT id, content FROM turns WHERE tenant_id = ? AND content LIKE ?",
+                    (tenant_id, f"%{query}%"),
+                ).fetchall()
+                conn.row_factory = None
+
+                if matches:
+                    match_ids = [m["id"] for m in matches]
+                    placeholders = ",".join("?" * len(match_ids))
+                    cursor = conn.execute(
+                        f"DELETE FROM turns WHERE id IN ({placeholders})",
+                        match_ids,
+                    )
+                    deleted_episodic += cursor.rowcount
+                    conn.commit()
+
+                # Also delete from semantic memory
+                if forget_semantic:
+                    results = await asyncio.to_thread(
+                        self.semantic_db.search, query, top_k=50, tenant_id=tenant_id
+                    )
+                    for r in results:
+                        doc_id = r.get("id")
+                        if doc_id and self.semantic_db.delete(doc_id):
+                            deleted_semantic += 1
+
+            # Delete by time range
+            if before or after:
+                conditions = ["tenant_id = ?"]
+                params: list[Any] = [tenant_id]
+                if before:
+                    conditions.append("timestamp_iso < ?")
+                    params.append(before)
+                if after:
+                    conditions.append("timestamp_iso > ?")
+                    params.append(after)
+
+                where = " AND ".join(conditions)
+                cursor = conn.execute(f"DELETE FROM turns WHERE {where}", params)
+                deleted_episodic += cursor.rowcount
+                conn.commit()
+
+            logger.info(
+                "[MemoryNode] Forget completed: %d episodic, %d semantic entries removed",
+                deleted_episodic,
+                deleted_semantic,
+            )
+            return message.create_response(
+                {
+                    "status": "forgotten",
+                    "deleted_episodic": deleted_episodic,
+                    "deleted_semantic": deleted_semantic,
+                }
+            )
+
+        except Exception as e:
+            logger.error("Memory forget failed: %s", e)
+            return message.create_error(str(e))
+
+    async def handle_stats(self, message: Message) -> Message | None:
+        """
+        Handles `memory.stats` — return counts from all memory subsystems.
+        """
+        try:
+            tenant_id = message.payload.get("tenant_id") or message.tenant_id or "default"
+
+            episodic_turns = self.db.get_turn_count(tenant_id)
+            episodic_sessions = self.db.get_session_count(tenant_id)
+            semantic_count = self.semantic_db.count
+            procedural_count = 0
+            value_count = 0
+
+            try:
+                proc_conn = self.procedural_db._get_conn()
+                row = proc_conn.execute(
+                    "SELECT COUNT(*) FROM skills WHERE tenant_id = ?", (tenant_id,)
+                ).fetchone()
+                procedural_count = row[0] if row else 0
+            except Exception:
+                pass
+
+            try:
+                val_conn = self.value_db._get_conn()
+                row = val_conn.execute(
+                    "SELECT COUNT(*) FROM rewards WHERE tenant_id = ?", (tenant_id,)
+                ).fetchone()
+                value_count = row[0] if row else 0
+            except Exception:
+                pass
+
+            kg_entities = self.knowledge_graph.entity_count
+            kg_relations = self.knowledge_graph.relation_count
+
+            return message.create_response(
+                {
+                    "episodic": {
+                        "turns": episodic_turns,
+                        "sessions": episodic_sessions,
+                    },
+                    "semantic": {
+                        "documents": semantic_count,
+                    },
+                    "procedural": {
+                        "skills": procedural_count,
+                    },
+                    "value": {
+                        "rewards": value_count,
+                    },
+                    "knowledge_graph": {
+                        "entities": kg_entities,
+                        "relations": kg_relations,
+                    },
+                }
+            )
+
+        except Exception as e:
+            logger.error("Memory stats failed: %s", e)
             return message.create_error(str(e))
