@@ -883,7 +883,7 @@ class CollectiveNode(Node):
 
     async def delegate_task(
         self,
-        query: str,
+        query: str | dict[str, Any],
         domain: str = "general",
         timeout: float = 10.0,
     ) -> DelegationResult:
@@ -982,19 +982,33 @@ class CollectiveNode(Node):
         query = payload.get("query", "")
         domain = payload.get("domain", "general")
 
-        # Process via vote handler (same as voting)
-        response_text = ""
-        confidence = 0.0
-
+        # 1. First, check if we have a vote handler (direct LLM response)
         if self._vote_handler:
             try:
                 response_text, confidence = await self._vote_handler(query, domain)
             except Exception as e:
                 logger.warning("Delegation handler failed: %s", e)
 
+        # 2. If no direct handler, publish as an incoming delegation event for 
+        # higher-level framework integration (e.g. SentraAgent)
         if not response_text:
-            response_text = f"[{self.instance_id}] Delegation processed"
-            confidence = 0.1
+            await self.publish(
+                "collective.delegation.incoming",
+                Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    topic="collective.delegation.incoming",
+                    payload={
+                        "delegation_id": delegation_id,
+                        "query": query,
+                        "domain": domain,
+                        "requester_id": requester,
+                    },
+                )
+            )
+            # We return early if we're delegating to the framework; 
+            # the framework is expected to send 'collective.vote.response' separately.
+            return None
 
         # Send response back using vote response mechanism
         vote_resp = VoteResponse(
