@@ -20,6 +20,7 @@ __plugin__ = {
     "description": "Multi-agent swarm manager for parallel sub-tasks.",
 }
 
+
 class SwarmManagerNode(HBLLMPlugin):
     """
     Subscribes to swarm actions or task decompositions and orchestrates
@@ -46,8 +47,7 @@ class SwarmManagerNode(HBLLMPlugin):
         # Mocking the spawning of separate CognitivePipelines by running parallel async tasks
         # In a real implementation, this would instantiate actual pipeline objects or process workers.
         results = await asyncio.gather(
-            *(self._run_sub_agent(task) for task in sub_tasks),
-            return_exceptions=True
+            *(self._run_sub_agent(task) for task in sub_tasks), return_exceptions=True
         )
 
         aggregated_results = []
@@ -62,7 +62,7 @@ class SwarmManagerNode(HBLLMPlugin):
         # Publish the aggregated result back to the bus
         reply = message.create_response(
             payload={"swarm_id": swarm_id, "results": aggregated_results},
-            msg_type=MessageType.TASK_AGGREGATE
+            msg_type=MessageType.TASK_AGGREGATE,
         )
         # Assuming we can publish back on a generic channel or the one requested
         if self.bus:
@@ -78,5 +78,5 @@ class SwarmManagerNode(HBLLMPlugin):
         return {
             "task": task_name,
             "status": "completed",
-            "output": f"Successfully executed: {task_name}"
+            "output": f"Successfully executed: {task_name}",
         }

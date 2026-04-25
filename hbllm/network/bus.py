@@ -128,7 +128,7 @@ class InProcessBus:
 
     async def start(self) -> None:
         """Start the message dispatch loop."""
-        if getattr(self, '_running', False):
+        if getattr(self, "_running", False):
             return
         self._running = True
         self._dispatch_task = asyncio.create_task(self._dispatch_loop())

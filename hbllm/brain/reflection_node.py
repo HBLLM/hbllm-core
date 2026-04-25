@@ -195,9 +195,9 @@ class ReflectionNode(Node):
         context = message.payload.get("context", "")
         if not context:
             return message.create_error("No context provided for reflection")
-            
+
         logger.info("[ReflectionNode] On-demand reflection request received.")
-        
+
         # In a real scenario, we'd call the LLM here.
         # For the prototype, we use a basic heuristic/placeholder.
         insights = []
@@ -205,7 +205,7 @@ class ReflectionNode(Node):
             insights.append("User is interested in space and scientific exploration.")
         if "black hole" in context.lower():
             insights.append("User specifically mentioned black holes.")
-            
+
         return message.create_response({"insights": insights})
 
     # ── Timer Loop ───────────────────────────────────────────────────
@@ -534,30 +534,36 @@ class ReflectionNode(Node):
 
             if insight.category == "capability":
                 # Trigger skill induction for gaps (autonomous expansion)
-                logger.info(f"[ReflectionNode] Requesting skill induction for gap: {insight.description}")
+                logger.info(
+                    f"[ReflectionNode] Requesting skill induction for gap: {insight.description}"
+                )
                 induction_msg = Message(
                     type=MessageType.QUERY,
                     source_node_id=self.node_id,
                     topic="system.induction.request",
-                    payload={"gap": insight.description}
+                    payload={"gap": insight.description},
                 )
                 asyncio.create_task(self.bus.publish("system.induction.request", induction_msg))
                 actions.append(f"Triggered autonomous skill induction for: {insight.description}")
 
                 # [NEW] [Hive Spawning] If gap is severe, request a new specialist agent
                 if insight.severity in ["critical", "warning"]:
-                    logger.info(f"[ReflectionNode] Requesting specialized Expert Spawn for: {insight.description}")
+                    logger.info(
+                        f"[ReflectionNode] Requesting specialized Expert Spawn for: {insight.description}"
+                    )
                     spawn_msg = Message(
                         type=MessageType.EVENT,
                         source_node_id=self.node_id,
                         topic="system.swarm.spawn",
                         payload={
                             "domain": insight.evidence.get("domain", "specialist"),
-                            "context": insight.description
-                        }
+                            "context": insight.description,
+                        },
                     )
                     asyncio.create_task(self.bus.publish("system.swarm.spawn", spawn_msg))
-                    actions.append(f"Triggered autonomous Hive Spawn for expert in: {insight.description}")
+                    actions.append(
+                        f"Triggered autonomous Hive Spawn for expert in: {insight.description}"
+                    )
 
         return actions
 

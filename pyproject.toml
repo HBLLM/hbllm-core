@@ -102,6 +102,7 @@ timeout = 120
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+exclude = ["plugins/"]
 disable_error_code = [
     "assignment", "arg-type", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 

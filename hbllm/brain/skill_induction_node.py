@@ -23,7 +23,7 @@ class SecurityInterceptor(ast.NodeVisitor):
     AST-based safety checker for induced code.
     Blocks dangerous imports and system-level calls.
     """
-    
+
     DANGEROUS_MODULES = {"os", "subprocess", "shutil", "socket", "sys", "pathlib", "builtins"}
     DANGEROUS_FUNCTIONS = {"exec", "eval", "getattr", "setattr", "delattr", "open"}
 
@@ -88,16 +88,16 @@ class SkillInductionNode(Node):
             "1. Must be a single Python function.\n"
             "2. Must have a clear docstring and type hints.\n"
             "3. Must NOT use dangerous modules like os, subprocess, or sys.\n"
-            "4. Return ONLY the code in a JSON block: {\"name\": \"tool_name\", \"code\": \"def ...\", \"description\": \"...\"}\n"
+            '4. Return ONLY the code in a JSON block: {"name": "tool_name", "code": "def ...", "description": "..."}\n'
         )
 
         try:
             if not self.llm:
-                 return message.create_error("No LLM available for induction.")
-            
+                return message.create_error("No LLM available for induction.")
+
             # Using generate_json if available, or fallback
             induction_data = await self.llm.generate_json(prompt)
-            
+
             tool_name = induction_data.get("name")
             tool_code = induction_data.get("code")
             tool_desc = induction_data.get("description")
@@ -115,7 +115,9 @@ class SkillInductionNode(Node):
 
             if interceptor.errors:
                 logger.error(f"Security Policy Violation in induced skill: {interceptor.errors}")
-                return message.create_error(f"Security validation failed: {', '.join(interceptor.errors)}")
+                return message.create_error(
+                    f"Security validation failed: {', '.join(interceptor.errors)}"
+                )
 
             # 3. Success! Publish induction event
             induced_msg = Message(
@@ -129,12 +131,12 @@ class SkillInductionNode(Node):
                     "code": tool_code,
                     "description": tool_desc,
                     "gap": gap_description,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
                 },
-                correlation_id=message.correlation_id or message.id
+                correlation_id=message.correlation_id or message.id,
             )
             await self.bus.publish("system.skill.induced", induced_msg)
-            
+
             logger.info(f"Successfully induced skill: {tool_name}")
             return message.create_response({"status": "SUCCESS", "skill_name": tool_name})
 

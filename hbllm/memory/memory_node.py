@@ -543,23 +543,27 @@ class MemoryNode(Node):
 
             entries = []
             for row in rows:
-                entries.append({
-                    "id": row["id"],
-                    "session_id": row["session_id"],
-                    "role": row["role"],
-                    "content": row["content"],
-                    "domain": row["domain"],
-                    "timestamp": row["timestamp_iso"],
-                    "metadata": _json.loads(row["metadata"]) if row["metadata"] else {},
-                })
+                entries.append(
+                    {
+                        "id": row["id"],
+                        "session_id": row["session_id"],
+                        "role": row["role"],
+                        "content": row["content"],
+                        "domain": row["domain"],
+                        "timestamp": row["timestamp_iso"],
+                        "metadata": _json.loads(row["metadata"]) if row["metadata"] else {},
+                    }
+                )
 
             total = total_row["cnt"] if total_row else 0
-            return message.create_response({
-                "entries": entries,
-                "total": total,
-                "offset": offset,
-                "limit": limit,
-            })
+            return message.create_response(
+                {
+                    "entries": entries,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
 
         except Exception as e:
             logger.error("Memory browse failed: %s", e)
@@ -653,13 +657,16 @@ class MemoryNode(Node):
 
             logger.info(
                 "[MemoryNode] Forget completed: %d episodic, %d semantic entries removed",
-                deleted_episodic, deleted_semantic,
+                deleted_episodic,
+                deleted_semantic,
             )
-            return message.create_response({
-                "status": "forgotten",
-                "deleted_episodic": deleted_episodic,
-                "deleted_semantic": deleted_semantic,
-            })
+            return message.create_response(
+                {
+                    "status": "forgotten",
+                    "deleted_episodic": deleted_episodic,
+                    "deleted_semantic": deleted_semantic,
+                }
+            )
 
         except Exception as e:
             logger.error("Memory forget failed: %s", e)
@@ -699,25 +706,27 @@ class MemoryNode(Node):
             kg_entities = self.knowledge_graph.entity_count
             kg_relations = self.knowledge_graph.relation_count
 
-            return message.create_response({
-                "episodic": {
-                    "turns": episodic_turns,
-                    "sessions": episodic_sessions,
-                },
-                "semantic": {
-                    "documents": semantic_count,
-                },
-                "procedural": {
-                    "skills": procedural_count,
-                },
-                "value": {
-                    "rewards": value_count,
-                },
-                "knowledge_graph": {
-                    "entities": kg_entities,
-                    "relations": kg_relations,
-                },
-            })
+            return message.create_response(
+                {
+                    "episodic": {
+                        "turns": episodic_turns,
+                        "sessions": episodic_sessions,
+                    },
+                    "semantic": {
+                        "documents": semantic_count,
+                    },
+                    "procedural": {
+                        "skills": procedural_count,
+                    },
+                    "value": {
+                        "rewards": value_count,
+                    },
+                    "knowledge_graph": {
+                        "entities": kg_entities,
+                        "relations": kg_relations,
+                    },
+                }
+            )
 
         except Exception as e:
             logger.error("Memory stats failed: %s", e)

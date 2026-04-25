@@ -989,7 +989,7 @@ class CollectiveNode(Node):
             except Exception as e:
                 logger.warning("Delegation handler failed: %s", e)
 
-        # 2. If no direct handler, publish as an incoming delegation event for 
+        # 2. If no direct handler, publish as an incoming delegation event for
         # higher-level framework integration (e.g. SentraAgent)
         if not response_text:
             await self.publish(
@@ -1004,9 +1004,9 @@ class CollectiveNode(Node):
                         "domain": domain,
                         "requester_id": requester,
                     },
-                )
+                ),
             )
-            # We return early if we're delegating to the framework; 
+            # We return early if we're delegating to the framework;
             # the framework is expected to send 'collective.vote.response' separately.
             return None
 

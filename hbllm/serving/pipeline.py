@@ -145,12 +145,18 @@ class CognitivePipeline:
 
         try:
             # ── Stage 1: Pre-processing (memory + identity injection) ──
-            await self._emit_thought("Initializing cognitive pre-processing...", correlation_id, tenant_id)
+            await self._emit_thought(
+                "Initializing cognitive pre-processing...", correlation_id, tenant_id
+            )
             context = await self._pre_process(text, tenant_id, session_id, correlation_id)
             stages.append("pre_process")
 
             # ── Stage 2: Route through cognitive pipeline ──
-            await self._emit_thought(f"Routing task to specialized experts (media: {len(media) if media else 0} items)...", correlation_id, tenant_id)
+            await self._emit_thought(
+                f"Routing task to specialized experts (media: {len(media) if media else 0} items)...",
+                correlation_id,
+                tenant_id,
+            )
             response = await self._route_and_wait(
                 text=text,
                 context=context,
@@ -165,7 +171,9 @@ class CognitivePipeline:
             stages.append("decision")
 
             # ── Stage 3: Post-processing (memory storage) ──
-            await self._emit_thought("Consolidating interaction into long-term memory...", correlation_id, tenant_id)
+            await self._emit_thought(
+                "Consolidating interaction into long-term memory...", correlation_id, tenant_id
+            )
             await self._post_process(text, response, tenant_id, session_id, correlation_id)
             stages.append("post_process")
 

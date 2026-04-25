@@ -19,6 +19,7 @@ __plugin__ = {
     "description": "Analyzes conversation to maintain an emotional state.",
 }
 
+
 class EmotionNode(HBLLMPlugin):
     """
     Subscribes to sensory input to maintain and update the active
@@ -43,16 +44,16 @@ class EmotionNode(HBLLMPlugin):
         # Mocking sentiment extraction based on keywords
         sentiment_score = 0.0
         text_lower = text.lower()
-        
+
         if any(w in text_lower for w in ["happy", "great", "awesome", "love"]):
             sentiment_score = 0.5
         elif any(w in text_lower for w in ["sad", "angry", "hate", "terrible", "bad"]):
             sentiment_score = -0.5
-            
+
         # Decay current emotion slightly towards neutral
         self.current_valence *= 0.8
         self.current_valence += sentiment_score
-        
+
         # Clamp valence
         self.current_valence = max(-1.0, min(1.0, self.current_valence))
 
@@ -63,7 +64,12 @@ class EmotionNode(HBLLMPlugin):
         elif self.current_valence < -0.3:
             current_emotion = "sad"
 
-        logger.info("[%s] Emotion updated: valence=%.2f, emotion=%s", self.node_id, self.current_valence, current_emotion)
+        logger.info(
+            "[%s] Emotion updated: valence=%.2f, emotion=%s",
+            self.node_id,
+            self.current_valence,
+            current_emotion,
+        )
 
         # Publish emotional state to the bus
         emotion_msg = Message(
@@ -74,8 +80,8 @@ class EmotionNode(HBLLMPlugin):
                 "valence": self.current_valence,
                 "arousal": self.current_arousal,
                 "emotion_label": current_emotion,
-                "triggered_by": message.id
-            }
+                "triggered_by": message.id,
+            },
         )
         if self.bus:
             await self.bus.publish("identity.emotion", emotion_msg)

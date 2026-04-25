@@ -20,6 +20,7 @@ __plugin__ = {
     "description": "Temporal reasoning: 'what happened before', 'remind me'.",
 }
 
+
 class TemporalReasoningNode(HBLLMPlugin):
     """
     Subscribes to temporal queries, parses timestamps, and queries/creates
@@ -49,8 +50,6 @@ class TemporalReasoningNode(HBLLMPlugin):
             response_text += f"The current system time is {datetime.now(timezone.utc).isoformat()}."
 
         # Publish result back
-        reply = message.create_response(
-            payload={"text": response_text, "temporal_data": {}}
-        )
+        reply = message.create_response(payload={"text": response_text, "temporal_data": {}})
         if self.bus:
             await self.bus.publish(reply.topic, reply)
