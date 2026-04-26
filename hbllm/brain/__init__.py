@@ -23,6 +23,7 @@ from hbllm.brain.world_simulator import WorldSimulator
 def __getattr__(name: str):
     if name == "ProcessRewardNode":
         from hbllm.brain.process_reward_node import ProcessRewardNode
+
         return ProcessRewardNode
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
