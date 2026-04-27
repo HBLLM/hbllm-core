@@ -27,9 +27,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.plugin.manager import PluginManager
 
 from hbllm.actions.tool_memory import ToolMemory
 
@@ -101,6 +104,11 @@ class BrainConfig:
     domain_registry: Any | None = None  # Hierarchical domain registry
     system_prompt: str = "You are a helpful AI assistant."
 
+    # Plugin system
+    inject_plugins: bool = True  # Auto-discover plugins on startup
+    plugin_dirs: list[str] | None = None  # Extra plugin scan directories
+    watch_plugins: bool = False  # Background watcher for new plugins
+
 
 class Brain:
     """
@@ -158,6 +166,9 @@ class Brain:
 
         # v3: Proactive Execution
         self.scheduler_node: Any = None
+
+        # Plugin system
+        self.plugin_manager: PluginManager | None = None
 
         self._hardware_loop_task: asyncio.Task[None] | None = None
 
@@ -252,6 +263,9 @@ class Brain:
         """Stop all nodes, pipeline, and bus."""
         if self._hardware_loop_task:
             self._hardware_loop_task.cancel()
+        # Stop plugin watcher
+        if self.plugin_manager:
+            await self.plugin_manager.stop_watching()
         await self.pipeline.stop()
         for node in reversed(self.nodes):
             try:
@@ -770,5 +784,28 @@ class BrainFactory:
             "policy engine, owner rules, sentinel, evaluation, reflection, skill_compiler, "
             "attention, load_manager"
         )
+
+        # ── Plugin System ────────────────────────────────────────────
+        if cfg.inject_plugins:
+            from hbllm.plugin.manager import PluginManager
+
+            extra_dirs = [Path(d) for d in (cfg.plugin_dirs or [])]
+            brain.plugin_manager = PluginManager(
+                plugin_dirs=extra_dirs,
+                skill_registry=brain.skill_registry,
+                policy_engine=brain.policy_engine,
+            )
+            # Auto-discover plugins from all configured paths
+            discovered = await brain.plugin_manager.discover_plugins()
+            if discovered:
+                logger.info(
+                    "Plugin system: loaded %d bundles on startup",
+                    len(discovered),
+                )
+
+            # Optionally start background watcher for hot-loading
+            if cfg.watch_plugins:
+                await brain.plugin_manager.watch_directories()
+                logger.info("Plugin watcher started (runtime hot-loading enabled)")
 
         return brain
