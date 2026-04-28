@@ -1,0 +1,13 @@
+{
+    "name": "emotion-modeling",
+    "version": "1.0.0",
+    "description": "Tracks emotional valence across conversations and adapts response tone.",
+    "author": "HBLLM Core",
+    "entry_point": "emotion_engine.py",
+    "manifest_version": 2,
+    "capabilities": ["emotion_tracking", "tone_adaptation"],
+    "topics": {
+        "subscribe": ["system.experience", "system.evaluation"],
+        "publish": ["emotion.state", "emotion.adaptation"]
+    }
+}

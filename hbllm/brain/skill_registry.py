@@ -488,7 +488,9 @@ class SkillRegistry:
         if graduated_ids:
             logger.info(
                 "Auto-graduated %d skills from '%s' (min_invocations=%d)",
-                len(graduated_ids), source, min_invocations,
+                len(graduated_ids),
+                source,
+                min_invocations,
             )
         return graduated_ids
 
@@ -499,9 +501,7 @@ class SkillRegistry:
             total = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
             cats = conn.execute("SELECT COUNT(DISTINCT category) FROM skills").fetchone()[0]
             avg_sr = conn.execute("SELECT AVG(success_rate) FROM skills").fetchone()[0]
-            sources = conn.execute(
-                "SELECT source, COUNT(*) FROM skills GROUP BY source"
-            ).fetchall()
+            sources = conn.execute("SELECT source, COUNT(*) FROM skills GROUP BY source").fetchall()
         return {
             "total_skills": total,
             "categories": cats,

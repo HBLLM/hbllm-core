@@ -62,14 +62,30 @@ class MockBrainProvider(LLMProvider):
         return "mock-brain"
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _test_config(tmp_path, **overrides) -> BrainConfig:
+    """Create a test-safe BrainConfig that disables background tasks."""
+    defaults = dict(
+        data_dir=str(tmp_path),
+        watch_plugins=False,
+    )
+    defaults.update(overrides)
+    return BrainConfig(**defaults)
+
+
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_factory_creates_brain():
+async def test_factory_creates_brain(tmp_path):
     """Factory creates a Brain with all components."""
     provider = MockBrainProvider()
-    brain = await BrainFactory.create(provider=provider)
+    brain = await BrainFactory.create(
+        provider=provider,
+        config=_test_config(tmp_path),
+    )
 
     assert isinstance(brain, Brain)
     assert brain.bus is not None
@@ -84,9 +100,10 @@ async def test_factory_creates_brain():
 
 
 @pytest.mark.asyncio
-async def test_factory_with_config():
+async def test_factory_with_config(tmp_path):
     """Factory respects custom config."""
-    config = BrainConfig(
+    config = _test_config(
+        tmp_path,
         inject_memory=False,
         inject_identity=False,
         inject_curiosity=False,
@@ -102,10 +119,13 @@ async def test_factory_with_config():
 
 
 @pytest.mark.asyncio
-async def test_brain_usage_tracking():
+async def test_brain_usage_tracking(tmp_path):
     """Usage counters accumulate across calls."""
     provider = MockBrainProvider()
-    brain = await BrainFactory.create(provider=provider)
+    brain = await BrainFactory.create(
+        provider=provider,
+        config=_test_config(tmp_path),
+    )
 
     # Direct LLM usage
     await brain.llm.generate("test")
@@ -116,10 +136,13 @@ async def test_brain_usage_tracking():
 
 
 @pytest.mark.asyncio
-async def test_brain_shutdown():
+async def test_brain_shutdown(tmp_path):
     """Brain shuts down cleanly."""
     provider = MockBrainProvider()
-    brain = await BrainFactory.create(provider=provider)
+    brain = await BrainFactory.create(
+        provider=provider,
+        config=_test_config(tmp_path),
+    )
 
     # Shutdown should not raise
     await brain.shutdown()
@@ -166,12 +189,13 @@ async def test_adapter_integration_with_nodes():
 
 
 @pytest.mark.asyncio
-async def test_provider_llm_counts():
+async def test_provider_llm_counts(tmp_path):
     """Verify total LLM call count through brain creation + queries."""
     provider = MockBrainProvider()
     brain = await BrainFactory.create(
         provider=provider,
-        config=BrainConfig(
+        config=_test_config(
+            tmp_path,
             inject_memory=False,
             inject_identity=False,
             inject_curiosity=False,

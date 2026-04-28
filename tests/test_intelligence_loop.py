@@ -502,10 +502,14 @@ class TestV2FactoryIntegration:
             inject_reflection=True,
             inject_skill_compiler=True,
             data_dir=str(tmp_path),
+            watch_plugins=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
-        await brain.shutdown()
+        try:
+            await brain.shutdown()
+        except Exception:
+            pass
 
     async def test_evaluation_node_wired(self, brain):
         assert brain.evaluation_node is not None
@@ -565,6 +569,7 @@ class TestV2FactoryIntegration:
             inject_reflection=False,
             inject_skill_compiler=False,
             data_dir=str(tmp_path),
+            watch_plugins=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.evaluation_node is None

@@ -102,7 +102,8 @@ class PromptStore:
         if keys_to_archive:
             logger.info(
                 "Archived %d prompt templates from '%s'",
-                len(keys_to_archive), source,
+                len(keys_to_archive),
+                source,
             )
         return len(keys_to_archive)
 
@@ -110,11 +111,10 @@ class PromptStore:
         """Restore archived templates from a source back to active."""
         prefix = "archived:"
         keys_to_restore = [
-            k for k, s in self._sources.items()
-            if s == source and k.startswith(prefix)
+            k for k, s in self._sources.items() if s == source and k.startswith(prefix)
         ]
         for key in keys_to_restore:
-            original_key = key[len(prefix):]
+            original_key = key[len(prefix) :]
             self._templates[original_key] = self._templates.pop(key)
             self._sources[original_key] = self._sources.pop(key)
         return len(keys_to_restore)
@@ -221,6 +221,7 @@ class PluginManager:
         # Package-level plugins (shipped with hbllm)
         try:
             import hbllm
+
             pkg_plugins = Path(hbllm.__file__).parent.parent / "plugins"
             if pkg_plugins.exists() and pkg_plugins not in self._plugin_dirs:
                 self._plugin_dirs.append(pkg_plugins)
@@ -342,15 +343,14 @@ class PluginManager:
         if loaded.knowledge_source_ids:
             logger.info(
                 "[%s] Retaining %d knowledge sources (learned knowledge persists)",
-                plugin_name, len(loaded.knowledge_source_ids),
+                plugin_name,
+                len(loaded.knowledge_source_ids),
             )
 
         # ── Skills: Graduate or Orphan ───────────────────────────────
         if sr and loaded.skill_ids:
             if hasattr(sr, "graduate_experienced_skills"):
-                graduated_ids = sr.graduate_experienced_skills(
-                    loaded.namespace, min_invocations=1
-                )
+                graduated_ids = sr.graduate_experienced_skills(loaded.namespace, min_invocations=1)
                 graduated_count = len(graduated_ids)
 
             if hasattr(sr, "find_by_source"):
@@ -364,12 +364,16 @@ class PluginManager:
                     except Exception as e:
                         logger.error(
                             "[%s] Failed to orphan skill %s: %s",
-                            plugin_name, skill.skill_id, e,
+                            plugin_name,
+                            skill.skill_id,
+                            e,
                         )
 
             logger.info(
                 "[%s] Skills: %d graduated to core, %d orphaned (all retained)",
-                plugin_name, graduated_count, orphaned_count,
+                plugin_name,
+                graduated_count,
+                orphaned_count,
             )
 
         # ── Policies: Deactivate (not delete) ────────────────────────
@@ -386,12 +390,15 @@ class PluginManager:
                 except Exception as e:
                     logger.error(
                         "[%s] Failed to deactivate policy %s: %s",
-                        plugin_name, policy_name, e,
+                        plugin_name,
+                        policy_name,
+                        e,
                     )
 
             logger.info(
                 "[%s] Deactivated %d policies (records retained)",
-                plugin_name, deactivated_count,
+                plugin_name,
+                deactivated_count,
             )
 
         # ── Prompts: Archive ─────────────────────────────────────────
@@ -399,7 +406,10 @@ class PluginManager:
 
         logger.info(
             "Bundle unloaded (soft): %s — graduated=%d orphaned=%d deactivated=%d knowledge=retained",
-            plugin_name, graduated_count, orphaned_count, deactivated_count,
+            plugin_name,
+            graduated_count,
+            orphaned_count,
+            deactivated_count,
         )
         return True
 
@@ -441,7 +451,8 @@ class PluginManager:
                 except Exception as e:
                     logger.error(
                         "Failed to load plugin from '%s': %s",
-                        entry.name, e,
+                        entry.name,
+                        e,
                     )
 
         if newly_loaded:
@@ -468,7 +479,8 @@ class PluginManager:
         async def _poll_loop() -> None:
             logger.info(
                 "Plugin watcher started (interval=%ds, dirs=%d)",
-                interval, len(self._plugin_dirs),
+                interval,
+                len(self._plugin_dirs),
             )
             while True:
                 try:
@@ -500,9 +512,7 @@ class PluginManager:
 
     # ── Asset Ingestion ──────────────────────────────────────────────
 
-    async def _ingest_knowledge(
-        self, loaded: LoadedBundle, knowledge_base: Any
-    ) -> None:
+    async def _ingest_knowledge(self, loaded: LoadedBundle, knowledge_base: Any) -> None:
         """Ingest knowledge documents into the KnowledgeBase."""
         if not loaded.bundle.assets.has_knowledge:
             return
@@ -531,7 +541,8 @@ class PluginManager:
 
                     logger.info(
                         "[%s] Ingested knowledge: %s",
-                        loaded.name, knowledge_file.name,
+                        loaded.name,
+                        knowledge_file.name,
                     )
                 else:
                     logger.warning(
@@ -542,17 +553,18 @@ class PluginManager:
             except FileNotFoundError:
                 logger.error(
                     "[%s] Knowledge file not found: %s",
-                    loaded.name, knowledge_file,
+                    loaded.name,
+                    knowledge_file,
                 )
             except Exception as e:
                 logger.error(
                     "[%s] Failed to ingest knowledge file %s: %s",
-                    loaded.name, knowledge_file.name, e,
+                    loaded.name,
+                    knowledge_file.name,
+                    e,
                 )
 
-    def _register_skills(
-        self, loaded: LoadedBundle, skill_registry: Any
-    ) -> None:
+    def _register_skills(self, loaded: LoadedBundle, skill_registry: Any) -> None:
         """Register pre-built skills into the SkillRegistry."""
         if not loaded.bundle.assets.has_skills:
             return
@@ -580,7 +592,8 @@ class PluginManager:
                     if existing_source == "graduated":
                         logger.debug(
                             "[%s] Skill '%s' is graduated — preserving as-is",
-                            loaded.name, skill_def["name"],
+                            loaded.name,
+                            skill_def["name"],
                         )
                         loaded.skill_ids.append(skill_id)
                         continue
@@ -589,7 +602,8 @@ class PluginManager:
                     if existing_source.startswith("orphaned:"):
                         logger.info(
                             "[%s] Re-activating orphaned skill '%s'",
-                            loaded.name, skill_def["name"],
+                            loaded.name,
+                            skill_def["name"],
                         )
                         # Fall through to re-store with active source
 
@@ -597,7 +611,8 @@ class PluginManager:
                     elif existing_source not in ("", loaded.namespace):
                         logger.debug(
                             "[%s] Skill '%s' was forked by user — skipping overwrite",
-                            loaded.name, skill_def["name"],
+                            loaded.name,
+                            skill_def["name"],
                         )
                         continue
 
@@ -630,18 +645,20 @@ class PluginManager:
 
                     logger.info(
                         "[%s] Registered skill: %s (%s)",
-                        loaded.name, skill_def["name"], skill_id,
+                        loaded.name,
+                        skill_def["name"],
+                        skill_id,
                     )
 
             except Exception as e:
                 logger.error(
                     "[%s] Failed to register skill '%s': %s",
-                    loaded.name, skill_def.get("name", "?"), e,
+                    loaded.name,
+                    skill_def.get("name", "?"),
+                    e,
                 )
 
-    def _load_policies(
-        self, loaded: LoadedBundle, policy_engine: Any
-    ) -> None:
+    def _load_policies(self, loaded: LoadedBundle, policy_engine: Any) -> None:
         """Load governance policies into the PolicyEngine."""
         if not loaded.bundle.assets.has_policies:
             return
@@ -655,21 +672,30 @@ class PluginManager:
 
         for policy_def in loaded.bundle.assets.policies:
             try:
-                from hbllm.brain.policy_engine import Policy, PolicyAction, PolicyCondition, PolicyType
+                from hbllm.brain.policy_engine import (
+                    Policy,
+                    PolicyAction,
+                    PolicyCondition,
+                    PolicyType,
+                )
 
                 # Parse runtime conditions if present
                 conditions = []
                 for cond_data in policy_def.get("conditions", []):
                     try:
-                        conditions.append(PolicyCondition(
-                            key=cond_data["key"],
-                            operator=cond_data["operator"],
-                            value=cond_data["value"],
-                        ))
+                        conditions.append(
+                            PolicyCondition(
+                                key=cond_data["key"],
+                                operator=cond_data["operator"],
+                                value=cond_data["value"],
+                            )
+                        )
                     except (KeyError, TypeError) as ce:
                         logger.warning(
                             "[%s] Invalid condition in policy '%s': %s",
-                            loaded.name, policy_def.get("name", "?"), ce,
+                            loaded.name,
+                            policy_def.get("name", "?"),
+                            ce,
                         )
 
                 policy = Policy(
@@ -693,18 +719,25 @@ class PluginManager:
 
                 logger.info(
                     "[%s] Loaded policy: %s (%s/%s)",
-                    loaded.name, policy.name, policy.type, policy.action,
+                    loaded.name,
+                    policy.name,
+                    policy.type,
+                    policy.action,
                 )
 
             except (KeyError, ValueError) as e:
                 logger.error(
                     "[%s] Failed to load policy '%s': %s",
-                    loaded.name, policy_def.get("name", "?"), e,
+                    loaded.name,
+                    policy_def.get("name", "?"),
+                    e,
                 )
             except Exception as e:
                 logger.error(
                     "[%s] Unexpected error loading policy '%s': %s",
-                    loaded.name, policy_def.get("name", "?"), e,
+                    loaded.name,
+                    policy_def.get("name", "?"),
+                    e,
                 )
 
     def _store_prompts(self, loaded: LoadedBundle) -> None:
@@ -719,13 +752,16 @@ class PluginManager:
             except Exception as e:
                 logger.error(
                     "[%s] Failed to store prompt '%s': %s",
-                    loaded.name, key, e,
+                    loaded.name,
+                    key,
+                    e,
                 )
 
         if loaded.prompt_keys:
             logger.info(
                 "[%s] Stored %d prompt templates",
-                loaded.name, len(loaded.prompt_keys),
+                loaded.name,
+                len(loaded.prompt_keys),
             )
 
     # ── Query ────────────────────────────────────────────────────────

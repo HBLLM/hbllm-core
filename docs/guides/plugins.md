@@ -92,3 +92,111 @@ hbllm plugin new <name>
 
 !!! info "Lifecycle Hooks"
     You can still override `on_start()` and `on_stop()` for manual resource management (like closing database connections or cleaning up temporary files). Always call `await super().on_start()` if you maintain the override.
+
+---
+
+## 📦 Plugin Bundle Format
+
+Plugins are distributed as directory bundles with a `plugin.json` manifest:
+
+```
+plugins/my-plugin/
+├── plugin.json        # Manifest v2 (required)
+├── my_engine.py       # Entry point (HBLLMPlugin subclass)
+├── knowledge/         # Auto-ingested knowledge files
+├── skills/            # Skill YAML definitions
+├── policies/          # Governance policy files
+├── prompts/           # Prompt templates
+└── tests/
+    └── test_my_plugin.py
+```
+
+### Manifest (`plugin.json`)
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "What this plugin does",
+  "author": "your-name",
+  "entry_point": "my_engine.py",
+  "dependencies": [],
+  "tags": ["category"],
+  "capabilities": ["what_it_provides"],
+  "knowledge_dir": "knowledge",
+  "skills_file": "skills/skills.yaml",
+  "policies_file": "policies/policies.yaml"
+}
+```
+
+---
+
+## 🧠 Built-in Cognitive Plugins
+
+HBLLM ships with three cognitive plugins that extend the brain's reasoning capabilities:
+
+### Emotion Modeling (`emotion-modeling`)
+
+Tracks emotional valence across conversations using a VAD (Valence-Arousal-Dominance) model with lexicon-based text analysis and exponential decay.
+
+```python
+from hbllm.plugin.sdk import HBLLMPlugin, subscribe
+from hbllm.network.messages import Message
+
+class EmotionEngine(HBLLMPlugin):
+    @subscribe("system.experience")
+    async def on_experience(self, message: Message) -> None:
+        # Analyze text for emotional content using VAD lexicon
+        text = message.payload.get("text", "")
+        self._update_from_text(text)
+        await self._publish_state()  # → "emotion.state"
+```
+
+**Topics**: `system.experience`, `system.evaluation` → `emotion.state`
+**Capabilities**: Tone adaptation hints (empathetic, enthusiastic, focused, clarifying)
+
+### Temporal Reasoning (`temporal-reasoning`)
+
+Adds time-aware context to conversations. Recognizes temporal references ("yesterday", "last week") and provides deadline tracking.
+
+**Topics**: `system.experience` → `temporal.context`
+**Capabilities**: Event history, temporal reference parsing, deadline tracking
+
+### Swarm Orchestrator (`swarm-orchestrator`)
+
+Decomposes complex tasks into parallelizable subtasks, dispatches them to independent workers, and aggregates results.
+
+```python
+engine = SwarmEngine(max_workers=4, task_timeout=60.0)
+result = await engine.execute("1. Research topic\n2. Write draft\n3. Review")
+# → Runs steps 1-3 with dependency resolution and parallel execution
+```
+
+**Topics**: `swarm.request` → `swarm.complete`
+**Capabilities**: Heuristic task decomposition, dependency resolution, configurable parallelism
+
+---
+
+## 🧪 Testing Plugins
+
+Each plugin should include localized tests in a `tests/` directory:
+
+```bash
+# Run a single plugin's tests
+python -m pytest hbllm/plugins/emotion-modeling/tests/ -v --timeout=30
+
+# Run all plugin tests
+python -m pytest hbllm/plugins/*/tests/ -v --timeout=30
+```
+
+Tests import the engine directly via `sys.path` manipulation (since plugin directories use hyphens):
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from emotion_engine import EmotionEngine
+```
+

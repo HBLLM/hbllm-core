@@ -13,7 +13,6 @@ import pytest
 
 from hbllm.plugin.manager import LoadedBundle, PluginManager, PromptStore
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -22,12 +21,16 @@ def _create_bundle(tmp_path: Path, name: str = "test-core-plugin") -> Path:
     plugin_dir = tmp_path / name
     plugin_dir.mkdir(parents=True)
 
-    (plugin_dir / "plugin.json").write_text(json.dumps({
-        "name": name,
-        "version": "1.0.0",
-        "manifest_version": 2,
-        "capabilities": ["testing"],
-    }))
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": name,
+                "version": "1.0.0",
+                "manifest_version": 2,
+                "capabilities": ["testing"],
+            }
+        )
+    )
     (plugin_dir / "__init__.py").write_text('"""Test."""\n')
 
     # Skills

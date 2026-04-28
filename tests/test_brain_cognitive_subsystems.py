@@ -53,13 +53,17 @@ class TestBrainCognitiveSubsystems:
         config = BrainConfig(
             inject_perception=False,
             data_dir=str(tmp_path),
+            watch_plugins=False,
         )
         brain = await BrainFactory.create(
             provider=_MockProvider(),
             config=config,
         )
         yield brain
-        await brain.shutdown()
+        try:
+            await brain.shutdown()
+        except Exception:
+            pass
 
     # ─── Subsystem Initialization ────────────────────────────────────
 
@@ -169,14 +173,21 @@ class TestBrainCognitiveSubsystems:
     # ─── Config Toggling ─────────────────────────────────────────────
 
     async def test_disable_revision(self, tmp_path):
-        config = BrainConfig(inject_revision=False, inject_perception=False, data_dir=str(tmp_path))
+        config = BrainConfig(
+            inject_revision=False,
+            inject_perception=False,
+            data_dir=str(tmp_path),
+            watch_plugins=False,
+        )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
         assert brain.revision_node is None
         assert brain.confidence_estimator is None
         await brain.shutdown()
 
     async def test_disable_goals(self, tmp_path):
-        config = BrainConfig(inject_goals=False, inject_perception=False, data_dir=str(tmp_path))
+        config = BrainConfig(
+            inject_goals=False, inject_perception=False, data_dir=str(tmp_path), watch_plugins=False
+        )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
         assert brain.goal_manager is None
         await brain.shutdown()

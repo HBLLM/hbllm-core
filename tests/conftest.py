@@ -12,6 +12,9 @@ import gc
 import logging
 
 import pytest
+import pytest_asyncio
+
+from hbllm.network.bus import InProcessBus
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +24,6 @@ def _force_gc_after_test():
     """Force garbage collection after each test to clean up dangling references."""
     yield
     gc.collect()
-
-
-import pytest_asyncio
-
-from hbllm.network.bus import InProcessBus
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -43,7 +41,14 @@ async def _force_task_cleanup():
         task.cancel()
 
     if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Use a timeout to prevent gather itself from hanging indefinitely
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=5.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass  # Tasks that won't cancel in 5s are orphaned — let them die
 
 
 @pytest_asyncio.fixture
