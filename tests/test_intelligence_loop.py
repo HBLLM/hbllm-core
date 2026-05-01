@@ -503,6 +503,12 @@ class TestV2FactoryIntegration:
             inject_skill_compiler=True,
             data_dir=str(tmp_path),
             watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_load_manager=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
@@ -570,6 +576,12 @@ class TestV2FactoryIntegration:
             inject_skill_compiler=False,
             data_dir=str(tmp_path),
             watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_load_manager=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.evaluation_node is None

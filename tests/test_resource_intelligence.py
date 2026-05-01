@@ -518,6 +518,11 @@ class TestPhase2FactoryIntegration:
             inject_load_manager=True,
             data_dir=str(tmp_path),
             watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
@@ -577,6 +582,11 @@ class TestPhase2FactoryIntegration:
             inject_load_manager=False,
             data_dir=str(tmp_path),
             watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.attention_manager is None

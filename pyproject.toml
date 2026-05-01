@@ -97,7 +97,8 @@ ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP04
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-timeout = 120
+timeout = 60
+timeout_method = "thread"
 
 [tool.mypy]
 python_version = "3.11"
