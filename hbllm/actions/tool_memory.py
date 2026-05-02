@@ -113,9 +113,20 @@ class ToolMemory:
 
     # ─── Recommendations ─────────────────────────────────────────────
 
-    def recommend_tool(self, query_type: str, top_n: int = 3) -> list[dict[str, Any]]:
+    def recommend_tool(
+        self,
+        query_type: str,
+        top_n: int = 3,
+        available_tools: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Recommend best tools for a query type based on historical performance.
+
+        Args:
+            query_type: The type of query to recommend tools for.
+            top_n: Maximum number of recommendations.
+            available_tools: If provided, only recommend tools in this list.
+                Pass ``registry.available_tools()`` to exclude offline tools.
 
         Returns tools ranked by a composite score of success rate + quality - latency.
         """
@@ -132,38 +143,62 @@ class ToolMemory:
                 GROUP BY tool_name
                 HAVING uses >= 3
                 ORDER BY (AVG(success) * 0.4 + AVG(result_quality) * 0.4 - AVG(latency_ms) / 10000 * 0.2) DESC
-                LIMIT ?
             """,
-                (query_type, top_n),
+                (query_type,),
             ).fetchall()
 
-        return [
-            {
-                "tool": r[0],
-                "uses": r[1],
-                "success_rate": round(r[2], 3),
-                "avg_quality": round(r[3], 3),
-                "avg_latency_ms": round(r[4], 1),
-                "score": round(r[2] * 0.4 + r[3] * 0.4 - r[4] / 10000 * 0.2, 3),
-            }
-            for r in rows
-        ]
+        results = []
+        for r in rows:
+            # Skip tools that are not in the available set
+            if available_tools is not None and r[0] not in available_tools:
+                continue
+            results.append(
+                {
+                    "tool": r[0],
+                    "uses": r[1],
+                    "success_rate": round(r[2], 3),
+                    "avg_quality": round(r[3], 3),
+                    "avg_latency_ms": round(r[4], 1),
+                    "score": round(r[2] * 0.4 + r[3] * 0.4 - r[4] / 10000 * 0.2, 3),
+                }
+            )
+            if len(results) >= top_n:
+                break
 
-    def recommend_sequence(self, task_type: str) -> list[str] | None:
-        """Recommend the best tool sequence for a task type."""
+        return results
+
+    def recommend_sequence(
+        self,
+        task_type: str,
+        available_tools: list[str] | None = None,
+    ) -> list[str] | None:
+        """Recommend the best tool sequence for a task type.
+
+        Args:
+            task_type: The type of task to recommend a sequence for.
+            available_tools: If provided, skip sequences that require
+                tools not in this list.
+        """
         with sqlite3.connect(str(self._db_path)) as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT sequence FROM tool_sequences
                 WHERE task_type = ? AND success = 1
                 GROUP BY sequence
                 ORDER BY COUNT(*) DESC, AVG(total_latency_ms) ASC
-                LIMIT 1
             """,
                 (task_type,),
-            ).fetchone()
+            ).fetchall()
 
-        return json.loads(row[0]) if row else None
+        for row in rows:
+            sequence = json.loads(row[0])
+            if available_tools is not None:
+                # Skip sequences that require unavailable tools
+                if not all(t in available_tools for t in sequence):
+                    continue
+            return sequence
+
+        return None
 
     # ─── Discovery ───────────────────────────────────────────────────
 

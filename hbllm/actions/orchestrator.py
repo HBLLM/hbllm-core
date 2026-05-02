@@ -19,15 +19,15 @@ from hbllm.actions.agent_executor import (
     ConfidenceScorer,
     build_tool_args,
 )
-from hbllm.actions.tool_registry import ToolRegistry
+from hbllm.actions.tool_registry import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
-PLANNER_PROMPT = """You are a Task Planner. Break down the user's request into clear, numbered steps.
+_PLANNER_PROMPT_TEMPLATE = """You are a Task Planner. Break down the user's request into clear, numbered steps.
 For each step, specify:
 - What needs to be done
-- Which tool to use (if any): python_exec, shell_exec, web_search, file_read, file_write, kb_search
+- Which tool to use (if any): {tool_names}
 - Expected output
 
 Format your plan as:
@@ -37,7 +37,8 @@ INPUT: [tool input if applicable]
 
 STEP 2: ...
 
-Be concise. Maximum 5 steps."""
+Be concise. Maximum 5 steps.
+IMPORTANT: Only use the tools listed above. Do NOT reference tools that are not available."""
 
 REVIEWER_PROMPT = """You are a Code Reviewer. Review the execution results and provide:
 1. Whether the task was completed successfully
@@ -54,6 +55,12 @@ class MultiAgentOrchestrator:
         self.llm = llm
         self.tools = tool_registry
 
+    def _build_planner_prompt(self) -> str:
+        """Build a planner prompt with the actual available tool names."""
+        available = self.tools.list_tools(available_only=True)
+        tool_names = ", ".join(t["name"] for t in available) or "NONE"
+        return _PLANNER_PROMPT_TEMPLATE.format(tool_names=tool_names)
+
     async def execute(
         self,
         task: str,
@@ -66,8 +73,9 @@ class MultiAgentOrchestrator:
 
         # ── Phase 1: Planning ──
         step_num += 1
+        planner_prompt = self._build_planner_prompt()
         plan_messages = [
-            {"role": "system", "content": PLANNER_PROMPT},
+            {"role": "system", "content": planner_prompt},
             {"role": "user", "content": f"Task: {task}"},
         ]
         if kb_context:
@@ -91,9 +99,22 @@ class MultiAgentOrchestrator:
             tool_input = ps.get("input", "").strip()
 
             if tool_name and tool_name != "none" and tool_input:
-                tool_result = await self.tools.invoke(
-                    tool_name, **self._resolve_tool_args(tool_name, tool_input)
-                )
+                # Pre-execution availability check — the tool could have gone
+                # offline between planning and execution.
+                availability = self.tools.get_availability(tool_name)
+                if not availability.get("available", False) and availability.get(
+                    "registered", False
+                ):
+                    tool_result = ToolResult(
+                        tool=tool_name,
+                        success=False,
+                        output="",
+                        error=f"Tool '{tool_name}' became unavailable during execution",
+                    )
+                else:
+                    tool_result = await self.tools.invoke(
+                        tool_name, **self._resolve_tool_args(tool_name, tool_input)
+                    )
                 steps.append(
                     AgentStep(
                         step_num=step_num,

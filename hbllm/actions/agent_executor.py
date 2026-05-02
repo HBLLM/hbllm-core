@@ -245,8 +245,9 @@ class AgentExecutor:
         steps: list[AgentStep] = []
         step_num = 0
 
-        # Build messages for LLM
-        tool_list = self.tools.list_tools()
+        # Build messages for LLM — only present available tools so the
+        # model never plans steps using offline/removed tools.
+        tool_list = self.tools.list_tools(available_only=True)
         tool_desc = "\n".join(f"- {t['name']}: {t['description']}" for t in tool_list)
 
         system_prompt = (

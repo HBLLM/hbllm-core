@@ -43,10 +43,22 @@ class ToolResult:
 
 
 class ToolRegistry:
-    """Registry of available tools for direct invocation (non-bus pattern)."""
+    """Registry of available tools for direct invocation (non-bus pattern).
 
-    def __init__(self) -> None:
+    Supports runtime tool lifecycle management:
+    - Register / unregister tools dynamically
+    - Mark tools as temporarily unavailable (e.g., service down, rate-limited)
+    - Filter tool lists by availability for LLM decision-making
+    - Publish lifecycle events on the bus (if connected)
+    """
+
+    def __init__(self, bus: Any = None) -> None:
         self._tools: dict[str, dict[str, Any]] = {}
+        self._availability: dict[str, bool] = {}
+        self._unavailable_reasons: dict[str, str] = {}
+        self._bus = bus  # Optional MessageBus for lifecycle events
+
+    # ── Registration ──────────────────────────────────────────────────
 
     def register(
         self,
@@ -55,16 +67,82 @@ class ToolRegistry:
         handler: Callable[..., Awaitable[ToolResult]],
         parameters: dict[str, str] | None = None,
     ) -> None:
+        """Register a tool. If a tool with the same name exists, it is replaced."""
         self._tools[name] = {
             "name": name,
             "description": description,
             "handler": handler,
             "parameters": parameters or {},
         }
+        self._availability[name] = True
+        self._unavailable_reasons.pop(name, None)
+        logger.info("Tool registered: %s", name)
+        self._fire_event("registered", name)
+
+    def unregister(self, name: str) -> bool:
+        """Remove a tool by name. Returns True if found and removed."""
+        removed = self._tools.pop(name, None)
+        self._availability.pop(name, None)
+        self._unavailable_reasons.pop(name, None)
+        if removed:
+            logger.info("Tool unregistered: %s", name)
+            self._fire_event("unregistered", name)
+            return True
+        return False
+
+    # ── Availability ──────────────────────────────────────────────────
+
+    def set_availability(self, name: str, available: bool, reason: str = "") -> None:
+        """Mark a tool as available or unavailable without removing it.
+
+        Use this for temporary outages (service down, rate-limited, etc.).
+        The tool definition is preserved so it can be restored instantly.
+        """
+        if name not in self._tools:
+            logger.warning("Cannot set availability for unknown tool: %s", name)
+            return
+        was_available = self._availability.get(name, True)
+        self._availability[name] = available
+        if available:
+            self._unavailable_reasons.pop(name, None)
+        else:
+            self._unavailable_reasons[name] = reason
+        # Only fire event on state change
+        if was_available and not available:
+            logger.warning("Tool marked unavailable: %s (%s)", name, reason)
+            self._fire_event("unavailable", name, {"reason": reason})
+        elif not was_available and available:
+            logger.info("Tool restored: %s", name)
+            self._fire_event("available", name)
+
+    def get_availability(self, name: str) -> dict[str, Any]:
+        """Check a tool's availability status."""
+        if name not in self._tools:
+            return {"registered": False, "available": False, "reason": "Tool not registered"}
+        return {
+            "registered": True,
+            "available": self._availability.get(name, True),
+            "reason": self._unavailable_reasons.get(name, ""),
+        }
+
+    def available_tools(self) -> list[str]:
+        """Return names of all currently available (registered + online) tools."""
+        return [name for name, info in self._tools.items() if self._availability.get(name, True)]
+
+    # ── Invocation ────────────────────────────────────────────────────
 
     async def invoke(self, name: str, **kwargs: Any) -> ToolResult:
+        """Invoke a tool by name. Checks availability before execution."""
         if name not in self._tools:
             return ToolResult(tool=name, success=False, output="", error=f"Unknown tool: {name}")
+        if not self._availability.get(name, True):
+            reason = self._unavailable_reasons.get(name, "temporarily offline")
+            return ToolResult(
+                tool=name,
+                success=False,
+                output="",
+                error=f"Tool '{name}' is currently unavailable: {reason}",
+            )
         start = time.monotonic()
         try:
             result = await self._tools[name]["handler"](**kwargs)
@@ -79,11 +157,60 @@ class ToolRegistry:
                 duration_ms=(time.monotonic() - start) * 1000,
             )
 
-    def list_tools(self) -> list[dict[str, Any]]:
-        return [
-            {"name": t["name"], "description": t["description"], "parameters": t["parameters"]}
-            for t in self._tools.values()
-        ]
+    # ── Listing ───────────────────────────────────────────────────────
+
+    def list_tools(self, available_only: bool = False) -> list[dict[str, Any]]:
+        """List registered tools with availability status.
+
+        Args:
+            available_only: If True, only return tools that are currently available.
+                This should be used when building LLM prompts so the model
+                never plans steps using offline tools.
+        """
+        result = []
+        for t in self._tools.values():
+            name = t["name"]
+            available = self._availability.get(name, True)
+            if available_only and not available:
+                continue
+            entry: dict[str, Any] = {
+                "name": name,
+                "description": t["description"],
+                "parameters": t["parameters"],
+                "available": available,
+            }
+            if not available:
+                entry["unavailable_reason"] = self._unavailable_reasons.get(name, "")
+            result.append(entry)
+        return result
+
+    # ── Bus Events ────────────────────────────────────────────────────
+
+    def _fire_event(
+        self, event_type: str, tool_name: str, extra: dict[str, Any] | None = None
+    ) -> None:
+        """Fire a tool lifecycle event on the bus (non-blocking, best-effort)."""
+        if self._bus is None:
+            return
+        import asyncio
+
+        payload: dict[str, Any] = {"tool_name": tool_name, "event": event_type}
+        if extra:
+            payload.update(extra)
+        try:
+            msg = Message(
+                type=MessageType.EVENT,
+                source_node_id="tool_registry",
+                topic=f"system.tool.{event_type}",
+                payload=payload,
+            )
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self._bus.publish(f"system.tool.{event_type}", msg))
+            else:
+                loop.run_until_complete(self._bus.publish(f"system.tool.{event_type}", msg))
+        except Exception as e:
+            logger.debug("Failed to publish tool event: %s", e)
 
 
 # ── @tool Decorator ────────────────────────────────────────────────────────────
