@@ -1,0 +1,12 @@
+[package]
+name = "hbllm_network_utils"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance network primitives for HBLLM: circuit breaker and rate limiter."
+
+[lib]
+name = "hbllm_network_utils"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py311"] }

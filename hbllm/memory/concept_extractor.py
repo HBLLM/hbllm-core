@@ -22,6 +22,24 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# ── Optional Rust Acceleration ───────────────────────────────────────────────
+
+try:
+    from hbllm_concept_extract import (  # type: ignore[import-not-found]
+        batch_keyword_count as _rust_keyword_count,
+    )
+    from hbllm_concept_extract import (
+        cluster_by_keywords as _rust_cluster,
+    )
+    from hbllm_concept_extract import (
+        extract_query_rules as _rust_rules,
+    )
+
+    _USE_RUST = True
+    logger.debug("Using Rust-accelerated concept extraction")
+except ImportError:
+    _USE_RUST = False
+
 
 @dataclass
 class ExtractedConcept:
@@ -166,6 +184,8 @@ class ConceptExtractor:
 
     def _count_keywords(self, texts: list[str]) -> Counter[str]:
         """Count significant keywords across texts."""
+        if _USE_RUST:
+            return Counter(_rust_keyword_count(texts))
         keywords: Counter[str] = Counter()
         for text in texts:
             words = re.findall(r"\b[a-z]{3,}\b", text.lower())
@@ -179,6 +199,13 @@ class ConceptExtractor:
         keyword_freq: Counter[str],
     ) -> list[tuple[list[str], list[str]]]:
         """Cluster queries by co-occurring keywords."""
+        if _USE_RUST:
+            raw = _rust_cluster(queries, self.min_frequency, self.min_keyword_count)
+            return [
+                (keywords, [queries[i] for i in indices])
+                for keywords, indices in raw
+            ]
+
         # Get significant keywords
         significant = {k for k, v in keyword_freq.items() if v >= self.min_frequency}
 
@@ -200,6 +227,9 @@ class ConceptExtractor:
 
     def _extract_rules(self, queries: list[str]) -> list[str]:
         """Extract generalized rules from a set of similar queries."""
+        if _USE_RUST:
+            return _rust_rules(queries)
+
         rules = []
 
         # If many questions → likely knowledge gap

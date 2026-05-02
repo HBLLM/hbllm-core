@@ -3,5 +3,11 @@ members = [
     "rust/tokenizer",
     "rust/data_tools",
     "rust/compute_kernel",
+    "rust/confidence",
+    "rust/semantic_search",
+    "rust/policy_eval",
+    "rust/knowledge_graph",
+    "rust/network_utils",
+    "rust/concept_extract",
 ]
 resolver = "2"

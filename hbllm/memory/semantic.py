@@ -45,6 +45,21 @@ try:
 except ImportError:
     _HAS_QDRANT = False
 
+# ── Optional Rust Acceleration ───────────────────────────────────────────────
+
+try:
+    from hbllm_semantic_search import (  # type: ignore[import-not-found]
+        batch_cosine_similarity as _rust_cosine,
+    )
+    from hbllm_semantic_search import (
+        content_hash as _rust_hash,
+    )
+
+    _HAS_RUST_SEARCH = True
+    logger.debug("Using Rust-accelerated semantic search")
+except ImportError:
+    _HAS_RUST_SEARCH = False
+
 # ── Fallback Embedder (TF-IDF) ──────────────────────────────────────────────
 
 
@@ -259,6 +274,8 @@ class SemanticMemory:
     @staticmethod
     def _content_hash(content: str) -> str:
         """Fast hash for deduplication."""
+        if _HAS_RUST_SEARCH:
+            return _rust_hash(content)
         return hashlib.md5(content.encode()).hexdigest()
 
     def store(
@@ -414,13 +431,23 @@ class SemanticMemory:
 
         # --- Compute dense similarity ---
         query_vec = self._encode([query])[0]
-        norms = np.linalg.norm(self.vectors, axis=1)
-        query_norm = np.linalg.norm(query_vec)
 
-        if query_norm == 0:
-            return []
+        if _HAS_RUST_SEARCH:
+            # Rust-accelerated cosine similarity
+            dense_scores = np.asarray(
+                _rust_cosine(
+                    query_vec.astype(np.float64),
+                    self.vectors.astype(np.float64),
+                )
+            )
+        else:
+            norms = np.linalg.norm(self.vectors, axis=1)
+            query_norm = np.linalg.norm(query_vec)
 
-        dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
+            if query_norm == 0:
+                return []
+
+            dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
 
         # --- Hybrid: blend with sparse TF-IDF scores if available ---
         if (
