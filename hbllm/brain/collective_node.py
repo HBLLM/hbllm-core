@@ -990,7 +990,7 @@ class CollectiveNode(Node):
                 logger.warning("Delegation handler failed: %s", e)
 
         # 2. If no direct handler, publish as an incoming delegation event for
-        # higher-level framework integration (e.g. SentraAgent)
+        # higher-level framework integration
         if not response_text:
             await self.publish(
                 "collective.delegation.incoming",

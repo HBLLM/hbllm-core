@@ -2,7 +2,7 @@
 Skill Induction Node — autonomous generation of new atomic capabilities.
 
 Transforms a "Capability Gap" detected by Reflection into a valid,
-sandboxed Python Tool that can be registered by the Sentra Agent.
+sandboxed Python Tool that can be registered by the Agent.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class SkillInductionNode(Node):
         logger.info(f"Inducing skill for gap: {gap_description}")
 
         # 1. Generate Python Tool via LLM
-        # We prompt for a specific format that Sentra @tool expects
+        # We prompt for a specific format that the @tool decorator expects
         prompt = (
             "You are the HBLLM Skill Induction Engine.\n"
             "Generate a specialized Python tool function to fill the following capability gap.\n\n"

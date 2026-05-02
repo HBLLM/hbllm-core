@@ -7,7 +7,7 @@ Provides:
   - CoreToolSet: registers framework-agnostic tools (python, shell, file, web)
 
 Platform-specific tools (config, model management, scheduling) are NOT
-registered here — they belong in the platform bridge (e.g. sentra.agent_executor).
+registered here — they belong in the platform bridge layer.
 """
 
 from __future__ import annotations
@@ -245,8 +245,9 @@ class AgentExecutor:
         steps: list[AgentStep] = []
         step_num = 0
 
-        # Build messages for LLM
-        tool_list = self.tools.list_tools()
+        # Build messages for LLM — only present available tools so the
+        # model never plans steps using offline/removed tools.
+        tool_list = self.tools.list_tools(available_only=True)
         tool_desc = "\n".join(f"- {t['name']}: {t['description']}" for t in tool_list)
 
         system_prompt = (

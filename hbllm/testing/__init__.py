@@ -2,7 +2,7 @@
 MockProvider — A deterministic LLM provider for testing.
 
 Returns predictable responses without network calls, enabling tests
-to exercise BrainFactory.create() and SentraAgent.start() without
+to exercise BrainFactory.create() and agent lifecycle without
 API keys or internet access.
 
 Usage::

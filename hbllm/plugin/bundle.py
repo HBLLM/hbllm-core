@@ -101,7 +101,7 @@ class PluginManifest:
     description: str = ""
     author: str = ""
     entry_point: str = "__init__.py"
-    sentra_version: str = ">=0.1.0"
+    platform_version: str = ">=0.1.0"
     dependencies: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     license: str = "MIT"
@@ -135,7 +135,7 @@ class PluginManifest:
             "description": self.description,
             "author": self.author,
             "entry_point": self.entry_point,
-            "sentra_version": self.sentra_version,
+            "platform_version": self.platform_version,
             "dependencies": self.dependencies,
             "tags": self.tags,
             "license": self.license,
@@ -169,7 +169,7 @@ class PluginManifest:
             description=data.get("description", ""),
             author=data.get("author", ""),
             entry_point=data.get("entry_point", "__init__.py"),
-            sentra_version=data.get("sentra_version", ">=0.1.0"),
+            platform_version=data.get("platform_version", data.get("sentra_version", ">=0.1.0")),
             dependencies=data.get("dependencies", []),
             tags=data.get("tags", []),
             license=data.get("license", "MIT"),
