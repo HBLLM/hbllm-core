@@ -201,10 +201,7 @@ class ConceptExtractor:
         """Cluster queries by co-occurring keywords."""
         if _USE_RUST:
             raw = _rust_cluster(queries, self.min_frequency, self.min_keyword_count)
-            return [
-                (keywords, [queries[i] for i in indices])
-                for keywords, indices in raw
-            ]
+            return [(keywords, [queries[i] for i in indices]) for keywords, indices in raw]
 
         # Get significant keywords
         significant = {k for k, v in keyword_freq.items() if v >= self.min_frequency}

@@ -115,17 +115,15 @@ class ConfidenceEstimator:
 
     def _estimate_rust(self, query: str, response: str) -> ConfidenceReport:
         """Rust-accelerated confidence estimation."""
-        overall, relevance, coherence, factuality_risk, uncertainty, detail, flags = (
-            _rust_estimate(
-                query,
-                response,
-                self.hallucination_threshold,
-                self.weights["relevance"],
-                self.weights["coherence"],
-                self.weights["factuality"],
-                self.weights["uncertainty"],
-                self.weights["detail"],
-            )
+        overall, relevance, coherence, factuality_risk, uncertainty, detail, flags = _rust_estimate(
+            query,
+            response,
+            self.hallucination_threshold,
+            self.weights["relevance"],
+            self.weights["coherence"],
+            self.weights["factuality"],
+            self.weights["uncertainty"],
+            self.weights["detail"],
         )
         return ConfidenceReport(
             overall=overall,
