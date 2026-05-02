@@ -8,7 +8,7 @@ triggers.
 Think of it as the brain's proprioception — it knows what it's doing,
 how well it's performing, and when something has changed.
 
-External sensors (e.g., Sentra's macOS SystemSensors) can be registered
+External sensors (e.g., platform-specific SystemSensors) can be registered
 via the ``AwarenessSensor`` protocol to feed platform-specific context
 into the same pattern detection pipeline.
 
@@ -88,7 +88,7 @@ class CognitiveTrigger:
 
 @runtime_checkable
 class AwarenessSensor(Protocol):
-    """Interface for platform-specific sensors (implemented by Sentra, etc.)."""
+    """Interface for platform-specific sensors."""
 
     name: str
 

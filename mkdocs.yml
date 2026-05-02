@@ -147,7 +147,6 @@ nav:
       - Plugin System: api/plugins.md
       - Model Internals: api/model.md
       - Serving & REST API: api/serving.md
-      - Sentra Bridge: api/sentra.md
       - Tokenizer: api/tokenizer.md
       - Network: api/network.md
       - Data Pipeline: api/data-pipeline.md

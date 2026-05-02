@@ -7,7 +7,7 @@ Provides:
   - CoreToolSet: registers framework-agnostic tools (python, shell, file, web)
 
 Platform-specific tools (config, model management, scheduling) are NOT
-registered here — they belong in the platform bridge (e.g. sentra.agent_executor).
+registered here — they belong in the platform bridge layer.
 """
 
 from __future__ import annotations

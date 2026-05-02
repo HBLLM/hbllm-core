@@ -5,7 +5,7 @@ Provides the full plugin lifecycle: discovery, loading, asset ingestion,
 soft-deactivation (graduation/orphaning), and runtime hot-loading.
 
 Designed to work standalone with hbllm core, or extended by higher-level
-frameworks like Sentra that add additional scan paths and agent hooks.
+frameworks that add additional scan paths and agent hooks.
 
 Usage::
 

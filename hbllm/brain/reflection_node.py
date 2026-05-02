@@ -190,7 +190,7 @@ class ReflectionNode(Node):
     async def _handle_request(self, message: Message) -> Message | None:
         """
         On-demand reflection request. Extracts insights from provided context.
-        Used by Sentra during memory consolidation.
+        Used during memory consolidation.
         """
         context = message.payload.get("context", "")
         if not context:
