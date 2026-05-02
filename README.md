@@ -8,369 +8,140 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-1400%2B%20passing-brightgreen.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
 <br/>
 
-## Why Choose HBLLM Core Over Standard LLM Frameworks?
+## Why HBLLM Core?
 
-Traditional **Large Language Models (LLMs)** behave as monolithic, stateless transformers: prompt → model → response. They lack continuous learning, memory consolidation, and dynamic domain adaptation.
-
-**HBLLM Core** disrupts this paradigm. It is a highly optimized, **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents**. Featuring 28+ specialized "brain nodes" orchestrated via an asynchronous Pub/Sub message bus, HBLLM mimics the localized, multi-path reasoning of a biological brain.
+Traditional LLMs are monolithic and stateless: prompt → model → response. **HBLLM Core** is a modular cognitive architecture with **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus — mimicking localized, multi-path reasoning of a biological brain.
 
 ```text
-                        ┌─────────────────────────────────────────┐
-    Input ───────────►  │              HBLLM Core Brain           │
-    (text, vision,      │                                         │
-     audio, sensors)    │   Router ──► Planner ──► Decision       │
-                        │     │          │            │           │
-                        │   Memory    Learner      Critic        │
-                        │   (5 types)    │            │           │
-                        │              World       Identity      │
-                        │              Model       (ethics)      │
-                        │                │                        │
-                        │           Curiosity ──► Spawner        │
-                        │           (explores)    (creates new   │
-                        │                          specialists)  │
-                        └───────────────────────────┬─────────────┘
-                                                    │
-    Output ◄────────────────────────────────────────┘
-    (actions, speech, motor control, API calls)
+                    ┌─────────────────────────────────────────┐
+    Input ────────► │              HBLLM Core Brain           │
+    (text, vision,  │                                         │
+     audio)         │   Router ──► Planner ──► Decision       │
+                    │     │          │            │           │
+                    │   Memory    Learner      Critic        │
+                    │   (5 types)    │            │           │
+                    │              World       Identity      │
+                    │              Model       (ethics)      │
+                    │                │                        │
+                    │           Curiosity ──► Spawner        │
+                    └───────────────────────────┬─────────────┘
+                                                │
+    Output ◄────────────────────────────────────┘
 ```
 
 By decoupling reasoning, memory, evaluation, and action, HBLLM can self-correct, execute multi-step tool chains, maintain lifelong memories, and optimize compute costs dynamically.
 
----
-
-## 🔧 The Zoning Model: Edge-Optimized MoE Efficiency
-
-While cloud AI platforms chase computationally expensive **massive monolithic models** (70B+ parameters), HBLLM champions **Edge Computing** and **On-Device AI**. We take a decentralized approach: **small, specialized model zones driven by dynamic LoRA routing**.
-
-### How Zoning Works
-
-HBLLM uses **one highly-optimized base model** (e.g., 125M, 500M, or 1.5B parameters) paired with **lightweight LoRA adapters** that hot-swap depending on the active cognitive task.
-
-| Component           | Size        | Purpose                                              |
-| ------------------- | ----------- | ---------------------------------------------------- |
-| **Base Model**      | 125M–1.5B   | Shared transformer backbone (GQA + SwiGLU + RoPE)    |
-| **LoRA Adapters**   | ~2MB each   | Domain specialization (General, Coding, Math, etc.)  |
-| **Sub-Domain LoRA** | ~2MB each   | Fine-grained specialization (coding.python, math.calculus) |
-| **MoE Router**      | ~15MB       | Edge-optimized ONNX Vector Router with softmax-weighted domain blending (top-2, max 3). |
-| **Domain Registry** | Zero params | Hierarchical domain tree with adapter fallback resolution |
-| **Cognitive Nodes** | Zero params | Orchestration, planning, memory — isolated logic     |
-
-### 🧬 Artificial Neurogenesis (Self-Expanding Zones)
-
-HBLLM ships with 3 starter zones, but the **SpawnerNode** automatically creates new specialist zones when you enter an unfamiliar domain.
-When encountering a completely new domain (e.g., "Gardening"), the system:
-1. **Registry Resolution**: Checks the `AdapterRegistry` for pre-trained "gardening" adapters on the HuggingFace Hub or local cache.
-2. **Security Audit**: If found, verifies the adapter's SHA-256 integrity and converts it from PEFT format to the internal HBLLM `state_dict`.
-3. **Fallback Training**: If no adapter exists, generates synthetic training data and trains a new 2MB LoRA adapter in the background.
-4. **Activation**: Spawns a new `DomainModuleNode` and hot-swaps the weights into the shared transformer backbone.
-**The brain literally grows a new region at runtime.**
+> 📖 **[Full Architecture →](docs/architecture/overview.md)** · **[Cognitive Nodes →](docs/architecture/cognitive-nodes.md)** · **[Memory Systems →](docs/architecture/memory-systems.md)**
 
 ---
 
-## 🏗️ Core Capabilities
+## Key Capabilities
 
-### Full System Architecture
+| Category | Highlights | Docs |
+|----------|-----------|------|
+| **🧠 Agentic Reasoning** | GoT planning, PRM scoring, MoE domain blending | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
+| **🧪 Zoning Model** | One base model + hot-swappable 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
+| **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
+| **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
+| **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Deployment](docs/guides/deployment.md) |
+| **⚙️ Infrastructure** | 128k+ context, Rust SIMD quantization, ONNX router | [Benchmarks](docs/api/benchmarks.md) |
+| **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialists | [Zoning](docs/zoning/how-it-works.md) |
 
-```mermaid
-flowchart TB
-    subgraph PERCEPTION["👁️ Perception Layer"]
-        direction LR
-        VIS["📸 Vision\n(Caption + OCR)"]
-        AIN["🎤 Audio In\n(STT + Streaming)"]
-        AOUT["🔊 Audio Out\n(TTS + Per-Tenant Voice)"]
-    end
+---
 
-    subgraph BUS["⚡ Message Bus (Async Pub/Sub)"]
-        direction LR
-        INPROC["InProcessBus\n(single server)"]
-        REDIS["RedisBus\n(distributed)"]
-        REG["Service Registry"]
-        CB["Circuit Breaker"]
-    end
+## Platform-Agnostic Design
 
-    subgraph BRAIN["🧠 Cognitive Core"]
-        direction TB
-        ROUTER["🔀 Router\n(intent + domain)"]
-        PLANNER["📋 GoT Planner\n(DAG reasoning)"]
-        WORKSPACE["📝 Workspace\n(blackboard consensus)"]
-        CRITIC["🔍 Critic\n(self-evaluation)"]
-        DECISION["⚖️ Decision\n(final output)"]
-        
-        ROUTER --> PLANNER
-        ROUTER --> WORKSPACE
-        PLANNER -->|"GoT thoughts"| WORKSPACE
-        WORKSPACE --> CRITIC
-        CRITIC --> DECISION
-    end
+HBLLM Core is a **fully platform-independent cognitive library**. It has zero dependencies on any frontend, desktop, or server framework.
 
-    subgraph META["🧬 Meta-Cognitive Layer"]
-        direction LR
-        LEARN["🎓 Learner"]
-        CURIOSITY["🔭 Curiosity"]
-        SPAWNER["🧬 Spawner\n(neurogenesis)"]
-        METAREASON["🧠 Meta\nReasoning"]
-        EXPERIENCE["🎥 Experience\n(salience)"]
-        IDENTITY["🛡️ Identity\n(ethics)"]
-        SLEEP["💤 Sleep Cycle\n(3-phase consolidation)"]
-        click SLEEP "docs/architecture/sleep-cycle.md" "Learn how HBLLM consolidates memory"
-        COLLECTIVE["📊 Collective"]
-        WORLD["🌍 World Model"]
-    end
+| Layer | Responsibility | Location |
+|-------|---------------|----------|
+| **Core** | Cognitive nodes, memory, bus, agent executor, plugins | `hbllm/` |
+| **Platform Bridge** | UI, config, persistence, platform-specific tools | External (e.g. [Sentra](../sentra/)) |
+| **Plugins** | Modular cognitive extensions | `hbllm/plugins/` |
 
-    subgraph MEMORY["💾 Memory Systems (5 types)"]
-        direction LR
-        EPISODIC["📖 Episodic\n(events)"]
-        SEMANTIC["📚 Semantic\n(hybrid search)"]
-        PROCEDURAL["🔧 Procedural\n(skills)"]
-        VALUE["❤️ Value\n(preferences)"]
-        WORKING["📋 Working\n(context)"]
-    end
+Platforms extend the core via thin subclass wrappers:
+```python
+from hbllm.actions.agent_executor import AgentExecutor
 
-    subgraph ACTIONS["⚡ Action Layer"]
-        direction LR
-        EXEC["🖥️ Execution\n(sandboxed)"]
-        API["🌐 API"]
-        BROWSER["🌍 Browser"]
-        LOGIC["🔧 Z3 Logic"]
-        FUZZY["🌀 Fuzzy"]
-        MCP["🔌 MCP"]
-        IOT["📡 IoT/MQTT"]
-        ROS["🤖 ROS2"]
-    end
-
-    subgraph ZONING["🧪 Zoning Model (Hierarchical Domains)"]
-        direction LR
-        BASE["Shared Base\n125M / 500M / 1.5B"]
-        GEN["General LoRA\n~2MB"]
-        CODE["Coding LoRA\n~2MB"]
-        CODEPY["coding.python\n~2MB"]
-        MATH["Math LoRA\n~2MB"]
-        NEW["??? LoRA\n(auto-spawned)"]
-        BASE --- GEN
-        BASE --- CODE
-        CODE --- CODEPY
-        BASE --- MATH
-        BASE -.->|"SpawnerNode"| NEW
-    end
-
-    subgraph PROVIDERS["🔗 LLM Providers"]
-        direction LR
-        OPENAI["OpenAI"]
-        ANTHROPIC["Anthropic"]
-        LOCAL["Local HBLLM"]
-        OLLAMA["Ollama"]
-    end
-
-    PERCEPTION ==> BUS
-    BUS ==> BRAIN
-    BRAIN ==> BUS
-    BUS ==> ACTIONS
-    BUS <--> MEMORY
-    BUS <--> META
-    ZONING -.-> BRAIN
-    PROVIDERS -.-> BRAIN
-    CURIOSITY -->|"goals"| SLEEP
-    SLEEP -->|"consolidation"| MEMORY
-    EXPERIENCE -->|"salience"| METAREASON
-    METAREASON -->|"improve"| LEARN
-    SPAWNER -->|"new zones"| ZONING
+class MyPlatformExecutor(AgentExecutor):
+    def _register_platform_tools(self):
+        self.tools.register("my_tool", ..., my_tool_fn, {})
 ```
 
-HBLLM Core isn't just a wrapper; it's a deeply engineered cognitive backend capable of production-scale agentic deployments.
-
-### 🧠 Agentic Reasoning & Evaluation
-- **Lock-Free LoRA Concurrency:** Isolated `ContextVars` allow asynchronous domain modules to share a single GPU lock-free, streaming tiny ~2MB adapters strictly during forward passes over the PCIe bus without blocking other cognitive nodes.
-- **Secure Adapter Registry**: A hardened runtime system for resolving and downloading domain-specific LoRA adapters from the HuggingFace Hub with mandatory SHA-256 integrity checks and `weights_only=True` loading.
-- **Continuous Lifetime Learning:** The `LearnerNode` implements contrastive DPO (Direct Preference Optimization) using a persistent, atomic JSON queue. It utilizes [biologically inspired Sleep Cycles](docs/architecture/sleep-cycle.md) to consolidate feedback into permanent model updates without interrupting the main serving loop.
-- **Dynamic MoE Blending:** Queries overlapping multiple domains use softmax-weighted blending (top-2, max 3) to mathematically synthesize custom experts at runtime.
-- **Hierarchical Domain Registry:** Domains use dot-notation (`coding.python`, `math.calculus`) with automatic adapter fallback chains — `coding.python.django` → `coding.python` → `coding` → `default`.
-- **Graph-of-Thoughts (GoT) Planning:** The `PlannerNode` breaks complex goals into dynamic, directed acyclic graphs of reasoning steps.
-- **Process Reward Models (PRM):** The `ProcessRewardNode` provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.
-
-### 💾 Multi-Tiered Memory Systems
-HBLLM operates **6 distinct memory types** mirroring human cognitive psychology:
-1. **Working Memory:** Adaptive Context Windows employing middle-out truncation to maintain huge reasoning trajectories without OOMs.
-2. **Episodic Memory:** Event-based timelines mapping user interactions per session.
-3. **Semantic Memory:** Fact and pattern extraction powered by hybrid dense/sparse (TF-IDF) vector search with deterministic UUID stability.
-4. **Procedural Memory:** Learned tool patterns and skill execution registries.
-5. **Knowledge Graph:** LRU-bounded (Least Recently Used) entity-relation graphs connecting concepts organically.
-
-### 🛡️ Enterprise-Grade Governance & Multi-Tenancy
-- **Strict Tenant Isolation:** API Key authenticators, per-tenant rate limiters (`RateLimiter`), and deeply isolated memory domains ensure zero data leakage.
-- **Policy Engine & Sentinel Node:** YAML-based governance constraints and a proactive `SentinelNode` that continuously scans the async bus traffic for policy violations.
-- **Owner Rules:** The `RuleExtractor` mines high-salience interactions for recurring *if→then* preferences, auto-promoting them to strict `OwnerRuleStore` behavioral guardrails.
-
-### ⚙️ Scalable Infrastructure
-- **128k+ Context via Sliding Window Attention:** True $O(1)$ memory scaling. Supports infinite-length conversations without VRAM explosion by evicting older tokens while perfectly preserving multi-head Attention Sinks for generation stability.
-- **Per-Block Quantization (Rust SIMD):** Universal hybrid layers combine 16-bit LoRA sidecars over an ultra-compressed base model backbone. Evaluated with `group_size=128`, scaling natively via a tightly integrated Rust compute kernel (AVX2/NEON optimizations). 
-- **Enterprise Reliability:** Automatic exponential backoff + jitter for external LLM calls (Anthropic/OpenAI) to silently heal transient `429` and `5xx` rate limits in production deployments.
-- **Hardened Checkpoint Security:** Checkpoint-loads implement forced `weights_only=True` sanitization to prevent arbitrary code execution attacks, ensuring deployment confidence for community-sourced LoRAs and models.
-- **Edge-Ready ONNX Router:** The Vector Routing Engine operates completely independently of PyTorch using `onnxruntime` and `tokenizers`. At under `15MB` of RAM footprint and ~0.0001ms native inference times, the routing engine thrives on constrained IoT devices like wearables or Raspberry Pis.
-- **Distributed Async Message Bus:** Nodes communicate purely via Pub/Sub. Deploy locally via `InProcessBus` or scale across clusters via `RedisBus` (featuring HMAC auth, TTLs, and exponential backoff).
-- **Token Optimization:** Dynamic routing to the cheapest capable provider. Automatically offsets easy queries to local ~125M models while elevating complex logic to GPT-4o or Claude 3.5.
-- **Sandboxed Execution:** The `ExecutionNode` evaluates logic securely with strict compute/memory bounds.
+> 📖 **[Plugin Development →](docs/guides/plugins.md)** · **[Custom Nodes →](docs/guides/custom-nodes.md)**
 
 ---
 
-## ⚡ Quick Start
+## Cognitive Plugins
 
-### Installation
+Three built-in plugins ship with the core, using the declarative `@subscribe` SDK:
+
+| Plugin | Capabilities | Topics |
+|--------|-------------|--------|
+| **Emotion Modeling** | VAD tracking, tone adaptation | `system.experience` → `emotion.state` |
+| **Temporal Reasoning** | Time references, deadline tracking | `system.experience` → `temporal.context` |
+| **Swarm Orchestrator** | Task decomposition, parallel execution | `swarm.request` → `swarm.complete` |
+
+> 📖 **[Plugin SDK Reference →](docs/guides/plugins.md)**
+
+---
+
+## Quick Start
 
 ```bash
 git clone https://github.com/your-org/hbllm-core.git
 cd hbllm-core
 pip install -e .
-
-# Optional hardware/sensor integrations:
-pip install paho-mqtt        # IoT / MQTT Home Automation
-export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics Integration (Requires rclpy)
 ```
-
-### CLI Utilities
-
-```bash
-hbllm info               # View active brain architecture
-hbllm nodes              # List 25+ loaded cognitive nodes
-hbllm plugins            # List dynamically installed plugins
-hbllm serve --port 8000  # Start the FastAPI + MCP Server
-hbllm train --model-size 125m  # Kickoff local reinforcement loops
-```
-
-### Server & API Modes
-
-Start the Brain as a standalone API:
-```bash
-# Full local autonomy (requires downloaded safetensors)
-python -m hbllm.serving.api
-
-# Cloud-Provider backend (Use OpenAI/Anthropic for the LLM heavy-lifting)
-HBLLM_PROVIDER=openai OPENAI_API_KEY=sk-... python -m hbllm.serving.api
-```
-
-### Python API Usage
 
 ```python
 import asyncio
 from hbllm.brain.factory import BrainFactory
 
 async def main():
-    # One-line brain setup
     brain = await BrainFactory.create("openai/gpt-4o")
-    
-    # Process a complex, multi-step goal
     result = await brain.process("Analyze our server logs and design a firewall rule.")
-    
-    print(f"Decision: {result.text}")
-    print(f"Stages: {result.stages_completed}")
-    print(f"Latency: {result.latency_ms:.0f}ms")
-    
+    print(result.text)
     await brain.shutdown()
 
 asyncio.run(main())
 ```
 
----
-
-## 🌍 Example Use Cases
-
-### 🏠 Smart Home Automation
-HBLLM Core powers intelligent systems that **learn** rather than just triggering hardcoded routines.
-- **Observation:** Notes you dim the lights when turning on the TV.
-- **Procedural Encoding:** The `LearnerNode` creates a skill binding the two actions.
-- **Anticipation:** The `WorldModelNode` begins proactively dimming lights when detecting TV audio signatures.
-
-### 🤖 Autonomous Robotics (ROS2)
-Functions as the cognitive layer for edge robots:
-- **Perception:** Visual OCR (`VisionNode`) and Audio STT (`AudioInputNode`).
-- **Pathing:** Breaking complex "fetch" requests into DAGs via the `PlannerNode`.
-- **Validation:** Evaluating obstacle physics via the `WorldSimulator` before moving servos.
+> 📖 **[Quickstart Guide →](docs/guides/quickstart.md)** · **[Configuration →](docs/guides/configuration.md)** · **[Deployment →](docs/guides/deployment.md)**
 
 ---
 
-## 🛠 Extending HBLLM (Writing Custom Nodes)
+## Documentation
 
-Nodes are highly decoupled. You can easily inject a custom sensor or API into the cognitive loop by inheriting from `Node` and publishing to the bus:
-
-```python
-from hbllm.network.node import Node, NodeType
-from hbllm.network.messages import Message, MessageType
-
-class TemperatureSensorNode(Node):
-    """Custom perception node reading from hardware."""
-
-    def __init__(self, node_id: str, i2c_address: str):
-        super().__init__(node_id, NodeType.DETECTOR, capabilities=["temperature"])
-        self.i2c = i2c_address
-
-    async def poll_hardware(self):
-        temp = read_sensor(self.i2c)
-        
-        # Publish directly to the cognitive stream
-        await self.publish("perception.temperature", Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            payload={"celsius": temp},
-        ))
-```
-
-```
-
-### 📦 Plugin Ecosystem
-
-HBLLM supports a dynamic, hot-loadable plugin registry. You can drop custom integrations into the `plugins/` directory, and they will be automatically discovered avoiding hardcoded bootstrappers.
-
-```python
-# plugins/my_custom_integration/__init__.py
-__plugin__ = {
-    "name": "my_custom_integration",
-    "version": "1.0.0"
-}
-
-async def register(bus, registry, app):
-    # 'bus' allows communication with the cognitive layer
-    # 'app' is the FastAPI instance (dynamically injected if requested), allowing you to mount REST endpoints!
-    
-    node = TemperatureSensorNode("temp_1", "0x5A")
-    await node.start(bus)
-    
-    app.post("/my-custom-webhook")(node.trigger_external_event)
-    
-    return node
-```
-
-Manage your installed plugins natively:
-```bash
-hbllm plugins
-```
+| Section | Contents |
+|---------|----------|
+| **[Architecture](docs/architecture/)** | System overview, cognitive nodes, memory, message bus, sleep cycle |
+| **[Zoning](docs/zoning/)** | LoRA routing, weighted domains, hybrid quantization |
+| **[Guides](docs/guides/)** | Quickstart, custom nodes, plugins, training, deployment, IoT/robotics |
+| **[API Reference](docs/api/)** | Brain factory, subsystems, network, model, tokenizer, Rust kernels |
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-We welcome contributions to push AGI forward! 
-Key areas where we need help:
-- 🧠 **New Cognitive Nodes:** Emotion modeling, temporal reasoning, multi-modal alignment.
-- 📱 **Edge Devices:** Optimization patches for Raspberry Pi 5 & Jetson Orin Nano.
-- 🌐 **Starter Zones:** Pre-trained 2MB LoRAs for Medicine, Law, or Creative Writing.
+We welcome contributions! Key areas:
+- 🧠 **Cognitive Plugins** — Extend emotion, temporal, swarm or build new ones
+- 📱 **Edge Devices** — Optimization for Raspberry Pi 5 & Jetson Orin Nano
+- 🌐 **Starter Zones** — Pre-trained LoRAs for Medicine, Law, Creative Writing
 
-Please review our [CONTRIBUTING.md](CONTRIBUTING.md) for Pull Request guidelines.
+> 📖 **[Contributing Guide →](docs/contributing.md)**
 
-## 📄 License
+## License
 
-HBLLM Core is released under the **GNU General Public License v3.0 (GPLv3)**. You are free to use, modify, and distribute this software, but any derivative works or modifications must also be released and distributed under the same open-source GPLv3 license.
-
----
-
-## Keywords for Search
-*HBLLM, Cognitive Architecture, Artificial General Intelligence (AGI), Large Language Models (LLM Framework), Multi-Agent Reinforcement Learning, Edge AI Inference, Graph of Thoughts (GoT), Rust SIMD Machine Learning, LoRA Router, Process Reward Models (PRM), AI Memory Consolidation.*
+HBLLM Core is released under **GNU General Public License v3.0 (GPLv3)**.
 
 <div align="center">
   <p><b>HBLLM Core</b> — Autonomous Agent AI that thinks, not just responds.</p>
-  <p>⭐ Star this repository on GitHub to support open-source cognitive architectures!</p>
+  <p>⭐ Star this repository to support open-source cognitive architectures!</p>
 </div>

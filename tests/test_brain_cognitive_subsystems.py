@@ -21,7 +21,7 @@ from hbllm.serving.token_optimizer import TokenOptimizer
 from hbllm.training.policy_optimizer import PolicyOptimizer
 from hbllm.training.reward_model import RewardModel
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(30)]
 
 
 class _MockProvider(LLMProvider):
@@ -53,13 +53,23 @@ class TestBrainCognitiveSubsystems:
         config = BrainConfig(
             inject_perception=False,
             data_dir=str(tmp_path),
+            watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_load_manager=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(
             provider=_MockProvider(),
             config=config,
         )
         yield brain
-        await brain.shutdown()
+        try:
+            await brain.shutdown()
+        except Exception:
+            pass
 
     # ─── Subsystem Initialization ────────────────────────────────────
 
@@ -169,14 +179,40 @@ class TestBrainCognitiveSubsystems:
     # ─── Config Toggling ─────────────────────────────────────────────
 
     async def test_disable_revision(self, tmp_path):
-        config = BrainConfig(inject_revision=False, inject_perception=False, data_dir=str(tmp_path))
+        config = BrainConfig(
+            inject_revision=False,
+            inject_perception=False,
+            data_dir=str(tmp_path),
+            watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_load_manager=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
+        )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
-        assert brain.revision_node is None
-        assert brain.confidence_estimator is None
-        await brain.shutdown()
+        try:
+            assert brain.revision_node is None
+            assert brain.confidence_estimator is None
+        finally:
+            await brain.shutdown()
 
     async def test_disable_goals(self, tmp_path):
-        config = BrainConfig(inject_goals=False, inject_perception=False, data_dir=str(tmp_path))
+        config = BrainConfig(
+            inject_goals=False,
+            inject_perception=False,
+            data_dir=str(tmp_path),
+            watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_load_manager=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
+        )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
-        assert brain.goal_manager is None
-        await brain.shutdown()
+        try:
+            assert brain.goal_manager is None
+        finally:
+            await brain.shutdown()

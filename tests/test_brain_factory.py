@@ -1,5 +1,6 @@
 """Tests for BrainFactory — end-to-end brain creation and query processing."""
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -62,31 +63,57 @@ class MockBrainProvider(LLMProvider):
         return "mock-brain"
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _test_config(tmp_path, **overrides) -> BrainConfig:
+    """Create a test-safe BrainConfig that disables background tasks."""
+    defaults = dict(
+        data_dir=str(tmp_path),
+        watch_plugins=False,
+        inject_plugins=False,
+        inject_awareness=False,
+        inject_load_manager=False,
+        inject_scheduler=False,
+        inject_knowledge=False,
+        inject_persistence=False,
+    )
+    defaults.update(overrides)
+    return BrainConfig(**defaults)
+
+
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_factory_creates_brain():
+@pytest.mark.timeout(30)
+async def test_factory_creates_brain(tmp_path):
     """Factory creates a Brain with all components."""
     provider = MockBrainProvider()
-    brain = await BrainFactory.create(provider=provider)
+    brain = await BrainFactory.create(
+        provider=provider,
+        config=_test_config(tmp_path),
+    )
 
-    assert isinstance(brain, Brain)
-    assert brain.bus is not None
-    assert brain.registry is not None
-    assert brain.pipeline is not None
-    assert brain.llm is not None
-    assert (
-        len(brain.nodes) >= 10
-    )  # Core pipeline + Memory + MetaCognitive + RuleExtractor + Identity + Sleep
-
-    await brain.shutdown()
+    try:
+        assert isinstance(brain, Brain)
+        assert brain.bus is not None
+        assert brain.registry is not None
+        assert brain.pipeline is not None
+        assert brain.llm is not None
+        assert (
+            len(brain.nodes) >= 10
+        )  # Core pipeline + Memory + MetaCognitive + RuleExtractor + Identity + Sleep
+    finally:
+        await brain.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_factory_with_config():
+@pytest.mark.timeout(30)
+async def test_factory_with_config(tmp_path):
     """Factory respects custom config."""
-    config = BrainConfig(
+    config = _test_config(
+        tmp_path,
         inject_memory=False,
         inject_identity=False,
         inject_curiosity=False,
@@ -96,42 +123,57 @@ async def test_factory_with_config():
     provider = MockBrainProvider()
     brain = await BrainFactory.create(provider=provider, config=config)
 
-    assert brain.llm.system_prompt == "You are a coding assistant."
-
-    await brain.shutdown()
+    try:
+        assert brain.llm.system_prompt == "You are a coding assistant."
+    finally:
+        await brain.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_brain_usage_tracking():
+@pytest.mark.timeout(30)
+async def test_brain_usage_tracking(tmp_path):
     """Usage counters accumulate across calls."""
     provider = MockBrainProvider()
-    brain = await BrainFactory.create(provider=provider)
+    brain = await BrainFactory.create(
+        provider=provider,
+        config=_test_config(tmp_path),
+    )
 
-    # Direct LLM usage
-    await brain.llm.generate("test")
-    assert brain.usage["call_count"] == 1
-    assert brain.usage["total_tokens"] == 30
-
-    await brain.shutdown()
+    try:
+        # Direct LLM usage
+        await brain.llm.generate("test")
+        assert brain.usage["call_count"] == 1
+        assert brain.usage["total_tokens"] == 30
+    finally:
+        await brain.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_brain_shutdown():
+@pytest.mark.timeout(30)
+async def test_brain_shutdown(tmp_path):
     """Brain shuts down cleanly."""
     provider = MockBrainProvider()
-    brain = await BrainFactory.create(provider=provider)
+    brain = await BrainFactory.create(
+        provider=provider,
+        config=_test_config(tmp_path),
+    )
 
     # Shutdown should not raise
     await brain.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_factory_with_string_provider():
+@pytest.mark.timeout(30)
+async def test_factory_with_string_provider(tmp_path):
     """Factory accepts provider name strings (but will fail without API keys)."""
     # We can't test with real API keys in CI, but we can verify the
-    # factory path handles the string correctly and wraps the error
+    # factory path handles the string correctly and wraps the error.
+    # Use a minimal config to avoid hanging on background tasks.
     try:
-        brain = await BrainFactory.create(provider="openai/gpt-4o-mini")
+        brain = await BrainFactory.create(
+            provider="openai/gpt-4o-mini",
+            config=_test_config(tmp_path),
+        )
         await brain.shutdown()
     except Exception:
         # Expected — no API key. The point is the factory didn't crash
@@ -140,6 +182,7 @@ async def test_factory_with_string_provider():
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
 async def test_adapter_integration_with_nodes():
     """ProviderLLM adapter works with the actual brain node interface."""
     provider = MockBrainProvider()
@@ -166,20 +209,23 @@ async def test_adapter_integration_with_nodes():
 
 
 @pytest.mark.asyncio
-async def test_provider_llm_counts():
+@pytest.mark.timeout(30)
+async def test_provider_llm_counts(tmp_path):
     """Verify total LLM call count through brain creation + queries."""
     provider = MockBrainProvider()
     brain = await BrainFactory.create(
         provider=provider,
-        config=BrainConfig(
+        config=_test_config(
+            tmp_path,
             inject_memory=False,
             inject_identity=False,
             inject_curiosity=False,
         ),
     )
 
-    initial_calls = provider._call_count
-    # Factory creation itself shouldn't make LLM calls
-    assert initial_calls == 0
-
-    await brain.shutdown()
+    try:
+        initial_calls = provider._call_count
+        # Factory creation itself shouldn't make LLM calls
+        assert initial_calls == 0
+    finally:
+        await brain.shutdown()

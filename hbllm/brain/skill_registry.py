@@ -47,6 +47,7 @@ class Skill:
     failure_types: list[str] = field(default_factory=list)
     confidence_score: float = 0.8
     tenant_id: str = "global"
+    source: str = ""  # provenance: "plugin:<name>", "auto-compiled", "user", "graduated"
 
 
 class SkillRegistry:
@@ -105,9 +106,12 @@ class SkillRegistry:
                 conn.execute("ALTER TABLE skills ADD COLUMN confidence_score REAL DEFAULT 0.8")
             if "tenant_id" not in columns:
                 conn.execute("ALTER TABLE skills ADD COLUMN tenant_id TEXT DEFAULT 'global'")
+            if "source" not in columns:
+                conn.execute("ALTER TABLE skills ADD COLUMN source TEXT DEFAULT ''")
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_cat ON skills(category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_tenant ON skills(tenant_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source)")
 
     # ─── Skill Extraction ────────────────────────────────────────────
 
@@ -171,8 +175,8 @@ class SkillRegistry:
                 (skill_id, name, description, category, steps, tools_used,
                  success_criteria, examples, success_rate, invocations,
                  avg_latency_ms, created_at, updated_at,
-                 version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     skill.skill_id,
@@ -195,25 +199,31 @@ class SkillRegistry:
                     json.dumps(skill.failure_types),
                     skill.confidence_score,
                     skill.tenant_id,
+                    skill.source,
                 ),
             )
 
     # ─── Skill Lookup ────────────────────────────────────────────────
 
+    _SELECT_COLS = (
+        "skill_id, name, description, category, steps, tools_used, success_criteria, "
+        "examples, success_rate, invocations, avg_latency_ms, created_at, version, "
+        "parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id, source"
+    )
+
     def find_skill(
         self, query: str, category: str | None = None, top_k: int = 5, tenant_id: str = "global"
     ) -> list[Skill]:
         """Find skills matching a query by keyword similarity."""
-        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             if category:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
+                    f"SELECT {self._SELECT_COLS} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
                     (category, tenant_id, top_k * 3),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills WHERE tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
+                    f"SELECT {self._SELECT_COLS} FROM skills WHERE tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
                     (tenant_id, top_k * 3),
                 ).fetchall()
 
@@ -232,10 +242,9 @@ class SkillRegistry:
         return [s for _, s in scored[:top_k]]
 
     def get_skill(self, skill_id: str) -> Skill | None:
-        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             row = conn.execute(
-                f"SELECT {select_cols} FROM skills WHERE skill_id = ?", (skill_id,)
+                f"SELECT {self._SELECT_COLS} FROM skills WHERE skill_id = ?", (skill_id,)
             ).fetchone()
         return self._row_to_skill(row) if row else None
 
@@ -368,32 +377,134 @@ class SkillRegistry:
             failure_types=json.loads(row[16]),
             confidence_score=row[17],
             tenant_id=row[18] if len(row) > 18 else "global",
+            source=row[19] if len(row) > 19 else "",
         )
 
     def list_skills(
         self, category: str | None = None, limit: int = 50, tenant_id: str = "global"
     ) -> list[Skill]:
-        select_cols = "skill_id, name, description, category, steps, tools_used, success_criteria, examples, success_rate, invocations, avg_latency_ms, created_at, version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id"
         with sqlite3.connect(str(self._db_path)) as conn:
             if category:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
+                    f"SELECT {self._SELECT_COLS} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
                     (category, tenant_id, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    f"SELECT {select_cols} FROM skills WHERE tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
+                    f"SELECT {self._SELECT_COLS} FROM skills WHERE tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
                     (tenant_id, limit),
                 ).fetchall()
         return [self._row_to_skill(r) for r in rows]
+
+    # ─── Skill Removal & Graduation ────────────────────────────────
+
+    def remove_skill(self, skill_id: str) -> bool:
+        """Remove a skill by ID. Returns True if deleted."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            cursor = conn.execute("DELETE FROM skills WHERE skill_id = ?", (skill_id,))
+            deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("Removed skill: %s", skill_id)
+        return deleted
+
+    def remove_by_source(self, source: str) -> int:
+        """
+        Remove all skills with a specific source.
+
+        Args:
+            source: The source tag (e.g., 'plugin:sentinel-shield')
+
+        Returns:
+            Number of skills removed.
+        """
+        with sqlite3.connect(str(self._db_path)) as conn:
+            cursor = conn.execute("DELETE FROM skills WHERE source = ?", (source,))
+            count = cursor.rowcount
+        if count:
+            logger.info("Removed %d skills with source '%s'", count, source)
+        return count
+
+    def find_by_source(self, source: str) -> list[Skill]:
+        """Find all skills from a specific source."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute(
+                f"SELECT {self._SELECT_COLS} FROM skills WHERE source = ? ORDER BY invocations DESC",
+                (source,),
+            ).fetchall()
+        return [self._row_to_skill(r) for r in rows]
+
+    def graduate_skill(self, skill_id: str) -> bool:
+        """
+        Graduate a plugin-provided skill to 'graduated' status.
+
+        Graduated skills survive plugin removal — they are considered
+        core-learned skills that originated from a plugin but have been
+        validated through real usage.
+
+        A skill qualifies for graduation when it has been invoked
+        at least once with a reasonable success rate.
+
+        Returns:
+            True if the skill was graduated.
+        """
+        with sqlite3.connect(str(self._db_path)) as conn:
+            cursor = conn.execute(
+                "UPDATE skills SET source = 'graduated', updated_at = ? WHERE skill_id = ?",
+                (time.time(), skill_id),
+            )
+            graduated = cursor.rowcount > 0
+        if graduated:
+            logger.info("Graduated skill to core: %s", skill_id)
+        return graduated
+
+    def graduate_experienced_skills(self, source: str, min_invocations: int = 1) -> list[str]:
+        """
+        Auto-graduate skills from a source that have been used enough.
+
+        Skills that have been invoked at least ``min_invocations`` times
+        are promoted to 'graduated' and will survive source removal.
+
+        Args:
+            source: The source to scan (e.g., 'plugin:calendar-sync')
+            min_invocations: Minimum usage count to qualify
+
+        Returns:
+            List of graduated skill IDs.
+        """
+        graduated_ids: list[str] = []
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT skill_id FROM skills WHERE source = ? AND invocations >= ?",
+                (source, min_invocations),
+            ).fetchall()
+
+            for (skill_id,) in rows:
+                conn.execute(
+                    "UPDATE skills SET source = 'graduated', updated_at = ? WHERE skill_id = ?",
+                    (time.time(), skill_id),
+                )
+                graduated_ids.append(skill_id)
+
+        if graduated_ids:
+            logger.info(
+                "Auto-graduated %d skills from '%s' (min_invocations=%d)",
+                len(graduated_ids),
+                source,
+                min_invocations,
+            )
+        return graduated_ids
+
+    # ─── Stats ───────────────────────────────────────────────────────
 
     def stats(self) -> dict[str, Any]:
         with sqlite3.connect(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
             cats = conn.execute("SELECT COUNT(DISTINCT category) FROM skills").fetchone()[0]
             avg_sr = conn.execute("SELECT AVG(success_rate) FROM skills").fetchone()[0]
+            sources = conn.execute("SELECT source, COUNT(*) FROM skills GROUP BY source").fetchall()
         return {
             "total_skills": total,
             "categories": cats,
             "avg_success_rate": round(avg_sr or 0, 3),
+            "by_source": {s: c for s, c in sources},
         }

@@ -12,7 +12,6 @@ import pytest
 import torch
 
 from hbllm.brain.learner_node import LearnerNode
-from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForCausalLM
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
@@ -21,7 +20,17 @@ from hbllm.network.messages import Message, MessageType
 @pytest.fixture
 def tiny_model():
     """Create a tiny model for CPU testing."""
-    config = get_config("125m")
+    from hbllm.model.config import ModelConfig
+
+    config = ModelConfig(
+        hidden_size=128,
+        num_attention_heads=2,
+        num_kv_heads=2,
+        num_layers=2,
+        intermediate_size=256,
+        vocab_size=1000,
+        max_position_embeddings=128,
+    )
     model = HBLLMForCausalLM(config)
     return model, config
 

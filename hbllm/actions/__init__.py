@@ -2,6 +2,7 @@
 
 from hbllm.actions.api_node import ApiNode
 from hbllm.actions.browser_node import BrowserNode
+from hbllm.actions.complexity import ComplexityDetector
 from hbllm.actions.execution_node import ExecutionNode
 from hbllm.actions.fuzzy_node import FuzzyNode
 from hbllm.actions.logic_node import LogicNode
@@ -10,16 +11,22 @@ from hbllm.actions.scheduler_tools import (
     ScheduleEventTool,
     ScheduleRecurringTool,
 )
+from hbllm.actions.tool_registry import ToolNode, ToolRegistry, ToolResult, tool
 from hbllm.actions.tool_router import ToolRouterNode
 
 __all__ = [
     "ApiNode",
     "BrowserNode",
+    "ComplexityDetector",
     "ExecutionNode",
     "FuzzyNode",
     "LogicNode",
+    "ToolNode",
+    "ToolRegistry",
+    "ToolResult",
     "ToolRouterNode",
     "ScheduleEventTool",
     "ScheduleRecurringTool",
     "CancelTaskTool",
+    "tool",
 ]

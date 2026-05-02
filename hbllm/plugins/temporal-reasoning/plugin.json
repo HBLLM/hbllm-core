@@ -1,0 +1,13 @@
+{
+    "name": "temporal-reasoning",
+    "version": "1.0.0",
+    "description": "Adds time-aware context: conversation history references, deadline tracking, temporal queries.",
+    "author": "HBLLM Core",
+    "entry_point": "temporal_engine.py",
+    "manifest_version": 2,
+    "capabilities": ["temporal_awareness", "deadline_tracking", "time_references"],
+    "topics": {
+        "subscribe": ["system.experience", "system.task.started", "system.task.completed"],
+        "publish": ["temporal.context", "temporal.deadline"]
+    }
+}

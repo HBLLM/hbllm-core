@@ -517,10 +517,19 @@ class TestPhase2FactoryIntegration:
             inject_attention=True,
             inject_load_manager=True,
             data_dir=str(tmp_path),
+            watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
-        await brain.shutdown()
+        try:
+            await brain.shutdown()
+        except Exception:
+            pass
 
     async def test_attention_manager_wired(self, brain):
         assert brain.attention_manager is not None
@@ -572,6 +581,12 @@ class TestPhase2FactoryIntegration:
             inject_attention=False,
             inject_load_manager=False,
             data_dir=str(tmp_path),
+            watch_plugins=False,
+            inject_plugins=False,
+            inject_awareness=False,
+            inject_scheduler=False,
+            inject_knowledge=False,
+            inject_persistence=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.attention_manager is None

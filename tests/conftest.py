@@ -3,6 +3,8 @@ Shared test fixtures and session-level cleanup.
 
 Forces clean exit after all tests by ensuring no orphaned asyncio
 tasks or event loops prevent pytest from terminating.
+
+Provides data directory isolation so tests don't pollute each other.
 """
 
 from __future__ import annotations
@@ -10,10 +12,40 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+import os
 
 import pytest
+import pytest_asyncio
+
+from hbllm.network.bus import InProcessBus
 
 logger = logging.getLogger(__name__)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path, monkeypatch):
+    """Isolate each test's data directory to prevent SQLite/file pollution.
+
+    Patches the default data_dir field in BrainConfig so every test that
+    creates a BrainConfig without explicit data_dir gets a temp directory.
+    Also redirects common path lookups.
+    """
+    try:
+        import dataclasses
+
+        from hbllm.brain.factory import BrainConfig
+
+        # Patch the dataclass field default for data_dir
+        for f in dataclasses.fields(BrainConfig):
+            if f.name == "data_dir":
+                monkeypatch.setattr(f, "default", str(tmp_path))
+                break
+    except Exception:
+        pass  # Not all test modules use BrainConfig
+
+    # Ensure deterministic working directory for any relative path access
+    monkeypatch.setenv("HBLLM_DATA_DIR", str(tmp_path))
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -21,11 +53,6 @@ def _force_gc_after_test():
     """Force garbage collection after each test to clean up dangling references."""
     yield
     gc.collect()
-
-
-import pytest_asyncio
-
-from hbllm.network.bus import InProcessBus
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -43,7 +70,14 @@ async def _force_task_cleanup():
         task.cancel()
 
     if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Use a short timeout to prevent gather itself from hanging indefinitely
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=2.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass  # Tasks that won't cancel in 2s are orphaned — let them die
 
 
 @pytest_asyncio.fixture

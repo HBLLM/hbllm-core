@@ -27,9 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.knowledge import KnowledgeBase
+    from hbllm.plugin.manager import PluginManager
 
 from hbllm.actions.tool_memory import ToolMemory
 
@@ -101,6 +105,20 @@ class BrainConfig:
     domain_registry: Any | None = None  # Hierarchical domain registry
     system_prompt: str = "You are a helpful AI assistant."
 
+    # Knowledge base
+    inject_knowledge: bool = True  # Auto-create knowledge base
+
+    # Persistence
+    inject_persistence: bool = True  # Auto-create BrainState
+
+    # Cognitive awareness
+    inject_awareness: bool = True  # Brain self-monitoring
+
+    # Plugin system
+    inject_plugins: bool = True  # Auto-discover plugins on startup
+    plugin_dirs: list[str] | None = None  # Extra plugin scan directories
+    watch_plugins: bool = False  # Background watcher for new plugins
+
 
 class Brain:
     """
@@ -158,6 +176,18 @@ class Brain:
 
         # v3: Proactive Execution
         self.scheduler_node: Any = None
+
+        # Knowledge base
+        self.knowledge_base: KnowledgeBase | None = None
+
+        # Persistence
+        self.state: Any = None  # BrainState reference
+
+        # Cognitive awareness
+        self.awareness: Any = None  # CognitiveAwareness reference
+
+        # Plugin system
+        self.plugin_manager: PluginManager | None = None
 
         self._hardware_loop_task: asyncio.Task[None] | None = None
 
@@ -252,6 +282,21 @@ class Brain:
         """Stop all nodes, pipeline, and bus."""
         if self._hardware_loop_task:
             self._hardware_loop_task.cancel()
+        # Stop plugin watcher
+        if self.plugin_manager:
+            await self.plugin_manager.stop_watching()
+        # Save knowledge base vectors
+        if self.knowledge_base:
+            try:
+                self.knowledge_base._save_vectors()
+            except Exception:
+                logger.debug("Error saving knowledge vectors during shutdown", exc_info=True)
+        # Close persistence
+        if self.state:
+            try:
+                self.state.close()
+            except Exception:
+                logger.debug("Error closing brain state during shutdown", exc_info=True)
         await self.pipeline.stop()
         for node in reversed(self.nodes):
             try:
@@ -770,5 +815,56 @@ class BrainFactory:
             "policy engine, owner rules, sentinel, evaluation, reflection, skill_compiler, "
             "attention, load_manager"
         )
+
+        # ── Cognitive Awareness ───────────────────────────────────────
+        if cfg.inject_awareness:
+            from hbllm.brain.awareness import CognitiveAwareness
+
+            awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
+            await awareness_node.start(message_bus)
+            await _register_node(registry, awareness_node)
+            brain.awareness = awareness_node
+            nodes.append(awareness_node)
+            logger.info("CognitiveAwareness wired (brain self-monitoring active)")
+
+        # ── Knowledge Base ────────────────────────────────────────────
+        if cfg.inject_knowledge:
+            from hbllm.knowledge import KnowledgeBase
+
+            kb_dir = str(Path(data_dir) / "knowledge")
+            brain.knowledge_base = KnowledgeBase(data_dir=kb_dir)
+            logger.info("KnowledgeBase wired (data_dir=%s)", kb_dir)
+
+        # ── Persistence (BrainState) ─────────────────────────────────
+        if cfg.inject_persistence:
+            from hbllm.persistence import BrainState
+
+            state_path = str(Path(data_dir) / "brain_state.db")
+            brain.state = BrainState(path=state_path)
+            logger.info("BrainState wired (path=%s)", state_path)
+
+        # ── Plugin System ────────────────────────────────────────────
+        if cfg.inject_plugins:
+            from hbllm.plugin.manager import PluginManager
+
+            extra_dirs = [Path(d) for d in (cfg.plugin_dirs or [])]
+            brain.plugin_manager = PluginManager(
+                plugin_dirs=extra_dirs,
+                skill_registry=brain.skill_registry,
+                policy_engine=brain.policy_engine,
+                knowledge_base=brain.knowledge_base,
+            )
+            # Auto-discover plugins from all configured paths
+            discovered = await brain.plugin_manager.discover_plugins()
+            if discovered:
+                logger.info(
+                    "Plugin system: loaded %d bundles on startup",
+                    len(discovered),
+                )
+
+            # Optionally start background watcher for hot-loading
+            if cfg.watch_plugins:
+                await brain.plugin_manager.watch_directories()
+                logger.info("Plugin watcher started (runtime hot-loading enabled)")
 
         return brain

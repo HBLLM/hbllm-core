@@ -1,0 +1,13 @@
+{
+    "name": "swarm-orchestrator",
+    "version": "1.0.0",
+    "description": "Coordinated task decomposition across multiple brain instances for complex multi-step problems.",
+    "author": "HBLLM Core",
+    "entry_point": "swarm_engine.py",
+    "manifest_version": 2,
+    "capabilities": ["task_decomposition", "parallel_execution", "result_aggregation"],
+    "topics": {
+        "subscribe": ["swarm.request", "swarm.result"],
+        "publish": ["swarm.task", "swarm.result", "swarm.complete"]
+    }
+}
