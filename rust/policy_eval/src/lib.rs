@@ -228,6 +228,7 @@ impl PolicySet {
 
     /// Add a policy. Pattern is compiled once and reused.
     #[pyo3(signature = (name, policy_type, action, pattern, content, severity, description, tenant_ids, priority, enabled, conditions))]
+    #[allow(clippy::too_many_arguments)]
     fn add_policy(
         &mut self,
         name: String,
