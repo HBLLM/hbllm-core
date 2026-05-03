@@ -80,7 +80,7 @@ fn cluster_queries(
             matched.truncate(5);
             clusters
                 .entry(matched)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(i);
         }
     }

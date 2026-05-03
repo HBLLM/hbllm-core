@@ -4,6 +4,7 @@
 //! Pre-compiles regex patterns and evaluates text against a batch of policies
 //! in a single pass, avoiding Python regex overhead per-policy.
 
+use std::cmp::Reverse;
 use pyo3::prelude::*;
 use regex::Regex;
 use std::collections::HashMap;
@@ -182,19 +183,19 @@ fn evaluate_policies(
                     }
                 }
             }
-            "scope" => {
-                if policy.action == "restrict" && !domain.is_empty() {
-                    let allowed: Vec<&str> = policy.content.split(',').map(|s| s.trim()).collect();
-                    if !allowed.contains(&domain) {
-                        result.passed = false;
-                        result.violations.push(format!(
-                            "[{}] {}: Domain '{}' not allowed",
-                            policy.severity.to_uppercase(),
-                            policy.name,
-                            domain
-                        ));
-                        result.applied_policies.push(policy.name.clone());
-                    }
+            "scope"
+                if policy.action == "restrict" && !domain.is_empty() =>
+            {
+                let allowed: Vec<&str> = policy.content.split(',').map(|s| s.trim()).collect();
+                if !allowed.contains(&domain) {
+                    result.passed = false;
+                    result.violations.push(format!(
+                        "[{}] {}: Domain '{}' not allowed",
+                        policy.severity.to_uppercase(),
+                        policy.name,
+                        domain
+                    ));
+                    result.applied_policies.push(policy.name.clone());
                 }
             }
             _ => {}
@@ -228,6 +229,7 @@ impl PolicySet {
 
     /// Add a policy. Pattern is compiled once and reused.
     #[pyo3(signature = (name, policy_type, action, pattern, content, severity, description, tenant_ids, priority, enabled, conditions))]
+    #[allow(clippy::too_many_arguments)]
     fn add_policy(
         &mut self,
         name: String,
@@ -271,7 +273,7 @@ impl PolicySet {
         });
 
         // Re-sort by priority (descending)
-        self.policies.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.policies.sort_by_key(|p| Reverse(p.priority));
         Ok(())
     }
 

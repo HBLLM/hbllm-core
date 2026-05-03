@@ -96,9 +96,7 @@ impl CircuitBreaker {
         self.failure_count += 1;
         self.last_failure = Some(Instant::now());
 
-        if self.state == 2 {
-            self.state = 1; // OPEN
-        } else if self.failure_count >= self.failure_threshold {
+        if self.state == 2 || self.failure_count >= self.failure_threshold {
             self.state = 1; // OPEN
         }
     }

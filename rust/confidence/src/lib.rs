@@ -76,7 +76,7 @@ fn score_relevance(query: &str, response: &str) -> f64 {
 
 fn score_coherence(response: &str) -> f64 {
     let sentences: Vec<&str> = response
-        .split(|c: char| c == '.' || c == '!' || c == '?')
+        .split(['.', '!', '?'])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();
@@ -149,6 +149,7 @@ fn score_detail(response: &str) -> f64 {
 
 /// Full confidence estimation returning (overall, relevance, coherence, factuality_risk, uncertainty, detail, flags)
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 fn estimate_confidence(
     query: &str,
     response: &str,
