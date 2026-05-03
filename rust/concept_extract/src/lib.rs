@@ -10,6 +10,7 @@
 use pyo3::prelude::*;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
 use std::sync::LazyLock;
 
 static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[a-z]{3,}\b").unwrap());
@@ -86,7 +87,7 @@ fn cluster_queries(
     }
 
     let mut result: Vec<(Vec<String>, Vec<usize>)> = clusters.into_iter().collect();
-    result.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    result.sort_by_key(|item| Reverse(item.1.len()));
     result
 }
 
