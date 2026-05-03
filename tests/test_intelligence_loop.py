@@ -530,11 +530,23 @@ class TestV2FactoryIntegration:
         assert isinstance(brain.skill_compiler_node, SkillCompilerNode)
 
     async def test_v2_nodes_in_node_list(self, brain):
-        """v2 nodes should appear in the nodes list."""
+        """v2 nodes should appear in the nodes list (directly or via composites)."""
         node_ids = [n.node_id for n in brain.nodes]
-        assert "evaluation" in node_ids
-        assert "reflection" in node_ids
-        assert "skill_compiler" in node_ids
+        # In composite mode, check that the parent composites are present
+        # and sub-nodes are accessible via properties
+        if brain.meta_cognition is not None:
+            assert brain.meta_cognition.node_id in node_ids
+            assert brain.meta_cognition.evaluation is not None
+            assert brain.meta_cognition.reflection is not None
+        else:
+            # Legacy mode fallback
+            assert "evaluation" in node_ids
+            assert "reflection" in node_ids
+        if brain.skill_engine is not None:
+            assert brain.skill_engine.node_id in node_ids
+            assert brain.skill_engine.compiler is not None
+        else:
+            assert "skill_compiler" in node_ids
 
     async def test_disable_v2_nodes(self, tmp_path):
         """Disabling v2 flags should skip wiring."""
