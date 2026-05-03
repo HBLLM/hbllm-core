@@ -1112,11 +1112,14 @@ class BrainFactory:
             brain.revision_node = reasoning.revision
 
         if meta:
-            brain.evaluation_node = meta.evaluation
-            brain.reflection_node = meta.reflection
+            if cfg.inject_evaluation:
+                brain.evaluation_node = meta.evaluation
+            if cfg.inject_reflection:
+                brain.reflection_node = meta.reflection
 
         if skills:
-            brain.skill_compiler_node = skills.compiler
+            if cfg.inject_skill_compiler:
+                brain.skill_compiler_node = skills.compiler
             brain.skill_intelligence_node = skills.intelligence
             brain.failure_analyzer_node = skills.failure_analyzer
 
