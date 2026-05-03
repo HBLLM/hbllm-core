@@ -91,9 +91,7 @@ class MetaCognition(Node):
         for sub in [self._meta, self._evaluation, self._reflection, self._curiosity]:
             await sub.start(bus)
 
-        logger.info(
-            "MetaCognition started with sub-nodes: meta, evaluation, reflection, curiosity"
-        )
+        logger.info("MetaCognition started with sub-nodes: meta, evaluation, reflection, curiosity")
 
     async def on_stop(self) -> None:
         for sub in [self._meta, self._evaluation, self._reflection, self._curiosity]:

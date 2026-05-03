@@ -142,8 +142,7 @@ class ReasoningCore(Node):
             await self._process_reward.start(bus)
 
         logger.info(
-            "ReasoningCore started with sub-nodes: router, planner, critic, decision, "
-            "revision%s",
+            "ReasoningCore started with sub-nodes: router, planner, critic, decision, revision%s",
             ", prm" if self._process_reward else "",
         )
 

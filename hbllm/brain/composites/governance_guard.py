@@ -66,9 +66,7 @@ class GovernanceGuard(Node):
         )
         await self._sentinel.start(self.bus)
 
-        logger.info(
-            "GovernanceGuard started with: policy_engine, sentinel, confidence_estimator"
-        )
+        logger.info("GovernanceGuard started with: policy_engine, sentinel, confidence_estimator")
 
     async def on_stop(self) -> None:
         if self._sentinel is not None:
@@ -84,9 +82,7 @@ class GovernanceGuard(Node):
         if self._sentinel is not None:
             sentinel_health = await self._sentinel.health_check()
 
-        status = (
-            sentinel_health.status if sentinel_health else HealthStatus.HEALTHY
-        )
+        status = sentinel_health.status if sentinel_health else HealthStatus.HEALTHY
 
         return NodeHealth(
             node_id=self.node_id,

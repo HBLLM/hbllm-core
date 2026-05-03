@@ -82,9 +82,7 @@ class ResourceManager(Node):
         for sub in [self._workspace, self._attention, self._load_manager, self._scheduler]:
             await sub.start(bus)
 
-        logger.info(
-            "ResourceManager started with sub-nodes: workspace, attention, load, scheduler"
-        )
+        logger.info("ResourceManager started with sub-nodes: workspace, attention, load, scheduler")
 
     async def on_stop(self) -> None:
         for sub in [self._workspace, self._attention, self._load_manager, self._scheduler]:

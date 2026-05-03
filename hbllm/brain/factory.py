@@ -550,7 +550,11 @@ class BrainFactory:
         # ── v4: Composite node path ──────────────────────────────────
         if cfg.use_composites:
             return await BrainFactory._build_composite_brain(
-                llm_provider, llm, cfg, message_bus, registry,
+                llm_provider,
+                llm,
+                cfg,
+                message_bus,
+                registry,
             )
 
         # 3. Create cognitive nodes with LLM injected (legacy path)
@@ -1001,8 +1005,14 @@ class BrainFactory:
 
         # Start all composite nodes
         composites = [
-            reasoning, memory_sys, governance, meta,
-            skills, resources, social, learning,
+            reasoning,
+            memory_sys,
+            governance,
+            meta,
+            skills,
+            resources,
+            social,
+            learning,
         ]
         for composite in composites:
             if composite is not None:
@@ -1128,9 +1138,7 @@ class BrainFactory:
             brain.token_optimizer = TokenOptimizer()
 
         if cfg.inject_owner_rules:
-            brain.owner_rules = OwnerRuleStore(
-                db_path=str(Path(cfg.data_dir) / "owner_rules.db")
-            )
+            brain.owner_rules = OwnerRuleStore(db_path=str(Path(cfg.data_dir) / "owner_rules.db"))
 
         # Cognitive Awareness
         if cfg.inject_awareness:
