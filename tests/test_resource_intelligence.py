@@ -523,6 +523,7 @@ class TestPhase2FactoryIntegration:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            use_composites=False,  # Use legacy path where individual nodes appear in brain.nodes
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
@@ -587,6 +588,7 @@ class TestPhase2FactoryIntegration:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            use_composites=False,  # Legacy path needed to test individual inject flags
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.attention_manager is None

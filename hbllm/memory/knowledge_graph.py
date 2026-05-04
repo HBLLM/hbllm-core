@@ -20,6 +20,18 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ── Optional Rust Acceleration ───────────────────────────────────────────────
+
+try:
+    from hbllm_knowledge_graph import (  # type: ignore[import-not-found]
+        disambiguate_entities as _rust_disambiguate,
+    )
+
+    _HAS_RUST_KG = True
+    logger.debug("Using Rust-accelerated knowledge graph")
+except ImportError:
+    _HAS_RUST_KG = False
+
 
 # ── Data types ───────────────────────────────────────────────────────────────
 
@@ -637,6 +649,10 @@ class KnowledgeGraph:
         """Character-level Jaccard similarity between two labels."""
         if a == b:
             return 1.0
+        if _HAS_RUST_KG:
+            from hbllm_knowledge_graph import entity_similarity  # type: ignore[import-not-found]
+
+            return entity_similarity(a, b)
         set_a = set(a.lower().split())
         set_b = set(b.lower().split())
         if not set_a or not set_b:

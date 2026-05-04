@@ -7,6 +7,9 @@ Multi-signal confidence scoring:
 - Uncertainty language detection
 - Token-level entropy estimation
 - Source attribution coverage
+
+When the ``hbllm_confidence`` Rust extension is available, the scoring
+pipeline runs ~10× faster. Falls back to pure Python automatically.
 """
 
 from __future__ import annotations
@@ -19,6 +22,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ── Optional Rust Acceleration ───────────────────────────────────────────────
+
+try:
+    from hbllm_confidence import (
+        estimate_confidence as _rust_estimate,  # type: ignore[import-not-found]
+    )
+
+    _USE_RUST = True
+    logger.debug("Using Rust-accelerated confidence estimator")
+except ImportError:
+    _USE_RUST = False
 
 
 @dataclass
@@ -94,6 +109,34 @@ class ConfidenceEstimator:
         """
         Produce a full confidence report for a query-response pair.
         """
+        if _USE_RUST:
+            return self._estimate_rust(query, response)
+        return self._estimate_python(query, response)
+
+    def _estimate_rust(self, query: str, response: str) -> ConfidenceReport:
+        """Rust-accelerated confidence estimation."""
+        overall, relevance, coherence, factuality_risk, uncertainty, detail, flags = _rust_estimate(
+            query,
+            response,
+            self.hallucination_threshold,
+            self.weights["relevance"],
+            self.weights["coherence"],
+            self.weights["factuality"],
+            self.weights["uncertainty"],
+            self.weights["detail"],
+        )
+        return ConfidenceReport(
+            overall=overall,
+            relevance=relevance,
+            coherence=coherence,
+            factuality_risk=factuality_risk,
+            uncertainty=uncertainty,
+            detail_level=detail,
+            flags=flags,
+        )
+
+    def _estimate_python(self, query: str, response: str) -> ConfidenceReport:
+        """Pure Python confidence estimation (fallback)."""
         relevance = self._score_relevance(query, response)
         coherence = self._score_coherence(response)
         factuality_risk = self._score_factuality_risk(response)

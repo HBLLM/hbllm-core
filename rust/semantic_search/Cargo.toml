@@ -1,0 +1,16 @@
+[package]
+name = "hbllm_semantic_search"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance cosine similarity search and TF-IDF encoding for HBLLM."
+
+[lib]
+name = "hbllm_semantic_search"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py311"] }
+numpy = "0.20.0"
+rayon = "1.8.0"
+md-5 = "0.10"
+regex = "1"

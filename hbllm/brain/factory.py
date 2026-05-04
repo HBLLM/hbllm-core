@@ -76,6 +76,17 @@ logger = logging.getLogger(__name__)
 class BrainConfig:
     """Configuration for Brain creation."""
 
+    # ── Composite node flags (v4: consolidated architecture) ──────
+    inject_reasoning: bool = True  # ReasoningCore (router+planner+critic+decision+revision+prm)
+    inject_memory_system: bool = True  # MemorySystem (memory+experience+sleep)
+    inject_meta_cognition: bool = True  # MetaCognition (meta+evaluation+reflection+curiosity)
+    inject_skill_engine: bool = True  # SkillEngine (compiler+intelligence+induction+failure+rules)
+    inject_governance: bool = True  # GovernanceGuard (sentinel+policy+confidence)
+    inject_resources: bool = True  # ResourceManager (workspace+attention+load+scheduler)
+    inject_social: bool = True  # SocialLayer (collective+identity)
+    inject_learning: bool = True  # LearningLoop (learner+world_model)
+
+    # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
     inject_identity: bool = True
     inject_curiosity: bool = True
@@ -104,6 +115,9 @@ class BrainConfig:
     inject_failure_analyzer: bool = True  # Automatic skill repair
     domain_registry: Any | None = None  # Hierarchical domain registry
     system_prompt: str = "You are a helpful AI assistant."
+
+    # ── Mode selection ────────────────────────────────────────────
+    use_composites: bool = True  # Use consolidated composite nodes (v4)
 
     # Knowledge base
     inject_knowledge: bool = True  # Auto-create knowledge base
@@ -143,6 +157,16 @@ class Brain:
         self.llm = llm
         self.nodes = nodes
         self.provider = provider
+
+        # ── v4: Composite nodes ────────────────────────────────────
+        self.reasoning_core: Any = None  # ReasoningCore
+        self.memory_system: Any = None  # MemorySystem
+        self.meta_cognition: Any = None  # MetaCognition
+        self.skill_engine: Any = None  # SkillEngine
+        self.governance_guard: Any = None  # GovernanceGuard
+        self.resource_manager: Any = None  # ResourceManager
+        self.social_layer: Any = None  # SocialLayer
+        self.learning_loop: Any = None  # LearningLoop
 
         # Cognitive subsystems (initialized by factory)
         self.skill_registry: SkillRegistry | None = None
@@ -523,7 +547,17 @@ class BrainFactory:
         registry = ServiceRegistry()
         await registry.start()
 
-        # 3. Create cognitive nodes with LLM injected
+        # ── v4: Composite node path ──────────────────────────────────
+        if cfg.use_composites:
+            return await BrainFactory._build_composite_brain(
+                llm_provider,
+                llm,
+                cfg,
+                message_bus,
+                registry,
+            )
+
+        # 3. Create cognitive nodes with LLM injected (legacy path)
         from hbllm.brain.collective_node import CollectiveNode
         from hbllm.brain.critic_node import CriticNode
         from hbllm.brain.curiosity_node import CuriosityNode
@@ -866,5 +900,296 @@ class BrainFactory:
             if cfg.watch_plugins:
                 await brain.plugin_manager.watch_directories()
                 logger.info("Plugin watcher started (runtime hot-loading enabled)")
+
+        return brain
+
+    @staticmethod
+    async def _build_composite_brain(
+        llm_provider: LLMProvider,
+        llm: ProviderLLM,
+        cfg: BrainConfig,
+        message_bus: MessageBus,
+        registry: ServiceRegistry,
+    ) -> Brain:
+        """
+        v4: Build brain using 8 composite nodes instead of 27 individual ones.
+
+        Each composite internally creates and wires its sub-nodes, preserving
+        all bus subscriptions for backward compatibility.
+        """
+        from hbllm.brain.composites import (
+            GovernanceGuard,
+            LearningLoop,
+            MemorySystem,
+            MetaCognition,
+            ReasoningCore,
+            ResourceManager,
+            SkillEngine,
+            SocialLayer,
+        )
+        from hbllm.modules.domain_registry import DomainRegistry
+
+        skill_registry = SkillRegistry(data_dir=cfg.data_dir)
+        domain_registry = cfg.domain_registry or DomainRegistry()
+
+        # Auto-discover sub-domain LoRA adapters from data/lora/
+        lora_dir = Path(cfg.data_dir) / "lora"
+        if lora_dir.is_dir():
+            from hbllm.modules.domain_registry import DomainSpec
+
+            for adapter_dir in sorted(lora_dir.iterdir()):
+                if adapter_dir.is_dir() and not domain_registry.exists(adapter_dir.name):
+                    domain_registry.register(
+                        DomainSpec(
+                            name=adapter_dir.name,
+                            centroid_text=f"Topics relating to {adapter_dir.name.replace('.', ' ')}",
+                        )
+                    )
+                    logger.info("Auto-discovered sub-domain LoRA: %s", adapter_dir.name)
+
+        nodes: list[Node] = []
+
+        # 1. ReasoningCore
+        reasoning = None
+        if cfg.inject_reasoning:
+            reasoning = ReasoningCore(
+                llm=llm,
+                policy_engine=None,  # Set after governance is created
+                domain_registry=domain_registry,
+                branch_factor=cfg.planner_branch_factor,
+                max_depth=cfg.planner_max_depth,
+                data_dir=cfg.data_dir,
+            )
+
+        # 2. MemorySystem
+        memory_sys = None
+        if cfg.inject_memory_system:
+            memory_sys = MemorySystem(llm=llm)
+
+        # 3. GovernanceGuard (created before MetaCognition so policy_engine is available)
+        governance = None
+        if cfg.inject_governance:
+            governance = GovernanceGuard()
+
+        # 4. MetaCognition
+        meta = None
+        if cfg.inject_meta_cognition:
+            meta = MetaCognition(
+                cognitive_metrics=None,  # Wired below
+                goal_manager=None,
+                self_model=None,
+                skill_registry=skill_registry,
+            )
+
+        # 5. SkillEngine
+        skills = None
+        if cfg.inject_skill_engine:
+            skills = SkillEngine(llm=llm, skill_registry=skill_registry)
+
+        # 6. ResourceManager
+        resources = None
+        if cfg.inject_resources:
+            resources = ResourceManager(
+                data_dir=cfg.data_dir,
+            )
+
+        # 7. SocialLayer
+        social = None
+        if cfg.inject_social:
+            social = SocialLayer(skill_registry=skill_registry)
+
+        # 8. LearningLoop
+        learning = None
+        if cfg.inject_learning:
+            learning = LearningLoop()
+
+        # Start all composite nodes
+        composites = [
+            reasoning,
+            memory_sys,
+            governance,
+            meta,
+            skills,
+            resources,
+            social,
+            learning,
+        ]
+        for composite in composites:
+            if composite is not None:
+                await composite.start(message_bus)
+                await _register_node(registry, composite)
+                nodes.append(composite)
+
+        # Perception nodes (optional — require ML models)
+        if cfg.inject_perception:
+            from hbllm.perception.audio_in_node import AudioInputNode
+            from hbllm.perception.audio_out_node import AudioOutputNode
+            from hbllm.perception.vision_node import VisionNode
+
+            for pnode in [
+                AudioInputNode(node_id="audio_in"),
+                AudioOutputNode(node_id="audio_out"),
+                VisionNode(node_id="vision"),
+            ]:
+                await pnode.start(message_bus)
+                await _register_node(registry, pnode)
+                nodes.append(pnode)
+
+        # Reasoning nodes (optional — require extra dependencies)
+        if cfg.inject_fuzzy_logic:
+            from hbllm.actions.fuzzy_node import FuzzyNode
+
+            fnode = FuzzyNode(node_id="fuzzy", llm=llm)
+            await fnode.start(message_bus)
+            await _register_node(registry, fnode)
+            nodes.append(fnode)
+
+        if cfg.inject_symbolic_logic:
+            from hbllm.actions.logic_node import LogicNode
+
+            lnode = LogicNode(node_id="logic", llm=llm)
+            await lnode.start(message_bus)
+            await _register_node(registry, lnode)
+            nodes.append(lnode)
+
+        # Create pipeline
+        pipeline_config = PipelineConfig(
+            total_timeout=cfg.total_timeout,
+            inject_memory=cfg.inject_memory,
+            inject_identity=cfg.inject_identity,
+            inject_curiosity=cfg.inject_curiosity,
+        )
+        pipeline = CognitivePipeline(
+            bus=message_bus,
+            registry=registry,
+            config=pipeline_config,
+        )
+        await pipeline.start()
+
+        logger.info(
+            "Brain created (composite mode) with %s provider, %d composite nodes",
+            llm_provider.name,
+            len(nodes),
+        )
+
+        brain = Brain(
+            bus=message_bus,
+            registry=registry,
+            pipeline=pipeline,
+            llm=llm,
+            nodes=nodes,
+            provider=llm_provider,
+        )
+
+        # Wire composite references
+        brain.reasoning_core = reasoning
+        brain.memory_system = memory_sys
+        brain.governance_guard = governance
+        brain.meta_cognition = meta
+        brain.skill_engine = skills
+        brain.resource_manager = resources
+        brain.social_layer = social
+        brain.learning_loop = learning
+
+        # Wire backward-compatible attributes from composites
+        brain.skill_registry = skill_registry
+        brain.tool_memory = ToolMemory(data_dir=cfg.data_dir)
+        brain.concept_extractor = ConceptExtractor()
+        brain.world_simulator = WorldSimulator()
+        brain.cognition_router = CognitionRouter()
+        brain.reward_model = RewardModel(data_dir=cfg.data_dir)
+        brain.policy_optimizer = PolicyOptimizer()
+        brain.interaction_miner = InteractionMiner(data_dir=cfg.data_dir)
+
+        # Map composite sub-components to legacy Brain attributes
+        if governance:
+            brain.policy_engine = governance.policy_engine
+            brain.sentinel = governance.sentinel
+            if cfg.inject_revision:
+                brain.confidence_estimator = governance.confidence_estimator
+
+        if reasoning and cfg.inject_revision:
+            brain.revision_node = reasoning.revision
+
+        if meta:
+            if cfg.inject_evaluation:
+                brain.evaluation_node = meta.evaluation
+            if cfg.inject_reflection:
+                brain.reflection_node = meta.reflection
+
+        if skills:
+            if cfg.inject_skill_compiler:
+                brain.skill_compiler_node = skills.compiler
+            brain.skill_intelligence_node = skills.intelligence
+            brain.failure_analyzer_node = skills.failure_analyzer
+
+        if resources:
+            brain.attention_manager = resources.attention
+            brain.load_manager = resources.load_manager
+            brain.scheduler_node = resources.scheduler
+
+        if cfg.inject_goals:
+            brain.goal_manager = GoalManager(data_dir=cfg.data_dir)
+
+        if cfg.inject_self_model:
+            brain.self_model = SelfModel(data_dir=cfg.data_dir)
+
+        if cfg.inject_metrics:
+            brain.cognitive_metrics = CognitiveMetrics(data_dir=cfg.data_dir)
+
+        if cfg.inject_cost_optimizer:
+            brain.token_optimizer = TokenOptimizer()
+
+        if cfg.inject_owner_rules:
+            brain.owner_rules = OwnerRuleStore(db_path=str(Path(cfg.data_dir) / "owner_rules.db"))
+
+        # Cognitive Awareness
+        if cfg.inject_awareness:
+            from hbllm.brain.awareness import CognitiveAwareness
+
+            awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
+            await awareness_node.start(message_bus)
+            await _register_node(registry, awareness_node)
+            brain.awareness = awareness_node
+            nodes.append(awareness_node)
+
+        # Knowledge Base
+        if cfg.inject_knowledge:
+            from hbllm.knowledge import KnowledgeBase
+
+            kb_dir = str(Path(cfg.data_dir) / "knowledge")
+            brain.knowledge_base = KnowledgeBase(data_dir=kb_dir)
+
+        # Persistence
+        if cfg.inject_persistence:
+            from hbllm.persistence import BrainState
+
+            state_path = str(Path(cfg.data_dir) / "brain_state.db")
+            brain.state = BrainState(path=state_path)
+
+        # Plugin System
+        if cfg.inject_plugins:
+            from hbllm.plugin.manager import PluginManager
+
+            extra_dirs = [Path(d) for d in (cfg.plugin_dirs or [])]
+            brain.plugin_manager = PluginManager(
+                plugin_dirs=extra_dirs,
+                skill_registry=brain.skill_registry,
+                policy_engine=brain.policy_engine,
+                knowledge_base=brain.knowledge_base,
+            )
+            discovered = await brain.plugin_manager.discover_plugins()
+            if discovered:
+                logger.info(
+                    "Plugin system: loaded %d bundles on startup",
+                    len(discovered),
+                )
+            if cfg.watch_plugins:
+                await brain.plugin_manager.watch_directories()
+
+        logger.info(
+            "v4 composite brain ready: %d top-level nodes (was 27+ in legacy mode)",
+            len(nodes),
+        )
 
         return brain

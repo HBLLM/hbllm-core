@@ -101,9 +101,7 @@ async def test_factory_creates_brain(tmp_path):
         assert brain.registry is not None
         assert brain.pipeline is not None
         assert brain.llm is not None
-        assert (
-            len(brain.nodes) >= 10
-        )  # Core pipeline + Memory + MetaCognitive + RuleExtractor + Identity + Sleep
+        assert len(brain.nodes) >= 8  # 8 composite nodes + awareness (v4 composite architecture)
     finally:
         await brain.shutdown()
 
