@@ -1,11 +1,17 @@
 """
 LearningLoop — unified learning and simulation node.
 
-Consolidates: LearnerNode + WorldModelNode
+Consolidates: LearnerNode + WorldModelNode + ProcessRewardNode
 
 LearnerNode handles online learning from feedback (DPO),
-WorldModelNode simulates actions for learning. Together they
-form the continuous learning pipeline.
+WorldModelNode simulates actions for learning,
+ProcessRewardNode scores reasoning steps for MCTS quality.
+
+Together they form the continuous learning pipeline.
+ProcessRewardNode was moved here from ReasoningCore because it is
+a learning/evaluation concern, not inference-critical. It still
+subscribes to `action.score_thought` on the bus so PlannerNode's
+MCTS can reach it transparently.
 """
 
 from __future__ import annotations
@@ -23,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 class LearningLoop(Node):
     """
-    Composite node for continuous learning: online feedback learning
-    and environment simulation.
+    Composite node for continuous learning: online feedback learning,
+    environment simulation, and process reward evaluation.
     """
 
     def __init__(
@@ -39,13 +45,16 @@ class LearningLoop(Node):
                 "dpo_training",
                 "world_simulation",
                 "action_simulation",
+                "process_reward",
+                "thought_evaluation",
             ],
         )
-        self.description = "Unified learning loop (feedback → simulate → learn)"
+        self.description = "Unified learning loop (feedback → simulate → learn → reward)"
 
         # Sub-nodes
         self._learner: Any = None
         self._world_model: Any = None
+        self._process_reward: Any = None
 
     async def on_start(self) -> None:
         from hbllm.brain.learner_node import LearnerNode
@@ -58,10 +67,25 @@ class LearningLoop(Node):
         for sub in [self._learner, self._world_model]:
             await sub.start(bus)
 
-        logger.info("LearningLoop started with sub-nodes: learner, world_model")
+        # Process Reward Model (optional — may require ML model / torch)
+        try:
+            from hbllm.brain.process_reward_node import ProcessRewardNode
+
+            self._process_reward = ProcessRewardNode(
+                node_id=f"{self.node_id}.prm",
+            )
+            await self._process_reward.start(bus)
+        except Exception:
+            logger.debug("ProcessRewardNode not available, skipping")
+            self._process_reward = None
+
+        logger.info(
+            "LearningLoop started with sub-nodes: learner, world_model%s",
+            ", prm" if self._process_reward else "",
+        )
 
     async def on_stop(self) -> None:
-        for sub in [self._learner, self._world_model]:
+        for sub in [self._learner, self._world_model, self._process_reward]:
             if sub is not None:
                 await sub.stop()
 
@@ -71,7 +95,7 @@ class LearningLoop(Node):
     async def health_check(self):
         from hbllm.network.node import HealthStatus, NodeHealth
 
-        subs = [self._learner, self._world_model]
+        subs = [self._learner, self._world_model, self._process_reward]
         sub_healths = []
         for sub in subs:
             if sub is not None:
@@ -100,3 +124,8 @@ class LearningLoop(Node):
     @property
     def world_model(self):
         return self._world_model
+
+    @property
+    def process_reward(self):
+        """Access the underlying ProcessRewardNode (may be None)."""
+        return self._process_reward

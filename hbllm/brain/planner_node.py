@@ -707,9 +707,26 @@ class PlannerNode(Node):
 
         When a workspace.update arrives, runs a lightweight GoT process
         and posts the best-path result as a workspace.thought.
+
+        Adaptive: skips expensive GoT for simple queries or fast-path flagged
+        requests. Only runs full MCTS for complex reasoning tasks.
         """
         text = message.payload.get("text", "")
         if not text or len(text) < 10:
+            return None
+
+        # ── Adaptive execution: skip GoT for simple/fast-path queries ─────
+        intent = message.payload.get("intent", "general_knowledge")
+        is_fast_path = message.payload.get("is_fast_path", False)
+        _skip_intents = {"general_knowledge", "smalltalk"}
+
+        if is_fast_path or intent in _skip_intents:
+            logger.debug(
+                "[GoT] Skipping GoT for %s query (intent=%s, fast_path=%s)",
+                "fast-path" if is_fast_path else "simple",
+                intent,
+                is_fast_path,
+            )
             return None
 
         # Check cache first

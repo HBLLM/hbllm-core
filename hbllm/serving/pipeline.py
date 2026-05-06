@@ -151,24 +151,36 @@ class CognitivePipeline:
             context = await self._pre_process(text, tenant_id, session_id, correlation_id)
             stages.append("pre_process")
 
-            # ── Stage 2: Route through cognitive pipeline ──
-            await self._emit_thought(
-                f"Routing task to specialized experts (media: {len(media) if media else 0} items)...",
-                correlation_id,
-                tenant_id,
-            )
-            response = await self._route_and_wait(
-                text=text,
-                context=context,
-                tenant_id=tenant_id,
-                session_id=session_id,
-                correlation_id=correlation_id,
-                model_size=model_size,
-                media=media,
-            )
-            stages.append("route")
-            stages.append("workspace")
-            stages.append("decision")
+            # ── Stage 1.5: Fast Path Check ──
+            complexity = self._classify_complexity(text)
+            if complexity == "trivial":
+                await self._emit_thought(
+                    "Query is trivial, routing to fast path...", correlation_id, tenant_id
+                )
+                response = await self._fast_path(
+                    text, context, tenant_id, session_id, correlation_id
+                )
+                stages.append("fast_path")
+                # Skip normal routing/workspace stages
+            else:
+                # ── Stage 2: Route through cognitive pipeline ──
+                await self._emit_thought(
+                    f"Routing task to specialized experts (media: {len(media) if media else 0} items)...",
+                    correlation_id,
+                    tenant_id,
+                )
+                response = await self._route_and_wait(
+                    text=text,
+                    context=context,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    correlation_id=correlation_id,
+                    model_size=model_size,
+                    media=media,
+                )
+                stages.append("route")
+                stages.append("workspace")
+                stages.append("decision")
 
             # ── Stage 3: Post-processing (memory storage) ──
             await self._emit_thought(
@@ -339,6 +351,73 @@ class CognitivePipeline:
             return response.payload
         finally:
             self._response_futures.pop(correlation_id, None)
+
+    def _classify_complexity(self, text: str) -> str:
+        """
+        Heuristic check to see if a query is trivial enough to skip the full pipeline.
+        """
+        if not text:
+            return "trivial"
+        words = text.split()
+        if (
+            len(words) < 6
+            and "?" not in text
+            and "how" not in text.lower()
+            and "why" not in text.lower()
+        ):
+            # Very short statements (e.g., "Hello", "Good morning", "Thanks")
+            return "trivial"
+        return "complex"
+
+    async def _fast_path(
+        self,
+        text: str,
+        context: dict[str, Any],
+        tenant_id: str,
+        session_id: str,
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        """
+        Execute a fast, direct LLM call bypassing the workspace and planners.
+        """
+        # We simulate the router's quick response here by asking the domain.general.query directly
+        # or sending a direct sensory output if it's just a greeting.
+        if text.lower().strip() in {"hello", "hi", "hey", "good morning", "good evening"}:
+            return {
+                "text": "Hello! How can I help you today?",
+                "source_node": "fast_path",
+                "confidence": 1.0,
+            }
+
+        # If it's short but not a canned greeting, we ask the intuition engine directly
+        query_msg = Message(
+            id=correlation_id,
+            type=MessageType.QUERY,
+            source_node_id="pipeline",
+            topic="domain.general.query",
+            tenant_id=tenant_id,
+            session_id=session_id,
+            payload={
+                "text": text,
+                "context": context,
+            },
+        )
+        try:
+            resp = await asyncio.wait_for(
+                self.bus.request("domain.general.query", query_msg, timeout=3.0),
+                timeout=3.0,
+            )
+            return {
+                "text": str(resp.payload.get("text", "")),
+                "source_node": "fast_path_llm",
+                "confidence": 0.9,
+            }
+        except Exception:
+            return {
+                "text": "I'm here! What's on your mind?",
+                "source_node": "fast_path_fallback",
+                "confidence": 0.5,
+            }
 
     async def _handle_decision_output(self, message: Message) -> None:
         """Capture decision output and resolve the corresponding future."""

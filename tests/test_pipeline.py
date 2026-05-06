@@ -161,8 +161,11 @@ class TestCognitivePipeline:
 
     async def test_timeout_returns_error(self, pipeline):
         pipe, _ = pipeline
-        # No nodes registered, so the query will time out
-        result = await pipe.process("test query", tenant_id="t1")
+        # No nodes registered, so the complex query will time out
+        result = await pipe.process(
+            "Please analyze this complex test query and provide a detailed breakdown.",
+            tenant_id="t1",
+        )
         assert result.error is True
         assert "pre_process" in result.stages_completed
         assert result.latency_ms > 0
