@@ -382,10 +382,30 @@ class RouterNode(Node):
             "Routing to Workspace with dominant intent: %s (confidence: %.2f)", intent, confidence
         )
 
+        # ── Fast-path detection ───────────────────────────────────────
+        # Simple queries with high confidence skip expensive GoT and get
+        # a very short workspace deadline.
+        _fast_path_intents = {"general_knowledge", "smalltalk"}
+        text_is_short = len(text.split()) < 30
+        is_fast_path = (
+            isinstance(target_domain, str)
+            and intent in _fast_path_intents
+            and confidence > 0.85
+            and text_is_short
+        )
+
         workspace_payload = message.payload.copy()
         workspace_payload["intent"] = intent
         workspace_payload["domain_hint"] = target_domain
         workspace_payload["confidence"] = confidence
+        workspace_payload["is_fast_path"] = is_fast_path
+
+        if is_fast_path:
+            logger.info(
+                "Router flagging query as FAST PATH (intent=%s, confidence=%.2f)",
+                intent,
+                confidence,
+            )
 
         routed_query = Message(
             type=MessageType.EVENT,

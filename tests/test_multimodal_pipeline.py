@@ -229,9 +229,11 @@ async def test_multimodal_text_only_passthrough():
     await pipeline.start()
 
     try:
-        result = await pipeline.process_multimodal(text="Plain text query")
+        result = await pipeline.process_multimodal(
+            text="This is a completely normal text query without fast path"
+        )
 
-        assert "Plain text query" in result.text
+        assert "normal text query" in result.text
         assert not result.error
     finally:
         await pipeline.stop()

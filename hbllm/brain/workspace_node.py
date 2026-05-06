@@ -112,6 +112,9 @@ class WorkspaceNode(Node):
                 await self._send_error_fallback(cid, "System overloaded. Please try again.")
 
         # Initialize a new Blackboard session for this specific User Query
+        is_fast_path = payload.get("is_fast_path", False)
+        thinking_time = 0.5 if is_fast_path else self._thinking_deadline
+
         self.blackboards[correlation_id] = {
             "tenant_id": message.tenant_id,
             "session_id": message.session_id,
@@ -119,12 +122,20 @@ class WorkspaceNode(Node):
             "thoughts": [],
             "start_time": time.monotonic(),
             "last_update": time.monotonic(),
-            # Configurable deadline for cognitive modules to think and post proposals
-            "deadline": time.monotonic() + self._thinking_deadline,
+            # Fast-path uses 0.5s deadline; complex uses full thinking deadline
+            "deadline": time.monotonic() + thinking_time,
             "resolved": False,
             "turn_count": 0,  # Track internal monologue turns
-            "absolute_deadline": time.monotonic() + 120.0,  # Hard cap: 120s for CPU inference
+            "absolute_deadline": time.monotonic() + (5.0 if is_fast_path else 120.0),
+            "is_fast_path": is_fast_path,
         }
+
+        if is_fast_path:
+            logger.info(
+                "Workspace fast-path mode: deadline=%.1fs for '%s...'",
+                thinking_time,
+                str(payload.get("text", ""))[:30],
+            )
 
         # Broadcast the context to ALL subjective thinking modules simultaneously
         # (This avoids the Router playing isolated favorites).
@@ -255,10 +266,10 @@ class WorkspaceNode(Node):
                 reason = proposal.get("reason")
                 content_failed = proposal.get("original_content")
 
-                # Prevent infinite backtracking loops — max 3 retries
+                # Prevent infinite backtracking loops — max 2 retries
                 retry_key = f"retries_{corr_id}"
                 current_retries = int(board.get(retry_key, 0))
-                if current_retries >= 3:
+                if current_retries >= 2:
                     logger.warning(
                         "Workspace max retries reached for %s, accepting as-is.", corr_id
                     )

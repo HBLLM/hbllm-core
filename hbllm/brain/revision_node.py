@@ -48,13 +48,15 @@ class RevisionNode:
 
     def __init__(
         self,
-        confidence_threshold: float = 0.7,
-        max_revisions: int = 3,
+        confidence_threshold: float = 0.85,
+        max_revisions: int = 2,
         improvement_threshold: float = 0.05,
+        total_deadline_ms: float = 5000.0,
     ):
         self.confidence_threshold = confidence_threshold
         self.max_revisions = max_revisions
         self.improvement_threshold = improvement_threshold
+        self.total_deadline_ms = total_deadline_ms
         self._total_revisions = 0
         self._total_processed = 0
 
@@ -78,6 +80,7 @@ class RevisionNode:
         """
         start = time.monotonic()
         self._total_processed += 1
+        deadline = start + (self.total_deadline_ms / 1000.0)
 
         current = response
         best = response
@@ -101,6 +104,14 @@ class RevisionNode:
             )
 
         for i in range(self.max_revisions):
+            # Hard time cap: stop revising if we've exceeded the deadline
+            if time.monotonic() >= deadline:
+                notes.append(f"Rev {i + 1}: aborted — total deadline exceeded")
+                logger.debug(
+                    "RevisionNode hit total_deadline_ms=%.0f, stopping", self.total_deadline_ms
+                )
+                break
+
             # Step 1: Critique
             if critique_fn:
                 critique = await critique_fn(query, current)

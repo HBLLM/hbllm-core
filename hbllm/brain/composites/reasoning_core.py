@@ -2,11 +2,15 @@
 ReasoningCore — unified reasoning pipeline.
 
 Consolidates: RouterNode + PlannerNode + CriticNode + DecisionNode
-             + RevisionNode + ProcessRewardNode
+             + RevisionNode
 
-These nodes always execute in sequence during every query, so combining
-them eliminates 5 bus round-trips per request while preserving each
-sub-node's bus subscriptions for backward compatibility.
+These nodes are grouped as a single composite for lifecycle management.
+At runtime, they communicate via the message bus (event-driven, NOT
+sequential). The PlannerNode skips expensive GoT for simple queries,
+and RevisionNode only fires when confidence is below threshold.
+
+ProcessRewardNode has been moved to LearningLoop composite — it is
+a learning concern, not an inference-critical component.
 """
 
 from __future__ import annotations
@@ -57,8 +61,6 @@ class ReasoningCore(Node):
                 "halting",
                 "decision",
                 "revision",
-                "process_reward",
-                "thought_evaluation",
             ],
         )
         self.description = "Unified reasoning pipeline (route → plan → critique → decide)"
@@ -76,7 +78,6 @@ class ReasoningCore(Node):
         self._critic: Any = None
         self._decision: Any = None
         self._revision: Any = None
-        self._process_reward: Any = None
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -122,28 +123,13 @@ class ReasoningCore(Node):
         # Revision (not a Node subclass — no bus start needed)
         self._revision = RevisionNode()
 
-        # Process Reward (optional — may require ML model)
-        try:
-            from hbllm.brain.process_reward_node import ProcessRewardNode
-
-            self._process_reward = ProcessRewardNode(
-                node_id=f"{self.node_id}.prm",
-            )
-        except Exception:
-            logger.debug("ProcessRewardNode not available, skipping")
-            self._process_reward = None
-
         # Start all Node-subclass sub-nodes on the same bus
         bus = self.bus
         for sub in [self._router, self._planner, self._critic, self._decision]:
             await sub.start(bus)
 
-        if self._process_reward is not None:
-            await self._process_reward.start(bus)
-
         logger.info(
-            "ReasoningCore started with sub-nodes: router, planner, critic, decision, revision%s",
-            ", prm" if self._process_reward else "",
+            "ReasoningCore started with sub-nodes: router, planner, critic, decision, revision",
         )
 
     async def on_stop(self) -> None:
@@ -153,7 +139,6 @@ class ReasoningCore(Node):
             self._planner,
             self._critic,
             self._decision,
-            self._process_reward,
         ]:
             if sub is not None and hasattr(sub, "stop"):
                 await sub.stop()
@@ -217,8 +202,3 @@ class ReasoningCore(Node):
     def revision(self):
         """Access the underlying RevisionNode."""
         return self._revision
-
-    @property
-    def process_reward(self):
-        """Access the underlying ProcessRewardNode (may be None)."""
-        return self._process_reward

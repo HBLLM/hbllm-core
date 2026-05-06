@@ -114,8 +114,12 @@ class TestEndToEndPipeline:
         pipe, _ = full_pipeline
 
         results = await asyncio.gather(
-            pipe.process("Hello from tenant A", tenant_id="tenant_a"),
-            pipe.process("Hello from tenant B", tenant_id="tenant_b"),
+            pipe.process(
+                "Can you help me process this request from tenant A?", tenant_id="tenant_a"
+            ),
+            pipe.process(
+                "Can you help me process this request from tenant B?", tenant_id="tenant_b"
+            ),
         )
 
         assert len(results) == 2
@@ -131,7 +135,10 @@ class TestEndToEndPipeline:
         """Test 5 concurrent queries all resolve correctly."""
         pipe, _ = full_pipeline
 
-        queries = [f"Query number {i}" for i in range(5)]
+        queries = [
+            f"This is a complex query number {i} to test concurrent handling properly"
+            for i in range(5)
+        ]
         results = await asyncio.gather(*(pipe.process(q, tenant_id="t1") for q in queries))
 
         assert len(results) == 5
@@ -208,7 +215,7 @@ class TestPipelineWithContextInjection:
     async def test_context_injected(self, pipeline_with_context):
         """Test that memory and identity are injected into the query."""
         pipe, _, captured = pipeline_with_context
-        result = await pipe.process("Tell me about cats", tenant_id="t1")
+        result = await pipe.process("Can you tell me all the details about cats?", tenant_id="t1")
 
         assert not result.error
         context = captured.get("context", {})
@@ -230,7 +237,7 @@ class TestPipelineFallback:
         pipe = CognitivePipeline(bus=bus, config=config)
         await pipe.start()
 
-        result = await pipe.process("test")
+        result = await pipe.process("Please analyze this complex timeout condition")
         assert result.error is True
         assert result.latency_ms > 0
 
@@ -265,7 +272,7 @@ class TestPipelineFallback:
 
         await bus.subscribe("router.query", quick_router)
 
-        result = await pipe.process("test")
+        result = await pipe.process("Can you give me a quick answer to this complex query?")
         assert not result.error
         assert result.text == "Quick answer"
 
