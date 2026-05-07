@@ -160,6 +160,18 @@ class SleepCycleNode(Node):
             if not self.is_sleeping:
                 return
 
+            # ── Phase 1.8: Knowledge Staleness Audit ─────────────────────
+            report["stale_knowledge_audited"] = await self._audit_knowledge_staleness()
+
+            if not self.is_sleeping:
+                return
+
+            # ── Phase 1.9: Task Knowledge Promotion (T2 → T3) ───────────
+            report["knowledge_promoted"] = await self._promote_task_knowledge()
+
+            if not self.is_sleeping:
+                return
+
             # Transition to REM sleep
             self.current_phase = SleepPhase.REM
             logger.info("[SleepNode] Transitioning to REM Phase...")
@@ -721,6 +733,146 @@ class SleepCycleNode(Node):
 
         logger.info("[SleepNode] Dream Journal:\n%s", journal)
         return journal
+
+    async def _audit_knowledge_staleness(self) -> int:
+        """
+        Phase 1.8: Knowledge Staleness Audit.
+
+        Scan web-sourced knowledge for entries past their TTL.
+        Stale entries are marked obsolete so the system hedges when using them.
+
+        Returns the number of stale entries processed.
+        """
+        logger.info("[SleepNode] Running knowledge staleness audit...")
+        processed = 0
+
+        try:
+            # Query the knowledge base for stale web entries
+            req_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="knowledge.stale_check",
+                payload={"ttl_days": 30},
+            )
+
+            try:
+                resp = await self.bus.request("knowledge.stale_check", req_msg, timeout=5.0)
+                stale_entries = resp.payload.get("stale_entries", [])
+            except Exception:
+                # If no handler registered, use direct KB access fallback
+                logger.debug("[SleepNode] No knowledge.stale_check handler, skipping.")
+                return 0
+
+            for entry in stale_entries:
+                doc_id = entry.get("doc_id", "")
+                age_days = entry.get("age_days", 0)
+                meta = entry.get("metadata", {})
+                title = meta.get("source_title", "unknown")
+
+                logger.info(
+                    "[SleepNode] Stale knowledge: '%s' (%.0f days old)",
+                    title,
+                    age_days,
+                )
+
+                # Mark as obsolete — the system will hedge when using it
+                await self.bus.publish(
+                    "knowledge.obsolete",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="knowledge.obsolete",
+                        payload={
+                            "doc_id": doc_id,
+                            "reason": f"Stale: {age_days:.0f} days past TTL",
+                            "source_url": meta.get("source_url", ""),
+                        },
+                    ),
+                )
+                processed += 1
+
+            logger.info(
+                "[SleepNode] Staleness audit complete: %d entries flagged",
+                processed,
+            )
+        except Exception as e:
+            logger.warning("[SleepNode] Staleness audit failed: %s", e)
+
+        return processed
+
+    async def _promote_task_knowledge(self) -> int:
+        """
+        Phase 1.9: Task Knowledge Promotion (T2 → T3).
+
+        Scan episodic memory for task-scoped web research (T2) that was
+        accessed frequently across sessions. Promote to core knowledge (T3)
+        for permanent storage.
+
+        Returns the number of entries promoted.
+        """
+        logger.info("[SleepNode] Checking for task knowledge promotion...")
+        promoted = 0
+
+        try:
+            req_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="memory.retrieve_by_tag",
+                payload={
+                    "tag": "tier:task_knowledge",
+                    "domain": "web_research",
+                    "min_access_count": 3,
+                },
+            )
+
+            try:
+                resp = await self.bus.request("memory.retrieve_by_tag", req_msg, timeout=5.0)
+                candidates = resp.payload.get("entries", [])
+            except Exception:
+                logger.debug("[SleepNode] No memory.retrieve_by_tag handler, skipping.")
+                return 0
+
+            for entry in candidates:
+                content = entry.get("content", "")
+                source_url = entry.get("source_url", "")
+                title = entry.get("source_title", "Promoted Knowledge")
+                access_count = entry.get("access_count", 0)
+
+                if not content:
+                    continue
+
+                # Promote to T3 via knowledge.ingest
+                await self.bus.publish(
+                    "knowledge.ingest",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="knowledge.ingest",
+                        payload={
+                            "content": content,
+                            "url": source_url,
+                            "title": f"[Promoted] {title}",
+                            "trust_score": 0.7,
+                            "tier": "core_knowledge",
+                            "ttl_days": 30,
+                            "source_type": "promotion",
+                            "promotion_reason": f"Accessed {access_count}x across sessions",
+                        },
+                    ),
+                )
+                promoted += 1
+
+                logger.info(
+                    "[SleepNode] Promoted T2→T3: '%s' (accessed %dx)",
+                    title[:60],
+                    access_count,
+                )
+
+        except Exception as e:
+            logger.warning("[SleepNode] Task knowledge promotion failed: %s", e)
+
+        logger.info("[SleepNode] Promotion complete: %d entries promoted", promoted)
+        return promoted
 
     async def _warm_memory_cache(self) -> int:
         """

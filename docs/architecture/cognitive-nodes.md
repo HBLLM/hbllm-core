@@ -174,6 +174,12 @@ The `NodeType` enum defines the categories of nodes:
 - **File:** `hbllm/brain/meta_node.py`
 - **Purpose:** Monitors the brain's own reasoning patterns to identify systematic biases or inefficiencies.
 
+### WebResearchNode
+
+- **Type:** `NodeType.META`
+- **File:** `hbllm/brain/web_research_node.py`
+- **Purpose:** Autonomous knowledge acquisition from the internet. Detects knowledge gaps, searches the web via BrowserNode, verifies source credibility, and ingests validated findings into episodic or semantic memory based on the 3-tier classification system (Information / Task Knowledge / Core Knowledge).
+
 ### CollectiveNode
 
 - **Type:** `NodeType.CORE`
