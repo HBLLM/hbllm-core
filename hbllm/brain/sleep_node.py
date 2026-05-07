@@ -36,7 +36,13 @@ class SleepCycleNode(Node):
     Orchestrates Memory Consolidation and Synaptic Strengthening when idle.
     """
 
-    def __init__(self, node_id: str, idle_timeout_seconds: float = 10.0, llm: Any = None) -> None:
+    def __init__(
+        self,
+        node_id: str,
+        idle_timeout_seconds: float = 10.0,
+        llm: Any = None,
+        self_model: Any = None,
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -48,6 +54,7 @@ class SleepCycleNode(Node):
         self._monitor_task: asyncio.Task[None] | None = None
         self._pending_goals: list[str] = []
         self.llm = llm  # Used for local GraphRAG clustering
+        self.self_model = self_model  # For targeted DPO training on weak domains
 
     @property
     def is_sleeping(self) -> bool:
@@ -299,8 +306,37 @@ class SleepCycleNode(Node):
         return len(turns)
 
     async def _run_self_improvement(self) -> bool:
-        """Phase 2: Trigger Lifelong Continuous DPO overnight."""
+        """Phase 2: Trigger Lifelong Continuous DPO overnight.
+
+        If a SelfModel is available, queries it for declining/weak domains
+        and sends them as priority hints so DPO focuses training where the
+        system is weakest.
+        """
         logger.info("[SleepNode] Initiating Phase 2: Autonomous Continuous DPO...")
+
+        # ── SelfModel-guided priority targeting ──────────────────────────
+        priority_domains: list[str] = []
+        if self.self_model:
+            try:
+                weaknesses = self.self_model.get_weaknesses(max_score=0.6, min_samples=3)
+                metrics = self.self_model.get_metrics()
+                declining = metrics.get("declining", [])
+                # Merge: declining domains first, then general weaknesses
+                seen: set[str] = set()
+                for d in declining + weaknesses:
+                    if d not in seen:
+                        priority_domains.append(d)
+                        seen.add(d)
+                if priority_domains:
+                    logger.info(
+                        "[SleepNode] SelfModel-guided DPO: prioritizing %d weak/declining domains: %s",
+                        len(priority_domains),
+                        priority_domains[:5],
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[SleepNode] SelfModel query failed, proceeding without priority hints: %s", e
+                )
 
         # Create an event to wait for the learner node to respond
         training_complete_event = asyncio.Event()
@@ -316,7 +352,10 @@ class SleepCycleNode(Node):
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
                 topic="system.sleep.dpo_trigger",
-                payload={"mode": "overnight_continuous"},
+                payload={
+                    "mode": "overnight_continuous",
+                    "priority_domains": priority_domains,
+                },
             )
             await self.bus.publish("system.sleep.dpo_trigger", trigger_msg)
 

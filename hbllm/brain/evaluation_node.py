@@ -169,6 +169,11 @@ class EvaluationNode(Node):
 
         This closes the loop: user says "bad" → confidence_error increases →
         GoalManager creates improvement goal → system self-improves.
+
+        For negative feedback, also triggers the micro-learning pipeline:
+        publishes the bad query+response pair to system.micro_learn so
+        LearnerNode can queue a DPO correction when a better response
+        is available (e.g., on retry).
         """
         payload = message.payload
         rating = payload.get("rating", 0)
@@ -193,6 +198,35 @@ class EvaluationNode(Node):
                 actual,
                 confidence_error,
             )
+
+            # ── Micro-learning trigger: negative feedback with a correction ──
+            if rating < 0:
+                query = ctx.get("content", "")
+                bad_response = ctx.get("output", ctx.get("content", ""))
+                correction = payload.get("correction", payload.get("preferred_response", ""))
+
+                if query and bad_response:
+                    micro_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        tenant_id=message.tenant_id,
+                        session_id=message.session_id,
+                        topic="system.micro_learn",
+                        payload={
+                            "query": query,
+                            "bad_response": bad_response,
+                            "correction": correction,
+                            "score": 1.0 - confidence_error,
+                        },
+                        correlation_id=corr_id,
+                    )
+                    await self.bus.publish("system.micro_learn", micro_msg)
+                    logger.info(
+                        "[EvaluationNode] Triggered micro-learning for negative feedback "
+                        "(corr_id=%s, has_correction=%s)",
+                        corr_id[:12],
+                        bool(correction),
+                    )
 
     async def _handle_query(self, message: Message) -> Message | None:
         """Return evaluation stats."""
