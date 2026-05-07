@@ -66,6 +66,9 @@ class SleepCycleNode(Node):
         # Accumulate curiosity goals for processing during sleep
         await self.bus.subscribe("system.sleep.goal", self._collect_goal)
 
+        # Manual trigger
+        await self.bus.subscribe("system.sleep.force", self._handle_force_sleep)
+
         # Start the background idle monitor
         self._monitor_task = asyncio.create_task(self._idle_monitor_loop())
 
@@ -120,8 +123,11 @@ class SleepCycleNode(Node):
         cycle_start = time.time()
         report: dict[str, Any] = {
             "memories_consolidated": 0,
+            "contradictions_resolved": 0,
+            "temporal_refs_normalized": 0,
             "goals_replayed": 0,
             "training_ran": False,
+            "dream_journal": "",
         }
         logger.info(
             "[SleepNode] System Idle for >%.1fs. Entering Deep Sleep (NREM Phase)...",
@@ -131,6 +137,18 @@ class SleepCycleNode(Node):
         try:
             # ── Phase 1: NREM (Memory Consolidation) ────────────────────
             report["memories_consolidated"] = await self._consolidate_memory()
+
+            if not self.is_sleeping:
+                return
+
+            # ── Phase 1.6: Temporal Normalization ────────────────────────
+            report["temporal_refs_normalized"] = await self._normalize_temporal_references()
+
+            if not self.is_sleeping:
+                return
+
+            # ── Phase 1.7: Contradiction Detection & Resolution ─────────
+            report["contradictions_resolved"] = await self._resolve_contradictions()
 
             if not self.is_sleeping:
                 return
@@ -156,8 +174,11 @@ class SleepCycleNode(Node):
         except Exception as e:
             logger.error("[SleepNode] Sleep cycle interrupted by internal error: %s", e)
 
-        # Emit sleep report
+        # ── Phase 4: Dream Journal ───────────────────────────────────────
         report["duration_seconds"] = round(time.time() - cycle_start, 1)
+        report["dream_journal"] = await self._generate_dream_journal(report)
+
+        # Emit sleep report
         await self.bus.publish(
             "system.sleep.report",
             Message(
@@ -369,3 +390,318 @@ class SleepCycleNode(Node):
 
         logger.info("[SleepNode] Replayed %d curiosity goals.", replayed)
         return replayed
+
+    # ── Gap Closers: Contradiction Detection, Temporal Normalization, Dream Journal ──
+
+    async def _resolve_contradictions(self) -> int:
+        """
+        Detect and resolve contradictory facts in the Knowledge Graph.
+
+        Scans for entities that have multiple conflicting relations of the same type
+        from the same source (e.g., "user prefers dark mode" vs "user prefers light mode").
+        Resolves by keeping the most recently created fact.
+
+        Returns:
+            Number of contradictions resolved.
+        """
+        logger.info("[SleepNode] Phase 1.7: Scanning Knowledge Graph for contradictions...")
+        resolved = 0
+
+        try:
+            # Fetch all entities from the knowledge graph
+            kg_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="knowledge.query",
+                payload={"action": "all_entities", "limit": 100},
+            )
+            kg_resp = await self.bus.request("knowledge.query", kg_msg, timeout=5.0)
+            entities = list(kg_resp.payload.get("entities", []))
+
+            if len(entities) < 2:
+                logger.info("[SleepNode] Not enough entities for contradiction scan.")
+                return 0
+
+            # Fetch all relations
+            rel_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="knowledge.query",
+                payload={"action": "all_relations", "limit": 200},
+            )
+            rel_resp = await self.bus.request("knowledge.query", rel_msg, timeout=5.0)
+            relations = list(rel_resp.payload.get("relations", []))
+
+            # Group relations by (source_id, relation_type) to find conflicts
+            from collections import defaultdict
+
+            groups: dict[str, list[dict]] = defaultdict(list)
+            for rel in relations:
+                key = f"{rel.get('source_id', '')}:{rel.get('relation_type', '')}"
+                groups[key].append(rel)
+
+            # Find groups with multiple targets (potential contradictions)
+            for key, rels in groups.items():
+                if len(rels) <= 1:
+                    continue
+
+                # For preference/attribute relations, multiple targets = contradiction
+                rel_type = rels[0].get("relation_type", "")
+                if rel_type not in ("prefers", "is_a", "has"):
+                    continue  # Only flag inherently-exclusive relations
+
+                # Sort by created_at descending — keep newest, prune rest
+                rels_sorted = sorted(rels, key=lambda r: r.get("created_at", 0), reverse=True)
+
+                for stale_rel in rels_sorted[1:]:
+                    prune_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="knowledge.query",
+                        payload={
+                            "action": "remove_relation",
+                            "source_id": stale_rel.get("source_id"),
+                            "target_id": stale_rel.get("target_id"),
+                            "relation_type": stale_rel.get("relation_type"),
+                        },
+                    )
+                    await self.bus.publish("knowledge.query", prune_msg)
+                    resolved += 1
+                    logger.info(
+                        "[SleepNode] Resolved contradiction: pruned stale '%s' "
+                        "relation (kept newest)",
+                        rel_type,
+                    )
+
+        except Exception as e:
+            logger.warning("[SleepNode] Contradiction resolution failed: %s", e)
+
+        logger.info("[SleepNode] Contradiction resolution complete: %d resolved.", resolved)
+        return resolved
+
+    async def _normalize_temporal_references(self) -> int:
+        """
+        Scan episodic memory for relative temporal references ("yesterday",
+        "last week") and replace them with absolute dates.
+
+        Uses the temporal-reasoning plugin's parser to detect references,
+        then rewrites the content with concrete dates based on the
+        memory entry's timestamp.
+
+        Returns:
+            Number of temporal references normalized.
+        """
+        logger.info("[SleepNode] Phase 1.6: Normalizing temporal references in memories...")
+        normalized = 0
+
+        try:
+            from hbllm.plugins.temporal_reasoning.temporal_engine import (
+                parse_temporal_references,
+            )
+        except ImportError:
+            try:
+                # Plugin may be installed under hyphenated path
+                import importlib
+                import sys
+
+                plugin_path = str(
+                    __import__("pathlib").Path(__file__).parent.parent
+                    / "plugins"
+                    / "temporal-reasoning"
+                )
+                if plugin_path not in sys.path:
+                    sys.path.insert(0, plugin_path)
+                mod = importlib.import_module("temporal_engine")
+                parse_temporal_references = mod.parse_temporal_references
+            except Exception:
+                logger.warning(
+                    "[SleepNode] temporal-reasoning plugin not available. "
+                    "Skipping temporal normalization."
+                )
+                return 0
+
+        try:
+            # Fetch recent episodic entries
+            req_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="memory.retrieve_recent",
+                payload={"session_id": "default_session", "limit": 20},
+            )
+            resp = await self.bus.request("memory.retrieve_recent", req_msg, timeout=5.0)
+
+            if resp.type == MessageType.ERROR:
+                return 0
+
+            turns = list(resp.payload.get("turns", []))
+
+            from datetime import datetime, timezone
+
+            for turn in turns:
+                content = turn.get("content", "")
+                if not content:
+                    continue
+
+                refs = parse_temporal_references(content)
+                if not refs:
+                    continue
+
+                # Use the turn's timestamp (or now) as the reference point
+                turn_ts = turn.get("timestamp", time.time())
+                ref_dt = datetime.fromtimestamp(turn_ts, tz=timezone.utc)
+
+                updated_content = content
+                for keyword, delta in refs:
+                    absolute_dt = ref_dt - delta
+                    absolute_str = absolute_dt.strftime("%Y-%m-%d")
+                    # Replace the relative reference with absolute date
+                    updated_content = updated_content.replace(
+                        keyword, f"{keyword} ({absolute_str})"
+                    )
+                    normalized += 1
+
+                if updated_content != content:
+                    # Store the normalized version
+                    store_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="memory.store",
+                        payload={
+                            "session_id": turn.get("session_id", "default_session"),
+                            "role": turn.get("role", "system"),
+                            "content": updated_content,
+                            "normalized": True,
+                        },
+                    )
+                    await self.bus.publish("memory.store", store_msg)
+                    logger.debug(
+                        "[SleepNode] Normalized %d temporal refs in memory entry.",
+                        len(refs),
+                    )
+
+        except Exception as e:
+            logger.warning("[SleepNode] Temporal normalization failed: %s", e)
+
+        logger.info(
+            "[SleepNode] Temporal normalization complete: %d references normalized.",
+            normalized,
+        )
+        return normalized
+
+    async def _generate_dream_journal(self, report: dict[str, Any]) -> str:
+        """
+        Generate a human-readable summary of what the AI learned during sleep.
+
+        This is the "here's what I learned while you were away" experience,
+        equivalent to Claude's /dream output but far more comprehensive.
+
+        Args:
+            report: The accumulated sleep cycle report dict.
+
+        Returns:
+            A formatted dream journal string.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        duration = report.get("duration_seconds", 0)
+
+        sections = []
+        sections.append(f"🌙 Dream Journal — {now}")
+        sections.append(f"Sleep duration: {duration}s")
+        sections.append("")
+
+        # Phase 1: Memory Consolidation
+        mem_count = report.get("memories_consolidated", 0)
+        if mem_count > 0:
+            sections.append(
+                f"📝 Memory Consolidation: Compressed {mem_count} recent "
+                f"conversation turns into long-term semantic memory."
+            )
+        else:
+            sections.append("📝 Memory Consolidation: No new memories to consolidate.")
+
+        # Phase 1.6: Temporal Normalization
+        temp_count = report.get("temporal_refs_normalized", 0)
+        if temp_count > 0:
+            sections.append(
+                f"🕐 Temporal Normalization: Resolved {temp_count} relative time "
+                f"references (e.g., 'yesterday' → absolute dates)."
+            )
+
+        # Phase 1.7: Contradiction Resolution
+        contra_count = report.get("contradictions_resolved", 0)
+        if contra_count > 0:
+            sections.append(
+                f"⚖️ Contradiction Resolution: Detected and pruned {contra_count} "
+                f"conflicting facts from the knowledge graph."
+            )
+
+        # Phase 2: DPO Training
+        if report.get("training_ran"):
+            sections.append(
+                "🧠 Neural Plasticity: Ran autonomous DPO training to strengthen "
+                "preferred response patterns."
+            )
+
+        # Phase 2b: Skills
+        skills = report.get("skills_optimized", 0)
+        if skills:
+            sections.append(f"⚡ Skill Optimization: Replayed and optimized {skills} skill(s).")
+
+        # Phase 3: Curiosity
+        goals = report.get("goals_replayed", 0)
+        if goals > 0:
+            sections.append(
+                f"🔍 Curiosity Exploration: Investigated {goals} knowledge gap(s) "
+                f"identified during active sessions."
+            )
+
+        journal = "\n".join(sections)
+
+        # Store the dream journal in episodic memory
+        try:
+            store_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="memory.store",
+                payload={
+                    "session_id": "dream_journal",
+                    "role": "system",
+                    "content": journal,
+                    "domain": "sleep_cycle",
+                },
+            )
+            await self.bus.publish("memory.store", store_msg)
+            logger.info("[SleepNode] Dream journal stored in memory.")
+        except Exception as e:
+            logger.warning("[SleepNode] Failed to store dream journal: %s", e)
+
+        logger.info("[SleepNode] Dream Journal:\n%s", journal)
+        return journal
+
+    async def _handle_force_sleep(self, message: Message) -> Message | None:
+        """
+        Handle manual sleep trigger (equivalent to Claude's /dream command).
+
+        Allows CLI/chat/API to trigger a consolidation cycle on demand.
+        """
+        if self.is_sleeping:
+            logger.info("[SleepNode] Manual trigger ignored — already sleeping.")
+            return (
+                message.create_response(
+                    {"status": "already_sleeping", "phase": self.current_phase.value}
+                )
+                if message.type == MessageType.QUERY
+                else None
+            )
+
+        logger.info("[SleepNode] Manual consolidation triggered (like /dream).")
+        # Run the sleep cycle without waiting for the idle timeout
+        asyncio.create_task(self._enter_sleep_cycle())
+
+        if message.type == MessageType.QUERY:
+            return message.create_response(
+                {"status": "consolidation_started", "message": "Dream cycle initiated."}
+            )
+        return None

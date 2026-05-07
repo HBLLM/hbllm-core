@@ -11,11 +11,11 @@ Unlike stateless LLMs that forget every interaction after the session ends, HBLL
 
 ---
 
-## Biological Inspiration: The 3-Phase Consolidation
+## Biological Inspiration: The Multi-Phase Consolidation
 
-Human brains use sleep to move information from short-term hippocampus storage to long-term cortical networks. HBLLM mirrors this with a **3-Phase Sleep Cycle** orchestrated by the `SleepCycleNode`.
+Human brains use sleep to move information from short-term hippocampus storage to long-term cortical networks. HBLLM mirrors this with a **multi-phase Sleep Cycle** orchestrated by the `SleepCycleNode`.
 
-### Phase 1: Memory Replay & Consolidation
+### Phase 1: Memory Replay & Consolidation (NREM)
 **Code:** `_consolidate_memory()`
 
 During the day, the **Episodic Memory** (System 2) records raw interaction logs. During sleep:
@@ -24,7 +24,23 @@ During the day, the **Episodic Memory** (System 2) records raw interaction logs.
 3.  **GraphRAG Clustering:** Entities and relations are extracted and clustered into thematic **Communities** in the Knowledge Graph.
 4.  **Synaptic Pruning:** Low-salience or redundant logs are archived, keeping the live vector space efficient.
 
-### Phase 2: Artificial Neuroplasticity (Continuous DPO)
+### Phase 1.6: Temporal Normalization
+**Code:** `_normalize_temporal_references()`
+
+Relative time references in stored memories become stale and misleading over time. During this sub-phase:
+- Episodic memory entries are scanned for temporal keywords ("yesterday", "last week", "recently").
+- Each relative reference is annotated with an absolute date (e.g., `yesterday (2026-05-06)`) based on the memory entry's original timestamp.
+- The `temporal-reasoning` plugin's parser (`parse_temporal_references()`) is reused for detection.
+
+### Phase 1.7: Contradiction Resolution
+**Code:** `_resolve_contradictions()`
+
+As the Knowledge Graph grows, contradictory facts can accumulate (e.g., "user prefers dark mode" vs "user prefers light mode"). This sub-phase:
+- Scans all KG relations grouped by `(source, relation_type)`.
+- Detects conflicts where inherently-exclusive relation types (`prefers`, `is_a`, `has`) have multiple targets from the same source.
+- Resolves by keeping the **most recently created** fact and pruning stale entries.
+
+### Phase 2: Artificial Neuroplasticity (Continuous DPO) — REM
 **Code:** `_run_self_improvement()`
 
 This is where the brain's weights actually change.
@@ -41,17 +57,42 @@ If the `CuriosityNode` identified knowledge gaps or "exploratory goals" during t
 - It "imagines" potential scenarios or searches its internal Knowledge Graph to bridge conceptual distances.
 - Resulting insights are stored back in **Semantic Memory**, ready for the next active session.
 
+### Phase 4: Dream Journal
+**Code:** `_generate_dream_journal()`
+
+After all phases complete, the system generates a human-readable **Dream Journal** summarizing everything it learned:
+- How many memories were compressed into long-term storage
+- How many temporal references were normalized
+- How many contradictions were detected and resolved
+- Whether DPO training ran and what it learned
+- How many curiosity gaps were explored
+
+The Dream Journal is stored in episodic memory and included in the `system.sleep.report` event payload, enabling any UI to display a "here's what I learned while you were away" experience.
+
 ---
 
 ## Execution & Triggers
 
-The Sleep Cycle can be triggered in two ways:
+The Sleep Cycle can be triggered in three ways:
 
 ### 1. Auto-Trigger (Idle Timeout)
 The `SleepCycleNode` monitors the message bus. If no `router.query` is detected for a configurable duration (default: 6 hours), the system automatically enters deep sleep.
 - **Wake-on-Activity:** If a user query arrives during sleep, the system immediately aborts the cycle and wakes up to provide sub-millisecond response time.
 
-### 2. Manual Trigger (API)
+### 2. Manual Trigger via Bus (`/dream`)
+Any node or CLI can publish to `system.sleep.force` to trigger an immediate consolidation cycle:
+
+```python
+# Programmatic trigger (equivalent to Claude's /dream)
+await bus.publish("system.sleep.force", Message(
+    type=MessageType.QUERY,
+    source_node_id="cli",
+    topic="system.sleep.force",
+    payload={}
+))
+```
+
+### 3. REST API Trigger
 For SaaS platforms, you can manually trigger a consolidation cycle for a specific tenant:
 
 ```bash
@@ -65,12 +106,16 @@ curl -X POST "https://api.hbllm.ai/v1/system/sleep" \
 
 ## Architectural Advantages
 
-| Feature | Monolithic LLM (OpenAI) | HBLLM (Human Brain) |
+| Feature | Monolithic LLM (OpenAI/Claude) | HBLLM (Human Brain) |
 |---|---|---|
-| **Memory** | Stateless / External RAG | **Integrated Consolidation** |
-| **Learning** | Manual Fine-Tuning | **Autonomous Continuous DPO** |
+| **Memory** | Flat text files (MEMORY.md) | **Structured GraphRAG + 5-tier Memory** |
+| **Learning** | None (no weight updates) | **Autonomous Continuous DPO** |
+| **Contradiction Resolution** | Text dedup only | **KG-level semantic resolution** |
+| **Temporal Normalization** | Relative → absolute dates | **Plugin-powered with absolute annotation** |
+| **Curiosity** | None | **Autonomous knowledge gap exploration** |
 | **Hardware** | Constant 80GB+ VRAM | **Low-VRAM (Inference) / Batch (Sleep)** |
 | **Privacy** | Shared Global Weights | **Per-Tenant Neural Isolation** |
+| **Observability** | `/dream` command | **Dream Journal with structured reporting** |
 | **Evolution** | Static until next release | **Grows smarter every sleep cycle** |
 
 ---
@@ -80,3 +125,4 @@ curl -X POST "https://api.hbllm.ai/v1/system/sleep" \
 - **VRAM/CPU Offset:** Consolidation is a batch process. It is configured to run at low priority (nice level) to ensure it doesn't starve the host OS of resources.
 - **Incremental:** The system only processes *new* memories since the last sleep cycle, keeping each cycle duration predictable.
 - **Safety:** The `SentinelNode` monitors sleep-cycle training to ensure the model doesn't "drift" into unstable or unethical states during autonomous refinement.
+
