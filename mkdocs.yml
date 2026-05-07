@@ -143,6 +143,7 @@ nav:
       - Brain Subsystems: api/brain-subsystems.md
       - Actions & Tools: api/actions.md
       - Governance & Security: api/governance.md
+      - Security Architecture: ../SECURITY.md
       - Memory: api/memory.md
       - Plugin System: api/plugins.md
       - Model Internals: api/model.md
