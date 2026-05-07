@@ -133,12 +133,22 @@ class CuriosityNode(Node):
         self.goal_queue = GoalQueue()
         self._last_dispatch = 0.0
 
+        # v2: Predictive Curiosity — track topic patterns
+        self._topic_sequence: list[str] = []  # Last N topics discussed
+        self._topic_cooccurrence: dict[str, dict[str, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )  # topic_a → topic_b → count
+        self._max_sequence_len = 100
+        self._prediction_cache: list[str] = []  # Pre-researched topics
+
     async def on_start(self) -> None:
         logger.info("Starting CuriosityNode (threshold=%d)", self.uncertainty_threshold)
         await self.bus.subscribe("system.feedback", self._handle_feedback)
         await self.bus.subscribe("workspace.fallback", self._handle_fallback)
         await self.bus.subscribe("workspace.thought", self._handle_low_confidence_thought)
         await self.bus.subscribe("curiosity.query", self._handle_query)
+        # v2: Predictive Curiosity — observe successful queries for patterns
+        await self.bus.subscribe("system.experience", self._handle_experience_for_prediction)
 
     async def on_stop(self) -> None:
         logger.info(
@@ -297,3 +307,91 @@ class CuriosityNode(Node):
         """Return the topics with the most uncertainty events."""
         sorted_topics = sorted(self.topic_counts.items(), key=lambda x: x[1], reverse=True)
         return [{"topic": topic, "event_count": count} for topic, count in sorted_topics[:top_k]]
+
+    # ── v2: Predictive Curiosity ──────────────────────────────────────
+
+    async def _handle_experience_for_prediction(self, message: Message) -> None:
+        """Track topic patterns from ALL queries (not just failures) for prediction."""
+        payload = message.payload
+        topic = payload.get("intent", payload.get("domain", ""))
+        if not topic:
+            return
+
+        # Record the topic in the sequence
+        if self._topic_sequence:
+            prev_topic = self._topic_sequence[-1]
+            if prev_topic != topic:
+                self._topic_cooccurrence[prev_topic][topic] += 1
+
+        self._topic_sequence.append(topic)
+        if len(self._topic_sequence) > self._max_sequence_len:
+            self._topic_sequence = self._topic_sequence[-self._max_sequence_len :]
+
+    def predict_next_topics(self, top_k: int = 3) -> list[dict[str, Any]]:
+        """
+        Predict what the user is likely to ask about next.
+
+        Uses topic co-occurrence patterns: if the user just discussed topic A,
+        and historically A is often followed by B, predict B.
+
+        Returns a list of {topic, probability} dicts.
+        """
+        if not self._topic_sequence:
+            return []
+
+        current_topic = self._topic_sequence[-1]
+        followers = self._topic_cooccurrence.get(current_topic, {})
+
+        if not followers:
+            return []
+
+        total = sum(followers.values())
+        predictions = [
+            {"topic": topic, "probability": round(count / total, 3)}
+            for topic, count in sorted(followers.items(), key=lambda x: x[1], reverse=True)
+        ]
+        return predictions[:top_k]
+
+    async def generate_predictive_goals(self) -> int:
+        """
+        Pre-research predicted topics — queue research goals for topics
+        the user is likely to ask about next.
+
+        Called by SleepCycleNode during the curiosity replay phase.
+        Returns the number of predictive goals generated.
+        """
+        predictions = self.predict_next_topics(top_k=3)
+        generated = 0
+
+        for pred in predictions:
+            topic = pred["topic"]
+            prob = pred["probability"]
+
+            # Only pre-research if the probability is meaningful
+            if prob < 0.2:
+                continue
+
+            # Don't re-research topics we've already explored
+            if topic in self._prediction_cache:
+                continue
+
+            self.goal_queue.add_or_update(
+                topic=topic,
+                description=f"Predictive research: user likely to ask about '{topic}' "
+                f"(probability={prob:.0%})",
+                priority=prob,
+                event_count=0,
+            )
+            self._prediction_cache.append(topic)
+            generated += 1
+            logger.info(
+                "[CuriosityNode] Predictive goal: '%s' (p=%.0f%%)",
+                topic,
+                prob * 100,
+            )
+
+        # Cap prediction cache to prevent unbounded growth
+        if len(self._prediction_cache) > 50:
+            self._prediction_cache = self._prediction_cache[-50:]
+
+        return generated

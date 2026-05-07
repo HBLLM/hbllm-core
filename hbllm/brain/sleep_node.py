@@ -196,6 +196,9 @@ class SleepCycleNode(Node):
             ),
         )
 
+        # ── Phase 5: Proactive Memory Warming ────────────────────────────
+        await self._warm_memory_cache()
+
         # Reset activity timer so we don't immediately go back to sleep unless idle again
         self._last_system_activity = time.time()
         self.current_phase = SleepPhase.AWAKE
@@ -718,6 +721,90 @@ class SleepCycleNode(Node):
 
         logger.info("[SleepNode] Dream Journal:\n%s", journal)
         return journal
+
+    async def _warm_memory_cache(self) -> int:
+        """
+        Phase 5: Proactive Memory Warming — pre-fetch context on wake-up.
+
+        After sleep completes, pre-loads recent conversation topics and
+        last session summary into the memory fast-path so the system
+        "remembers" without being asked. No competitor does this.
+
+        Returns the number of topics warmed.
+        """
+        logger.info("[SleepNode] Warming memory cache for next session...")
+        warmed = 0
+
+        try:
+            # 1. Fetch last 5 conversation turns for topic extraction
+            req_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="memory.retrieve_recent",
+                payload={"session_id": "default_session", "limit": 5},
+            )
+            resp = await self.bus.request("memory.retrieve_recent", req_msg, timeout=3.0)
+            turns = resp.payload.get("turns", [])
+
+            if not turns:
+                logger.info("[SleepNode] No recent turns to warm cache with.")
+                return 0
+
+            # 2. Extract unique topic keywords from recent turns
+            topics: set[str] = set()
+            for turn in turns:
+                content = turn.get("content", "") if isinstance(turn, dict) else ""
+                # Extract significant words (>4 chars, not common stop words)
+                stop_words = {
+                    "about",
+                    "after",
+                    "before",
+                    "could",
+                    "would",
+                    "should",
+                    "there",
+                    "their",
+                    "these",
+                    "those",
+                    "where",
+                    "which",
+                    "being",
+                    "going",
+                    "doing",
+                    "having",
+                    "think",
+                    "thing",
+                }
+                words = content.lower().split()
+                for word in words:
+                    clean = word.strip(".,!?\"'()[]{}:;")
+                    if len(clean) > 4 and clean not in stop_words:
+                        topics.add(clean)
+
+            # 3. Pre-warm top-5 topics via memory retrieval
+            top_topics = sorted(topics)[:5]
+            for topic in top_topics:
+                try:
+                    warm_msg = Message(
+                        type=MessageType.QUERY,
+                        source_node_id=self.node_id,
+                        topic="memory.retrieve_recent",
+                        payload={"query": topic, "limit": 3, "warm_cache": True},
+                    )
+                    await self.bus.request("memory.retrieve_recent", warm_msg, timeout=2.0)
+                    warmed += 1
+                except Exception:
+                    pass  # Non-critical — skip if individual topic warm fails
+
+            logger.info(
+                "[SleepNode] Memory cache warmed with %d topics: %s",
+                warmed,
+                top_topics,
+            )
+        except Exception as e:
+            logger.warning("[SleepNode] Memory cache warming failed (non-critical): %s", e)
+
+        return warmed
 
     async def _handle_force_sleep(self, message: Message) -> Message | None:
         """
