@@ -150,12 +150,65 @@ class CuriosityNode(Node):
         # v2: Predictive Curiosity — observe successful queries for patterns
         await self.bus.subscribe("system.experience", self._handle_experience_for_prediction)
 
+        # Start predictive exploration loop
+        import asyncio
+
+        self._predictive_task = asyncio.create_task(self._predictive_exploration_loop())
+
+    async def _predictive_exploration_loop(self) -> None:
+        """Background loop to periodically trigger predictive web research."""
+        import asyncio
+
+        while self._running:
+            await asyncio.sleep(
+                self.goal_dispatch_interval * 2
+            )  # Check less frequently than dispatch
+            await self._predictive_exploration()
+
+    async def _predictive_exploration(self) -> None:
+        """Identify trending topics and autonomously trigger web research ahead of time."""
+        # Get predictions
+        predictions = self.predict_next_topics(top_k=2)
+        for pred in predictions:
+            topic = pred["topic"]
+            prob = pred["probability"]
+
+            if prob < 0.3 or topic in self._prediction_cache:
+                continue
+
+            self._prediction_cache.append(topic)
+            logger.info(
+                "[CuriosityNode] Proactively researching predicted topic: '%s' (p=%.2f)",
+                topic,
+                prob,
+            )
+
+            # Dispatch to WebResearchNode
+            from hbllm.network.messages import Message, MessageType
+
+            await self.publish(
+                "system.research.request",
+                Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="system.research.request",
+                    payload={
+                        "topic": topic,
+                        "query": f"Learn background context about {topic}",
+                        "urgency": "low",
+                        "context": f"Predictive exploration based on recent patterns (prob={prob})",
+                    },
+                ),
+            )
+
     async def on_stop(self) -> None:
         logger.info(
             "Stopping CuriosityNode (%d events, %d goals)",
             len(self.events),
             len(self.goal_queue.goals),
         )
+        if hasattr(self, "_predictive_task") and self._predictive_task:
+            self._predictive_task.cancel()
 
     async def handle_message(self, message: Message) -> Message | None:
         return None

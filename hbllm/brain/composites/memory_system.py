@@ -84,6 +84,36 @@ class MemorySystem(Node):
 
         logger.info("MemorySystem started with sub-nodes: memory, experience, sleep")
 
+        # Trigger proactive memory warming
+        import asyncio
+
+        asyncio.create_task(self._warm_memory_cache())
+
+    async def _warm_memory_cache(self) -> None:
+        """Proactively warm the semantic cache with recent high-salience concepts."""
+        try:
+            # Short delay to let the rest of the system boot
+            import asyncio
+
+            await asyncio.sleep(2.0)
+
+            if self._memory and hasattr(self._memory, "knowledge_graph"):
+                kg = self._memory.knowledge_graph
+                # Get the last 5 entities added to the KG
+                entities = list(kg._entities.values())[-5:]
+                if not entities:
+                    logger.debug("[MemorySystem] No entities in KG to warm cache.")
+                    return
+
+                for entity in entities:
+                    logger.debug("[MemorySystem] Warming cache for concept: %s", entity.label)
+                    await asyncio.to_thread(
+                        self._memory.semantic_db.search, entity.label, top_k=5, tenant_id="default"
+                    )
+            logger.info("[MemorySystem] Proactive memory warming complete.")
+        except Exception as e:
+            logger.warning("[MemorySystem] Failed to warm memory cache: %s", e)
+
     async def on_stop(self) -> None:
         for sub in [self._memory, self._experience, self._sleep]:
             if sub is not None:

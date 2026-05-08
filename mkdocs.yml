@@ -123,6 +123,8 @@ nav:
       - Cognitive Nodes: architecture/cognitive-nodes.md
       - Sleep Cycle: architecture/sleep-cycle.md
       - Web Research: architecture/web-research.md
+      - Self-Model: architecture/self-model.md
+      - Evaluation Loop: architecture/evaluation-loop.md
       - Message Bus: architecture/message-bus.md
       - Memory Systems: architecture/memory-systems.md
       - Network Resilience: architecture/network-resilience.md

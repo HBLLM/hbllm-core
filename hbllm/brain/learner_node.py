@@ -401,20 +401,43 @@ class LearnerNode(Node):
 
         # Path 2: High-scoring → distillation bank
         elif overall_score > self.distillation_threshold:
-            if len(self._distillation_bank) < self._max_distillation_bank:
-                self._distillation_bank.append(
-                    {
-                        "query": query,
-                        "response": response,
-                    }
+            # Check if this query is in the micro_learn_queue (a retry correction)
+            queued_item = next(
+                (item for item in self._micro_learn_queue if item.get("query") == query), None
+            )
+            if queued_item:
+                bad_response = queued_item.get("bad_response", "")
+                logger.info(
+                    "[LearnerNode] Matched high-scoring retry to queued bad response. Triggering micro-learning."
                 )
-                self._distillation_count += 1
-                logger.debug(
-                    "[LearnerNode] Banked high-confidence response for distillation "
-                    "(score=%.2f, bank=%d)",
-                    overall_score,
-                    len(self._distillation_bank),
+                # Create a task so we don't block the event handler
+                import asyncio
+
+                asyncio.create_task(
+                    self.micro_learn(
+                        query=query,
+                        bad_response=bad_response,
+                        good_response=response,
+                    )
                 )
+                self._micro_learn_queue = [
+                    item for item in self._micro_learn_queue if item.get("query") != query
+                ]
+            else:
+                if len(self._distillation_bank) < self._max_distillation_bank:
+                    self._distillation_bank.append(
+                        {
+                            "query": query,
+                            "response": response,
+                        }
+                    )
+                    self._distillation_count += 1
+                    logger.debug(
+                        "[LearnerNode] Banked high-confidence response for distillation "
+                        "(score=%.2f, bank=%d)",
+                        overall_score,
+                        len(self._distillation_bank),
+                    )
 
     async def _handle_micro_learn_event(self, message: Message) -> None:
         """
