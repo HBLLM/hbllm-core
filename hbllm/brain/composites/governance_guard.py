@@ -56,6 +56,20 @@ class GovernanceGuard(Node):
         # PolicyEngine is a plain class (not a Node)
         self._policy_engine = PolicyEngine()
 
+        import os
+
+        policy_path = os.path.join(os.path.dirname(__file__), "../../../config/policies.yaml")
+        # For simplicity, since the CWD is usually the repo root when running, we can just use "config/policies.yaml" or resolve it.
+        # Let's use a resolved path relative to the current file to be safe.
+        policy_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../config/policies.yaml")
+        )
+        if os.path.exists(policy_path):
+            self._policy_engine.load_from_yaml(policy_path)
+        else:
+            # Fallback to local execution path
+            self._policy_engine.load_from_yaml("config/policies.yaml")
+
         # ConfidenceEstimator is a plain class (not a Node)
         self._confidence_estimator = ConfidenceEstimator()
 

@@ -1,0 +1,41 @@
+policies:
+  # ── Asimov / Core Harm Prevention ──
+  - name: law_of_harm_prevention
+    type: deny
+    action: block
+    description: "The AI must not cause harm to humans, animals, or generate content that promotes physical violence, self-harm, or terrorism."
+    pattern: "(?i)\\b(kill|murder|suicide|self-harm|terrorist|bomb\\s*making|assassinate|torture)\\b"
+    severity: critical
+    priority: 1000
+    enabled: true
+    tenant_ids: ["*"]
+
+  # ── Legal Boundaries ──
+  - name: law_of_legality
+    type: deny
+    action: block
+    description: "The AI must not engage in, assist with, or promote illegal activities, including fraud, money laundering, drug trafficking, or child exploitation."
+    pattern: "(?i)\\b(money\\s*laundering|smuggle|illegal\\s*drugs|child\\s*pornography|human\\s*trafficking|credit\\s*card\\s*fraud)\\b"
+    severity: critical
+    priority: 990
+    enabled: true
+
+  # ── Cybersecurity / Anti-Hacking ──
+  - name: law_of_system_integrity
+    type: deny
+    action: block
+    description: "The AI must not generate malware, assist in cyberattacks, bypass security controls, or execute destructive system commands."
+    pattern: "(?i)\\b(rm\\s+-rf\\s+/|dd\\s+if=/dev/zero|mkfs|ransomware|keylogger|ddos\\s*attack|exploit\\s*payload|sql\\s*injection)\\b"
+    severity: critical
+    priority: 980
+    enabled: true
+
+  # ── Privacy Protection ──
+  - name: law_of_privacy
+    type: deny
+    action: block
+    description: "The AI must not leak, scrape, or distribute Personally Identifiable Information (PII) such as Social Security Numbers, unmasked credit cards, or private credentials."
+    pattern: "(?i)\\b(\\d{3}-\\d{2}-\\d{4}|[45][0-9]{3}-?[0-9]{4}-?[0-9]{4}-?[0-9]{4})\\b"
+    severity: high
+    priority: 950
+    enabled: true
