@@ -1,3 +1,10 @@
+"""Generalized event-driven task scheduler backed by SQLite.
+
+Manages a local SQLite database of scheduled tasks and emits them onto the
+MessageBus when they become due. Supports one-off and recurring cron-style
+triggers via human-readable interval expressions (e.g. 'every 5 minutes').
+"""
+
 import asyncio
 import json
 import logging
@@ -85,8 +92,69 @@ class SchedulerNode(Node):
             description="Proactive event scheduler and autonomous task runner.",
         )
 
+    # ── Sync SQLite helpers (safe to call via asyncio.to_thread) ──────────
+
+    def _db_get_due_tasks(self, now: float) -> list[dict[str, Any]]:
+        """Return all pending tasks whose trigger_time <= now."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM scheduled_tasks WHERE status = 'pending' AND trigger_time <= ?",
+                (now,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def _db_mark_processing(self, task_id: str) -> None:
+        """Transition a task to the 'processing' state."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE scheduled_tasks SET status = 'processing' WHERE task_id = ?",
+                (task_id,),
+            )
+
+    def _db_resolve_task(self, task: dict[str, Any], success: bool, now: float) -> str:
+        """Persist the post-execution state of a task.
+
+        Returns an outcome string: 'rescheduled', 'completed', 'retrying', or 'failed'.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            if success:
+                if task["cron_expression"]:
+                    interval = parse_interval_seconds(task["cron_expression"])
+                    if interval and interval > 0:
+                        conn.execute(
+                            "UPDATE scheduled_tasks SET status = 'pending', trigger_time = ? WHERE task_id = ?",
+                            (now + interval, task["task_id"]),
+                        )
+                        return "rescheduled"
+                    else:
+                        logger.warning(
+                            "Could not parse cron expression '%s' for task %s; marking completed",
+                            task["cron_expression"],
+                            task["task_id"],
+                        )
+                conn.execute(
+                    "UPDATE scheduled_tasks SET status = 'completed' WHERE task_id = ?",
+                    (task["task_id"],),
+                )
+                return "completed"
+            else:
+                if task["retry_policy"] == "retry":
+                    conn.execute(
+                        "UPDATE scheduled_tasks SET status = 'pending', trigger_time = ? WHERE task_id = ?",
+                        (now + 60.0, task["task_id"]),
+                    )
+                    return "retrying"
+                conn.execute(
+                    "UPDATE scheduled_tasks SET status = 'failed' WHERE task_id = ?",
+                    (task["task_id"],),
+                )
+                return "failed"
+
+    # ── Schema init ──────────────────────────────────────────────────────────
+
     def _init_db(self) -> None:
-        """Initialize the SQLite schema."""
+        """Initialize the SQLite schema (called synchronously at construction time)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
@@ -235,81 +303,29 @@ class SchedulerNode(Node):
             await asyncio.sleep(self.tick_interval)
 
     async def _process_due_tasks(self) -> None:
-        """Query tasks that are past their trigger_time and pending."""
+        """Query tasks past their trigger_time and dispatch them.
+
+        All SQLite operations are offloaded to a thread pool via
+        ``asyncio.to_thread`` to avoid blocking the event loop.
+        """
         now = time.time()
-        due_tasks = []
-
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM scheduled_tasks WHERE status = 'pending' AND trigger_time <= ?",
-                (now,),
-            )
-            due_tasks = [dict(row) for row in cursor.fetchall()]
-
+        due_tasks = await asyncio.to_thread(self._db_get_due_tasks, now)
         if not due_tasks:
             return
 
         for task in due_tasks:
-            # Mark processing
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    "UPDATE scheduled_tasks SET status = 'processing' WHERE task_id = ?",
-                    (task["task_id"],),
-                )
+            await asyncio.to_thread(self._db_mark_processing, task["task_id"])
 
             success = await self._execute_task(task)
 
-            # Post-execution resolution
-            with sqlite3.connect(self.db_path) as conn:
-                if success:
-                    # If it has a cron/interval expression, reschedule for next occurrence.
-                    if task["cron_expression"]:
-                        interval = parse_interval_seconds(task["cron_expression"])
-                        if interval and interval > 0:
-                            next_trigger = now + interval
-                            conn.execute(
-                                "UPDATE scheduled_tasks SET status = 'pending', trigger_time = ? WHERE task_id = ?",
-                                (next_trigger, task["task_id"]),
-                            )
-                            self._tasks_rescheduled += 1
-                            logger.debug(
-                                "Rescheduled recurring task %s for +%.0fs",
-                                task["task_id"],
-                                interval,
-                            )
-                        else:
-                            # Unparseable cron expression — complete and warn
-                            conn.execute(
-                                "UPDATE scheduled_tasks SET status = 'completed' WHERE task_id = ?",
-                                (task["task_id"],),
-                            )
-                            self._tasks_completed += 1
-                            logger.warning(
-                                "Could not parse cron expression '%s' for task %s; marking completed",
-                                task["cron_expression"],
-                                task["task_id"],
-                            )
-                    else:
-                        conn.execute(
-                            "UPDATE scheduled_tasks SET status = 'completed' WHERE task_id = ?",
-                            (task["task_id"],),
-                        )
-                        self._tasks_completed += 1
-                else:
-                    if task["retry_policy"] == "retry":
-                        # Simplistic backoff: retry in 60s
-                        new_trigger = now + 60.0
-                        conn.execute(
-                            "UPDATE scheduled_tasks SET status = 'pending', trigger_time = ? WHERE task_id = ?",
-                            (new_trigger, task["task_id"]),
-                        )
-                    else:
-                        conn.execute(
-                            "UPDATE scheduled_tasks SET status = 'failed' WHERE task_id = ?",
-                            (task["task_id"],),
-                        )
-                        self._tasks_failed += 1
+            outcome = await asyncio.to_thread(self._db_resolve_task, task, success, now)
+            if outcome == "rescheduled":
+                self._tasks_rescheduled += 1
+                logger.debug("Rescheduled recurring task %s", task["task_id"])
+            elif outcome == "completed":
+                self._tasks_completed += 1
+            elif outcome == "failed":
+                self._tasks_failed += 1
 
     async def _execute_task(self, task: dict[str, Any]) -> bool:
         """Publish the scheduled task to the MessageBus."""

@@ -10,6 +10,7 @@ cross-node memory coordination overhead.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -84,10 +85,15 @@ class MemorySystem(Node):
 
         logger.info("MemorySystem started with sub-nodes: memory, experience, sleep")
 
-        # Trigger proactive memory warming
-        import asyncio
-
-        asyncio.create_task(self._warm_memory_cache())
+        # Trigger proactive memory warming (non-blocking)
+        _warm_task = asyncio.create_task(self._warm_memory_cache())
+        _warm_task.add_done_callback(
+            lambda t: (
+                logger.error("[MemorySystem] _warm_memory_cache raised: %s", t.exception())
+                if not t.cancelled() and t.exception()
+                else None
+            )
+        )
 
     async def _warm_memory_cache(self) -> None:
         """Proactively warm the semantic cache with recent high-salience concepts."""

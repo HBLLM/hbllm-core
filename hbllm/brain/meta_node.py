@@ -1,3 +1,10 @@
+"""Meta-Reasoning Supervisor node.
+
+Monitors system-wide user feedback and, upon detecting a systemic weakness
+in a specific domain, orchestrates a self-improvement loop by persisting
+failed interactions to disk and publishing a ``system.improve`` event.
+"""
+
 import asyncio
 import json
 import logging
@@ -47,6 +54,24 @@ class MetaReasoningNode(Node):
         self._db_path = os.path.join(self.reflection_dir, "meta_feedback.db")
         self._init_db()
         self._load_from_db()
+
+    # ── Sync SQLite helpers (safe for asyncio.to_thread) ──────────────────
+
+    def _db_insert_feedback(self, domain: str, instruction: str, response: str) -> None:
+        """Persist a negative-feedback sample to SQLite."""
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                "INSERT INTO negative_feedback (domain, instruction, response, created_at)"
+                " VALUES (?, ?, ?, ?)",
+                (domain, instruction, response, time.time()),
+            )
+
+    def _db_clear_feedback(self, domain: str) -> None:
+        """Delete all feedback rows for *domain* from SQLite."""
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("DELETE FROM negative_feedback WHERE domain = ?", (domain,))
+
+    # ── Schema init & restore ──────────────────────────────────────────────
 
     def _init_db(self) -> None:
         """Initialize SQLite schema for persistent feedback storage."""
@@ -134,13 +159,10 @@ class MetaReasoningNode(Node):
                 }
                 self.negative_feedback_buffer[domain].append(sample)
 
-                # Persist to SQLite
                 try:
-                    with sqlite3.connect(self._db_path) as conn:
-                        conn.execute(
-                            "INSERT INTO negative_feedback (domain, instruction, response, created_at) VALUES (?, ?, ?, ?)",
-                            (domain, payload.prompt, payload.response, time.time()),
-                        )
+                    await asyncio.to_thread(
+                        self._db_insert_feedback, domain, payload.prompt, payload.response
+                    )
                 except Exception as e:
                     logger.warning("Failed to persist feedback to SQLite: %s", e)
 
@@ -207,8 +229,7 @@ class MetaReasoningNode(Node):
         self.negative_feedback_buffer[domain] = []
         self._last_reflection_time[domain] = time.time()
         try:
-            with sqlite3.connect(self._db_path) as conn:
-                conn.execute("DELETE FROM negative_feedback WHERE domain = ?", (domain,))
+            await asyncio.to_thread(self._db_clear_feedback, domain)
         except Exception as e:
             logger.warning("Failed to clear SQLite feedback for domain '%s': %s", domain, e)
 

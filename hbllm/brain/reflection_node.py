@@ -543,7 +543,16 @@ class ReflectionNode(Node):
                     topic="system.induction.request",
                     payload={"gap": insight.description},
                 )
-                asyncio.create_task(self.bus.publish("system.induction.request", induction_msg))
+                _ind_task = asyncio.create_task(
+                    self.bus.publish("system.induction.request", induction_msg)
+                )
+                _ind_task.add_done_callback(
+                    lambda t: (
+                        logger.error("[ReflectionNode] induction publish raised: %s", t.exception())
+                        if not t.cancelled() and t.exception()
+                        else None
+                    )
+                )
                 actions.append(f"Triggered autonomous skill induction for: {insight.description}")
 
                 # [NEW] [Hive Spawning] If gap is severe, request a new specialist agent
@@ -560,7 +569,18 @@ class ReflectionNode(Node):
                             "context": insight.description,
                         },
                     )
-                    asyncio.create_task(self.bus.publish("system.swarm.spawn", spawn_msg))
+                    _spawn_task = asyncio.create_task(
+                        self.bus.publish("system.swarm.spawn", spawn_msg)
+                    )
+                    _spawn_task.add_done_callback(
+                        lambda t: (
+                            logger.error(
+                                "[ReflectionNode] swarm.spawn publish raised: %s", t.exception()
+                            )
+                            if not t.cancelled() and t.exception()
+                            else None
+                        )
+                    )
                     actions.append(
                         f"Triggered autonomous Hive Spawn for expert in: {insight.description}"
                     )

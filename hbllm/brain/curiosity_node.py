@@ -9,6 +9,7 @@ and publishes them to the Planner for investigation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -151,18 +152,12 @@ class CuriosityNode(Node):
         await self.bus.subscribe("system.experience", self._handle_experience_for_prediction)
 
         # Start predictive exploration loop
-        import asyncio
-
-        self._predictive_task = asyncio.create_task(self._predictive_exploration_loop())
+        self._predict_loop_task = asyncio.create_task(self._predictive_exploration_loop())
 
     async def _predictive_exploration_loop(self) -> None:
-        """Background loop to periodically trigger predictive web research."""
-        import asyncio
-
+        """Background loop: periodically run predictive research."""
         while self._running:
-            await asyncio.sleep(
-                self.goal_dispatch_interval * 2
-            )  # Check less frequently than dispatch
+            await asyncio.sleep(self.goal_dispatch_interval * 2)
             await self._predictive_exploration()
 
     async def _predictive_exploration(self) -> None:
@@ -184,8 +179,6 @@ class CuriosityNode(Node):
             )
 
             # Dispatch to WebResearchNode
-            from hbllm.network.messages import Message, MessageType
-
             await self.publish(
                 "system.research.request",
                 Message(

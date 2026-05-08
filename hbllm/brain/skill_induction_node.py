@@ -8,6 +8,7 @@ sandboxed Python Tool that can be registered by the Agent.
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 import time
 from typing import Any
@@ -75,8 +76,6 @@ class SkillInductionNode(Node):
         for task in self._active_tasks:
             task.cancel()
         if self._active_tasks:
-            import asyncio
-
             await asyncio.gather(*self._active_tasks, return_exceptions=True)
             self._active_tasks.clear()
 
@@ -91,8 +90,6 @@ class SkillInductionNode(Node):
         logger.info("Inducing skill for gap: %s", gap_description)
 
         # Create a background task for the LLM call to allow cancellation
-        import asyncio
-
         task = asyncio.create_task(self._induce_skill(message, gap_description))
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
