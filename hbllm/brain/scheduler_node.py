@@ -67,6 +67,7 @@ class SchedulerNode(Node):
         self.db_path = self.data_dir / "scheduler.db"
         self.tick_interval = tick_interval
         self._loop_task: asyncio.Task[None] | None = None
+        self._running = False
 
         # Telemetry counters
         self._tasks_scheduled = 0
@@ -115,6 +116,7 @@ class SchedulerNode(Node):
         await self.bus.subscribe("system.scheduler.schedule", self._handle_schedule_command)
         await self.bus.subscribe("system.scheduler.cancel", self._handle_cancel_command)
 
+        self._running = True
         self._loop_task = asyncio.create_task(self._tick_loop())
         logger.info("SchedulerNode %s started. DB: %s", self.node_id, self.db_path)
 
@@ -126,9 +128,9 @@ class SchedulerNode(Node):
         """Lifecycle hook."""
         pass
 
-    async def handle_message(self, message: Message) -> None:
+    async def handle_message(self, message: Message) -> Message | None:
         """Default handler for generic messages. Unused as we route commands specifically."""
-        pass
+        return None
 
     async def _handle_schedule_command(self, msg: Message) -> None:
         """Handle incoming schedule commands."""
@@ -152,6 +154,7 @@ class SchedulerNode(Node):
 
     async def stop(self) -> None:
         """Stop the background loop and node."""
+        self._running = False
         if self._loop_task:
             self._loop_task.cancel()
             try:
@@ -223,7 +226,7 @@ class SchedulerNode(Node):
 
     async def _tick_loop(self) -> None:
         """Background loop to poll for due tasks and publish them."""
-        while True:
+        while self._running:
             try:
                 await self._process_due_tasks()
             except Exception as e:

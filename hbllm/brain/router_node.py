@@ -74,6 +74,7 @@ class RouterNode(Node):
 
         # Self-expansion tracking
         self.unknown_threshold = 0.3
+        self.fallback_threshold = 0.5  # Trigger SLM fallback before marking unknown
         self.spawn_trigger_count = 2
         self.unknown_counts: dict[str, int] = defaultdict(int)
 
@@ -83,6 +84,7 @@ class RouterNode(Node):
         # Vector Routing Setup
         self.use_vectors = use_vectors
         self.domain_centroids: dict[str, Any] = {}
+        self.intent_centroids: dict[str, Any] = {}
         self.encoder: Any | None = None
         self._tokenizer: Any | None = None
         self._onnx_inputs: list[str] = []
@@ -143,6 +145,13 @@ class RouterNode(Node):
         for domain_name, centroid_text in self.domain_registry.centroid_texts().items():
             emb = self._encode_text(centroid_text)
             self.domain_centroids[domain_name] = emb
+
+        # Bootstrap intents
+        for intent in self.known_intents:
+            # e.g. "code_generation" -> "code generation"
+            text = intent.replace("_", " ")
+            emb = self._encode_text(text)
+            self.intent_centroids[intent] = emb
 
         # [Improvement 8] Load persisted centroids (overwrite bootstrapped ones)
         self._load_centroids()
@@ -246,6 +255,19 @@ class RouterNode(Node):
             # Sort domains by calibrated score
             sorted_domains = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
+            # --- Intent Scoring ---
+            intent_scores = {}
+            for i_name, i_centroid in self.intent_centroids.items():
+                norm_q = float(np.linalg.norm(query_emb))
+                norm_c = float(np.linalg.norm(i_centroid))
+                if norm_q > 0 and norm_c > 0:
+                    raw_score = float(np.dot(query_emb, i_centroid) / (norm_q * norm_c))
+                    intent_scores[i_name] = self._calibrate(raw_score)
+
+            if intent_scores:
+                sorted_intents = sorted(intent_scores.items(), key=lambda x: x[1], reverse=True)
+                intent = sorted_intents[0][0]
+
             if not sorted_domains:
                 target_domain = "general"
                 confidence = 0.5
@@ -303,29 +325,35 @@ class RouterNode(Node):
                 target_domain,
                 confidence,
             )
-        elif self.llm:
-            # Fallback to LLM if vector encoder isn't available
-            domains_str = ", ".join(sorted(self.known_domains))
-            intents_str = ", ".join(sorted(self.known_intents))
-            try:
-                classification = await self.llm.generate_json(
-                    f"You are an intent classifier for a modular AI system. Classify the following "
-                    f"query into exactly one domain and intent.\n\n"
-                    f"Available domains: {domains_str}\n"
-                    f"Available intents: {intents_str}\n\n"
-                    f'Query: "{text}"\n\n'
-                    f'Output JSON: {{"domain": "...", "intent": "...", "confidence": 0.0-1.0}}'
+            # [Option 3] Hybrid Fallback Mechanism
+            if confidence < self.fallback_threshold and self.llm:
+                logger.info(
+                    "Vector confidence %.3f < fallback threshold %.3f. Triggering SLM fallback...",
+                    confidence,
+                    self.fallback_threshold,
+                )
+                slm_domain, slm_intent, slm_confidence = await self._fallback_llm_classification(
+                    text
                 )
 
-                if classification and "error" not in classification:
-                    target_domain = classification.get("domain", self.default_domain)
-                    intent = classification.get("intent", "general_knowledge")
-                    try:
-                        confidence = float(classification.get("confidence", 0.5))
-                    except (ValueError, TypeError):
-                        confidence = 0.5
-            except Exception as e:
-                logger.warning("Router LLM classification failed, using defaults: %s", e)
+                # If the SLM is more confident, we trust its judgment to prevent unnecessary spawning
+                if slm_confidence >= self.unknown_threshold:
+                    logger.info(
+                        "SLM fallback successful. Domain: %s, Confidence: %.3f",
+                        slm_domain,
+                        slm_confidence,
+                    )
+                    target_domain = slm_domain
+                    intent = slm_intent
+                    confidence = slm_confidence
+                else:
+                    logger.warning(
+                        "SLM fallback also failed with low confidence (%.3f)", slm_confidence
+                    )
+
+        elif self.llm:
+            # Fallback to LLM if vector encoder isn't available at all
+            target_domain, intent, confidence = await self._fallback_llm_classification(text)
 
         # 2. Self-Expansion Logic
         if confidence < self.unknown_threshold:
@@ -624,6 +652,10 @@ class RouterNode(Node):
                     name: centroid.tolist() if isinstance(centroid, np.ndarray) else centroid
                     for name, centroid in self.domain_centroids.items()
                 },
+                "intent_centroids": {
+                    name: centroid.tolist() if isinstance(centroid, np.ndarray) else centroid
+                    for name, centroid in self.intent_centroids.items()
+                },
             }
             self._centroids_path.parent.mkdir(parents=True, exist_ok=True)
             self._centroids_path.write_text(json.dumps(data), encoding="utf-8")
@@ -659,6 +691,10 @@ class RouterNode(Node):
                 self.domain_centroids[name] = np.array(vec, dtype=np.float32)
                 loaded += 1
 
+            intent_centroids = data.get("intent_centroids", {})
+            for name, vec in intent_centroids.items():
+                self.intent_centroids[name] = np.array(vec, dtype=np.float32)
+
             logger.info(
                 "Loaded %d persisted centroids from %s (threshold=%.2f)",
                 loaded,
@@ -667,3 +703,33 @@ class RouterNode(Node):
             )
         except Exception as e:
             logger.warning("Failed to load centroids: %s", e)
+
+    async def _fallback_llm_classification(self, text: str) -> tuple[str, str, float]:
+        """Use the base SLM to classify the query intent zero-shot (Fallback Method)."""
+        if not self.llm:
+            return self.default_domain, "general_knowledge", 0.5
+
+        domains_str = ", ".join(sorted(self.known_domains))
+        intents_str = ", ".join(sorted(self.known_intents))
+        try:
+            classification = await self.llm.generate_json(
+                f"You are an intent classifier for a modular AI system. Classify the following "
+                f"query into exactly one domain and intent.\n\n"
+                f"Available domains: {domains_str}\n"
+                f"Available intents: {intents_str}\n\n"
+                f'Query: "{text}"\n\n'
+                f'Output JSON: {{"domain": "...", "intent": "...", "confidence": 0.0-1.0}}'
+            )
+
+            if classification and "error" not in classification:
+                target_domain = classification.get("domain", self.default_domain)
+                intent = classification.get("intent", "general_knowledge")
+                try:
+                    confidence = float(classification.get("confidence", 0.5))
+                except (ValueError, TypeError):
+                    confidence = 0.5
+                return target_domain, intent, confidence
+        except Exception as e:
+            logger.warning("Router SLM classification failed, using defaults: %s", e)
+
+        return self.default_domain, "general_knowledge", 0.5

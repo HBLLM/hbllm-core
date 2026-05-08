@@ -302,6 +302,7 @@ class PlannerNode(Node):
             return None
 
         text = message.payload.get("text", "")
+        domain_hint = message.payload.get("domain_hint", "general")
 
         # Check prompt cache for exact matches
         cache_key = self._cache_key(text)
@@ -337,7 +338,7 @@ class PlannerNode(Node):
         root_node = graph.add_root("Root Query: " + text[:50], score=0.5)
 
         initial_thoughts = await asyncio.gather(
-            *[self._generate_thought(text, i + 1) for i in range(self.branch_factor)]
+            *[self._generate_thought(text, i + 1, domain_hint) for i in range(self.branch_factor)]
         )
 
         branch_nodes = []
@@ -390,7 +391,7 @@ class PlannerNode(Node):
 
             # 2. Expansion (only expand if we've already scored it and haven't hit max depth)
             if leaf.visits > 0 and leaf.depth < self.max_depth:
-                await self._refine_thought(graph, leaf, text, iteration)
+                await self._refine_thought(graph, leaf, text, iteration, domain_hint)
 
                 # Pick one of the newly expanded children to simulate
                 unvisited = [
@@ -406,6 +407,16 @@ class PlannerNode(Node):
             else:
                 # If we selected a terminal node that can't expand, re-simulate or just use existing score
                 reward = leaf.score
+
+            # EARLY CONVERGENCE EXIT
+            if reward > 0.90:
+                logger.info(
+                    "[MCTS] Early convergence reached at iteration %d (Score: %.2f)",
+                    iteration,
+                    reward,
+                )
+                graph.backpropagate(leaf.id, reward)
+                break
 
             # 4. Backpropagation
             graph.backpropagate(leaf.id, reward)
@@ -427,7 +438,7 @@ class PlannerNode(Node):
 
         if len(top_leaves) >= 2 and top_leaves[0].q_value > 0.5:
             merged_content = await self._merge_thoughts(
-                text, top_leaves[0].content, top_leaves[1].content
+                text, top_leaves[0].content, top_leaves[1].content, domain_hint
             )
             if merged_content:
                 merged_node = graph.merge([n.id for n in top_leaves], merged_content)
@@ -483,17 +494,22 @@ class PlannerNode(Node):
 
     # ── Private helpers ───────────────────────────────────────────────────
 
-    async def _generate_thought(self, query: str, branch_id: int) -> str:
+    async def _generate_thought(
+        self, query: str, branch_id: int, domain_hint: str = "general"
+    ) -> str:
         """Generate one diverse initial thought."""
         prompt = f"Exploring Approach {branch_id} to solve: {query}"
+        topic = (
+            f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
+        )
         req = Message(
             type=MessageType.QUERY,
             source_node_id=self.node_id,
-            topic="domain.general.query",
+            topic=topic,
             payload={"text": prompt},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=90.0)
+            resp = await self.request(topic, req, timeout=90.0)
             return str(resp.payload.get("text", ""))
         except Exception as e:
             logger.warning("[GoT] Branch %d generation failed: %s", branch_id, e)
@@ -629,7 +645,12 @@ class PlannerNode(Node):
         return f"{head}\n\n[... {omitted} characters dynamically omitted to preserve context bounds ...]\n\n{tail}"
 
     async def _refine_thought(
-        self, graph: ThoughtGraph, parent: ThoughtNode, query: str, refinement_id: int
+        self,
+        graph: ThoughtGraph,
+        parent: ThoughtNode,
+        query: str,
+        refinement_id: int,
+        domain_hint: str = "general",
     ) -> None:
         """Refine a thought by branching deeper with an adaptive context window."""
         trajectory = parent.trajectory_history + [parent.content]
@@ -665,21 +686,26 @@ class PlannerNode(Node):
             f'If you want to delegate a complex sub-task to the Skill Intelligence Layer, output exactly <skill_call task="describe task">fallback args</skill_call>.\n'
             f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
+        topic = (
+            f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
+        )
         req = Message(
             type=MessageType.QUERY,
             source_node_id=self.node_id,
-            topic="domain.general.query",
+            topic=topic,
             payload={"text": prompt},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=90.0)
+            resp = await self.request(topic, req, timeout=90.0)
             content = resp.payload.get("text", "")
             if content:
                 graph.branch(parent.id, content)
         except Exception as e:
             logger.warning("[GoT] Refinement failed: %s", e)
 
-    async def _merge_thoughts(self, query: str, thought_a: str, thought_b: str) -> str:
+    async def _merge_thoughts(
+        self, query: str, thought_a: str, thought_b: str, domain_hint: str = "general"
+    ) -> str:
         """Merge two complementary thoughts into a synthesis."""
         prompt = (
             f"Synthesize these two approaches into a single, comprehensive solution:\n"
@@ -688,14 +714,17 @@ class PlannerNode(Node):
             f"Approach B: {thought_b[:200]}\n"
             f"Provide a unified, improved answer."
         )
+        topic = (
+            f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
+        )
         req = Message(
             type=MessageType.QUERY,
             source_node_id=self.node_id,
-            topic="domain.general.query",
+            topic=topic,
             payload={"text": prompt},
         )
         try:
-            resp = await self.request("domain.general.query", req, timeout=90.0)
+            resp = await self.request(topic, req, timeout=90.0)
             return str(resp.payload.get("text", ""))
         except Exception as e:
             logger.warning("[GoT] Merge failed: %s", e)

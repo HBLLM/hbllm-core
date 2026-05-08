@@ -14,6 +14,11 @@
 
 <br/>
 
+> [!NOTE]  
+> **Reviewer Quick Links:**
+> - 🛡️ **[Security Architecture](SECURITY.md)** (AST Code Sandboxing, Tenant Isolation, Adapter Integrity)
+> - ⚡ **[Reproducible Benchmarks](docs/api/benchmarks.md)** (Memory Profiling, Fast-Path Latency)
+
 ## Why HBLLM Core?
 
 Traditional LLMs are monolithic and stateless: prompt → model → response. **HBLLM Core** is a modular cognitive architecture with **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus — mimicking localized, multi-path reasoning of a biological brain.

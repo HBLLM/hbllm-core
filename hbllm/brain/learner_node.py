@@ -103,6 +103,7 @@ class LearnerNode(Node):
         # v2: Subscribe to evaluation events for micro-learning
         if self.enable_micro_learning:
             await self.bus.subscribe("system.evaluation", self._handle_evaluation)
+            await self.bus.subscribe("system.micro_learn", self._handle_micro_learn_event)
 
     async def on_stop(self) -> None:
         """Clean up."""
@@ -413,6 +414,54 @@ class LearnerNode(Node):
                     "(score=%.2f, bank=%d)",
                     overall_score,
                     len(self._distillation_bank),
+                )
+
+    async def _handle_micro_learn_event(self, message: Message) -> None:
+        """
+        Process micro-learning correction events from EvaluationNode.
+
+        When a user gives negative feedback AND provides a correction,
+        this immediately queues a DPO pair for the next sleep cycle.
+        When no correction is provided, the bad response is still queued
+        so it can be paired with a future good response on retry.
+        """
+        payload = message.payload
+        query = payload.get("query", "")
+        bad_response = payload.get("bad_response", "")
+        correction = payload.get("correction", "")
+
+        if not query or not bad_response:
+            return
+
+        if correction:
+            # We have both bad and good — trigger immediate micro-learning
+            success = await self.micro_learn(
+                query=query,
+                bad_response=bad_response,
+                good_response=correction,
+            )
+            if success:
+                # Remove from micro-learn queue if it was there
+                self._micro_learn_queue = [
+                    item for item in self._micro_learn_queue if item.get("query") != query
+                ]
+                logger.info(
+                    "[LearnerNode] Micro-learn correction applied for '%s...'",
+                    query[:40],
+                )
+        else:
+            # No correction yet — queue the bad response for future pairing
+            if len(self._micro_learn_queue) < self._max_micro_queue:
+                self._micro_learn_queue.append(
+                    {
+                        "query": query,
+                        "bad_response": bad_response,
+                        "score": payload.get("score", 0.0),
+                    }
+                )
+                logger.debug(
+                    "[LearnerNode] Queued bad response for future correction pairing (queue=%d)",
+                    len(self._micro_learn_queue),
                 )
 
     async def micro_learn(

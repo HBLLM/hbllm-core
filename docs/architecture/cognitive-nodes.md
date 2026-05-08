@@ -116,9 +116,39 @@ The `NodeType` enum defines the categories of nodes:
 
 ### SleepCycleNode
 
-- **Type:** `NodeType.CORE`
+- **Type:** `NodeType.DOMAIN_MODULE`
 - **File:** `hbllm/brain/sleep_node.py`
-- **Purpose:** 3-phase memory consolidation (Replay → Prune → Strengthen) inspired by biological sleep cycles. Runs during idle periods.
+- **Purpose:** Multi-phase memory consolidation inspired by biological sleep cycles. Runs during idle periods.
+- **Phases:** Memory Replay → Temporal Normalization → Contradiction Resolution → DPO Training → Curiosity Replay → Dream Journal
+- **Triggers:** Idle timeout (auto), `system.sleep.force` (manual), REST API
+- **Integration:** Queries `SelfModel` for weak domains to prioritize DPO training
+
+### EvaluationNode
+
+- **Type:** `NodeType.META`
+- **File:** `hbllm/brain/evaluation_node.py`
+- **Purpose:** Closes the intelligence feedback loop. Scores every interaction across 5 dimensions (task_success, plan_validity, tool_accuracy, memory_usage, confidence_error) and feeds results into GoalManager.
+- **Micro-learning:** On negative user feedback, publishes `system.micro_learn` events so LearnerNode can queue DPO corrections in real-time.
+
+### SkillInductionNode
+
+- **Type:** `NodeType.META`
+- **File:** `hbllm/brain/skill_induction_node.py`
+- **Purpose:** Autonomous code generation for new tools. When ReflectionNode identifies a capability gap, this node prompts the LLM to generate a sandboxed Python function, validates it via AST security scanning, and registers it as a new tool.
+
+### SchedulerNode
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/brain/scheduler_node.py`
+- **Purpose:** Proactive event scheduler backed by SQLite. Manages recurring and one-shot tasks with cron-style interval expressions, publishing events to the bus when they come due.
+- **Supports:** `fire_and_forget` and `retry` policies for task execution.
+
+### SelfModel
+
+- **Type:** Utility (not a Node)
+- **File:** `hbllm/brain/self_model.py`
+- **Purpose:** SQLite-backed internal model of system capabilities. Tracks domain expertise levels, confidence calibration, performance trends (improving/stable/declining), and recommends model selection based on domain strength.
+- **Integration:** Consulted by SleepCycleNode for targeted DPO training, by DecisionNode for model routing, and by GoalManager for self-improvement priorities.
 
 ### IdentityNode
 
@@ -143,6 +173,12 @@ The `NodeType` enum defines the categories of nodes:
 - **Type:** `NodeType.META`
 - **File:** `hbllm/brain/meta_node.py`
 - **Purpose:** Monitors the brain's own reasoning patterns to identify systematic biases or inefficiencies.
+
+### WebResearchNode
+
+- **Type:** `NodeType.META`
+- **File:** `hbllm/brain/web_research_node.py`
+- **Purpose:** Autonomous knowledge acquisition from the internet. Detects knowledge gaps, searches the web via BrowserNode, verifies source credibility, and ingests validated findings into episodic or semantic memory based on the 3-tier classification system (Information / Task Knowledge / Core Knowledge).
 
 ### CollectiveNode
 

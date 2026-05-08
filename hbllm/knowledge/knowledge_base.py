@@ -502,6 +502,106 @@ class KnowledgeBase:
 
         return enriched
 
+    # ── Web Research Ingestion ───────────────────────────────────────────────
+
+    def ingest_web_content(
+        self,
+        content: str,
+        url: str,
+        title: str,
+        trust_score: float,
+        domain: str,
+        tier: str = "core_knowledge",
+        ttl_days: int | None = 30,
+    ) -> str:
+        """
+        Store web research content with provenance metadata.
+
+        Returns the doc_id of the stored chunk.
+        """
+        if not content.strip():
+            return ""
+
+        header = f"[Web: {title}]\nSource: {url}\n"
+        chunks = self._chunk_text(header, content)
+
+        doc_ids = []
+        for chunk_text in chunks:
+            doc_id = self.memory.store(
+                content=chunk_text,
+                metadata={
+                    "source_type": "web",
+                    "source_url": url,
+                    "source_title": title,
+                    "source_domain": domain,
+                    "trust_score": trust_score,
+                    "tier": tier,
+                    "ttl_days": ttl_days,
+                    "ingested_at": time.time(),
+                    "status": "active",
+                },
+            )
+            if doc_id:
+                doc_ids.append(doc_id)
+
+        # Track under a virtual "web_research" source
+        web_source_id = "web_research"
+        if web_source_id not in self._chunk_map:
+            self._chunk_map[web_source_id] = []
+        self._chunk_map[web_source_id].extend(doc_ids)
+
+        self._save_vectors()
+        logger.info(
+            "Ingested web content: '%s' (%d chunks, trust=%.2f, tier=%s)",
+            title[:60],
+            len(doc_ids),
+            trust_score,
+            tier,
+        )
+        return doc_ids[0] if doc_ids else ""
+
+    def get_stale_entries(self, ttl_days: int = 30) -> list[dict[str, Any]]:
+        """
+        Find web-sourced entries older than TTL for staleness audit.
+
+        Returns list of {doc_id, metadata, age_days} for stale entries.
+        """
+        cutoff = time.time() - (ttl_days * 86400)
+        stale = []
+        docs = getattr(self.memory, "documents", None) or getattr(self.memory, "_docs", {})
+
+        web_doc_ids = self._chunk_map.get("web_research", [])
+        for doc_id in web_doc_ids:
+            if doc_id in docs:
+                doc = docs[doc_id]
+                meta = doc.get("metadata", {})
+                ingested_at = meta.get("ingested_at", 0)
+                status = meta.get("status", "active")
+
+                if status == "active" and ingested_at < cutoff:
+                    age_days = (time.time() - ingested_at) / 86400
+                    stale.append(
+                        {
+                            "doc_id": doc_id,
+                            "metadata": meta,
+                            "age_days": round(age_days, 1),
+                        }
+                    )
+
+        return stale
+
+    def mark_obsolete(self, doc_id: str, reason: str = "") -> bool:
+        """Mark a knowledge entry as obsolete (soft delete)."""
+        docs = getattr(self.memory, "documents", None) or getattr(self.memory, "_docs", {})
+        if doc_id in docs:
+            meta = docs[doc_id].get("metadata", {})
+            meta["status"] = "obsolete"
+            meta["obsoleted_at"] = time.time()
+            meta["obsolete_reason"] = reason
+            logger.info("Marked doc %s as obsolete: %s", doc_id, reason)
+            return True
+        return False
+
     # ── Persistence ──────────────────────────────────────────────────────────
 
     def _save_manifest(self):

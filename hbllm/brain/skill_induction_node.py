@@ -62,11 +62,11 @@ class SkillInductionNode(Node):
         self.llm = llm
 
     async def on_start(self) -> None:
-        logger.info(f"Starting SkillInductionNode: {self.node_id}")
+        logger.info("Starting SkillInductionNode: %s", self.node_id)
         await self.bus.subscribe("system.induction.request", self.handle_message)
 
     async def on_stop(self) -> None:
-        pass
+        logger.info("Stopping SkillInductionNode: %s", self.node_id)
 
     async def handle_message(self, message: Message) -> Message | None:
         if message.type != MessageType.QUERY:
@@ -76,7 +76,7 @@ class SkillInductionNode(Node):
         if not gap_description:
             return message.create_error("No gap description provided for induction.")
 
-        logger.info(f"Inducing skill for gap: {gap_description}")
+        logger.info("Inducing skill for gap: %s", gap_description)
 
         # 1. Generate Python Tool via LLM
         # We prompt for a specific format that the @tool decorator expects
@@ -114,7 +114,7 @@ class SkillInductionNode(Node):
                 return message.create_error(f"Induced code has syntax errors: {str(se)}")
 
             if interceptor.errors:
-                logger.error(f"Security Policy Violation in induced skill: {interceptor.errors}")
+                logger.error("Security Policy Violation in induced skill: %s", interceptor.errors)
                 return message.create_error(
                     f"Security validation failed: {', '.join(interceptor.errors)}"
                 )
@@ -137,9 +137,9 @@ class SkillInductionNode(Node):
             )
             await self.bus.publish("system.skill.induced", induced_msg)
 
-            logger.info(f"Successfully induced skill: {tool_name}")
+            logger.info("Successfully induced skill: %s", tool_name)
             return message.create_response({"status": "SUCCESS", "skill_name": tool_name})
 
         except Exception as e:
-            logger.error(f"Skill induction failed: {e}")
+            logger.error("Skill induction failed: %s", e)
             return message.create_error(f"Induction pipeline error: {str(e)}")
