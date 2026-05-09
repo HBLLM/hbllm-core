@@ -60,6 +60,8 @@ class InteractionMiner:
                 CREATE TABLE IF NOT EXISTS interactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     tenant_id TEXT DEFAULT '',
+                    user_id TEXT DEFAULT '',
+                    device_id TEXT DEFAULT '',
                     query TEXT NOT NULL,
                     response TEXT NOT NULL,
                     reward REAL DEFAULT 0.0,
@@ -73,6 +75,9 @@ class InteractionMiner:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS mined_samples (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id TEXT DEFAULT '',
+                    user_id TEXT DEFAULT '',
+                    device_id TEXT DEFAULT '',
                     instruction TEXT NOT NULL,
                     response TEXT NOT NULL,
                     quality_score REAL NOT NULL,
@@ -96,6 +101,8 @@ class InteractionMiner:
         regenerated: bool = False,
         follow_up: bool = False,
         tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
         tokens_used: int = 0,
         model: str = "",
     ) -> None:
@@ -103,10 +110,12 @@ class InteractionMiner:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO interactions "
-                "(tenant_id, query, response, reward, regenerated, follow_up, "
-                "tokens_used, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(tenant_id, user_id, device_id, query, response, reward, regenerated, follow_up, "
+                "tokens_used, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     tenant_id,
+                    user_id,
+                    device_id,
                     query,
                     response,
                     reward,
@@ -289,6 +298,8 @@ class AsyncInteractionMiner:
                     CREATE TABLE IF NOT EXISTS interactions (
                         id SERIAL PRIMARY KEY,
                         tenant_id TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        device_id TEXT DEFAULT '',
                         query TEXT NOT NULL,
                         response TEXT NOT NULL,
                         reward REAL DEFAULT 0.0,
@@ -300,6 +311,9 @@ class AsyncInteractionMiner:
                     );
                     CREATE TABLE IF NOT EXISTS mined_samples (
                         id SERIAL PRIMARY KEY,
+                        tenant_id TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        device_id TEXT DEFAULT '',
                         instruction TEXT NOT NULL,
                         response TEXT NOT NULL,
                         quality_score REAL NOT NULL,
@@ -321,6 +335,8 @@ class AsyncInteractionMiner:
         regenerated: bool = False,
         follow_up: bool = False,
         tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
         tokens_used: int = 0,
         model: str = "",
     ) -> None:
@@ -330,10 +346,12 @@ class AsyncInteractionMiner:
                 await conn.execute(
                     """
                     INSERT INTO interactions
-                    (tenant_id, query, response, reward, regenerated, follow_up, tokens_used, model)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    (tenant_id, user_id, device_id, query, response, reward, regenerated, follow_up, tokens_used, model)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     """,
                     tenant_id,
+                    user_id,
+                    device_id,
                     query,
                     response,
                     reward,
@@ -344,7 +362,7 @@ class AsyncInteractionMiner:
                 )
         else:
             self._fallback.record_interaction(
-                query, response, reward, regenerated, follow_up, tenant_id, tokens_used, model
+                query, response, reward, regenerated, follow_up, tenant_id, user_id, device_id, tokens_used, model
             )
 
     async def mine_sft_samples(

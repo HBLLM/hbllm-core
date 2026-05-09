@@ -79,8 +79,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     status_code=401, content={"detail": "Token payload missing 'tenant_id'"}
                 )
 
-            # Securely inject the verified tenant_id into the request state
+            # Securely inject the verified identity triplet into the request state
             request.state.tenant_id = tenant_id
+            request.state.user_id = payload.get("user_id", "default")
+            request.state.device_id = payload.get("device_id", "default")
 
         except jwt.ExpiredSignatureError:
             return JSONResponse(status_code=401, content={"detail": "Token has expired"})

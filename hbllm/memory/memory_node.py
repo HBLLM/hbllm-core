@@ -315,9 +315,13 @@ class MemoryNode(Node):
                         "session_id": session_id,
                         "role": role,
                         "tenant_id": payload.tenant_id or message.tenant_id,
+                        "user_id": payload.user_id or message.user_id,
+                        "device_id": payload.device_id or message.device_id,
                     },
                     is_priority=False,
                     tenant_id=payload.tenant_id or message.tenant_id,
+                    user_id=payload.user_id or message.user_id,
+                    device_id=payload.device_id or message.device_id,
                 )
             )
             task.add_done_callback(self._handle_background_task_result)
@@ -375,6 +379,8 @@ class MemoryNode(Node):
                 query,
                 limit,
                 tenant_id=message.tenant_id,
+                user_id=message.user_id,
+                device_id=message.device_id,
             )
 
             return message.create_response(
@@ -466,6 +472,8 @@ class MemoryNode(Node):
                 action=action,
                 reward=reward,
                 context=payload.get("context"),
+                user_id=message.user_id,
+                device_id=message.device_id,
             )
             return message.create_response({"status": "recorded", "reward_id": reward_id})
 
@@ -487,10 +495,10 @@ class MemoryNode(Node):
             tenant_id = message.tenant_id or "default"
 
             if topic:
-                preferences = self.value_db.get_preference(tenant_id, topic)
+                preferences = self.value_db.get_preference(tenant_id, topic, message.user_id, message.device_id)
                 return message.create_response({"topic": topic, "preferences": preferences})
             else:
-                top_prefs = self.value_db.get_top_preferences(tenant_id, top_k)
+                top_prefs = self.value_db.get_top_preferences(tenant_id, top_k, message.user_id, message.device_id)
                 return message.create_response({"top_preferences": top_prefs})
 
         except Exception as e:

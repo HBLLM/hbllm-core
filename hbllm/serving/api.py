@@ -37,6 +37,8 @@ class ChatRequest(BaseModel):
     """Incoming chat message from a tenant."""
 
     tenant_id: str = Field(default="", description="Unique tenant identifier (overridden by JWT)")
+    user_id: str = Field(default="", description="User identifier (overridden by JWT)")
+    device_id: str = Field(default="", description="Device identifier (overridden by JWT)")
     session_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()), description="Session identifier"
     )
@@ -52,6 +54,8 @@ class ChatResponse(BaseModel):
     """Response from the cognitive pipeline."""
 
     tenant_id: str
+    user_id: str = "default"
+    device_id: str = "default"
     session_id: str
     correlation_id: str
     response_text: str
@@ -155,6 +159,13 @@ async def _boot_brain(
     pm.discover()
     await pm.load_all()
 
+    # 4. Start Synapse Gateway
+    from hbllm.serving.synapse_gateway import SynapseGateway
+
+    gateway = SynapseGateway(bus=brain.bus)
+    await gateway.start()
+    _state["synapse_gateway"] = gateway
+
     _state["brain"] = brain
     _state["plugin_manager"] = pm
     _state["bus_type"] = bus_type
@@ -165,6 +176,10 @@ async def _boot_brain(
 
 async def _shutdown_brain() -> None:
     """Gracefully shutdown all nodes and the bus."""
+    gateway = _state.get("synapse_gateway")
+    if gateway:
+        await gateway.stop()
+
     brain = _state.get("brain")
     if brain:
         await brain.shutdown()
@@ -1099,6 +1114,8 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
             "tenant_id": request.tenant_id,
             "role": "user",
             "content": request.text,
+            "user_id": request.user_id,
+            "device_id": request.device_id,
         },
     )
     await bus.publish("memory.store", memory_msg)
@@ -1108,6 +1125,8 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
         type=MessageType.QUERY,
         source_node_id="api_server",
         tenant_id=request.tenant_id,
+        user_id=request.user_id,
+        device_id=request.device_id,
         session_id=request.session_id,
         topic="router.query",
         payload=QueryPayload(text=request.text).model_dump(),
@@ -1132,12 +1151,16 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
                 "tenant_id": request.tenant_id,
                 "role": "assistant",
                 "content": response_text,
+                "user_id": request.user_id,
+                "device_id": request.device_id,
             },
         )
         await bus.publish("memory.store", store_msg)
 
         return ChatResponse(
             tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            device_id=request.device_id,
             session_id=request.session_id,
             correlation_id=correlation_id,
             response_text=response_text,
@@ -1159,6 +1182,8 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
     based on system mode. Use 'provider' field to force a specific provider.
     """
     request.tenant_id = getattr(api_req.state, "tenant_id", "default")
+    request.user_id = getattr(api_req.state, "user_id", "default")
+    request.device_id = getattr(api_req.state, "device_id", "default")
     mode = _state.get("mode", "provider")
 
     # Explicit provider override always uses provider path
@@ -1172,6 +1197,36 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
         return await _chat_via_provider(request)
 
 
+from fastapi import WebSocket, WebSocketDisconnect
+
+@app.websocket("/v1/synapse/ws")
+async def synapse_websocket(websocket: WebSocket) -> Any:
+    """
+    WebSocket endpoint for Synapse Edge Devices.
+    Requires query parameters: tenant_id, user_id, device_id
+    """
+    tenant_id = websocket.query_params.get("tenant_id", "default")
+    user_id = websocket.query_params.get("user_id", "default")
+    device_id = websocket.query_params.get("device_id", "default")
+    
+    gateway = _state.get("synapse_gateway")
+    if not gateway:
+        await websocket.close(code=1011, reason="Synapse Gateway not initialized")
+        return
+        
+    await gateway.connect(websocket, tenant_id, user_id, device_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await gateway.handle_inbound_message(tenant_id, user_id, device_id, data)
+    except WebSocketDisconnect:
+        gateway.disconnect(tenant_id, user_id, device_id)
+    except Exception as e:
+        logger.error(f"Synapse WebSocket error: {e}")
+        gateway.disconnect(tenant_id, user_id, device_id)
+
+
 @app.post("/v1/chat/stream")
 async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingResponse:
     """
@@ -1182,6 +1237,8 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
         data: {"token": "", "done": true, "correlation_id": "..."}
     """
     request.tenant_id = getattr(api_req.state, "tenant_id", "default")
+    request.user_id = getattr(api_req.state, "user_id", "default")
+    request.device_id = getattr(api_req.state, "device_id", "default")
     brain = _state.get("brain")
     bus = getattr(brain, "bus", None)
     if not bus:
@@ -1204,11 +1261,15 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
         type=MessageType.EVENT,
         source_node_id="api_server",
         tenant_id=request.tenant_id,
+        user_id=request.user_id,
+        device_id=request.device_id,
         session_id=request.session_id,
         topic="memory.store",
         payload={
             "session_id": request.session_id,
             "tenant_id": request.tenant_id,
+            "user_id": request.user_id,
+            "device_id": request.device_id,
             "role": "user",
             "content": request.text,
         },
@@ -1220,6 +1281,8 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
         type=MessageType.QUERY,
         source_node_id="api_server",
         tenant_id=request.tenant_id,
+        user_id=request.user_id,
+        device_id=request.device_id,
         session_id=request.session_id,
         topic="router.query",
         payload=QueryPayload(text=request.text).model_dump(),

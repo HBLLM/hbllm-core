@@ -316,6 +316,62 @@ class ToolNode(Node):
             return message.create_error(f"Tool execution failed: {str(e)}")
 
 
+class RemoteToolNode(Node):
+    """
+    Acts as a proxy for a tool that lives on an edge device.
+    Subscribes to action.tool.<name> and forwards it to the edge via SynapseGateway.
+    """
+
+    def __init__(self, tool_name: str, tenant_id: str, user_id: str, device_id: str):
+        super().__init__(node_id=f"remote_tool_{tool_name}_{device_id}", node_type=NodeType.ACTION)
+        self.tool_name = tool_name
+        self.target_tenant_id = tenant_id
+        self.target_user_id = user_id
+        self.target_device_id = device_id
+        self.topic = f"action.tool.{self.tool_name}"
+
+    async def on_start(self) -> None:
+        logger.info(f"Registering RemoteTool: {self.tool_name} on topic {self.topic}")
+        await self.bus.subscribe(self.topic, self.handle_message)
+
+    async def on_stop(self) -> None:
+        pass
+
+    async def handle_message(self, message: Message) -> Message | None:
+        if message.type != MessageType.QUERY:
+            return None
+
+        arguments = message.payload.get("arguments", {})
+        logger.info(f"Forwarding remote tool {self.tool_name} to edge {self.target_device_id}")
+
+        req = Message(
+            type=MessageType.QUERY,
+            source_node_id=self.node_id,
+            tenant_id=self.target_tenant_id,
+            user_id=self.target_user_id,
+            device_id=self.target_device_id,
+            topic="edge.tool_call",
+            payload={
+                "tool_name": self.tool_name,
+                "args": arguments,
+            },
+        )
+
+        try:
+            import asyncio
+            resp = await self.request("edge.tool_result", req, timeout=30.0)
+            return message.create_response({
+                "status": "SUCCESS",
+                "output": resp.payload.get("result"),
+                "error": resp.payload.get("error")
+            })
+        except (TimeoutError, asyncio.TimeoutError):
+            return message.create_error(f"Remote tool {self.tool_name} timed out.")
+        except Exception as e:
+            logger.error(f"Remote tool {self.tool_name} failed: {e}")
+            return message.create_error(f"Execution error: {str(e)}")
+
+
 # ── Dynamic Tool Creation ──────────────────────────────────────────────────────
 
 

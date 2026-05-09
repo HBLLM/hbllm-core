@@ -50,14 +50,28 @@ class BrainState:
     def _init_tables(self) -> None:
         """Create tables if they don't exist."""
         self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS tenants (
+                id TEXT PRIMARY KEY,
+                parent_id TEXT REFERENCES tenants(id),
+                metadata TEXT DEFAULT '{}',
+                created_at REAL NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS kv_store (
-                key TEXT PRIMARY KEY,
+                tenant_id TEXT DEFAULT '',
+                user_id TEXT DEFAULT '',
+                device_id TEXT DEFAULT '',
+                key TEXT NOT NULL,
                 value TEXT NOT NULL,
-                updated_at REAL NOT NULL
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (tenant_id, user_id, device_id, key)
             );
 
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT DEFAULT '',
+                user_id TEXT DEFAULT '',
+                device_id TEXT DEFAULT '',
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 metadata TEXT DEFAULT '{}',
@@ -66,12 +80,18 @@ class BrainState:
 
             CREATE TABLE IF NOT EXISTS checkpoints (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT DEFAULT '',
+                user_id TEXT DEFAULT '',
+                device_id TEXT DEFAULT '',
                 data TEXT NOT NULL,
                 created_at REAL NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS tool_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT DEFAULT '',
+                user_id TEXT DEFAULT '',
+                device_id TEXT DEFAULT '',
                 tool_name TEXT NOT NULL,
                 input TEXT NOT NULL,
                 output TEXT NOT NULL,
@@ -83,43 +103,44 @@ class BrainState:
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    def save(self, key: str, value: Any) -> None:
+    def save(self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Save a value to the key-value store."""
         self._conn.execute(
-            "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
-            (key, json.dumps(value), time.time()),
+            "INSERT OR REPLACE INTO kv_store (tenant_id, user_id, device_id, key, value, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (tenant_id, user_id, device_id, key, json.dumps(value), time.time()),
         )
         self._conn.commit()
 
-    def load(self, key: str, default: Any = None) -> Any:
+    def load(self, key: str, default: Any = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> Any:
         """Load a value from the key-value store."""
-        row = self._conn.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
+        row = self._conn.execute("SELECT value FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?", (tenant_id, user_id, device_id, key)).fetchone()
         if row:
             return json.loads(row[0])
         return default
 
-    def delete(self, key: str) -> None:
+    def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Delete a key from the store."""
-        self._conn.execute("DELETE FROM kv_store WHERE key = ?", (key,))
+        self._conn.execute("DELETE FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?", (tenant_id, user_id, device_id, key))
         self._conn.commit()
 
     # ── Conversation History ──────────────────────────────────────────────
 
-    def append_message(self, role: str, content: str, metadata: dict | None = None) -> int:
+    def append_message(self, role: str, content: str, metadata: dict | None = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
         """Append a message to conversation history."""
         cursor = self._conn.execute(
-            "INSERT INTO messages (role, content, metadata, created_at) VALUES (?, ?, ?, ?)",
-            (role, content, json.dumps(metadata or {}), time.time()),
+            "INSERT INTO messages (tenant_id, user_id, device_id, role, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tenant_id, user_id, device_id, role, content, json.dumps(metadata or {}), time.time()),
         )
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    def get_messages(self, limit: int = 50, offset: int = 0) -> list[dict]:
+    def get_messages(self, limit: int = 50, offset: int = 0, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
         """Get recent messages from conversation history."""
         rows = self._conn.execute(
             "SELECT id, role, content, metadata, created_at FROM messages "
+            "WHERE tenant_id = ? AND user_id = ? AND device_id = ? "
             "ORDER BY id DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            (tenant_id, user_id, device_id, limit, offset),
         ).fetchall()
         return [
             {
@@ -132,64 +153,65 @@ class BrainState:
             for row in reversed(rows)  # Return in chronological order
         ]
 
-    def clear_messages(self) -> None:
+    def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Clear all conversation history."""
-        self._conn.execute("DELETE FROM messages")
+        self._conn.execute("DELETE FROM messages WHERE tenant_id = ? AND user_id = ? AND device_id = ?", (tenant_id, user_id, device_id))
         self._conn.commit()
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
-    def checkpoint(self, data: dict) -> int:
+    def checkpoint(self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
         """Save a checkpoint."""
         cursor = self._conn.execute(
-            "INSERT INTO checkpoints (data, created_at) VALUES (?, ?)",
-            (json.dumps(data), time.time()),
+            "INSERT INTO checkpoints (tenant_id, user_id, device_id, data, created_at) VALUES (?, ?, ?, ?, ?)",
+            (tenant_id, user_id, device_id, json.dumps(data), time.time()),
         )
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    def latest_checkpoint(self) -> dict | None:
+    def latest_checkpoint(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> dict | None:
         """Get the most recent checkpoint."""
         row = self._conn.execute(
-            "SELECT data, created_at FROM checkpoints ORDER BY id DESC LIMIT 1"
+            "SELECT data, created_at FROM checkpoints WHERE tenant_id = ? AND user_id = ? AND device_id = ? ORDER BY id DESC LIMIT 1",
+            (tenant_id, user_id, device_id)
         ).fetchone()
         if row:
             return {"data": json.loads(row[0]), "created_at": row[1]}
         return None
 
-    def list_checkpoints(self, limit: int = 10) -> list[dict]:
+    def list_checkpoints(self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
         """List recent checkpoints."""
         rows = self._conn.execute(
-            "SELECT id, data, created_at FROM checkpoints ORDER BY id DESC LIMIT ?",
-            (limit,),
+            "SELECT id, data, created_at FROM checkpoints WHERE tenant_id = ? AND user_id = ? AND device_id = ? ORDER BY id DESC LIMIT ?",
+            (tenant_id, user_id, device_id, limit),
         ).fetchall()
         return [{"id": row[0], "data": json.loads(row[1]), "created_at": row[2]} for row in rows]
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
     def log_tool_call(
-        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0
+        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0, tenant_id: str = "", user_id: str = "", device_id: str = ""
     ) -> None:
         """Log a tool invocation."""
         self._conn.execute(
-            "INSERT INTO tool_logs (tool_name, input, output, duration_ms, created_at) VALUES (?, ?, ?, ?, ?)",
-            (tool_name, input_data, output[:5000], duration_ms, time.time()),
+            "INSERT INTO tool_logs (tenant_id, user_id, device_id, tool_name, input, output, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (tenant_id, user_id, device_id, tool_name, input_data, output[:5000], duration_ms, time.time()),
         )
         self._conn.commit()
 
-    def get_tool_logs(self, tool_name: str | None = None, limit: int = 20) -> list[dict]:
+    def get_tool_logs(self, tool_name: str | None = None, limit: int = 20, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
         """Get tool execution logs."""
         if tool_name:
             rows = self._conn.execute(
                 "SELECT tool_name, input, output, duration_ms, created_at FROM tool_logs "
-                "WHERE tool_name = ? ORDER BY id DESC LIMIT ?",
-                (tool_name, limit),
+                "WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND tool_name = ? ORDER BY id DESC LIMIT ?",
+                (tenant_id, user_id, device_id, tool_name, limit),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT tool_name, input, output, duration_ms, created_at FROM tool_logs "
-                "ORDER BY id DESC LIMIT ?",
-                (limit,),
+                "WHERE tenant_id = ? AND user_id = ? AND device_id = ? ORDER BY id DESC LIMIT ?",
+                (tenant_id, user_id, device_id, limit),
             ).fetchall()
         return [
             {
@@ -243,13 +265,26 @@ class AsyncBrainState:
         if not self._pg_tables_created:
             async with pool.acquire() as conn:
                 await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tenants (
+                        id TEXT PRIMARY KEY,
+                        parent_id TEXT REFERENCES tenants(id),
+                        metadata JSONB DEFAULT '{}',
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
                     CREATE TABLE IF NOT EXISTS kv_store (
-                        key TEXT PRIMARY KEY,
+                        tenant_id TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        device_id TEXT DEFAULT '',
+                        key TEXT NOT NULL,
                         value JSONB NOT NULL,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (tenant_id, user_id, device_id, key)
                     );
                     CREATE TABLE IF NOT EXISTS messages (
                         id SERIAL PRIMARY KEY,
+                        tenant_id TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        device_id TEXT DEFAULT '',
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
                         metadata JSONB DEFAULT '{}',
@@ -257,11 +292,17 @@ class AsyncBrainState:
                     );
                     CREATE TABLE IF NOT EXISTS checkpoints (
                         id SERIAL PRIMARY KEY,
+                        tenant_id TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        device_id TEXT DEFAULT '',
                         data JSONB NOT NULL,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     );
                     CREATE TABLE IF NOT EXISTS tool_logs (
                         id SERIAL PRIMARY KEY,
+                        tenant_id TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        device_id TEXT DEFAULT '',
                         tool_name TEXT NOT NULL,
                         input TEXT NOT NULL,
                         output TEXT NOT NULL,
@@ -274,61 +315,64 @@ class AsyncBrainState:
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    async def save(self, key: str, value: Any) -> None:
+    async def save(self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO kv_store (key, value) VALUES ($1, $2) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
-                    key,
-                    value,
+                    "INSERT INTO kv_store (tenant_id, user_id, device_id, key, value) VALUES ($1, $2, $3, $4, $5) "
+                    "ON CONFLICT (tenant_id, user_id, device_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
+                    tenant_id, user_id, device_id, key, value,
                 )
         else:
-            self._fallback.save(key, value)
+            self._fallback.save(key, value, tenant_id, user_id, device_id)
 
-    async def load(self, key: str, default: Any = None) -> Any:
+    async def load(self, key: str, default: Any = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> Any:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT value FROM kv_store WHERE key = $1", key)
+                row = await conn.fetchrow(
+                    "SELECT value FROM kv_store WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND key = $4", 
+                    tenant_id, user_id, device_id, key
+                )
                 if row:
                     return row["value"]
                 return default
-        return self._fallback.load(key, default)
+        return self._fallback.load(key, default, tenant_id, user_id, device_id)
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM kv_store WHERE key = $1", key)
+                await conn.execute(
+                    "DELETE FROM kv_store WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND key = $4", 
+                    tenant_id, user_id, device_id, key
+                )
         else:
-            self._fallback.delete(key)
+            self._fallback.delete(key, tenant_id, user_id, device_id)
 
     # ── Conversation History ──────────────────────────────────────────────
 
-    async def append_message(self, role: str, content: str, metadata: dict | None = None) -> int:
+    async def append_message(self, role: str, content: str, metadata: dict | None = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row_id = await conn.fetchval(
-                    "INSERT INTO messages (role, content, metadata) VALUES ($1, $2, $3) RETURNING id",
-                    role,
-                    content,
-                    metadata or {},
+                    "INSERT INTO messages (tenant_id, user_id, device_id, role, content, metadata) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+                    tenant_id, user_id, device_id, role, content, metadata or {},
                 )
                 return int(row_id) if row_id else 0
-        return self._fallback.append_message(role, content, metadata)
+        return self._fallback.append_message(role, content, metadata, tenant_id, user_id, device_id)
 
-    async def get_messages(self, limit: int = 50, offset: int = 0) -> list[dict]:
+    async def get_messages(self, limit: int = 50, offset: int = 0, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT id, role, content, metadata, extract(epoch from created_at) as created_at "
-                    "FROM messages ORDER BY id DESC LIMIT $1 OFFSET $2",
-                    limit,
-                    offset,
+                    "FROM messages WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 "
+                    "ORDER BY id DESC LIMIT $4 OFFSET $5",
+                    tenant_id, user_id, device_id, limit, offset,
                 )
                 return [
                     {
@@ -340,90 +384,97 @@ class AsyncBrainState:
                     }
                     for row in reversed(rows)
                 ]
-        return self._fallback.get_messages(limit, offset)
+        return self._fallback.get_messages(limit, offset, tenant_id, user_id, device_id)
 
-    async def clear_messages(self) -> None:
+    async def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM messages")
+                await conn.execute(
+                    "DELETE FROM messages WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3", 
+                    tenant_id, user_id, device_id
+                )
         else:
-            self._fallback.clear_messages()
+            self._fallback.clear_messages(tenant_id, user_id, device_id)
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
-    async def checkpoint(self, data: dict) -> int:
+    async def checkpoint(self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row_id = await conn.fetchval(
-                    "INSERT INTO checkpoints (data) VALUES ($1) RETURNING id", data
+                    "INSERT INTO checkpoints (tenant_id, user_id, device_id, data) VALUES ($1, $2, $3, $4) RETURNING id",
+                    tenant_id, user_id, device_id, data
                 )
                 return int(row_id) if row_id else 0
-        return self._fallback.checkpoint(data)
+        return self._fallback.checkpoint(data, tenant_id, user_id, device_id)
 
-    async def latest_checkpoint(self) -> dict | None:
+    async def latest_checkpoint(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> dict | None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "SELECT data, extract(epoch from created_at) as created_at "
-                    "FROM checkpoints ORDER BY id DESC LIMIT 1"
+                    "FROM checkpoints WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 ORDER BY id DESC LIMIT 1",
+                    tenant_id, user_id, device_id
                 )
                 if row:
                     return {"data": row["data"], "created_at": row["created_at"]}
                 return None
-        return self._fallback.latest_checkpoint()
+        return self._fallback.latest_checkpoint(tenant_id, user_id, device_id)
 
-    async def list_checkpoints(self, limit: int = 10) -> list[dict]:
+    async def list_checkpoints(self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT id, data, extract(epoch from created_at) as created_at "
-                    "FROM checkpoints ORDER BY id DESC LIMIT $1",
-                    limit,
+                    "FROM checkpoints WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 ORDER BY id DESC LIMIT $4",
+                    tenant_id, user_id, device_id, limit,
                 )
                 return [
                     {"id": row["id"], "data": row["data"], "created_at": row["created_at"]}
                     for row in rows
                 ]
-        return self._fallback.list_checkpoints(limit)
+        return self._fallback.list_checkpoints(limit, tenant_id, user_id, device_id)
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
     async def log_tool_call(
-        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0
+        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0, tenant_id: str = "", user_id: str = "", device_id: str = ""
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO tool_logs (tool_name, input, output, duration_ms) VALUES ($1, $2, $3, $4)",
+                    "INSERT INTO tool_logs (tenant_id, user_id, device_id, tool_name, input, output, duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    tenant_id,
+                    user_id,
+                    device_id,
                     tool_name,
                     input_data,
                     output[:5000],
                     duration_ms,
                 )
         else:
-            self._fallback.log_tool_call(tool_name, input_data, output, duration_ms)
+            self._fallback.log_tool_call(tool_name, input_data, output, duration_ms, tenant_id, user_id, device_id)
 
-    async def get_tool_logs(self, tool_name: str | None = None, limit: int = 20) -> list[dict]:
+    async def get_tool_logs(self, tool_name: str | None = None, limit: int = 20, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 if tool_name:
                     rows = await conn.fetch(
                         "SELECT tool_name, input, output, duration_ms, extract(epoch from created_at) as created_at "
-                        "FROM tool_logs WHERE tool_name = $1 ORDER BY id DESC LIMIT $2",
-                        tool_name,
-                        limit,
+                        "FROM tool_logs WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND tool_name = $4 ORDER BY id DESC LIMIT $5",
+                        tenant_id, user_id, device_id, tool_name, limit,
                     )
                 else:
                     rows = await conn.fetch(
                         "SELECT tool_name, input, output, duration_ms, extract(epoch from created_at) as created_at "
-                        "FROM tool_logs ORDER BY id DESC LIMIT $1",
-                        limit,
+                        "FROM tool_logs WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 ORDER BY id DESC LIMIT $4",
+                        tenant_id, user_id, device_id, limit,
                     )
                 return [
                     {
@@ -435,7 +486,7 @@ class AsyncBrainState:
                     }
                     for row in rows
                 ]
-        return self._fallback.get_tool_logs(tool_name, limit)
+        return self._fallback.get_tool_logs(tool_name, limit, tenant_id, user_id, device_id)
 
     async def close(self) -> None:
         # DBPool handles global connection closure, but we close the fallback
