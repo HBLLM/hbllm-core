@@ -315,6 +315,9 @@ class SemanticMemory:
             return _rust_hash(content)
         return hashlib.md5(content.encode()).hexdigest()
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def store(
         self,
         content: str,
@@ -421,6 +424,9 @@ class SemanticMemory:
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return doc_id
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     async def astore(
         self,
         content: str,
@@ -490,6 +496,9 @@ class SemanticMemory:
         self._tfidf_timer = threading.Timer(2.0, _do_encode)
         self._tfidf_timer.start()
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def search(
         self,
         query: str,
@@ -592,7 +601,7 @@ class SemanticMemory:
                 ]
             )
             final_scores[~user_mask] = -1.0
-            
+
         if device_id:
             device_mask = np.array(
                 [
@@ -630,14 +639,18 @@ class SemanticMemory:
         """Async version of search that queries Postgres pgvector if available."""
         pool = await self._ensure_pg_table()
         if not pool:
-            return self.search(query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id)
+            return self.search(
+                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+            )
 
         if not query or not query.strip():
             return []
 
         self._load_model()
         if self.model is None:
-            return self.search(query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id)
+            return self.search(
+                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+            )
 
         query_vec = self.model.encode([query])[0]
 
@@ -658,15 +671,15 @@ class SemanticMemory:
                 if tenant_id and tenant_id != "system":
                     args.append(tenant_id)
                     conditions.append(f"(tenant_id = ${len(args)} OR tenant_id IS NULL)")
-                
+
                 if user_id:
                     args.append(user_id)
                     conditions.append(f"(user_id = ${len(args)} OR user_id IS NULL)")
-                    
+
                 if device_id:
                     args.append(device_id)
                     conditions.append(f"(device_id = ${len(args)} OR device_id IS NULL)")
-                    
+
                 if conditions:
                     sql += " WHERE " + " AND ".join(conditions)
 

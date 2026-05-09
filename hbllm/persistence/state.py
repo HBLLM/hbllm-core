@@ -103,7 +103,12 @@ class BrainState:
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    def save(self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def save(
+        self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> None:
         """Save a value to the key-value store."""
         self._conn.execute(
             "INSERT OR REPLACE INTO kv_store (tenant_id, user_id, device_id, key, value, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -111,21 +116,51 @@ class BrainState:
         )
         self._conn.commit()
 
-    def load(self, key: str, default: Any = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> Any:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def load(
+        self,
+        key: str,
+        default: Any = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> Any:
         """Load a value from the key-value store."""
-        row = self._conn.execute("SELECT value FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?", (tenant_id, user_id, device_id, key)).fetchone()
+        row = self._conn.execute(
+            "SELECT value FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?",
+            (tenant_id, user_id, device_id, key),
+        ).fetchone()
         if row:
             return json.loads(row[0])
         return default
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Delete a key from the store."""
-        self._conn.execute("DELETE FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?", (tenant_id, user_id, device_id, key))
+        self._conn.execute(
+            "DELETE FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?",
+            (tenant_id, user_id, device_id, key),
+        )
         self._conn.commit()
 
     # ── Conversation History ──────────────────────────────────────────────
 
-    def append_message(self, role: str, content: str, metadata: dict | None = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def append_message(
+        self,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> int:
         """Append a message to conversation history."""
         cursor = self._conn.execute(
             "INSERT INTO messages (tenant_id, user_id, device_id, role, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -134,7 +169,17 @@ class BrainState:
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    def get_messages(self, limit: int = 50, offset: int = 0, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def get_messages(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> list[dict]:
         """Get recent messages from conversation history."""
         rows = self._conn.execute(
             "SELECT id, role, content, metadata, created_at FROM messages "
@@ -153,14 +198,25 @@ class BrainState:
             for row in reversed(rows)  # Return in chronological order
         ]
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Clear all conversation history."""
-        self._conn.execute("DELETE FROM messages WHERE tenant_id = ? AND user_id = ? AND device_id = ?", (tenant_id, user_id, device_id))
+        self._conn.execute(
+            "DELETE FROM messages WHERE tenant_id = ? AND user_id = ? AND device_id = ?",
+            (tenant_id, user_id, device_id),
+        )
         self._conn.commit()
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
-    def checkpoint(self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def checkpoint(
+        self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> int:
         """Save a checkpoint."""
         cursor = self._conn.execute(
             "INSERT INTO checkpoints (tenant_id, user_id, device_id, data, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -169,17 +225,27 @@ class BrainState:
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    def latest_checkpoint(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> dict | None:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def latest_checkpoint(
+        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> dict | None:
         """Get the most recent checkpoint."""
         row = self._conn.execute(
             "SELECT data, created_at FROM checkpoints WHERE tenant_id = ? AND user_id = ? AND device_id = ? ORDER BY id DESC LIMIT 1",
-            (tenant_id, user_id, device_id)
+            (tenant_id, user_id, device_id),
         ).fetchone()
         if row:
             return {"data": json.loads(row[0]), "created_at": row[1]}
         return None
 
-    def list_checkpoints(self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def list_checkpoints(
+        self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> list[dict]:
         """List recent checkpoints."""
         rows = self._conn.execute(
             "SELECT id, data, created_at FROM checkpoints WHERE tenant_id = ? AND user_id = ? AND device_id = ? ORDER BY id DESC LIMIT ?",
@@ -189,17 +255,46 @@ class BrainState:
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def log_tool_call(
-        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self,
+        tool_name: str,
+        input_data: str,
+        output: str,
+        duration_ms: float = 0,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
     ) -> None:
         """Log a tool invocation."""
         self._conn.execute(
             "INSERT INTO tool_logs (tenant_id, user_id, device_id, tool_name, input, output, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (tenant_id, user_id, device_id, tool_name, input_data, output[:5000], duration_ms, time.time()),
+            (
+                tenant_id,
+                user_id,
+                device_id,
+                tool_name,
+                input_data,
+                output[:5000],
+                duration_ms,
+                time.time(),
+            ),
         )
         self._conn.commit()
 
-    def get_tool_logs(self, tool_name: str | None = None, limit: int = 20, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    def get_tool_logs(
+        self,
+        tool_name: str | None = None,
+        limit: int = 20,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> list[dict]:
         """Get tool execution logs."""
         if tool_name:
             rows = self._conn.execute(
@@ -315,56 +410,112 @@ class AsyncBrainState:
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    async def save(self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def save(
+        self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 await conn.execute(
                     "INSERT INTO kv_store (tenant_id, user_id, device_id, key, value) VALUES ($1, $2, $3, $4, $5) "
                     "ON CONFLICT (tenant_id, user_id, device_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
-                    tenant_id, user_id, device_id, key, value,
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    key,
+                    value,
                 )
         else:
             self._fallback.save(key, value, tenant_id, user_id, device_id)
 
-    async def load(self, key: str, default: Any = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> Any:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def load(
+        self,
+        key: str,
+        default: Any = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> Any:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT value FROM kv_store WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND key = $4", 
-                    tenant_id, user_id, device_id, key
+                    "SELECT value FROM kv_store WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND key = $4",
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    key,
                 )
                 if row:
                     return row["value"]
                 return default
         return self._fallback.load(key, default, tenant_id, user_id, device_id)
 
-    async def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def delete(
+        self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "DELETE FROM kv_store WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND key = $4", 
-                    tenant_id, user_id, device_id, key
+                    "DELETE FROM kv_store WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND key = $4",
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    key,
                 )
         else:
             self._fallback.delete(key, tenant_id, user_id, device_id)
 
     # ── Conversation History ──────────────────────────────────────────────
 
-    async def append_message(self, role: str, content: str, metadata: dict | None = None, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def append_message(
+        self,
+        role: str,
+        content: str,
+        metadata: dict | None = None,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> int:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row_id = await conn.fetchval(
                     "INSERT INTO messages (tenant_id, user_id, device_id, role, content, metadata) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-                    tenant_id, user_id, device_id, role, content, metadata or {},
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    role,
+                    content,
+                    metadata or {},
                 )
                 return int(row_id) if row_id else 0
         return self._fallback.append_message(role, content, metadata, tenant_id, user_id, device_id)
 
-    async def get_messages(self, limit: int = 50, offset: int = 0, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def get_messages(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
@@ -372,7 +523,11 @@ class AsyncBrainState:
                     "SELECT id, role, content, metadata, extract(epoch from created_at) as created_at "
                     "FROM messages WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 "
                     "ORDER BY id DESC LIMIT $4 OFFSET $5",
-                    tenant_id, user_id, device_id, limit, offset,
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    limit,
+                    offset,
                 )
                 return [
                     {
@@ -386,52 +541,82 @@ class AsyncBrainState:
                 ]
         return self._fallback.get_messages(limit, offset, tenant_id, user_id, device_id)
 
-    async def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def clear_messages(
+        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "DELETE FROM messages WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3", 
-                    tenant_id, user_id, device_id
+                    "DELETE FROM messages WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3",
+                    tenant_id,
+                    user_id,
+                    device_id,
                 )
         else:
             self._fallback.clear_messages(tenant_id, user_id, device_id)
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
-    async def checkpoint(self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = "") -> int:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def checkpoint(
+        self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> int:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row_id = await conn.fetchval(
                     "INSERT INTO checkpoints (tenant_id, user_id, device_id, data) VALUES ($1, $2, $3, $4) RETURNING id",
-                    tenant_id, user_id, device_id, data
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    data,
                 )
                 return int(row_id) if row_id else 0
         return self._fallback.checkpoint(data, tenant_id, user_id, device_id)
 
-    async def latest_checkpoint(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> dict | None:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def latest_checkpoint(
+        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> dict | None:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "SELECT data, extract(epoch from created_at) as created_at "
                     "FROM checkpoints WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 ORDER BY id DESC LIMIT 1",
-                    tenant_id, user_id, device_id
+                    tenant_id,
+                    user_id,
+                    device_id,
                 )
                 if row:
                     return {"data": row["data"], "created_at": row["created_at"]}
                 return None
         return self._fallback.latest_checkpoint(tenant_id, user_id, device_id)
 
-    async def list_checkpoints(self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def list_checkpoints(
+        self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
+    ) -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT id, data, extract(epoch from created_at) as created_at "
                     "FROM checkpoints WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 ORDER BY id DESC LIMIT $4",
-                    tenant_id, user_id, device_id, limit,
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    limit,
                 )
                 return [
                     {"id": row["id"], "data": row["data"], "created_at": row["created_at"]}
@@ -441,8 +626,18 @@ class AsyncBrainState:
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     async def log_tool_call(
-        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self,
+        tool_name: str,
+        input_data: str,
+        output: str,
+        duration_ms: float = 0,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -458,9 +653,21 @@ class AsyncBrainState:
                     duration_ms,
                 )
         else:
-            self._fallback.log_tool_call(tool_name, input_data, output, duration_ms, tenant_id, user_id, device_id)
+            self._fallback.log_tool_call(
+                tool_name, input_data, output, duration_ms, tenant_id, user_id, device_id
+            )
 
-    async def get_tool_logs(self, tool_name: str | None = None, limit: int = 20, tenant_id: str = "", user_id: str = "", device_id: str = "") -> list[dict]:
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
+    async def get_tool_logs(
+        self,
+        tool_name: str | None = None,
+        limit: int = 20,
+        tenant_id: str = "",
+        user_id: str = "",
+        device_id: str = "",
+    ) -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:
@@ -468,13 +675,20 @@ class AsyncBrainState:
                     rows = await conn.fetch(
                         "SELECT tool_name, input, output, duration_ms, extract(epoch from created_at) as created_at "
                         "FROM tool_logs WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 AND tool_name = $4 ORDER BY id DESC LIMIT $5",
-                        tenant_id, user_id, device_id, tool_name, limit,
+                        tenant_id,
+                        user_id,
+                        device_id,
+                        tool_name,
+                        limit,
                     )
                 else:
                     rows = await conn.fetch(
                         "SELECT tool_name, input, output, duration_ms, extract(epoch from created_at) as created_at "
                         "FROM tool_logs WHERE tenant_id = $1 AND user_id = $2 AND device_id = $3 ORDER BY id DESC LIMIT $4",
-                        tenant_id, user_id, device_id, limit,
+                        tenant_id,
+                        user_id,
+                        device_id,
+                        limit,
                     )
                 return [
                     {

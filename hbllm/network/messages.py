@@ -73,7 +73,7 @@ class Message(BaseModel):
     source_node_id: str
     target_node_id: str | None = None  # None = broadcast
     tenant_id: str = "default"  # Phase 9.5: Multi-tenant isolation
-    user_id: str = "default"    # Hierarchical identity
+    user_id: str = "default"  # Hierarchical identity
     device_id: str = "default"  # Edge tracking
     session_id: str = "default"  # Phase 9.5: Session correlation
     topic: str

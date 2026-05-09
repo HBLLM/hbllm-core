@@ -362,7 +362,16 @@ class AsyncInteractionMiner:
                 )
         else:
             self._fallback.record_interaction(
-                query, response, reward, regenerated, follow_up, tenant_id, user_id, device_id, tokens_used, model
+                query,
+                response,
+                reward,
+                regenerated,
+                follow_up,
+                tenant_id,
+                user_id,
+                device_id,
+                tokens_used,
+                model,
             )
 
     async def mine_sft_samples(

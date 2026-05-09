@@ -2,7 +2,8 @@
 Unified Configuration System for HBLLM Core.
 
 This module provides a central entry point for loading all system configurations,
-including model parameters, cluster topology, and the new LoRA Adapter Registry.
+including model parameters, cluster topology, the LoRA Adapter Registry, and
+multi-tenant security settings.
 """
 
 import os
@@ -16,6 +17,43 @@ from hbllm.modules.adapter_registry import AdapterRegistryConfig
 from hbllm.network.cluster_config import ClusterConfig
 
 
+class SecurityConfig(BaseModel):
+    """
+    Multi-tenant security configuration.
+
+    Controls tenant isolation enforcement, audit logging, rate limiting,
+    and encryption at rest.
+
+    Example YAML::
+
+        security:
+          tenant_guard_mode: strict    # off | warn | strict
+          isolation_level: namespace   # shared | namespace | dedicated
+          audit_enabled: true
+          audit_db_path: data/audit.db
+          rate_limit_enabled: true
+          rate_limit_rpm: 60
+          encryption_key_path: ""
+    """
+
+    # Tenant isolation enforcement level
+    tenant_guard_mode: str = "warn"  # off | warn | strict
+
+    # Data separation strategy
+    isolation_level: str = "shared"  # shared | namespace | dedicated
+
+    # Audit logging
+    audit_enabled: bool = True
+    audit_db_path: str = "data/audit.db"
+
+    # Rate limiting
+    rate_limit_enabled: bool = True
+    rate_limit_rpm: int = 60
+
+    # Encryption at rest
+    encryption_key_path: str = ""  # empty = auto-generate per boot
+
+
 class HBLLMCoreConfig(BaseModel):
     """The root configuration object for the entire HBLLM system."""
 
@@ -25,6 +63,7 @@ class HBLLMCoreConfig(BaseModel):
     # Nested configurations
     cluster: ClusterConfig = Field(default_factory=ClusterConfig)
     adapters: AdapterRegistryConfig = Field(default_factory=AdapterRegistryConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
 
     # Global paths
     checkpoints_dir: str = "./checkpoints"

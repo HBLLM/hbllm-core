@@ -188,8 +188,12 @@ class TestBrainStateIsolation:
         )
 
     def test_message_isolation(self, state):
-        state.append_message("user", "Hello from Alice", tenant_id="t1", user_id="alice", device_id="d1")
-        state.append_message("user", "Hello from Bob", tenant_id="t1", user_id="bob", device_id="d2")
+        state.append_message(
+            "user", "Hello from Alice", tenant_id="t1", user_id="alice", device_id="d1"
+        )
+        state.append_message(
+            "user", "Hello from Bob", tenant_id="t1", user_id="bob", device_id="d2"
+        )
 
         alice_msgs = state.get_messages(tenant_id="t1", user_id="alice", device_id="d1")
         assert len(alice_msgs) == 1
@@ -212,8 +216,12 @@ class TestBrainStateIsolation:
         assert cp_bob["data"]["step"] == 99
 
     def test_tool_log_isolation(self, state):
-        state.log_tool_call("calculator", "2+2", "4", tenant_id="t1", user_id="alice", device_id="d1")
-        state.log_tool_call("translator", "hello", "hola", tenant_id="t1", user_id="bob", device_id="d2")
+        state.log_tool_call(
+            "calculator", "2+2", "4", tenant_id="t1", user_id="alice", device_id="d1"
+        )
+        state.log_tool_call(
+            "translator", "hello", "hola", tenant_id="t1", user_id="bob", device_id="d2"
+        )
 
         logs_alice = state.get_tool_logs(tenant_id="t1", user_id="alice", device_id="d1")
         assert len(logs_alice) == 1
@@ -269,10 +277,12 @@ class TestSynapseGateway:
 
     @pytest.mark.asyncio
     async def test_capability_registration(self, gateway):
-        msg_data = json.dumps({
-            "type": "register_capabilities",
-            "tools": ["read_gps", "vibrate", "camera"],
-        })
+        msg_data = json.dumps(
+            {
+                "type": "register_capabilities",
+                "tools": ["read_gps", "vibrate", "camera"],
+            }
+        )
 
         await gateway.handle_inbound_message("t1", "alice", "phone_1", msg_data)
 
@@ -331,13 +341,15 @@ class TestSynapseGateway:
     @pytest.mark.asyncio
     async def test_tool_result_forwarding(self, gateway):
         """Tool results from edge should be parsed correctly."""
-        msg_data = json.dumps({
-            "type": "tool_result",
-            "correlation_id": "corr-123",
-            "tool_name": "read_gps",
-            "result": {"lat": 6.9271, "lng": 79.8612},
-            "error": None,
-        })
+        msg_data = json.dumps(
+            {
+                "type": "tool_result",
+                "correlation_id": "corr-123",
+                "tool_name": "read_gps",
+                "result": {"lat": 6.9271, "lng": 79.8612},
+                "error": None,
+            }
+        )
 
         # Should not raise even without a bus
         await gateway.handle_inbound_message("t1", "alice", "phone_1", msg_data)

@@ -8,7 +8,7 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-1400%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-1600%2B%20passing-brightgreen.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
@@ -16,7 +16,8 @@
 
 > [!NOTE]  
 > **Reviewer Quick Links:**
-> - 🛡️ **[Security Architecture](SECURITY.md)** (AST Code Sandboxing, Tenant Isolation, Adapter Integrity)
+> - 🛡️ **[Security Architecture](SECURITY.md)** (Identity Triplet, Tenant Guard, Audit Log, Encryption at Rest)
+> - 🔐 **[Governance & Policies](docs/api/governance.md)** (PolicyEngine, SentinelNode, Constitutional Principles)
 > - ⚡ **[Reproducible Benchmarks](docs/api/benchmarks.md)** (Memory Profiling, Fast-Path Latency)
 
 ## Why HBLLM Core?
@@ -54,7 +55,8 @@ By decoupling reasoning, memory, evaluation, and action, HBLLM can self-correct,
 | **🧪 Zoning Model** | One base model + hot-swappable 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
 | **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
-| **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Deployment](docs/guides/deployment.md) |
+| **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Governance](docs/api/governance.md) |
+| **🔐 Enterprise Security** | Identity triplet, `@require_tenant`, audit log, encryption | [Security](SECURITY.md) |
 | **⚙️ Infrastructure** | 128k+ context, Rust SIMD quantization, ONNX router | [Benchmarks](docs/api/benchmarks.md) |
 | **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialists | [Zoning](docs/zoning/how-it-works.md) |
 

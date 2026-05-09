@@ -105,7 +105,9 @@ class ValueMemory:
         )
         return reward_id
 
-    def get_preference(self, tenant_id: str, topic: str, user_id: str = "", device_id: str = "") -> dict[str, float]:
+    def get_preference(
+        self, tenant_id: str, topic: str, user_id: str = "", device_id: str = ""
+    ) -> dict[str, float]:
         """
         Get aggregated preferences for a topic.
 
@@ -136,7 +138,9 @@ class ValueMemory:
 
         return {action: sum(values) / len(values) for action, values in preferences.items()}
 
-    def get_top_preferences(self, tenant_id: str, top_k: int = 5, user_id: str = "", device_id: str = "") -> list[dict[str, Any]]:
+    def get_top_preferences(
+        self, tenant_id: str, top_k: int = 5, user_id: str = "", device_id: str = ""
+    ) -> list[dict[str, Any]]:
         """
         Get the tenant's strongest preferences across all topics.
 

@@ -287,6 +287,9 @@ class MemoryNode(Node):
 
     # Specific topic handlers below:
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     async def handle_store(self, message: Message) -> Message | None:
         """
         Handles `memory.store` topics.
@@ -362,6 +365,9 @@ class MemoryNode(Node):
             logger.error("Memory retrieval failed: %s", e)
             return message.create_error(str(e))
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     async def handle_search(self, message: Message) -> Message | None:
         """
         Handles `memory.search` topics for long-term semantic RAG.
@@ -495,10 +501,14 @@ class MemoryNode(Node):
             tenant_id = message.tenant_id or "default"
 
             if topic:
-                preferences = self.value_db.get_preference(tenant_id, topic, message.user_id, message.device_id)
+                preferences = self.value_db.get_preference(
+                    tenant_id, topic, message.user_id, message.device_id
+                )
                 return message.create_response({"topic": topic, "preferences": preferences})
             else:
-                top_prefs = self.value_db.get_top_preferences(tenant_id, top_k, message.user_id, message.device_id)
+                top_prefs = self.value_db.get_top_preferences(
+                    tenant_id, top_k, message.user_id, message.device_id
+                )
                 return message.create_response({"top_preferences": top_prefs})
 
         except Exception as e:

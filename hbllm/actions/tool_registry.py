@@ -359,12 +359,15 @@ class RemoteToolNode(Node):
 
         try:
             import asyncio
+
             resp = await self.request("edge.tool_result", req, timeout=30.0)
-            return message.create_response({
-                "status": "SUCCESS",
-                "output": resp.payload.get("result"),
-                "error": resp.payload.get("error")
-            })
+            return message.create_response(
+                {
+                    "status": "SUCCESS",
+                    "output": resp.payload.get("result"),
+                    "error": resp.payload.get("error"),
+                }
+            )
         except (TimeoutError, asyncio.TimeoutError):
             return message.create_error(f"Remote tool {self.tool_name} timed out.")
         except Exception as e:

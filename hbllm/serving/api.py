@@ -20,8 +20,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from hbllm.config import HBLLMCoreConfig
 from hbllm.network.messages import Message, MessageType, QueryPayload
+from hbllm.security.audit_log import AuditLog
 from hbllm.serving.auth import JWTAuthMiddleware
+from hbllm.serving.security import BodySizeLimitMiddleware, sanitize_input
 
 logging.basicConfig(
     level=logging.INFO,
@@ -162,7 +165,8 @@ async def _boot_brain(
     # 4. Start Synapse Gateway
     from hbllm.serving.synapse_gateway import SynapseGateway
 
-    gateway = SynapseGateway(bus=brain.bus)
+    audit_log = _state.get("audit_log")
+    gateway = SynapseGateway(bus=brain.bus, audit_log=audit_log)
     await gateway.start()
     _state["synapse_gateway"] = gateway
 
@@ -228,6 +232,12 @@ async def lifespan(app: FastAPI) -> Any:
         )
 
     model_size = os.getenv("HBLLM_MODEL_SIZE", "125m")
+
+    # Initialize Core Config & Security components
+    config = HBLLMCoreConfig.load()
+    if config.security.audit_enabled:
+        _state["audit_log"] = AuditLog(db_path=config.security.audit_db_path)
+
     try:
         await _boot_brain(app=app, model_size=model_size)
         logger.info("Full brain pipeline active")
@@ -1042,7 +1052,7 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
             logger.warning("RAG retrieval failed: %s", e)
 
     messages.append({"role": "system", "content": system_content})
-    messages.append({"role": "user", "content": request.text})
+    messages.append({"role": "user", "content": sanitize_input(request.text)})
 
     # Apply policy engine if available
     policy_engine = _state.get("policy_engine")
@@ -1129,7 +1139,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
         device_id=request.device_id,
         session_id=request.session_id,
         topic="router.query",
-        payload=QueryPayload(text=request.text).model_dump(),
+        payload=QueryPayload(text=sanitize_input(request.text)).model_dump(),
         correlation_id=correlation_id,
     )
     await bus.publish("router.query", query_msg)
@@ -1199,6 +1209,7 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+
 @app.websocket("/v1/synapse/ws")
 async def synapse_websocket(websocket: WebSocket) -> Any:
     """
@@ -1211,6 +1222,7 @@ async def synapse_websocket(websocket: WebSocket) -> Any:
     Identity is extracted from the verified JWT — not from untrusted params.
     """
     import os
+
     import jwt as pyjwt
 
     # ── 1. Extract and verify JWT ──
@@ -1223,7 +1235,11 @@ async def synapse_websocket(websocket: WebSocket) -> Any:
     if not secret_key:
         # In dev mode, accept the token from _state if the auth middleware generated one
         auth_mw = next(
-            (m for m in getattr(app, "user_middleware", []) if hasattr(m, "kwargs") and "secret_key" in m.kwargs),
+            (
+                m
+                for m in getattr(app, "user_middleware", [])
+                if hasattr(m, "kwargs") and "secret_key" in m.kwargs
+            ),
             None,
         )
         if auth_mw:

@@ -141,12 +141,12 @@ nav:
       - Training Pipeline: guides/training.md
       - Robotics & IoT: guides/robotics-iot.md
       - Deployment: guides/deployment.md
+      - Security Architecture: security.md
   - API Reference:
       - Brain Factory: api/brain-factory.md
       - Brain Subsystems: api/brain-subsystems.md
       - Actions & Tools: api/actions.md
-      - Governance & Security: api/governance.md
-      - Security Architecture: security.md
+      - Governance & Policies: api/governance.md
       - Memory: api/memory.md
       - Plugin System: api/plugins.md
       - Model Internals: api/model.md
