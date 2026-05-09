@@ -181,6 +181,12 @@ class SemanticMemory:
         self._lock = threading.Lock()
         self._tfidf_timer: threading.Timer | None = None
 
+        # ── PostgreSQL/pgvector Backend ──────────────────────────────────
+        from hbllm.persistence.db_pool import DBPool
+
+        self._db_pool_class = DBPool
+        self._pg_table_created = False
+
         # ── Optional Qdrant Backend ──────────────────────────────────────
         self._use_qdrant = use_qdrant and _HAS_QDRANT
         self._qdrant: QdrantClient | None = None
@@ -229,6 +235,33 @@ class SemanticMemory:
             vectors_config=VectorParams(size=dims, distance=Distance.COSINE),
         )
         self._qdrant_initialized = True
+
+    async def _ensure_pg_table(self) -> Any:
+        """Lazily create the PostgreSQL pgvector table on first write."""
+        pool = await self._db_pool_class.get_pool()
+        if pool is None:
+            return None
+
+        if not self._pg_table_created:
+            dims = 384
+            if self.model is not None:
+                dims = self.model.get_sentence_embedding_dimension()
+
+            async with pool.acquire() as conn:
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                await conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS semantic_memory (
+                        id UUID PRIMARY KEY,
+                        content TEXT NOT NULL,
+                        metadata JSONB DEFAULT '{{}}',
+                        embedding vector({dims}),
+                        tenant_id TEXT,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_semantic_tenant ON semantic_memory(tenant_id);
+                """)
+            self._pg_table_created = True
+        return pool
 
     def _encode(self, texts: list[str]) -> np.ndarray[Any, Any]:
         """Encode texts using the best available method."""
@@ -376,6 +409,49 @@ class SemanticMemory:
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return doc_id
 
+    async def astore(
+        self,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        is_priority: bool = False,
+        tenant_id: str | None = None,
+    ) -> str | None:
+        """Async version of store that persists to Postgres if configured."""
+        # 1. Store in local fallback memory (also handles deduplication/TF-IDF)
+        doc_id = self.store(content, metadata, is_priority, tenant_id)
+        if not doc_id:
+            return None
+
+        # 2. Replicate to PostgreSQL pgvector
+        pool = await self._ensure_pg_table()
+        if pool:
+            meta = metadata or {}
+            if is_priority:
+                meta["is_priority"] = True
+
+            # Re-compute embedding (or fetch from memory)
+            # We already loaded the model inside self.store()
+            if self.model is not None:
+                embedding = self.model.encode([content])[0]
+                try:
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            """
+                            INSERT INTO semantic_memory (id, content, metadata, embedding, tenant_id)
+                            VALUES ($1, $2, $3, $4, $5)
+                            ON CONFLICT (id) DO NOTHING
+                            """,
+                            doc_id,
+                            content,
+                            meta,
+                            embedding.tolist(),
+                            tenant_id,
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to store vector in PostgreSQL: {e}")
+
+        return doc_id
+
     def _schedule_tfidf_encode(self) -> None:
         """Debounces and schedules a full TF-IDF re-encoding."""
         if self._tfidf_timer is not None:
@@ -502,6 +578,75 @@ class SemanticMemory:
             results.append(res)
 
         return results
+
+    async def asearch(
+        self,
+        query: str,
+        top_k: int = 3,
+        reward_scores: dict[str, float] | None = None,
+        reward_boost: float = 0.1,
+        tenant_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Async version of search that queries Postgres pgvector if available."""
+        pool = await self._ensure_pg_table()
+        if not pool:
+            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
+
+        if not query or not query.strip():
+            return []
+
+        self._load_model()
+        if self.model is None:
+            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
+
+        query_vec = self.model.encode([query])[0]
+
+        results = []
+        try:
+            async with pool.acquire() as conn:
+                # We use the <-> operator for L2 distance (or cosine distance). pgvector uses <=> for cosine distance.
+                # Let's use <=> (cosine distance) since we use cosine similarity locally.
+                # Order by distance ASC
+
+                sql = """
+                    SELECT id, content, metadata, 1 - (embedding <=> $1) AS score
+                    FROM semantic_memory
+                """
+                args: list[Any] = [query_vec.tolist()]
+
+                if tenant_id and tenant_id != "system":
+                    sql += " WHERE tenant_id = $2 OR tenant_id IS NULL"
+                    args.append(tenant_id)
+
+                sql += f" ORDER BY embedding <=> $1 ASC LIMIT {top_k}"
+
+                rows = await conn.fetch(sql, *args)
+
+                for row in rows:
+                    doc_id = str(row["id"])
+                    score = float(row["score"])
+
+                    # Apply reward boosting if any
+                    if reward_scores and doc_id in reward_scores:
+                        score += reward_boost * reward_scores[doc_id]
+
+                    results.append(
+                        {
+                            "id": doc_id,
+                            "content": row["content"],
+                            "metadata": row["metadata"],
+                            "score": score,
+                        }
+                    )
+
+            # Sort again if rewards changed the order
+            if reward_scores:
+                results.sort(key=lambda x: x["score"], reverse=True)
+
+            return results
+        except Exception as e:
+            logger.error(f"PostgreSQL pgvector search failed: {e}")
+            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
 
     def delete(self, doc_id: str) -> bool:
         """

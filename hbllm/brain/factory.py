@@ -57,7 +57,7 @@ from hbllm.brain.skill_compiler_node import SkillCompilerNode
 # New cognitive modules
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.world_simulator import WorldSimulator
-from hbllm.data.interaction_miner import InteractionMiner
+from hbllm.data.interaction_miner import AsyncInteractionMiner, InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
@@ -182,7 +182,7 @@ class Brain:
         self.token_optimizer: TokenOptimizer | None = None
         self.reward_model: RewardModel | None = None
         self.policy_optimizer: PolicyOptimizer | None = None
-        self.interaction_miner: InteractionMiner | None = None
+        self.interaction_miner: AsyncInteractionMiner | None = None
         self.policy_engine: PolicyEngine | None = None
         self.owner_rules: OwnerRuleStore | None = None
         self.sentinel: Any = None  # SentinelNode reference
@@ -259,7 +259,7 @@ class Brain:
 
         # Post-process: interaction mining
         if self.interaction_miner and not result.error:
-            self.interaction_miner.record_interaction(
+            await self.interaction_miner.record_interaction(
                 query=text,
                 response=result.text,
                 reward=result.confidence,
@@ -728,7 +728,7 @@ class BrainFactory:
         brain.cognition_router = CognitionRouter()
         brain.reward_model = RewardModel(data_dir=data_dir)
         brain.policy_optimizer = PolicyOptimizer()
-        brain.interaction_miner = InteractionMiner(data_dir=data_dir)
+        brain.interaction_miner = AsyncInteractionMiner(data_dir=data_dir)
 
         # Configurable subsystems
         if cfg.inject_revision:

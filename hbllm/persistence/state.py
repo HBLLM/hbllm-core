@@ -17,6 +17,8 @@ import sqlite3
 import time
 from typing import Any
 
+from hbllm.persistence.db_pool import DBPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -219,3 +221,239 @@ class BrainState:
             "checkpoints": cp_count,
             "tool_logs": tool_count,
         }
+
+
+class AsyncBrainState:
+    """
+    Async Postgres-backed persistent state manager for HBLLM brain sessions.
+    Falls back to synchronous sqlite-backed BrainState if Postgres is unavailable.
+    """
+
+    def __init__(self, path: str = "./brain_state.db"):
+        self.path = path
+        self._fallback = BrainState(path)
+        self._pg_tables_created = False
+
+    async def _ensure_pg_tables(self) -> Any | None:
+        """Lazily create the PostgreSQL tables on first write."""
+        pool = await DBPool.get_pool()
+        if pool is None:
+            return None
+
+        if not self._pg_tables_created:
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS kv_store (
+                        key TEXT PRIMARY KEY,
+                        value JSONB NOT NULL,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id SERIAL PRIMARY KEY,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        metadata JSONB DEFAULT '{}',
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        id SERIAL PRIMARY KEY,
+                        data JSONB NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS tool_logs (
+                        id SERIAL PRIMARY KEY,
+                        tool_name TEXT NOT NULL,
+                        input TEXT NOT NULL,
+                        output TEXT NOT NULL,
+                        duration_ms REAL DEFAULT 0,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+            self._pg_tables_created = True
+        return pool
+
+    # ── Key-Value Store ───────────────────────────────────────────────────
+
+    async def save(self, key: str, value: Any) -> None:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO kv_store (key, value) VALUES ($1, $2) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
+                    key,
+                    value,
+                )
+        else:
+            self._fallback.save(key, value)
+
+    async def load(self, key: str, default: Any = None) -> Any:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT value FROM kv_store WHERE key = $1", key)
+                if row:
+                    return row["value"]
+                return default
+        return self._fallback.load(key, default)
+
+    async def delete(self, key: str) -> None:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute("DELETE FROM kv_store WHERE key = $1", key)
+        else:
+            self._fallback.delete(key)
+
+    # ── Conversation History ──────────────────────────────────────────────
+
+    async def append_message(self, role: str, content: str, metadata: dict | None = None) -> int:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                row_id = await conn.fetchval(
+                    "INSERT INTO messages (role, content, metadata) VALUES ($1, $2, $3) RETURNING id",
+                    role,
+                    content,
+                    metadata or {},
+                )
+                return int(row_id) if row_id else 0
+        return self._fallback.append_message(role, content, metadata)
+
+    async def get_messages(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT id, role, content, metadata, extract(epoch from created_at) as created_at "
+                    "FROM messages ORDER BY id DESC LIMIT $1 OFFSET $2",
+                    limit,
+                    offset,
+                )
+                return [
+                    {
+                        "id": row["id"],
+                        "role": row["role"],
+                        "content": row["content"],
+                        "metadata": row["metadata"],
+                        "created_at": row["created_at"],
+                    }
+                    for row in reversed(rows)
+                ]
+        return self._fallback.get_messages(limit, offset)
+
+    async def clear_messages(self) -> None:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute("DELETE FROM messages")
+        else:
+            self._fallback.clear_messages()
+
+    # ── Checkpoints ───────────────────────────────────────────────────────
+
+    async def checkpoint(self, data: dict) -> int:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                row_id = await conn.fetchval(
+                    "INSERT INTO checkpoints (data) VALUES ($1) RETURNING id", data
+                )
+                return int(row_id) if row_id else 0
+        return self._fallback.checkpoint(data)
+
+    async def latest_checkpoint(self) -> dict | None:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT data, extract(epoch from created_at) as created_at "
+                    "FROM checkpoints ORDER BY id DESC LIMIT 1"
+                )
+                if row:
+                    return {"data": row["data"], "created_at": row["created_at"]}
+                return None
+        return self._fallback.latest_checkpoint()
+
+    async def list_checkpoints(self, limit: int = 10) -> list[dict]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT id, data, extract(epoch from created_at) as created_at "
+                    "FROM checkpoints ORDER BY id DESC LIMIT $1",
+                    limit,
+                )
+                return [
+                    {"id": row["id"], "data": row["data"], "created_at": row["created_at"]}
+                    for row in rows
+                ]
+        return self._fallback.list_checkpoints(limit)
+
+    # ── Tool Logs ─────────────────────────────────────────────────────────
+
+    async def log_tool_call(
+        self, tool_name: str, input_data: str, output: str, duration_ms: float = 0
+    ) -> None:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO tool_logs (tool_name, input, output, duration_ms) VALUES ($1, $2, $3, $4)",
+                    tool_name,
+                    input_data,
+                    output[:5000],
+                    duration_ms,
+                )
+        else:
+            self._fallback.log_tool_call(tool_name, input_data, output, duration_ms)
+
+    async def get_tool_logs(self, tool_name: str | None = None, limit: int = 20) -> list[dict]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                if tool_name:
+                    rows = await conn.fetch(
+                        "SELECT tool_name, input, output, duration_ms, extract(epoch from created_at) as created_at "
+                        "FROM tool_logs WHERE tool_name = $1 ORDER BY id DESC LIMIT $2",
+                        tool_name,
+                        limit,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT tool_name, input, output, duration_ms, extract(epoch from created_at) as created_at "
+                        "FROM tool_logs ORDER BY id DESC LIMIT $1",
+                        limit,
+                    )
+                return [
+                    {
+                        "tool": row["tool_name"],
+                        "input": row["input"],
+                        "output": row["output"],
+                        "duration_ms": row["duration_ms"],
+                        "created_at": row["created_at"],
+                    }
+                    for row in rows
+                ]
+        return self._fallback.get_tool_logs(tool_name, limit)
+
+    async def close(self) -> None:
+        # DBPool handles global connection closure, but we close the fallback
+        self._fallback.close()
+
+    @property
+    async def stats(self) -> dict:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                kv_count = await conn.fetchval("SELECT COUNT(*) FROM kv_store")
+                msg_count = await conn.fetchval("SELECT COUNT(*) FROM messages")
+                cp_count = await conn.fetchval("SELECT COUNT(*) FROM checkpoints")
+                tool_count = await conn.fetchval("SELECT COUNT(*) FROM tool_logs")
+                return {
+                    "kv_entries": kv_count,
+                    "messages": msg_count,
+                    "checkpoints": cp_count,
+                    "tool_logs": tool_count,
+                }
+        return self._fallback.stats

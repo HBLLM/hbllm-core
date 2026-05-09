@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.db_pool import DBPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -264,3 +266,199 @@ class InteractionMiner:
             "regeneration_rate": round(regen / max(total, 1), 3),
             "mined_samples": mined,
         }
+
+
+class AsyncInteractionMiner:
+    """
+    Async Postgres-backed interaction miner.
+    Falls back to synchronous sqlite-backed InteractionMiner if Postgres is unavailable.
+    """
+
+    def __init__(self, data_dir: str = "data"):
+        self._fallback = InteractionMiner(data_dir)
+        self._pg_tables_created = False
+
+    async def _ensure_pg_tables(self) -> Any | None:
+        pool = await DBPool.get_pool()
+        if pool is None:
+            return None
+
+        if not self._pg_tables_created:
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS interactions (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id TEXT DEFAULT '',
+                        query TEXT NOT NULL,
+                        response TEXT NOT NULL,
+                        reward REAL DEFAULT 0.0,
+                        regenerated INTEGER DEFAULT 0,
+                        follow_up INTEGER DEFAULT 0,
+                        tokens_used INTEGER DEFAULT 0,
+                        model TEXT DEFAULT '',
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS mined_samples (
+                        id SERIAL PRIMARY KEY,
+                        instruction TEXT NOT NULL,
+                        response TEXT NOT NULL,
+                        quality_score REAL NOT NULL,
+                        data_type TEXT DEFAULT 'sft',
+                        source TEXT DEFAULT 'mined',
+                        metadata JSONB DEFAULT '{}',
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_interactions_reward ON interactions(reward DESC);
+                """)
+            self._pg_tables_created = True
+        return pool
+
+    async def record_interaction(
+        self,
+        query: str,
+        response: str,
+        reward: float = 0.0,
+        regenerated: bool = False,
+        follow_up: bool = False,
+        tenant_id: str = "",
+        tokens_used: int = 0,
+        model: str = "",
+    ) -> None:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO interactions
+                    (tenant_id, query, response, reward, regenerated, follow_up, tokens_used, model)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    tenant_id,
+                    query,
+                    response,
+                    reward,
+                    int(regenerated),
+                    int(follow_up),
+                    tokens_used,
+                    model,
+                )
+        else:
+            self._fallback.record_interaction(
+                query, response, reward, regenerated, follow_up, tenant_id, tokens_used, model
+            )
+
+    async def mine_sft_samples(
+        self, min_reward: float = 0.5, min_length: int = 20, limit: int = 5000
+    ) -> list[MinedSample]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT query, response, reward FROM interactions
+                    WHERE reward >= $1 AND regenerated = 0
+                    AND LENGTH(response) > $2
+                    ORDER BY reward DESC LIMIT $3
+                    """,
+                    min_reward,
+                    min_length,
+                    limit,
+                )
+                samples = [
+                    MinedSample(
+                        instruction=r["query"],
+                        response=r["response"],
+                        quality_score=float(r["reward"]),
+                        data_type="sft",
+                    )
+                    for r in rows
+                ]
+                logger.info("Mined %d SFT samples (min_reward=%.2f)", len(samples), min_reward)
+                return samples
+        return self._fallback.mine_sft_samples(min_reward, min_length, limit)
+
+    async def mine_preference_pairs(self, limit: int = 2000) -> list[dict[str, str]]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT a.query, b.response as chosen, a.response as rejected
+                    FROM interactions a
+                    JOIN interactions b ON a.query = b.query AND a.id != b.id
+                    WHERE a.regenerated = 1 AND b.regenerated = 0
+                    AND b.reward > a.reward
+                    ORDER BY b.reward DESC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+                pairs = [
+                    {"query": r["query"], "chosen": r["chosen"], "rejected": r["rejected"]}
+                    for r in rows
+                ]
+                logger.info("Mined %d preference pairs", len(pairs))
+                return pairs
+        return self._fallback.mine_preference_pairs(limit)
+
+    async def mine_hard_negatives(
+        self, max_reward: float = -0.3, limit: int = 1000
+    ) -> list[MinedSample]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT query, response, reward FROM interactions
+                    WHERE reward <= $1
+                    ORDER BY reward ASC LIMIT $2
+                    """,
+                    max_reward,
+                    limit,
+                )
+                return [
+                    MinedSample(
+                        instruction=r["query"],
+                        response=r["response"],
+                        quality_score=float(r["reward"]),
+                        data_type="safety",
+                        source="hard_negative",
+                    )
+                    for r in rows
+                ]
+        return self._fallback.mine_hard_negatives(max_reward, limit)
+
+    async def mine_knowledge(
+        self, min_reward: float = 0.7, limit: int = 5000
+    ) -> list[dict[str, str]]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT query, response FROM interactions
+                    WHERE reward >= $1 AND regenerated = 0
+                    AND query LIKE '%?%'
+                    ORDER BY reward DESC LIMIT $2
+                    """,
+                    min_reward,
+                    limit,
+                )
+                return [{"question": r["query"], "answer": r["response"]} for r in rows]
+        return self._fallback.mine_knowledge(min_reward, limit)
+
+    async def stats(self) -> dict[str, Any]:
+        pool = await self._ensure_pg_tables()
+        if pool:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval("SELECT COUNT(*) FROM interactions")
+                avg_reward = await conn.fetchval("SELECT AVG(reward) FROM interactions")
+                regen = await conn.fetchval("SELECT COUNT(*) FROM interactions WHERE regenerated=1")
+                mined = await conn.fetchval("SELECT COUNT(*) FROM mined_samples")
+                return {
+                    "total_interactions": total,
+                    "avg_reward": round(float(avg_reward) if avg_reward else 0.0, 3),
+                    "regeneration_rate": round(regen / max(total, 1), 3),
+                    "mined_samples": mined,
+                }
+        return self._fallback.stats
