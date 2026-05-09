@@ -1203,19 +1203,62 @@ from fastapi import WebSocket, WebSocketDisconnect
 async def synapse_websocket(websocket: WebSocket) -> Any:
     """
     WebSocket endpoint for Synapse Edge Devices.
-    Requires query parameters: tenant_id, user_id, device_id
+
+    Authentication: Pass a JWT token as a query parameter:
+        ws://host/v1/synapse/ws?token=<jwt>
+
+    The token must contain `tenant_id`, `user_id`, and `device_id` claims.
+    Identity is extracted from the verified JWT — not from untrusted params.
     """
-    tenant_id = websocket.query_params.get("tenant_id", "default")
-    user_id = websocket.query_params.get("user_id", "default")
-    device_id = websocket.query_params.get("device_id", "default")
-    
+    import os
+    import jwt as pyjwt
+
+    # ── 1. Extract and verify JWT ──
+    token = websocket.query_params.get("token", "")
+    if not token:
+        await websocket.close(code=1008, reason="Missing authentication token")
+        return
+
+    secret_key = os.environ.get("HBLLM_JWT_SECRET", "")
+    if not secret_key:
+        # In dev mode, accept the token from _state if the auth middleware generated one
+        auth_mw = next(
+            (m for m in getattr(app, "user_middleware", []) if hasattr(m, "kwargs") and "secret_key" in m.kwargs),
+            None,
+        )
+        if auth_mw:
+            secret_key = auth_mw.kwargs.get("secret_key", "")
+
+    if not secret_key:
+        logger.warning("Synapse WS: No JWT secret configured — rejecting connection")
+        await websocket.close(code=1011, reason="Server auth not configured")
+        return
+
+    try:
+        payload = pyjwt.decode(token, secret_key, algorithms=["HS256"])
+    except pyjwt.ExpiredSignatureError:
+        await websocket.close(code=1008, reason="Token expired")
+        return
+    except pyjwt.InvalidTokenError:
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
+    tenant_id = payload.get("tenant_id")
+    if not tenant_id:
+        await websocket.close(code=1008, reason="Token missing tenant_id")
+        return
+
+    user_id = payload.get("user_id", "default")
+    device_id = payload.get("device_id", "default")
+
+    # ── 2. Connect to SynapseGateway ──
     gateway = _state.get("synapse_gateway")
     if not gateway:
         await websocket.close(code=1011, reason="Synapse Gateway not initialized")
         return
-        
+
     await gateway.connect(websocket, tenant_id, user_id, device_id)
-    
+
     try:
         while True:
             data = await websocket.receive_text()
