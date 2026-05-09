@@ -1,12 +1,12 @@
 ---
-title: "HBLLM Core — Open Source Cognitive AI That Runs Without Massive GPU"
-description: "Open-source AGI framework that runs without massive GPU or VRAM. 28+ cognitive nodes, 6 memory systems, Rust SIMD inference, and dynamic LoRA routing. Deploy autonomous AI agents on Raspberry Pi, laptops, and edge devices — no expensive hardware required."
+title: "HBLLM Core — Your Sovereign Personal AI"
+description: "A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware. 28+ cognitive nodes, 6 memory systems, and dynamic LoRA routing for absolute privacy and digital sovereignty."
 ---
 
-<!-- SEO Keywords: Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, CPU Inference, Raspberry Pi AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Lightweight LLM -->
+<!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, Privacy-First AI, On-Premise AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Multi-Tenant AI -->
 
 <div class="hero-title">🧠 HBLLM Core</div>
-<div class="hero-subtitle">A Human-Brain Inspired Cognitive Architecture for Autonomous AI Agents</div>
+<div class="hero-subtitle">Your Sovereign Personal AI. A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware.</div>
 
 <div class="badges" markdown>
 
@@ -22,9 +22,9 @@ description: "Open-source AGI framework that runs without massive GPU or VRAM. 2
 
 ## Why HBLLM Core?
 
-Traditional **Large Language Models (LLMs)** are monolithic, stateless transformers that demand 80GB+ VRAM just to run a 70B model. They lack continuous learning, memory consolidation, and dynamic domain adaptation — and they can't run on the hardware most people actually have.
+While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for digital sovereignty. It is a **Personal AI Platform** engineered to give you complete ownership over a cognitive agent that truly knows you, without ever sending your life to the cloud.
 
-**HBLLM Core** rethinks this from the ground up. It is a **modular cognitive architecture** designed for **Edge AI deployments and Autonomous Agents** — engineered to deliver intelligent reasoning **without massive GPU/VRAM requirements**. With 28+ specialized "brain nodes" and a shared 125M–1.5B parameter backbone enhanced by ~2MB LoRA adapters, HBLLM achieves domain-expert performance on hardware as modest as a **Raspberry Pi 5 or a laptop with no dedicated GPU**.
+It achieves this by replacing massive GPU clusters with an efficient, modular architecture: **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus. With a shared 125M–1.5B parameter backbone enhanced by ~2MB LoRA adapters, HBLLM learns your domains and runs securely on hardware as accessible as a **Raspberry Pi 5 or a laptop with no dedicated GPU**.
 
 <div class="feature-grid">
 <div class="feature-card">
@@ -173,12 +173,12 @@ flowchart TB
 
 ---
 
-## The Zoning Model — Edge-Optimized MoE
+## The Zoning Model — Personalization Without Retraining
 
-While cloud AI platforms chase computationally expensive **massive monolithic models** (70B+ parameters requiring 80GB+ VRAM), HBLLM champions **Edge Computing** and **On-Device AI** with small, specialized model zones driven by dynamic LoRA routing.
+While cloud AI platforms force you into a one-size-fits-all model, HBLLM champions **Sovereign Personalization** with small, specialized model zones driven by dynamic LoRA routing. Your AI adapts to *your* data, *your* coding style, and *your* documents.
 
-!!! success "No Expensive Hardware Needed"
-    A 70B parameter model requires ~140GB of RAM even at FP16. HBLLM's 125M model runs in **under 500MB** — that's **280× less memory**. Even the 1.5B model fits comfortably in 4GB with INT4 quantization. The cognitive architecture (nodes, bus, memory) adds near-zero overhead.
+!!! success "Absolute Privacy, Minimal Hardware"
+    A 70B parameter model requires ~140GB of RAM even at FP16. HBLLM's 125M model runs in **under 500MB** — allowing you to host an incredibly smart, personalized agent strictly on your own hardware without the data privacy risks of the cloud.
 
 | Component | Size | VRAM/RAM | Purpose |
 |---|---|---|---|
@@ -373,6 +373,6 @@ Please review our [Contributing Guide](contributing.md) for Pull Request guideli
 HBLLM Core is released under the **GNU General Public License v3.0 (GPLv3)** — the world's most popular copyleft license. This ensures that the system remains free and open-source, and that all improvements made by the community must also be shared back under the same terms.
 
 <div style="text-align: center; margin-top: 3rem;">
-  <p><strong>HBLLM Core</strong> — Autonomous Agent AI that thinks, not just responds.</p>
-  <p>⭐ <a href="https://github.com/hbllm/hbllm-core">Star this project on GitHub</a> to support open-source cognitive architectures!</p>
+  <p><strong>HBLLM Core</strong> — Your Sovereign Personal AI.</p>
+  <p>⭐ <a href="https://github.com/hbllm/hbllm-core">Star this project on GitHub</a> to support open-source, privacy-first cognitive architectures!</p>
 </div>
