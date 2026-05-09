@@ -190,7 +190,7 @@ original = vault.decrypt(encrypted)
 - **Constitutional AI layer** intercepting all outputs. Responses are evaluated against safety policies (`DENY`, `TRANSFORM`, `SCOPE`) before delivery.
 - Per-tenant policy scoping with configurable `BLOCK`, `WARN`, `APPEND`, `PREPEND`, `REPLACE`, `RESTRICT` actions.
 
-> 📖 **[Full Policy Engine Reference →](docs/api/governance.md)**
+> 📖 **[Full Policy Engine Reference →](api/governance.md)**
 
 ## 8. Configuration Reference
 
