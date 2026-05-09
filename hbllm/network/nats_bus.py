@@ -42,14 +42,27 @@ class NatsBus:
 
     def __init__(
         self,
-        servers: str | list[str] = "nats://localhost:4222",
+        servers: str | list[str] | None = None,
         serializer: Serializer | None = None,
         subject_prefix: str = "hbllm",
         use_jetstream: bool = False,
     ) -> None:
+        """
+        Initialize the NatsBus.
+
+        Args:
+            servers: NATS connection URLs. Defaults to HBLLM_NATS_URL
+                     env var or nats://localhost:4222.
+            serializer: Serializer for message payloads.
+            subject_prefix: Prefix for all NATS subjects.
+            use_jetstream: Whether to enable JetStream durable subscriptions.
+        """
+        import os
+
         if not _HAS_NATS:
             raise RuntimeError("nats-py required for NatsBus. Install with: pip install nats-py")
 
+        servers = servers or os.getenv("HBLLM_NATS_URL", "nats://localhost:4222")
         self._servers = [servers] if isinstance(servers, str) else servers
         self._serializer = serializer or JsonSerializer()
         self._prefix = subject_prefix

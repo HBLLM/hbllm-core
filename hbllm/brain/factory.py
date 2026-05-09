@@ -275,8 +275,11 @@ class Brain:
         except ImportError:
             return
 
-        while True:
-            await asyncio.sleep(60)  # Check every minute
+        while self._hardware_loop_task and not self._hardware_loop_task.cancelled():
+            try:
+                await asyncio.sleep(60)  # Check every minute
+            except asyncio.CancelledError:
+                break
 
             # Simulated model footprint in memory (assume dynamic tracking)
             # Threshold: > 90%
@@ -306,6 +309,10 @@ class Brain:
         """Stop all nodes, pipeline, and bus."""
         if self._hardware_loop_task:
             self._hardware_loop_task.cancel()
+            try:
+                await self._hardware_loop_task
+            except asyncio.CancelledError:
+                pass
         # Stop plugin watcher
         if self.plugin_manager:
             await self.plugin_manager.stop_watching()

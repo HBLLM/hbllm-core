@@ -104,10 +104,13 @@ async def _boot_brain(
     app: Any = None,
     model_size: str = "125m",
     bus_type: str = "inprocess",
-    redis_url: str = "redis://localhost:6379",
+    redis_url: str | None = None,
 ) -> None:
     """Initialize the full brain pipeline."""
     # 1. Bus
+    import os
+
+    redis_url = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
     from hbllm.network.bus import MessageBus
 
     bus: MessageBus

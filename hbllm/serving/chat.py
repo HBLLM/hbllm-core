@@ -551,11 +551,13 @@ def main() -> None:
         choices=["in_process", "redis"],
         help="Message bus backend to use",
     )
+    import os
+
     parser.add_argument(
         "--redis-url",
         type=str,
-        default="redis://localhost:6379",
-        help="Redis URL (if using --bus redis)",
+        default=os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379"),
+        help="Redis URL (if using --bus redis). Defaults to HBLLM_REDIS_URL env var or redis://localhost:6379",
     )
     args = parser.parse_args()
 

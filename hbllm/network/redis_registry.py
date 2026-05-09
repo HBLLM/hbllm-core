@@ -42,16 +42,28 @@ class RedisRegistry(ServiceRegistry):
 
     def __init__(
         self,
-        redis_url: str = "redis://localhost:6379",
+        redis_url: str | None = None,
         ttl: int = _DEFAULT_TTL,
         health_check_interval: float = 10.0,
         node_timeout: float = 30.0,
     ) -> None:
+        """
+        Initialize the RedisRegistry.
+
+        Args:
+            redis_url: Redis connection string. Defaults to HBLLM_REDIS_URL
+                       env var or redis://localhost:6379.
+            ttl: TTL for node registrations in seconds.
+            health_check_interval: Interval to broadcast node health.
+            node_timeout: Timeout before a node is considered dead locally.
+        """
+        import os
+
         super().__init__(
             health_check_interval=health_check_interval,
             node_timeout=node_timeout,
         )
-        self.redis_url = redis_url
+        self.redis_url = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
         self.ttl = ttl
         self._redis: Any | None = None
         self._listener_task: asyncio.Task[Any] | None = None
