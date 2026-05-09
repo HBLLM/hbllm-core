@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  hbllm-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - HBLLM_DATABASE_URL=postgresql://hbllm:hbllm_password@postgres:5432/hbllm_brain
+      - HBLLM_REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    environment:
+      POSTGRES_USER: hbllm
+      POSTGRES_PASSWORD: hbllm_password
+      POSTGRES_DB: hbllm_brain
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

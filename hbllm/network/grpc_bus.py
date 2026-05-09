@@ -24,8 +24,8 @@ from hbllm.network.tracing import BusMetrics
 logger = logging.getLogger(__name__)
 
 try:
-    import grpc
-    import grpc.aio
+    import grpc  # type: ignore[import-untyped]
+    import grpc.aio  # type: ignore[import-untyped,import-not-found]
 
     _HAS_GRPC = True
 except ImportError:
@@ -46,17 +46,28 @@ class GrpcBus:
 
     def __init__(
         self,
-        host: str = "localhost",
+        host: str | None = None,
         port: int = 50051,
         serializer: Serializer | None = None,
         max_message_size: int = 16 * 1024 * 1024,  # 16 MB
     ) -> None:
+        """
+        Initialize the GrpcBus.
+
+        Args:
+            host: The gRPC bind host. Defaults to HBLLM_GRPC_HOST env var or localhost.
+            port: The gRPC bind port.
+            serializer: Serializer for message payloads.
+            max_message_size: Max payload size for gRPC channel.
+        """
+        import os
+
         if not _HAS_GRPC:
             raise RuntimeError(
                 "grpcio required for GrpcBus. Install with: pip install grpcio grpcio-tools"
             )
 
-        self._host = host
+        self._host = host or os.getenv("HBLLM_GRPC_HOST", "localhost")
         self._port = port
         self._serializer = serializer or JsonSerializer()
         self._max_message_size = max_message_size

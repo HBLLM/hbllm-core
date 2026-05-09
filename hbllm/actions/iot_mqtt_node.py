@@ -100,19 +100,33 @@ class MqttIoTNode(Node):
     def __init__(
         self,
         node_id: str = "iot_mqtt",
-        broker_host: str = "localhost",
+        broker_host: str | None = None,
         broker_port: int = 1883,
         username: str | None = None,
         password: str | None = None,
         topic_prefix: str = "hbllm",
         ha_discovery: bool = True,
     ) -> None:
+        """
+        Initialize MqttIoTNode.
+
+        Args:
+            broker_host: The MQTT broker hostname. Defaults to HBLLM_MQTT_HOST
+                         env var or localhost.
+            broker_port: The MQTT broker port.
+            username: Optional MQTT username.
+            password: Optional MQTT password.
+            topic_prefix: Prefix for MQTT topics.
+            ha_discovery: Whether to enable Home Assistant auto-discovery.
+        """
+        import os
+
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
             capabilities=["iot", "mqtt", "home_automation", "sensors"],
         )
-        self.broker_host = broker_host
+        self.broker_host = broker_host or os.getenv("HBLLM_MQTT_HOST", "localhost")
         self.broker_port = broker_port
         self.username = username
         self.password = password

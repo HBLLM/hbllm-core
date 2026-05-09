@@ -8,6 +8,7 @@ sandboxed Python Tool that can be registered by the Agent.
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 import time
 from typing import Any
@@ -60,13 +61,23 @@ class SkillInductionNode(Node):
             capabilities=["skill_induction", "code_generation"],
         )
         self.llm = llm
+        self._active_tasks: set[Any] = set()
 
     async def on_start(self) -> None:
         logger.info("Starting SkillInductionNode: %s", self.node_id)
         await self.bus.subscribe("system.induction.request", self.handle_message)
 
     async def on_stop(self) -> None:
-        logger.info("Stopping SkillInductionNode: %s", self.node_id)
+        logger.info(
+            "Stopping SkillInductionNode: %s. Cancelling %d active tasks.",
+            self.node_id,
+            len(self._active_tasks),
+        )
+        for task in self._active_tasks:
+            task.cancel()
+        if self._active_tasks:
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            self._active_tasks.clear()
 
     async def handle_message(self, message: Message) -> Message | None:
         if message.type != MessageType.QUERY:
@@ -78,8 +89,14 @@ class SkillInductionNode(Node):
 
         logger.info("Inducing skill for gap: %s", gap_description)
 
+        # Create a background task for the LLM call to allow cancellation
+        task = asyncio.create_task(self._induce_skill(message, gap_description))
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
+        return await task
+
+    async def _induce_skill(self, message: Message, gap_description: str) -> Message:
         # 1. Generate Python Tool via LLM
-        # We prompt for a specific format that the @tool decorator expects
         prompt = (
             "You are the HBLLM Skill Induction Engine.\n"
             "Generate a specialized Python tool function to fill the following capability gap.\n\n"

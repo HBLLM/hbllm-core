@@ -633,11 +633,21 @@ class OllamaProvider(LLMProvider):
     def __init__(
         self,
         model: str = "llama3",
-        base_url: str = "http://localhost:11434/api",
+        base_url: str | None = None,
         **kwargs: Any,
     ):
+        """
+        Initialize OllamaProvider.
+
+        Args:
+            model: The Ollama model name to use.
+            base_url: The Ollama API endpoint. Defaults to OLLAMA_BASE_URL
+                      env var or http://localhost:11434/api.
+        """
+        import os
+
         self._model = model
-        self._base_url = base_url
+        self._base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/api")
 
     async def generate(
         self,

@@ -976,7 +976,14 @@ class SleepCycleNode(Node):
 
         logger.info("[SleepNode] Manual consolidation triggered (like /dream).")
         # Run the sleep cycle without waiting for the idle timeout
-        asyncio.create_task(self._enter_sleep_cycle())
+        _dream_task = asyncio.create_task(self._enter_sleep_cycle())
+        _dream_task.add_done_callback(
+            lambda t: (
+                logger.error("[SleepNode] Dream cycle raised: %s", t.exception())
+                if not t.cancelled() and t.exception()
+                else None
+            )
+        )
 
         if message.type == MessageType.QUERY:
             return message.create_response(

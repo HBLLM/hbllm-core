@@ -45,7 +45,10 @@ class ClusterInfo(BaseModel):
     """Top-level cluster identity."""
 
     name: str = "hbllm-default"
-    redis_url: str = "redis://localhost:6379"
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis connection URL. Can be overridden with ${HBLLM_REDIS_URL} in YAML.",
+    )
     auth_secret: str = ""
     serializer: str = "json"
 

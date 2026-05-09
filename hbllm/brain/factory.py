@@ -57,7 +57,7 @@ from hbllm.brain.skill_compiler_node import SkillCompilerNode
 # New cognitive modules
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.world_simulator import WorldSimulator
-from hbllm.data.interaction_miner import InteractionMiner
+from hbllm.data.interaction_miner import AsyncInteractionMiner, InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
@@ -182,7 +182,7 @@ class Brain:
         self.token_optimizer: TokenOptimizer | None = None
         self.reward_model: RewardModel | None = None
         self.policy_optimizer: PolicyOptimizer | None = None
-        self.interaction_miner: InteractionMiner | None = None
+        self.interaction_miner: AsyncInteractionMiner | None = None
         self.policy_engine: PolicyEngine | None = None
         self.owner_rules: OwnerRuleStore | None = None
         self.sentinel: Any = None  # SentinelNode reference
@@ -259,7 +259,7 @@ class Brain:
 
         # Post-process: interaction mining
         if self.interaction_miner and not result.error:
-            self.interaction_miner.record_interaction(
+            await self.interaction_miner.record_interaction(
                 query=text,
                 response=result.text,
                 reward=result.confidence,
@@ -275,8 +275,11 @@ class Brain:
         except ImportError:
             return
 
-        while True:
-            await asyncio.sleep(60)  # Check every minute
+        while self._hardware_loop_task and not self._hardware_loop_task.cancelled():
+            try:
+                await asyncio.sleep(60)  # Check every minute
+            except asyncio.CancelledError:
+                break
 
             # Simulated model footprint in memory (assume dynamic tracking)
             # Threshold: > 90%
@@ -306,6 +309,10 @@ class Brain:
         """Stop all nodes, pipeline, and bus."""
         if self._hardware_loop_task:
             self._hardware_loop_task.cancel()
+            try:
+                await self._hardware_loop_task
+            except asyncio.CancelledError:
+                pass
         # Stop plugin watcher
         if self.plugin_manager:
             await self.plugin_manager.stop_watching()
@@ -721,7 +728,7 @@ class BrainFactory:
         brain.cognition_router = CognitionRouter()
         brain.reward_model = RewardModel(data_dir=data_dir)
         brain.policy_optimizer = PolicyOptimizer()
-        brain.interaction_miner = InteractionMiner(data_dir=data_dir)
+        brain.interaction_miner = AsyncInteractionMiner(data_dir=data_dir)
 
         # Configurable subsystems
         if cfg.inject_revision:

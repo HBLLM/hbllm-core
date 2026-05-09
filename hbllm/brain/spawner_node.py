@@ -1,3 +1,10 @@
+"""Spawner node — dynamic LoRA adapter training on-demand.
+
+Listens for spawn requests on the bus and forks a background training
+job to create a new domain-specific LoRA adapter without interrupting
+the running model's inference path.
+"""
+
 import asyncio
 import logging
 import os

@@ -194,18 +194,21 @@ class LearnerNode(Node):
             await self._broadcast_complete()
             return None
 
-        with open(self.queue_path) as f:
+        def _read_queue() -> list[Any]:
             try:
-                batch = json.load(f)
-            except json.JSONDecodeError:
-                batch = []
+                with open(self.queue_path) as f:
+                    return json.load(f)  # type: ignore[no-any-return]
+            except (json.JSONDecodeError, OSError):
+                return []
+
+        batch = await asyncio.to_thread(_read_queue)
 
         if not batch:
             await self._broadcast_complete()
             return None
 
         # Empty the queue so we don't double train if it crashes midway
-        os.remove(self.queue_path)
+        await asyncio.to_thread(os.remove, self.queue_path)
 
         if self.training_task and not self.training_task.done():
             logger.warning("[LearnerNode] DPO already running.")
@@ -216,8 +219,12 @@ class LearnerNode(Node):
         re_queue = batch[self.batch_size :]
 
         if re_queue:
-            with open(self.queue_path, "w") as f:
-                json.dump(re_queue, f)
+
+            def _write_queue(data: list[Any]) -> None:
+                with open(self.queue_path, "w") as f:
+                    json.dump(data, f)
+
+            await asyncio.to_thread(_write_queue, re_queue)
 
         self.training_task = asyncio.create_task(self._run_dpo_training(target_batch))
         return None
@@ -401,20 +408,48 @@ class LearnerNode(Node):
 
         # Path 2: High-scoring → distillation bank
         elif overall_score > self.distillation_threshold:
-            if len(self._distillation_bank) < self._max_distillation_bank:
-                self._distillation_bank.append(
-                    {
-                        "query": query,
-                        "response": response,
-                    }
+            # Check if this query is in the micro_learn_queue (a retry correction)
+            queued_item = next(
+                (item for item in self._micro_learn_queue if item.get("query") == query), None
+            )
+            if queued_item:
+                bad_response = queued_item.get("bad_response", "")
+                logger.info(
+                    "[LearnerNode] Matched high-scoring retry to queued bad response. Triggering micro-learning."
                 )
-                self._distillation_count += 1
-                logger.debug(
-                    "[LearnerNode] Banked high-confidence response for distillation "
-                    "(score=%.2f, bank=%d)",
-                    overall_score,
-                    len(self._distillation_bank),
+                # Create a tracked task so we don't block the event handler
+                _mlrn_task = asyncio.create_task(
+                    self.micro_learn(
+                        query=query,
+                        bad_response=bad_response,
+                        good_response=response,
+                    )
                 )
+                _mlrn_task.add_done_callback(
+                    lambda t: (
+                        logger.error("[LearnerNode] micro_learn task raised: %s", t.exception())
+                        if not t.cancelled() and t.exception()
+                        else None
+                    )
+                )
+                self._micro_learn_queue = [
+                    item for item in self._micro_learn_queue if item.get("query") != query
+                ]
+            else:
+                if len(self._distillation_bank) < self._max_distillation_bank:
+                    self._distillation_bank.append(
+                        {
+                            "query": query,
+                            "response": response,
+                        }
+                    )
+                    self._distillation_count += 1
+                    logger.debug(
+                        "[LearnerNode] Banked high-confidence response for distillation "
+                        "(score=%.2f, bank=%d)",
+                        overall_score,
+                        len(self._distillation_bank),
+                    )
 
     async def _handle_micro_learn_event(self, message: Message) -> None:
         """
@@ -495,20 +530,23 @@ class LearnerNode(Node):
                 self.pending_pairs[pair_key]["chosen"] = good_response
                 self.pending_pairs[pair_key]["rejected"] = bad_response
 
-                # Persist to queue for sleep-cycle batch processing
-                queue: list[Any] = []
+                # Offload queue read+write to a thread to avoid blocking the event loop
                 p = Path(self.queue_path)
-                if p.exists():
-                    try:
-                        with p.open("r") as f:
-                            queue = json.load(f)
-                    except (json.JSONDecodeError, OSError):
-                        queue = []
 
-                queue.append((query, good_response, bad_response))
-                p.parent.mkdir(parents=True, exist_ok=True)
-                with p.open("w") as f:
-                    json.dump(queue, f)
+                def _rw_queue() -> None:
+                    q: list[Any] = []
+                    if p.exists():
+                        try:
+                            with p.open("r") as f:
+                                q = json.load(f)
+                        except (json.JSONDecodeError, OSError):
+                            q = []
+                    q.append((query, good_response, bad_response))
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    with p.open("w") as f:
+                        json.dump(q, f)
+
+                await asyncio.to_thread(_rw_queue)
 
                 del self.pending_pairs[pair_key]
                 self._micro_learn_steps += 1

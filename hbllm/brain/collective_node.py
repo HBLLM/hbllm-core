@@ -216,6 +216,8 @@ class CollectiveNode(Node):
         self._pending_votes: dict[str, list[VoteResponse]] = {}
         self._vote_events: dict[str, asyncio.Event] = {}
         self._vote_handler: Any = None  # callable for local vote generation
+        # Cap on simultaneous in-flight elections to prevent unbounded dict growth
+        self._max_concurrent_elections: int = 50
         self.skill_registry = skill_registry
 
         # Stats
@@ -643,6 +645,15 @@ class CollectiveNode(Node):
         vote_strategy = strategy or self.default_strategy
         vote_timeout = timeout or self.vote_timeout
 
+        # Guard against unbounded growth under concurrent-voting load
+        if len(self._pending_votes) >= self._max_concurrent_elections:
+            logger.warning(
+                "[CollectiveNode] MAX_CONCURRENT_ELECTIONS (%d) reached — dropping vote request for: %s",
+                self._max_concurrent_elections,
+                query[:60],
+            )
+            return {"consensus": "", "confidence": 0.0, "vote_count": 0, "error": "overloaded"}
+
         vote_req = VoteRequest(
             query=query,
             domain=domain,
@@ -900,6 +911,14 @@ class CollectiveNode(Node):
                 delegated=False,
                 reason="no_suitable_peer",
             )
+
+        # Guard against unbounded growth under heavy delegation load
+        if len(self._pending_votes) >= self._max_concurrent_elections:
+            logger.warning(
+                "[CollectiveNode] MAX_CONCURRENT_ELECTIONS (%d) reached — skipping delegation",
+                self._max_concurrent_elections,
+            )
+            return DelegationResult(delegated=False, reason="overloaded")
 
         delegation_id = uuid.uuid4().hex[:12]
 

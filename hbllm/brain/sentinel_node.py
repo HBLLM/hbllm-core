@@ -127,7 +127,14 @@ class SentinelNode(Node):
                     error_msg = message.create_error(
                         f"BLOCKED BY SENTINEL: {violation}", code="POLICY_DENY"
                     )
-                    asyncio.create_task(self.bus.publish(error_msg.topic, error_msg))
+                    _deny_task = asyncio.create_task(self.bus.publish(error_msg.topic, error_msg))
+                    _deny_task.add_done_callback(
+                        lambda t: (
+                            logger.error("[Sentinel] policy-deny publish raised: %s", t.exception())
+                            if not t.cancelled() and t.exception()
+                            else None
+                        )
+                    )
 
                 # Drop the original message
                 return None

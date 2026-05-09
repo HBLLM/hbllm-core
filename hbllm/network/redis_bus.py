@@ -35,8 +35,18 @@ class RedisBus(MessageBus):
     can correlate request-responses dynamically without explicit response-topic subscriptions.
     """
 
-    def __init__(self, redis_url: str = "redis://localhost:6379", auth_secret: str = "") -> None:
-        self.redis_url = redis_url
+    def __init__(self, redis_url: str | None = None, auth_secret: str = "") -> None:
+        """
+        Initialize the RedisBus.
+
+        Args:
+            redis_url: The Redis connection URL. Defaults to HBLLM_REDIS_URL
+                       env var or redis://localhost:6379.
+            auth_secret: Optional secret for HMAC-SHA256 message signing.
+        """
+        import os
+
+        self.redis_url = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
         self.auth_secret = auth_secret
         self.client: Any | None = None
         self.pubsub: Any | None = None
