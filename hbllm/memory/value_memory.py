@@ -39,6 +39,8 @@ class ValueMemory:
                 CREATE TABLE IF NOT EXISTS rewards (
                     id TEXT PRIMARY KEY,
                     tenant_id TEXT NOT NULL,
+                    user_id TEXT DEFAULT '',
+                    device_id TEXT DEFAULT '',
                     topic TEXT NOT NULL,
                     action TEXT NOT NULL,
                     reward REAL NOT NULL,
@@ -58,6 +60,8 @@ class ValueMemory:
         action: str,
         reward: float,
         context: dict[str, Any] | None = None,
+        user_id: str = "",
+        device_id: str = "",
     ) -> str:
         """
         Record a reward signal for a tenant action.
@@ -77,11 +81,13 @@ class ValueMemory:
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                """INSERT INTO rewards (id, tenant_id, topic, action, reward, context, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO rewards (id, tenant_id, user_id, device_id, topic, action, reward, context, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     reward_id,
                     tenant_id,
+                    user_id,
+                    device_id,
                     topic,
                     action,
                     max(-1.0, min(1.0, reward)),  # Clamp to [-1, 1]
@@ -99,7 +105,9 @@ class ValueMemory:
         )
         return reward_id
 
-    def get_preference(self, tenant_id: str, topic: str) -> dict[str, float]:
+    def get_preference(
+        self, tenant_id: str, topic: str, user_id: str = "", device_id: str = ""
+    ) -> dict[str, float]:
         """
         Get aggregated preferences for a topic.
 
@@ -110,9 +118,9 @@ class ValueMemory:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """SELECT action, reward, created_at FROM rewards
-                   WHERE tenant_id = ? AND topic = ?
+                   WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND topic = ?
                    ORDER BY created_at DESC""",
-                (tenant_id, topic),
+                (tenant_id, user_id, device_id, topic),
             ).fetchall()
 
         if not rows:
@@ -130,7 +138,9 @@ class ValueMemory:
 
         return {action: sum(values) / len(values) for action, values in preferences.items()}
 
-    def get_top_preferences(self, tenant_id: str, top_k: int = 5) -> list[dict[str, Any]]:
+    def get_top_preferences(
+        self, tenant_id: str, top_k: int = 5, user_id: str = "", device_id: str = ""
+    ) -> list[dict[str, Any]]:
         """
         Get the tenant's strongest preferences across all topics.
 
@@ -141,11 +151,11 @@ class ValueMemory:
             rows = conn.execute(
                 """SELECT topic, action, AVG(reward) as avg_reward, COUNT(*) as count
                    FROM rewards
-                   WHERE tenant_id = ?
+                   WHERE tenant_id = ? AND user_id = ? AND device_id = ?
                    GROUP BY topic, action
                    ORDER BY avg_reward DESC
                    LIMIT ?""",
-                (tenant_id, top_k),
+                (tenant_id, user_id, device_id, top_k),
             ).fetchall()
 
         return [
@@ -158,31 +168,31 @@ class ValueMemory:
             for row in rows
         ]
 
-    def get_signal_count(self, tenant_id: str) -> int:
-        """Get total number of reward signals for a tenant."""
+    def get_signal_count(self, tenant_id: str, user_id: str = "", device_id: str = "") -> int:
+        """Get total number of reward signals for a tenant/user/device."""
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
-                "SELECT COUNT(*) FROM rewards WHERE tenant_id = ?",
-                (tenant_id,),
+                "SELECT COUNT(*) FROM rewards WHERE tenant_id = ? AND user_id = ? AND device_id = ?",
+                (tenant_id, user_id, device_id),
             ).fetchone()
             return row[0] if row else 0
 
-    def clear_tenant(self, tenant_id: str) -> int:
-        """Purge all rewards for a tenant. Returns count of deleted records."""
+    def clear_tenant(self, tenant_id: str, user_id: str = "", device_id: str = "") -> int:
+        """Purge all rewards for a tenant/user/device. Returns count of deleted records."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "DELETE FROM rewards WHERE tenant_id = ?",
-                (tenant_id,),
+                "DELETE FROM rewards WHERE tenant_id = ? AND user_id = ? AND device_id = ?",
+                (tenant_id, user_id, device_id),
             )
             deleted = cursor.rowcount
             conn.commit()
         return deleted
 
-    def get_all_topics(self, tenant_id: str) -> list[str]:
-        """Get all distinct topics that have been recorded for a tenant."""
+    def get_all_topics(self, tenant_id: str, user_id: str = "", device_id: str = "") -> list[str]:
+        """Get all distinct topics that have been recorded for a tenant/user/device."""
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute(
-                "SELECT DISTINCT topic FROM rewards WHERE tenant_id = ? ORDER BY topic",
-                (tenant_id,),
+                "SELECT DISTINCT topic FROM rewards WHERE tenant_id = ? AND user_id = ? AND device_id = ? ORDER BY topic",
+                (tenant_id, user_id, device_id),
             ).fetchall()
         return [row[0] for row in rows]

@@ -256,9 +256,13 @@ class SemanticMemory:
                         metadata JSONB DEFAULT '{{}}',
                         embedding vector({dims}),
                         tenant_id TEXT,
+                        user_id TEXT,
+                        device_id TEXT,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     );
                     CREATE INDEX IF NOT EXISTS idx_semantic_tenant ON semantic_memory(tenant_id);
+                    CREATE INDEX IF NOT EXISTS idx_semantic_user ON semantic_memory(user_id);
+                    CREATE INDEX IF NOT EXISTS idx_semantic_device ON semantic_memory(device_id);
                 """)
             self._pg_table_created = True
         return pool
@@ -311,12 +315,17 @@ class SemanticMemory:
             return _rust_hash(content)
         return hashlib.md5(content.encode()).hexdigest()
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def store(
         self,
         content: str,
         metadata: dict[str, Any] | None = None,
         is_priority: bool = False,
         tenant_id: str | None = None,
+        user_id: str | None = None,
+        device_id: str | None = None,
     ) -> str | None:
         """
         Embed and store a document.
@@ -326,12 +335,14 @@ class SemanticMemory:
             metadata: Optional metadata dict.
             is_priority: Whether this is a high-salience priority document.
             tenant_id: Secure namespace to partition the data under.
+            user_id: The specific user this memory belongs to.
+            device_id: The device this memory originated from.
 
         Returns:
             UUID of the stored document, or None if skipped.
         """
         with self._lock:
-            return self._store_unsafe(content, metadata, is_priority, tenant_id)
+            return self._store_unsafe(content, metadata, is_priority, tenant_id, user_id, device_id)
 
     def _store_unsafe(
         self,
@@ -339,6 +350,8 @@ class SemanticMemory:
         metadata: dict[str, Any] | None = None,
         is_priority: bool = False,
         tenant_id: str | None = None,
+        user_id: str | None = None,
+        device_id: str | None = None,
     ) -> str | None:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
@@ -358,6 +371,8 @@ class SemanticMemory:
         if is_priority:
             meta["is_priority"] = True
         meta["tenant_id"] = tenant_id
+        meta["user_id"] = user_id
+        meta["device_id"] = device_id
 
         doc_id = str(uuid.uuid4())
         doc = {"id": doc_id, "content": content, "metadata": meta}
@@ -409,16 +424,21 @@ class SemanticMemory:
         logger.debug("Stored semantic document (priority=%s): %s...", is_priority, content[:50])
         return doc_id
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     async def astore(
         self,
         content: str,
         metadata: dict[str, Any] | None = None,
         is_priority: bool = False,
         tenant_id: str | None = None,
+        user_id: str | None = None,
+        device_id: str | None = None,
     ) -> str | None:
         """Async version of store that persists to Postgres if configured."""
         # 1. Store in local fallback memory (also handles deduplication/TF-IDF)
-        doc_id = self.store(content, metadata, is_priority, tenant_id)
+        doc_id = self.store(content, metadata, is_priority, tenant_id, user_id, device_id)
         if not doc_id:
             return None
 
@@ -437,8 +457,8 @@ class SemanticMemory:
                     async with pool.acquire() as conn:
                         await conn.execute(
                             """
-                            INSERT INTO semantic_memory (id, content, metadata, embedding, tenant_id)
-                            VALUES ($1, $2, $3, $4, $5)
+                            INSERT INTO semantic_memory (id, content, metadata, embedding, tenant_id, user_id, device_id)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
                             ON CONFLICT (id) DO NOTHING
                             """,
                             doc_id,
@@ -446,6 +466,8 @@ class SemanticMemory:
                             meta,
                             embedding.tolist(),
                             tenant_id,
+                            user_id,
+                            device_id,
                         )
                 except Exception as e:
                     logger.error(f"Failed to store vector in PostgreSQL: {e}")
@@ -474,6 +496,9 @@ class SemanticMemory:
         self._tfidf_timer = threading.Timer(2.0, _do_encode)
         self._tfidf_timer.start()
 
+    from hbllm.security.tenant_guard import require_tenant
+
+    @require_tenant
     def search(
         self,
         query: str,
@@ -481,6 +506,8 @@ class SemanticMemory:
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
         tenant_id: str | None = None,
+        user_id: str | None = None,
+        device_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search for the most semantically similar documents to the query.
@@ -495,6 +522,8 @@ class SemanticMemory:
                            Positive rewards boost documents, negative ones penalize.
             reward_boost: How much to weight reward scores (default 0.1).
             tenant_id: Secure namespace to query strictly within.
+            user_id: The specific user this memory belongs to.
+            device_id: The device this memory originated from.
 
         Returns:
             List of document dicts with "score" field, sorted by relevance.
@@ -564,6 +593,24 @@ class SemanticMemory:
             )
             final_scores[~tenant_mask] = -1.0  # Erase non-tenant similarity completely
 
+        if user_id:
+            user_mask = np.array(
+                [
+                    self.documents[doc_id]["metadata"].get("user_id") == user_id
+                    for doc_id in self.ids
+                ]
+            )
+            final_scores[~user_mask] = -1.0
+
+        if device_id:
+            device_mask = np.array(
+                [
+                    self.documents[doc_id]["metadata"].get("device_id") == device_id
+                    for doc_id in self.ids
+                ]
+            )
+            final_scores[~device_mask] = -1.0
+
         # Get top-k indices
         top_indices = np.argsort(final_scores)[::-1][:top_k]
 
@@ -586,18 +633,24 @@ class SemanticMemory:
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
         tenant_id: str | None = None,
+        user_id: str | None = None,
+        device_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Async version of search that queries Postgres pgvector if available."""
         pool = await self._ensure_pg_table()
         if not pool:
-            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
+            return self.search(
+                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+            )
 
         if not query or not query.strip():
             return []
 
         self._load_model()
         if self.model is None:
-            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
+            return self.search(
+                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+            )
 
         query_vec = self.model.encode([query])[0]
 
@@ -614,9 +667,21 @@ class SemanticMemory:
                 """
                 args: list[Any] = [query_vec.tolist()]
 
+                conditions = []
                 if tenant_id and tenant_id != "system":
-                    sql += " WHERE tenant_id = $2 OR tenant_id IS NULL"
                     args.append(tenant_id)
+                    conditions.append(f"(tenant_id = ${len(args)} OR tenant_id IS NULL)")
+
+                if user_id:
+                    args.append(user_id)
+                    conditions.append(f"(user_id = ${len(args)} OR user_id IS NULL)")
+
+                if device_id:
+                    args.append(device_id)
+                    conditions.append(f"(device_id = ${len(args)} OR device_id IS NULL)")
+
+                if conditions:
+                    sql += " WHERE " + " AND ".join(conditions)
 
                 sql += f" ORDER BY embedding <=> $1 ASC LIMIT {top_k}"
 

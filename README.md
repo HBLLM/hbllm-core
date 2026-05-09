@@ -1,14 +1,14 @@
-<!-- SEO Keywords: Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, Graph of Thoughts, LoRA Tuning, Python 3.10 AI Framework, Rust AI Inference, Autonomous Agents, LLMOps -->
+<!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, LoRA Tuning, Privacy-First AI, On-Premise AI, Python 3.10 AI Framework, Autonomous Agents, Multi-Tenant AI -->
 
 <div align="center">
-  <h1>🧠 HBLLM Core: Human Brain LLM Cognitive Architecture</h1>
-  <p><b>A Biologically-Inspired Agentic Framework for Large Language Models (LLMs)</b></p>
-  <p><em>An advanced AGI-oriented multi-agent ecosystem that thinks, learns, and adapts — moving beyond stateless chat interfaces.</em></p>
+  <h1>🧠 HBLLM Core: Your Sovereign Personal AI</h1>
+  <p><b>A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware.</b></p>
+  <p><em>An advanced cognitive architecture that learns from you, protects your data, and manages your digital life through secure client and server plugins.</em></p>
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-1400%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-1600%2B%20passing-brightgreen.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
@@ -16,12 +16,15 @@
 
 > [!NOTE]  
 > **Reviewer Quick Links:**
-> - 🛡️ **[Security Architecture](SECURITY.md)** (AST Code Sandboxing, Tenant Isolation, Adapter Integrity)
+> - 🛡️ **[Security Architecture](SECURITY.md)** (Identity Triplet, Tenant Guard, Audit Log, Encryption at Rest)
+> - 🔐 **[Governance & Policies](docs/api/governance.md)** (PolicyEngine, SentinelNode, Constitutional Principles)
 > - ⚡ **[Reproducible Benchmarks](docs/api/benchmarks.md)** (Memory Profiling, Fast-Path Latency)
 
 ## Why HBLLM Core?
 
-Traditional LLMs are monolithic and stateless: prompt → model → response. **HBLLM Core** is a modular cognitive architecture with **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus — mimicking localized, multi-path reasoning of a biological brain.
+While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for digital sovereignty. It is a **Personal AI Platform** engineered to give you complete ownership over a cognitive agent that truly knows you, without ever sending your life to the cloud.
+
+It achieves this by replacing massive GPU clusters with an efficient, modular architecture: **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus. By running on hardware as accessible as a Raspberry Pi or a laptop, it ensures your data remains strictly yours.
 
 ```text
                     ┌─────────────────────────────────────────┐
@@ -40,7 +43,7 @@ Traditional LLMs are monolithic and stateless: prompt → model → response. **
     Output ◄────────────────────────────────────┘
 ```
 
-By decoupling reasoning, memory, evaluation, and action, HBLLM can self-correct, execute multi-step tool chains, maintain lifelong memories, and optimize compute costs dynamically.
+By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain lifelong memories, securely execute multi-step tools across your local and cloud environments, and dynamically adapt to your personal domains using hot-swappable LoRA adapters.
 
 > 📖 **[Full Architecture →](docs/architecture/overview.md)** · **[Cognitive Nodes →](docs/architecture/cognitive-nodes.md)** · **[Memory Systems →](docs/architecture/memory-systems.md)**
 
@@ -51,10 +54,11 @@ By decoupling reasoning, memory, evaluation, and action, HBLLM can self-correct,
 | Category | Highlights | Docs |
 |----------|-----------|------|
 | **🧠 Agentic Reasoning** | GoT planning, PRM scoring, MoE domain blending | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
-| **🧪 Zoning Model** | One base model + hot-swappable 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
+| **🧪 Personalization** | Dynamically adapts to your knowledge via 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
 | **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
-| **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Deployment](docs/guides/deployment.md) |
+| **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Governance](docs/api/governance.md) |
+| **🔐 Enterprise Security** | Identity triplet, `@require_tenant`, audit log, encryption | [Security](SECURITY.md) |
 | **⚙️ Infrastructure** | 128k+ context, Rust SIMD quantization, ONNX router | [Benchmarks](docs/api/benchmarks.md) |
 | **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialists | [Zoning](docs/zoning/how-it-works.md) |
 
@@ -147,6 +151,6 @@ We welcome contributions! Key areas:
 HBLLM Core is released under **GNU General Public License v3.0 (GPLv3)**.
 
 <div align="center">
-  <p><b>HBLLM Core</b> — Autonomous Agent AI that thinks, not just responds.</p>
-  <p>⭐ Star this repository to support open-source cognitive architectures!</p>
+  <p><b>HBLLM Core</b> — Your Sovereign Personal AI.</p>
+  <p>⭐ Star this repository to support open-source, privacy-first cognitive architectures!</p>
 </div>

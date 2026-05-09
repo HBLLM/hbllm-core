@@ -73,6 +73,8 @@ class Message(BaseModel):
     source_node_id: str
     target_node_id: str | None = None  # None = broadcast
     tenant_id: str = "default"  # Phase 9.5: Multi-tenant isolation
+    user_id: str = "default"  # Hierarchical identity
+    device_id: str = "default"  # Edge tracking
     session_id: str = "default"  # Phase 9.5: Session correlation
     topic: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -93,6 +95,8 @@ class Message(BaseModel):
             source_node_id=self.target_node_id or "system",
             target_node_id=self.source_node_id,
             tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            device_id=self.device_id,
             session_id=self.session_id,
             topic=f"{self.topic}.response",
             payload=payload,
@@ -106,6 +110,8 @@ class Message(BaseModel):
             source_node_id=self.target_node_id or "system",
             target_node_id=self.source_node_id,
             tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            device_id=self.device_id,
             session_id=self.session_id,
             topic=f"{self.topic}.error",
             payload={"error": error, "code": code},
@@ -154,6 +160,8 @@ class MemoryStorePayload(BaseModel):
     domain: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     tenant_id: str | None = None
+    user_id: str | None = None
+    device_id: str | None = None
 
 
 class MemoryRetrievePayload(BaseModel):
@@ -162,6 +170,8 @@ class MemoryRetrievePayload(BaseModel):
     session_id: str = "default_session"
     limit: int = 10
     tenant_id: str | None = None
+    user_id: str | None = None
+    device_id: str | None = None
 
 
 class FeedbackPayload(BaseModel):
@@ -192,6 +202,8 @@ class SpawnRequestPayload(BaseModel):
     trigger_query: str
     confidence_score: float
     tenant_id: str | None = None
+    user_id: str | None = None
+    device_id: str | None = None
     lora_rank: int | None = None  # Override rank (4, 8, 16, 32, 64)
 
 

@@ -127,8 +127,15 @@ curl http://localhost:8000/health
 
 ## Security Checklist
 
+- [x] Set `HBLLM_JWT_SECRET` for production (`HBLLM_ENV=production` enforces this)
+- [x] Set `HBLLM_TENANT_GUARD_MODE=STRICT` for production deployments
 - [x] Set `HBLLM_REDIS_HMAC_KEY` for distributed deployments
 - [x] Use `weights_only=True` (enforced automatically)
-- [x] Enable per-tenant rate limiting
+- [x] Enable per-tenant rate limiting (`security.rate_limiting_enabled: true`)
+- [x] Enable audit logging (`security.audit_enabled: true`)
+- [x] Enable encryption at rest for sensitive fields (`security.encryption_enabled: true`)
 - [x] Pin adapter revisions to specific Git tags
 - [x] Run behind a reverse proxy (nginx/Caddy) with TLS
+- [x] Set `HBLLM_CORS_ORIGINS` to specific domains (wildcard blocked in production)
+
+> 📖 **[Full Security Architecture →](../security.md)**

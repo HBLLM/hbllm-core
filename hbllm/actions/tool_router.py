@@ -75,6 +75,8 @@ class ToolRouterNode(Node):
             type=MessageType.QUERY,
             source_node_id=self.node_id,
             tenant_id=message.tenant_id,
+            user_id=message.user_id,
+            device_id=message.device_id,
             session_id=message.session_id,
             topic=target_topic,
             payload=target_payload,
