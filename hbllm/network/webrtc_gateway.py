@@ -7,10 +7,10 @@ for ultra-low latency streaming (e.g., live video frames for VisionNode).
 
 import asyncio
 import logging
-import orjson
 from typing import Any
 
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCDataChannel
+import orjson
+from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
 
 from hbllm.network.bus import MessageBus
 from hbllm.network.messages import Message, MessageType
@@ -67,7 +67,7 @@ class WebRTCGateway:
                         data = orjson.loads(message.encode("utf-8"))
 
                     topic = data.get("topic", f"perception.{channel.label}")
-                    
+
                     msg = Message(
                         type=MessageType.EVENT,
                         source_node_id=f"webrtc_{device_id}",

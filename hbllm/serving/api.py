@@ -196,6 +196,7 @@ async def _boot_brain(
     # 5. Start WebRTC Gateway (optional high-bandwidth plane)
     try:
         from hbllm.network.webrtc_gateway import WebRTCGateway
+
         webrtc_gateway = WebRTCGateway(bus=brain.bus)
         _state["webrtc_gateway"] = webrtc_gateway
         logger.info("WebRTC Gateway initialized for high-bandwidth perception")
@@ -1331,7 +1332,9 @@ async def webrtc_offer(api_req: Request, request: WebRTCOfferRequest) -> Any:
 
     webrtc_gateway = _state.get("webrtc_gateway")
     if not webrtc_gateway:
-        raise HTTPException(status_code=501, detail="WebRTC perception plane is disabled on this Core")
+        raise HTTPException(
+            status_code=501, detail="WebRTC perception plane is disabled on this Core"
+        )
 
     try:
         answer = await webrtc_gateway.handle_offer(
@@ -1600,6 +1603,7 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20) -> Any:
 
 _sync_dedup_cache: set[str] = set()
 
+
 @app.post("/v1/sync/episodic")
 async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
     """Sync a batch of episodic memories from an edge device (append strategy)."""
@@ -1614,16 +1618,18 @@ async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
 
     import hashlib
     import json
-    
+
     synced_count = 0
     for mem in request.memories:
         payload = dict(mem)
-        
+
         # Deduplication hash based on content
-        content_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        content_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         if content_hash in _sync_dedup_cache:
             continue
-            
+
         # Add to cache and restrict size to prevent memory leaks
         _sync_dedup_cache.add(content_hash)
         if len(_sync_dedup_cache) > 10000:
@@ -1647,7 +1653,11 @@ async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
         await bus.publish("memory.store", msg)
         synced_count += 1
 
-    return {"status": "success", "synced": synced_count, "skipped": len(request.memories) - synced_count}
+    return {
+        "status": "success",
+        "synced": synced_count,
+        "skipped": len(request.memories) - synced_count,
+    }
 
 
 @app.post("/v1/sync/semantic")
@@ -1664,16 +1674,18 @@ async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
 
     import hashlib
     import json
-    
+
     synced_count = 0
     for item in request.knowledge_items:
         payload = dict(item)
-        
+
         # Deduplication hash based on content
-        content_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        content_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         if content_hash in _sync_dedup_cache:
             continue
-            
+
         _sync_dedup_cache.add(content_hash)
         if len(_sync_dedup_cache) > 10000:
             _sync_dedup_cache.pop()
@@ -1695,7 +1707,11 @@ async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
         await bus.publish("knowledge.store", msg)
         synced_count += 1
 
-    return {"status": "success", "synced": synced_count, "skipped": len(request.knowledge_items) - synced_count}
+    return {
+        "status": "success",
+        "synced": synced_count,
+        "skipped": len(request.knowledge_items) - synced_count,
+    }
 
 
 @app.post("/v1/feedback")
