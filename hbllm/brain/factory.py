@@ -935,9 +935,13 @@ class BrainFactory:
             SocialLayer,
         )
         from hbllm.modules.domain_registry import DomainRegistry
+        from hbllm.security.trust import TrustInterceptor
 
         skill_registry = SkillRegistry(data_dir=cfg.data_dir)
         domain_registry = cfg.domain_registry or DomainRegistry()
+
+        # Wire Trust Interceptor (Trust Model Pt 1)
+        message_bus.add_interceptor(TrustInterceptor(registry=registry))
 
         # Auto-discover sub-domain LoRA adapters from data/lora/
         lora_dir = Path(cfg.data_dir) / "lora"

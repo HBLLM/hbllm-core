@@ -83,6 +83,7 @@ class Message(BaseModel):
     correlation_id: str | None = None  # Links request → response
     ttl_seconds: float | None = None  # Time-to-live
     is_security_cleared: bool = False  # Set by proactive interceptors
+    signature: str | None = None  # Ed25519 signature of (id + type + payload_json)
 
     def create_response(
         self,
@@ -102,6 +103,17 @@ class Message(BaseModel):
             payload=payload,
             correlation_id=self.id,
         )
+
+    @property
+    def signable_data(self) -> bytes:
+        """
+        Deterministic string for signing/verification.
+        Combines ID, Type, Source, and sorted Payload JSON.
+        """
+        import json
+        payload_str = json.dumps(self.payload, sort_keys=True)
+        data = f"{self.id}|{self.type}|{self.source_node_id}|{payload_str}"
+        return data.encode("utf-8")
 
     def create_error(self, error: str, code: str = "UNKNOWN") -> Message:
         """Create an error response."""

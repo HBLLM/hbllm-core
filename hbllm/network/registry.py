@@ -12,7 +12,9 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
+from hbllm.security.identity import NodeIdentity
 
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
@@ -146,6 +148,21 @@ class ServiceRegistry:
             return False
         # 'admin' scope grants all permissions
         return "admin" in info.scopes or scope in info.scopes or scope == "public"
+
+    async def verify_message(self, message: Message) -> bool:
+        """Verify the cryptographic signature of a message."""
+        info = self._nodes.get(message.source_node_id)
+        if not info or not info.public_key:
+            return False
+
+        if not message.signature:
+            return False
+
+        return NodeIdentity.verify(
+            public_key_b64=info.public_key,
+            data=message.signable_data,
+            signature_b64=message.signature
+        )
 
     async def is_node_healthy(self, node_id: str) -> bool:
         """Check if a specific node is healthy."""
