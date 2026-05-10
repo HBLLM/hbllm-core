@@ -1557,6 +1557,8 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20) -> Any:
         return {"session_id": session_id, "turns": []}
 
 
+_sync_dedup_cache: set[str] = set()
+
 @app.post("/v1/sync/episodic")
 async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
     """Sync a batch of episodic memories from an edge device (append strategy)."""
@@ -1569,8 +1571,24 @@ async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
+    import hashlib
+    import json
+    
+    synced_count = 0
     for mem in request.memories:
         payload = dict(mem)
+        
+        # Deduplication hash based on content
+        content_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        if content_hash in _sync_dedup_cache:
+            continue
+            
+        # Add to cache and restrict size to prevent memory leaks
+        _sync_dedup_cache.add(content_hash)
+        if len(_sync_dedup_cache) > 10000:
+            # Pop an arbitrary item if cache gets too large
+            _sync_dedup_cache.pop()
+
         payload["tenant_id"] = tenant_id
         payload["user_id"] = user_id
         payload["device_id"] = device_id
@@ -1586,8 +1604,9 @@ async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
             payload=payload,
         )
         await bus.publish("memory.store", msg)
+        synced_count += 1
 
-    return {"status": "success", "synced": len(request.memories)}
+    return {"status": "success", "synced": synced_count, "skipped": len(request.memories) - synced_count}
 
 
 @app.post("/v1/sync/semantic")
@@ -1602,8 +1621,22 @@ async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
+    import hashlib
+    import json
+    
+    synced_count = 0
     for item in request.knowledge_items:
         payload = dict(item)
+        
+        # Deduplication hash based on content
+        content_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        if content_hash in _sync_dedup_cache:
+            continue
+            
+        _sync_dedup_cache.add(content_hash)
+        if len(_sync_dedup_cache) > 10000:
+            _sync_dedup_cache.pop()
+
         payload["tenant_id"] = tenant_id
         payload["user_id"] = user_id
         payload["device_id"] = device_id
@@ -1619,8 +1652,9 @@ async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
             payload=payload,
         )
         await bus.publish("knowledge.store", msg)
+        synced_count += 1
 
-    return {"status": "success", "synced": len(request.knowledge_items)}
+    return {"status": "success", "synced": synced_count, "skipped": len(request.knowledge_items) - synced_count}
 
 
 @app.post("/v1/feedback")

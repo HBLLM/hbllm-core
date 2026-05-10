@@ -6,14 +6,18 @@ and execute tools remotely on behalf of the central Hub's cognition engine.
 """
 
 import asyncio
-import json
+import orjson
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from hbllm.network.bus import MessageBus
 from hbllm.network.messages import Message, MessageType
+from hbllm.security.audit_log import AuditLog
+
+if TYPE_CHECKING:
+    from hbllm.actions.tool_registry import RemoteToolNode
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,7 @@ class SynapseGateway:
     Tracks active devices by (tenant_id, user_id, device_id).
     """
 
-    def __init__(self, bus: MessageBus | None = None, audit_log: Any = None):
+    def __init__(self, bus: MessageBus | None = None, audit_log: AuditLog | None = None):
         self.bus = bus
         self.audit_log = audit_log
         # Map: (tenant_id, user_id, device_id) -> WebSocket
@@ -32,7 +36,9 @@ class SynapseGateway:
         # Map: (tenant_id, user_id, device_id) -> list[str] (tool names)
         self.device_capabilities: dict[tuple[str, str, str], list[str]] = {}
         # Map: (tenant_id, user_id, device_id) -> list[RemoteToolNode]
-        self.device_nodes: dict[tuple[str, str, str], list[Any]] = {}
+        self.device_nodes: dict[tuple[str, str, str], list['RemoteToolNode']] = {}
+        # Map: (tenant_id, user_id, device_id) -> list[dict] (outbound messages)
+        self._outbound_queues: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 
         self._bus_task: asyncio.Task[Any] | None = None
 
@@ -87,6 +93,18 @@ class SynapseGateway:
                 resource=f"device:{device_id}",
             )
 
+        # Flush any pending outbound messages (QoS 1)
+        pending_msgs = self._outbound_queues.pop(key, [])
+        if pending_msgs:
+            logger.info(f"Flushing {len(pending_msgs)} pending messages to {device_id}")
+            for msg in pending_msgs:
+                try:
+                    await websocket.send_text(orjson.dumps(msg).decode('utf-8'))
+                except Exception as e:
+                    logger.error(f"Failed to flush message to {device_id}: {e}")
+                    self.disconnect(tenant_id, user_id, device_id)
+                    break
+
     def disconnect(self, tenant_id: str, user_id: str, device_id: str) -> None:
         """Handle a disconnected edge device."""
         key = (tenant_id, user_id, device_id)
@@ -126,7 +144,7 @@ class SynapseGateway:
 
     async def broadcast_to_tenant(self, tenant_id: str, message: dict[str, Any]) -> None:
         """Broadcast a message to all connected devices in a tenant."""
-        message_str = json.dumps(message)
+        message_str = orjson.dumps(message).decode('utf-8')
         tasks = []
         for key, ws in self.active_connections.items():
             if key[0] == tenant_id:
@@ -146,14 +164,32 @@ class SynapseGateway:
         key = (tenant_id, user_id, device_id)
         ws = self.active_connections.get(key)
         if not ws:
-            return False
+            # Device offline: buffer the message for when it reconnects
+            if key not in self._outbound_queues:
+                self._outbound_queues[key] = []
+            
+            # Prevent unbounded memory growth (keep last 100 messages)
+            if len(self._outbound_queues[key]) < 100:
+                self._outbound_queues[key].append(message)
+                logger.info(f"Buffered message for disconnected device {device_id}")
+                return True
+            else:
+                logger.warning(f"Outbound queue full for device {device_id}, dropping message")
+                return False
 
         try:
-            await ws.send_text(json.dumps(message))
+            await ws.send_text(orjson.dumps(message).decode('utf-8'))
             return True
         except Exception as e:
             logger.error(f"Failed to send message to device {device_id}: {e}")
             self.disconnect(tenant_id, user_id, device_id)
+            
+            # Re-queue the failed message if not full
+            if key not in self._outbound_queues:
+                self._outbound_queues[key] = []
+            if len(self._outbound_queues[key]) < 100:
+                self._outbound_queues[key].append(message)
+                
             return False
 
     async def _handle_outbound_tool_call(self, message: Message) -> None:
@@ -192,7 +228,7 @@ class SynapseGateway:
     ) -> None:
         """Process messages received from an edge device via WebSocket."""
         try:
-            data = json.loads(text_data)
+            data = orjson.loads(text_data)
             msg_type = data.get("type")
 
             if msg_type == "register_capabilities":
@@ -249,7 +285,7 @@ class SynapseGateway:
             else:
                 logger.debug(f"Unknown message type from edge device {device_id}: {msg_type}")
 
-        except json.JSONDecodeError:
+        except orjson.JSONDecodeError:
             logger.warning(f"Invalid JSON from device {device_id}: {text_data}")
         except Exception as e:
             logger.error(f"Error handling edge message from {device_id}: {e}")

@@ -51,6 +51,7 @@ dependencies = [
     "networkx>=3.2.0",
     "redis>=5.0.0",
     "Pillow>=10.0.0",
+    "orjson>=3.9.0",
 
     # API
     "fastapi>=0.110.0",
