@@ -78,23 +78,36 @@ class UplinkNode(Node):
 
         url = f"{self.upstream_url}?tenant_id={self.tenant_id}&user_id={self.user_id}&device_id={self.device_id}"
 
+        # Use additional_headers for websockets 14+, extra_headers for <14
+        connect_kwargs = {"extra_headers": headers}
+        try:
+            import websockets.version
+
+            if int(websockets.version.version.split(".")[0]) >= 14:
+                connect_kwargs = {"additional_headers": headers}
+        except Exception:
+            pass
+
         while True:
             try:
-                self._ws = await websockets.connect(url, extra_headers=headers)
-                logger.info("UplinkNode '%s' connected to %s", self.node_id, self.upstream_url)
+                async with websockets.connect(url, **connect_kwargs) as ws:
+                    self._ws = ws
+                    logger.info("UplinkNode '%s' connected to %s", self.node_id, self.upstream_url)
 
-                # Reset retry delay on successful connection
-                retry_delay = 1.0
+                    # Reset retry delay on successful connection
+                    retry_delay = 1.0
 
-                # Register local tools upstream
-                if self.local_tools:
-                    await self._ws.send(
-                        json.dumps({"type": "register_capabilities", "tools": self.local_tools})
-                    )
-                    logger.info("UplinkNode advertised %d tools upstream", len(self.local_tools))
+                    # Register local tools upstream
+                    if self.local_tools:
+                        await self._ws.send(
+                            json.dumps({"type": "register_capabilities", "tools": self.local_tools})
+                        )
+                        logger.info(
+                            "UplinkNode advertised %d tools upstream", len(self.local_tools)
+                        )
 
-                # Blocks here until connection closes or errors
-                await self._read_loop()
+                    # Blocks here until connection closes or errors
+                    await self._read_loop()
 
             except websockets.exceptions.ConnectionClosed:
                 logger.warning(
