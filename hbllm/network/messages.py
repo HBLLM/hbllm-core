@@ -147,6 +147,7 @@ class MemorySearchPayload(BaseModel):
     query_text: str | None = None
     embedding: list[float] | None = None
     memory_type: str = "semantic"  # semantic, episodic, procedural
+    scope: str | None = None  # working, episodic, semantic, sensitive
     top_k: int = 5
     domain_filter: str | None = None
 
@@ -162,6 +163,7 @@ class MemoryStorePayload(BaseModel):
     tenant_id: str | None = None
     user_id: str | None = None
     device_id: str | None = None
+    scope: str = "episodic"
 
 
 class MemoryRetrievePayload(BaseModel):
@@ -172,6 +174,7 @@ class MemoryRetrievePayload(BaseModel):
     tenant_id: str | None = None
     user_id: str | None = None
     device_id: str | None = None
+    scope: str | None = None
 
 
 class FeedbackPayload(BaseModel):

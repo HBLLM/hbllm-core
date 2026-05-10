@@ -971,7 +971,7 @@ class BrainFactory:
         # 2. MemorySystem
         memory_sys = None
         if cfg.inject_memory_system:
-            memory_sys = MemorySystem(llm=llm)
+            memory_sys = MemorySystem(llm=llm, registry=registry)
 
         # 3. GovernanceGuard (created before MetaCognition so policy_engine is available)
         governance = None

@@ -66,6 +66,7 @@ class NodeInfo(BaseModel):
     node_type: NodeType
     capabilities: list[str] = []
     capability_metadata: dict[str, Any] = {}  # Metadata for capabilities (e.g., capacity: 5)
+    scopes: list[str] = ["public"]  # Permissions: which topic groups this node can access
     description: str = ""
     fallback_for: list[str] = []  # List of node_ids this node can substitute for
     priority: int = 0  # Higher = preferred when multiple nodes serve same capability
@@ -85,11 +86,13 @@ class Node(ABC):
         node_type: NodeType,
         capabilities: list[str] | None = None,
         capability_metadata: dict[str, Any] | None = None,
+        scopes: list[str] | None = None,
     ) -> None:
         self.node_id = node_id
         self.node_type = node_type
         self.capabilities = capabilities or []
         self.capability_metadata = capability_metadata or {}
+        self.scopes = scopes or ["public"]
         self.description = ""
         self._bus: MessageBus | None = None
         self._running = False
@@ -116,6 +119,7 @@ class Node(ABC):
             node_type=self.node_type,
             capabilities=self.capabilities,
             capability_metadata=self.capability_metadata,
+            scopes=self.scopes,
             description=self.description,
         )
 

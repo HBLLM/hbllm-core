@@ -27,6 +27,7 @@ from hbllm.network.messages import (
     MessageType,
 )
 from hbllm.network.node import Node, NodeType
+from hbllm.network.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,12 @@ class MemoryNode(Node):
     Service node that persists and recalls conversation context.
     """
 
-    def __init__(self, node_id: str, db_path: str | Path = "working_memory.db"):
+    def __init__(
+        self,
+        node_id: str,
+        db_path: str | Path = "working_memory.db",
+        registry: ServiceRegistry | None = None,
+    ):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.MEMORY,
@@ -47,6 +53,7 @@ class MemoryNode(Node):
                 "value_tracking",
             ],
         )
+        self.registry = registry
         # Ensure the memory directory exists
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -294,6 +301,18 @@ class MemoryNode(Node):
         """
         Handles `memory.store` topics.
         """
+        # CapBAC: Check permissions
+        if self.registry:
+            payload_data = message.payload
+            scope = payload_data.get("scope", "episodic")
+            if not await self.registry.has_permission(message.source_node_id, scope):
+                logger.warning(
+                    "[MemoryNode] Permission denied: Node '%s' cannot store in scope '%s'",
+                    message.source_node_id,
+                    scope,
+                )
+                return message.create_error(f"Access denied to scope '{scope}'", code="FORBIDDEN")
+
         try:
             payload = MemoryStorePayload(**message.payload)
             session_id = payload.session_id
@@ -307,30 +326,40 @@ class MemoryNode(Node):
                 domain=payload.domain,
                 metadata=payload.metadata,
                 tenant_id=payload.tenant_id or (message.tenant_id or "default"),
+                user_id=payload.user_id or message.user_id,
+                device_id=payload.device_id or message.device_id,
+                scope=payload.scope,
             )
 
-            # Offload semantic storage to a background thread with error handling
-            task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.semantic_db.store,
-                    content,
-                    {
-                        "session_id": session_id,
-                        "role": role,
-                        "tenant_id": payload.tenant_id or message.tenant_id,
-                        "user_id": payload.user_id or message.user_id,
-                        "device_id": payload.device_id or message.device_id,
-                    },
-                    is_priority=False,
-                    tenant_id=payload.tenant_id or message.tenant_id,
-                    user_id=payload.user_id or message.user_id,
-                    device_id=payload.device_id or message.device_id,
+            # Sensitive Memory Guard: Skip semantic indexing for sensitive/working data
+            if payload.scope not in ["sensitive", "working"]:
+                # Offload semantic storage to a background thread with error handling
+                task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self.semantic_db.store,
+                        content,
+                        {
+                            "session_id": session_id,
+                            "role": role,
+                            "tenant_id": payload.tenant_id or message.tenant_id,
+                            "user_id": payload.user_id or message.user_id,
+                            "device_id": payload.device_id or message.device_id,
+                            "scope": payload.scope,
+                        },
+                        is_priority=False,
+                        tenant_id=payload.tenant_id or message.tenant_id,
+                        user_id=payload.user_id or message.user_id,
+                        device_id=payload.device_id or message.device_id,
+                    )
                 )
-            )
-            task.add_done_callback(self._handle_background_task_result)
-            # Track for graceful shutdown
-            self._pending_tasks.add(task)
-            task.add_done_callback(self._pending_tasks.discard)
+                task.add_done_callback(self._handle_background_task_result)
+                # Track for graceful shutdown
+                self._pending_tasks.add(task)
+                task.add_done_callback(self._pending_tasks.discard)
+            else:
+                logger.debug(
+                    "[MemoryNode] Skipping semantic storage for %s scoped entry", payload.scope
+                )
 
             # Fire and forget mostly, but we reply with success
             return message.create_response({"status": "stored", "turn_id": turn_id})
@@ -343,6 +372,12 @@ class MemoryNode(Node):
         """
         Handles `memory.retrieve_recent` topics.
         """
+        # CapBAC: Check permissions (retrieve defaults to episodic if not specified)
+        if self.registry:
+            scope = message.payload.get("scope", "episodic")
+            if not await self.registry.has_permission(message.source_node_id, scope):
+                return message.create_error(f"Access denied to scope '{scope}'", code="FORBIDDEN")
+
         try:
             payload = MemoryRetrievePayload(**message.payload)
             session_id = payload.session_id

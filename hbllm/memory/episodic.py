@@ -45,6 +45,9 @@ class EpisodicMemory:
             CREATE TABLE IF NOT EXISTS turns (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT,
+                device_id TEXT,
+                scope TEXT NOT NULL DEFAULT 'episodic',
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
@@ -58,11 +61,13 @@ class EpisodicMemory:
             CREATE INDEX IF NOT EXISTS idx_tenant_session_time
             ON turns(tenant_id, session_id, timestamp_iso DESC)
         """)
-        # Migrate: add tenant_id column if upgrading from old schema
+        # Migration: add missing columns if upgrading
         try:
-            cursor.execute("SELECT tenant_id FROM turns LIMIT 1")
+            cursor.execute("SELECT user_id FROM turns LIMIT 1")
         except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE turns ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
+            cursor.execute("ALTER TABLE turns ADD COLUMN user_id TEXT")
+            cursor.execute("ALTER TABLE turns ADD COLUMN device_id TEXT")
+            cursor.execute("ALTER TABLE turns ADD COLUMN scope TEXT NOT NULL DEFAULT 'episodic'")
         conn.commit()
         logger.debug("Initialized EpisodicMemory at %s", self.db_path)
 
@@ -80,6 +85,9 @@ class EpisodicMemory:
         domain: str | None = None,
         metadata: dict[str, Any] | None = None,
         tenant_id: str = "default",
+        user_id: str | None = None,
+        device_id: str | None = None,
+        scope: str = "episodic",
     ) -> str:
         """
         Store a single conversation turn.
@@ -103,10 +111,22 @@ class EpisodicMemory:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO turns (id, tenant_id, session_id, role, content, domain, timestamp_iso, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO turns (id, tenant_id, user_id, device_id, scope, session_id, role, content, domain, timestamp_iso, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-            (turn_id, tenant_id, session_id, role, content, domain, now_iso, meta_str),
+            (
+                turn_id,
+                tenant_id,
+                user_id,
+                device_id,
+                scope,
+                session_id,
+                role,
+                content,
+                domain,
+                now_iso,
+                meta_str,
+            ),
         )
         conn.commit()
 

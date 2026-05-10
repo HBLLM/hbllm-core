@@ -139,6 +139,14 @@ class ServiceRegistry:
                 capabilities.update(info.capabilities)
         return capabilities
 
+    async def has_permission(self, node_id: str, scope: str) -> bool:
+        """Check if a node has permission to access a specific scope."""
+        info = self._nodes.get(node_id)
+        if not info:
+            return False
+        # 'admin' scope grants all permissions
+        return "admin" in info.scopes or scope in info.scopes or scope == "public"
+
     async def is_node_healthy(self, node_id: str) -> bool:
         """Check if a specific node is healthy."""
         health = self._health.get(node_id)
