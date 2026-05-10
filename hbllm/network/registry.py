@@ -47,7 +47,20 @@ class ServiceRegistry:
         self._bus = bus
         self._running = True
         self._health_task = asyncio.create_task(self._health_check_loop())
+
+        if self._bus:
+            # Lifecycle listener
+            await self._bus.subscribe("node.lifecycle", self._handle_lifecycle_message)
+
         logger.info("ServiceRegistry started (interval=%.1fs)", self._health_check_interval)
+
+    async def _handle_lifecycle_message(self, message: Message) -> Message | None:
+        """Handle incoming node lifecycle messages."""
+        if message.type == MessageType.NODE_DEREGISTERED:
+            node_id = message.source_node_id
+            logger.info("[Registry] Received dying gasp from node: %s", node_id)
+            await self.deregister(node_id)
+        return None
 
     async def stop(self) -> None:
         """Stop the registry."""

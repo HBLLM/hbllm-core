@@ -7,6 +7,7 @@ This is the fundamental building block of the distributed architecture.
 
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -15,11 +16,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from hbllm.network.clocks import VectorClock
+from hbllm.network.messages import Message, MessageType
 from hbllm.security.identity import NodeIdentity
 
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
-    from hbllm.network.messages import Message
 
 
 class NodeType(StrEnum):
@@ -36,6 +37,10 @@ class NodeType(StrEnum):
     META = "meta"
     PERCEPTION = "perception"
     ACTION = "action"
+    SYSTEM = "system"
+
+
+logger = logging.getLogger(__name__)
 
 
 class HealthStatus(StrEnum):
@@ -144,6 +149,22 @@ class Node(ABC):
 
     async def stop(self) -> None:
         """Stop the node and clean up resources."""
+        if self._bus and self._running:
+            try:
+                # Dying Gasp: Notify the bus we are leaving
+                await self.publish(
+                    "node.lifecycle",
+                    Message(
+                        type=MessageType.NODE_DEREGISTERED,
+                        source_node_id=self.node_id,
+                        target_node_id="system",
+                        topic="node.lifecycle",
+                        payload={"reason": "graceful_shutdown"},
+                    ),
+                )
+            except Exception:
+                logger.warning("Failed to send dying gasp for node %s", self.node_id)
+
         self._running = False
         await self.on_stop()
         self._bus = None

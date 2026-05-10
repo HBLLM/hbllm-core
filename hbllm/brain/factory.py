@@ -365,13 +365,7 @@ class Brain:
 
 async def _register_node(registry: Any, node: Node) -> None:
     """Helper to register a node and mark it healthy upon startup."""
-    await registry.register(
-        NodeInfo(
-            node_id=node.node_id,
-            node_type=node.node_type,
-            capabilities=node.capabilities,
-        )
-    )
+    await registry.register(node.get_info())
     await registry.update_health(NodeHealth(node_id=node.node_id, status=HealthStatus.HEALTHY))
 
 
