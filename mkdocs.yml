@@ -127,6 +127,7 @@ nav:
       - Message Bus: architecture/message-bus.md
       - Memory Systems: architecture/memory-systems.md
       - Network Resilience: architecture/network-resilience.md
+      - Distributed Trust: architecture/distributed-trust.md
   - Zoning Model:
       - How It Works: zoning/how-it-works.md
       - LoRA Routing: zoning/lora-routing.md

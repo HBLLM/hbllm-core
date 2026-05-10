@@ -60,6 +60,17 @@ Nodes that monitor, improve, and expand the brain itself:
 - **IdentityNode** — Ethical constraints and personality persistence.
 - **WorldModelNode** — Sandboxed AST simulation for "what-if" reasoning.
 
+## Communication & Security
+
+All nodes communicate via the **MessageBus**, which has been hardened for distributed swarms:
+
+- **Trust Model**: Every node has an **Ed25519** cryptographic identity. All messages are signed and verified via the `TrustInterceptor`.
+- **Authority Hierarchy**: Uses **Vector Clocks** for causal ordering and **Authority Scores** (0-100) to resolve state conflicts between devices.
+- **Bus Implementations**:
+    - **InProcessBus** — single-process async (local dev) with interceptor support.
+    - **SynapseGateway** — production edge gateway with JWT/HMAC auth.
+    - **DurableBus** — SQLite-backed persistence wrapper for reliable delivery.
+
 ### Layer 4: Memory Systems
 
 See [Memory Systems](memory-systems.md) for the full deep-dive.

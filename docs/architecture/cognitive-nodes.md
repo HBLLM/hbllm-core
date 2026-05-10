@@ -35,6 +35,17 @@ class MyNode(Node):
         ...
 ```
 
+## Node Hardening & Identity
+
+In distributed environments, every node functions as an autonomous security principal with the following hardened attributes:
+
+- **Cryptographic Identity**: Nodes generate an **Ed25519** key pair on startup. All outbound messages are signed using this private key to prevent spoofing.
+- **Authority Score**: A numeric value (`0-100`) determining the node's relative trust level. High-trust devices (e.g., local workstations) carry higher authority than edge peripherals.
+- **Scoped Permissions**: Nodes register with specific `scopes` (e.g., `["public", "navigation"]`). The `MemoryNode` enforces these scopes, ensuring nodes only access authorized data categories.
+- **Dying Gasp**: Graceful shutdown notification (`NODE_DEREGISTERED`) that triggers immediate resource reclamation in the `ServiceRegistry`.
+
+---
+
 ## Node Types
 
 The `NodeType` enum defines the categories of nodes:
