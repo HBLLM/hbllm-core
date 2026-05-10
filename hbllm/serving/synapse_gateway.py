@@ -39,6 +39,8 @@ class SynapseGateway:
         self.device_nodes: dict[tuple[str, str, str], list[RemoteToolNode]] = {}
         # Map: (tenant_id, user_id, device_id) -> list[dict] (outbound messages)
         self._outbound_queues: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        # Set of devices that have connected in this session
+        self.known_devices: set[tuple[str, str, str]] = set()
 
         self._bus_task: asyncio.Task[Any] | None = None
 
@@ -82,6 +84,7 @@ class SynapseGateway:
 
         self.active_connections[key] = websocket
         self.device_capabilities[key] = []
+        self.known_devices.add(key)
         logger.info(f"Edge device connected: tenant={tenant_id} user={user_id} device={device_id}")
 
         if self.audit_log:
@@ -164,6 +167,11 @@ class SynapseGateway:
         key = (tenant_id, user_id, device_id)
         ws = self.active_connections.get(key)
         if not ws:
+            # Only buffer if the device is known to have connected before in this session
+            if key not in self.known_devices:
+                logger.warning(f"Targeting unknown device {device_id}, cannot buffer.")
+                return False
+
             # Device offline: buffer the message for when it reconnects
             if key not in self._outbound_queues:
                 self._outbound_queues[key] = []
