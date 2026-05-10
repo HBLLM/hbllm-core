@@ -156,12 +156,22 @@ flowchart TB
         OLLAMA["Ollama"]
     end
 
+    subgraph SWARM["🌐 Hierarchical Swarm"]
+        direction LR
+        UPLINK["📡 UplinkNode"]
+        MOBILE["📱 Mobile Apps"]
+        DESKTOP["💻 Desktop Brains"]
+        UPLINK --- MOBILE
+        UPLINK --- DESKTOP
+    end
+
     PERCEPTION ==> BUS
     BUS ==> BRAIN
     BRAIN ==> BUS
     BUS ==> ACTIONS
     BUS <--> MEMORY
     BUS <--> META
+    SWARM <==>|"SynapseGateway"| BUS
     ZONING -.-> BRAIN
     PROVIDERS -.-> BRAIN
     CURIOSITY -->|"goals"| SLEEP

@@ -101,6 +101,7 @@ def run_serve(args):
             port=args.port,
             workers=args.workers,
             log_level="info",
+            loop="uvloop",
         )
     except ImportError:
         logging.error("uvicorn not installed. Run: pip install uvicorn")

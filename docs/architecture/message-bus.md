@@ -43,6 +43,27 @@ bus = RedisBus(
 await bus.start()
 ```
 
+### UplinkNode (Hierarchical Swarm)
+
+To bridge a local `MessageBus` to a remote Core server (creating an Edge Brain), you can use the `UplinkNode`. This node transparently tunnels `tool_call` and `tool_result` messages over WebSockets.
+
+```python
+from hbllm.network.uplink_node import UplinkNode
+
+# Connect an Edge device (e.g. laptop) to the Home AI
+uplink = UplinkNode(
+    node_id="laptop_edge",
+    upstream_url="wss://home.ai/v1/synapse/ws",
+    tenant_id="tenant-001",
+    user_id="user-001",
+    device_id="laptop",
+    local_tools=["local_file_system", "mcp.vscode"]
+)
+
+# Start the node (it will auto-reconnect if dropped)
+await uplink.start(local_bus)
+```
+
 ## Message
 
 ```python

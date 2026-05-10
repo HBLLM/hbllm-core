@@ -56,6 +56,7 @@ By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain life
 | **🧠 Agentic Reasoning** | GoT planning, PRM scoring, MoE domain blending | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
 | **🧪 Personalization** | Dynamically adapts to your knowledge via 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
 | **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
+| **🌐 Swarm Architecture** | Edge devices act as synced limbs via WebSocket `UplinkNode` | [Message Bus](docs/architecture/message-bus.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
 | **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Governance](docs/api/governance.md) |
 | **🔐 Enterprise Security** | Identity triplet, `@require_tenant`, audit log, encryption | [Security](SECURITY.md) |

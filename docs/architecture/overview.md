@@ -70,9 +70,22 @@ Execution nodes that interact with the external world:
 
 - **ExecutionNode** — Sandboxed Python evaluation with resource limits.
 - **MCPClientNode** — Model Context Protocol tool calls.
+- **UplinkNode** — WebSocket bridge to central/cloud servers for Hierarchical Swarms.
 - **BrowserNode** — Web page interaction and scraping.
 - **Z3LogicNode** — Formal verification and constraint solving.
 - **FuzzyLogicNode** — Approximate reasoning with scikit-fuzzy.
+
+---
+
+## Hierarchical Swarm Architecture
+
+HBLLM supports a decentralized multi-homed architecture. Edge devices (like laptops, mobile phones, or desktop workstations) can run their own local `MessageBus` and connect to a Central Core via WebSockets using the `UplinkNode`.
+
+1. **Auto-Discovery** — Edge devices advertise their local tools (`register_capabilities`) up to the central server.
+2. **Transparent Execution** — The central server sends `tool_call` commands down the WebSocket, the Edge device executes them locally, and pipes the `tool_result` back up.
+3. **Sovereign Sync** — Edge devices append their offline episodic memories and semantic knowledge to the central brain via secure REST APIs (`/v1/sync/*`).
+
+This allows the central brain to command a swarm of edge limbs dynamically, while edge devices maintain autonomous local execution.
 
 ---
 
