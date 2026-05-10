@@ -118,6 +118,13 @@ class SyncSemanticRequest(BaseModel):
     )
 
 
+class WebRTCOfferRequest(BaseModel):
+    """SDP offer from an edge device for a high-bandwidth data channel."""
+
+    sdp: str = Field(..., description="Session Description Protocol payload")
+    type: str = Field(..., description="Should be 'offer'")
+
+
 # ─── Global State ─────────────────────────────────────────────────────────────
 
 _state: dict[str, Any] = {}
@@ -186,6 +193,15 @@ async def _boot_brain(
     await gateway.start()
     _state["synapse_gateway"] = gateway
 
+    # 5. Start WebRTC Gateway (optional high-bandwidth plane)
+    try:
+        from hbllm.network.webrtc_gateway import WebRTCGateway
+        webrtc_gateway = WebRTCGateway(bus=brain.bus)
+        _state["webrtc_gateway"] = webrtc_gateway
+        logger.info("WebRTC Gateway initialized for high-bandwidth perception")
+    except ImportError:
+        logger.warning("aiortc not installed. WebRTC perception plane disabled.")
+
     _state["brain"] = brain
     _state["plugin_manager"] = pm
     _state["bus_type"] = bus_type
@@ -199,6 +215,10 @@ async def _shutdown_brain() -> None:
     gateway = _state.get("synapse_gateway")
     if gateway:
         await gateway.stop()
+
+    webrtc_gateway = _state.get("webrtc_gateway")
+    if webrtc_gateway:
+        await webrtc_gateway.stop()
 
     brain = _state.get("brain")
     if brain:
@@ -1300,6 +1320,27 @@ async def synapse_websocket(websocket: WebSocket) -> Any:
     except Exception as e:
         logger.error(f"Synapse WebSocket error: {e}")
         gateway.disconnect(tenant_id, user_id, device_id)
+
+
+@app.post("/v1/synapse/webrtc/offer")
+async def webrtc_offer(api_req: Request, request: WebRTCOfferRequest) -> Any:
+    """Negotiate a WebRTC P2P connection for high-bandwidth perception streams."""
+    tenant_id = getattr(api_req.state, "tenant_id", "default")
+    user_id = getattr(api_req.state, "user_id", "default")
+    device_id = getattr(api_req.state, "device_id", "default")
+
+    webrtc_gateway = _state.get("webrtc_gateway")
+    if not webrtc_gateway:
+        raise HTTPException(status_code=501, detail="WebRTC perception plane is disabled on this Core")
+
+    try:
+        answer = await webrtc_gateway.handle_offer(
+            tenant_id, user_id, device_id, request.sdp, request.type
+        )
+        return answer
+    except Exception as e:
+        logger.error(f"WebRTC negotiation failed for {device_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/chat/stream")

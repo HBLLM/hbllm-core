@@ -52,6 +52,8 @@ dependencies = [
     "redis>=5.0.0",
     "Pillow>=10.0.0",
     "orjson>=3.9.0",
+    "uvloop>=0.19.0; sys_platform != 'win32'",
+    "aiortc>=1.8.0",
 
     # API
     "fastapi>=0.110.0",
