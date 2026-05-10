@@ -68,10 +68,11 @@ class ServiceRegistry:
             capabilities_available=node_info.capabilities,
         )
         logger.info(
-            "Registered node: %s (type=%s, capabilities=%s)",
+            "Registered node: %s (type=%s, capabilities=%s, metadata=%s)",
             node_info.node_id,
             node_info.node_type.value,
             node_info.capabilities,
+            node_info.capability_metadata,
         )
 
     async def deregister(self, node_id: str) -> None:

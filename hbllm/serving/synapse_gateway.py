@@ -35,6 +35,8 @@ class SynapseGateway:
         self.active_connections: dict[tuple[str, str, str], WebSocket] = {}
         # Map: (tenant_id, user_id, device_id) -> list[str] (tool names)
         self.device_capabilities: dict[tuple[str, str, str], list[str]] = {}
+        # Map: (tenant_id, user_id, device_id) -> dict[str, Any] (capability metadata)
+        self.device_metadata: dict[tuple[str, str, str], dict[str, Any]] = {}
         # Map: (tenant_id, user_id, device_id) -> list[RemoteToolNode]
         self.device_nodes: dict[tuple[str, str, str], list[RemoteToolNode]] = {}
         # Map: (tenant_id, user_id, device_id) -> list[dict] (outbound messages)
@@ -242,7 +244,9 @@ class SynapseGateway:
             if msg_type == "register_capabilities":
                 # The device is telling us what local tools it has
                 tools = data.get("tools", [])
+                metadata = data.get("metadata", {})
                 self.device_capabilities[(tenant_id, user_id, device_id)] = tools
+                self.device_metadata[(tenant_id, user_id, device_id)] = metadata
 
                 # Stop existing remote nodes for this device if any
                 old_nodes = self.device_nodes.get((tenant_id, user_id, device_id), [])
@@ -254,7 +258,13 @@ class SynapseGateway:
                 from hbllm.actions.tool_registry import RemoteToolNode
 
                 for tool_name in tools:
-                    node = RemoteToolNode(tool_name, tenant_id, user_id, device_id)
+                    node = RemoteToolNode(
+                        tool_name,
+                        tenant_id,
+                        user_id,
+                        device_id,
+                        capability_metadata=metadata,
+                    )
                     if self.bus:
                         await node.start(self.bus)
                     new_nodes.append(node)

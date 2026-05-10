@@ -36,6 +36,8 @@ class LearningLoop(Node):
     def __init__(
         self,
         node_id: str = "learning_loop",
+        *,
+        llm: Any | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -47,14 +49,17 @@ class LearningLoop(Node):
                 "action_simulation",
                 "process_reward",
                 "thought_evaluation",
+                "self_expansion",
             ],
         )
-        self.description = "Unified learning loop (feedback → simulate → learn → reward)"
+        self.description = "Unified learning loop (feedback → simulate → learn → reward → expand)"
+        self._llm = llm
 
         # Sub-nodes
         self._learner: Any = None
         self._world_model: Any = None
         self._process_reward: Any = None
+        self._spawner: Any = None
 
     async def on_start(self) -> None:
         from hbllm.brain.learner_node import LearnerNode
@@ -66,6 +71,21 @@ class LearningLoop(Node):
         bus = self.bus
         for sub in [self._learner, self._world_model]:
             await sub.start(bus)
+
+        # Self-Expansion / Spawner Node
+        if self._llm and hasattr(self._llm, "provider"):
+            from hbllm.serving.provider import LocalProvider
+
+            provider = self._llm.provider
+            if isinstance(provider, LocalProvider):
+                from hbllm.brain.spawner_node import SpawnerNode
+
+                self._spawner = SpawnerNode(
+                    node_id=f"{self.node_id}.spawner",
+                    model=provider._model,
+                    tokenizer=provider._tokenizer,
+                )
+                await self._spawner.start(bus)
 
         # Process Reward Model (optional — may require ML model / torch)
         try:
@@ -80,12 +100,13 @@ class LearningLoop(Node):
             self._process_reward = None
 
         logger.info(
-            "LearningLoop started with sub-nodes: learner, world_model%s",
+            "LearningLoop started with sub-nodes: learner, world_model%s%s",
+            ", spawner" if self._spawner else "",
             ", prm" if self._process_reward else "",
         )
 
     async def on_stop(self) -> None:
-        for sub in [self._learner, self._world_model, self._process_reward]:
+        for sub in [self._learner, self._world_model, self._process_reward, self._spawner]:
             if sub is not None:
                 await sub.stop()
 
@@ -95,7 +116,7 @@ class LearningLoop(Node):
     async def health_check(self):
         from hbllm.network.node import HealthStatus, NodeHealth
 
-        subs = [self._learner, self._world_model, self._process_reward]
+        subs = [self._learner, self._world_model, self._process_reward, self._spawner]
         sub_healths = []
         for sub in subs:
             if sub is not None:

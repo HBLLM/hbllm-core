@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -65,6 +65,7 @@ class NodeInfo(BaseModel):
     node_id: str
     node_type: NodeType
     capabilities: list[str] = []
+    capability_metadata: dict[str, Any] = {}  # Metadata for capabilities (e.g., capacity: 5)
     description: str = ""
     fallback_for: list[str] = []  # List of node_ids this node can substitute for
     priority: int = 0  # Higher = preferred when multiple nodes serve same capability
@@ -79,11 +80,16 @@ class Node(ABC):
     """
 
     def __init__(
-        self, node_id: str, node_type: NodeType, capabilities: list[str] | None = None
+        self,
+        node_id: str,
+        node_type: NodeType,
+        capabilities: list[str] | None = None,
+        capability_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.node_id = node_id
         self.node_type = node_type
         self.capabilities = capabilities or []
+        self.capability_metadata = capability_metadata or {}
         self.description = ""
         self._bus: MessageBus | None = None
         self._running = False
@@ -109,6 +115,7 @@ class Node(ABC):
             node_id=self.node_id,
             node_type=self.node_type,
             capabilities=self.capabilities,
+            capability_metadata=self.capability_metadata,
             description=self.description,
         )
 

@@ -1008,7 +1008,7 @@ class BrainFactory:
         # 8. LearningLoop
         learning = None
         if cfg.inject_learning:
-            learning = LearningLoop()
+            learning = LearningLoop(llm=llm)
 
         # Start all composite nodes
         composites = [
