@@ -102,6 +102,22 @@ class FeedbackRequest(BaseModel):
     comment: str | None = Field(default=None, description="Optional user comment")
 
 
+class SyncEpisodicRequest(BaseModel):
+    """Batch of episodic memories to sync upstream."""
+
+    memories: list[dict[str, Any]] = Field(
+        ..., description="List of episodic memory dictionaries to append"
+    )
+
+
+class SyncSemanticRequest(BaseModel):
+    """Batch of semantic knowledge items to sync upstream."""
+
+    knowledge_items: list[dict[str, Any]] = Field(
+        ..., description="List of knowledge items to append"
+    )
+
+
 # ─── Global State ─────────────────────────────────────────────────────────────
 
 _state: dict[str, Any] = {}
@@ -1539,6 +1555,72 @@ async def get_memory(tenant_id: str, session_id: str, limit: int = 20) -> Any:
         return result.payload
     except (TimeoutError, asyncio.TimeoutError):
         return {"session_id": session_id, "turns": []}
+
+
+@app.post("/v1/sync/episodic")
+async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
+    """Sync a batch of episodic memories from an edge device (append strategy)."""
+    tenant_id = getattr(api_req.state, "tenant_id", "default")
+    user_id = getattr(api_req.state, "user_id", "default")
+    device_id = getattr(api_req.state, "device_id", "default")
+
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    for mem in request.memories:
+        payload = dict(mem)
+        payload["tenant_id"] = tenant_id
+        payload["user_id"] = user_id
+        payload["device_id"] = device_id
+
+        msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=f"edge_sync_{device_id}",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            device_id=device_id,
+            session_id=mem.get("session_id", "sync_session"),
+            topic="memory.store",
+            payload=payload,
+        )
+        await bus.publish("memory.store", msg)
+
+    return {"status": "success", "synced": len(request.memories)}
+
+
+@app.post("/v1/sync/semantic")
+async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
+    """Sync a batch of semantic knowledge items from an edge device (append strategy)."""
+    tenant_id = getattr(api_req.state, "tenant_id", "default")
+    user_id = getattr(api_req.state, "user_id", "default")
+    device_id = getattr(api_req.state, "device_id", "default")
+
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    for item in request.knowledge_items:
+        payload = dict(item)
+        payload["tenant_id"] = tenant_id
+        payload["user_id"] = user_id
+        payload["device_id"] = device_id
+
+        msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=f"edge_sync_{device_id}",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            device_id=device_id,
+            session_id="sync_session",
+            topic="knowledge.store",
+            payload=payload,
+        )
+        await bus.publish("knowledge.store", msg)
+
+    return {"status": "success", "synced": len(request.knowledge_items)}
 
 
 @app.post("/v1/feedback")
