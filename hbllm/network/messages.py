@@ -84,6 +84,7 @@ class Message(BaseModel):
     ttl_seconds: float | None = None  # Time-to-live
     is_security_cleared: bool = False  # Set by proactive interceptors
     signature: str | None = None  # Ed25519 signature of (id + type + payload_json)
+    vector_clock: dict[str, int] | None = None  # For causality tracking
 
     def create_response(
         self,

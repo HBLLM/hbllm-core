@@ -164,6 +164,13 @@ class ServiceRegistry:
             signature_b64=message.signature
         )
 
+    async def get_authority_score(self, node_id: str) -> int:
+        """Get the authority score of a node (0-100)."""
+        info = self._nodes.get(node_id)
+        if not info:
+            return 0
+        return info.authority_score
+
     async def is_node_healthy(self, node_id: str) -> bool:
         """Check if a specific node is healthy."""
         health = self._health.get(node_id)

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from hbllm.network.clocks import VectorClock
 from hbllm.security.identity import NodeIdentity
 
 if TYPE_CHECKING:
@@ -70,6 +71,7 @@ class NodeInfo(BaseModel):
     capability_metadata: dict[str, Any] = {}  # Metadata for capabilities (e.g., capacity: 5)
     scopes: list[str] = ["public"]  # Permissions: which topic groups this node can access
     public_key: str | None = None  # Ed25519 public key (Base64)
+    authority_score: int = 50  # 0-100, used for conflict resolution (higher wins)
     description: str = ""
     fallback_for: list[str] = []  # List of node_ids this node can substitute for
     priority: int = 0  # Higher = preferred when multiple nodes serve same capability
@@ -96,12 +98,15 @@ class Node(ABC):
         self.capabilities = capabilities or []
         self.capability_metadata = capability_metadata or {}
         self.scopes = scopes or ["public"]
+        self.authority_score = 50  # Default authority
         self.description = ""
         self._bus: MessageBus | None = None
         self._running = False
         self._start_time = 0.0
         # Trust Model: Identity
         self.identity = NodeIdentity.generate()  # Temporary key if not loaded
+        # Authority Hierarchy: Vector Clock
+        self.clock = VectorClock(node_id=self.node_id)
 
     @property
     def bus(self) -> MessageBus:
@@ -126,6 +131,7 @@ class Node(ABC):
             capability_metadata=self.capability_metadata,
             scopes=self.scopes,
             public_key=self.identity.public_key_b64,
+            authority_score=self.authority_score,
             description=self.description,
         )
 
@@ -154,11 +160,15 @@ class Node(ABC):
 
     async def publish(self, topic: str, message: Message) -> None:
         """Sign and publish a message to the bus."""
+        self.clock.increment()
+        message.vector_clock = self.clock.to_dict()
         message.signature = self.identity.sign(message.signable_data)
         await self.bus.publish(topic, message)
 
     async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Sign and send a request message to the bus."""
+        self.clock.increment()
+        message.vector_clock = self.clock.to_dict()
         message.signature = self.identity.sign(message.signable_data)
         return await self.bus.request(topic, message, timeout=timeout)
 
