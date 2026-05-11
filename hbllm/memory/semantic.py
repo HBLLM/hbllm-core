@@ -447,6 +447,7 @@ class SemanticMemory:
         content: str,
         metadata: dict[str, Any] | None = None,
         is_priority: bool = False,
+        tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
         vector_clock: dict[str, int] | None = None,

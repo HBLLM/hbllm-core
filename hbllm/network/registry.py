@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
+from hbllm.network.node import DeviceTier, HealthStatus, NodeHealth, NodeInfo, NodeType
 from hbllm.security.identity import NodeIdentity
 
 if TYPE_CHECKING:
@@ -165,7 +165,6 @@ class ServiceRegistry:
             healthy_only: Only return healthy/degraded nodes
             device_tier: Filter by hardware tier
         """
-        from hbllm.network.node import DeviceTier
 
         tier_val = None
         if device_tier:

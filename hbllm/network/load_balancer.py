@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from hbllm.network.node import HealthStatus, NodeInfo
+from hbllm.network.node import DeviceTier, HealthStatus, NodeInfo
 
 if TYPE_CHECKING:
     from hbllm.network.circuit_breaker import CircuitBreakerRegistry
@@ -184,7 +184,6 @@ class LoadBalancer:
         2. If multiple candidates in tier, use round_robin within them.
         3. If no candidates in tier, fallback to higher power tiers (e.g. MOBILE -> SERVER -> CLOUD).
         """
-        from hbllm.network.node import DeviceTier
 
         if preferred_tier:
             tier_val = (

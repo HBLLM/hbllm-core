@@ -30,7 +30,7 @@ import websockets
 
 from hbllm.network.bus import Subscription
 from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import Node, NodeType
+from hbllm.network.node import DeviceTier, Node, NodeType
 
 if TYPE_CHECKING:
     from websockets.client import WebSocketClientProtocol
@@ -52,9 +52,8 @@ class UplinkNode(Node):
         device_id: str,
         auth_token: str | None = None,
         local_tools: list[str] | None = None,
-        device_tier: str | None = None,
+        device_tier: DeviceTier | str | None = None,
     ) -> None:
-        from hbllm.network.node import DeviceTier
 
         super().__init__(
             node_id=node_id,

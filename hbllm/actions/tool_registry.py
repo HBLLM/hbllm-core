@@ -20,7 +20,7 @@ from functools import wraps
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import Node, NodeType
+from hbllm.network.node import DeviceTier, Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -285,8 +285,6 @@ class ToolNode(Node):
     """
 
     def __init__(self, tool_name: str, func: Callable, tenant_id: str, device_tier: DeviceTier | None = None):
-        from hbllm.network.node import DeviceTier
-
         super().__init__(
             node_id=f"tool_{tool_name}_{tenant_id}",
             node_type=NodeType.ACTION,
@@ -337,8 +335,6 @@ class RemoteToolNode(Node):
         capability_metadata: dict[str, Any] | None = None,
         device_tier: DeviceTier | None = None,
     ):
-        from hbllm.network.node import DeviceTier
-
         super().__init__(
             node_id=f"remote_tool_{tool_name}_{device_id}",
             node_type=NodeType.ACTION,

@@ -24,7 +24,7 @@ from hbllm.network.messages import (
     QueryPayload,
     SpawnRequestPayload,
 )
-from hbllm.network.node import Node, NodeType
+from hbllm.network.node import DeviceTier, Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -742,7 +742,6 @@ class RouterNode(Node):
         """
         Heuristic to determine the best hardware tier for a given task.
         """
-        from hbllm.network.node import DeviceTier
 
         # 1. Cloud-bound tasks
         if intent in ("web_search", "tool_synthesis"):
