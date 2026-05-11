@@ -99,6 +99,11 @@ class ServiceRegistry:
                     node_info.node_id,
                 )
                 raise PermissionError(f"Node '{node_info.node_id}' is not signed by the Owner.")
+        else:
+            logger.debug(
+                "[Registry] Node '%s' registered in permissive (standalone) mode.",
+                node_info.node_id,
+            )
         self._nodes[node_info.node_id] = node_info
         self._health[node_info.node_id] = NodeHealth(
             node_id=node_info.node_id,
