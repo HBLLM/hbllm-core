@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from hbllm.brain.provider_adapter import ProviderLLM
     from hbllm.network.bus import MessageBus
     from hbllm.network.messages import Message
+    from hbllm.network.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class MemorySystem(Node):
         node_id: str = "memory_system",
         *,
         llm: ProviderLLM | None = None,
+        registry: ServiceRegistry | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -57,6 +59,7 @@ class MemorySystem(Node):
         )
         self.description = "Unified memory lifecycle (store → experience → consolidate)"
         self._llm = llm
+        self._registry = registry
 
         # Sub-nodes
         self._memory: Any = None
@@ -69,7 +72,10 @@ class MemorySystem(Node):
         from hbllm.brain.sleep_node import SleepCycleNode
         from hbllm.memory.memory_node import MemoryNode
 
-        self._memory = MemoryNode(node_id=f"{self.node_id}.memory")
+        self._memory = MemoryNode(
+            node_id=f"{self.node_id}.memory",
+            registry=self._registry,
+        )
         self._experience = ExperienceNode(
             node_id=f"{self.node_id}.experience",
             llm=self._llm,

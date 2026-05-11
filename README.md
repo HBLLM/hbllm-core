@@ -24,7 +24,7 @@
 
 While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for digital sovereignty. It is a **Personal AI Platform** engineered to give you complete ownership over a cognitive agent that truly knows you, without ever sending your life to the cloud.
 
-It achieves this by replacing massive GPU clusters with an efficient, modular architecture: **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus. By running on hardware as accessible as a Raspberry Pi or a laptop, it ensures your data remains strictly yours.
+It achieves this by replacing massive GPU clusters with an efficient, modular architecture: **A Hierarchical Swarm of Specialized Cognitive Nodes** orchestrated via an async Pub/Sub message bus. By securely connecting edge devices (phones, IoT, laptops) to a central home brain via Ed25519 cryptographic trust, it ensures your data remains strictly yours.
 
 ```text
                     ┌─────────────────────────────────────────┐
@@ -56,10 +56,10 @@ By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain life
 | **🧠 Agentic Reasoning** | GoT planning, PRM scoring, MoE domain blending | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
 | **🧪 Personalization** | Dynamically adapts to your knowledge via 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
 | **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
-| **🌐 Swarm Architecture** | Edge devices act as synced limbs via WebSocket `UplinkNode` | [Message Bus](docs/architecture/message-bus.md) |
+| **🌐 Swarm Architecture** | Hierarchical edge devices via `SynapseGateway` and `UplinkNode` | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
-| **🛡️ Governance** | PolicyEngine + SentinelNode + tenant isolation | [Governance](docs/api/governance.md) |
-| **🔐 Enterprise Security** | Identity triplet, `@require_tenant`, audit log, encryption | [Security](SECURITY.md) |
+| **🛡️ Governance & Trust** | Ed25519 Distributed Trust, Vector Clock Anti-Replay | [Distributed Trust](docs/architecture/distributed-trust.md) |
+| **🔐 Enterprise Security** | Identity triplet, Node Revocation (`system.dlq`), audit log | [Security](SECURITY.md) |
 | **⚙️ Infrastructure** | 128k+ context, Rust SIMD quantization, ONNX router | [Benchmarks](docs/api/benchmarks.md) |
 | **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialists | [Zoning](docs/zoning/how-it-works.md) |
 

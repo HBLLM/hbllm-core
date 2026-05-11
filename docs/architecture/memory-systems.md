@@ -170,6 +170,21 @@ This mirrors the biological process of memory consolidation during sleep.
 
 ---
 
+## Memory Topology (Scopes)
+
+To prevent synchronization chaos and protect sensitive data in distributed environments, HBLLM enforces a 4-tier memory topology:
+
+| Scope | Persistence | Sync Level | Description |
+| :--- | :--- | :--- | :--- |
+| **WORKING** | Transient | Local-only | Per-node ephemeral state, never synced. |
+| **EPISODIC** | Persistent | Swarm-wide | User interaction history, synced across trusted devices. |
+| **SEMANTIC** | Persistent | Global/Tenant | Shared domain knowledge and facts. |
+| **SENSITIVE** | Encrypted | Local-only | PII, credentials, and restricted data. Strictly blocked from sync. |
+
+Access to these scopes is enforced via **CapBAC** (Capability-Based Access Control) at the node registration level.
+
+---
+
 ## MemoryNode
 
 The `MemoryNode` (`hbllm.memory.memory_node.MemoryNode`) is the bus-connected wrapper that subscribes to memory-related topics (`MEMORY_STORE`, `MEMORY_SEARCH`) and dispatches operations to the appropriate underlying memory system.

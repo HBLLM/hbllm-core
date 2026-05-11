@@ -31,6 +31,12 @@ await bus.unsubscribe(sub)
 await bus.stop()
 ```
 
+#### Dead Letter Queue (DLQ)
+
+The `InProcessBus` features a native Dead Letter Queue. If a message expires due to TTL, or if it is blocked by a proactive interceptor (e.g., due to a failed Ed25519 signature verification or a Replay Attack violation), the message is cleanly rerouted to the `system.dlq` topic.
+
+This preserves the original payload and appends diagnostic metadata (e.g., `dlq_reason: "interceptor_blocked"` and `original_topic`), allowing administrators to audit dropped traffic and detect intrusion attempts without breaking the main asynchronous dispatch loop.
+
 ### RedisBus
 
 ```python

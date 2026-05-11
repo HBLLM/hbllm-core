@@ -19,15 +19,21 @@ Usage:
   await node.start(bus)
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import websockets
 
+from hbllm.network.bus import Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+
+if TYPE_CHECKING:
+    from websockets.client import WebSocketClientProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +65,56 @@ class UplinkNode(Node):
         self.auth_token = auth_token
         self.local_tools = local_tools or []
 
-        self._ws: Any = None
-        self._read_task: asyncio.Task[None] | None = None
+        self._ws: WebSocketClientProtocol | None = None
+        self._read_task: asyncio.Task | None = None
+        self._subs: list[Subscription] = []
         self._pending_calls: dict[str, str] = {}  # correlation_id -> tool_name
 
     async def on_start(self) -> None:
         """Start the persistent connection loop."""
         self._read_task = asyncio.create_task(self._connection_loop())
+        # Subscribe to local topics that should be forwarded upstream
+        sub = await self.bus.subscribe("uplink.send", self._handle_local_outbound)
+        self._subs.append(sub)
+
+    async def _handle_local_outbound(self, message: Message) -> None:
+        """Forward a message from the local bus to the upstream Hub."""
+        if not self._ws:
+            return
+
+        payload = {
+            "type": "bridge_message",
+            "msg_type": message.type,
+            "topic": message.topic,
+            "payload": message.payload,
+            "correlation_id": message.correlation_id or message.id,
+        }
+        try:
+            await self._ws.send(json.dumps(payload))
+        except Exception as e:
+            logger.error("UplinkNode failed to forward message upstream: %s", e)
+
+    async def _handle_bridged_instruction(self, data: dict[str, Any]) -> None:
+        """Route a high-level instruction from upstream to the local MessageBus."""
+        topic = data.get("topic", "hub.instruction")
+        msg_type = data.get("msg_type", MessageType.INSTRUCTION)
+        payload = data.get("payload", {})
+        correlation_id = data.get("correlation_id")
+
+        logger.debug("UplinkNode routing upstream instruction: %s", topic)
+
+        # Publish to local bus
+        bridged_msg = Message(
+            type=msg_type,
+            source_node_id="hub",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            device_id=self.device_id,
+            topic=topic,
+            correlation_id=correlation_id,
+            payload=payload,
+        )
+        await self.bus.publish(topic, bridged_msg)
 
     async def _connection_loop(self) -> None:
         """Maintains a persistent connection with exponential backoff."""
@@ -128,11 +177,22 @@ class UplinkNode(Node):
         logger.debug("UplinkNode received direct message: %s", message.id)
 
     async def on_stop(self) -> None:
-        """Disconnect from upstream."""
+        """Disconnect from upstream and clean up subscriptions."""
         if self._read_task:
             self._read_task.cancel()
+            try:
+                await self._read_task
+            except asyncio.CancelledError:
+                pass
+
         if self._ws:
             await self._ws.close()
+
+        # Clean up subscriptions
+        for sub in self._subs:
+            await self.bus.unsubscribe(sub)
+        self._subs.clear()
+
         logger.info("UplinkNode '%s' stopped", self.node_id)
 
     async def _read_loop(self) -> None:
@@ -148,6 +208,8 @@ class UplinkNode(Node):
 
                     if msg_type == "tool_call":
                         await self._handle_upstream_tool_call(data)
+                    elif msg_type == "bridge_message":
+                        await self._handle_bridged_instruction(data)
                     else:
                         logger.debug("UplinkNode received unknown message: %s", msg_type)
 

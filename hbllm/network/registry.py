@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
+from hbllm.security.identity import NodeIdentity
 
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
@@ -39,13 +41,28 @@ class ServiceRegistry:
         self._health_task: asyncio.Task[None] | None = None
         self._running = False
         self._bus: MessageBus | None = None
+        self._revoked_nodes: set[str] = set()
+        self._vector_clocks: dict[str, Any] = {}  # node_id -> VectorClock
 
     async def start(self, bus: MessageBus | None = None) -> None:
         """Start the registry and health check loop."""
         self._bus = bus
         self._running = True
         self._health_task = asyncio.create_task(self._health_check_loop())
+
+        if self._bus:
+            # Lifecycle listener
+            await self._bus.subscribe("node.lifecycle", self._handle_lifecycle_message)
+
         logger.info("ServiceRegistry started (interval=%.1fs)", self._health_check_interval)
+
+    async def _handle_lifecycle_message(self, message: Message) -> Message | None:
+        """Handle incoming node lifecycle messages."""
+        if message.type == MessageType.NODE_DEREGISTERED:
+            node_id = message.source_node_id
+            logger.info("[Registry] Received dying gasp from node: %s", node_id)
+            await self.deregister(node_id)
+        return None
 
     async def stop(self) -> None:
         """Stop the registry."""
@@ -68,17 +85,37 @@ class ServiceRegistry:
             capabilities_available=node_info.capabilities,
         )
         logger.info(
-            "Registered node: %s (type=%s, capabilities=%s)",
+            "Registered node: %s (type=%s, capabilities=%s, metadata=%s)",
             node_info.node_id,
             node_info.node_type.value,
             node_info.capabilities,
+            node_info.capability_metadata,
         )
 
     async def deregister(self, node_id: str) -> None:
         """Remove a node from the registry."""
         self._nodes.pop(node_id, None)
         self._health.pop(node_id, None)
+        self._vector_clocks.pop(node_id, None)
         logger.info("Deregistered node: %s", node_id)
+
+    async def revoke_node(self, node_id: str, reason: str = "Compromised") -> None:
+        """Revoke a node's identity globally, preventing it from participating in the network."""
+        self._revoked_nodes.add(node_id)
+        await self.deregister(node_id)
+        logger.critical("Node '%s' has been REVOKED. Reason: %s", node_id, reason)
+        if self._bus:
+            from hbllm.network.messages import Message, MessageType
+
+            await self._bus.publish(
+                "system.security.revocation",
+                Message(
+                    type=MessageType.EVENT,
+                    topic="system.security.revocation",
+                    source_node_id="system",
+                    payload={"revoked_node_id": node_id, "reason": reason},
+                ),
+            )
 
     async def update_health(self, health: NodeHealth) -> None:
         """Update health status for a node."""
@@ -138,8 +175,86 @@ class ServiceRegistry:
                 capabilities.update(info.capabilities)
         return capabilities
 
+    async def has_permission(self, node_id: str, scope: str) -> bool:
+        """Check if a node has permission to access a specific scope."""
+        info = self._nodes.get(node_id)
+        if not info:
+            return False
+        # 'admin' scope grants all permissions
+        return "admin" in info.scopes or scope in info.scopes or scope == "public"
+
+    async def verify_message(self, message: Message) -> bool:
+        """Verify the cryptographic signature and causal ordering of a message."""
+        if message.source_node_id in self._revoked_nodes:
+            logger.warning(
+                "[Registry] verify_message failed: Node '%s' is REVOKED", message.source_node_id
+            )
+            return False
+
+        info = self._nodes.get(message.source_node_id)
+        if not info:
+            logger.debug(
+                "[Registry] verify_message failed: Node '%s' not found", message.source_node_id
+            )
+            return False
+        if not info.public_key:
+            logger.debug(
+                "[Registry] verify_message failed: Node '%s' has no public key",
+                message.source_node_id,
+            )
+            return False
+
+        if not message.signature:
+            logger.debug(
+                "[Registry] verify_message failed: Message from '%s' has no signature",
+                message.source_node_id,
+            )
+            return False
+
+        is_valid = NodeIdentity.verify(
+            public_key_b64=info.public_key,
+            data=message.signable_data,
+            signature_b64=message.signature,
+        )
+        if not is_valid:
+            logger.debug(
+                "[Registry] verify_message failed: Invalid signature for node '%s'",
+                message.source_node_id,
+            )
+            return False
+
+        # Verify Vector Clock for Replay Protection
+        if message.vector_clock:
+            from hbllm.network.clocks import VectorClock
+
+            msg_clock = VectorClock.from_dict(message.source_node_id, message.vector_clock)
+            current_clock = self._vector_clocks.get(message.source_node_id)
+
+            if current_clock:
+                cmp = msg_clock.compare(current_clock)
+                if cmp in ("before", "equal"):
+                    logger.warning(
+                        "[Registry] verify_message failed: Replay or causality violation from node '%s'",
+                        message.source_node_id,
+                    )
+                    return False
+                current_clock.update(msg_clock)
+            else:
+                self._vector_clocks[message.source_node_id] = msg_clock
+
+        return True
+
+    async def get_authority_score(self, node_id: str) -> int:
+        """Get the authority score of a node (0-100)."""
+        info = self._nodes.get(node_id)
+        if not info:
+            return 0
+        return info.authority_score
+
     async def is_node_healthy(self, node_id: str) -> bool:
         """Check if a specific node is healthy."""
+        if node_id in self._revoked_nodes:
+            return False
         health = self._health.get(node_id)
         if not health:
             return False

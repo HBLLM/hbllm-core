@@ -56,8 +56,8 @@ It achieves this by replacing massive GPU clusters with an efficient, modular ar
 <p>Edge-optimized ONNX Vector Router blends domain experts dynamically without heavy PyTorch dependencies. Under 15MB RAM overhead.</p>
 </div>
 <div class="feature-card">
-<h3>🛡️ Enterprise Governance</h3>
-<p>Multi-tenant isolation, Policy Engine, Sentinel monitoring, and Owner Rules for production-grade deployments.</p>
+<h3>🛡️ Enterprise Governance & Trust</h3>
+<p>Ed25519 Distributed Trust, Vector Clock Replay Protection, Multi-tenant isolation, and Policy Engine for production-grade Sovereign networks.</p>
 </div>
 </div>
 

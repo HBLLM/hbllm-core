@@ -7,16 +7,20 @@ This is the fundamental building block of the distributed architecture.
 
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from hbllm.network.clocks import VectorClock
+from hbllm.network.messages import Message, MessageType
+from hbllm.security.identity import NodeIdentity
+
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
-    from hbllm.network.messages import Message
 
 
 class NodeType(StrEnum):
@@ -33,6 +37,10 @@ class NodeType(StrEnum):
     META = "meta"
     PERCEPTION = "perception"
     ACTION = "action"
+    SYSTEM = "system"
+
+
+logger = logging.getLogger(__name__)
 
 
 class HealthStatus(StrEnum):
@@ -65,6 +73,10 @@ class NodeInfo(BaseModel):
     node_id: str
     node_type: NodeType
     capabilities: list[str] = []
+    capability_metadata: dict[str, Any] = {}  # Metadata for capabilities (e.g., capacity: 5)
+    scopes: list[str] = ["public"]  # Permissions: which topic groups this node can access
+    public_key: str | None = None  # Ed25519 public key (Base64)
+    authority_score: int = 50  # 0-100, used for conflict resolution (higher wins)
     description: str = ""
     fallback_for: list[str] = []  # List of node_ids this node can substitute for
     priority: int = 0  # Higher = preferred when multiple nodes serve same capability
@@ -79,15 +91,27 @@ class Node(ABC):
     """
 
     def __init__(
-        self, node_id: str, node_type: NodeType, capabilities: list[str] | None = None
+        self,
+        node_id: str,
+        node_type: NodeType,
+        capabilities: list[str] | None = None,
+        capability_metadata: dict[str, Any] | None = None,
+        scopes: list[str] | None = None,
     ) -> None:
         self.node_id = node_id
         self.node_type = node_type
         self.capabilities = capabilities or []
+        self.capability_metadata = capability_metadata or {}
+        self.scopes = scopes or ["public"]
+        self.authority_score = 50  # Default authority
         self.description = ""
         self._bus: MessageBus | None = None
         self._running = False
         self._start_time = 0.0
+        # Trust Model: Identity
+        self.node_identity = NodeIdentity.generate()  # Temporary key if not loaded
+        # Authority Hierarchy: Vector Clock
+        self.clock = VectorClock(node_id=self.node_id)
 
     @property
     def bus(self) -> MessageBus:
@@ -109,6 +133,10 @@ class Node(ABC):
             node_id=self.node_id,
             node_type=self.node_type,
             capabilities=self.capabilities,
+            capability_metadata=self.capability_metadata,
+            scopes=self.scopes,
+            public_key=self.node_identity.public_key_b64,
+            authority_score=self.authority_score,
             description=self.description,
         )
 
@@ -121,6 +149,22 @@ class Node(ABC):
 
     async def stop(self) -> None:
         """Stop the node and clean up resources."""
+        if self._bus and self._running:
+            try:
+                # Dying Gasp: Notify the bus we are leaving
+                await self.publish(
+                    "node.lifecycle",
+                    Message(
+                        type=MessageType.NODE_DEREGISTERED,
+                        source_node_id=self.node_id,
+                        target_node_id="system",
+                        topic="node.lifecycle",
+                        payload={"reason": "graceful_shutdown"},
+                    ),
+                )
+            except Exception:
+                logger.warning("Failed to send dying gasp for node %s", self.node_id)
+
         self._running = False
         await self.on_stop()
         self._bus = None
@@ -134,6 +178,20 @@ class Node(ABC):
     async def on_stop(self) -> None:
         """Called when the node is stopping. Clean up resources here."""
         ...
+
+    async def publish(self, topic: str, message: Message) -> None:
+        """Sign and publish a message to the bus."""
+        self.clock.increment()
+        message.vector_clock = self.clock.to_dict()
+        message.signature = self.node_identity.sign(message.signable_data)
+        await self.bus.publish(topic, message)
+
+    async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
+        """Sign and send a request message to the bus."""
+        self.clock.increment()
+        message.vector_clock = self.clock.to_dict()
+        message.signature = self.node_identity.sign(message.signable_data)
+        return await self.bus.request(topic, message, timeout=timeout)
 
     @abstractmethod
     async def handle_message(self, message: Message) -> Message | None:
@@ -176,14 +234,6 @@ class Node(ABC):
             uptime_seconds=self.uptime,
             capabilities_available=self.capabilities,
         )
-
-    async def publish(self, topic: str, message: Message) -> None:
-        """Convenience: publish a message via the bus."""
-        await self.bus.publish(topic, message)
-
-    async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
-        """Convenience: send a request and wait for response via the bus."""
-        return await self.bus.request(topic, message, timeout=timeout)
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} id={self.node_id} type={self.node_type.value}>"

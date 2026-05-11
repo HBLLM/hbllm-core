@@ -30,8 +30,13 @@ class MessageType(StrEnum):
 
     # Task planning
     TASK_DECOMPOSE = "task_decompose"
+    TASK_ASSIGNMENT = "task_assignment"
     TASK_RESULT = "task_result"
     TASK_AGGREGATE = "task_aggregate"
+
+    # Direct Control
+    COMMAND = "command"
+    INSTRUCTION = "instruction"
 
     # Memory operations
     MEMORY_STORE = "memory_store"
@@ -83,6 +88,8 @@ class Message(BaseModel):
     correlation_id: str | None = None  # Links request → response
     ttl_seconds: float | None = None  # Time-to-live
     is_security_cleared: bool = False  # Set by proactive interceptors
+    signature: str | None = None  # Ed25519 signature of (id + type + payload_json)
+    vector_clock: dict[str, int] | None = None  # For causality tracking
 
     def create_response(
         self,
@@ -102,6 +109,18 @@ class Message(BaseModel):
             payload=payload,
             correlation_id=self.id,
         )
+
+    @property
+    def signable_data(self) -> bytes:
+        """
+        Deterministic string for signing/verification.
+        Combines ID, Type, Source, and sorted Payload JSON.
+        """
+        import json
+
+        payload_str = json.dumps(self.payload, sort_keys=True)
+        data = f"{self.id}|{self.type}|{self.source_node_id}|{payload_str}"
+        return data.encode("utf-8")
 
     def create_error(self, error: str, code: str = "UNKNOWN") -> Message:
         """Create an error response."""
@@ -147,6 +166,7 @@ class MemorySearchPayload(BaseModel):
     query_text: str | None = None
     embedding: list[float] | None = None
     memory_type: str = "semantic"  # semantic, episodic, procedural
+    scope: str | None = None  # working, episodic, semantic, sensitive
     top_k: int = 5
     domain_filter: str | None = None
 
@@ -162,6 +182,7 @@ class MemoryStorePayload(BaseModel):
     tenant_id: str | None = None
     user_id: str | None = None
     device_id: str | None = None
+    scope: str = "episodic"
 
 
 class MemoryRetrievePayload(BaseModel):
@@ -172,6 +193,7 @@ class MemoryRetrievePayload(BaseModel):
     tenant_id: str | None = None
     user_id: str | None = None
     device_id: str | None = None
+    scope: str | None = None
 
 
 class FeedbackPayload(BaseModel):
@@ -213,3 +235,13 @@ class SystemImprovePayload(BaseModel):
     domain: str
     reasoning: str
     dataset_path: str
+
+
+class TaskAssignmentPayload(BaseModel):
+    """Payload for delegating high-level instructions between nodes."""
+
+    task_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    instruction: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    priority: Priority = Priority.NORMAL
+    deadline: datetime | None = None

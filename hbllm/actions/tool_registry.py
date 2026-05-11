@@ -322,8 +322,19 @@ class RemoteToolNode(Node):
     Subscribes to action.tool.<name> and forwards it to the edge via SynapseGateway.
     """
 
-    def __init__(self, tool_name: str, tenant_id: str, user_id: str, device_id: str):
-        super().__init__(node_id=f"remote_tool_{tool_name}_{device_id}", node_type=NodeType.ACTION)
+    def __init__(
+        self,
+        tool_name: str,
+        tenant_id: str,
+        user_id: str,
+        device_id: str,
+        capability_metadata: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            node_id=f"remote_tool_{tool_name}_{device_id}",
+            node_type=NodeType.ACTION,
+            capability_metadata=capability_metadata,
+        )
         self.tool_name = tool_name
         self.target_tenant_id = tenant_id
         self.target_user_id = user_id

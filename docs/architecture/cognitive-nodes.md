@@ -35,6 +35,17 @@ class MyNode(Node):
         ...
 ```
 
+## Node Hardening & Identity
+
+In distributed environments, every node functions as an autonomous security principal with the following hardened attributes:
+
+- **Cryptographic Identity**: Nodes generate an **Ed25519** key pair on startup. All outbound messages are signed using this private key to prevent spoofing.
+- **Authority Score**: A numeric value (`0-100`) determining the node's relative trust level. High-trust devices (e.g., local workstations) carry higher authority than edge peripherals.
+- **Scoped Permissions**: Nodes register with specific `scopes` (e.g., `["public", "navigation"]`). The `MemoryNode` enforces these scopes, ensuring nodes only access authorized data categories.
+- **Dying Gasp**: Graceful shutdown notification (`NODE_DEREGISTERED`) that triggers immediate resource reclamation in the `ServiceRegistry`.
+
+---
+
 ## Node Types
 
 The `NodeType` enum defines the categories of nodes:
@@ -208,6 +219,25 @@ The `NodeType` enum defines the categories of nodes:
 
 - **File:** `hbllm/modules/hardware_hal.py`
 - **Purpose:** Autonomous system introspection. Benchmarks disk latency, CPU threads, and VRAM bandwidth to recommend the optimal quantization policy (INT4 vs INT8) for the current device.
+
+---
+
+## Edge & Gateway Nodes
+
+To support the hierarchical distributed architecture, HBLLM uses specialized gateway nodes to bridge the central MessageBus to remote edges securely.
+
+### SynapseGateway
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/serving/synapse_gateway.py`
+- **Purpose:** Centralized WebSocket hub that acts as the ingress point for Edge Nodes. It authenticates connections, subscribes to internal `edge.*` topics, and multiplexes JSON/msgpack traffic between the core brain and remote clients.
+- **Security:** Actively listens to `system.security.revocation` events and instantly terminates WebSockets matching compromised edge IDs.
+
+### UplinkNode
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/network/uplink_node.py`
+- **Purpose:** Client-side proxy running on remote devices (like a laptop or IoT peripheral). It establishes a persistent WebSocket connection to the `SynapseGateway`, authenticates using its Ed25519 keys, and tunnels local tool invocations seamlessly to the upstream brain.
 
 ---
 

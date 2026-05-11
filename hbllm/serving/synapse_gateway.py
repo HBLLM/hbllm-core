@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 from fastapi import WebSocket, WebSocketDisconnect
 
-from hbllm.network.bus import MessageBus
+from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.security.audit_log import AuditLog
 
@@ -35,6 +35,8 @@ class SynapseGateway:
         self.active_connections: dict[tuple[str, str, str], WebSocket] = {}
         # Map: (tenant_id, user_id, device_id) -> list[str] (tool names)
         self.device_capabilities: dict[tuple[str, str, str], list[str]] = {}
+        # Map: (tenant_id, user_id, device_id) -> dict[str, Any] (capability metadata)
+        self.device_metadata: dict[tuple[str, str, str], dict[str, Any]] = {}
         # Map: (tenant_id, user_id, device_id) -> list[RemoteToolNode]
         self.device_nodes: dict[tuple[str, str, str], list[RemoteToolNode]] = {}
         # Map: (tenant_id, user_id, device_id) -> list[dict] (outbound messages)
@@ -43,6 +45,7 @@ class SynapseGateway:
         self.known_devices: set[tuple[str, str, str]] = set()
 
         self._bus_task: asyncio.Task[Any] | None = None
+        self._subs: list[Subscription] = []
 
     async def start(self) -> None:
         """Start listening to the internal MessageBus for outbound edge commands."""
@@ -52,16 +55,38 @@ class SynapseGateway:
             )
             return
 
-        await self.bus.subscribe("edge.tool_call", self._handle_outbound_tool_call)
-        logger.info("SynapseGateway started and subscribed to edge.tool_call")
+        # Subscribe to topics that handle outbound communication to edge devices
+        self._subs.append(
+            await self.bus.subscribe("edge.tool_call", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("edge.instruction", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("edge.task_assignment", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("edge.command", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("system.security.revocation", self._handle_revocation_event)
+        )
+
+        logger.info("SynapseGateway started and subscribed to edge.* topics")
 
     async def stop(self) -> None:
-        """Stop the gateway and disconnect all clients."""
+        """Stop the gateway and clean up subscriptions."""
         for key in list(self.active_connections.keys()):
             self.disconnect(*key)
         self.active_connections.clear()
         self.device_capabilities.clear()
         self.device_nodes.clear()
+
+        for sub in self._subs:
+            await self.bus.unsubscribe(sub)
+        self._subs.clear()
+
+        logger.info("SynapseGateway stopped")
 
     async def connect(
         self,
@@ -200,32 +225,71 @@ class SynapseGateway:
 
             return False
 
-    async def _handle_outbound_tool_call(self, message: Message) -> None:
-        """Handle outbound tool calls directed to edge devices."""
-        if message.type != MessageType.EVENT and message.type != MessageType.QUERY:
+    async def _handle_revocation_event(self, message: Message) -> None:
+        """Disconnect and drop queues for a revoked node."""
+        revoked_node_id = message.payload.get("revoked_node_id")
+        if not revoked_node_id:
             return
 
-        payload = message.payload
+        keys_to_disconnect = [k for k in self.active_connections if k[2] == revoked_node_id]
+
+        for key in keys_to_disconnect:
+            ws = self.active_connections[key]
+            try:
+                await ws.close(code=1008, reason="Identity revoked")
+            except Exception:
+                pass
+            self.disconnect(*key)
+            logger.critical("SynapseGateway disconnected revoked node: %s", revoked_node_id)
+
+            # Clear outbound queues for the revoked node
+            if key in self._outbound_queues:
+                del self._outbound_queues[key]
+
+    async def _handle_outbound_bridged_message(self, message: Message) -> None:
+        """Handle outbound messages directed to edge devices (tools, tasks, commands)."""
+        # Only forward types that make sense for edge delegation
+        forwardable_types = {
+            MessageType.QUERY,
+            MessageType.EVENT,
+            MessageType.COMMAND,
+            MessageType.INSTRUCTION,
+            MessageType.TASK_ASSIGNMENT,
+            MessageType.TASK_DECOMPOSE,
+            MessageType.SYSTEM_IMPROVE,
+        }
+
+        if message.type not in forwardable_types:
+            return
+
         tenant_id = message.tenant_id
         user_id = message.user_id
         device_id = message.device_id
 
         if not device_id or device_id == "default":
-            logger.warning("Received edge tool call without specific device_id")
+            logger.warning("Received edge message without specific device_id: %s", message.topic)
             return
 
         # Forward to the specific device
-        outbound_msg = {
-            "type": "tool_call",
+        outbound_msg: dict[str, Any] = {
+            "type": "bridge_message",
             "correlation_id": message.correlation_id or message.id,
-            "tool_name": payload.get("tool_name"),
-            "args": payload.get("args", {}),
+            "topic": message.topic,
+            "msg_type": message.type,
+            "payload": message.payload,
         }
+
+        # Backwards compatibility for legacy clients expecting "tool_call" type
+        if message.topic == "edge.tool_call" or "tool_name" in message.payload:
+            outbound_msg["type"] = "tool_call"
+            outbound_msg["tool_name"] = str(message.payload.get("tool_name", "unknown"))
+            outbound_msg["args"] = message.payload.get("args") or message.payload.get(
+                "arguments", {}
+            )
 
         success = await self.send_to_device(tenant_id, user_id, device_id, outbound_msg)
         if not success:
-            logger.warning(f"Failed to route tool call to disconnected device {device_id}")
-            # Optionally publish a failure back to the bus
+            logger.warning(f"Failed to route {message.type} to disconnected device {device_id}")
 
     async def handle_inbound_message(
         self,
@@ -242,7 +306,9 @@ class SynapseGateway:
             if msg_type == "register_capabilities":
                 # The device is telling us what local tools it has
                 tools = data.get("tools", [])
+                metadata = data.get("metadata", {})
                 self.device_capabilities[(tenant_id, user_id, device_id)] = tools
+                self.device_metadata[(tenant_id, user_id, device_id)] = metadata
 
                 # Stop existing remote nodes for this device if any
                 old_nodes = self.device_nodes.get((tenant_id, user_id, device_id), [])
@@ -254,7 +320,13 @@ class SynapseGateway:
                 from hbllm.actions.tool_registry import RemoteToolNode
 
                 for tool_name in tools:
-                    node = RemoteToolNode(tool_name, tenant_id, user_id, device_id)
+                    node = RemoteToolNode(
+                        tool_name,
+                        tenant_id,
+                        user_id,
+                        device_id,
+                        capability_metadata=metadata,
+                    )
                     if self.bus:
                         await node.start(self.bus)
                     new_nodes.append(node)
@@ -290,6 +362,22 @@ class SynapseGateway:
                         },
                     )
                     await self.bus.publish("edge.tool_result", tool_msg)
+
+            elif msg_type in {"bridge_message", "instruction", "task_assignment", "command"}:
+                # High-level instruction/assignment from an edge HBLLM instance
+                if self.bus:
+                    target_topic = data.get("topic", "edge.inbound")
+                    bridged_msg = Message(
+                        type=data.get("msg_type", MessageType.INSTRUCTION),
+                        source_node_id=f"edge_{device_id}",
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        device_id=device_id,
+                        topic=target_topic,
+                        correlation_id=data.get("correlation_id"),
+                        payload=data.get("payload", {}),
+                    )
+                    await self.bus.publish(target_topic, bridged_msg)
             else:
                 logger.debug(f"Unknown message type from edge device {device_id}: {msg_type}")
 
