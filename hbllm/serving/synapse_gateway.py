@@ -56,10 +56,18 @@ class SynapseGateway:
             return
 
         # Subscribe to topics that handle outbound communication to edge devices
-        self._subs.append(await self.bus.subscribe("edge.tool_call", self._handle_outbound_bridged_message))
-        self._subs.append(await self.bus.subscribe("edge.instruction", self._handle_outbound_bridged_message))
-        self._subs.append(await self.bus.subscribe("edge.task_assignment", self._handle_outbound_bridged_message))
-        self._subs.append(await self.bus.subscribe("edge.command", self._handle_outbound_bridged_message))
+        self._subs.append(
+            await self.bus.subscribe("edge.tool_call", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("edge.instruction", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("edge.task_assignment", self._handle_outbound_bridged_message)
+        )
+        self._subs.append(
+            await self.bus.subscribe("edge.command", self._handle_outbound_bridged_message)
+        )
 
         logger.info("SynapseGateway started and subscribed to edge.* topics")
 
@@ -74,7 +82,7 @@ class SynapseGateway:
         for sub in self._subs:
             await self.bus.unsubscribe(sub)
         self._subs.clear()
-        
+
         logger.info("SynapseGateway stopped")
 
     async def connect(
@@ -251,7 +259,9 @@ class SynapseGateway:
         if message.topic == "edge.tool_call" or "tool_name" in message.payload:
             outbound_msg["type"] = "tool_call"
             outbound_msg["tool_name"] = str(message.payload.get("tool_name", "unknown"))
-            outbound_msg["args"] = message.payload.get("args") or message.payload.get("arguments", {})
+            outbound_msg["args"] = message.payload.get("args") or message.payload.get(
+                "arguments", {}
+            )
 
         success = await self.send_to_device(tenant_id, user_id, device_id, outbound_msg)
         if not success:

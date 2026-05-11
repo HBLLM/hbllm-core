@@ -159,7 +159,7 @@ class InProcessBus:
                 await self._dispatch_task
             except asyncio.CancelledError:
                 pass
-        
+
         self._subscriptions.clear()
         logger.info("InProcessBus stopped and handlers cleared")
 

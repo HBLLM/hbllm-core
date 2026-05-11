@@ -43,12 +43,12 @@ async def test_synapse_gateway_instruction_bridging(bus):
 
     # The gateway should be listening to "edge.task_assignment"
     await bus.publish("edge.task_assignment", instruction_msg)
-    await asyncio.sleep(0.1) # Wait for async processing
+    await asyncio.sleep(0.1)  # Wait for async processing
 
     # Verify WebSocket received the bridged message
     assert mock_ws.send_text.called
     sent_data = json.loads(mock_ws.send_text.call_args[0][0])
-    
+
     assert sent_data["type"] == "bridge_message"
     assert sent_data["msg_type"] == MessageType.TASK_ASSIGNMENT.value
     assert sent_data["payload"]["instruction"] == "Analyze logs"
@@ -60,7 +60,7 @@ async def test_synapse_gateway_instruction_bridging(bus):
 async def test_uplink_node_outbound_forwarding(bus):
     """Test that UplinkNode forwards local 'uplink.send' messages upstream."""
     mock_ws = AsyncMock()
-    
+
     with patch("websockets.connect") as mock_connect:
         mock_ws.__aenter__.return_value = mock_ws
         mock_connect.return_value = mock_ws
@@ -70,7 +70,7 @@ async def test_uplink_node_outbound_forwarding(bus):
             upstream_url="ws://hub.local",
             tenant_id="t1",
             user_id="u1",
-            device_id="d1"
+            device_id="d1",
         )
         await node.start(bus)
         await asyncio.sleep(0.1)
@@ -80,7 +80,7 @@ async def test_uplink_node_outbound_forwarding(bus):
             type=MessageType.INSTRUCTION,
             source_node_id="local_manager",
             topic="hub.instruction",
-            payload={"action": "report_status"}
+            payload={"action": "report_status"},
         )
         await bus.publish("uplink.send", local_msg)
         await asyncio.sleep(0.1)
@@ -99,19 +99,20 @@ async def test_uplink_node_outbound_forwarding(bus):
 async def test_uplink_node_inbound_bridging(bus):
     """Test that UplinkNode receives instructions from Hub and publishes to local bus."""
     mock_ws = AsyncMock()
-    
+
     # Hub sends a bridge_message down to the edge
     hub_payload = {
         "type": "bridge_message",
         "msg_type": "task_assignment",
         "topic": "local.executor",
         "payload": {"task": "cleanup_cache"},
-        "correlation_id": "hub_corr_1"
+        "correlation_id": "hub_corr_1",
     }
     mock_ws.__aiter__.return_value = [json.dumps(hub_payload)]
 
     # Listen for the message on the local bus
     received_msgs = []
+
     async def catcher(msg):
         received_msgs.append(msg)
 
@@ -126,10 +127,10 @@ async def test_uplink_node_inbound_bridging(bus):
             upstream_url="ws://hub.local",
             tenant_id="t1",
             user_id="u1",
-            device_id="d1"
+            device_id="d1",
         )
         await node.start(bus)
-        await asyncio.sleep(0.2) # Wait for read loop
+        await asyncio.sleep(0.2)  # Wait for read loop
 
         # Verify local bus received the message
         assert len(received_msgs) == 1
@@ -159,7 +160,7 @@ async def test_synapse_gateway_legacy_tool_compatibility(bus):
         user_id="u1",
         device_id="d1",
         topic="edge.tool_call",
-        payload={"tool_name": "web_search", "args": {"q": "HBLLM"}}
+        payload={"tool_name": "web_search", "args": {"q": "HBLLM"}},
     )
 
     await bus.publish("edge.tool_call", tool_msg)
@@ -167,11 +168,11 @@ async def test_synapse_gateway_legacy_tool_compatibility(bus):
 
     assert mock_ws.send_text.called
     sent_data = json.loads(mock_ws.send_text.call_args[0][0])
-    
+
     # Check that both new and legacy fields exist
-    assert sent_data["type"] == "tool_call" # Legacy type
+    assert sent_data["type"] == "tool_call"  # Legacy type
     assert sent_data["tool_name"] == "web_search"
     assert sent_data["args"]["q"] == "HBLLM"
-    assert "msg_type" in sent_data # New bridge metadata also present
+    assert "msg_type" in sent_data  # New bridge metadata also present
 
     await gateway.stop()

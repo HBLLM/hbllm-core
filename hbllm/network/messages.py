@@ -117,6 +117,7 @@ class Message(BaseModel):
         Combines ID, Type, Source, and sorted Payload JSON.
         """
         import json
+
         payload_str = json.dumps(self.payload, sort_keys=True)
         data = f"{self.id}|{self.type}|{self.source_node_id}|{payload_str}"
         return data.encode("utf-8")

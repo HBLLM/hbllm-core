@@ -19,16 +19,21 @@ Usage:
   await node.start(bus)
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import websockets
 
 from hbllm.network.bus import Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+
+if TYPE_CHECKING:
+    from websockets.client import WebSocketClientProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +65,7 @@ class UplinkNode(Node):
         self.auth_token = auth_token
         self.local_tools = local_tools or []
 
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: WebSocketClientProtocol | None = None
         self._read_task: asyncio.Task | None = None
         self._subs: list[Subscription] = []
         self._pending_calls: dict[str, str] = {}  # correlation_id -> tool_name
@@ -179,7 +184,7 @@ class UplinkNode(Node):
                 await self._read_task
             except asyncio.CancelledError:
                 pass
-        
+
         if self._ws:
             await self._ws.close()
 
@@ -187,7 +192,7 @@ class UplinkNode(Node):
         for sub in self._subs:
             await self.bus.unsubscribe(sub)
         self._subs.clear()
-        
+
         logger.info("UplinkNode '%s' stopped", self.node_id)
 
     async def _read_loop(self) -> None:
