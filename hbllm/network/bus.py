@@ -189,6 +189,7 @@ class InProcessBus:
                 if new_msg is None:
                     # Message blocked by interceptor
                     self.metrics.record_drop(topic)
+                    await self._route_to_dlq(message, "interceptor_blocked")
                     return
                 message = new_msg
             except Exception as e:
@@ -196,6 +197,7 @@ class InProcessBus:
                     "Interceptor failed on topic '%s', blocking message. Error: %s", topic, e
                 )
                 self.metrics.record_drop(topic)
+                await self._route_to_dlq(message, f"interceptor_error: {e}")
                 return
 
         self.metrics.record_publish(topic)
@@ -204,6 +206,21 @@ class InProcessBus:
         self._msg_counter += 1
         priority_key = -message.priority.value  # CRITICAL=3 → -3 (highest)
         await self._queue.put((priority_key, float(self._msg_counter), topic, message))
+
+    async def _route_to_dlq(self, message: Message, reason: str) -> None:
+        """Route a dropped message to the Dead Letter Queue (DLQ)."""
+        if message.topic == "system.dlq":
+            return  # Prevent infinite DLQ loops
+
+        dlq_msg = message.model_copy(deep=True)
+        dlq_msg.topic = "system.dlq"
+        dlq_msg.payload["dlq_reason"] = reason
+        dlq_msg.payload["original_topic"] = message.topic
+
+        # Bypass interceptors and queue directly
+        self._msg_counter += 1
+        priority_key = -dlq_msg.priority.value
+        await self._queue.put((priority_key, float(self._msg_counter), "system.dlq", dlq_msg))
 
     async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Send a request and wait for a correlated response."""
@@ -272,6 +289,7 @@ class InProcessBus:
                         age,
                         message.ttl_seconds,
                     )
+                    await self._route_to_dlq(message, "ttl_expired")
                     continue
 
             # Check if this is a response to a pending request

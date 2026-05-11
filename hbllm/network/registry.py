@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
@@ -41,6 +41,8 @@ class ServiceRegistry:
         self._health_task: asyncio.Task[None] | None = None
         self._running = False
         self._bus: MessageBus | None = None
+        self._revoked_nodes: set[str] = set()
+        self._vector_clocks: dict[str, Any] = {}  # node_id -> VectorClock
 
     async def start(self, bus: MessageBus | None = None) -> None:
         """Start the registry and health check loop."""
@@ -94,7 +96,26 @@ class ServiceRegistry:
         """Remove a node from the registry."""
         self._nodes.pop(node_id, None)
         self._health.pop(node_id, None)
+        self._vector_clocks.pop(node_id, None)
         logger.info("Deregistered node: %s", node_id)
+
+    async def revoke_node(self, node_id: str, reason: str = "Compromised") -> None:
+        """Revoke a node's identity globally, preventing it from participating in the network."""
+        self._revoked_nodes.add(node_id)
+        await self.deregister(node_id)
+        logger.critical("Node '%s' has been REVOKED. Reason: %s", node_id, reason)
+        if self._bus:
+            from hbllm.network.messages import Message, MessageType
+
+            await self._bus.publish(
+                "system.security.revocation",
+                Message(
+                    type=MessageType.EVENT,
+                    topic="system.security.revocation",
+                    source_node_id="system",
+                    payload={"revoked_node_id": node_id, "reason": reason},
+                ),
+            )
 
     async def update_health(self, health: NodeHealth) -> None:
         """Update health status for a node."""
@@ -163,7 +184,13 @@ class ServiceRegistry:
         return "admin" in info.scopes or scope in info.scopes or scope == "public"
 
     async def verify_message(self, message: Message) -> bool:
-        """Verify the cryptographic signature of a message."""
+        """Verify the cryptographic signature and causal ordering of a message."""
+        if message.source_node_id in self._revoked_nodes:
+            logger.warning(
+                "[Registry] verify_message failed: Node '%s' is REVOKED", message.source_node_id
+            )
+            return False
+
         info = self._nodes.get(message.source_node_id)
         if not info:
             logger.debug(
@@ -194,7 +221,28 @@ class ServiceRegistry:
                 "[Registry] verify_message failed: Invalid signature for node '%s'",
                 message.source_node_id,
             )
-        return is_valid
+            return False
+
+        # Verify Vector Clock for Replay Protection
+        if message.vector_clock:
+            from hbllm.network.clocks import VectorClock
+
+            msg_clock = VectorClock.from_dict(message.source_node_id, message.vector_clock)
+            current_clock = self._vector_clocks.get(message.source_node_id)
+
+            if current_clock:
+                cmp = msg_clock.compare(current_clock)
+                if cmp in ("before", "equal"):
+                    logger.warning(
+                        "[Registry] verify_message failed: Replay or causality violation from node '%s'",
+                        message.source_node_id,
+                    )
+                    return False
+                current_clock.update(msg_clock)
+            else:
+                self._vector_clocks[message.source_node_id] = msg_clock
+
+        return True
 
     async def get_authority_score(self, node_id: str) -> int:
         """Get the authority score of a node (0-100)."""
@@ -205,6 +253,8 @@ class ServiceRegistry:
 
     async def is_node_healthy(self, node_id: str) -> bool:
         """Check if a specific node is healthy."""
+        if node_id in self._revoked_nodes:
+            return False
         health = self._health.get(node_id)
         if not health:
             return False

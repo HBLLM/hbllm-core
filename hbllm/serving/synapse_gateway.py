@@ -68,6 +68,9 @@ class SynapseGateway:
         self._subs.append(
             await self.bus.subscribe("edge.command", self._handle_outbound_bridged_message)
         )
+        self._subs.append(
+            await self.bus.subscribe("system.security.revocation", self._handle_revocation_event)
+        )
 
         logger.info("SynapseGateway started and subscribed to edge.* topics")
 
@@ -221,6 +224,27 @@ class SynapseGateway:
                 self._outbound_queues[key].append(message)
 
             return False
+
+    async def _handle_revocation_event(self, message: Message) -> None:
+        """Disconnect and drop queues for a revoked node."""
+        revoked_node_id = message.payload.get("revoked_node_id")
+        if not revoked_node_id:
+            return
+
+        keys_to_disconnect = [k for k in self.active_connections if k[2] == revoked_node_id]
+
+        for key in keys_to_disconnect:
+            ws = self.active_connections[key]
+            try:
+                await ws.close(code=1008, reason="Identity revoked")
+            except Exception:
+                pass
+            self.disconnect(*key)
+            logger.critical("SynapseGateway disconnected revoked node: %s", revoked_node_id)
+
+            # Clear outbound queues for the revoked node
+            if key in self._outbound_queues:
+                del self._outbound_queues[key]
 
     async def _handle_outbound_bridged_message(self, message: Message) -> None:
         """Handle outbound messages directed to edge devices (tools, tasks, commands)."""
