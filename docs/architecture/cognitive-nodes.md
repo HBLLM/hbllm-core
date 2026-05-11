@@ -222,6 +222,25 @@ The `NodeType` enum defines the categories of nodes:
 
 ---
 
+## Edge & Gateway Nodes
+
+To support the hierarchical distributed architecture, HBLLM uses specialized gateway nodes to bridge the central MessageBus to remote edges securely.
+
+### SynapseGateway
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/serving/synapse_gateway.py`
+- **Purpose:** Centralized WebSocket hub that acts as the ingress point for Edge Nodes. It authenticates connections, subscribes to internal `edge.*` topics, and multiplexes JSON/msgpack traffic between the core brain and remote clients.
+- **Security:** Actively listens to `system.security.revocation` events and instantly terminates WebSockets matching compromised edge IDs.
+
+### UplinkNode
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/network/uplink_node.py`
+- **Purpose:** Client-side proxy running on remote devices (like a laptop or IoT peripheral). It establishes a persistent WebSocket connection to the `SynapseGateway`, authenticates using its Ed25519 keys, and tunnels local tool invocations seamlessly to the upstream brain.
+
+---
+
 ## Perception Nodes
 
 ### VisionNode

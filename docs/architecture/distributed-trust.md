@@ -9,7 +9,9 @@ Every node in the swarm is identified by its **Node ID** and its **Ed25519 Publi
 - **Registration**: On first boot, a node generates a persistent key pair. It registers its public key with the `ServiceRegistry`.
 - **Signing**: Every `Message` sent via the `MessageBus` must contain a `signature`. This signature is a hash of the message's ID, type, and payload, signed by the node's private key.
 - **Verification**: The `TrustInterceptor` on the bus verifies the signature of every incoming message against the registered public key. If a signature is missing or invalid, the message is dropped.
+- **Replay Protection (Vector Clocks)**: Valid signatures alone don't prevent replay attacks. Therefore, `ServiceRegistry` also verifies causal ordering via embedded `VectorClock` data. If a message attempts to replay an older clock or violates causality, it is flagged as a security violation and dropped.
 - **Registration Order**: Nodes **must** be registered in the `ServiceRegistry` *before* `node.start()` is called. This ensures that the node's initial heartbeat and startup messages are verifiable by the trust model.
+
 
 ## 2. Capability-Based Access Control (CapBAC)
 
@@ -34,3 +36,4 @@ In a distributed system, concurrent updates to the same memory state are inevita
 - **Heartbeats**: Nodes send periodic health checks to the registry.
 - **Dying Gasp**: When a node shuts down gracefully, it sends a `NODE_DEREGISTERED` message. This allows the registry to reclaim its resources immediately, preventing other nodes from routing traffic to it.
 - **Implicit Recovery**: If a node crashes and re-registers, it broadcasts its new state. Other nodes update their routing tables and vector clocks to re-sync causal history.
+- **Node Compromise & Key Revocation**: If a node is suspected of being compromised, its identity can be permanently banned via `ServiceRegistry.revoke_node()`. This broadcasts a global `system.security.revocation` event, triggering gateways (like `SynapseGateway`) to instantly sever active WebSockets and flush outbound queues for the compromised node, isolating it from the network.
