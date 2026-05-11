@@ -40,8 +40,9 @@ async def test_uplink_node_registration():
             local_tools=["local_tool_1", "mcp.local_mcp_tool"],
         )
 
-        # Trigger on_start directly to avoid needing a full bus lifecycle
-        await node.on_start()
+        # Start the node with a mock bus to initialize self._bus
+        mock_bus = AsyncMock()
+        await node.start(mock_bus)
 
         # Give the background connect_loop a moment to run
         await asyncio.sleep(0.1)
