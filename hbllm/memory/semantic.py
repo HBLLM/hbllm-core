@@ -326,6 +326,8 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
     ) -> str | None:
         """
         Embed and store a document.
@@ -342,7 +344,16 @@ class SemanticMemory:
             UUID of the stored document, or None if skipped.
         """
         with self._lock:
-            return self._store_unsafe(content, metadata, is_priority, tenant_id, user_id, device_id)
+            return self._store_unsafe(
+                content,
+                metadata,
+                is_priority,
+                tenant_id,
+                user_id,
+                device_id,
+                vector_clock,
+                authority_score,
+            )
 
     def _store_unsafe(
         self,
@@ -352,6 +363,8 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
     ) -> str | None:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
@@ -373,6 +386,8 @@ class SemanticMemory:
         meta["tenant_id"] = tenant_id
         meta["user_id"] = user_id
         meta["device_id"] = device_id
+        meta["vector_clock"] = vector_clock
+        meta["authority_score"] = authority_score
 
         doc_id = str(uuid.uuid4())
         doc = {"id": doc_id, "content": content, "metadata": meta}
@@ -432,13 +447,23 @@ class SemanticMemory:
         content: str,
         metadata: dict[str, Any] | None = None,
         is_priority: bool = False,
-        tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
     ) -> str | None:
         """Async version of store that persists to Postgres if configured."""
         # 1. Store in local fallback memory (also handles deduplication/TF-IDF)
-        doc_id = self.store(content, metadata, is_priority, tenant_id, user_id, device_id)
+        doc_id = self.store(
+            content,
+            metadata,
+            is_priority,
+            tenant_id,
+            user_id,
+            device_id,
+            vector_clock,
+            authority_score,
+        )
         if not doc_id:
             return None
 

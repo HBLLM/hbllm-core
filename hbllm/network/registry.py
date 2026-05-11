@@ -43,6 +43,7 @@ class ServiceRegistry:
         self._bus: MessageBus | None = None
         self._revoked_nodes: set[str] = set()
         self._vector_clocks: dict[str, Any] = {}  # node_id -> VectorClock
+        self._owner_public_key: str | None = None  # Root of Trust
 
     async def start(self, bus: MessageBus | None = None) -> None:
         """Start the registry and health check loop."""
@@ -75,8 +76,29 @@ class ServiceRegistry:
                 pass
         logger.info("ServiceRegistry stopped")
 
+    def set_owner(self, public_key_b64: str) -> None:
+        """Set the Root of Trust (Owner's public key)."""
+        self._owner_public_key = public_key_b64
+        logger.info("ServiceRegistry Root of Trust set: %s...", public_key_b64[:10])
+
     async def register(self, node_info: NodeInfo) -> None:
         """Register a node with the registry."""
+        # Trust Chain Validation
+        if self._owner_public_key:
+            from hbllm.security.trust_chain import TrustChain
+
+            tc = TrustChain()
+            if not node_info.owner_signature or not tc.verify_node_registration(
+                node_id=node_info.node_id,
+                public_key_b64=node_info.public_key or "",
+                owner_signature_b64=node_info.owner_signature,
+                owner_public_key_b64=self._owner_public_key,
+            ):
+                logger.warning(
+                    "[Registry] Node '%s' registration REJECTED: Invalid owner signature",
+                    node_info.node_id,
+                )
+                raise PermissionError(f"Node '{node_info.node_id}' is not signed by the Owner.")
         self._nodes[node_info.node_id] = node_info
         self._health[node_info.node_id] = NodeHealth(
             node_id=node_info.node_id,
@@ -127,6 +149,7 @@ class ServiceRegistry:
         node_type: NodeType | None = None,
         capability: str | None = None,
         healthy_only: bool = True,
+        device_tier: DeviceTier | str | None = None,
     ) -> list[NodeInfo]:
         """
         Discover nodes matching criteria.
@@ -135,7 +158,14 @@ class ServiceRegistry:
             node_type: Filter by node type
             capability: Filter by capability string
             healthy_only: Only return healthy/degraded nodes
+            device_tier: Filter by hardware tier
         """
+        from hbllm.network.node import DeviceTier
+
+        tier_val = None
+        if device_tier:
+            tier_val = device_tier.value if isinstance(device_tier, DeviceTier) else device_tier
+
         results = []
         for node_id, info in self._nodes.items():
             # Filter by type
@@ -144,6 +174,10 @@ class ServiceRegistry:
 
             # Filter by capability
             if capability and capability not in info.capabilities:
+                continue
+
+            # Filter by Device Tier
+            if tier_val and info.device_tier != tier_val:
                 continue
 
             # Filter by health

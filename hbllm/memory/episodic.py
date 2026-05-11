@@ -53,7 +53,10 @@ class EpisodicMemory:
                 content TEXT NOT NULL,
                 domain TEXT,
                 timestamp_iso TEXT NOT NULL,
-                metadata TEXT
+                metadata TEXT,
+                vector_clock TEXT,
+                authority_score INTEGER DEFAULT 50,
+                parent_memory_id TEXT
             )
         """)
         # Index for fast retrieval of latest turns per tenant+session
@@ -61,13 +64,10 @@ class EpisodicMemory:
             CREATE INDEX IF NOT EXISTS idx_tenant_session_time
             ON turns(tenant_id, session_id, timestamp_iso DESC)
         """)
-        # Migration: add missing columns if upgrading
         try:
-            cursor.execute("SELECT user_id FROM turns LIMIT 1")
+            cursor.execute("SELECT parent_memory_id FROM turns LIMIT 1")
         except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE turns ADD COLUMN user_id TEXT")
-            cursor.execute("ALTER TABLE turns ADD COLUMN device_id TEXT")
-            cursor.execute("ALTER TABLE turns ADD COLUMN scope TEXT NOT NULL DEFAULT 'episodic'")
+            cursor.execute("ALTER TABLE turns ADD COLUMN parent_memory_id TEXT")
         conn.commit()
         logger.debug("Initialized EpisodicMemory at %s", self.db_path)
 
@@ -88,6 +88,9 @@ class EpisodicMemory:
         user_id: str | None = None,
         device_id: str | None = None,
         scope: str = "episodic",
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
+        parent_memory_id: str | None = None,
     ) -> str:
         """
         Store a single conversation turn.
@@ -126,6 +129,9 @@ class EpisodicMemory:
                 domain,
                 now_iso,
                 meta_str,
+                json.dumps(vector_clock) if vector_clock else None,
+                authority_score,
+                parent_memory_id,
             ),
         )
         conn.commit()
@@ -168,6 +174,9 @@ class EpisodicMemory:
                     "domain": row["domain"],
                     "timestamp": row["timestamp_iso"],
                     "metadata": json.loads(row["metadata"]),
+                    "vector_clock": json.loads(row["vector_clock"]) if row["vector_clock"] else None,
+                    "authority_score": row["authority_score"],
+                    "parent_memory_id": row["parent_memory_id"],
                 }
             )
 

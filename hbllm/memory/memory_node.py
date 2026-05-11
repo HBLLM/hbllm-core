@@ -329,6 +329,9 @@ class MemoryNode(Node):
                 user_id=payload.user_id or message.user_id,
                 device_id=payload.device_id or message.device_id,
                 scope=payload.scope,
+                vector_clock=message.vector_clock,
+                authority_score=message.payload.get("authority_score", 50),
+                parent_memory_id=payload.parent_memory_id,
             )
 
             # Sensitive Memory Guard: Skip semantic indexing for sensitive/working data
@@ -350,6 +353,8 @@ class MemoryNode(Node):
                         tenant_id=payload.tenant_id or message.tenant_id,
                         user_id=payload.user_id or message.user_id,
                         device_id=payload.device_id or message.device_id,
+                        vector_clock=message.vector_clock,
+                        authority_score=message.payload.get("authority_score", 50),
                     )
                 )
                 task.add_done_callback(self._handle_background_task_result)

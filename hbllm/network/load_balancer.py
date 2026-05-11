@@ -50,6 +50,7 @@ class LoadBalancer:
         self,
         capability: str,
         strategy: str | None = None,
+        preferred_tier: DeviceTier | str | None = None,
     ) -> NodeInfo | None:
         """
         Select the best node for a capability using the configured strategy.
@@ -90,6 +91,8 @@ class LoadBalancer:
             return await self._select_least_loaded(capability, available)
         elif active_strategy == "capability_match":
             return self._select_capability_match(capability, available)
+        elif active_strategy == "hardware_aware":
+            return self._select_hardware_aware(capability, available, preferred_tier)
         else:
             logger.warning("Unknown strategy '%s', defaulting to round_robin", active_strategy)
             return self._select_round_robin(capability, available)
@@ -167,6 +170,48 @@ class LoadBalancer:
 
         # Partial matches
         return self._select_round_robin(capability, candidates)
+
+    def _select_hardware_aware(
+        self,
+        capability: str,
+        candidates: list[NodeInfo],
+        preferred_tier: DeviceTier | str | None = None,
+    ) -> NodeInfo:
+        """
+        Select nodes based on hardware tiers.
+        Logic:
+        1. If preferred_tier is specified, filter for it.
+        2. If multiple candidates in tier, use round_robin within them.
+        3. If no candidates in tier, fallback to higher power tiers (e.g. MOBILE -> SERVER -> CLOUD).
+        """
+        from hbllm.network.node import DeviceTier
+
+        if preferred_tier:
+            tier_val = (
+                preferred_tier.value if isinstance(preferred_tier, DeviceTier) else preferred_tier
+            )
+            in_tier = [n for n in candidates if n.device_tier == tier_val]
+            if in_tier:
+                return self._select_round_robin(capability, in_tier)
+
+        # Intelligent Fallback (Heuristics)
+        # 1. Prefer Server if it's a heavy 'brain' or 'memory' task
+        if capability.startswith(("brain", "memory", "planner")):
+            servers = [n for n in candidates if n.device_tier == DeviceTier.SERVER]
+            if servers:
+                return self._select_round_robin(capability, servers)
+
+        # 2. Prefer Mobile/Edge for 'perception' or 'action'
+        if capability.startswith(("perception", "action")):
+            mobile_edge = [
+                n for n in candidates if n.device_tier in [DeviceTier.MOBILE, DeviceTier.EDGE]
+            ]
+            if mobile_edge:
+                return self._select_round_robin(capability, mobile_edge)
+
+        # Default: Highest priority node across all tiers
+        sorted_candidates = sorted(candidates, key=lambda n: n.priority, reverse=True)
+        return self._select_round_robin(capability, [sorted_candidates[0]])
 
     def reset_counters(self) -> None:
         """Reset all round-robin counters."""
