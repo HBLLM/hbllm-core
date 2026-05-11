@@ -109,7 +109,7 @@ class Node(ABC):
         self._running = False
         self._start_time = 0.0
         # Trust Model: Identity
-        self.identity = NodeIdentity.generate()  # Temporary key if not loaded
+        self.node_identity = NodeIdentity.generate()  # Temporary key if not loaded
         # Authority Hierarchy: Vector Clock
         self.clock = VectorClock(node_id=self.node_id)
 
@@ -135,7 +135,7 @@ class Node(ABC):
             capabilities=self.capabilities,
             capability_metadata=self.capability_metadata,
             scopes=self.scopes,
-            public_key=self.identity.public_key_b64,
+            public_key=self.node_identity.public_key_b64,
             authority_score=self.authority_score,
             description=self.description,
         )
@@ -183,14 +183,14 @@ class Node(ABC):
         """Sign and publish a message to the bus."""
         self.clock.increment()
         message.vector_clock = self.clock.to_dict()
-        message.signature = self.identity.sign(message.signable_data)
+        message.signature = self.node_identity.sign(message.signable_data)
         await self.bus.publish(topic, message)
 
     async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Sign and send a request message to the bus."""
         self.clock.increment()
         message.vector_clock = self.clock.to_dict()
-        message.signature = self.identity.sign(message.signable_data)
+        message.signature = self.node_identity.sign(message.signable_data)
         return await self.bus.request(topic, message, timeout=timeout)
 
     @abstractmethod
@@ -234,14 +234,6 @@ class Node(ABC):
             uptime_seconds=self.uptime,
             capabilities_available=self.capabilities,
         )
-
-    async def publish(self, topic: str, message: Message) -> None:
-        """Convenience: publish a message via the bus."""
-        await self.bus.publish(topic, message)
-
-    async def request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
-        """Convenience: send a request and wait for response via the bus."""
-        return await self.bus.request(topic, message, timeout=timeout)
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} id={self.node_id} type={self.node_type.value}>"

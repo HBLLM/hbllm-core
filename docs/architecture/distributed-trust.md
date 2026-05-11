@@ -9,6 +9,7 @@ Every node in the swarm is identified by its **Node ID** and its **Ed25519 Publi
 - **Registration**: On first boot, a node generates a persistent key pair. It registers its public key with the `ServiceRegistry`.
 - **Signing**: Every `Message` sent via the `MessageBus` must contain a `signature`. This signature is a hash of the message's ID, type, and payload, signed by the node's private key.
 - **Verification**: The `TrustInterceptor` on the bus verifies the signature of every incoming message against the registered public key. If a signature is missing or invalid, the message is dropped.
+- **Registration Order**: Nodes **must** be registered in the `ServiceRegistry` *before* `node.start()` is called. This ensures that the node's initial heartbeat and startup messages are verifiable by the trust model.
 
 ## 2. Capability-Based Access Control (CapBAC)
 

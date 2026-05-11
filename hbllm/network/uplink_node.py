@@ -66,6 +66,47 @@ class UplinkNode(Node):
     async def on_start(self) -> None:
         """Start the persistent connection loop."""
         self._read_task = asyncio.create_task(self._connection_loop())
+        # Subscribe to local topics that should be forwarded upstream
+        await self.bus.subscribe("uplink.send", self._handle_local_outbound)
+
+    async def _handle_local_outbound(self, message: Message) -> None:
+        """Forward a message from the local bus to the upstream Hub."""
+        if not self._ws:
+            return
+
+        payload = {
+            "type": "bridge_message",
+            "msg_type": message.type,
+            "topic": message.topic,
+            "payload": message.payload,
+            "correlation_id": message.correlation_id or message.id,
+        }
+        try:
+            await self._ws.send(json.dumps(payload))
+        except Exception as e:
+            logger.error("UplinkNode failed to forward message upstream: %s", e)
+
+    async def _handle_bridged_instruction(self, data: dict[str, Any]) -> None:
+        """Route a high-level instruction from upstream to the local MessageBus."""
+        topic = data.get("topic", "hub.instruction")
+        msg_type = data.get("msg_type", MessageType.INSTRUCTION)
+        payload = data.get("payload", {})
+        correlation_id = data.get("correlation_id")
+
+        logger.debug("UplinkNode routing upstream instruction: %s", topic)
+
+        # Publish to local bus
+        bridged_msg = Message(
+            type=msg_type,
+            source_node_id="hub",
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            device_id=self.device_id,
+            topic=topic,
+            correlation_id=correlation_id,
+            payload=payload,
+        )
+        await self.bus.publish(topic, bridged_msg)
 
     async def _connection_loop(self) -> None:
         """Maintains a persistent connection with exponential backoff."""
@@ -148,6 +189,8 @@ class UplinkNode(Node):
 
                     if msg_type == "tool_call":
                         await self._handle_upstream_tool_call(data)
+                    elif msg_type == "bridge_message":
+                        await self._handle_bridged_instruction(data)
                     else:
                         logger.debug("UplinkNode received unknown message: %s", msg_type)
 

@@ -30,8 +30,13 @@ class MessageType(StrEnum):
 
     # Task planning
     TASK_DECOMPOSE = "task_decompose"
+    TASK_ASSIGNMENT = "task_assignment"
     TASK_RESULT = "task_result"
     TASK_AGGREGATE = "task_aggregate"
+
+    # Direct Control
+    COMMAND = "command"
+    INSTRUCTION = "instruction"
 
     # Memory operations
     MEMORY_STORE = "memory_store"
@@ -229,3 +234,13 @@ class SystemImprovePayload(BaseModel):
     domain: str
     reasoning: str
     dataset_path: str
+
+
+class TaskAssignmentPayload(BaseModel):
+    """Payload for delegating high-level instructions between nodes."""
+
+    task_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    instruction: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    priority: Priority = Priority.NORMAL
+    deadline: datetime | None = None

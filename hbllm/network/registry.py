@@ -165,17 +165,25 @@ class ServiceRegistry:
     async def verify_message(self, message: Message) -> bool:
         """Verify the cryptographic signature of a message."""
         info = self._nodes.get(message.source_node_id)
-        if not info or not info.public_key:
+        if not info:
+            logger.debug("[Registry] verify_message failed: Node '%s' not found", message.source_node_id)
+            return False
+        if not info.public_key:
+            logger.debug("[Registry] verify_message failed: Node '%s' has no public key", message.source_node_id)
             return False
 
         if not message.signature:
+            logger.debug("[Registry] verify_message failed: Message from '%s' has no signature", message.source_node_id)
             return False
 
-        return NodeIdentity.verify(
+        is_valid = NodeIdentity.verify(
             public_key_b64=info.public_key,
             data=message.signable_data,
             signature_b64=message.signature
         )
+        if not is_valid:
+            logger.debug("[Registry] verify_message failed: Invalid signature for node '%s'", message.source_node_id)
+        return is_valid
 
     async def get_authority_score(self, node_id: str) -> int:
         """Get the authority score of a node (0-100)."""

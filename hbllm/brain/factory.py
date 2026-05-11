@@ -546,7 +546,7 @@ class BrainFactory:
         await message_bus.start()
 
         registry = ServiceRegistry()
-        await registry.start()
+        await registry.start(message_bus)
 
         # ── v4: Composite node path ──────────────────────────────────
         if cfg.use_composites:
@@ -759,8 +759,8 @@ class BrainFactory:
                 self_model=brain.self_model,
                 skill_registry=brain.skill_registry,
             )
-            await eval_node.start(message_bus)
             await _register_node(registry, eval_node)
+            await eval_node.start(message_bus)
             brain.evaluation_node = eval_node
             nodes.append(eval_node)
             logger.info("v2: EvaluationNode wired (intelligence feedback loop)")
@@ -773,8 +773,8 @@ class BrainFactory:
                 self_model=brain.self_model,
                 skill_registry=brain.skill_registry,
             )
-            await refl_node.start(message_bus)
             await _register_node(registry, refl_node)
+            await refl_node.start(message_bus)
             brain.reflection_node = refl_node
             nodes.append(refl_node)
             logger.info("v2: ReflectionNode wired (periodic batch reflection)")
@@ -785,8 +785,8 @@ class BrainFactory:
                 skill_registry=brain.skill_registry,
                 llm=llm,
             )
-            await compiler_node.start(message_bus)
             await _register_node(registry, compiler_node)
+            await compiler_node.start(message_bus)
             brain.skill_compiler_node = compiler_node
             nodes.append(compiler_node)
             logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
@@ -795,8 +795,8 @@ class BrainFactory:
             from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
 
             fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
-            await fail_node.start(message_bus)
             await _register_node(registry, fail_node)
+            await fail_node.start(message_bus)
             brain.failure_analyzer_node = fail_node
             nodes.append(fail_node)
             logger.info("FailureAnalyzerNode wired (automated skill repair)")
@@ -805,8 +805,8 @@ class BrainFactory:
             from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
 
             sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
-            await sil_node.start(message_bus)
             await _register_node(registry, sil_node)
+            await sil_node.start(message_bus)
             brain.skill_intelligence_node = sil_node
             nodes.append(sil_node)
             logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")
@@ -814,8 +814,8 @@ class BrainFactory:
         # v2: Resource Intelligence — wire attention and load managers
         if cfg.inject_attention:
             attn_node = AttentionManager(node_id="attention")
-            await attn_node.start(message_bus)
             await _register_node(registry, attn_node)
+            await attn_node.start(message_bus)
             brain.attention_manager = attn_node
             nodes.append(attn_node)
             logger.info("v2: AttentionManager wired (memory budgets & focus)")
@@ -825,8 +825,8 @@ class BrainFactory:
                 node_id="load_manager",
                 monitor_interval=60.0,
             )
-            await load_node.start(message_bus)
             await _register_node(registry, load_node)
+            await load_node.start(message_bus)
             brain.load_manager = load_node
             nodes.append(load_node)
             logger.info("v2: LoadManager wired (resource monitoring & degradation)")
@@ -839,8 +839,8 @@ class BrainFactory:
                 node_id="scheduler",
                 data_dir=data_dir,
             )
-            await sched_node.start(message_bus)
             await _register_node(registry, sched_node)
+            await sched_node.start(message_bus)
             brain.scheduler_node = sched_node
             nodes.append(sched_node)
             logger.info("v3: SchedulerNode wired (proactive autonomous task execution)")
@@ -856,8 +856,8 @@ class BrainFactory:
             from hbllm.brain.awareness import CognitiveAwareness
 
             awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
-            await awareness_node.start(message_bus)
             await _register_node(registry, awareness_node)
+            await awareness_node.start(message_bus)
             brain.awareness = awareness_node
             nodes.append(awareness_node)
             logger.info("CognitiveAwareness wired (brain self-monitoring active)")
@@ -1021,8 +1021,8 @@ class BrainFactory:
         ]
         for composite in composites:
             if composite is not None:
-                await composite.start(message_bus)
                 await _register_node(registry, composite)
+                await composite.start(message_bus)
                 nodes.append(composite)
 
         # Perception nodes (optional — require ML models)
@@ -1036,8 +1036,8 @@ class BrainFactory:
                 AudioOutputNode(node_id="audio_out"),
                 VisionNode(node_id="vision"),
             ]:
-                await pnode.start(message_bus)
                 await _register_node(registry, pnode)
+                await pnode.start(message_bus)
                 nodes.append(pnode)
 
         # Reasoning nodes (optional — require extra dependencies)
@@ -1045,16 +1045,16 @@ class BrainFactory:
             from hbllm.actions.fuzzy_node import FuzzyNode
 
             fnode = FuzzyNode(node_id="fuzzy", llm=llm)
-            await fnode.start(message_bus)
             await _register_node(registry, fnode)
+            await fnode.start(message_bus)
             nodes.append(fnode)
 
         if cfg.inject_symbolic_logic:
             from hbllm.actions.logic_node import LogicNode
 
             lnode = LogicNode(node_id="logic", llm=llm)
-            await lnode.start(message_bus)
             await _register_node(registry, lnode)
+            await lnode.start(message_bus)
             nodes.append(lnode)
 
         # Create pipeline
@@ -1153,8 +1153,8 @@ class BrainFactory:
             from hbllm.brain.awareness import CognitiveAwareness
 
             awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
-            await awareness_node.start(message_bus)
             await _register_node(registry, awareness_node)
+            await awareness_node.start(message_bus)
             brain.awareness = awareness_node
             nodes.append(awareness_node)
 

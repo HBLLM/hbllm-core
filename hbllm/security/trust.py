@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
 
@@ -14,10 +16,10 @@ class TrustInterceptor:
     Verifies signatures of all incoming messages using the ServiceRegistry.
     """
 
-    def __init__(self, registry: "ServiceRegistry"):
+    def __init__(self, registry: ServiceRegistry):
         self.registry = registry
 
-    async def __call__(self, message: "Message") -> "Message" | None:
+    async def __call__(self, message: Message) -> Message | None:
         """
         Intercepts message and verifies signature.
         Returns message if valid, None if invalid/untrusted.

@@ -481,7 +481,7 @@ class CognitiveAwareness(Node):
 
                     # Publish to bus
                     try:
-                        await self.bus.publish(
+                        await self.publish(
                             "system.awareness.trigger",
                             Message(
                                 type=MessageType.EVENT,
