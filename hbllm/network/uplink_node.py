@@ -26,6 +26,7 @@ from typing import Any
 
 import websockets
 
+from hbllm.network.bus import Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
@@ -59,15 +60,17 @@ class UplinkNode(Node):
         self.auth_token = auth_token
         self.local_tools = local_tools or []
 
-        self._ws: Any = None
-        self._read_task: asyncio.Task[None] | None = None
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._read_task: asyncio.Task | None = None
+        self._subs: list[Subscription] = []
         self._pending_calls: dict[str, str] = {}  # correlation_id -> tool_name
 
     async def on_start(self) -> None:
         """Start the persistent connection loop."""
         self._read_task = asyncio.create_task(self._connection_loop())
         # Subscribe to local topics that should be forwarded upstream
-        await self.bus.subscribe("uplink.send", self._handle_local_outbound)
+        sub = await self.bus.subscribe("uplink.send", self._handle_local_outbound)
+        self._subs.append(sub)
 
     async def _handle_local_outbound(self, message: Message) -> None:
         """Forward a message from the local bus to the upstream Hub."""
@@ -169,11 +172,22 @@ class UplinkNode(Node):
         logger.debug("UplinkNode received direct message: %s", message.id)
 
     async def on_stop(self) -> None:
-        """Disconnect from upstream."""
+        """Disconnect from upstream and clean up subscriptions."""
         if self._read_task:
             self._read_task.cancel()
+            try:
+                await self._read_task
+            except asyncio.CancelledError:
+                pass
+        
         if self._ws:
             await self._ws.close()
+
+        # Clean up subscriptions
+        for sub in self._subs:
+            await self.bus.unsubscribe(sub)
+        self._subs.clear()
+        
         logger.info("UplinkNode '%s' stopped", self.node_id)
 
     async def _read_loop(self) -> None:

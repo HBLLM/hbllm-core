@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import orjson
 from fastapi import WebSocket, WebSocketDisconnect
 
-from hbllm.network.bus import MessageBus
+from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.security.audit_log import AuditLog
 
@@ -45,6 +45,7 @@ class SynapseGateway:
         self.known_devices: set[tuple[str, str, str]] = set()
 
         self._bus_task: asyncio.Task[Any] | None = None
+        self._subs: list[Subscription] = []
 
     async def start(self) -> None:
         """Start listening to the internal MessageBus for outbound edge commands."""
@@ -55,20 +56,26 @@ class SynapseGateway:
             return
 
         # Subscribe to topics that handle outbound communication to edge devices
-        await self.bus.subscribe("edge.tool_call", self._handle_outbound_bridged_message)
-        await self.bus.subscribe("edge.instruction", self._handle_outbound_bridged_message)
-        await self.bus.subscribe("edge.task_assignment", self._handle_outbound_bridged_message)
-        await self.bus.subscribe("edge.command", self._handle_outbound_bridged_message)
+        self._subs.append(await self.bus.subscribe("edge.tool_call", self._handle_outbound_bridged_message))
+        self._subs.append(await self.bus.subscribe("edge.instruction", self._handle_outbound_bridged_message))
+        self._subs.append(await self.bus.subscribe("edge.task_assignment", self._handle_outbound_bridged_message))
+        self._subs.append(await self.bus.subscribe("edge.command", self._handle_outbound_bridged_message))
 
         logger.info("SynapseGateway started and subscribed to edge.* topics")
 
     async def stop(self) -> None:
-        """Stop the gateway and disconnect all clients."""
+        """Stop the gateway and clean up subscriptions."""
         for key in list(self.active_connections.keys()):
             self.disconnect(*key)
         self.active_connections.clear()
         self.device_capabilities.clear()
         self.device_nodes.clear()
+
+        for sub in self._subs:
+            await self.bus.unsubscribe(sub)
+        self._subs.clear()
+        
+        logger.info("SynapseGateway stopped")
 
     async def connect(
         self,
