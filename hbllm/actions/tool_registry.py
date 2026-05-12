@@ -284,7 +284,9 @@ class ToolNode(Node):
     Wraps a python function registered via @tool and exposes it to the HBLLM bus.
     """
 
-    def __init__(self, tool_name: str, func: Callable, tenant_id: str, device_tier: DeviceTier | None = None):
+    def __init__(
+        self, tool_name: str, func: Callable, tenant_id: str, device_tier: DeviceTier | None = None
+    ):
         super().__init__(
             node_id=f"tool_{tool_name}_{tenant_id}",
             node_type=NodeType.ACTION,

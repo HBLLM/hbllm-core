@@ -1,9 +1,9 @@
 <!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, LoRA Tuning, Privacy-First AI, On-Premise AI, Python 3.10 AI Framework, Autonomous Agents, Multi-Tenant AI -->
 
 <div align="center">
-  <h1>🧠 HBLLM Core: Your Sovereign Personal AI</h1>
-  <p><b>A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware.</b></p>
-  <p><em>An advanced cognitive architecture that learns from you, protects your data, and manages your digital life through secure client and server plugins.</em></p>
+  <h1>🧠 HBLLM Core: Local-First Sovereign AI Runtime</h1>
+  <p><b>A private, sovereign AI engine designed for standalone local utility with optional distributed cognition.</b></p>
+  <p><em>An advanced cognitive architecture that runs entirely on your own hardware by default, scales to a hierarchical swarm when needed, and protects your data through cryptographic distributed trust.</em></p>
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
@@ -22,9 +22,9 @@
 
 ## Why HBLLM Core?
 
-While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for digital sovereignty. It is a **Personal AI Platform** engineered to give you complete ownership over a cognitive agent that truly knows you, without ever sending your life to the cloud.
+While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for **digital sovereignty**. It is a **Local-First AI Runtime** engineered to provide absolute privacy by default, with the capability to orchestrate distributed resources only when requested.
 
-It achieves this by replacing massive GPU clusters with an efficient, modular architecture: **A Hierarchical Swarm of Specialized Cognitive Nodes** orchestrated via an async Pub/Sub message bus. By securely connecting edge devices (phones, IoT, laptops) to a central home brain via Ed25519 cryptographic trust, it ensures your data remains strictly yours.
+HBLLM replaces monolithic cloud dependencies with a modular **Hierarchical Swarm of Specialized Cognitive Nodes**. By securely connecting your own devices (phones, laptops, edge servers) via Ed25519 cryptographic trust, it creates a personal AI network that is locally autonomous but globally aware.
 
 ```text
                     ┌─────────────────────────────────────────┐

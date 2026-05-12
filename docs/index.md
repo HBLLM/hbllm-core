@@ -1,12 +1,12 @@
 ---
-title: "HBLLM Core — Your Sovereign Personal AI"
-description: "A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware. 28+ cognitive nodes, 6 memory systems, and dynamic LoRA routing for absolute privacy and digital sovereignty."
+title: "HBLLM Core — Local-First Sovereign AI Runtime"
+description: "A private, sovereign AI engine designed for standalone local utility with optional distributed cognition. 28+ cognitive nodes, 6 memory systems, and cryptographic trust for absolute privacy."
 ---
 
 <!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, Privacy-First AI, On-Premise AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Multi-Tenant AI -->
 
 <div class="hero-title">🧠 HBLLM Core</div>
-<div class="hero-subtitle">Your Sovereign Personal AI. A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware.</div>
+<div class="hero-subtitle">Local-First Sovereign AI Runtime. A private, sovereign AI engine designed for standalone local utility with optional distributed cognition.</div>
 
 <div class="badges" markdown>
 
@@ -22,9 +22,9 @@ description: "A highly personalized, multi-tenant AI ecosystem that runs entirel
 
 ## Why HBLLM Core?
 
-While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for digital sovereignty. It is a **Personal AI Platform** engineered to give you complete ownership over a cognitive agent that truly knows you, without ever sending your life to the cloud.
+While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for **digital sovereignty**. It is a **Local-First AI Runtime** engineered to provide absolute privacy by default, with the capability to orchestrate distributed resources only when requested.
 
-It achieves this by replacing massive GPU clusters with an efficient, modular architecture: **28+ specialized brain nodes** orchestrated via an async Pub/Sub message bus. With a shared 125M–1.5B parameter backbone enhanced by ~2MB LoRA adapters, HBLLM learns your domains and runs securely on hardware as accessible as a **Raspberry Pi 5 or a laptop with no dedicated GPU**.
+HBLLM replaces monolithic cloud dependencies with a modular **Hierarchical Swarm of Specialized Cognitive Nodes**. By securely connecting your own devices (phones, laptops, edge servers) via Ed25519 cryptographic trust, it creates a personal AI network that is locally autonomous but globally aware.
 
 <div class="feature-grid">
 <div class="feature-card">

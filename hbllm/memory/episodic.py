@@ -174,7 +174,9 @@ class EpisodicMemory:
                     "domain": row["domain"],
                     "timestamp": row["timestamp_iso"],
                     "metadata": json.loads(row["metadata"]),
-                    "vector_clock": json.loads(row["vector_clock"]) if row["vector_clock"] else None,
+                    "vector_clock": json.loads(row["vector_clock"])
+                    if row["vector_clock"]
+                    else None,
                     "authority_score": row["authority_score"],
                     "parent_memory_id": row["parent_memory_id"],
                 }

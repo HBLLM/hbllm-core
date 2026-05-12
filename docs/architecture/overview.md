@@ -7,10 +7,10 @@ description: "Technical deep-dive into HBLLM's modular brain architecture that r
 
 HBLLM Core is built on four foundational principles:
 
-1. **Modularity** — Every cognitive function is an isolated, stateless node.
-2. **Asynchronous Communication** — Nodes exchange messages via Pub/Sub, never calling each other directly.
-3. **Emergent Intelligence** — Complex behavior arises from simple node interactions, not monolithic code.
-4. **Hardware Efficiency** — The architecture separates intelligence (nodes, memory, planning) from model inference, enabling full cognitive capability on CPU-only devices with as little as 1GB RAM.
+1.  **Local-First Autonomy** — The system is designed to provide full cognitive utility on a single device without cloud dependencies.
+2.  **Sovereign Distributed Cognition** — Optional scaling to a swarm of personal devices via cryptographic trust chaining.
+3.  **Causal Consistency** — Maintains a unified chronological memory state across all distributed nodes.
+4.  **Hardware Efficiency** — Decouples intelligence from model inference, enabling complex reasoning on CPU-only devices.
 
 !!! info "Why This Matters for Hardware"
     Traditional LLMs require 80GB+ VRAM for a 70B model. HBLLM's cognitive nodes are **zero-parameter pure logic** — they add no GPU load. Only the base model (125M–1.5B) requires compute, and it runs efficiently on CPU via Rust SIMD kernels with INT4 quantization.
@@ -88,7 +88,7 @@ Execution nodes that interact with the external world:
 
 ---
 
-## Hierarchical Swarm Architecture
+## Optional: Hierarchical Swarm Architecture
 
 HBLLM supports a decentralized multi-homed architecture. Edge devices (like laptops, mobile phones, or desktop workstations) can run their own local `MessageBus` and connect to a Central Core via WebSockets using the `UplinkNode`.
 
