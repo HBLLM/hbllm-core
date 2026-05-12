@@ -57,16 +57,22 @@ async def cognitive_system():
 
     for node in reversed(nodes):
         try:
-            await node.stop()
-        except Exception:
-            pass
-    await bus.stop()
+            # Use a timeout for individual node stops to prevent fixture hang
+            await asyncio.wait_for(node.stop(), timeout=10.0)
+        except Exception as e:
+            print(f"Fixture failed to stop node {node.node_id}: {e}")
+
+    try:
+        await asyncio.wait_for(bus.stop(), timeout=10.0)
+    except Exception as e:
+        print(f"Fixture failed to stop bus: {e}")
 
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
 async def test_full_query_flow(cognitive_system):
     """
     Send a query through the full pipeline:
@@ -170,6 +176,7 @@ async def test_multi_tenant_isolation(cognitive_system):
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(30)
 async def test_negative_feedback_triggers_improvement(cognitive_system):
     """Accumulated negative feedback should trigger system.improve."""
     bus, nodes, llm = cognitive_system

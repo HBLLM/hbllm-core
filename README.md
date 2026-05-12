@@ -22,9 +22,13 @@
 
 ## Why HBLLM Core?
 
-While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for **digital sovereignty**. It is a **Local-First AI Runtime** engineered to provide absolute privacy by default, with the capability to orchestrate distributed resources only when requested.
+While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for **digital sovereignty**. It is a **Local-First AI Runtime** engineered to provide absolute privacy by default. 
 
-HBLLM replaces monolithic cloud dependencies with a modular **Hierarchical Swarm of Specialized Cognitive Nodes**. By securely connecting your own devices (phones, laptops, edge servers) via Ed25519 cryptographic trust, it creates a personal AI network that is locally autonomous but globally aware.
+**Standalone by Default**: HBLLM Core runs completely on its own without needing to connect to the broader HBLLM network or any cloud service. It is designed to be fully functional entirely on your local hardware.
+
+**Optional Distributed Cognition**: When requested, HBLLM replaces monolithic cloud dependencies with a modular **Hierarchical Swarm of Specialized Cognitive Nodes**. By securely connecting your own devices (phones, laptops, edge servers) via Ed25519 cryptographic trust, it creates a personal AI network. 
+
+**Universal Connectivity**: The `SynapseGateway` is not just for AI-to-AI communication. It allows **non-AI applications**, traditional software, web backends, and IoT devices to seamlessly connect to the cognitive swarm and utilize its intelligence.
 
 ```text
                     ┌─────────────────────────────────────────┐

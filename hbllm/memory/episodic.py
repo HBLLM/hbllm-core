@@ -114,8 +114,8 @@ class EpisodicMemory:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO turns (id, tenant_id, user_id, device_id, scope, session_id, role, content, domain, timestamp_iso, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO turns (id, tenant_id, user_id, device_id, scope, session_id, role, content, domain, timestamp_iso, metadata, vector_clock, authority_score, parent_memory_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 turn_id,

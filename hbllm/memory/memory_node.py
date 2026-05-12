@@ -98,16 +98,28 @@ class MemoryNode(Node):
         await self.bus.subscribe("memory.browse", self.handle_browse)
         await self.bus.subscribe("memory.forget", self.handle_forget)
         await self.bus.subscribe("memory.stats", self.handle_stats)
+        # Tracking for handle_improvement which was previously untracked
+        self._improvement_tasks: set[asyncio.Task[Any]] = set()
 
     async def on_stop(self) -> None:
         """Persist in-memory data to disk and clean up."""
         # Await any in-flight background storage tasks before persisting
-        if self._pending_tasks:
+        all_tasks = self._pending_tasks.union(self._improvement_tasks)
+        if all_tasks:
             logger.info(
-                "Awaiting %d pending background tasks before shutdown", len(self._pending_tasks)
+                "Awaiting %d pending background tasks before shutdown (timeout=5s)", len(all_tasks)
             )
-            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
-            self._pending_tasks.clear()
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*all_tasks, return_exceptions=True), timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Timed out waiting for background tasks during MemoryNode stop")
+            except Exception as e:
+                logger.error("Error during background task cleanup: %s", e)
+            finally:
+                self._pending_tasks.clear()
+                self._improvement_tasks.clear()
 
         logger.info("Stopping MemoryNode — persisting semantic memory and knowledge graph")
         try:
@@ -115,6 +127,17 @@ class MemoryNode(Node):
             self.knowledge_graph.save_to_disk(self._persistence_dir / "knowledge_graph.json")
         except Exception as e:
             logger.error("Failed to persist memory to disk: %s", e)
+
+        # Close connections and release locks
+        if hasattr(self.semantic_db, "close"):
+            self.semantic_db.close()
+        if hasattr(self.db, "close"):
+            self.db.close()
+        if hasattr(self.procedural_db, "close"):
+            self.procedural_db.close()
+        if hasattr(self.value_db, "close"):
+            self.value_db.close()
+        logger.info("MemoryNode stopped gracefully")
 
     @staticmethod
     def _handle_background_task_result(task: asyncio.Task[Any]) -> None:
@@ -145,13 +168,21 @@ class MemoryNode(Node):
         # Store a summary fact in Semantic Memory.
         pattern_content = f"Learned pattern in domain '{domain}': {reasoning}"
 
-        await asyncio.to_thread(
-            self.semantic_db.store,
-            pattern_content,
-            {"source": "reflection_engine", "domain": domain, "tenant_id": message.tenant_id},
-            is_priority=False,  # Patterns grow general semantic memory
-            tenant_id=message.tenant_id,
+        # Store a summary fact in Semantic Memory.
+        pattern_content = f"Learned pattern in domain '{domain}': {reasoning}"
+
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                self.semantic_db.store,
+                pattern_content,
+                {"source": "reflection_engine", "domain": domain, "tenant_id": message.tenant_id},
+                is_priority=False,  # Patterns grow general semantic memory
+                tenant_id=message.tenant_id,
+            )
         )
+        self._improvement_tasks.add(task)
+        task.add_done_callback(self._improvement_tasks.discard)
+        await task
 
     async def handle_salience(self, message: Message) -> None:
         """

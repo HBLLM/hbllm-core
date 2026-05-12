@@ -144,6 +144,10 @@ class ServiceRegistry:
                 ),
             )
 
+    async def is_revoked(self, node_id: str) -> bool:
+        """Check if a node has been revoked."""
+        return node_id in self._revoked_nodes
+
     async def update_health(self, health: NodeHealth) -> None:
         """Update health status for a node."""
         health.last_heartbeat = time.monotonic()
