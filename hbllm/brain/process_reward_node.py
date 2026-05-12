@@ -47,9 +47,9 @@ class ProcessRewardNode(Node):
         self.prm_path = self.checkpoint_dir / "prm_adapter.pt"  # Or separate PRM weights
         self.llm = llm
 
-        # Load PRM model
-        config = get_config(model_name)
-        self.prm_model = HBLLMForProcessReward(config)
+        # PRM model will be lazy-loaded in on_start if weights exist
+        self.model_name = model_name
+        self.prm_model = None
         self.tokenizer = (
             HBLLMTokenizer.from_tiktoken()
         )  # Standard dummy tokenizer for tests or load real one
@@ -61,8 +61,12 @@ class ProcessRewardNode(Node):
 
         if self.prm_path.exists():
             try:
+                config = get_config(self.model_name)
+                self.prm_model = HBLLMForProcessReward(config)
                 state_dict = torch.load(self.prm_path, map_location=self.device, weights_only=True)
                 self.prm_model.load_state_dict(state_dict, strict=False)
+                self.prm_model.to(self.device)
+                self.prm_model.eval()
                 self.prm_is_trained = True
                 logger.info("[ProcessRewardNode] Loaded PRM weights from %s", self.prm_path)
             except Exception as e:
@@ -72,9 +76,6 @@ class ProcessRewardNode(Node):
                 "[ProcessRewardNode] No PRM weights found at %s. Will use fallback heuristic/LLM.",
                 self.prm_path,
             )
-
-        self.prm_model.to(self.device)
-        self.prm_model.eval()
 
         await self.bus.subscribe("action.score_thought", self.handle_score_request)
 
@@ -114,22 +115,27 @@ class ProcessRewardNode(Node):
             reliable the score is (1.0 = trained PRM, 0.6 = LLM fallback,
             0.2 = heuristic default).
         """
-        if not self.prm_is_trained and self.llm:
-            # Fallback to LLM if PRM isn't trained yet
-            try:
-                result = await self.llm.generate_json(
-                    f"Evaluate the logical soundness and correctness of this reasoning step. "
-                    f"Output a score between 0.0 and 1.0.\n\n"
-                    f"Step: {content[:300]}\n\n"
-                    f'Output JSON: {{"score": 0.0-1.0}}'
-                )
-                return float(result.get("score", 0.5)), 0.6
-            except Exception:
-                logger.warning(
-                    "[ProcessRewardNode] LLM fallback scoring failed, using heuristic 0.5"
-                )
+        if not self.prm_is_trained:
+            if self.llm:
+                # Fallback to LLM if PRM isn't trained yet
+                try:
+                    result = await self.llm.generate_json(
+                        f"Evaluate the logical soundness and correctness of this reasoning step. "
+                        f"Output a score between 0.0 and 1.0.\n\n"
+                        f"Step: {content[:300]}\n\n"
+                        f'Output JSON: {{"score": 0.0-1.0}}'
+                    )
+                    return float(result.get("score", 0.5)), 0.6
+                except Exception:
+                    logger.warning(
+                        "[ProcessRewardNode] LLM fallback scoring failed, using heuristic 0.5"
+                    )
+            return 0.5, 0.2
 
         # If PRM is "trained" (or we are forcing it for tests), run the neural net
+        if self.prm_model is None:
+            return 0.5, 0.2
+
         try:
             # Tokenize
             tokens = self.tokenizer.encode(content)

@@ -54,6 +54,7 @@ class MetaReasoningNode(Node):
         self._db_path = os.path.join(self.reflection_dir, "meta_feedback.db")
         self._init_db()
         self._load_from_db()
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
 
     # ── Sync SQLite helpers (safe for asyncio.to_thread) ──────────────────
 
@@ -114,6 +115,19 @@ class MetaReasoningNode(Node):
 
     async def on_stop(self) -> None:
         """Clean up."""
+        if self._pending_tasks:
+            logger.info(
+                "MetaReasoningNode awaiting %d background tasks (timeout=5s)",
+                len(self._pending_tasks),
+            )
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._pending_tasks, return_exceptions=True), timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("MetaReasoningNode shutdown timed out waiting for background tasks")
+            finally:
+                self._pending_tasks.clear()
         logger.info("Stopping MetaReasoningNode")
 
     async def handle_salience(self, message: Message) -> None:
@@ -160,9 +174,13 @@ class MetaReasoningNode(Node):
                 self.negative_feedback_buffer[domain].append(sample)
 
                 try:
-                    await asyncio.to_thread(
-                        self._db_insert_feedback, domain, payload.prompt, payload.response
+                    task = asyncio.create_task(
+                        asyncio.to_thread(
+                            self._db_insert_feedback, domain, payload.prompt, payload.response
+                        )
                     )
+                    self._pending_tasks.add(task)
+                    task.add_done_callback(self._pending_tasks.discard)
                 except Exception as e:
                     logger.warning("Failed to persist feedback to SQLite: %s", e)
 

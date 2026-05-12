@@ -24,6 +24,7 @@ Usage::
 import hashlib
 import logging
 import math
+import os
 import re
 import threading
 import uuid
@@ -178,8 +179,9 @@ class SemanticMemory:
         self._sparse_dirty = True
         self._sparse_cache: np.ndarray[Any, Any] | None = None
         self._content_hashes: set[str] = set()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._tfidf_timer: threading.Timer | None = None
+        self._closed = False
 
         # ── PostgreSQL/pgvector Backend ──────────────────────────────────
         from hbllm.persistence.db_pool import DBPool
@@ -204,18 +206,27 @@ class SemanticMemory:
         return len(self.ids)
 
     def _load_model(self) -> None:
+        if os.environ.get("HBLLM_TESTING") == "1":
+            self._use_tfidf = True
+
         if self.model is None and not self._use_tfidf:
+            # Import and load model outside the lock if possible, but use a local
+            # check to avoid redundant loads.
             try:
                 from sentence_transformers import SentenceTransformer
 
                 logger.info("Loading embedding model %s...", self.model_name)
-                self.model = SentenceTransformer(self.model_name)
+                model = SentenceTransformer(self.model_name)
+                with self._lock:
+                    if self.model is None:
+                        self.model = model
             except Exception:
                 logger.info(
                     "sentence-transformers unavailable — using TF-IDF fallback. "
                     "Install with: pip install sentence-transformers"
                 )
-                self._use_tfidf = True
+                with self._lock:
+                    self._use_tfidf = True
 
     def _ensure_qdrant_collection(self) -> None:
         """Lazily create the Qdrant collection on first write."""
@@ -326,6 +337,8 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
     ) -> str | None:
         """
         Embed and store a document.
@@ -341,8 +354,21 @@ class SemanticMemory:
         Returns:
             UUID of the stored document, or None if skipped.
         """
+        if self._closed:
+            logger.warning("Attempted to store in a closed SemanticMemory instance")
+            return None
+
         with self._lock:
-            return self._store_unsafe(content, metadata, is_priority, tenant_id, user_id, device_id)
+            return self._store_unsafe(
+                content,
+                metadata,
+                is_priority,
+                tenant_id,
+                user_id,
+                device_id,
+                vector_clock,
+                authority_score,
+            )
 
     def _store_unsafe(
         self,
@@ -352,6 +378,8 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
     ) -> str | None:
         if not content or not content.strip():
             logger.warning("Attempted to store empty content — skipping")
@@ -373,6 +401,8 @@ class SemanticMemory:
         meta["tenant_id"] = tenant_id
         meta["user_id"] = user_id
         meta["device_id"] = device_id
+        meta["vector_clock"] = vector_clock
+        meta["authority_score"] = authority_score
 
         doc_id = str(uuid.uuid4())
         doc = {"id": doc_id, "content": content, "metadata": meta}
@@ -435,10 +465,21 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
+        vector_clock: dict[str, int] | None = None,
+        authority_score: int = 50,
     ) -> str | None:
         """Async version of store that persists to Postgres if configured."""
         # 1. Store in local fallback memory (also handles deduplication/TF-IDF)
-        doc_id = self.store(content, metadata, is_priority, tenant_id, user_id, device_id)
+        doc_id = self.store(
+            content,
+            metadata,
+            is_priority,
+            tenant_id,
+            user_id,
+            device_id,
+            vector_clock,
+            authority_score,
+        )
         if not doc_id:
             return None
 
@@ -528,6 +569,9 @@ class SemanticMemory:
         Returns:
             List of document dicts with "score" field, sorted by relevance.
         """
+        if self._closed:
+            return []
+
         if not self.documents or self.vectors is None:
             return []
 
@@ -786,6 +830,16 @@ class SemanticMemory:
                     logger.warning("Qdrant clear failed: %s", e)
 
             return count
+
+    def close(self) -> None:
+        """Gracefully shut down, cancelling timers and clearing caches."""
+        with self._lock:
+            self._closed = True
+            if self._tfidf_timer is not None:
+                self._tfidf_timer.cancel()
+                self._tfidf_timer = None
+            self._vectors_cache = None
+            self._sparse_cache = None
 
     def get_all(self) -> list[dict[str, Any]]:
         """Return all stored documents (without vectors)."""

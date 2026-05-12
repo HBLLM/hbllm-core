@@ -24,7 +24,7 @@ from hbllm.network.messages import (
     QueryPayload,
     SpawnRequestPayload,
 )
-from hbllm.network.node import Node, NodeType
+from hbllm.network.node import DeviceTier, Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -422,11 +422,15 @@ class RouterNode(Node):
             and text_is_short
         )
 
+        # ── Hardware-Aware Tiering ──────────────────────────────────
+        preferred_tier = self._get_preferred_tier(intent, target_domain)
+
         workspace_payload = message.payload.copy()
         workspace_payload["intent"] = intent
         workspace_payload["domain_hint"] = target_domain
         workspace_payload["confidence"] = confidence
         workspace_payload["is_fast_path"] = is_fast_path
+        workspace_payload["preferred_tier"] = preferred_tier
 
         if is_fast_path:
             logger.info(
@@ -733,3 +737,27 @@ class RouterNode(Node):
             logger.warning("Router SLM classification failed, using defaults: %s", e)
 
         return self.default_domain, "general_knowledge", 0.5
+
+    def _get_preferred_tier(self, intent: str, domain: Any) -> str:
+        """
+        Heuristic to determine the best hardware tier for a given task.
+        """
+
+        # 1. Cloud-bound tasks
+        if intent in ("web_search", "tool_synthesis"):
+            return DeviceTier.CLOUD
+
+        # 2. Heavy reasoning tasks
+        if intent in ("complex_reasoning", "math_reasoning", "code_generation"):
+            return DeviceTier.SERVER
+
+        # 3. Perception/Action (Edge-optimized)
+        domain_name = domain if isinstance(domain, str) else str(domain)
+        if domain_name.startswith(("vision", "audio", "sensor", "home_automation")):
+            return DeviceTier.EDGE
+
+        # 4. Smalltalk/General (Mobile/Edge if possible, else Server)
+        if intent in ("smalltalk", "general_knowledge"):
+            return DeviceTier.EDGE
+
+        return DeviceTier.SERVER

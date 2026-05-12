@@ -30,7 +30,7 @@ import websockets
 
 from hbllm.network.bus import Subscription
 from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import Node, NodeType
+from hbllm.network.node import DeviceTier, Node, NodeType
 
 if TYPE_CHECKING:
     from websockets.client import WebSocketClientProtocol
@@ -52,11 +52,14 @@ class UplinkNode(Node):
         device_id: str,
         auth_token: str | None = None,
         local_tools: list[str] | None = None,
+        device_tier: DeviceTier | str | None = None,
     ) -> None:
+
         super().__init__(
             node_id=node_id,
             node_type=NodeType.META,
             capabilities=["uplink_bridge"],
+            device_tier=device_tier or DeviceTier.SERVER,
         )
         self.upstream_url = upstream_url
         self.tenant_id = tenant_id
@@ -149,7 +152,13 @@ class UplinkNode(Node):
                     # Register local tools upstream
                     if self.local_tools:
                         await self._ws.send(
-                            json.dumps({"type": "register_capabilities", "tools": self.local_tools})
+                            json.dumps(
+                                {
+                                    "type": "register_capabilities",
+                                    "tools": self.local_tools,
+                                    "device_tier": self.device_tier,
+                                }
+                            )
                         )
                         logger.info(
                             "UplinkNode advertised %d tools upstream", len(self.local_tools)

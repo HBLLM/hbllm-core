@@ -20,7 +20,7 @@ from functools import wraps
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
-from hbllm.network.node import Node, NodeType
+from hbllm.network.node import DeviceTier, Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -284,8 +284,14 @@ class ToolNode(Node):
     Wraps a python function registered via @tool and exposes it to the HBLLM bus.
     """
 
-    def __init__(self, tool_name: str, func: Callable, tenant_id: str):
-        super().__init__(node_id=f"tool_{tool_name}_{tenant_id}", node_type=NodeType.ACTION)
+    def __init__(
+        self, tool_name: str, func: Callable, tenant_id: str, device_tier: DeviceTier | None = None
+    ):
+        super().__init__(
+            node_id=f"tool_{tool_name}_{tenant_id}",
+            node_type=NodeType.ACTION,
+            device_tier=device_tier or DeviceTier.SERVER,
+        )
         self.tool_name = tool_name
         self.func = func
         self.topic = f"action.tool.{self.tool_name}"
@@ -329,11 +335,13 @@ class RemoteToolNode(Node):
         user_id: str,
         device_id: str,
         capability_metadata: dict[str, Any] | None = None,
+        device_tier: DeviceTier | None = None,
     ):
         super().__init__(
             node_id=f"remote_tool_{tool_name}_{device_id}",
             node_type=NodeType.ACTION,
             capability_metadata=capability_metadata,
+            device_tier=device_tier or DeviceTier.MOBILE,
         )
         self.tool_name = tool_name
         self.target_tenant_id = tenant_id

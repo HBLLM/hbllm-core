@@ -183,6 +183,7 @@ class MemoryStorePayload(BaseModel):
     user_id: str | None = None
     device_id: str | None = None
     scope: str = "episodic"
+    parent_memory_id: str | None = None
 
 
 class MemoryRetrievePayload(BaseModel):

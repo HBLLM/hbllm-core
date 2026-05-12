@@ -38,6 +38,16 @@ class NodeType(StrEnum):
     PERCEPTION = "perception"
     ACTION = "action"
     SYSTEM = "system"
+    GATEWAY = "gateway"
+
+
+class DeviceTier(StrEnum):
+    """Tiering for hardware capabilities in the personal AI network."""
+
+    MOBILE = "mobile"  # Phone, tablet (high latency, low power)
+    EDGE = "edge"  # Raspberry Pi, localized IoT (low latency, minimal power)
+    SERVER = "server"  # Desktop, home server (low latency, high power)
+    CLOUD = "cloud"  # Remote GPU, shared API (high latency, infinite power)
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +90,8 @@ class NodeInfo(BaseModel):
     description: str = ""
     fallback_for: list[str] = []  # List of node_ids this node can substitute for
     priority: int = 0  # Higher = preferred when multiple nodes serve same capability
+    device_tier: DeviceTier = DeviceTier.SERVER  # Default to server tier
+    owner_signature: str | None = None  # Signature from the Owner Node
 
 
 class Node(ABC):
@@ -97,12 +109,14 @@ class Node(ABC):
         capabilities: list[str] | None = None,
         capability_metadata: dict[str, Any] | None = None,
         scopes: list[str] | None = None,
+        device_tier: DeviceTier = DeviceTier.SERVER,
     ) -> None:
         self.node_id = node_id
         self.node_type = node_type
         self.capabilities = capabilities or []
         self.capability_metadata = capability_metadata or {}
         self.scopes = scopes or ["public"]
+        self.device_tier = device_tier
         self.authority_score = 50  # Default authority
         self.description = ""
         self._bus: MessageBus | None = None
@@ -138,6 +152,7 @@ class Node(ABC):
             public_key=self.node_identity.public_key_b64,
             authority_score=self.authority_score,
             description=self.description,
+            device_tier=self.device_tier,
         )
 
     async def start(self, bus: MessageBus) -> None:

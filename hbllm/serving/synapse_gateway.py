@@ -307,6 +307,7 @@ class SynapseGateway:
                 # The device is telling us what local tools it has
                 tools = data.get("tools", [])
                 metadata = data.get("metadata", {})
+                device_tier = data.get("device_tier")
                 self.device_capabilities[(tenant_id, user_id, device_id)] = tools
                 self.device_metadata[(tenant_id, user_id, device_id)] = metadata
 
@@ -326,6 +327,7 @@ class SynapseGateway:
                         user_id,
                         device_id,
                         capability_metadata=metadata,
+                        device_tier=device_tier,
                     )
                     if self.bus:
                         await node.start(self.bus)

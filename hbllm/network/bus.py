@@ -148,8 +148,22 @@ class InProcessBus:
         for task in list(self._active_tasks):
             if not task.done():
                 task.cancel()
+
+        # Wait for all active handler tasks to finish
         if self._active_tasks:
-            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._active_tasks, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                logger.warning(
+                    "InProcessBus.stop() timed out waiting for %d active tasks.",
+                    len(self._active_tasks),
+                )
+                for idx, t in enumerate(self._active_tasks):
+                    logger.warning("Active Task %d: %s", idx, t)
+
         self._active_tasks.clear()
 
         # Stop dispatch loop

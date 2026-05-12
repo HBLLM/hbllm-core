@@ -45,6 +45,7 @@ def _isolate_data_dir(tmp_path, monkeypatch):
 
     # Ensure deterministic working directory for any relative path access
     monkeypatch.setenv("HBLLM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("HBLLM_TESTING", "1")
     yield
 
 
@@ -52,7 +53,7 @@ def _isolate_data_dir(tmp_path, monkeypatch):
 def _force_gc_after_test():
     """Force garbage collection after each test to clean up dangling references."""
     yield
-    gc.collect()
+    # gc.collect()
 
 
 @pytest_asyncio.fixture(autouse=True)
