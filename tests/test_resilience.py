@@ -5,7 +5,12 @@ import asyncio
 import pytest
 
 from hbllm.network.bus import InProcessBus
-from hbllm.network.circuit_breaker import CircuitBreaker, CircuitBreakerRegistry, CircuitOpenError
+from hbllm.network.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerRegistry,
+    CircuitOpenError,
+    CircuitState,
+)
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
@@ -154,11 +159,13 @@ async def test_circuit_breaker_recovers():
     with pytest.raises(RuntimeError):
         await cb.call(failing)
 
-    await asyncio.sleep(0.02)  # Wait for HALF_OPEN
+    # Backoff doubles timeout to ~0.02+jitter, so sleep longer
+    await asyncio.sleep(0.05)
 
     result = await cb.call(ok)
     assert result == "recovered"
-    assert cb.can_execute()
+    # After one success in HALF_OPEN, transitions to PARTIAL_OPEN
+    assert cb.state == CircuitState.PARTIAL_OPEN
 
 
 # ── Concurrent Message Flood ────────────────────────────────────────────────
