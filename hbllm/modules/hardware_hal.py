@@ -101,7 +101,7 @@ class HardwareHAL:
             end_time = time.time()
             os.remove(test_file)
             return (end_time - start_time) * 1000
-        except Exception:
+        except (OSError, PermissionError):
             return 10.0  # Default high latency if disk is protected
 
     @staticmethod

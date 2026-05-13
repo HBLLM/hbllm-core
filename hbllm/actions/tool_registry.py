@@ -148,7 +148,7 @@ class ToolRegistry:
             result = await self._tools[name]["handler"](**kwargs)
             result.duration_ms = (time.monotonic() - start) * 1000
             return result
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             return ToolResult(
                 tool=name,
                 success=False,
@@ -209,7 +209,7 @@ class ToolRegistry:
                 loop.create_task(self._bus.publish(f"system.tool.{event_type}", msg))
             else:
                 loop.run_until_complete(self._bus.publish(f"system.tool.{event_type}", msg))
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.debug("Failed to publish tool event: %s", e)
 
 
@@ -317,7 +317,7 @@ class ToolNode(Node):
                 result = self.func(**arguments)
 
             return message.create_response({"status": "SUCCESS", "output": result})
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error(f"Tool {self.tool_name} failed: {e}")
             return message.create_error(f"Tool execution failed: {str(e)}")
 
@@ -389,7 +389,7 @@ class RemoteToolNode(Node):
             )
         except (TimeoutError, asyncio.TimeoutError):
             return message.create_error(f"Remote tool {self.tool_name} timed out.")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error(f"Remote tool {self.tool_name} failed: {e}")
             return message.create_error(f"Execution error: {str(e)}")
 

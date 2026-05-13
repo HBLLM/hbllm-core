@@ -202,7 +202,7 @@ class MqttIoTNode(Node):
             self._mqtt_client = client
             self._mqtt_loop_task = asyncio.create_task(asyncio.to_thread(client.loop_forever))
             logger.info("MQTT connecting to %s:%d", self.broker_host, self.broker_port)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("MQTT connection failed: %s", e)
 
     def _on_mqtt_connect(

@@ -61,7 +61,7 @@ class VisionNode(Node):
                 model="Salesforce/blip-image-captioning-base",
                 device=device,
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Failed to load vision model: %s", e)
 
     async def on_stop(self) -> None:
@@ -83,7 +83,7 @@ class VisionNode(Node):
 
             caption = await asyncio.to_thread(self._process_image, str(image_data))
             return message.create_response({"text": caption, "domain": "vision"})
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Vision processing error: %s", e)
             return message.create_error(f"Vision failure: {e}")
 
@@ -98,7 +98,7 @@ class VisionNode(Node):
                 image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex))).convert("RGB")
             else:
                 image = Image.open(path_or_hex).convert("RGB")
-        except Exception:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
             # Fallback to path
             image = Image.open(path_or_hex).convert("RGB")
 
@@ -198,7 +198,7 @@ class VisionNode(Node):
                     "domain": "vision",
                 }
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("OCR processing error: %s", e)
             return message.create_error(f"OCR failure: {e}")
 
@@ -223,7 +223,7 @@ class VisionNode(Node):
             ocr_text = ""
             try:
                 ocr_text = await asyncio.to_thread(self._extract_text_ocr, data_str)
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 
             content = f"[Visual Analysis] {caption}"
@@ -246,7 +246,7 @@ class VisionNode(Node):
                 correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.warning("VisionNode workspace thought failed: %s", e)
 
         return None

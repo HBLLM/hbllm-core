@@ -111,7 +111,7 @@ class AudioInputNode(Node):
 
             return resp
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Audio transcription failed: %s", e)
             return message.create_error(str(e))
 
@@ -217,7 +217,7 @@ class AudioInputNode(Node):
                 )
                 asyncio.create_task(self.bus.publish("router.query", query_msg))
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.warning("Stream transcription failed for %s: %s", session_id, e)
 
     async def handle_workspace_query(self, message: Message) -> Message | None:
@@ -259,7 +259,7 @@ class AudioInputNode(Node):
                 correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.warning("AudioInputNode workspace thought failed: %s", e)
 
         return None

@@ -145,7 +145,7 @@ async def tool_shell_exec(command: str) -> ToolResult:
         return ToolResult(tool="shell_exec", success=(proc.returncode == 0), output=out, error=err)
     except (TimeoutError, asyncio.TimeoutError):
         return ToolResult(tool="shell_exec", success=False, output="", error="Timed out (10s)")
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
         return ToolResult(tool="shell_exec", success=False, output="", error=str(e))
 
 
@@ -170,7 +170,7 @@ async def tool_file_read(path: str) -> ToolResult:
             )
         content = p.read_text(errors="replace")
         return ToolResult(tool="file_read", success=True, output=content)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
         return ToolResult(tool="file_read", success=False, output="", error=str(e))
 
 
@@ -192,7 +192,7 @@ async def tool_file_write(path: str, content: str) -> ToolResult:
         return ToolResult(
             tool="file_write", success=True, output=f"Written {len(content)} bytes to {p}"
         )
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
         return ToolResult(tool="file_write", success=False, output="", error=str(e))
 
 
@@ -220,5 +220,5 @@ async def tool_web_search(query: str) -> ToolResult:
             output="",
             error="duckduckgo-search not installed. Run: pip install duckduckgo-search",
         )
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
         return ToolResult(tool="web_search", success=False, output="", error=str(e))

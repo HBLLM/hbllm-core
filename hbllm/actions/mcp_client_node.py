@@ -108,7 +108,7 @@ class McpClientNode(Node):
                 len(self._tools),
                 "SSE" if self.sse_url else "stdio",
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("McpClientNode '%s' failed to start: %s", self.node_id, e)
             await self._cleanup()
 
@@ -241,7 +241,7 @@ class McpClientNode(Node):
                 "content": result.get("content", []),
                 "is_error": result.get("isError", False),
             }
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             return {
                 "tool": tool_name,
                 "content": [{"type": "text", "text": str(e)}],
@@ -356,7 +356,7 @@ class McpClientNode(Node):
                 break
             except asyncio.IncompleteReadError:
                 break
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
                 logger.error("Error reading MCP response: %s", e)
 
     async def _cleanup(self) -> None:

@@ -210,7 +210,7 @@ class AgentExecutor:
                     )
                 output = "\n\n".join(formatted) if formatted else "No results found."
                 return ToolResult(tool="kb_search", success=True, output=output)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
                 return ToolResult(tool="kb_search", success=False, output="", error=str(e))
 
         self.tools.register(
@@ -340,7 +340,7 @@ class AgentExecutor:
                 return await self.llm.generate(prompt)
             else:
                 return "[LLM not available — configure a provider]"
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("LLM call failed: %s", e)
             return f"[Error: {e}]"
 

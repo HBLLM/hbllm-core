@@ -232,7 +232,7 @@ class AdapterRegistry:
             payload = safe_torch_load(path)
             # If payload is a wrapped dict (new format), return the state_dict
             return self._extract_state_dict(payload)
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, EOFError) as e:
             logger.error("Failed to load cached adapter for '%s': %s", domain, e)
             return None
 
@@ -244,7 +244,7 @@ class AdapterRegistry:
                 payload = safe_torch_load(path)
                 logger.info("Using locally trained adapter for '%s'", domain)
                 return self._extract_state_dict(payload)
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, EOFError) as e:
                 logger.warning("Failed to load locally trained adapter: %s", e)
         return None
 
@@ -323,7 +323,7 @@ class AdapterRegistry:
 
             return self._extract_state_dict(safe_torch_load(target_path))
 
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, ConnectionError) as e:
             logger.error("Download failed for '%s': %s", domain, e)
             return None
 
@@ -337,7 +337,7 @@ class AdapterRegistry:
             api = HfApi()
             files = api.list_repo_files(repo_id, revision=revision)
             return PEFT_CONFIG_FILE in files
-        except Exception:
+        except (RuntimeError, ConnectionError, ImportError):
             return False
 
     async def _handle_peft_download(
@@ -437,7 +437,7 @@ class AdapterRegistry:
                 hf_hub_download, repo_id=repo_id, filename=filename, revision=revision
             )
             return path
-        except Exception as e:
+        except (OSError, RuntimeError, ConnectionError) as e:
             logger.error("HuggingFace download error for %s/%s: %s", repo_id, filename, e)
             return None
 
