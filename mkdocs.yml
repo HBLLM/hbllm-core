@@ -55,6 +55,10 @@ plugins:
       separator: '[\s\-\.]+'
   - minify:
       minify_html: true
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
 
 markdown_extensions:
   - abbr
