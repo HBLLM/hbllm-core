@@ -20,19 +20,23 @@ Usage::
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
-import secrets
+import os
 from pathlib import Path
 from typing import Any
+
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
 
 
 # ── Key Derivation ──────────────────────────────────────────────────
+
+
+import hashlib
+import json
+import logging
+import secrets
 
 
 def _derive_key(password: str, salt: bytes) -> bytes:
@@ -41,8 +45,8 @@ def _derive_key(password: str, salt: bytes) -> bytes:
 
 
 def _generate_key() -> bytes:
-    """Generate a random 32-byte encryption key."""
-    return secrets.token_bytes(32)
+    """Generate a random 32-byte encryption key (url-safe base64 for Fernet)."""
+    return Fernet.generate_key()
 
 
 # ── Fernet-like Encryption ──────────────────────────────────────────
@@ -50,30 +54,34 @@ def _generate_key() -> bytes:
 
 class EncryptionVault:
     """
-    AES-like symmetric encryption vault for field-level data protection.
+    AES-based symmetric encryption vault for field-level data protection.
 
-    Uses HMAC-SHA256 for authentication and base64 encoding for storage.
-    For production, swap with `cryptography.fernet.Fernet` or AWS KMS.
+    Uses Fernet (AES128 in CBC mode with SHA256 HMAC authentication).
     """
-
-    VERSION = b"\x80"  # version byte for future upgrades
 
     def __init__(self, key: bytes | None = None):
         self._key = key or _generate_key()
-        self._enc_key = self._key[:16]  # first 16 bytes for "encryption"
-        self._mac_key = self._key[16:]  # last 16 bytes for HMAC
+        self._fernet = Fernet(self._key)
         self._salt: bytes | None = None
+
+    @classmethod
+    def from_env(cls, env_var: str = "HBLLM_ENCRYPTION_KEY") -> EncryptionVault:
+        """Load encryption key from an environment variable."""
+        key_str = os.environ.get(env_var)
+        if not key_str:
+            raise ValueError(f"Environment variable {env_var} is not set")
+        return cls(key=key_str.encode("utf-8"))
 
     @classmethod
     def from_key_file(cls, path: str) -> EncryptionVault:
         """Load encryption key from file, or create if missing."""
         p = Path(path)
         if p.exists():
-            key = base64.urlsafe_b64decode(p.read_text().strip())
+            key = p.read_text().strip().encode("utf-8")
             return cls(key=key)
         key = _generate_key()
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(base64.urlsafe_b64encode(key).decode())
+        p.write_text(key.decode("utf-8"))
         p.chmod(0o600)
         logger.info("Generated new encryption key at %s", path)
         return cls(key=key)
@@ -81,55 +89,28 @@ class EncryptionVault:
     @classmethod
     def from_password(cls, password: str, salt: bytes | None = None) -> EncryptionVault:
         """Derive key from password."""
+        import base64
+
         salt = salt or secrets.token_bytes(16)
-        key = _derive_key(password, salt)
+        raw_key = _derive_key(password, salt)
+        # Fernet requires url-safe base64 encoded 32-byte key
+        key = base64.urlsafe_b64encode(raw_key)
         vault = cls(key=key)
         vault._salt = salt
         return vault
 
     def encrypt(self, plaintext: str) -> str:
         """Encrypt a string value. Returns base64-encoded ciphertext."""
-        data = plaintext.encode("utf-8")
-        # Simple XOR-based encryption with HMAC auth
-        # (For production: use cryptography.fernet.Fernet)
-        nonce = secrets.token_bytes(16)
-        stream = self._keystream(nonce, len(data))
-        ciphertext = bytes(a ^ b for a, b in zip(data, stream))
-
-        # Authenticate: version + nonce + ciphertext
-        payload = self.VERSION + nonce + ciphertext
-        mac = hmac.new(self._mac_key, payload, hashlib.sha256).digest()
-
-        return base64.urlsafe_b64encode(payload + mac).decode()
+        return self._fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
     def decrypt(self, token: str) -> str:
         """Decrypt a token. Raises ValueError on tampering."""
         try:
-            raw = base64.urlsafe_b64decode(token.encode())
-        except Exception:
-            raise ValueError("Invalid encryption token")
-
-        if len(raw) < 1 + 16 + 32:
-            raise ValueError("Token too short")
-
-        payload = raw[:-32]
-        mac = raw[-32:]
-
-        # Verify HMAC
-        expected_mac = hmac.new(self._mac_key, payload, hashlib.sha256).digest()
-        if not hmac.compare_digest(mac, expected_mac):
-            raise ValueError("Token authentication failed — data may be tampered")
-
-        version = payload[0:1]
-        if version != self.VERSION:
-            raise ValueError(f"Unsupported token version: {version!r}")
-
-        nonce = payload[1:17]
-        ciphertext = payload[17:]
-
-        stream = self._keystream(nonce, len(ciphertext))
-        plaintext = bytes(a ^ b for a, b in zip(ciphertext, stream))
-        return plaintext.decode("utf-8")
+            return self._fernet.decrypt(token.encode("utf-8")).decode("utf-8")
+        except InvalidToken:
+            raise ValueError("Token authentication failed — data may be tampered or key is wrong")
+        except Exception as e:
+            raise ValueError(f"Invalid encryption token: {e}")
 
     def encrypt_dict(self, data: dict[str, Any]) -> str:
         """Encrypt a dictionary as JSON."""
@@ -139,23 +120,21 @@ class EncryptionVault:
         """Decrypt a token back to a dictionary."""
         return dict(json.loads(self.decrypt(token)))
 
-    def _keystream(self, nonce: bytes, length: int) -> bytes:
-        """Generate a pseudo-random keystream from nonce + key."""
-        stream = b""
-        counter = 0
-        while len(stream) < length:
-            block = hmac.new(
-                self._enc_key,
-                nonce + counter.to_bytes(4, "big"),
-                hashlib.sha256,
-            ).digest()
-            stream += block
-            counter += 1
-        return stream[:length]
-
     def rotate_key(self, new_key: bytes | None = None) -> EncryptionVault:
         """Create a new vault with a rotated key."""
         return EncryptionVault(key=new_key or _generate_key())
+
+    def rotate_and_reencrypt(self, data_list: list[str]) -> tuple[EncryptionVault, list[str]]:
+        """
+        Create a new vault and re-encrypt a list of tokens with the new key.
+        Useful for key rotation migrations.
+        """
+        new_vault = self.rotate_key()
+        new_data = []
+        for token in data_list:
+            plaintext = self.decrypt(token)
+            new_data.append(new_vault.encrypt(plaintext))
+        return new_vault, new_data
 
     @property
     def key_fingerprint(self) -> str:

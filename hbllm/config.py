@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from hbllm.modules.adapter_registry import AdapterRegistryConfig
 from hbllm.network.cluster_config import ClusterConfig
@@ -51,7 +51,17 @@ class SecurityConfig(BaseModel):
     rate_limit_rpm: int = 60
 
     # Encryption at rest
-    encryption_key_path: str = ""  # empty = auto-generate per boot
+    encryption_key_source: str = "auto"  # auto | env | file | vault
+    encryption_key_env_var: str = "HBLLM_ENCRYPTION_KEY"
+    encryption_key_path: str = "data/encryption.key"
+
+    @field_validator("encryption_key_source")
+    @classmethod
+    def validate_key_source(cls, v: str) -> str:
+        allowed = {"auto", "env", "file", "vault"}
+        if v not in allowed:
+            raise ValueError(f"encryption_key_source must be one of {allowed}")
+        return v
 
 
 class HBLLMCoreConfig(BaseModel):
@@ -68,6 +78,20 @@ class HBLLMCoreConfig(BaseModel):
     # Global paths
     checkpoints_dir: str = "./checkpoints"
     data_dir: str = "./data"
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> "HBLLMCoreConfig":
+        """Semantic validation of configuration dependencies."""
+        if self.security.audit_enabled and not self.security.audit_db_path:
+            raise ValueError("audit_db_path must be set when audit_enabled is True")
+
+        if self.security.rate_limit_enabled and self.security.rate_limit_rpm <= 0:
+            raise ValueError("rate_limit_rpm must be strictly positive")
+
+        if self.security.encryption_key_source == "file" and not self.security.encryption_key_path:
+            raise ValueError("encryption_key_path must be set when source is 'file'")
+
+        return self
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "HBLLMCoreConfig":

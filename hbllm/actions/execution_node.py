@@ -93,21 +93,39 @@ class _SecurityVisitor(ast.NodeVisitor):
     - Use of dunder attributes (__class__, __subclasses__, etc.)
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        allowed_modules: set[str] | None = None,
+        blocked_modules: frozenset[str] | set[str] | None = None,
+        blocked_builtins: frozenset[str] | set[str] | None = None,
+    ) -> None:
         self.violations: list[str] = []
+        self.allowed_modules = allowed_modules
+        self.blocked_modules = blocked_modules if blocked_modules is not None else BLOCKED_MODULES
+        self.blocked_builtins = (
+            blocked_builtins if blocked_builtins is not None else BLOCKED_BUILTINS
+        )
 
     # ── import detection ─────────────────────────────────────────────────
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root_mod = alias.name.split(".")[0]
-            if root_mod in BLOCKED_MODULES:
+            if self.allowed_modules is not None and root_mod not in self.allowed_modules:
+                self.violations.append(
+                    f"Line {node.lineno}: import '{alias.name}' not in allowed_modules whitelist"
+                )
+            elif root_mod in self.blocked_modules:
                 self.violations.append(f"Line {node.lineno}: blocked import '{alias.name}'")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module:
             root_mod = node.module.split(".")[0]
-            if root_mod in BLOCKED_MODULES:
+            if self.allowed_modules is not None and root_mod not in self.allowed_modules:
+                self.violations.append(
+                    f"Line {node.lineno}: import from '{node.module}' not in allowed_modules whitelist"
+                )
+            elif root_mod in self.blocked_modules:
                 self.violations.append(f"Line {node.lineno}: blocked import from '{node.module}'")
         self.generic_visit(node)
 
@@ -121,7 +139,7 @@ class _SecurityVisitor(ast.NodeVisitor):
         elif isinstance(func, ast.Attribute):
             name = func.attr
 
-        if name and name in BLOCKED_BUILTINS:
+        if name and name in self.blocked_builtins:
             self.violations.append(f"Line {node.lineno}: blocked built-in call '{name}()'")
         self.generic_visit(node)
 
@@ -132,12 +150,17 @@ class _SecurityVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if node.id in BLOCKED_BUILTINS:
+        if node.id in self.blocked_builtins:
             self.violations.append(f"Line {node.lineno}: blocked built-in access '{node.id}'")
         self.generic_visit(node)
 
 
-def validate_code(code: str) -> list[str]:
+def validate_code(
+    code: str,
+    allowed_modules: set[str] | None = None,
+    blocked_modules: frozenset[str] | set[str] | None = None,
+    blocked_builtins: frozenset[str] | set[str] | None = None,
+) -> list[str]:
     """
     Parse *code* and return a list of security violations (empty = safe).
 
@@ -145,7 +168,7 @@ def validate_code(code: str) -> list[str]:
     whether to propagate or wrap it.
     """
     tree = ast.parse(code)
-    visitor = _SecurityVisitor()
+    visitor = _SecurityVisitor(allowed_modules, blocked_modules, blocked_builtins)
     visitor.visit(tree)
     return visitor.violations
 
@@ -156,10 +179,24 @@ def validate_code(code: str) -> list[str]:
 class ExecutionNode(Node):
     """Executes code securely to provide deterministic ground-truth verification."""
 
-    def __init__(self, node_id: str, timeout: float = 3.0):
+    def __init__(
+        self,
+        node_id: str,
+        timeout: float = 3.0,
+        max_memory_mb: int = 256,
+        allowed_modules: list[str] | None = None,
+        blocked_modules: set[str] | None = None,
+        blocked_builtins: set[str] | None = None,
+        disable_network: bool = True,
+    ):
         # We will set node_type to CORE since ACTION doesn't exist
         super().__init__(node_id=node_id, node_type=NodeType.CORE)
         self.timeout = timeout
+        self.max_memory_mb = max_memory_mb
+        self.allowed_modules = set(allowed_modules) if allowed_modules is not None else None
+        self.blocked_modules = blocked_modules
+        self.blocked_builtins = blocked_builtins
+        self.disable_network = disable_network
 
     async def on_start(self) -> None:
         logger.info("Starting ExecutionNode")
@@ -185,7 +222,12 @@ class ExecutionNode(Node):
 
         # ── Security gate: AST validation before execution ──
         try:
-            violations = validate_code(code)
+            violations = validate_code(
+                code,
+                allowed_modules=self.allowed_modules,
+                blocked_modules=self.blocked_modules,
+                blocked_builtins=self.blocked_builtins,
+            )
         except SyntaxError as e:
             return message.create_error(f"Syntax error in submitted code: {e}")
 
@@ -206,7 +248,7 @@ class ExecutionNode(Node):
             bound_wrapper = (
                 "import resource\n"
                 "try:\n"
-                "    resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))\n"
+                f"    resource.setrlimit(resource.RLIMIT_AS, ({self.max_memory_mb} * 1024 * 1024, {self.max_memory_mb} * 1024 * 1024))\n"
                 f"    resource.setrlimit(resource.RLIMIT_CPU, ({int(self.timeout)}, {int(self.timeout)}))\n"
                 "except BaseException:\n"
                 "    pass\n\n"
@@ -223,10 +265,14 @@ class ExecutionNode(Node):
                     "PYTHONHASHSEED": "0",
                 }
 
+                exec_cmd = [sys.executable, "-I", temp_script.name]
+
+                # Use platform-specific unshare to disable network if on linux
+                if self.disable_network and sys.platform.startswith("linux"):
+                    exec_cmd = ["unshare", "-n"] + exec_cmd
+
                 proc = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-I",
-                    temp_script.name,  # -I = isolated mode
+                    *exec_cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=safe_env,
@@ -252,7 +298,7 @@ class ExecutionNode(Node):
                     return {"status": "SUCCESS", "output": output, "error": error}
                 else:
                     return {"status": "FAILURE", "output": output, "error": error}
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
                 return {"status": "FAILURE", "output": "", "error": str(e)}
         finally:
             os.unlink(temp_script.name)
