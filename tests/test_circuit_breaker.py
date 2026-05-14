@@ -64,7 +64,8 @@ def test_half_open_transition():
 def test_half_open_to_partial_open():
     cb = CircuitBreaker("node_1", failure_threshold=1, recovery_timeout=0.01)
     cb.record_failure()
-    time.sleep(0.02)
+    # Backoff doubles timeout to ~0.02+jitter, so sleep longer
+    time.sleep(0.05)
     assert cb.state == CircuitState.HALF_OPEN
 
     cb.record_success()
