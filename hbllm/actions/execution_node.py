@@ -269,7 +269,7 @@ class ExecutionNode(Node):
 
                 # Use platform-specific unshare to disable network if on linux
                 if self.disable_network and sys.platform.startswith("linux"):
-                    exec_cmd = ["unshare", "-n"] + exec_cmd
+                    exec_cmd = ["unshare", "-Urn"] + exec_cmd
 
                 proc = await asyncio.create_subprocess_exec(
                     *exec_cmd,
