@@ -19,7 +19,7 @@ async def test_execution_node_success(execution_node):
     )
     resp = await execution_node.handle_message(msg)
     assert resp is not None
-    assert resp.payload["status"] == "SUCCESS"
+    assert resp.payload["status"] == "SUCCESS", f"Failed: {resp.payload.get('error')} | Output: {resp.payload.get('output')}"
     assert "hello world" in resp.payload["output"]
     assert "4" in resp.payload["output"]
 

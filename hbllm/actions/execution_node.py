@@ -198,9 +198,29 @@ class ExecutionNode(Node):
         self.blocked_modules = blocked_modules
         self.blocked_builtins = blocked_builtins
         self.disable_network = disable_network
+        self._can_unshare = False
 
     async def on_start(self) -> None:
         logger.info("Starting ExecutionNode")
+        # Check if unshare is supported in this environment
+        if self.disable_network and sys.platform.startswith("linux"):
+            unshare_path = shutil.which("unshare")
+            if unshare_path:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        unshare_path, "-Urn", "true",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await proc.wait()
+                    if proc.returncode == 0:
+                        self._can_unshare = True
+                    else:
+                        logger.warning("unshare -Urn failed (exit %s). Network isolation disabled.", proc.returncode)
+                except Exception as e:
+                    logger.warning("unshare check failed: %s. Network isolation disabled.", e)
+            else:
+                logger.warning("unshare not found. Network isolation disabled.")
         await self.bus.subscribe("action.execute_code", self.handle_message)
 
     async def on_stop(self) -> None:
@@ -269,12 +289,10 @@ class ExecutionNode(Node):
                 exec_cmd = [sys.executable, "-I", temp_script.name]
 
                 # Use platform-specific unshare to disable network if on linux
-                if self.disable_network and sys.platform.startswith("linux"):
+                if self._can_unshare:
                     unshare_path = shutil.which("unshare")
                     if unshare_path:
                         exec_cmd = [unshare_path, "-Urn"] + exec_cmd
-                    else:
-                        logger.warning("unshare not found; cannot enforce network disablement")
 
                 proc = await asyncio.create_subprocess_exec(
                     *exec_cmd,
