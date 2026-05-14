@@ -208,7 +208,9 @@ class ExecutionNode(Node):
             if unshare_path:
                 try:
                     proc = await asyncio.create_subprocess_exec(
-                        unshare_path, "-Urn", "true",
+                        unshare_path,
+                        "-Urn",
+                        "true",
                         stdout=asyncio.subprocess.DEVNULL,
                         stderr=asyncio.subprocess.DEVNULL,
                     )
@@ -216,7 +218,10 @@ class ExecutionNode(Node):
                     if proc.returncode == 0:
                         self._can_unshare = True
                     else:
-                        logger.warning("unshare -Urn failed (exit %s). Network isolation disabled.", proc.returncode)
+                        logger.warning(
+                            "unshare -Urn failed (exit %s). Network isolation disabled.",
+                            proc.returncode,
+                        )
                 except Exception as e:
                     logger.warning("unshare check failed: %s. Network isolation disabled.", e)
             else:
