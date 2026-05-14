@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import sys
 import tempfile
 from typing import Any
@@ -269,7 +270,11 @@ class ExecutionNode(Node):
 
                 # Use platform-specific unshare to disable network if on linux
                 if self.disable_network and sys.platform.startswith("linux"):
-                    exec_cmd = ["unshare", "-Urn"] + exec_cmd
+                    unshare_path = shutil.which("unshare")
+                    if unshare_path:
+                        exec_cmd = [unshare_path, "-Urn"] + exec_cmd
+                    else:
+                        logger.warning("unshare not found; cannot enforce network disablement")
 
                 proc = await asyncio.create_subprocess_exec(
                     *exec_cmd,
