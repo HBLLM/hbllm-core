@@ -131,7 +131,7 @@ class StreamingPretrainingDataset(IterableDataset[dict[str, torch.Tensor]]):
                         "input_ids": input_ids,
                         "labels": input_ids.clone(),
                     }
-            except Exception:
+            except (OSError, ValueError, RuntimeError):
                 logger.exception("Error reading shard %s", shard_path)
                 continue
 

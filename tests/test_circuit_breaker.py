@@ -55,25 +55,43 @@ def test_half_open_transition():
     cb.record_failure()
     assert cb.state == CircuitState.OPEN
 
-    time.sleep(0.02)  # Wait for recovery timeout
+    # Backoff doubles timeout to ~0.02+jitter, so sleep longer
+    time.sleep(0.05)
     assert cb.state == CircuitState.HALF_OPEN
     assert cb.can_execute()
 
 
-def test_half_open_to_closed():
+def test_half_open_to_partial_open():
     cb = CircuitBreaker("node_1", failure_threshold=1, recovery_timeout=0.01)
     cb.record_failure()
-    time.sleep(0.02)
+    # Backoff doubles timeout to ~0.02+jitter, so sleep longer
+    time.sleep(0.05)
     assert cb.state == CircuitState.HALF_OPEN
 
     cb.record_success()
+    assert cb.state == CircuitState.PARTIAL_OPEN
+
+
+def test_partial_open_to_closed():
+    cb = CircuitBreaker("node_1", failure_threshold=1, recovery_timeout=0.01)
+    cb.record_failure()
+    # Backoff doubles timeout to ~0.02+jitter, so sleep longer
+    time.sleep(0.05)
+    assert cb.state == CircuitState.HALF_OPEN
+    cb.record_success()  # transitions to PARTIAL_OPEN
+    assert cb.state == CircuitState.PARTIAL_OPEN
+
+    for _ in range(5):
+        cb.record_success()
+
     assert cb.state == CircuitState.CLOSED
 
 
 def test_half_open_to_open():
     cb = CircuitBreaker("node_1", failure_threshold=1, recovery_timeout=0.01)
     cb.record_failure()
-    time.sleep(0.02)
+    # Backoff doubles timeout to ~0.02+jitter, so sleep longer
+    time.sleep(0.05)
     assert cb.state == CircuitState.HALF_OPEN
 
     cb.record_failure()
@@ -131,7 +149,8 @@ async def test_call_failure():
 def test_time_until_retry():
     cb = CircuitBreaker("node_1", failure_threshold=1, recovery_timeout=5.0)
     cb.record_failure()
-    assert 4.0 < cb.time_until_retry <= 5.0
+    # Backoff doubles to ~10.0 + up to 20% jitter, so max is ~12.0
+    assert 4.0 < cb.time_until_retry <= 12.5
 
 
 def test_repr():

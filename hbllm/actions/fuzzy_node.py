@@ -82,7 +82,7 @@ class FuzzyNode(Node):
             )
             await self.bus.publish("workspace.thought", thought_msg)
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("[FuzzyNode] Fuzzy modeling failed: %s", e)
 
         return None
@@ -177,6 +177,6 @@ class FuzzyNode(Node):
             answer = f"[Fuzzy Analysis]: Based on the subjective metrics, the computed {con_name} is ~{result_value:.1f} (range {con_range[0]}-{con_range[1]})."
             return answer, 0.85
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("[FuzzyNode] Dynamic fuzzy construction failed: %s", e)
             return None, None

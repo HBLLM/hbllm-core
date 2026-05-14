@@ -198,7 +198,7 @@ class MultiAgentOrchestrator:
                 return await self.llm.generate(prompt)
             else:
                 return "[LLM not available]"
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("LLM call failed: %s", e)
             return f"[LLM error: {e}]"
 

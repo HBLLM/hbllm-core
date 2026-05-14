@@ -91,7 +91,7 @@ class LogicNode(Node):
             )
             await self.bus.publish("workspace.thought", thought_msg)
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("[LogicNode] Constraint modeling failed: %s", e)
 
         return None
@@ -199,6 +199,6 @@ class LogicNode(Node):
             else:
                 logger.warning("[LogicNode] Z3 code executed but no 'result' variable found.")
                 return None
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("[LogicNode] Z3 sandbox execution failed: %s", e)
             return None

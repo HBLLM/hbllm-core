@@ -84,7 +84,7 @@ class ApiNode(Node):
             )
             await self.bus.publish("workspace.thought", thought_msg)
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("[ApiNode] Schema synthesis failed: %s", e)
 
         return None

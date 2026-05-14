@@ -57,7 +57,7 @@ class DataSynthesizer:
 
             self._llm = LLMInterface(self.model, self.tokenizer)
             return self._llm
-        except Exception as e:
+        except (ImportError, RuntimeError, AttributeError) as e:
             logger.warning("Could not initialize LLMInterface: %s", e)
             return None
 
@@ -136,7 +136,7 @@ class DataSynthesizer:
                     loop.close()
 
                 question, answer = self._parse_qa_output(raw_output, topic, i)
-            except Exception as e:
+            except (RuntimeError, asyncio.TimeoutError, ValueError) as e:
                 logger.warning("LLM generation failed for sample %d: %s — using template", i, e)
                 question, answer = self._template_pair(topic, i)
 

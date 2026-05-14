@@ -88,6 +88,6 @@ class ToolRouterNode(Node):
             return message.create_response(resp.payload)
         except (TimeoutError, asyncio.TimeoutError):
             return message.create_error(f"Tool execution for '{tool_name}' timed out.")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Error executing tool %s: %s", tool_name, e)
             return message.create_error(f"Execution error: {str(e)}")

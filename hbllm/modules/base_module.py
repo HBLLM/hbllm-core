@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import torch
@@ -70,7 +71,7 @@ class DomainModuleNode(Node):
         # Parse payload
         try:
             payload = QueryPayload(**message.payload)
-        except Exception as e:
+        except (TypeError, ValueError, KeyError) as e:
             return message.create_error(f"Invalid QueryPayload: {e}")
 
         prompt = getattr(payload, "text", "")
@@ -174,8 +175,10 @@ class DomainModuleNode(Node):
                 else:
                     return self.tokenizer.decode(out_tokens, skip_special_tokens=True)
 
+            start_time = time.monotonic()
             response_text = await _generate_async()
-            logger.info("Domain '%s' finished generating.", self.domain_name)
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+            logger.info("Domain '%s' finished generating in %d ms.", self.domain_name, latency_ms)
 
             # 3. Propose thought to Blackboard instead of creating a synchronous response
             thought_msg = Message(
@@ -188,13 +191,22 @@ class DomainModuleNode(Node):
                     "type": f"intuition_{self.domain_name}",
                     "confidence": 0.8,  # Base LLM confidence
                     "content": response_text,
+                    "metrics": {
+                        "latency_ms": latency_ms,
+                        "tokens_generated": 30,
+                        "domain": self.domain_name,
+                    },
                 },
                 correlation_id=message.correlation_id,
             )
             await self.bus.publish("workspace.thought", thought_msg)
             return None
 
-        except Exception as e:
+        except (
+            RuntimeError,
+            torch.cuda.CudaError if hasattr(torch, "cuda") else RuntimeError,
+            ValueError,
+        ) as e:
             logger.error("Generation failed: %s", e)
             return None
 

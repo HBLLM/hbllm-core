@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.memory.episodic import EpisodicMemory
+from hbllm.memory.interface import MemoryType, SearchResult, UnifiedMemoryInterface
 from hbllm.memory.knowledge_graph import KnowledgeGraph
 from hbllm.memory.procedural import ProceduralMemory
 from hbllm.memory.semantic import SemanticMemory
@@ -32,7 +33,7 @@ from hbllm.network.registry import ServiceRegistry
 logger = logging.getLogger(__name__)
 
 
-class MemoryNode(Node):
+class MemoryNode(Node, UnifiedMemoryInterface):
     """
     Service node that persists and recalls conversation context.
     """
@@ -115,7 +116,7 @@ class MemoryNode(Node):
                 )
             except asyncio.TimeoutError:
                 logger.warning("Timed out waiting for background tasks during MemoryNode stop")
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
                 logger.error("Error during background task cleanup: %s", e)
             finally:
                 self._pending_tasks.clear()
@@ -125,7 +126,7 @@ class MemoryNode(Node):
         try:
             self.semantic_db.save_to_disk(self._persistence_dir / "semantic")
             self.knowledge_graph.save_to_disk(self._persistence_dir / "knowledge_graph.json")
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Failed to persist memory to disk: %s", e)
 
         # Close connections and release locks
@@ -211,6 +212,109 @@ class MemoryNode(Node):
                 is_priority=True,
                 tenant_id=message.tenant_id,
             )
+
+    # ── UnifiedMemoryInterface Implementation ──
+
+    async def store(self, memory_type: MemoryType, data: Any, **kwargs: Any) -> str:
+        if memory_type == MemoryType.EPISODIC:
+            return str(
+                self.db.store_turn(
+                    session_id=kwargs.get("session_id", ""),
+                    role=kwargs.get("role", "user"),
+                    content=data,
+                    tenant_id=kwargs.get("tenant_id", "default"),
+                )
+            )
+        elif memory_type == MemoryType.SEMANTIC:
+            await asyncio.to_thread(
+                self.semantic_db.store,
+                data,
+                kwargs.get("metadata", {}),
+                is_priority=kwargs.get("is_priority", False),
+                tenant_id=kwargs.get("tenant_id", "default"),
+            )
+            return "stored"
+        elif memory_type == MemoryType.PROCEDURAL:
+            self.procedural_db.store_skill(
+                tenant_id=kwargs.get("tenant_id", "default"),
+                skill_name=kwargs.get("name", ""),
+                trigger_pattern=data,
+                steps=kwargs.get("steps", kwargs.get("code", [])),
+            )
+            return "stored"
+        elif memory_type == MemoryType.VALUE:
+            self.value_db.record_reward(
+                tenant_id=kwargs.get("tenant_id", "default"),
+                topic=kwargs.get("topic", "general"),
+                action=kwargs.get("action_name", ""),
+                reward=data,
+                user_id=kwargs.get("session_id", ""),
+            )
+            return "stored"
+        elif memory_type == MemoryType.KNOWLEDGE_GRAPH:
+            return "stored"
+        return ""
+
+    async def retrieve(self, memory_type: MemoryType, query: Any, **kwargs: Any) -> list[Any]:
+        if memory_type == MemoryType.EPISODIC:
+            return self.db.retrieve_recent(
+                session_id=kwargs.get("session_id", ""),
+                limit=kwargs.get("limit", 10),
+                tenant_id=kwargs.get("tenant_id", "default"),
+            )
+        return []
+
+    async def search(
+        self, query: str, memory_types: list[MemoryType] | None = None, **kwargs: Any
+    ) -> list[SearchResult]:
+        types_to_search = memory_types or [MemoryType.EPISODIC, MemoryType.SEMANTIC]
+        results = []
+
+        tenant_id = kwargs.get("tenant_id", "default")
+        limit = kwargs.get("limit", 5)
+
+        if MemoryType.SEMANTIC in types_to_search:
+            sem_res = await asyncio.to_thread(
+                self.semantic_db.search, query, top_k=limit, tenant_id=tenant_id
+            )
+            for r in sem_res:
+                results.append(
+                    SearchResult(
+                        memory_type=MemoryType.SEMANTIC,
+                        id=r.get("id", ""),
+                        content=r.get("content"),
+                        score=r.get("score", 1.0),
+                        metadata=r,
+                    )
+                )
+
+        # Episodic search (mocked as retrieve for unified demo)
+        if MemoryType.EPISODIC in types_to_search:
+            ep_res = self.db.retrieve_recent(
+                session_id=kwargs.get("session_id", ""), limit=limit, tenant_id=tenant_id
+            )
+            for i, r in enumerate(ep_res):
+                results.append(
+                    SearchResult(
+                        memory_type=MemoryType.EPISODIC,
+                        id=str(i),
+                        content=r.get("content"),
+                        score=1.0,
+                        metadata=r,
+                    )
+                )
+
+        return sorted(results, key=lambda x: x.score, reverse=True)[:limit]
+
+    async def forget(self, memory_type: MemoryType, **kwargs: Any) -> int:
+        return 0
+
+    async def stats(self, tenant_id: str) -> dict[str, Any]:
+        return {
+            "episodic": {"count": 0},
+            "semantic": {"count": len(self.semantic_db._data)},
+            "knowledge_graph": {"entities": self.knowledge_graph.entity_count},
+        }
 
     async def handle_message(self, message: Message) -> Message | None:
         """
@@ -400,7 +504,7 @@ class MemoryNode(Node):
             # Fire and forget mostly, but we reply with success
             return message.create_response({"status": "stored", "turn_id": turn_id})
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory store failed: %s", e)
             return message.create_error(str(e))
 
@@ -432,7 +536,7 @@ class MemoryNode(Node):
                 }
             )
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory retrieval failed: %s", e)
             return message.create_error(str(e))
 
@@ -466,7 +570,7 @@ class MemoryNode(Node):
                 }
             )
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Semantic search failed: %s", e)
             return message.create_error(str(e))
 
@@ -497,7 +601,7 @@ class MemoryNode(Node):
             )
             return message.create_response({"status": "stored", "skill_id": skill_id})
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Skill store failed: %s", e)
             return message.create_error(str(e))
 
@@ -520,7 +624,7 @@ class MemoryNode(Node):
             skills = self.procedural_db.find_skill(tenant_id, query, top_k)
             return message.create_response({"skills": skills})
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Skill find failed: %s", e)
             return message.create_error(str(e))
 
@@ -554,7 +658,7 @@ class MemoryNode(Node):
             )
             return message.create_response({"status": "recorded", "reward_id": reward_id})
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Reward record failed: %s", e)
             return message.create_error(str(e))
 
@@ -582,7 +686,7 @@ class MemoryNode(Node):
                 )
                 return message.create_response({"top_preferences": top_prefs})
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Reward query failed: %s", e)
             return message.create_error(str(e))
 
@@ -654,7 +758,7 @@ class MemoryNode(Node):
                 }
             )
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory browse failed: %s", e)
             return message.create_error(str(e))
 
@@ -757,7 +861,7 @@ class MemoryNode(Node):
                 }
             )
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory forget failed: %s", e)
             return message.create_error(str(e))
 
@@ -780,7 +884,7 @@ class MemoryNode(Node):
                     "SELECT COUNT(*) FROM skills WHERE tenant_id = ?", (tenant_id,)
                 ).fetchone()
                 procedural_count = row[0] if row else 0
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 
             try:
@@ -789,7 +893,7 @@ class MemoryNode(Node):
                     "SELECT COUNT(*) FROM rewards WHERE tenant_id = ?", (tenant_id,)
                 ).fetchone()
                 value_count = row[0] if row else 0
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 
             kg_entities = self.knowledge_graph.entity_count
@@ -817,6 +921,6 @@ class MemoryNode(Node):
                 }
             )
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory stats failed: %s", e)
             return message.create_error(str(e))

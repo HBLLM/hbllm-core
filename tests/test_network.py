@@ -379,6 +379,11 @@ class TestCircuitBreaker:
         cb.record_failure()
         assert cb.state == CircuitState.HALF_OPEN
         cb.record_success()
+        # Now transitions to PARTIAL_OPEN (not directly to CLOSED)
+        assert cb.state == CircuitState.PARTIAL_OPEN
+        # 5 more successes to fully close
+        for _ in range(5):
+            cb.record_success()
         assert cb.state == CircuitState.CLOSED
 
     def test_half_open_failure_reopens(self):
@@ -443,7 +448,8 @@ class TestCircuitBreaker:
 
         cb.record_failure()
         assert cb.time_until_retry > 0
-        assert cb.time_until_retry <= 30.0
+        # Backoff doubles to ~60 + up to 20% jitter, so max is ~72
+        assert cb.time_until_retry <= 75.0
 
     def test_repr(self):
         cb = CircuitBreaker("node-1", failure_threshold=3)

@@ -220,7 +220,7 @@ class Ros2Node(Node):
         if rclpy:
             try:
                 rclpy.shutdown()
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -265,7 +265,7 @@ class Ros2Node(Node):
 
             logger.info("ROS2 node '%s' initialized with publishers", self.ros2_node_name)
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("ROS2 init failed: %s. Falling back to simulation.", e)
             self.ros2_enabled = False
             self._ros2_node = None

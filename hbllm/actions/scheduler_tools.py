@@ -65,7 +65,7 @@ class ScheduleEventTool:
                 return {"status": "success", "task_id": task_id, "trigger_time": trigger_time}
             else:
                 return {"status": "error", "error": "Execution environment lacks MessageBus"}
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             return {"status": "error", "error": str(e)}
 
 
@@ -118,7 +118,7 @@ class ScheduleRecurringTool:
                 return {"status": "success", "task_id": task_id}
             else:
                 return {"status": "error", "error": "Execution environment lacks MessageBus"}
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             return {"status": "error", "error": str(e)}
 
 
@@ -153,5 +153,5 @@ class CancelTaskTool:
                 return {"status": "cancel_request_dispatched"}
             else:
                 return {"status": "error", "error": "Execution environment lacks MessageBus"}
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             return {"status": "error", "error": str(e)}

@@ -110,7 +110,14 @@ class BrowserNode(Node):
                                 }
                             )
 
-                        except Exception as e:
+                        except (
+                            RuntimeError,
+                            ValueError,
+                            TypeError,
+                            OSError,
+                            KeyError,
+                            ConnectionError,
+                        ) as e:
                             logger.warning("Failed to scrape %s: %s", url, e)
                             # Fallback to just the snippet
                             results.append(
@@ -144,6 +151,6 @@ class BrowserNode(Node):
             return message.create_error(
                 "Missing dependencies. Please run: pip install duckduckgo-search beautifulsoup4 requests"
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Web search failed: %s", e)
             return message.create_error(str(e))

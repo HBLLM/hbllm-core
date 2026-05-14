@@ -153,7 +153,7 @@ class AudioOutputNode(Node):
 
             return message.create_response({"audio_path": out_file})
 
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Audio Synthesis failed: %s", e)
             return message.create_error(str(e))
 
