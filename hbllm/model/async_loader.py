@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ModelInfo:
-    def __init__(self, model_id: str, model: Any, tokenizer: Any):
+    def __init__(self, model_id: str, model: Any, tokenizer: Any) -> None:
         self.model_id = model_id
         self.model = model
         self.tokenizer = tokenizer
@@ -26,7 +26,7 @@ class ModelInfo:
 class AsyncModelManager:
     """Manager for async model lifecycle."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._models: dict[str, ModelInfo] = {}
         self._lock = asyncio.Lock()
 
@@ -39,7 +39,9 @@ class AsyncModelManager:
 
             logger.info("Asynchronously loading model from source: %s", source)
             # Run the synchronous load_model in a separate thread
-            model, tokenizer = await asyncio.to_thread(load_model, source, **kwargs)
+            result = await asyncio.to_thread(load_model, source, **kwargs)
+            model: Any = result[0]
+            tokenizer: Any = result[1]
             self._models[source] = ModelInfo(source, model, tokenizer)
             return model
 
