@@ -63,7 +63,18 @@ class DatabasePool:
             self._semaphore.release()
 
     async def close_all(self) -> None:
-        """Close all connections in the pool."""
+        """Close all connections in the pool and checkpoint WAL."""
+        if not self._connections:
+            return
+
+        try:
+            # Force WAL truncation to prevent unbounded growth
+            await self._connections[-1].execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            await self._connections[-1].commit()
+            logger.info("WAL checkpointed and truncated for %s", self.db_path)
+        except Exception as e:
+            logger.error("Failed to checkpoint WAL for %s: %s", self.db_path, e)
+
         for conn in self._connections:
             try:
                 await conn.close()

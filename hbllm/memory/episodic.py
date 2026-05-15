@@ -12,6 +12,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from hbllm.memory.pool import DatabasePool
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,22 +27,12 @@ class EpisodicMemory:
 
     def __init__(self, db_path: str | Path = "working_memory.db"):
         self.db_path = Path(db_path)
-        self._conn: sqlite3.Connection | None = None
-        self._init_db()
+        self.pool = DatabasePool(str(self.db_path))
 
-    def _get_conn(self) -> sqlite3.Connection:
-        """Return the persistent connection, creating it if needed."""
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-        return self._conn
-
-    def _init_db(self) -> None:
+    async def init_db(self) -> None:
         """Create the necessary tables if they don't exist."""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute("""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS turns (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -59,25 +50,23 @@ class EpisodicMemory:
                 parent_memory_id TEXT
             )
         """)
-        # Index for fast retrieval of latest turns per tenant+session
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_tenant_session_time
-            ON turns(tenant_id, session_id, timestamp_iso DESC)
-        """)
-        try:
-            cursor.execute("SELECT parent_memory_id FROM turns LIMIT 1")
-        except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE turns ADD COLUMN parent_memory_id TEXT")
-        conn.commit()
+            # Index for fast retrieval of latest turns per tenant+session
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tenant_session_time
+                ON turns(tenant_id, session_id, timestamp_iso DESC)
+            """)
+            try:
+                await conn.execute("SELECT parent_memory_id FROM turns LIMIT 1")
+            except Exception:
+                await conn.execute("ALTER TABLE turns ADD COLUMN parent_memory_id TEXT")
+            await conn.commit()
         logger.debug("Initialized EpisodicMemory at %s", self.db_path)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the persistent database connection."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        await self.pool.close_all()
 
-    def store_turn(
+    async def store_turn(
         self,
         session_id: str,
         role: str,
@@ -110,13 +99,12 @@ class EpisodicMemory:
         now_iso = datetime.now(timezone.utc).isoformat()
         meta_str = json.dumps(metadata) if metadata else "{}"
 
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO turns (id, tenant_id, user_id, device_id, scope, session_id, role, content, domain, timestamp_iso, metadata, vector_clock, authority_score, parent_memory_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO turns (id, tenant_id, user_id, device_id, scope, session_id, role, content, domain, timestamp_iso, metadata, vector_clock, authority_score, parent_memory_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 turn_id,
                 tenant_id,
@@ -132,13 +120,13 @@ class EpisodicMemory:
                 json.dumps(vector_clock) if vector_clock else None,
                 authority_score,
                 parent_memory_id,
-            ),
-        )
-        conn.commit()
+            )
+            )
+            await conn.commit()
 
         return turn_id
 
-    def retrieve_recent(
+    async def retrieve_recent(
         self, session_id: str, limit: int = 10, tenant_id: str = "default"
     ) -> list[dict[str, Any]]:
         """
@@ -146,25 +134,21 @@ class EpisodicMemory:
 
         Returns a list of dicts ordered chronologically (oldest first).
         """
-        conn = self._get_conn()
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT * FROM turns
-            WHERE tenant_id = ? AND session_id = ?
-            ORDER BY timestamp_iso DESC
-            LIMIT ?
-        """,
-            (tenant_id, session_id, limit),
-        )
-
-        rows = cursor.fetchall()
-        conn.row_factory = None  # Reset for other methods
+        async with self.pool.acquire() as conn:
+            conn.row_factory = sqlite3.Row
+            async with conn.execute(
+                """
+                SELECT * FROM turns
+                WHERE tenant_id = ? AND session_id = ?
+                ORDER BY timestamp_iso DESC
+                LIMIT ?
+            """,
+                (tenant_id, session_id, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
 
         results = []
-        for row in reversed(rows):
+        for row in reversed(list(rows)):
             results.append(
                 {
                     "id": row["id"],
@@ -184,18 +168,17 @@ class EpisodicMemory:
 
         return results
 
-    def clear_session(self, session_id: str, tenant_id: str = "default") -> int:
+    async def clear_session(self, session_id: str, tenant_id: str = "default") -> int:
         """Delete all turns for a tenant's session. Returns deleted count."""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute(
-            "DELETE FROM turns WHERE tenant_id = ? AND session_id = ?", (tenant_id, session_id)
-        )
-        deleted = cursor.rowcount
-        conn.commit()
+        async with self.pool.acquire() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM turns WHERE tenant_id = ? AND session_id = ?", (tenant_id, session_id)
+            )
+            deleted = cursor.rowcount
+            await conn.commit()
         return deleted
 
-    def search_by_content(
+    async def search_by_content(
         self,
         query: str,
         tenant_id: str = "default",
@@ -212,16 +195,15 @@ class EpisodicMemory:
         Returns:
             List of matching turn dicts ordered by recency.
         """
-        conn = self._get_conn()
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """SELECT * FROM turns
-               WHERE tenant_id = ? AND content LIKE ?
-               ORDER BY timestamp_iso DESC
-               LIMIT ?""",
-            (tenant_id, f"%{query}%", limit),
-        ).fetchall()
-        conn.row_factory = None  # Reset for other methods
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                """SELECT * FROM turns
+                   WHERE tenant_id = ? AND content LIKE ?
+                   ORDER BY timestamp_iso DESC
+                   LIMIT ?""",
+                (tenant_id, f"%{query}%", limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
 
         return [
             {
@@ -236,7 +218,7 @@ class EpisodicMemory:
             for row in rows
         ]
 
-    def retrieve_by_domain(
+    async def retrieve_by_domain(
         self,
         domain: str,
         tenant_id: str = "default",
@@ -248,16 +230,15 @@ class EpisodicMemory:
         Useful for cross-session context — e.g. recalling all "coding"
         conversations regardless of session.
         """
-        conn = self._get_conn()
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """SELECT * FROM turns
-               WHERE tenant_id = ? AND domain = ?
-               ORDER BY timestamp_iso DESC
-               LIMIT ?""",
-            (tenant_id, domain, limit),
-        ).fetchall()
-        conn.row_factory = None  # Reset for other methods
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                """SELECT * FROM turns
+                   WHERE tenant_id = ? AND domain = ?
+                   ORDER BY timestamp_iso DESC
+                   LIMIT ?""",
+                (tenant_id, domain, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
 
         return [
             {
@@ -272,7 +253,7 @@ class EpisodicMemory:
             for row in rows
         ]
 
-    def cleanup_old_turns(self, days: int = 90, tenant_id: str | None = None) -> int:
+    async def cleanup_old_turns(self, days: int = 90, tenant_id: str | None = None) -> int:
         """
         Delete turns older than `days` to prevent unbounded growth.
 
@@ -287,37 +268,39 @@ class EpisodicMemory:
 
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-        conn = self._get_conn()
-        if tenant_id:
-            cursor = conn.execute(
-                "DELETE FROM turns WHERE tenant_id = ? AND timestamp_iso < ?",
-                (tenant_id, cutoff),
-            )
-        else:
-            cursor = conn.execute(
-                "DELETE FROM turns WHERE timestamp_iso < ?",
-                (cutoff,),
-            )
-        deleted = cursor.rowcount
-        conn.commit()
+        async with self.pool.acquire() as conn:
+            if tenant_id:
+                cursor = await conn.execute(
+                    "DELETE FROM turns WHERE tenant_id = ? AND timestamp_iso < ?",
+                    (tenant_id, cutoff),
+                )
+            else:
+                cursor = await conn.execute(
+                    "DELETE FROM turns WHERE timestamp_iso < ?",
+                    (cutoff,),
+                )
+            deleted = cursor.rowcount
+            await conn.commit()
 
         logger.info("Cleaned up %d turns older than %d days", deleted, days)
         return deleted
 
-    def get_session_count(self, tenant_id: str = "default") -> int:
+    async def get_session_count(self, tenant_id: str = "default") -> int:
         """Count distinct sessions for a tenant."""
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT COUNT(DISTINCT session_id) FROM turns WHERE tenant_id = ?",
-            (tenant_id,),
-        ).fetchone()
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM turns WHERE tenant_id = ?",
+                (tenant_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
         return row[0] if row else 0
 
-    def get_turn_count(self, tenant_id: str = "default") -> int:
+    async def get_turn_count(self, tenant_id: str = "default") -> int:
         """Count total turns for a tenant."""
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT COUNT(*) FROM turns WHERE tenant_id = ?",
-            (tenant_id,),
-        ).fetchone()
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM turns WHERE tenant_id = ?",
+                (tenant_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
         return row[0] if row else 0
