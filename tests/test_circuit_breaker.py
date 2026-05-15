@@ -188,3 +188,97 @@ def test_registry_reset_all():
 
     reg.reset_all()
     assert len(reg.get_open_circuits()) == 0
+
+
+# ── State Persistence ──────────────────────────────────────────────────────
+
+
+def test_circuit_breaker_to_dict():
+    """to_dict captures all mutable state fields."""
+    cb = CircuitBreaker("node_x", failure_threshold=2)
+    cb.record_failure()
+    cb.record_failure()
+
+    d = cb.to_dict()
+    assert d["node_id"] == "node_x"
+    assert d["state"] == "open"
+    assert d["failure_count"] == 2
+    assert d["total_failures"] == 2
+
+
+def test_circuit_breaker_load_dict():
+    """load_dict restores state from a snapshot."""
+    cb = CircuitBreaker("node_y")
+    snapshot = {
+        "state": "open",
+        "failure_count": 5,
+        "success_count": 0,
+        "last_failure_time": 12345.0,
+        "half_open_calls": 0,
+        "current_recovery_timeout": 60.0,
+        "total_failures": 10,
+        "total_successes": 20,
+        "last_state_change": 99999.0,
+    }
+    cb.load_dict(snapshot)
+
+    assert cb._state == CircuitState.OPEN
+    assert cb._failure_count == 5
+    assert cb.total_failures == 10
+    assert cb.total_successes == 20
+    assert cb._current_recovery_timeout == 60.0
+
+
+def test_circuit_breaker_roundtrip():
+    """to_dict → load_dict preserves all state."""
+    original = CircuitBreaker("node_z", failure_threshold=3)
+    original.record_failure()
+    original.record_failure()
+    original.record_failure()
+    assert original.state == CircuitState.OPEN
+
+    snapshot = original.to_dict()
+
+    restored = CircuitBreaker("node_z", failure_threshold=3)
+    restored.load_dict(snapshot)
+
+    assert restored._state == original._state
+    assert restored._failure_count == original._failure_count
+    assert restored.total_failures == original.total_failures
+    assert restored._current_recovery_timeout == original._current_recovery_timeout
+
+
+def test_registry_save_and_load_state(tmp_path):
+    """Registry round-trips state through a JSON file."""
+    state_file = tmp_path / "cb_state.json"
+
+    reg1 = CircuitBreakerRegistry(failure_threshold=1)
+    reg1.get("node_a").record_failure()
+    reg1.get("node_b")  # healthy
+    reg1.save_state(state_file)
+
+    assert state_file.exists()
+
+    reg2 = CircuitBreakerRegistry(failure_threshold=1)
+    reg2.load_state(state_file)
+
+    assert reg2.get("node_a")._state == CircuitState.OPEN
+    assert reg2.get("node_a").total_failures == 1
+    assert reg2.get("node_b")._state == CircuitState.CLOSED
+
+
+def test_registry_load_missing_file(tmp_path):
+    """Loading from a non-existent file is a no-op."""
+    reg = CircuitBreakerRegistry()
+    reg.load_state(tmp_path / "nonexistent.json")
+    assert len(reg._breakers) == 0
+
+
+def test_registry_load_corrupt_file(tmp_path):
+    """Loading from a corrupt file logs a warning and continues."""
+    corrupt = tmp_path / "bad.json"
+    corrupt.write_text("{invalid json!!!}")
+
+    reg = CircuitBreakerRegistry()
+    reg.load_state(corrupt)
+    assert len(reg._breakers) == 0
