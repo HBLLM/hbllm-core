@@ -50,6 +50,8 @@ All memory classes live in `hbllm/memory/`:
 from hbllm.memory.episodic import EpisodicMemory
 
 em = EpisodicMemory(db_path="memory.db", tenant_id="user-01")
+await em.init_db()
+
 await em.store_turn(
     role="user",
     content="Tell me about quantum computing",
@@ -93,6 +95,8 @@ Skills are automatically extracted from successful multi-step interactions.
 from hbllm.memory.procedural import ProceduralMemory
 
 pm = ProceduralMemory(db_path="skills.db", tenant_id="user-01")
+await pm.init_db()
+
 await pm.store_skill(
     name="deploy-docker",
     steps=["docker build", "docker push", "kubectl apply"],
@@ -115,9 +119,10 @@ Tracks per-tenant reward signals keyed by topic and action, using exponential de
 from hbllm.memory.value_memory import ValueMemory
 
 vm = ValueMemory(db_path="value_memory.db")
+await vm.init_db()
 
 # Record a preference signal
-vm.record_reward(
+await vm.record_reward(
     tenant_id="user-01",
     topic="response_style",
     action="formal_tone",
@@ -125,11 +130,11 @@ vm.record_reward(
 )
 
 # Get aggregated preferences (weighted by recency)
-prefs = vm.get_preference("user-01", "response_style")
+prefs = await vm.get_preference("user-01", "response_style")
 # {"formal_tone": 0.72, "casual_tone": 0.3}
 
 # Get top preferences across all topics
-top = vm.get_top_preferences("user-01", top_k=5)
+top = await vm.get_top_preferences("user-01", top_k=5)
 ```
 
 ---

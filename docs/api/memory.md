@@ -76,9 +76,10 @@ This is the system's short-to-medium term recall.
 from hbllm.memory.episodic import EpisodicMemory
 
 episodic = EpisodicMemory(db_path="working_memory.db")
+await episodic.init_db()
 
 # Store a conversation turn
-episodic.store(
+await episodic.store_turn(
     session_id="sess-123",
     role="user",
     content="What is Python?",
@@ -86,7 +87,7 @@ episodic.store(
 )
 
 # Retrieve recent history
-turns = episodic.retrieve_recent(session_id="sess-123", limit=10)
+turns = await episodic.retrieve_recent(session_id="sess-123", limit=10)
 ```
 
 ### Key Features
@@ -141,9 +142,10 @@ executable knowledge.
 from hbllm.memory.procedural import ProceduralMemory
 
 procedural = ProceduralMemory(db_path="procedural_memory.db")
+await procedural.init_db()
 
 # Store a skill
-procedural.store_skill(
+await procedural.store_skill(
     name="Deploy to Production",
     trigger="deploy the application",
     steps=[
@@ -157,7 +159,7 @@ procedural.store_skill(
 )
 
 # Find matching skills
-skills = procedural.find_skills("deploy the app to production")
+skills = await procedural.find_skill("deploy the app to production")
 ```
 
 ### Key Features
@@ -180,9 +182,10 @@ feedback) keyed by topic and action. Feeds into the RLHF loop.
 from hbllm.memory.value_memory import ValueMemory
 
 values = ValueMemory(db_path="value_memory.db")
+await values.init_db()
 
 # Record positive feedback
-values.record_signal(
+await values.record_reward(
     tenant_id="user-123",
     topic="code_style",
     action="use_type_hints",
@@ -190,7 +193,7 @@ values.record_signal(
 )
 
 # Record negative feedback
-values.record_signal(
+await values.record_reward(
     tenant_id="user-123",
     topic="code_style",
     action="use_global_vars",
@@ -198,8 +201,8 @@ values.record_signal(
 )
 
 # Query preferences (exponential decay for recency)
-prefs = values.get_preferences(tenant_id="user-123", topic="code_style")
-# [{"action": "use_type_hints", "score": 0.92}, {"action": "use_global_vars", "score": -0.85}]
+prefs = await values.get_preference("user-123", "code_style")
+# {"use_type_hints": 0.92, "use_global_vars": -0.85}
 ```
 
 ### Exponential Decay
