@@ -54,7 +54,7 @@ async def test_memory_store_and_retrieve(tmp_db_dir):
     await bus.publish("memory.store", store_msg)
     await asyncio.sleep(0.3)
 
-    turns = memory.db.retrieve_recent("s1", limit=5, tenant_id="t1")
+    turns = await memory.db.retrieve_recent("s1", limit=5, tenant_id="t1")
     assert len(turns) >= 1
     assert any(t["content"] == "Hello world" for t in turns)
 
@@ -70,7 +70,7 @@ async def test_memory_store_and_retrieve(tmp_db_dir):
     await bus.publish("memory.store", store_msg2)
     await asyncio.sleep(0.3)
 
-    turns = memory.db.retrieve_recent("s1", limit=10, tenant_id="t1")
+    turns = await memory.db.retrieve_recent("s1", limit=10, tenant_id="t1")
     assert len(turns) >= 2
 
     await memory.stop()
@@ -118,8 +118,8 @@ async def test_memory_multi_tenant_isolation(tmp_db_dir):
     await bus.publish("memory.store", msg_b)
     await asyncio.sleep(0.3)
 
-    turns_a = memory.db.retrieve_recent("s1", tenant_id="tenantA")
-    turns_b = memory.db.retrieve_recent("s1", tenant_id="tenantB")
+    turns_a = await memory.db.retrieve_recent("s1", tenant_id="tenantA")
+    turns_b = await memory.db.retrieve_recent("s1", tenant_id="tenantB")
     assert len(turns_a) == 1
     assert turns_a[0]["content"] == "Tenant A data"
     assert len(turns_b) == 1

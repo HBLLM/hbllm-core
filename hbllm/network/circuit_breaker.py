@@ -278,10 +278,7 @@ class CircuitBreakerRegistry:
 
     def save_state(self, path: str | Path) -> None:
         """Persist all circuit breaker states to a JSON file."""
-        state = {
-            node_id: breaker.to_dict()
-            for node_id, breaker in self._breakers.items()
-        }
+        state = {node_id: breaker.to_dict() for node_id, breaker in self._breakers.items()}
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:

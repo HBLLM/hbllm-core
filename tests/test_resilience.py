@@ -288,10 +288,11 @@ async def test_episodic_concurrent_writes():
 
     with tempfile.TemporaryDirectory() as tmp:
         mem = EpisodicMemory(db_path=Path(tmp) / "concurrent.db")
+        await mem.init_db()
 
         async def writer(session: str, count: int):
             for i in range(count):
-                mem.store_turn(session, "user", f"msg_{i}")
+                await mem.store_turn(session, "user", f"msg_{i}")
 
         await asyncio.gather(
             writer("s1", 50),
@@ -299,5 +300,7 @@ async def test_episodic_concurrent_writes():
             writer("s3", 50),
         )
 
-        assert mem.get_turn_count() == 150
-        assert mem.get_session_count() == 3
+        assert await mem.get_turn_count() == 150
+        assert await mem.get_session_count() == 3
+
+        await mem.close()

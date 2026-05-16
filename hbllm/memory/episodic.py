@@ -12,10 +12,11 @@ import json
 import logging
 import sqlite3
 import uuid
-from hbllm.memory.pool import DatabasePool
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from hbllm.memory.pool import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -105,22 +106,22 @@ class EpisodicMemory:
                 INSERT INTO turns (id, tenant_id, user_id, device_id, scope, session_id, role, content, domain, timestamp_iso, metadata, vector_clock, authority_score, parent_memory_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                turn_id,
-                tenant_id,
-                user_id,
-                device_id,
-                scope,
-                session_id,
-                role,
-                content,
-                domain,
-                now_iso,
-                meta_str,
-                json.dumps(vector_clock) if vector_clock else None,
-                authority_score,
-                parent_memory_id,
-            )
+                (
+                    turn_id,
+                    tenant_id,
+                    user_id,
+                    device_id,
+                    scope,
+                    session_id,
+                    role,
+                    content,
+                    domain,
+                    now_iso,
+                    meta_str,
+                    json.dumps(vector_clock) if vector_clock else None,
+                    authority_score,
+                    parent_memory_id,
+                ),
             )
             await conn.commit()
 

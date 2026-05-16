@@ -96,15 +96,18 @@ class TestValueMemoryIsolation:
     """Verify that ValueMemory rewards are scoped by identity triplet."""
 
     @pytest.fixture
-    def value_db(self, tmp_path):
+    async def value_db(self, tmp_path):
         from hbllm.memory.value_memory import ValueMemory
 
         db = ValueMemory(db_path=str(tmp_path / "value.db"))
-        return db
+        await db.init_db()
+        yield db
+        await db.close()
 
-    def test_reward_isolation(self, value_db):
+    @pytest.mark.asyncio
+    async def test_reward_isolation(self, value_db):
         # Record rewards for different users
-        value_db.record_reward(
+        await value_db.record_reward(
             tenant_id="t1",
             topic="response_style",
             action="formal_tone",
@@ -112,7 +115,7 @@ class TestValueMemoryIsolation:
             user_id="alice",
             device_id="phone",
         )
-        value_db.record_reward(
+        await value_db.record_reward(
             tenant_id="t1",
             topic="response_style",
             action="formal_tone",
@@ -122,7 +125,7 @@ class TestValueMemoryIsolation:
         )
 
         # Alice's preference should be positive
-        pref_alice = value_db.get_preference(
+        pref_alice = await value_db.get_preference(
             tenant_id="t1",
             topic="response_style",
             user_id="alice",
@@ -133,7 +136,7 @@ class TestValueMemoryIsolation:
         assert pref_alice.get("formal_tone", 0) > 0
 
         # Bob's preference should be negative
-        pref_bob = value_db.get_preference(
+        pref_bob = await value_db.get_preference(
             tenant_id="t1",
             topic="response_style",
             user_id="bob",
@@ -142,9 +145,10 @@ class TestValueMemoryIsolation:
         assert isinstance(pref_bob, dict)
         assert pref_bob.get("formal_tone", 0) < 0
 
-    def test_cross_user_reward_isolation(self, value_db):
+    @pytest.mark.asyncio
+    async def test_cross_user_reward_isolation(self, value_db):
         """A user who has no rewards should get empty preferences."""
-        value_db.record_reward(
+        await value_db.record_reward(
             tenant_id="t1",
             topic="domain",
             action="math",
@@ -153,7 +157,7 @@ class TestValueMemoryIsolation:
             device_id="phone",
         )
 
-        pref_charlie = value_db.get_preference(
+        pref_charlie = await value_db.get_preference(
             tenant_id="t1",
             topic="domain",
             user_id="charlie",

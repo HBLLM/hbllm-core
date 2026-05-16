@@ -43,7 +43,7 @@ import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ class BackupManager:
         self._checkpoint_databases(file_paths)
 
         # Create compressed archive
-        total_size = sum(f["size"] for f in files_info)
+        total_size = sum(cast(int, f["size"]) for f in files_info)
         with tarfile.open(archive_path, "w:gz") as tar:
             for path in file_paths:
                 arcname = path.relative_to(self.data_dir)
@@ -235,7 +235,10 @@ class BackupManager:
         # Extract to temp dir first for safety
         with tempfile.TemporaryDirectory() as tmpdir:
             with tarfile.open(backup_path, "r:gz") as tar:
-                tar.extractall(tmpdir)
+                if hasattr(tarfile, "data_filter"):
+                    tar.extractall(tmpdir, filter="data")
+                else:
+                    tar.extractall(tmpdir)
 
             # Read manifest
             manifest_path = Path(tmpdir) / "manifest.json"
@@ -302,7 +305,10 @@ class BackupManager:
         errors = []
         with tempfile.TemporaryDirectory() as tmpdir:
             with tarfile.open(backup_path, "r:gz") as tar:
-                tar.extractall(tmpdir)
+                if hasattr(tarfile, "data_filter"):
+                    tar.extractall(tmpdir, filter="data")
+                else:
+                    tar.extractall(tmpdir)
 
             for file_info in manifest.files:
                 file_path = Path(tmpdir) / file_info["name"]
@@ -372,8 +378,8 @@ class BackupManager:
             backup_path = Path(backup_path)
 
         try:
-            import boto3
-            from botocore.config import Config as BotoConfig
+            import boto3  # type: ignore
+            from botocore.config import Config as BotoConfig  # type: ignore
 
             s3 = boto3.client(
                 "s3",
@@ -409,8 +415,8 @@ class BackupManager:
         local_path = self.backup_dir / backup_name
 
         try:
-            import boto3
-            from botocore.config import Config as BotoConfig
+            import boto3  # type: ignore
+            from botocore.config import Config as BotoConfig  # type: ignore
 
             s3 = boto3.client(
                 "s3",
@@ -433,7 +439,7 @@ class BackupManager:
     def _push_via_http(self, backup_path: Path) -> dict[str, Any]:
         """Fallback HTTP upload for environments without boto3."""
         try:
-            import httpx
+            import httpx  # type: ignore  # type: ignore
 
             endpoint = self._cloud_config["endpoint"]  # type: ignore
             bucket = self._cloud_config["bucket"]  # type: ignore

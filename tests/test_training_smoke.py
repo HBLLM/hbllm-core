@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 import torch
 
+pytestmark = pytest.mark.timeout(300)
+
 from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForCausalLM
 from hbllm.training.dpo import compute_dpo_loss, get_batch_logps

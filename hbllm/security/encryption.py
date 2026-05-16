@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
-from collections.abc import Iterable, Iterator
 
 from cryptography.fernet import Fernet, InvalidToken
 

@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from hbllm.memory.pool import DatabasePool
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from hbllm.memory.pool import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +196,9 @@ class ValueMemory:
             await conn.commit()
         return deleted
 
-    async def get_all_topics(self, tenant_id: str, user_id: str = "", device_id: str = "") -> list[str]:
+    async def get_all_topics(
+        self, tenant_id: str, user_id: str = "", device_id: str = ""
+    ) -> list[str]:
         """Get all distinct topics that have been recorded for a tenant/user/device."""
         async with self.pool.acquire() as conn:
             async with conn.execute(
