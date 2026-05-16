@@ -13,6 +13,8 @@ Tests the complete flow using only HBLLM Core modules:
 import os
 import tempfile
 
+import pytest
+
 from hbllm.memory.episodic import EpisodicMemory
 from hbllm.memory.semantic import SemanticMemory
 from hbllm.serving.security import ApiKeyManager, InputSanitizer, RateLimiter
@@ -193,36 +195,38 @@ class TestKnowledgeBase:
 class TestEpisodicTenantIsolation:
     """Test that episodic memory properly isolates tenants."""
 
-    def setup_method(self):
-        self.db_path = tempfile.mktemp(suffix=".db")
+    @pytest.fixture(autouse=True)
+    async def setup_episodic(self, tmp_path):
+        self.db_path = str(tmp_path / "tenant_iso.db")
         self.db = EpisodicMemory(self.db_path)
+        await self.db.init_db()
+        yield
+        await self.db.pool.close_all()
 
-    def teardown_method(self):
-        if os.path.exists(self.db_path):
-            os.unlink(self.db_path)
-
-    def test_tenant_isolation_writes(self):
+    @pytest.mark.asyncio
+    async def test_tenant_isolation_writes(self):
         """Ensure tenant A's data doesn't leak to tenant B."""
-        self.db.store_turn("session1", "user", "Acme secret question", tenant_id="acme")
-        self.db.store_turn("session1", "assistant", "Acme secret answer", tenant_id="acme")
-        self.db.store_turn("session1", "user", "Globex public question", tenant_id="globex")
+        await self.db.store_turn("session1", "user", "Acme secret question", tenant_id="acme")
+        await self.db.store_turn("session1", "assistant", "Acme secret answer", tenant_id="acme")
+        await self.db.store_turn("session1", "user", "Globex public question", tenant_id="globex")
 
-        acme_turns = self.db.retrieve_recent("session1", limit=10, tenant_id="acme")
-        globex_turns = self.db.retrieve_recent("session1", limit=10, tenant_id="globex")
+        acme_turns = await self.db.retrieve_recent("session1", limit=10, tenant_id="acme")
+        globex_turns = await self.db.retrieve_recent("session1", limit=10, tenant_id="globex")
 
         assert len(acme_turns) == 2
         assert len(globex_turns) == 1
         assert all("Acme" in t["content"] for t in acme_turns)
         assert "Globex" in globex_turns[0]["content"]
 
-    def test_tenant_isolation_clear(self):
+    @pytest.mark.asyncio
+    async def test_tenant_isolation_clear(self):
         """Clearing one tenant's data shouldn't affect another."""
-        self.db.store_turn("s1", "user", "Keep this", tenant_id="acme")
-        self.db.store_turn("s1", "user", "Delete this", tenant_id="globex")
+        await self.db.store_turn("s1", "user", "Keep this", tenant_id="acme")
+        await self.db.store_turn("s1", "user", "Delete this", tenant_id="globex")
 
         # Only retrieve per-tenant, confirming isolation
-        acme = self.db.retrieve_recent("s1", limit=10, tenant_id="acme")
-        globex = self.db.retrieve_recent("s1", limit=10, tenant_id="globex")
+        acme = await self.db.retrieve_recent("s1", limit=10, tenant_id="acme")
+        globex = await self.db.retrieve_recent("s1", limit=10, tenant_id="globex")
         assert len(acme) == 1
         assert len(globex) == 1
 
@@ -236,17 +240,17 @@ class TestFullTenantJourney:
     API Key → Auth → Store Memory → Search → Verify Isolation
     """
 
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    async def setup_journey(self, tmp_path):
         self.akm = ApiKeyManager()
         self.rl = RateLimiter(requests_per_minute=60, burst_size=10)
         self.san = InputSanitizer()
-        self.db_path = tempfile.mktemp(suffix=".db")
+        self.db_path = str(tmp_path / "journey.db")
         self.episodic = EpisodicMemory(self.db_path)
+        await self.episodic.init_db()
         self.semantic = SemanticMemory()
-
-    def teardown_method(self):
-        if os.path.exists(self.db_path):
-            os.unlink(self.db_path)
+        yield
+        await self.episodic.pool.close_all()
 
     async def test_full_journey(self):
         """Simulate a full tenant lifecycle using core modules."""
@@ -289,17 +293,17 @@ class TestFullTenantJourney:
         assert self.semantic.count == 3
 
         # 7. Store conversation in episodic memory
-        self.episodic.store_turn("s1", "user", clean_input, tenant_id=tenant_id)
-        self.episodic.store_turn(
+        await self.episodic.store_turn("s1", "user", clean_input, tenant_id=tenant_id)
+        await self.episodic.store_turn(
             "s1", "assistant", "All items can be returned within 30 days.", tenant_id=tenant_id
         )
 
         # 8. Retrieve conversation history
-        turns = self.episodic.retrieve_recent("s1", limit=10, tenant_id=tenant_id)
+        turns = await self.episodic.retrieve_recent("s1", limit=10, tenant_id=tenant_id)
         assert len(turns) == 2
 
         # 9. Verify tenant isolation — other tenant sees nothing in episodic
-        other_turns = self.episodic.retrieve_recent("s1", limit=10, tenant_id="other-tenant")
+        other_turns = await self.episodic.retrieve_recent("s1", limit=10, tenant_id="other-tenant")
         assert len(other_turns) == 0
 
         # 10. Scope check

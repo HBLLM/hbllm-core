@@ -15,11 +15,13 @@ Transitions:
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
 from collections.abc import Callable, Coroutine
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -201,6 +203,35 @@ class CircuitBreaker:
         self._current_recovery_timeout = self.base_recovery_timeout
         logger.info("Circuit for '%s' manually reset to CLOSED", self.node_id)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize circuit breaker state for persistence."""
+        return {
+            "node_id": self.node_id,
+            "state": self._state.value,
+            "failure_count": self._failure_count,
+            "success_count": self._success_count,
+            "last_failure_time": self._last_failure_time,
+            "half_open_calls": self._half_open_calls,
+            "current_recovery_timeout": self._current_recovery_timeout,
+            "total_failures": self.total_failures,
+            "total_successes": self.total_successes,
+            "last_state_change": self.last_state_change,
+        }
+
+    def load_dict(self, data: dict[str, Any]) -> None:
+        """Restore circuit breaker state from a persisted snapshot."""
+        self._state = CircuitState(data["state"])
+        self._failure_count = data.get("failure_count", 0)
+        self._success_count = data.get("success_count", 0)
+        self._last_failure_time = data.get("last_failure_time", 0.0)
+        self._half_open_calls = data.get("half_open_calls", 0)
+        self._current_recovery_timeout = data.get(
+            "current_recovery_timeout", self.base_recovery_timeout
+        )
+        self.total_failures = data.get("total_failures", 0)
+        self.total_successes = data.get("total_successes", 0)
+        self.last_state_change = data.get("last_state_change", time.time())
+
     def __repr__(self) -> str:
         return (
             f"<CircuitBreaker node={self.node_id} state={self.state.value} "
@@ -244,3 +275,33 @@ class CircuitBreakerRegistry:
         """Reset all circuit breakers."""
         for breaker in self._breakers.values():
             breaker.reset()
+
+    def save_state(self, path: str | Path) -> None:
+        """Persist all circuit breaker states to a JSON file."""
+        state = {node_id: breaker.to_dict() for node_id, breaker in self._breakers.items()}
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(state, f, indent=2)
+        logger.info("Saved %d circuit breaker states to %s", len(state), path)
+
+    def load_state(self, path: str | Path) -> None:
+        """Restore circuit breaker states from a JSON file."""
+        path = Path(path)
+        if not path.exists():
+            logger.debug("No circuit breaker state file at %s, starting fresh", path)
+            return
+
+        try:
+            with open(path) as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load circuit breaker state from %s: %s", path, e)
+            return
+
+        restored = 0
+        for node_id, data in state.items():
+            breaker = self.get(node_id)
+            breaker.load_dict(data)
+            restored += 1
+        logger.info("Restored %d circuit breaker states from %s", restored, path)

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -124,17 +125,21 @@ class EncryptionVault:
         """Create a new vault with a rotated key."""
         return EncryptionVault(key=new_key or _generate_key())
 
-    def rotate_and_reencrypt(self, data_list: list[str]) -> tuple[EncryptionVault, list[str]]:
+    def rotate_and_reencrypt(
+        self, data_iterable: Iterable[str]
+    ) -> tuple[EncryptionVault, Iterator[str]]:
         """
-        Create a new vault and re-encrypt a list of tokens with the new key.
-        Useful for key rotation migrations.
+        Create a new vault and re-encrypt a stream of tokens with the new key.
+        Useful for key rotation migrations over large datasets without memory exhaustion.
         """
         new_vault = self.rotate_key()
-        new_data = []
-        for token in data_list:
-            plaintext = self.decrypt(token)
-            new_data.append(new_vault.encrypt(plaintext))
-        return new_vault, new_data
+
+        def _generator() -> Iterator[str]:
+            for token in data_iterable:
+                plaintext = self.decrypt(token)
+                yield new_vault.encrypt(plaintext)
+
+        return new_vault, _generator()
 
     @property
     def key_fingerprint(self) -> str:

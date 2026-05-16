@@ -59,10 +59,15 @@ class InputSanitizer(BaseHTTPMiddleware):
 
     # Very basic patterns for generic injection attempts (system prompt bypass)
     BLOCKED_PATTERNS = [
-        re.compile(r"ignore previous instructions", re.IGNORECASE),
-        re.compile(r"you are now a", re.IGNORECASE),
+        re.compile(r"ignore (?:all )?(?:previous )?instructions", re.IGNORECASE),
+        re.compile(r"disregard (?:all )?(?:previous )?(?:instructions|directions)", re.IGNORECASE),
+        re.compile(r"you are (?:now )?a(?:n)? (?:assistant|expert|AI|developer)", re.IGNORECASE),
         re.compile(r"system directive overwrite", re.IGNORECASE),
         re.compile(r"\[system\]", re.IGNORECASE),
+        re.compile(r"(?:Do Anything Now|DAN) mode", re.IGNORECASE),
+        re.compile(r"forget (?:everything|all instructions)", re.IGNORECASE),
+        re.compile(r"\\n\\n(?:Human|Assistant|System):", re.IGNORECASE),
+        re.compile(r"print your (?:initial )?prompt", re.IGNORECASE),
     ]
 
     async def dispatch(self, request: Request, call_next: Callable) -> JSONResponse:

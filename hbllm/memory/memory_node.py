@@ -85,6 +85,9 @@ class MemoryNode(Node, UnifiedMemoryInterface):
     async def on_start(self) -> None:
         """Subscribe to memory lifecycle verbs."""
         logger.info("Starting MemoryNode with DB at %s", self.db.db_path)
+        await self.db.init_db()
+        await self.procedural_db.init_db()
+        await self.value_db.init_db()
         await self.bus.subscribe("memory.store", self.handle_store)
         await self.bus.subscribe("memory.retrieve_recent", self.handle_retrieve)
         await self.bus.subscribe("memory.search", self.handle_search)
@@ -133,11 +136,11 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         if hasattr(self.semantic_db, "close"):
             self.semantic_db.close()
         if hasattr(self.db, "close"):
-            self.db.close()
+            await self.db.close()
         if hasattr(self.procedural_db, "close"):
-            self.procedural_db.close()
+            await self.procedural_db.close()
         if hasattr(self.value_db, "close"):
-            self.value_db.close()
+            await self.value_db.close()
         logger.info("MemoryNode stopped gracefully")
 
     @staticmethod
@@ -218,7 +221,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
     async def store(self, memory_type: MemoryType, data: Any, **kwargs: Any) -> str:
         if memory_type == MemoryType.EPISODIC:
             return str(
-                self.db.store_turn(
+                await self.db.store_turn(
                     session_id=kwargs.get("session_id", ""),
                     role=kwargs.get("role", "user"),
                     content=data,
@@ -235,7 +238,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             )
             return "stored"
         elif memory_type == MemoryType.PROCEDURAL:
-            self.procedural_db.store_skill(
+            await self.procedural_db.store_skill(
                 tenant_id=kwargs.get("tenant_id", "default"),
                 skill_name=kwargs.get("name", ""),
                 trigger_pattern=data,
@@ -243,7 +246,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             )
             return "stored"
         elif memory_type == MemoryType.VALUE:
-            self.value_db.record_reward(
+            await self.value_db.record_reward(
                 tenant_id=kwargs.get("tenant_id", "default"),
                 topic=kwargs.get("topic", "general"),
                 action=kwargs.get("action_name", ""),
@@ -257,7 +260,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
     async def retrieve(self, memory_type: MemoryType, query: Any, **kwargs: Any) -> list[Any]:
         if memory_type == MemoryType.EPISODIC:
-            return self.db.retrieve_recent(
+            return await self.db.retrieve_recent(
                 session_id=kwargs.get("session_id", ""),
                 limit=kwargs.get("limit", 10),
                 tenant_id=kwargs.get("tenant_id", "default"),
@@ -290,7 +293,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
         # Episodic search (mocked as retrieve for unified demo)
         if MemoryType.EPISODIC in types_to_search:
-            ep_res = self.db.retrieve_recent(
+            ep_res = await self.db.retrieve_recent(
                 session_id=kwargs.get("session_id", ""), limit=limit, tenant_id=tenant_id
             )
             for i, r in enumerate(ep_res):
@@ -454,7 +457,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             role = payload.role
             content = payload.content
 
-            turn_id = self.db.store_turn(
+            turn_id = await self.db.store_turn(
                 session_id=session_id,
                 role=role,
                 content=content,
@@ -523,7 +526,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             session_id = payload.session_id
             limit = payload.limit
 
-            turns = self.db.retrieve_recent(
+            turns = await self.db.retrieve_recent(
                 session_id,
                 limit=limit,
                 tenant_id=payload.tenant_id or (message.tenant_id or "default"),
@@ -592,7 +595,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             if not skill_name or not steps:
                 return message.create_error("Missing 'skill_name' or 'steps'")
 
-            skill_id = self.procedural_db.store_skill(
+            skill_id = await self.procedural_db.store_skill(
                 tenant_id=tenant_id,
                 skill_name=skill_name,
                 trigger_pattern=trigger_pattern,
@@ -621,7 +624,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             if not query:
                 return message.create_error("Missing 'query'")
 
-            skills = self.procedural_db.find_skill(tenant_id, query, top_k)
+            skills = await self.procedural_db.find_skill(tenant_id, query, top_k)
             return message.create_response({"skills": skills})
 
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
@@ -647,7 +650,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             if not action:
                 return message.create_error("Missing 'action'")
 
-            reward_id = self.value_db.record_reward(
+            reward_id = await self.value_db.record_reward(
                 tenant_id=tenant_id,
                 topic=topic,
                 action=action,
@@ -676,12 +679,12 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             tenant_id = message.tenant_id or "default"
 
             if topic:
-                preferences = self.value_db.get_preference(
+                preferences = await self.value_db.get_preference(
                     tenant_id, topic, message.user_id, message.device_id
                 )
                 return message.create_response({"topic": topic, "preferences": preferences})
             else:
-                top_prefs = self.value_db.get_top_preferences(
+                top_prefs = await self.value_db.get_top_preferences(
                     tenant_id, top_k, message.user_id, message.device_id
                 )
                 return message.create_response({"top_preferences": top_prefs})
@@ -707,31 +710,35 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             session_id = payload.get("session_id")
             tenant_id = payload.get("tenant_id") or message.tenant_id or "default"
 
-            conn = self.db._get_conn()
-            conn.row_factory = sqlite3.Row
+            async with self.db.pool.acquire() as conn:
+                conn.row_factory = sqlite3.Row
 
-            if session_id:
-                rows = conn.execute(
-                    "SELECT * FROM turns WHERE tenant_id = ? AND session_id = ? "
-                    "ORDER BY timestamp_iso DESC LIMIT ? OFFSET ?",
-                    (tenant_id, session_id, limit, offset),
-                ).fetchall()
-                total_row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM turns WHERE tenant_id = ? AND session_id = ?",
-                    (tenant_id, session_id),
-                ).fetchone()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM turns WHERE tenant_id = ? "
-                    "ORDER BY timestamp_iso DESC LIMIT ? OFFSET ?",
-                    (tenant_id, limit, offset),
-                ).fetchall()
-                total_row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM turns WHERE tenant_id = ?",
-                    (tenant_id,),
-                ).fetchone()
+                if session_id:
+                    async with conn.execute(
+                        "SELECT * FROM turns WHERE tenant_id = ? AND session_id = ? "
+                        "ORDER BY timestamp_iso DESC LIMIT ? OFFSET ?",
+                        (tenant_id, session_id, limit, offset),
+                    ) as cursor:
+                        rows = await cursor.fetchall()
+                    async with conn.execute(
+                        "SELECT COUNT(*) as cnt FROM turns WHERE tenant_id = ? AND session_id = ?",
+                        (tenant_id, session_id),
+                    ) as cursor:
+                        total_row = await cursor.fetchone()
+                else:
+                    async with conn.execute(
+                        "SELECT * FROM turns WHERE tenant_id = ? "
+                        "ORDER BY timestamp_iso DESC LIMIT ? OFFSET ?",
+                        (tenant_id, limit, offset),
+                    ) as cursor:
+                        rows = await cursor.fetchall()
+                    async with conn.execute(
+                        "SELECT COUNT(*) as cnt FROM turns WHERE tenant_id = ?",
+                        (tenant_id,),
+                    ) as cursor:
+                        total_row = await cursor.fetchone()
 
-            conn.row_factory = None
+                conn.row_factory = None
             import json as _json
 
             entries = []
@@ -784,43 +791,45 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             entry_ids = payload.get("entry_ids", [])
             forget_semantic = payload.get("forget_semantic", True)
 
-            conn = self.db._get_conn()
             deleted_episodic = 0
             deleted_semantic = 0
 
             # Delete specific entries by ID
             if entry_ids:
-                placeholders = ",".join("?" * len(entry_ids))
-                cursor = conn.execute(
-                    f"DELETE FROM turns WHERE tenant_id = ? AND id IN ({placeholders})",
-                    [tenant_id] + list(entry_ids),
-                )
-                deleted_episodic += cursor.rowcount
-                conn.commit()
+                async with self.db.pool.acquire() as conn:
+                    placeholders = ",".join("?" * len(entry_ids))
+                    cursor = await conn.execute(
+                        f"DELETE FROM turns WHERE tenant_id = ? AND id IN ({placeholders})",
+                        [tenant_id] + list(entry_ids),
+                    )
+                    deleted_episodic += cursor.rowcount
+                    await conn.commit()
 
             # Delete by session
             if session_id:
-                deleted_episodic += self.db.clear_session(session_id, tenant_id)
+                deleted_episodic += await self.db.clear_session(session_id, tenant_id)
 
             # Delete by content query
             if query:
-                # First find matching IDs for reporting
-                conn.row_factory = sqlite3.Row
-                matches = conn.execute(
-                    "SELECT id, content FROM turns WHERE tenant_id = ? AND content LIKE ?",
-                    (tenant_id, f"%{query}%"),
-                ).fetchall()
-                conn.row_factory = None
+                async with self.db.pool.acquire() as conn:
+                    # First find matching IDs for reporting
+                    conn.row_factory = sqlite3.Row
+                    async with conn.execute(
+                        "SELECT id, content FROM turns WHERE tenant_id = ? AND content LIKE ?",
+                        (tenant_id, f"%{query}%"),
+                    ) as cursor:
+                        matches = await cursor.fetchall()
+                    conn.row_factory = None
 
-                if matches:
-                    match_ids = [m["id"] for m in matches]
-                    placeholders = ",".join("?" * len(match_ids))
-                    cursor = conn.execute(
-                        f"DELETE FROM turns WHERE id IN ({placeholders})",
-                        match_ids,
-                    )
-                    deleted_episodic += cursor.rowcount
-                    conn.commit()
+                    if matches:
+                        match_ids = [m["id"] for m in matches]
+                        placeholders = ",".join("?" * len(match_ids))
+                        cursor = await conn.execute(
+                            f"DELETE FROM turns WHERE id IN ({placeholders})",
+                            match_ids,
+                        )
+                        deleted_episodic += cursor.rowcount
+                        await conn.commit()
 
                 # Also delete from semantic memory
                 if forget_semantic:
@@ -834,19 +843,20 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
             # Delete by time range
             if before or after:
-                conditions = ["tenant_id = ?"]
-                params: list[Any] = [tenant_id]
-                if before:
-                    conditions.append("timestamp_iso < ?")
-                    params.append(before)
-                if after:
-                    conditions.append("timestamp_iso > ?")
-                    params.append(after)
+                async with self.db.pool.acquire() as conn:
+                    conditions = ["tenant_id = ?"]
+                    params: list[Any] = [tenant_id]
+                    if before:
+                        conditions.append("timestamp_iso < ?")
+                        params.append(before)
+                    if after:
+                        conditions.append("timestamp_iso > ?")
+                        params.append(after)
 
-                where = " AND ".join(conditions)
-                cursor = conn.execute(f"DELETE FROM turns WHERE {where}", params)
-                deleted_episodic += cursor.rowcount
-                conn.commit()
+                    where = " AND ".join(conditions)
+                    cursor = await conn.execute(f"DELETE FROM turns WHERE {where}", params)
+                    deleted_episodic += cursor.rowcount
+                    await conn.commit()
 
             logger.info(
                 "[MemoryNode] Forget completed: %d episodic, %d semantic entries removed",
@@ -872,27 +882,24 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         try:
             tenant_id = message.payload.get("tenant_id") or message.tenant_id or "default"
 
-            episodic_turns = self.db.get_turn_count(tenant_id)
-            episodic_sessions = self.db.get_session_count(tenant_id)
+            episodic_turns = await self.db.get_turn_count(tenant_id)
+            episodic_sessions = await self.db.get_session_count(tenant_id)
             semantic_count = self.semantic_db.count
             procedural_count = 0
             value_count = 0
 
             try:
-                proc_conn = self.procedural_db._get_conn()
-                row = proc_conn.execute(
-                    "SELECT COUNT(*) FROM skills WHERE tenant_id = ?", (tenant_id,)
-                ).fetchone()
-                procedural_count = row[0] if row else 0
+                async with self.procedural_db.pool.acquire() as conn:
+                    async with conn.execute(
+                        "SELECT COUNT(*) FROM skills WHERE tenant_id = ?", (tenant_id,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                        procedural_count = row[0] if row else 0
             except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 
             try:
-                val_conn = self.value_db._get_conn()
-                row = val_conn.execute(
-                    "SELECT COUNT(*) FROM rewards WHERE tenant_id = ?", (tenant_id,)
-                ).fetchone()
-                value_count = row[0] if row else 0
+                value_count = await self.value_db.get_signal_count(tenant_id)
             except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 

@@ -43,10 +43,13 @@ async def profile_memory() -> BenchmarkReport:
     for n in sizes:
         with tempfile.TemporaryDirectory() as tmp:
             mem = EpisodicMemory(db_path=Path(tmp) / "ep.db")
+            await mem.init_db()
             t0 = time.perf_counter()
             for i in range(n):
-                mem.store_turn(f"s{i % 10}", "user", f"Message number {i} " * 5)
+                await mem.store_turn(f"s{i % 10}", "user", f"Message number {i} " * 5)
             elapsed = time.perf_counter() - t0
+
+            await mem.close()
 
             db_size = (Path(tmp) / "ep.db").stat().st_size
 
@@ -116,9 +119,10 @@ async def profile_memory() -> BenchmarkReport:
 
     with tempfile.TemporaryDirectory() as tmp:
         proc_mem = ProceduralMemory(db_path=Path(tmp) / "proc.db")
+        await proc_mem.init_db()
         t0 = time.perf_counter()
         for i in range(500):
-            proc_mem.store_skill(
+            await proc_mem.store_skill(
                 "t1",
                 f"skill_{i}",
                 f"trigger {i}",
@@ -136,8 +140,10 @@ async def profile_memory() -> BenchmarkReport:
         )
 
         t0 = time.perf_counter()
-        proc_mem.find_skill("t1", "skill_250")
+        await proc_mem.find_skill("t1", "skill_250")
         search_time = time.perf_counter() - t0
+
+        await proc_mem.close()
         report.add(
             BenchmarkResult(
                 name="ProceduralMemory — skill search",
