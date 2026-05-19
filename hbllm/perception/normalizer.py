@@ -43,9 +43,9 @@ class EventNormalizer:
         # Limits (events per minute)
         self.BUDGETS = {
             PerceptionModality.SYSTEM: float("inf"),  # Unlimited (trusted)
-            PerceptionModality.APP: 300,              # Throttled (5/sec avg)
-            PerceptionModality.SENSOR: 60,            # Heavily sampled (1/sec avg)
-            PerceptionModality.INFERRED: 10,          # Very limited
+            PerceptionModality.APP: 300,  # Throttled (5/sec avg)
+            PerceptionModality.SENSOR: 60,  # Heavily sampled (1/sec avg)
+            PerceptionModality.INFERRED: 10,  # Very limited
         }
 
         # Deduplication windows (seconds) by modality
@@ -70,10 +70,7 @@ class EventNormalizer:
             self._modality_counts.clear()
             self._last_budget_reset = now
             # Also cleanup dedup cache
-            self._dedup_cache = {
-                k: v for k, v in self._dedup_cache.items()
-                if now - v < 60.0
-            }
+            self._dedup_cache = {k: v for k, v in self._dedup_cache.items() if now - v < 60.0}
 
         # 2. Enforce Budgets
         mod = event.modality

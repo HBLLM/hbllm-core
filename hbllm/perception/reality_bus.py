@@ -26,18 +26,18 @@ logger = logging.getLogger(__name__)
 class PerceptionModality(StrEnum):
     """Trust tiers for incoming perception events."""
 
-    SYSTEM = "system"      # High trust, unlimited budget (e.g., OS idle state)
-    APP = "app"            # Medium trust, throttled (e.g., calendar, VSCode)
-    SENSOR = "sensor"      # Low trust/noisy, sampled (e.g., webcam motion)
+    SYSTEM = "system"  # High trust, unlimited budget (e.g., OS idle state)
+    APP = "app"  # Medium trust, throttled (e.g., calendar, VSCode)
+    SENSOR = "sensor"  # Low trust/noisy, sampled (e.g., webcam motion)
     INFERRED = "inferred"  # AI-generated, heavily rate-limited
 
 
 class EventOrigin(StrEnum):
     """Where did this event originate from?"""
 
-    EXTERNAL = "external"    # Physical world / user
-    SYSTEM = "system"        # OS / Device
-    AUTONOMY = "autonomy"    # HBLLM AutonomyCore (danger: feedback loop risk)
+    EXTERNAL = "external"  # Physical world / user
+    SYSTEM = "system"  # OS / Device
+    AUTONOMY = "autonomy"  # HBLLM AutonomyCore (danger: feedback loop risk)
 
 
 @dataclass
@@ -49,20 +49,20 @@ class PerceptionEvent:
     entity_id: str = "unknown"  # What entity does this describe? (e.g. 'user_1', 'display_0')
 
     # Classification
-    event_type: str = ""        # e.g., "activity", "schedule", "motion"
-    sub_type: str = ""          # e.g., "window_focus", "meeting_start"
+    event_type: str = ""  # e.g., "activity", "schedule", "motion"
+    sub_type: str = ""  # e.g., "window_focus", "meeting_start"
     modality: PerceptionModality = PerceptionModality.APP
     origin: EventOrigin = EventOrigin.EXTERNAL
 
     # Confidence & Truth
-    confidence: float = 1.0     # 0.0 to 1.0 (how sure are we this happened?)
-    source_trust: float = 1.0   # 0.0 to 1.0 (how reliable is the sensor?)
-    priority_hint: int = 0      # 0 (low) to 100 (critical)
+    confidence: float = 1.0  # 0.0 to 1.0 (how sure are we this happened?)
+    source_trust: float = 1.0  # 0.0 to 1.0 (how reliable is the sensor?)
+    priority_hint: int = 0  # 0 (low) to 100 (critical)
 
     # Ordering
     event_timestamp: float = field(default_factory=time.time)
     ingest_timestamp: float = 0.0
-    logical_clock: int = 0      # Assigned by RealityEventBus
+    logical_clock: int = 0  # Assigned by RealityEventBus
 
     # Payload
     payload: dict[str, Any] = field(default_factory=dict)

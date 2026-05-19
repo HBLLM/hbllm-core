@@ -65,7 +65,7 @@ class DynamicValueArbitrator:
         self.policies = policies or [
             ResourceConservationPolicy(),
             UrgencyOverridePolicy(),
-            InterruptionPenaltyPolicy()
+            InterruptionPenaltyPolicy(),
         ]
 
     def compute_utility(self, base_utility: float, context: dict[str, Any]) -> float:

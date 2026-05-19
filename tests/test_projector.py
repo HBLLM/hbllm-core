@@ -16,12 +16,11 @@ from hbllm.perception.reality_bus import PerceptionEvent
 def base_state():
     engine = WorldStateEngine()
     event = PerceptionEvent(
-        entity_id="device_1",
-        event_type="status",
-        payload={"battery": 100, "state": "idle"}
+        entity_id="device_1", event_type="status", payload={"battery": 100, "state": "idle"}
     )
     # Simulate an async call locally for test setup
     import asyncio
+
     asyncio.run(engine.handle_normalized_event(event))
     return engine
 

@@ -19,21 +19,21 @@ def test_calculate_causal_probability(temp_causal_graph):
     """Test the causal scoring function with various inputs."""
     # Strong causal link (recent, high trust, exact match, system intervention)
     strong_prob = temp_causal_graph.calculate_causal_probability(
-        temporal_distance_s=2.0,       # Very recent
-        source_trust=1.0,              # High trust
-        event_match_score=0.9,         # Expected outcome
-        state_alignment_score=1.0,     # Matches world state perfectly
-        intervention_signal_strength=1.0 # The system literally just pushed a button
+        temporal_distance_s=2.0,  # Very recent
+        source_trust=1.0,  # High trust
+        event_match_score=0.9,  # Expected outcome
+        state_alignment_score=1.0,  # Matches world state perfectly
+        intervention_signal_strength=1.0,  # The system literally just pushed a button
     )
     assert strong_prob > 0.8
 
     # Weak causal link (long time ago, passive observation)
     weak_prob = temp_causal_graph.calculate_causal_probability(
-        temporal_distance_s=150.0,     # Too old
-        source_trust=0.5,              # Noisy sensor
-        event_match_score=0.1,         # Unrelated
-        state_alignment_score=0.2,     # Out of sync
-        intervention_signal_strength=0.0 # System did nothing
+        temporal_distance_s=150.0,  # Too old
+        source_trust=0.5,  # Noisy sensor
+        event_match_score=0.1,  # Unrelated
+        state_alignment_score=0.2,  # Out of sync
+        intervention_signal_strength=0.0,  # System did nothing
     )
     assert weak_prob < temp_causal_graph.hallucination_threshold
 
@@ -48,7 +48,7 @@ def test_hallucination_thresholding(temp_causal_graph):
         source_trust=0.3,
         event_match_score=0.1,
         state_alignment_score=0.0,
-        intervention_signal_strength=0.0
+        intervention_signal_strength=0.0,
     )
     assert link1 is None
 
@@ -60,7 +60,7 @@ def test_hallucination_thresholding(temp_causal_graph):
         source_trust=1.0,
         event_match_score=1.0,
         state_alignment_score=1.0,
-        intervention_signal_strength=1.0
+        intervention_signal_strength=1.0,
     )
     assert link2 is not None
     assert link2.probability > 0.8
@@ -76,7 +76,7 @@ def test_causal_graph_queries(temp_causal_graph):
         event_match_score=0.8,
         state_alignment_score=0.8,
         intervention_signal_strength=0.9,
-        metadata={"reason": "test_chain_1"}
+        metadata={"reason": "test_chain_1"},
     )
 
     temp_causal_graph.infer_and_store(
@@ -86,8 +86,8 @@ def test_causal_graph_queries(temp_causal_graph):
         source_trust=0.9,
         event_match_score=0.9,
         state_alignment_score=0.9,
-        intervention_signal_strength=0.1, # passive trigger
-        metadata={"reason": "test_chain_2"}
+        intervention_signal_strength=0.1,  # passive trigger
+        metadata={"reason": "test_chain_2"},
     )
 
     # Check what caused event_B

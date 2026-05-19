@@ -43,7 +43,9 @@ class EpistemicCalibrationTracker:
         """Get epistemic calibration for a domain (default 0.7)."""
         return self._calibration_scores.get(domain, 0.7)
 
-    def record_verification(self, domain: str, predicted_outcome: Any, verified_outcome: Any, match: bool) -> None:
+    def record_verification(
+        self, domain: str, predicted_outcome: Any, verified_outcome: Any, match: bool
+    ) -> None:
         """Update epistemic calibration based on how well the simulation matched reality."""
         current = self.get_calibration(domain)
         # EWMA approach to epistemic calibration
@@ -72,7 +74,7 @@ class CognitiveStressMonitor:
         return self.governance.get_cognitive_pressure(
             memory_pressure=self.memory_pressure,
             active_goals=self.active_plans,
-            queue_depth=self.queue_backlog
+            queue_depth=self.queue_backlog,
         )
 
 
@@ -88,7 +90,5 @@ class SelfStateEngine:
     def get_cognitive_pressure(self) -> float:
         """Get the current cognitive stress level (0.0 to 1.0)."""
         return self.stress.update_stress(
-            self.stress.active_plans,
-            self.stress.queue_backlog,
-            self.stress.memory_pressure
+            self.stress.active_plans, self.stress.queue_backlog, self.stress.memory_pressure
         )

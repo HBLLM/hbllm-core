@@ -50,13 +50,9 @@ class EventLog:
             """)
             # Indexes for fast replay and querying
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_logical_clock "
-                "ON perception_events(logical_clock)"
+                "CREATE INDEX IF NOT EXISTS idx_logical_clock ON perception_events(logical_clock)"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_entity_id "
-                "ON perception_events(entity_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_id ON perception_events(entity_id)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_event_timestamp "
                 "ON perception_events(event_timestamp)"
@@ -111,7 +107,5 @@ class EventLog:
     def get_latest_clock(self) -> int:
         """Get the highest logical clock currently stored."""
         with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT MAX(logical_clock) FROM perception_events"
-            ).fetchone()
+            row = conn.execute("SELECT MAX(logical_clock) FROM perception_events").fetchone()
             return row[0] if row and row[0] is not None else 0

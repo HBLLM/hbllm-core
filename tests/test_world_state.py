@@ -36,7 +36,7 @@ class TestWorldStateEngine:
             origin=EventOrigin.SYSTEM,
             confidence=0.9,
             source_trust=1.0,
-            payload={"app": "terminal"}
+            payload={"app": "terminal"},
         )
 
         await engine.handle_normalized_event(event)
@@ -56,7 +56,7 @@ class TestWorldStateEngine:
             event_type="presence",
             confidence=1.0,
             source_trust=1.0,
-            event_timestamp=time.time() - 3600.0  # 1 hour ago
+            event_timestamp=time.time() - 3600.0,  # 1 hour ago
         )
         await engine.handle_normalized_event(event)
 
@@ -78,14 +78,14 @@ class TestWorldStateEngine:
             event_type="status",
             confidence=0.8,
             payload={"status": "online"},
-            event_timestamp=time.time()
+            event_timestamp=time.time(),
         )
         e2 = PerceptionEvent(
             entity_id="node_b",
             event_type="status",
             confidence=1.0,
             payload={"status": "offline"},
-            event_timestamp=time.time()
+            event_timestamp=time.time(),
         )
         temp_event_log.append(e1)
         temp_event_log.append(e2)

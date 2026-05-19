@@ -13,9 +13,9 @@ from hbllm.brain.autonomy.task_graph import TaskNode
 class PredictionOrigin(StrEnum):
     """The epistemic origin of a simulated prediction."""
 
-    HISTORICAL = "historical"   # Derived from CausalGraph records
-    INFERRED = "inferred"       # Derived from deterministic rules or tight correlation
-    SPECULATIVE = "speculative" # Hallucinated by LLM due to novel domain
+    HISTORICAL = "historical"  # Derived from CausalGraph records
+    INFERRED = "inferred"  # Derived from deterministic rules or tight correlation
+    SPECULATIVE = "speculative"  # Hallucinated by LLM due to novel domain
 
 
 @dataclass
@@ -23,11 +23,13 @@ class FutureWorldState:
     """A projected future state of the world, strictly isolated from WorldState."""
 
     state_id: str = field(default_factory=lambda: f"fws_{uuid.uuid4().hex[:12]}")
-    base_clock: int = 0         # The logical clock of the WorldState this branches from
-    mutations: dict[str, Any] = field(default_factory=dict) # Entity deltas applied over the base state
-    predicted_confidence: float = 1.0 # Overall confidence in this future state
+    base_clock: int = 0  # The logical clock of the WorldState this branches from
+    mutations: dict[str, Any] = field(
+        default_factory=dict
+    )  # Entity deltas applied over the base state
+    predicted_confidence: float = 1.0  # Overall confidence in this future state
     prediction_origin: PredictionOrigin = PredictionOrigin.INFERRED
-    risk_score: float = 0.0     # 0.0 to 1.0 composite risk
+    risk_score: float = 0.0  # 0.0 to 1.0 composite risk
 
     def to_dict(self) -> dict[str, Any]:
         return {

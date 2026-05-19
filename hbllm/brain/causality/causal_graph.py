@@ -87,7 +87,7 @@ class CausalGraph:
         source_trust: float,
         event_match_score: float,
         state_alignment_score: float,
-        intervention_signal_strength: float
+        intervention_signal_strength: float,
     ) -> float:
         """Probabilistic scoring function for causality.
 
@@ -102,11 +102,11 @@ class CausalGraph:
         time_decay = max(0.0, 1.0 - (temporal_distance_s / 120.0))
 
         base_prob = (
-            time_decay * 0.3 +
-            intervention_signal_strength * 0.3 +
-            event_match_score * 0.2 +
-            source_trust * 0.1 +
-            state_alignment_score * 0.1
+            time_decay * 0.3
+            + intervention_signal_strength * 0.3
+            + event_match_score * 0.2
+            + source_trust * 0.1
+            + state_alignment_score * 0.1
         )
         return min(1.0, max(0.0, base_prob))
 
@@ -119,7 +119,7 @@ class CausalGraph:
         event_match_score: float,
         state_alignment_score: float,
         intervention_signal_strength: float,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
     ) -> CausalLink | None:
         """Calculate probability and store link if above threshold."""
         prob = self.calculate_causal_probability(
@@ -127,18 +127,17 @@ class CausalGraph:
             source_trust,
             event_match_score,
             state_alignment_score,
-            intervention_signal_strength
+            intervention_signal_strength,
         )
 
         if prob < self.hallucination_threshold:
-            logger.debug("Discarded weak causal link %s -> %s (prob: %.2f)", source_id, target_id, prob)
+            logger.debug(
+                "Discarded weak causal link %s -> %s (prob: %.2f)", source_id, target_id, prob
+            )
             return None
 
         link = CausalLink(
-            source_id=source_id,
-            target_id=target_id,
-            probability=prob,
-            metadata=metadata or {}
+            source_id=source_id, target_id=target_id, probability=prob, metadata=metadata or {}
         )
 
         self._insert(link)
@@ -157,8 +156,8 @@ class CausalGraph:
                     link.target_id,
                     link.probability,
                     link.created_at,
-                    json.dumps(link.metadata)
-                )
+                    json.dumps(link.metadata),
+                ),
             )
 
     def get_causes(self, target_id: str) -> list[CausalLink]:
@@ -167,7 +166,7 @@ class CausalGraph:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM causal_links WHERE target_id = ? ORDER BY probability DESC",
-                (target_id,)
+                (target_id,),
             ).fetchall()
             return [self._row_to_link(r) for r in rows]
 
@@ -177,7 +176,7 @@ class CausalGraph:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM causal_links WHERE source_id = ? ORDER BY probability DESC",
-                (source_id,)
+                (source_id,),
             ).fetchall()
             return [self._row_to_link(r) for r in rows]
 
@@ -188,5 +187,5 @@ class CausalGraph:
             target_id=row["target_id"],
             probability=row["probability"],
             created_at=row["created_at"],
-            metadata=json.loads(row["metadata"] or "{}")
+            metadata=json.loads(row["metadata"] or "{}"),
         )

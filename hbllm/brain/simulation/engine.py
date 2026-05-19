@@ -22,7 +22,9 @@ class ConsequenceEstimator:
         self.causal_graph = causal_graph
         self.speculative_calls_this_hour = 0
 
-    def estimate(self, task: TaskNode, projected_state: ProjectedState) -> tuple[dict[str, dict[str, Any]], PredictionOrigin, float]:
+    def estimate(
+        self, task: TaskNode, projected_state: ProjectedState
+    ) -> tuple[dict[str, dict[str, Any]], PredictionOrigin, float]:
         """Estimate state changes if this task executes.
 
         Returns:
@@ -45,7 +47,9 @@ class ConsequenceEstimator:
         spec_mutations = self._speculative_hallucination(task)
         return spec_mutations, PredictionOrigin.SPECULATIVE, 0.5
 
-    def _deterministic_rules(self, task: TaskNode, projected_state: ProjectedState) -> dict[str, dict[str, Any]]:
+    def _deterministic_rules(
+        self, task: TaskNode, projected_state: ProjectedState
+    ) -> dict[str, dict[str, Any]]:
         """Hardcoded logic for known system constraints."""
         if task.action_topic == "system.sleep":
             return {"system_state": {"status": "sleeping"}}
@@ -65,12 +69,16 @@ class ConsequenceEstimator:
 class PredictiveSimulationEngine:
     """Core engine for tiered future simulation."""
 
-    def __init__(self, world_state: WorldStateEngine, causal_graph: CausalGraph, risk_engine: RiskEngine) -> None:
+    def __init__(
+        self, world_state: WorldStateEngine, causal_graph: CausalGraph, risk_engine: RiskEngine
+    ) -> None:
         self.world_state = world_state
         self.estimator = ConsequenceEstimator(causal_graph)
         self.risk_engine = risk_engine
 
-    def simulate_plan(self, goal: Goal, tasks: list[TaskNode], tier: int = 1) -> CounterfactualScenario:
+    def simulate_plan(
+        self, goal: Goal, tasks: list[TaskNode], tier: int = 1
+    ) -> CounterfactualScenario:
         """Simulate a plan and return the scored scenario."""
         projected = ProjectedState(base_state=self.world_state)
 
@@ -85,7 +93,7 @@ class PredictiveSimulationEngine:
                 goal_id=goal.goal_id,
                 proposed_tasks=tasks,
                 predicted_state=future_state,
-                utility_score=0.5
+                utility_score=0.5,
             )
             self.risk_engine.evaluate_scenario(scenario)
             return scenario
@@ -99,7 +107,10 @@ class PredictiveSimulationEngine:
             # Downgrade overall origin to worst case
             if origin == PredictionOrigin.SPECULATIVE:
                 overall_origin = PredictionOrigin.SPECULATIVE
-            elif origin == PredictionOrigin.HISTORICAL and overall_origin != PredictionOrigin.SPECULATIVE:
+            elif (
+                origin == PredictionOrigin.HISTORICAL
+                and overall_origin != PredictionOrigin.SPECULATIVE
+            ):
                 overall_origin = PredictionOrigin.HISTORICAL
 
             overall_confidence *= conf
@@ -117,7 +128,7 @@ class PredictiveSimulationEngine:
             proposed_tasks=tasks,
             predicted_state=future_state,
             utility_score=0.8,
-            risk_categories=risks
+            risk_categories=risks,
         )
 
         self.risk_engine.evaluate_scenario(scenario)

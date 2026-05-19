@@ -81,8 +81,12 @@ class TestEventNormalizer:
         normalizer.subscribe(received.append)
 
         # Same signature
-        e1 = PerceptionEvent(entity_id="u1", event_type="type1", sub_type="sub1", modality=PerceptionModality.APP)
-        e2 = PerceptionEvent(entity_id="u1", event_type="type1", sub_type="sub1", modality=PerceptionModality.APP)
+        e1 = PerceptionEvent(
+            entity_id="u1", event_type="type1", sub_type="sub1", modality=PerceptionModality.APP
+        )
+        e2 = PerceptionEvent(
+            entity_id="u1", event_type="type1", sub_type="sub1", modality=PerceptionModality.APP
+        )
 
         await normalizer.handle_raw_event(e1)
         await normalizer.handle_raw_event(e2)
@@ -102,7 +106,7 @@ class TestEventNormalizer:
                 entity_id=f"u{i}",
                 event_type="motion",
                 sub_type=f"cam_{i}",
-                modality=PerceptionModality.SENSOR
+                modality=PerceptionModality.SENSOR,
             )
             await normalizer.handle_raw_event(e)
 
@@ -120,7 +124,7 @@ class TestEventNormalizer:
                 entity_id=f"sys_{i}",
                 event_type="os",
                 sub_type=f"evt_{i}",
-                modality=PerceptionModality.SYSTEM
+                modality=PerceptionModality.SYSTEM,
             )
             await normalizer.handle_raw_event(e)
 

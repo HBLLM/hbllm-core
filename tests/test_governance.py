@@ -35,7 +35,9 @@ def test_cognitive_pressure(governance):
     assert profile["allow_speculation"] is True
 
     # High pressure
-    pressure = governance.get_cognitive_pressure(memory_pressure=0.9, active_goals=15, queue_depth=60)
+    pressure = governance.get_cognitive_pressure(
+        memory_pressure=0.9, active_goals=15, queue_depth=60
+    )
     assert pressure > 0.75
 
     profile = governance.get_degradation_profile(pressure)

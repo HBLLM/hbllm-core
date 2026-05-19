@@ -30,11 +30,14 @@ class ProjectedState:
 
         return None
 
-    def update_entity(self, entity_id: str, new_properties: dict[str, Any], confidence: float = 1.0) -> None:
+    def update_entity(
+        self, entity_id: str, new_properties: dict[str, Any], confidence: float = 1.0
+    ) -> None:
         """Apply a simulated mutation to an entity."""
         entity = self.get_entity_state(entity_id)
         if not entity:
             from hbllm.brain.world_state import EntityState
+
             entity = EntityState(entity_id=entity_id, confidence=confidence)
 
         entity.properties.update(new_properties)
@@ -49,12 +52,12 @@ class ProjectedState:
                 "properties": v.properties,
                 "confidence": v.confidence,
                 "last_updated": v.last_updated,
-                "source_set": list(v.source_set)
+                "source_set": list(v.source_set),
             }
-            
+
         return FutureWorldState(
             base_clock=self.base_clock,
             mutations=serialized_mutations,
             predicted_confidence=1.0,
-            prediction_origin=origin
+            prediction_origin=origin,
         )

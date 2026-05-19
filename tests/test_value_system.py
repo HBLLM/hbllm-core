@@ -30,10 +30,7 @@ def test_interruption_penalty():
     """Ensure interruption penalty divides utility if user is focused."""
     arbitrator = DynamicValueArbitrator(policies=[InterruptionPenaltyPolicy()])
 
-    context = {
-        "user_is_focused": True,
-        "action_interrupts_user": True
-    }
+    context = {"user_is_focused": True, "action_interrupts_user": True}
 
     utility = arbitrator.compute_utility(1.0, context)
     assert utility == 0.125  # 1.0 / 8.0
