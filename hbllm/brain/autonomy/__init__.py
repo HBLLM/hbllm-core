@@ -9,6 +9,7 @@ Components
 - ``CognitiveStateMachine`` — hierarchical state control (brainstem)
 - ``AttentionSystem`` — multi-factor event prioritization
 - ``AutonomyCore`` — hybrid event+tick cognitive heartbeat
+- ``TaskGraphRuntime`` — persistent DAG-based goal execution
 """
 
 from __future__ import annotations
@@ -22,9 +23,12 @@ __all__ = [
     "CognitiveState",
     "CognitiveStateCategory",
     "CognitiveStateMachine",
+    "Goal",
     "IncrementalContextWindow",
     "InternalThought",
     "ScoredEvent",
+    "TaskGraphRuntime",
+    "TaskNode",
     "TickProfile",
 ]
 
@@ -63,6 +67,11 @@ def __getattr__(name: str):  # noqa: ANN202
 
     if name in ("AutonomyCore", "InternalThought"):
         from hbllm.brain.autonomy.loop import AutonomyCore, InternalThought
+
+        return locals()[name]
+
+    if name in ("Goal", "TaskGraphRuntime", "TaskNode"):
+        from hbllm.brain.autonomy.task_graph import Goal, TaskGraphRuntime, TaskNode
 
         return locals()[name]
 
