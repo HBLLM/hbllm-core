@@ -11,6 +11,7 @@ import logging
 from hbllm.brain.autonomy.task_graph import Goal, TaskGraphRuntime, TaskNode
 from hbllm.brain.simulation.engine import PredictiveSimulationEngine
 from hbllm.brain.simulation.models import CounterfactualScenario
+from hbllm.brain.governance import CognitiveGovernanceEngine
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,10 @@ logger = logging.getLogger(__name__)
 class AnticipatoryPlanner:
     """Plans goals by forecasting consequences and arbitrating risk/utility."""
 
-    def __init__(self, simulator: PredictiveSimulationEngine, runtime: TaskGraphRuntime) -> None:
+    def __init__(self, simulator: PredictiveSimulationEngine, runtime: TaskGraphRuntime, governance: CognitiveGovernanceEngine | None = None) -> None:
         self.simulator = simulator
         self.runtime = runtime
+        self.governance = governance or CognitiveGovernanceEngine()
 
     def plan_and_execute(self, goal: Goal, strategies: list[list[TaskNode]], tier: int = 1) -> bool:
         """Evaluate multiple strategies, select the safest/highest utility, and execute.
@@ -35,6 +37,22 @@ class AnticipatoryPlanner:
         """
         if not strategies:
             logger.warning("No strategies provided for goal %s", goal.name)
+            return False
+
+        # 1. Apply Cognitive Governance
+        pressure = self.governance.get_cognitive_pressure(0.5, 5, 20) # Pseudo-metrics for now
+        profile = self.governance.get_degradation_profile(pressure)
+        
+        # Override tier based on degradation profile
+        if profile.get("force_heuristic"):
+            tier = 0
+            logger.warning("Cognitive pressure high (%.2f). Downgrading to Tier 0 heuristic simulation.", pressure)
+        elif profile.get("max_simulation_depth", 3) < tier:
+            tier = profile["max_simulation_depth"]
+            
+        # Abstract LLM budget check
+        if tier > 0 and not self.governance.consume_llm_call():
+            logger.error("LLM budget exceeded. Cannot perform deep simulation for goal %s.", goal.name)
             return False
 
         scored_scenarios: list[CounterfactualScenario] = []

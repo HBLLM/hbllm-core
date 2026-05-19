@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from hbllm.brain.simulation.models import CounterfactualScenario
+from hbllm.brain.self_state import SelfStateEngine
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ class RiskProfile:
 class RiskEngine:
     """Evaluates utility and explicitly models risk for proposed scenarios."""
 
-    def __init__(self, profile: RiskProfile | None = None) -> None:
+    def __init__(self, profile: RiskProfile | None = None, self_state: SelfStateEngine | None = None) -> None:
         self.profile = profile or RiskProfile()
+        self.self_state = self_state
 
     def evaluate_scenario(self, scenario: CounterfactualScenario) -> float:
         """Score a scenario. Higher score means better utility/lower risk."""
@@ -52,6 +54,23 @@ class RiskEngine:
             return 0.0
 
         utility = scenario.utility_score
+
+        # 1. Epistemic Calibration & Tool Reliability injection
+        if self.self_state:
+            # Check reliability of proposed tools
+            lowest_reliability = 1.0
+            for task in scenario.proposed_tasks:
+                rel = self.self_state.tools.get_reliability(task.action_topic)
+                lowest_reliability = min(lowest_reliability, rel)
+
+            # Inverse of reliability contributes to RELIABILITY risk
+            current_rel_risk = scenario.risk_categories.get(RiskCategory.RELIABILITY.value, 0.0)
+            scenario.risk_categories[RiskCategory.RELIABILITY.value] = max(current_rel_risk, 1.0 - lowest_reliability)
+
+            # Add cognitive stress risk
+            stress = self.self_state.get_cognitive_pressure()
+            if stress > 0.6:
+                scenario.risk_categories[RiskCategory.COGNITIVE.value] = stress
 
         composite_risk = 0.0
         categories_count = 0
