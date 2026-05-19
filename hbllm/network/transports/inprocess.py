@@ -39,8 +39,8 @@ class InProcessTransport(Transport):
         super().__init__(transport_id=transport_id, transport_type="inprocess")
         self._subscriptions: dict[str, list[Subscription]] = defaultdict(list)
         self._pending_requests: dict[str, asyncio.Future[Message]] = {}
-        self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = (
-            asyncio.PriorityQueue(maxsize=queue_size)
+        self._queue: asyncio.PriorityQueue[tuple[int, float, str, Message]] = asyncio.PriorityQueue(
+            maxsize=queue_size
         )
         self._queue_size = queue_size
         self._running = False
@@ -121,9 +121,7 @@ class InProcessTransport(Transport):
         priority_key = -message.priority.value
         await self._queue.put((priority_key, float(self._msg_counter), topic, message))
 
-    async def send_request(
-        self, topic: str, message: Message, timeout: float = 30.0
-    ) -> Message:
+    async def send_request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
@@ -205,9 +203,7 @@ class InProcessTransport(Transport):
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run(
-                    s: Subscription = sub, t: str = topic, m: Message = message
-                ) -> None:
+                async def _run(s: Subscription = sub, t: str = topic, m: Message = message) -> None:
                     async with self._handler_semaphore:
                         start = time.monotonic()
                         try:
@@ -220,9 +216,7 @@ class InProcessTransport(Transport):
                                 await self.send(response.topic, response)
                         except Exception:
                             self.metrics.record_error()
-                            logger.exception(
-                                "Error in handler for topic '%s', message %s", t, m.id
-                            )
+                            logger.exception("Error in handler for topic '%s', message %s", t, m.id)
 
                 task = asyncio.create_task(_run())
                 self._active_tasks.add(task)

@@ -113,8 +113,8 @@ class MDNSDiscovery:
         self._peers: dict[str, DiscoveredPeer] = {}
 
         # Callbacks
-        self.on_peer_found: Any | None = None   # async fn(DiscoveredPeer)
-        self.on_peer_lost: Any | None = None    # async fn(str node_id)
+        self.on_peer_found: Any | None = None  # async fn(DiscoveredPeer)
+        self.on_peer_lost: Any | None = None  # async fn(str node_id)
 
         # ZeroConf internals
         self._zeroconf: Any | None = None
@@ -170,7 +170,9 @@ class MDNSDiscovery:
 
         logger.info(
             "mDNS: broadcasting '%s' on %s:%d (capabilities: %s)",
-            self.node_id, local_ip, self.api_port,
+            self.node_id,
+            local_ip,
+            self.api_port,
             ", ".join(self.capabilities) or "none",
         )
 
@@ -217,9 +219,7 @@ class MDNSDiscovery:
         elif state_change == ServiceStateChange.Removed:
             asyncio.ensure_future(self._handle_service_removed(name))
 
-    async def _handle_service_added(
-        self, zeroconf: Any, service_type: str, name: str
-    ) -> None:
+    async def _handle_service_added(self, zeroconf: Any, service_type: str, name: str) -> None:
         """Process a newly discovered service."""
         from zeroconf import ServiceInfo
 
@@ -262,7 +262,10 @@ class MDNSDiscovery:
         if is_new:
             logger.info(
                 "mDNS: discovered peer '%s' at %s:%d (role=%s, caps=%s)",
-                node_id, host, peer.port, peer.role,
+                node_id,
+                host,
+                peer.port,
+                peer.role,
                 ", ".join(capabilities) or "none",
             )
             if self.on_peer_found:
@@ -295,7 +298,8 @@ class MDNSDiscovery:
                 await asyncio.sleep(self.peer_timeout / 2)
                 now = time.monotonic()
                 stale = [
-                    nid for nid, peer in self._peers.items()
+                    nid
+                    for nid, peer in self._peers.items()
                     if (now - peer.last_seen) > self.peer_timeout
                 ]
                 for nid in stale:

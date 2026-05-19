@@ -45,9 +45,9 @@ class GossipEntry(BaseModel):
     """A single entry in the gossip state table."""
 
     node_id: str
-    key: str              # e.g., "capabilities", "health", "role"
-    value: Any            # The actual data
-    version: int = 0      # Monotonically increasing version per entry
+    key: str  # e.g., "capabilities", "health", "role"
+    value: Any  # The actual data
+    version: int = 0  # Monotonically increasing version per entry
     timestamp: float = Field(default_factory=time.monotonic)
     originator: str = ""  # Who first published this entry
 
@@ -58,7 +58,7 @@ class GossipMessage(BaseModel):
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:12])
     source_node: str
     entries: list[GossipEntry] = Field(default_factory=list)
-    ttl: int = 3          # Max remaining hops
+    ttl: int = 3  # Max remaining hops
     created_at: float = Field(default_factory=time.monotonic)
 
 
@@ -159,7 +159,9 @@ class GossipSync:
         self._gossip_task = asyncio.create_task(self._gossip_loop())
         logger.info(
             "GossipSync started (node=%s, interval=%.1fs, max_hops=%d)",
-            self.node_id, self.gossip_interval, self.max_hops,
+            self.node_id,
+            self.gossip_interval,
+            self.max_hops,
         )
 
     async def stop(self) -> None:
@@ -240,7 +242,9 @@ class GossipSync:
         if merged_count > 0:
             logger.debug(
                 "Gossip: merged %d entries from %s (ttl=%d)",
-                merged_count, message.source_node, message.ttl,
+                merged_count,
+                message.source_node,
+                message.ttl,
             )
 
         # Re-broadcast with decremented TTL
@@ -257,7 +261,7 @@ class GossipSync:
 
         # Update NodeState peer info
         if self._node_state and entry.key == "capabilities":
-            from hbllm.network.node_state import PeerInfo, NodeRole
+            from hbllm.network.node_state import NodeRole, PeerInfo
 
             capabilities = entry.value if isinstance(entry.value, list) else []
             role_entry = self._state.get((entry.node_id, "role"))
@@ -270,12 +274,14 @@ class GossipSync:
             tier_entry = self._state.get((entry.node_id, "device_tier"))
             device_tier = tier_entry.value if tier_entry else "server"
 
-            self._node_state.register_peer(PeerInfo(
-                node_id=entry.node_id,
-                role=role,
-                capabilities=capabilities,
-                device_tier=device_tier,
-            ))
+            self._node_state.register_peer(
+                PeerInfo(
+                    node_id=entry.node_id,
+                    role=role,
+                    capabilities=capabilities,
+                    device_tier=device_tier,
+                )
+            )
 
         # Update CapabilityRegistry
         if self._capability_registry and entry.key == "capabilities":
@@ -366,8 +372,7 @@ class GossipSync:
         """Remove entries older than entry_ttl."""
         now = time.monotonic()
         stale_keys = [
-            k for k, entry in self._state.items()
-            if (now - entry.timestamp) > self.entry_ttl
+            k for k, entry in self._state.items() if (now - entry.timestamp) > self.entry_ttl
         ]
         for k in stale_keys:
             self._state.pop(k, None)
@@ -397,11 +402,7 @@ class GossipSync:
 
     def get_state_for_node(self, node_id: str) -> dict[str, Any]:
         """Get all gossip state for a specific node."""
-        return {
-            key: entry.value
-            for (nid, key), entry in self._state.items()
-            if nid == node_id
-        }
+        return {key: entry.value for (nid, key), entry in self._state.items() if nid == node_id}
 
     def get_stats(self) -> dict[str, Any]:
         """Get gossip engine statistics."""

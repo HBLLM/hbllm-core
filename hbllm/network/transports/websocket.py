@@ -58,7 +58,11 @@ class WebSocketTransport(Transport):
         self._state = TransportState.CONNECTING
         self.metrics.uptime_start = time.monotonic()
         self._connection_task = asyncio.create_task(self._connection_loop())
-        logger.info("WebSocketTransport '%s' starting connection to %s", self.transport_id, self.upstream_url)
+        logger.info(
+            "WebSocketTransport '%s' starting connection to %s",
+            self.transport_id,
+            self.upstream_url,
+        )
 
     async def stop(self) -> None:
         """Disconnect and clean up."""
@@ -104,9 +108,7 @@ class WebSocketTransport(Transport):
             self.metrics.record_error()
             logger.error("WebSocketTransport send failed: %s", e)
 
-    async def send_request(
-        self, topic: str, message: Message, timeout: float = 30.0
-    ) -> Message:
+    async def send_request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request upstream and wait for a correlated response."""
         future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
@@ -154,6 +156,7 @@ class WebSocketTransport(Transport):
         connect_kwargs: dict[str, Any] = {"extra_headers": headers}
         try:
             import websockets.version
+
             if int(websockets.version.version.split(".")[0]) >= 14:
                 connect_kwargs = {"additional_headers": headers}
         except Exception:
@@ -175,11 +178,13 @@ class WebSocketTransport(Transport):
                     # Advertise capabilities
                     if self.local_capabilities:
                         await self._ws.send(
-                            json.dumps({
-                                "type": "register_capabilities",
-                                "tools": self.local_capabilities,
-                                "device_tier": self.device_tier,
-                            })
+                            json.dumps(
+                                {
+                                    "type": "register_capabilities",
+                                    "tools": self.local_capabilities,
+                                    "device_tier": self.device_tier,
+                                }
+                            )
                         )
 
                     await self._read_loop()
@@ -188,7 +193,9 @@ class WebSocketTransport(Transport):
                 break
             except Exception as e:
                 self.metrics.reconnections += 1
-                logger.warning("WebSocketTransport connection lost: %s. Retrying in %.0fs...", e, retry_delay)
+                logger.warning(
+                    "WebSocketTransport connection lost: %s. Retrying in %.0fs...", e, retry_delay
+                )
 
             self._state = TransportState.RECONNECTING
             await asyncio.sleep(retry_delay)

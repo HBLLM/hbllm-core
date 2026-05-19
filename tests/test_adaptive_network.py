@@ -27,7 +27,6 @@ from hbllm.network.routing.ril import RoutingIntelligenceLayer
 from hbllm.network.transports.base import TransportMetrics, TransportState
 from hbllm.network.transports.inprocess import InProcessTransport
 
-
 # ──────────────────────────────────────────────
 # ExecutionContext tests
 # ──────────────────────────────────────────────
@@ -285,8 +284,12 @@ class TestNodeStateEngine:
 
     def test_transport_tracking(self):
         e = NodeStateEngine("n")
-        e.update_transport(TransportInfo(transport_id="ipc", transport_type="inprocess", state="connected"))
-        e.update_transport(TransportInfo(transport_id="ws", transport_type="websocket", state="connected"))
+        e.update_transport(
+            TransportInfo(transport_id="ipc", transport_type="inprocess", state="connected")
+        )
+        e.update_transport(
+            TransportInfo(transport_id="ws", transport_type="websocket", state="connected")
+        )
         snap = e.snapshot()
         assert len(snap.active_transports) == 2
         e.remove_transport("ws")
@@ -464,9 +467,17 @@ class TestGossipSync:
         msg = GossipMessage(
             source_node="car",
             entries=[
-                GossipEntry(node_id="car", key="capabilities", value=["obd2", "dashcam"], version=1, originator="car"),
+                GossipEntry(
+                    node_id="car",
+                    key="capabilities",
+                    value=["obd2", "dashcam"],
+                    version=1,
+                    originator="car",
+                ),
                 GossipEntry(node_id="car", key="role", value="edge", version=1, originator="car"),
-                GossipEntry(node_id="car", key="device_tier", value="edge", version=1, originator="car"),
+                GossipEntry(
+                    node_id="car", key="device_tier", value="edge", version=1, originator="car"
+                ),
             ],
         )
         await gossip.receive(msg)

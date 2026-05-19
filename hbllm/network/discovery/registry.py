@@ -35,16 +35,16 @@ class CapabilityEntry(BaseModel):
 
     node_id: str
     capability: str
-    transport_id: str = ""       # Which transport reaches this node
-    transport_type: str = ""     # "inprocess", "websocket", "redis", "webrtc"
+    transport_id: str = ""  # Which transport reaches this node
+    transport_type: str = ""  # "inprocess", "websocket", "redis", "webrtc"
     device_tier: str = "server"
     authority_score: int = 50
-    latency_ms: float = 0.0     # Last measured latency to this node
-    load: float = 0.0           # 0.0-1.0, last known load
-    is_local: bool = False      # True if this node is in our process
+    latency_ms: float = 0.0  # Last measured latency to this node
+    load: float = 0.0  # 0.0-1.0, last known load
+    is_local: bool = False  # True if this node is in our process
     is_reachable: bool = True
     last_updated: float = Field(default_factory=time.monotonic)
-    ttl_seconds: float = 60.0   # How long this entry is valid without refresh
+    ttl_seconds: float = 60.0  # How long this entry is valid without refresh
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -125,7 +125,9 @@ class CapabilityRegistry:
 
         logger.debug(
             "CapabilityRegistry: registered %s with %d capabilities (transport=%s)",
-            node_id, len(capabilities), transport_type,
+            node_id,
+            len(capabilities),
+            transport_type,
         )
 
     def deregister(self, node_id: str) -> None:
@@ -133,9 +135,7 @@ class CapabilityRegistry:
         old_entries = self._by_node.pop(node_id, [])
         for entry in old_entries:
             cap_list = self._by_capability.get(entry.capability, [])
-            self._by_capability[entry.capability] = [
-                e for e in cap_list if e.node_id != node_id
-            ]
+            self._by_capability[entry.capability] = [e for e in cap_list if e.node_id != node_id]
             # Clean up empty lists
             if not self._by_capability[entry.capability]:
                 del self._by_capability[entry.capability]
@@ -232,8 +232,7 @@ class CapabilityRegistry:
         self._prune_stale()
         total_entries = sum(len(v) for v in self._by_node.values())
         reachable = sum(
-            1 for entries in self._by_node.values()
-            if any(e.is_reachable for e in entries)
+            1 for entries in self._by_node.values() if any(e.is_reachable for e in entries)
         )
         return {
             "total_nodes": len(self._by_node),
@@ -300,7 +299,4 @@ class CapabilityRegistry:
         return len(self._by_capability)
 
     def __repr__(self) -> str:
-        return (
-            f"<CapabilityRegistry nodes={self.node_count} "
-            f"capabilities={self.capability_count}>"
-        )
+        return f"<CapabilityRegistry nodes={self.node_count} capabilities={self.capability_count}>"

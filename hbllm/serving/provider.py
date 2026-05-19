@@ -159,6 +159,13 @@ class LocalProvider(LLMProvider):
         self._ensure_loaded()
         import torch
 
+        tenant_id = kwargs.get("tenant_id")
+        if tenant_id:
+            try:
+                self.set_lora_active(True, tenant_id=tenant_id)
+            except ValueError:
+                pass
+
         with trace_span(
             "llm.generate",
             {"provider": "local", "model": "hbllm-local", "max_tokens": str(max_tokens)},
@@ -203,6 +210,13 @@ class LocalProvider(LLMProvider):
         """Stream tokens from the local model one at a time, using Speculative Decoding if configured."""
         self._ensure_loaded()
         import torch
+
+        tenant_id = kwargs.get("tenant_id")
+        if tenant_id:
+            try:
+                self.set_lora_active(True, tenant_id=tenant_id)
+            except ValueError:
+                pass
 
         prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
         input_ids = self._tokenizer.encode(prompt, add_bos=True)
@@ -316,6 +330,7 @@ class LocalProvider(LLMProvider):
     def load_lora_from_disk(
         self,
         lora_path: str,
+        tenant_id: str = "default",
         r: int = 8,
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
@@ -329,25 +344,59 @@ class LocalProvider(LLMProvider):
         if not os.path.exists(lora_path):
             raise FileNotFoundError(f"LoRA adapter not found at {lora_path}")
 
-        logger.info("Loading LoRA adapter from %s", lora_path)
-        state_dict = torch.load(lora_path, map_location=self._device, weights_only=True)
+        logger.info("Loading LoRA adapter from %s for tenant %s", lora_path, tenant_id)
 
         # Dispatch to the model
         if hasattr(self._model, "load_lora_adapter"):
+            state_dict = torch.load(lora_path, map_location=self._device, weights_only=True)
             self._model.load_lora_adapter(
-                state_dict, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
+                state_dict,
+                adapter_name=tenant_id,
+                r=r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
             )
             # Ensure it's active
-            self._model.set_lora_active(True)
+            self._model.set_lora_active(tenant_id)
         else:
-            raise NotImplementedError("Model does not support load_lora_adapter")
+            # Fallback to HuggingFace PEFT
+            try:
+                from peft import PeftModel
+            except ImportError:
+                raise NotImplementedError(
+                    "Model does not natively support load_lora_adapter, "
+                    "and 'peft' library is not installed. Install with: pip install peft"
+                )
 
-    def set_lora_active(self, active: bool = True) -> None:
+            if isinstance(self._model, PeftModel):
+                self._model.load_adapter(lora_path, adapter_name=tenant_id)
+                self._model.set_adapter(tenant_id)
+            else:
+                self._model = PeftModel.from_pretrained(
+                    self._model, lora_path, adapter_name=tenant_id
+                )
+
+            logger.info("Loaded LoRA adapter via HuggingFace PEFT for tenant %s", tenant_id)
+
+    def set_lora_active(self, active: bool = True, tenant_id: str = "default") -> None:
         """Toggle LoRA active state without unloading weights."""
         self._ensure_loaded()
         if hasattr(self._model, "set_lora_active"):
-            self._model.set_lora_active(active)
-            logger.info("LocalProvider LoRA active=%s", active)
+            self._model.set_lora_active(tenant_id if active else None)
+            logger.info("LocalProvider LoRA active=%s for tenant %s", active, tenant_id)
+        else:
+            try:
+                from peft import PeftModel
+            except ImportError:
+                return
+
+            if isinstance(self._model, PeftModel):
+                if active:
+                    self._model.set_adapter(tenant_id)
+                    logger.info("LocalProvider PEFT LoRA active=True for tenant %s", tenant_id)
+                else:
+                    self._model.disable_adapter_layers()
+                    logger.info("LocalProvider PEFT LoRA active=False")
 
     def load_draft_model(self, draft_model: Any) -> None:
         """

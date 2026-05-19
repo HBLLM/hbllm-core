@@ -14,8 +14,9 @@ import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Coroutine
 from enum import StrEnum
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -158,9 +159,7 @@ class Transport(ABC):
         ...
 
     @abstractmethod
-    async def send_request(
-        self, topic: str, message: Message, timeout: float = 30.0
-    ) -> Message:
+    async def send_request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         ...
 

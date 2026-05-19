@@ -23,14 +23,18 @@ def __getattr__(name: str):  # noqa: N807
     """Lazy imports for concrete transports to avoid heavy deps at import time."""
     if name == "InProcessTransport":
         from hbllm.network.transports.inprocess import InProcessTransport
+
         return InProcessTransport
     if name == "WebSocketTransport":
         from hbllm.network.transports.websocket import WebSocketTransport
+
         return WebSocketTransport
     if name == "RedisTransport":
         from hbllm.network.transports.redis import RedisTransport
+
         return RedisTransport
     if name == "WebRTCTransport":
         from hbllm.network.transports.webrtc import WebRTCTransport
+
         return WebRTCTransport
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

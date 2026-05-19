@@ -314,7 +314,8 @@ class RoutingIntelligenceLayer:
             if best_entry and best_entry.transport_id:
                 transport = self._transports.get(best_entry.transport_id)
                 if transport and transport.state in (
-                    TransportState.CONNECTED, TransportState.DEGRADED
+                    TransportState.CONNECTED,
+                    TransportState.DEGRADED,
                 ):
                     ctx.capability_required = target_capability
                     ctx.target_node = best_entry.node_id

@@ -288,6 +288,7 @@ class HBLLMForCausalLM(nn.Module):
     def load_lora_adapter(
         self,
         state_dict: dict[str, torch.Tensor],
+        adapter_name: str = "default",
         r: int = 8,
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
@@ -323,15 +324,15 @@ class HBLLMForCausalLM(nn.Module):
                 target_modules=target_modules,
             )
 
-        # Load the state into the 'default' adapter slot so the LocalProvider can trigger it globally
-        logger.info("Loading LoRA state dict into default Multi-LoRA slot...")
-        LoRAManager.add_adapter(self, adapter_name="default", state_dict=state_dict)
+        # Load the state into the specified adapter slot so the LocalProvider can trigger it dynamically
+        logger.info("Loading LoRA state dict into Multi-LoRA slot: %s...", adapter_name)
+        LoRAManager.add_adapter(self, adapter_name=adapter_name, state_dict=state_dict)
 
-    def set_lora_active(self, active: bool = True) -> None:
+    def set_lora_active(self, adapter_name: str | None = "default") -> None:
         """Toggle LoRA adapters on or off for inference."""
         from hbllm.modules.lora import LoRAManager
 
-        LoRAManager.set_active_adapter(self, "default" if active else None)
+        LoRAManager.set_active_adapter(self, adapter_name)
 
     def forward(
         self,

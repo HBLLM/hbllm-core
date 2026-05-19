@@ -174,9 +174,7 @@ class WebRTCTransport(Transport):
         await peer.pc.setRemoteDescription(desc)
         logger.info("WebRTC: applied answer from peer '%s'", remote_node_id)
 
-    async def handle_offer(
-        self, remote_node_id: str, offer: dict[str, str]
-    ) -> dict[str, str]:
+    async def handle_offer(self, remote_node_id: str, offer: dict[str, str]) -> dict[str, str]:
         """
         Handle an SDP offer from a remote peer and return an answer.
 
@@ -223,10 +221,12 @@ class WebRTCTransport(Transport):
 
     async def send(self, topic: str, message: Message) -> None:
         """Send a message to all connected peers via data channels."""
-        wire = json.dumps({
-            "topic": topic,
-            "message": message.model_dump(mode="json"),
-        })
+        wire = json.dumps(
+            {
+                "topic": topic,
+                "message": message.model_dump(mode="json"),
+            }
+        )
 
         sent = False
         for peer in self._peers.values():
@@ -251,10 +251,12 @@ class WebRTCTransport(Transport):
             self.metrics.record_drop()
             return
 
-        wire = json.dumps({
-            "topic": topic,
-            "message": message.model_dump(mode="json"),
-        })
+        wire = json.dumps(
+            {
+                "topic": topic,
+                "message": message.model_dump(mode="json"),
+            }
+        )
         try:
             peer.channel.send(wire)
             peer.messages_sent += 1
@@ -263,9 +265,7 @@ class WebRTCTransport(Transport):
             self.metrics.record_error()
             logger.error("WebRTC: send to '%s' failed: %s", peer_node_id, e)
 
-    async def send_request(
-        self, topic: str, message: Message, timeout: float = 30.0
-    ) -> Message:
+    async def send_request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
@@ -356,10 +356,7 @@ class WebRTCTransport(Transport):
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run(
-                    s: Subscription = sub, t: str = topic, m: Message = message
-                ) -> None:
-                    start = time.monotonic()
+                async def _run(s: Subscription = sub, t: str = topic, m: Message = message) -> None:
                     try:
                         response = await s.handler(m)
                         if response is not None:
@@ -405,8 +402,7 @@ class WebRTCTransport(Transport):
     def connected_peers(self) -> list[str]:
         """List of currently connected peer node IDs."""
         return [
-            p.node_id for p in self._peers.values()
-            if p.channel and p.channel.readyState == "open"
+            p.node_id for p in self._peers.values() if p.channel and p.channel.readyState == "open"
         ]
 
     def get_peer_stats(self) -> dict[str, dict[str, Any]]:

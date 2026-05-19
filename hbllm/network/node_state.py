@@ -30,8 +30,8 @@ class NodeRole(StrEnum):
     """Dynamic role a node can assume in the network."""
 
     STANDALONE = "standalone"  # No network participation
-    EDGE = "edge"             # Connects upstream to a Hub
-    RELAY = "relay"           # Forwards traffic between peers
+    EDGE = "edge"  # Connects upstream to a Hub
+    RELAY = "relay"  # Forwards traffic between peers
     COORDINATOR = "coordinator"  # Central Hub / authority node
 
 
@@ -51,8 +51,8 @@ class PeerInfo(BaseModel):
 
     node_id: str
     role: NodeRole = NodeRole.STANDALONE
-    transport_id: str = ""       # Which transport connects us to this peer
-    transport_type: str = ""     # "websocket", "webrtc", "redis", etc.
+    transport_id: str = ""  # Which transport connects us to this peer
+    transport_type: str = ""  # "websocket", "webrtc", "redis", etc.
     capabilities: list[str] = Field(default_factory=list)
     device_tier: str = "server"
     latency_ms: float = 0.0
@@ -83,8 +83,8 @@ class NodeStateSnapshot(BaseModel):
     authority_score: int
 
     # Load metrics
-    cpu_load: float = 0.0       # 0.0 - 1.0
-    memory_load: float = 0.0    # 0.0 - 1.0
+    cpu_load: float = 0.0  # 0.0 - 1.0
+    memory_load: float = 0.0  # 0.0 - 1.0
     task_queue_depth: int = 0
     active_tasks: int = 0
 
@@ -171,8 +171,11 @@ class NodeStateEngine:
 
         Used by the RIL as a penalty in transport scoring.
         """
-        return (self._cpu_load * 0.4 + self._memory_load * 0.3 +
-                min(self._task_queue_depth / 100.0, 1.0) * 0.3)
+        return (
+            self._cpu_load * 0.4
+            + self._memory_load * 0.3
+            + min(self._task_queue_depth / 100.0, 1.0) * 0.3
+        )
 
     @property
     def is_overloaded(self) -> bool:
@@ -199,17 +202,22 @@ class NodeStateEngine:
             return
 
         self._role = new_role
-        self._role_history.append({
-            "from": old_role.value,
-            "to": new_role.value,
-            "reason": reason,
-            "timestamp": time.monotonic(),
-        })
+        self._role_history.append(
+            {
+                "from": old_role.value,
+                "to": new_role.value,
+                "reason": reason,
+                "timestamp": time.monotonic(),
+            }
+        )
         self._last_updated = time.monotonic()
 
         logger.info(
             "NodeState[%s] role changed: %s → %s (reason: %s)",
-            self.node_id, old_role.value, new_role.value, reason,
+            self.node_id,
+            old_role.value,
+            new_role.value,
+            reason,
         )
 
     # ── Status Management ─────────────────────────────────────────────
@@ -219,7 +227,9 @@ class NodeStateEngine:
         if self._status != status:
             logger.info(
                 "NodeState[%s] status changed: %s → %s",
-                self.node_id, self._status.value, status.value,
+                self.node_id,
+                self._status.value,
+                status.value,
             )
             self._status = status
             self._last_updated = time.monotonic()
@@ -260,7 +270,10 @@ class NodeStateEngine:
         self._last_updated = time.monotonic()
         logger.debug(
             "NodeState[%s] peer registered: %s (role=%s, transport=%s)",
-            self.node_id, peer.node_id, peer.role.value, peer.transport_type,
+            self.node_id,
+            peer.node_id,
+            peer.role.value,
+            peer.transport_type,
         )
 
     def remove_peer(self, node_id: str) -> None:
@@ -287,10 +300,7 @@ class NodeStateEngine:
 
     def find_peer_by_capability(self, capability: str) -> list[PeerInfo]:
         """Find reachable peers that advertise a specific capability."""
-        return [
-            p for p in self._peers.values()
-            if p.is_reachable and capability in p.capabilities
-        ]
+        return [p for p in self._peers.values() if p.is_reachable and capability in p.capabilities]
 
     # ── Transport Tracking ────────────────────────────────────────────
 

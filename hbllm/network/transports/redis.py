@@ -131,9 +131,7 @@ class RedisTransport(Transport):
             if not future.done():
                 future.set_result(message)
 
-    async def send_request(
-        self, topic: str, message: Message, timeout: float = 30.0
-    ) -> Message:
+    async def send_request(self, topic: str, message: Message, timeout: float = 30.0) -> Message:
         """Send a request and wait for a correlated response."""
         future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._pending_requests[message.id] = future
@@ -219,9 +217,9 @@ class RedisTransport(Transport):
 
                     # TTL enforcement
                     if message.ttl_seconds is not None:
-                        age = time.time() - message.timestamp.replace(
-                            tzinfo=timezone.utc
-                        ).timestamp()
+                        age = (
+                            time.time() - message.timestamp.replace(tzinfo=timezone.utc).timestamp()
+                        )
                         if age > message.ttl_seconds:
                             self.metrics.record_drop()
                             continue
@@ -283,9 +281,7 @@ class RedisTransport(Transport):
                 if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
                     continue
 
-                async def _run(
-                    s: Subscription = sub, t: str = topic, m: Message = message
-                ) -> None:
+                async def _run(s: Subscription = sub, t: str = topic, m: Message = message) -> None:
                     start = time.monotonic()
                     try:
                         response = await s.handler(m)
