@@ -56,7 +56,7 @@ from hbllm.brain.skill_compiler_node import SkillCompilerNode
 
 # New cognitive modules
 from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.brain.world_state import WorldStateEngine
 from hbllm.data.interaction_miner import AsyncInteractionMiner, InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.bus import InProcessBus, MessageBus
@@ -173,7 +173,7 @@ class Brain:
         self.goal_manager: GoalManager | None = None
         self.self_model: SelfModel | None = None
         self.cognitive_metrics: CognitiveMetrics | None = None
-        self.world_simulator: WorldSimulator | None = None
+        self.world_state: WorldStateEngine | None = None
         self.revision_node: RevisionNode | None = None
         self.confidence_estimator: ConfidenceEstimator | None = None
         self.tool_memory: ToolMemory | None = None
@@ -574,6 +574,7 @@ class BrainFactory:
         from hbllm.brain.sleep_node import SleepCycleNode
         from hbllm.brain.workspace_node import WorkspaceNode
         from hbllm.brain.world_model_node import WorldModelNode
+        from hbllm.brain.world_state import WorldStateEngine
         from hbllm.memory.memory_node import MemoryNode
 
         # Create PolicyEngine for governance
@@ -718,7 +719,7 @@ class BrainFactory:
         brain.skill_registry = skill_registry
         brain.tool_memory = ToolMemory(data_dir=data_dir)
         brain.concept_extractor = ConceptExtractor()
-        brain.world_simulator = WorldSimulator()
+        brain.world_state = WorldStateEngine()
         brain.cognition_router = CognitionRouter()
         brain.reward_model = RewardModel(data_dir=data_dir)
         brain.policy_optimizer = PolicyOptimizer()
@@ -1100,7 +1101,7 @@ class BrainFactory:
         brain.skill_registry = skill_registry
         brain.tool_memory = ToolMemory(data_dir=cfg.data_dir)
         brain.concept_extractor = ConceptExtractor()
-        brain.world_simulator = WorldSimulator()
+        brain.world_state = WorldStateEngine()
         brain.cognition_router = CognitionRouter()
         brain.reward_model = RewardModel(data_dir=cfg.data_dir)
         brain.policy_optimizer = PolicyOptimizer()

@@ -14,7 +14,7 @@ from hbllm.brain.sleep_node import SleepCycleNode
 from hbllm.brain.spawner_node import SpawnerNode
 from hbllm.brain.workspace_node import WorkspaceNode
 from hbllm.brain.world_model_node import WorldModelNode
-from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.brain.world_state import SimulationInterface, WorldStateEngine
 
 # Lazy imports for torch-dependent modules to avoid hard dependency
 # on PyTorch at package-import time (e.g. in PyInstaller sidecar builds).
@@ -47,5 +47,6 @@ __all__ = [
     "SpawnerNode",
     "WorkspaceNode",
     "WorldModelNode",
-    "WorldSimulator",
+    "WorldStateEngine",
+    "SimulationInterface",
 ]
