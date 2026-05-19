@@ -10,6 +10,8 @@ The RIL:
   - Chooses the best transport per message.
   - Maintains fallback chains.
   - Attaches ExecutionContext for traceability.
+  - Factors in NodeState (load, health) for scoring (Phase 2).
+  - Queries CapabilityRegistry for capability-aware routing (Phase 2).
 
 The RIL MUST NOT:
   - Manage memory sync logic.
@@ -22,12 +24,16 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.bus import MessageHandler, Subscription
 from hbllm.network.messages import Message
 from hbllm.network.routing.context import ExecutionContext
 from hbllm.network.transports.base import Transport, TransportState
+
+if TYPE_CHECKING:
+    from hbllm.network.discovery.registry import CapabilityRegistry
+    from hbllm.network.node_state import NodeStateEngine
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +47,10 @@ class RoutingIntelligenceLayer:
         score = capability_match + latency_score + reliability_score
                 + trust_score - load_penalty
 
-    For Phase 1, the scoring is simplified to:
-      1. Local (InProcess) is always preferred if it has subscribers.
-      2. Fall back to the next connected transport with lowest latency.
+    Phase 2 enhancements:
+      - NodeState integration: node load_score is applied as a penalty.
+      - CapabilityRegistry integration: if a target capability is specified,
+        the RIL queries the registry for the best transport to reach it.
 
     The RIL exposes the same publish/subscribe/request interface as
     MessageBus, so existing nodes can use it transparently.
@@ -55,6 +62,20 @@ class RoutingIntelligenceLayer:
         self._transport_priority: list[str] = []  # Ordered by preference
         self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
         self._running = False
+
+        # Phase 2: State awareness (optional, gracefully degrades if not set)
+        self._node_state: NodeStateEngine | None = None
+        self._capability_registry: CapabilityRegistry | None = None
+
+    def set_node_state(self, engine: NodeStateEngine) -> None:
+        """Attach the NodeState engine for load-aware scoring."""
+        self._node_state = engine
+        logger.info("RIL: NodeState engine attached (node=%s)", engine.node_id)
+
+    def set_capability_registry(self, registry: CapabilityRegistry) -> None:
+        """Attach the CapabilityRegistry for capability-aware routing."""
+        self._capability_registry = registry
+        logger.info("RIL: CapabilityRegistry attached (%d nodes)", registry.node_count)
 
     # ── Transport Management ──────────────────────────────────────────
 
@@ -277,14 +298,29 @@ class RoutingIntelligenceLayer:
         """
         Select the best transport for a message.
 
-        Phase 1 scoring (deterministic):
+        Phase 2 scoring (state-aware):
           1. Prefer InProcess if it has local subscribers for the topic.
-          2. Otherwise, pick the connected transport with the best score.
-
-        Future phases will use the full probabilistic model:
-          score = capability_match + latency_score + reliability_score
-                  + trust_score - load_penalty
+          2. If a target capability is specified, query the CapabilityRegistry
+             to find the best transport to reach a node with that capability.
+          3. Factor in NodeState load as a penalty.
+          4. Fall back to the connected transport with the best score.
         """
+        # ── Capability-aware routing (Phase 2) ──
+        target_capability = message.payload.get("_target_capability")
+        if target_capability and self._capability_registry:
+            best_entry = self._capability_registry.find_best_for_capability(
+                target_capability, local_only=False
+            )
+            if best_entry and best_entry.transport_id:
+                transport = self._transports.get(best_entry.transport_id)
+                if transport and transport.state in (
+                    TransportState.CONNECTED, TransportState.DEGRADED
+                ):
+                    ctx.capability_required = target_capability
+                    ctx.target_node = best_entry.node_id
+                    return transport
+
+        # ── Score-based selection ──
         best: Transport | None = None
         best_score = -1.0
 
@@ -304,11 +340,16 @@ class RoutingIntelligenceLayer:
         """
         Compute a routing score for a transport.
 
-        Phase 1 scoring weights:
+        Scoring formula:
+          score = capability_match + latency_score + reliability_score
+                  + type_bonus - load_penalty
+
+        Weights:
           - Local subscribers bonus: +100 (strong local preference)
           - Low latency bonus: up to +50 (inversely proportional to latency)
           - Reliability bonus: up to +30 (based on error rate)
           - Type bonus: inprocess=+20, webrtc=+15, redis=+10, websocket=+5
+          - Load penalty: up to -25 (from NodeState load_score)
         """
         score = 0.0
         metrics = transport.get_metrics()
@@ -338,6 +379,12 @@ class RoutingIntelligenceLayer:
             "websocket": 5.0,
         }
         score += type_bonuses.get(transport.transport_type, 0.0)
+
+        # ── Load penalty (Phase 2: NodeState integration) ──
+        if self._node_state:
+            # Penalize routing through an overloaded node.
+            # Max penalty: -25 when load_score = 1.0
+            score -= self._node_state.load_score * 25.0
 
         return score
 
