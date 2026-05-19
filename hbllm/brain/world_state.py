@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 # --- Live Graph & Entities ---
 
+
 @dataclass
 class EntityState:
     """Probabilistic state of an entity in the real world."""
@@ -40,20 +41,39 @@ class EntityState:
     # Provenance
     source_set: set[str] = field(default_factory=set)
 
-    def update(self, event: PerceptionEvent) -> None:
-        """Apply a perception event to update this entity's state."""
-        # 1. Update properties based on payload
-        for key, val in event.payload.items():
-            self.properties[key] = val
+    def update(self, event: PerceptionEvent, now: float | None = None) -> None:
+        """Apply a perception event using probabilistic fusion rules."""
+        if now is None:
+            now = time.time()
 
-        # 2. Update confidence
-        # Simplified Bayesian update: if new event has high confidence,
-        # we trust it. If it's a noisy sensor, we barely adjust.
-        # For this PoC, we just take the max or weighted average.
-        self.confidence = max(self.confidence * 0.9, event.confidence * event.source_trust)
+        # Decay existing confidence before fusing
+        self.decay_confidence(now)
 
-        # 3. Provenance
-        self.last_updated = event.event_timestamp
+        # Calculate event weight
+        # trust_weight (SYSTEM > APP > SENSOR > INFERRED)
+        trust_weights = {"system": 1.0, "app": 0.8, "sensor": 0.5, "inferred": 0.2}
+        trust_w = trust_weights.get(event.modality.value, 0.5)
+
+        # recency_weight (fresh events are weighted higher)
+        age = now - event.event_timestamp
+        recency_w = max(0.1, 1.0 - (age / 3600.0))  # Decays over an hour
+
+        event_weight = trust_w + recency_w + event.confidence
+        current_weight = self.confidence * 2.0  # Heuristic scaling
+
+        # If the incoming event is "stronger" than current belief, overwrite properties.
+        # Otherwise, probabilistically blend or reject.
+        if event_weight >= current_weight:
+            for key, val in event.payload.items():
+                self.properties[key] = val
+
+            # Boost confidence but cap at 1.0
+            self.confidence = min(1.0, event.confidence * event.source_trust + 0.1)
+        else:
+            # Event is weaker, but still contributes to overall confidence if it aligns
+            self.confidence = min(1.0, self.confidence + 0.05)
+
+        self.last_updated = now
         self.source_set.add(event.origin.value)
 
     def decay_confidence(self, current_time: float, half_life_s: float = 3600.0) -> None:
@@ -115,10 +135,7 @@ class WorldStateEngine:
                         entity.decay_confidence(now)
 
                     # Prune entities with near-zero confidence (< 0.05)
-                    self._graph = {
-                        k: v for k, v in self._graph.items()
-                        if v.confidence > 0.05
-                    }
+                    self._graph = {k: v for k, v in self._graph.items() if v.confidence > 0.05}
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -155,9 +172,11 @@ class WorldStateEngine:
 
 # --- Simulation Interface (Retained for Planner) ---
 
+
 @dataclass
 class Scenario:
     """A simulated scenario with predicted outcomes."""
+
     scenario_id: str
     strategy: str
     steps: list[str]
@@ -172,6 +191,7 @@ class Scenario:
 @dataclass
 class SimulationResult:
     """Result of simulating multiple scenarios."""
+
     best_scenario: Scenario
     all_scenarios: list[Scenario]
     simulation_time_ms: float

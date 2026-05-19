@@ -49,10 +49,13 @@ class TaskStatus(StrEnum):
     PENDING = "pending"
     READY = "ready"  # All dependencies met
     RUNNING = "running"
+    VERIFYING = "verifying"  # Awaiting reality verification
+    CORRECTING = "correcting"  # Execution failed verification, adjusting plan
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
     BLOCKED = "blocked"  # Dependency failed
+    UNCERTAIN = "uncertain"  # Verification deadlock / ambiguity
 
 
 class TaskPriority(StrEnum):
@@ -63,6 +66,41 @@ class TaskPriority(StrEnum):
 
 
 # ── Data Models ──────────────────────────────────────────────────────────────
+
+
+@dataclass
+class VerificationRule:
+    """Probabilistic rule to verify task success against WorldStateEngine."""
+
+    entity_id: str
+    property_name: str
+    expected_value: Any
+    min_match_score: float = 0.8  # 0.0 to 1.0 (fuzzy match / confidence)
+    max_wait_time_s: float = 60.0  # Timeout before escalating to UNCERTAIN
+    time_window_s: float = 5.0  # Acceptable reality lag window (s)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entity_id": self.entity_id,
+            "property_name": self.property_name,
+            "expected_value": self.expected_value,
+            "min_match_score": self.min_match_score,
+            "max_wait_time_s": self.max_wait_time_s,
+            "time_window_s": self.time_window_s,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any] | None) -> VerificationRule | None:
+        if not d:
+            return None
+        return cls(
+            entity_id=d["entity_id"],
+            property_name=d["property_name"],
+            expected_value=d["expected_value"],
+            min_match_score=d.get("min_match_score", 0.8),
+            max_wait_time_s=d.get("max_wait_time_s", 60.0),
+            time_window_s=d.get("time_window_s", 5.0),
+        )
 
 
 @dataclass
@@ -80,11 +118,15 @@ class TaskNode:
     result: dict[str, Any] = field(default_factory=dict)
     retry_count: int = 0
     max_retries: int = 3
+    correction_attempts: int = 0
+    max_correction_attempts: int = 2
     timeout_s: float = 300.0  # 5 min default
     created_at: float = field(default_factory=time.time)
     started_at: float = 0.0
     completed_at: float = 0.0
     dependencies: list[str] = field(default_factory=list)  # task_ids
+    verification_rule: VerificationRule | None = None
+    verification_started_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,11 +141,17 @@ class TaskNode:
             "result": self.result,
             "retry_count": self.retry_count,
             "max_retries": self.max_retries,
+            "correction_attempts": self.correction_attempts,
+            "max_correction_attempts": self.max_correction_attempts,
             "timeout_s": self.timeout_s,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "dependencies": self.dependencies,
+            "verification_rule": self.verification_rule.to_dict()
+            if self.verification_rule
+            else None,
+            "verification_started_at": self.verification_started_at,
         }
 
     @classmethod
@@ -120,11 +168,15 @@ class TaskNode:
             result=d.get("result", {}),
             retry_count=d.get("retry_count", 0),
             max_retries=d.get("max_retries", 3),
+            correction_attempts=d.get("correction_attempts", 0),
+            max_correction_attempts=d.get("max_correction_attempts", 2),
             timeout_s=d.get("timeout_s", 300.0),
             created_at=d.get("created_at", 0.0),
             started_at=d.get("started_at", 0.0),
             completed_at=d.get("completed_at", 0.0),
             dependencies=d.get("dependencies", []),
+            verification_rule=VerificationRule.from_dict(d.get("verification_rule")),
+            verification_started_at=d.get("verification_started_at", 0.0),
         )
 
 
@@ -216,11 +268,15 @@ class TaskGraphRuntime:
                     result TEXT DEFAULT '{}',
                     retry_count INTEGER DEFAULT 0,
                     max_retries INTEGER DEFAULT 3,
+                    correction_attempts INTEGER DEFAULT 0,
+                    max_correction_attempts INTEGER DEFAULT 2,
                     timeout_s REAL DEFAULT 300.0,
                     created_at REAL,
                     started_at REAL DEFAULT 0,
                     completed_at REAL DEFAULT 0,
                     dependencies TEXT DEFAULT '[]',
+                    verification_rule TEXT,
+                    verification_started_at REAL DEFAULT 0,
                     FOREIGN KEY (goal_id) REFERENCES goals(goal_id)
                 )
             """)
@@ -392,32 +448,109 @@ class TaskGraphRuntime:
             return False
 
     def complete_task(self, task_id: str, result: dict[str, Any] | None = None) -> bool:
-        """Mark a task as COMPLETED and cascade readiness to dependents."""
+        """Mark a task as COMPLETED (or VERIFYING) and cascade readiness."""
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT verification_rule FROM task_nodes WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if not row:
+                return False
+
+            has_rule = bool(json.loads(row["verification_rule"] or "null"))
+            target_status = TaskStatus.VERIFYING.value if has_rule else TaskStatus.COMPLETED.value
+
             cursor = conn.execute(
-                """UPDATE task_nodes SET status = ?, completed_at = ?, result = ?
+                """UPDATE task_nodes SET status = ?, completed_at = ?, result = ?, verification_started_at = ?
                    WHERE task_id = ? AND status = ?""",
                 (
-                    TaskStatus.COMPLETED.value,
-                    now,
+                    target_status,
+                    now if not has_rule else 0.0,
                     json.dumps(result or {}),
+                    now if has_rule else 0.0,
                     task_id,
                     TaskStatus.RUNNING.value,
                 ),
             )
-            if cursor.rowcount == 0:
-                return False
+            if cursor.rowcount > 0:
+                self._running_tasks.discard(task_id)
+                if not has_rule:
+                    # Cascade immediately
+                    goal_id = conn.execute(
+                        "SELECT goal_id FROM task_nodes WHERE task_id = ?", (task_id,)
+                    ).fetchone()[0]
+                    self._update_ready_tasks(goal_id)
+                return True
+            return False
 
-        self._running_tasks.discard(task_id)
+    def verify_pending_tasks(self, world_state: Any) -> None:
+        """Evaluate tasks in VERIFYING state against the WorldStateEngine."""
+        now = time.time()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM task_nodes WHERE status = ?", (TaskStatus.VERIFYING.value,)
+            ).fetchall()
 
-        # Get the goal_id for this task to cascade
-        goal_id = self._get_task_goal_id(task_id)
-        if goal_id:
-            self._update_ready_tasks(goal_id)
-            self._check_goal_completion(goal_id)
+            for row in rows:
+                task = self._row_to_task(row)
+                if not task.verification_rule:
+                    continue
 
-        return True
+                rule = task.verification_rule
+                entity = world_state.get_entity_state(rule.entity_id)
+
+                # 1. Event-driven check
+                if (
+                    entity
+                    and entity.last_updated >= task.verification_started_at - rule.time_window_s
+                ):
+                    val = entity.properties.get(rule.property_name)
+                    # Simple heuristic match score for PoC:
+                    match_score = 0.0
+                    if val == rule.expected_value:
+                        match_score = entity.confidence
+                    elif (
+                        isinstance(val, str)
+                        and isinstance(rule.expected_value, str)
+                        and rule.expected_value.lower() in val.lower()
+                    ):
+                        match_score = entity.confidence * 0.8
+
+                    if match_score >= rule.min_match_score:
+                        # Success
+                        conn.execute(
+                            "UPDATE task_nodes SET status = ?, completed_at = ? WHERE task_id = ?",
+                            (TaskStatus.COMPLETED.value, now, task.task_id),
+                        )
+                        self._update_ready_tasks(task.goal_id)
+                        continue
+
+                # 2. Timeout fallback
+                age = now - task.verification_started_at
+                if age > rule.max_wait_time_s:
+                    task.correction_attempts += 1
+                    if task.correction_attempts <= task.max_correction_attempts:
+                        conn.execute(
+                            "UPDATE task_nodes SET status = ?, correction_attempts = ? WHERE task_id = ?",
+                            (TaskStatus.CORRECTING.value, task.correction_attempts, task.task_id),
+                        )
+                        logger.info(
+                            "Task %s verification timed out. Transitioning to CORRECTING (%d/%d)",
+                            task.task_id,
+                            task.correction_attempts,
+                            task.max_correction_attempts,
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE task_nodes SET status = ? WHERE task_id = ?",
+                            (TaskStatus.UNCERTAIN.value, task.task_id),
+                        )
+                        logger.warning(
+                            "Task %s verification permanently failed. Marking UNCERTAIN.",
+                            task.task_id,
+                        )
 
     def fail_task(self, task_id: str, error: str = "") -> str:
         """Handle a task failure. Returns 'retrying', 'failed', or 'blocked'.
@@ -548,8 +681,10 @@ class TaskGraphRuntime:
             """INSERT INTO task_nodes
                (task_id, goal_id, name, description, status, priority,
                 action_topic, action_payload, result, retry_count,
-                max_retries, timeout_s, created_at, dependencies)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                max_retries, correction_attempts, max_correction_attempts,
+                timeout_s, created_at, dependencies,
+                verification_rule, verification_started_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task.task_id,
                 task.goal_id,
@@ -562,9 +697,13 @@ class TaskGraphRuntime:
                 json.dumps(task.result),
                 task.retry_count,
                 task.max_retries,
+                task.correction_attempts,
+                task.max_correction_attempts,
                 task.timeout_s,
                 task.created_at,
                 json.dumps(task.dependencies),
+                json.dumps(task.verification_rule.to_dict()) if task.verification_rule else None,
+                task.verification_started_at,
             ),
         )
 
@@ -581,11 +720,27 @@ class TaskGraphRuntime:
             result=json.loads(row["result"] or "{}"),
             retry_count=row["retry_count"] if row["retry_count"] is not None else 0,
             max_retries=row["max_retries"] if row["max_retries"] is not None else 3,
+            correction_attempts=row["correction_attempts"]
+            if "correction_attempts" in row.keys() and row["correction_attempts"] is not None
+            else 0,
+            max_correction_attempts=row["max_correction_attempts"]
+            if "max_correction_attempts" in row.keys()
+            and row["max_correction_attempts"] is not None
+            else 2,
             timeout_s=row["timeout_s"] if row["timeout_s"] is not None else 300.0,
             created_at=row["created_at"] if row["created_at"] is not None else 0.0,
             started_at=row["started_at"] if row["started_at"] is not None else 0.0,
             completed_at=row["completed_at"] if row["completed_at"] is not None else 0.0,
             dependencies=json.loads(row["dependencies"] or "[]"),
+            verification_rule=VerificationRule.from_dict(
+                json.loads(row["verification_rule"] or "null")
+            )
+            if "verification_rule" in row.keys()
+            else None,
+            verification_started_at=row["verification_started_at"]
+            if "verification_started_at" in row.keys()
+            and row["verification_started_at"] is not None
+            else 0.0,
         )
 
     def _update_goal_status(
