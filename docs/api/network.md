@@ -1,11 +1,13 @@
 ---
 title: "API Reference — Network Layer"
-description: "API documentation for HBLLM's message bus, messages, and circuit breaker."
+description: "API documentation for HBLLM's message bus, messages, circuit breaker, transports, routing, and discovery."
 ---
 
 # Network API
 
 The network layer provides asynchronous Pub/Sub communication between all cognitive nodes.
+
+> **See also:** [Adaptive Hybrid Network Architecture](../architecture/adaptive-network.md) for the full Transport Layer, Routing Intelligence Layer, NodeState Engine, and Discovery system documentation.
 
 ## MessageBus
 
