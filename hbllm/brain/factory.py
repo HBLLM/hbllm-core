@@ -86,6 +86,14 @@ class BrainConfig:
     inject_social: bool = True  # SocialLayer (collective+identity)
     inject_learning: bool = True  # LearningLoop (learner+world_model)
 
+    # ── Advanced Capability flags (Phase 3-7) ───────
+    inject_embodiment: bool = True
+    inject_human_control: bool = True
+    inject_causal_graph: bool = True
+    inject_compaction: bool = True
+    inject_task_graph: bool = True
+    inject_mesh: bool = True
+
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
     inject_identity: bool = True
@@ -209,6 +217,18 @@ class Brain:
 
         # Cognitive awareness
         self.awareness: Any = None  # CognitiveAwareness reference
+
+        # Phase 3-7 Core subsystems
+        self.event_log: Any | None = None
+        self.os_adapter: Any | None = None
+        self.verifier: Any | None = None
+        self.task_graph: Any | None = None
+        self.causal_graph: Any | None = None
+        self.compaction_engine: Any | None = None
+        self.permission_registry: Any | None = None
+        self.decision_tracer: Any | None = None
+        self.security_guard: Any | None = None
+        self.mesh_registry: Any | None = None
 
         # Plugin system
         self.plugin_manager: PluginManager | None = None
@@ -360,6 +380,15 @@ class Brain:
             stats["token_optimizer"] = self.token_optimizer.stats()
         if self.reward_model:
             stats["rewards"] = self.reward_model.stats()
+
+        # Advanced subsystem stats
+        if self.task_graph and hasattr(self.task_graph, "stats"):
+            stats["task_graph"] = self.task_graph.stats()
+        if self.compaction_engine and hasattr(self.compaction_engine, "stats"):
+            stats["compaction"] = self.compaction_engine.stats()
+        if self.causal_graph and hasattr(self.causal_graph, "stats"):
+            stats["causality"] = self.causal_graph.stats()
+
         return stats
 
 
@@ -719,11 +748,53 @@ class BrainFactory:
         brain.skill_registry = skill_registry
         brain.tool_memory = ToolMemory(data_dir=data_dir)
         brain.concept_extractor = ConceptExtractor()
-        brain.world_state = WorldStateEngine()
+
+        from hbllm.perception.event_log import EventLog
+
+        brain.event_log = EventLog(data_dir=data_dir)
+        brain.world_state = WorldStateEngine(event_log=brain.event_log)
+
         brain.cognition_router = CognitionRouter()
         brain.reward_model = RewardModel(data_dir=data_dir)
         brain.policy_optimizer = PolicyOptimizer()
         brain.interaction_miner = AsyncInteractionMiner(data_dir=data_dir)
+
+        # Advanced Subsystems (Phase 3-7)
+        if cfg.inject_task_graph:
+            from hbllm.brain.autonomy.task_graph import TaskGraphRuntime
+
+            brain.task_graph = TaskGraphRuntime(data_dir=data_dir)
+
+        if cfg.inject_causal_graph:
+            from hbllm.brain.causality.causal_graph import CausalGraph
+
+            brain.causal_graph = CausalGraph(data_dir=data_dir)
+
+        if cfg.inject_compaction:
+            from hbllm.brain.compaction.engine import CognitiveCompactionEngine
+
+            brain.compaction_engine = CognitiveCompactionEngine()
+
+        if cfg.inject_embodiment:
+            from hbllm.brain.embodiment.os_adapter import OSAdapter
+            from hbllm.brain.embodiment.verifier import Verifier
+
+            brain.os_adapter = OSAdapter()
+            brain.verifier = Verifier(brain.os_adapter)
+
+        if cfg.inject_human_control:
+            from hbllm.brain.control.guard import SecurityGuard
+            from hbllm.brain.control.permissions import PermissionRegistry
+            from hbllm.brain.observability.tracer import DecisionTraceLedger
+
+            brain.permission_registry = PermissionRegistry()
+            brain.decision_tracer = DecisionTraceLedger(data_dir=data_dir)
+            brain.security_guard = SecurityGuard(brain.permission_registry, brain.decision_tracer)
+
+        if cfg.inject_mesh:
+            from hbllm.brain.mesh.registry import NodeRegistry, NodeType
+
+            brain.mesh_registry = NodeRegistry(local_node_id="local", local_node_type=NodeType.EDGE)
 
         # Configurable subsystems
         if cfg.inject_revision:
