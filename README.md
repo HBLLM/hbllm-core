@@ -34,17 +34,16 @@ While the industry races to build massive, centralized models that ingest your p
                     ┌─────────────────────────────────────────┐
     Input ────────► │              HBLLM Core Brain           │
     (text, vision,  │                                         │
-     audio)         │   Router ──► Planner ──► Decision       │
-                    │     │          │            │           │
-                    │   Memory    Learner      Critic        │
-                    │   (5 types)    │            │           │
-                    │              World       Identity      │
-                    │              Model       (ethics)      │
-                    │                │                        │
-                    │           Curiosity ──► Spawner        │
-                    └───────────────────────────┬─────────────┘
-                                                │
-    Output ◄────────────────────────────────────┘
+     audio)         │   EventBus ─► Router ──► Planner        │
+                    │     │           │          │            │
+                    │ EventLog     Memory    Learner/Critic   │
+                    │     │       (5 types)      │            │
+                    │ CausalGraph              World/Identity │
+                    │     │                      │            │
+                    │ Human Guard ─► Verifier ─► OS Adapter   │
+                    └────────────────────────────┬────────────┘
+                                                 │
+    Action / Output ◄────────────────────────────┘
 ```
 
 By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain lifelong memories, securely execute multi-step tools across your local and cloud environments, and dynamically adapt to your personal domains using hot-swappable LoRA adapters.
@@ -61,6 +60,9 @@ By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain life
 | **🧪 Personalization** | Dynamically adapts to your knowledge via 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
 | **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
 | **🌐 Swarm Architecture** | Hierarchical edge devices via `SynapseGateway` and `UplinkNode` | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
+| **🦾 Embodiment & Actuation**| OS/Device adapter, idempotency tracking, execution verification | [Embodiment](docs/architecture/embodiment.md) |
+| **🛑 Human Control Layer** | Trust boundaries, intervention policies, explanation-first mode | [Human Control](docs/architecture/human-control.md) |
+| **📦 Cognitive Compaction**| Causal graphs, attention-based memory folding, decision deltas | [Causality & Compaction](docs/architecture/causality-and-compaction.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
 | **🛡️ Governance & Trust** | Ed25519 Distributed Trust, Vector Clock Anti-Replay | [Distributed Trust](docs/architecture/distributed-trust.md) |
 | **🔐 Enterprise Security** | Identity triplet, Node Revocation (`system.dlq`), audit log | [Security](SECURITY.md) |
