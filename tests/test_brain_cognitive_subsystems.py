@@ -12,7 +12,7 @@ from hbllm.brain.goal_manager import GoalManager
 from hbllm.brain.revision_node import RevisionNode
 from hbllm.brain.self_model import SelfModel
 from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.brain.world_state import WorldStateEngine
 from hbllm.data.interaction_miner import InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
@@ -89,9 +89,9 @@ class TestBrainCognitiveSubsystems:
         assert brain.cognitive_metrics is not None
         assert isinstance(brain.cognitive_metrics, CognitiveMetrics)
 
-    async def test_world_simulator_initialized(self, brain):
-        assert brain.world_simulator is not None
-        assert isinstance(brain.world_simulator, WorldSimulator)
+    async def test_world_state_initialized(self, brain):
+        assert brain.world_state is not None
+        assert isinstance(brain.world_state, WorldStateEngine)
 
     async def test_revision_node_initialized(self, brain):
         assert brain.revision_node is not None

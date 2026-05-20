@@ -208,6 +208,7 @@ class SimulationInterface:
     def __init__(self, max_scenarios: int = 5, risk_weight: float = 0.3):
         self.max_scenarios = max_scenarios
         self.risk_weight = risk_weight
+        self._simulations_run = 0
 
     async def simulate(
         self,
@@ -217,6 +218,7 @@ class SimulationInterface:
     ) -> SimulationResult:
         """Simulate multiple strategies and select the best."""
         start = time.monotonic()
+        self._simulations_run += 1
 
         scenarios: list[Scenario] = []
         for i, strategy in enumerate(strategies[: self.max_scenarios]):
@@ -318,3 +320,6 @@ class SimulationInterface:
         outcome = f"Execute {len(steps)} steps to achieve: {goal[:100]}"
 
         return outcome, confidence, reward, risks
+
+    def stats(self) -> dict[str, int]:
+        return {"simulations_run": self._simulations_run}
