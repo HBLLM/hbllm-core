@@ -471,6 +471,8 @@ class TestLearnerNodeMicroLearning:
         # With micro-learning disabled, the handler is never subscribed
         assert len(node.get_micro_learn_queue()) == 0
         await node.stop()
+        # Ensure node cleanup completes before bus teardown
+        await asyncio.sleep(0.01)
 
 
 # ── Factory Integration Tests ────────────────────────────────────────────
