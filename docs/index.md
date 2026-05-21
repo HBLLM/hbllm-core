@@ -1,19 +1,19 @@
 ---
-title: "HBLLM Core — Local-First Sovereign AI Runtime"
-description: "A private, sovereign AI engine designed for standalone local utility with optional distributed cognition. 28+ cognitive nodes, 6 memory systems, and cryptographic trust for absolute privacy."
+title: "HBLLM Core — An AI That Thinks Like a Person"
+description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 28+ cognitive nodes, 5 memory systems, and cryptographic trust for absolute privacy."
 ---
 
 <!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, Privacy-First AI, On-Premise AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Multi-Tenant AI -->
 
 <div class="hero-title">🧠 HBLLM Core</div>
-<div class="hero-subtitle">Local-First Sovereign AI Runtime. A private, sovereign AI engine designed for standalone local utility with optional distributed cognition.</div>
+<div class="hero-subtitle">An AI that thinks like a person — runs entirely on your own hardware, no cloud required. Local by default. Distributed when you want it.</div>
 
 <div class="badges" markdown>
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-1102%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-1800%2B%20passing-brightgreen.svg)](#)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
@@ -22,9 +22,15 @@ description: "A private, sovereign AI engine designed for standalone local utili
 
 ## Why HBLLM Core?
 
-While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for **digital sovereignty**. It is a **Local-First AI Runtime** engineered to provide absolute privacy by default, with the capability to orchestrate distributed resources only when requested.
+Most AI systems answer questions when you ask them. HBLLM Core does something fundamentally different — **it thinks all the time, entirely on your own machine**.
 
-HBLLM replaces monolithic cloud dependencies with a modular **Hierarchical Swarm of Specialized Cognitive Nodes**. By securely connecting your own devices (phones, laptops, edge servers) via Ed25519 cryptographic trust, it creates a personal AI network that is locally autonomous but globally aware.
+It has a genuine **memory** like a human does: short-term memory for what just happened, long-term memory for things it has learned, a knowledge graph of how concepts relate to each other, and even a sense of personal values built up from reward signals over time. Everything stored locally, everything private.
+
+It can **set goals and pursue them in the background** — breaking big objectives into steps, retrying failed ones, checking that its actions actually worked in the real world, and picking up exactly where it left off after a reboot, just like a person resuming work after sleep.
+
+When you're ready, it can **scale across your own devices** — your phone, laptop, and home server sharing knowledge and collaborating, all connected by Ed25519 cryptographic trust, with no cloud middleman involved.
+
+And it has the **safety instincts of a responsible person** — it knows when it's overloaded and slows down, a policy engine blocks harmful actions before they happen, and every decision is logged to an immutable audit trail.
 
 <div class="feature-grid">
 <div class="feature-card">

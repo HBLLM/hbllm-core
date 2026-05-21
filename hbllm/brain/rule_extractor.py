@@ -159,8 +159,12 @@ class RuleExtractorNode(Node):
 
     async def on_stop(self) -> None:
         logger.info("Stopping RuleExtractorNode")
-        if self._extraction_task:
+        if self._extraction_task and not self._extraction_task.done():
             self._extraction_task.cancel()
+            try:
+                await self._extraction_task
+            except asyncio.CancelledError:
+                pass
 
     async def handle_message(self, message: Message) -> Message | None:
         """Handle direct rule extraction requests."""

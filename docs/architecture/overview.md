@@ -23,7 +23,9 @@ graph TD
     B --> C["Cognitive Core"]
     B --> D["Meta-Cognitive Layer"]
     B --> E["Memory Systems"]
-    B --> F["Action Layer"]
+    B --> F["Action & Embodiment Layer"]
+    B --> I["Human Control Layer"]
+    E --> J["Causal Graph & Compaction"]
     G["Zoning Model"] -.-> C
     H["LLM Providers"] -.-> C
 ```
@@ -75,16 +77,25 @@ All nodes communicate via the **MessageBus**, which has been hardened for distri
 
 See [Memory Systems](memory-systems.md) for the full deep-dive.
 
-### Layer 5: Action
+### Layer 5: Action & Embodiment
 
-Execution nodes that interact with the external world:
+Execution nodes that interact with the external world safely through the [Embodiment](embodiment.md) adapter:
 
 - **ExecutionNode** — Sandboxed Python evaluation with resource limits.
+- **OS Adapter** — Interacts safely with host operating systems via idempotency hashing.
+- **Execution Verifier** — Async polling to verify actual physical/digital state changes.
 - **MCPClientNode** — Model Context Protocol tool calls.
 - **UplinkNode** — WebSocket bridge to central/cloud servers for Hierarchical Swarms.
 - **BrowserNode** — Web page interaction and scraping.
 - **Z3LogicNode** — Formal verification and constraint solving.
 - **FuzzyLogicNode** — Approximate reasoning with scikit-fuzzy.
+
+### Layer 6: Human Control & Safety
+
+The [Human Control](human-control.md) layer ensures the user remains in command:
+- **Trust Boundaries** — Scoped tokens mapping actions to specific trust zones (SAFE vs SENSITIVE).
+- **Security Guard** — Triggers explanation-first intents for sensitive actions.
+- **Intervention** — Semantic pause, stop, and reverse functionalities.
 
 ---
 
@@ -130,3 +141,6 @@ sequenceDiagram
 - [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
 - [Message Bus](message-bus.md) — How Pub/Sub routing works.
 - [Memory Systems](memory-systems.md) — The 6 memory types explained.
+- [Embodiment](embodiment.md) — Actuator safety and verification.
+- [Human Control](human-control.md) — Safety boundaries and intent integrity.
+- [Causality & Compaction](causality-and-compaction.md) — Decision trace graphs and memory folding.

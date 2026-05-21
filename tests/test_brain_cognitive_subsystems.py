@@ -1,5 +1,6 @@
 """Integration test: BrainFactory creates Brain with all cognitive subsystems wired."""
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -12,7 +13,7 @@ from hbllm.brain.goal_manager import GoalManager
 from hbllm.brain.revision_node import RevisionNode
 from hbllm.brain.self_model import SelfModel
 from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.world_simulator import WorldSimulator
+from hbllm.brain.world_state import WorldStateEngine
 from hbllm.data.interaction_miner import InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
@@ -60,6 +61,13 @@ class TestBrainCognitiveSubsystems:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            # Disable Phase 3-7 subsystems not under test
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(
             provider=_MockProvider(),
@@ -67,8 +75,8 @@ class TestBrainCognitiveSubsystems:
         )
         yield brain
         try:
-            await brain.shutdown()
-        except Exception:
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError, Exception):
             pass
 
     # ─── Subsystem Initialization ────────────────────────────────────
@@ -89,9 +97,9 @@ class TestBrainCognitiveSubsystems:
         assert brain.cognitive_metrics is not None
         assert isinstance(brain.cognitive_metrics, CognitiveMetrics)
 
-    async def test_world_simulator_initialized(self, brain):
-        assert brain.world_simulator is not None
-        assert isinstance(brain.world_simulator, WorldSimulator)
+    async def test_world_state_initialized(self, brain):
+        assert brain.world_state is not None
+        assert isinstance(brain.world_state, WorldStateEngine)
 
     async def test_revision_node_initialized(self, brain):
         assert brain.revision_node is not None
@@ -190,13 +198,19 @@ class TestBrainCognitiveSubsystems:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
         try:
             assert brain.revision_node is None
             assert brain.confidence_estimator is None
         finally:
-            await brain.shutdown()
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
 
     async def test_disable_goals(self, tmp_path):
         config = BrainConfig(
@@ -210,9 +224,15 @@ class TestBrainCognitiveSubsystems:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
         try:
             assert brain.goal_manager is None
         finally:
-            await brain.shutdown()
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)

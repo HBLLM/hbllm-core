@@ -1,14 +1,14 @@
-<!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, LoRA Tuning, Privacy-First AI, On-Premise AI, Python 3.10 AI Framework, Autonomous Agents, Multi-Tenant AI -->
+<!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, LoRA Tuning, Privacy-First AI, On-Premise AI, Python 3.11 AI Framework, Autonomous Agents, Multi-Tenant AI -->
 
 <div align="center">
-  <h1>🧠 HBLLM Core: Local-First Sovereign AI Runtime</h1>
-  <p><b>A private, sovereign AI engine designed for standalone local utility with optional distributed cognition.</b></p>
-  <p><em>An advanced cognitive architecture that runs entirely on your own hardware by default, scales to a hierarchical swarm when needed, and protects your data through cryptographic distributed trust.</em></p>
+  <h1>🧠 HBLLM Core: An AI That Thinks Like a Person</h1>
+  <p><b>A continuously thinking, goal-driven, memory-forming cognitive brain — runs entirely on your own hardware, no cloud required.</b></p>
+  <p><em>Local by default. Distributed when you want it. HBLLM stays awake, notices what's happening around it, sets its own goals, and learns from every interaction — your data never leaves your device unless you choose.</em></p>
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-1600%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-1800%2B%20passing-brightgreen.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
@@ -20,34 +20,33 @@
 > - 🔐 **[Governance & Policies](docs/api/governance.md)** (PolicyEngine, SentinelNode, Constitutional Principles)
 > - ⚡ **[Reproducible Benchmarks](docs/api/benchmarks.md)** (Memory Profiling, Fast-Path Latency)
 
-## Why HBLLM Core?
+## What is HBLLM Core?
 
-While the industry races to build massive, centralized models that ingest your private data, **HBLLM Core** is built for **digital sovereignty**. It is a **Local-First AI Runtime** engineered to provide absolute privacy by default. 
+Most AI systems answer questions when you ask them. HBLLM Core does something fundamentally different — **it thinks all the time, entirely on your own machine**.
 
-**Standalone by Default**: HBLLM Core runs completely on its own without needing to connect to the broader HBLLM network or any cloud service. It is designed to be fully functional entirely on your local hardware.
+It has a genuine **memory** like a human does: short-term memory for what just happened, long-term memory for things it's learned, a knowledge graph of how concepts relate to each other, and even a sense of personal values built up from reward signals over time. Everything stored locally, everything private.
 
-**Optional Distributed Cognition**: When requested, HBLLM replaces monolithic cloud dependencies with a modular **Hierarchical Swarm of Specialized Cognitive Nodes**. By securely connecting your own devices (phones, laptops, edge servers) via Ed25519 cryptographic trust, it creates a personal AI network. 
+It can **set goals and pursue them in the background** — breaking big objectives into steps, retrying failed ones, checking that its actions actually worked in the real world, and picking up exactly where it left off after a reboot, just like a person resuming work after sleep.
 
-**Universal Connectivity**: The `SynapseGateway` is not just for AI-to-AI communication. It allows **non-AI applications**, traditional software, web backends, and IoT devices to seamlessly connect to the cognitive swarm and utilize its intelligence.
+When you're ready, it can **scale across your own devices** — your phone, laptop, and home server sharing knowledge and collaborating, all connected by cryptographic trust, with no cloud middleman involved.
+
+And it has the **safety instincts of a responsible person** — it knows when it's overloaded and slows down, it has a conscience in the form of a policy engine that blocks harmful actions before they happen, and every decision it makes is logged to an immutable audit trail.
 
 ```text
                     ┌─────────────────────────────────────────┐
     Input ────────► │              HBLLM Core Brain           │
     (text, vision,  │                                         │
-     audio)         │   Router ──► Planner ──► Decision       │
-                    │     │          │            │           │
-                    │   Memory    Learner      Critic        │
-                    │   (5 types)    │            │           │
-                    │              World       Identity      │
-                    │              Model       (ethics)      │
-                    │                │                        │
-                    │           Curiosity ──► Spawner        │
-                    └───────────────────────────┬─────────────┘
-                                                │
-    Output ◄────────────────────────────────────┘
+     audio, OS)     │   Perception ─► Router ──► Planner      │
+                    │       │           │           │          │
+                    │  WorldState    Memory    Critic/Eval     │
+                    │       │       (5 types)       │          │
+                    │  TaskGraph                 Identity      │
+                    │       │                       │          │
+                    │  Human Guard ─► Verifier ─► OS Adapter  │
+                    └────────────────────────────┬────────────┘
+                                                 │
+    Action / Output ◄────────────────────────────┘
 ```
-
-By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain lifelong memories, securely execute multi-step tools across your local and cloud environments, and dynamically adapt to your personal domains using hot-swappable LoRA adapters.
 
 > 📖 **[Full Architecture →](docs/architecture/overview.md)** · **[Cognitive Nodes →](docs/architecture/cognitive-nodes.md)** · **[Memory Systems →](docs/architecture/memory-systems.md)**
 
@@ -55,17 +54,20 @@ By decoupling reasoning, memory, evaluation, and action, HBLLM can maintain life
 
 ## Key Capabilities
 
-| Category | Highlights | Docs |
-|----------|-----------|------|
-| **🧠 Agentic Reasoning** | GoT planning, PRM scoring, MoE domain blending | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
-| **🧪 Personalization** | Dynamically adapts to your knowledge via 2MB LoRA adapters | [How It Works](docs/zoning/how-it-works.md) |
-| **💾 Memory Systems** | Working, Episodic, Semantic, Procedural, Knowledge Graph | [Memory Systems](docs/architecture/memory-systems.md) |
-| **🌐 Swarm Architecture** | Hierarchical edge devices via `SynapseGateway` and `UplinkNode` | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
-| **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding | [Plugin Guide](docs/guides/plugins.md) |
-| **🛡️ Governance & Trust** | Ed25519 Distributed Trust, Vector Clock Anti-Replay | [Distributed Trust](docs/architecture/distributed-trust.md) |
-| **🔐 Enterprise Security** | Identity triplet, Node Revocation (`system.dlq`), audit log | [Security](SECURITY.md) |
-| **⚙️ Infrastructure** | 128k+ context, Rust SIMD quantization, ONNX router | [Benchmarks](docs/api/benchmarks.md) |
-| **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialists | [Zoning](docs/zoning/how-it-works.md) |
+| Category | What it does | Docs |
+|----------|-------------|------|
+| **⚙️ Fully Local by Default** | Runs entirely on your own hardware — no cloud, no API keys, no data leaving your device | [Benchmarks](docs/api/benchmarks.md) |
+| **🧠 Always-On Cognition** | Stays awake between queries — notices events, forms thoughts, and acts proactively without being asked | [Executive Brain](docs/architecture/executive-brain-layer.md) |
+| **💾 Human-Like Memory** | Five memory types (Episodic, Semantic, Procedural, Value, Knowledge Graph) that persist across reboots and grow over time | [Memory Systems](docs/architecture/memory-systems.md) |
+| **🎯 Goal Pursuit** | Decomposes objectives into persistent DAG tasks, retries failures, verifies real-world outcomes, and survives crashes | [Executive Brain](docs/architecture/executive-brain-layer.md) |
+| **👁️ World Awareness** | Reads your OS, sensors, calendar, and apps — maintains a live probabilistic model of what's happening right now | [Embodiment](docs/architecture/embodiment.md) |
+| **🧪 Self-Personalizing** | Dynamically adapts to your knowledge via 2MB LoRA adapters — grows new specialist regions at runtime | [Zoning](docs/zoning/how-it-works.md) |
+| **🌐 Distributed When You Want It** | Optionally spans your phone, laptop, and edge servers via `SynapseGateway` with Ed25519 cryptographic trust — zero cloud required | [Adaptive Network](docs/architecture/adaptive-network.md) |
+| **🛑 Human Control Layer** | Policy engine blocks harmful actions, every decision is audited, and the system slows itself down when overloaded | [Human Control](docs/architecture/human-control.md) |
+| **📦 Memory Compaction** | Causal graphs, attention-based memory folding, and decision deltas keep the brain efficient over long lifetimes | [Causality & Compaction](docs/architecture/causality-and-compaction.md) |
+| **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding — extend any part of the cognitive loop | [Plugin Guide](docs/guides/plugins.md) |
+| **🔐 Enterprise Security** | Multi-tenant isolation, encrypted memory scopes, node revocation, and vector clock replay protection | [Security](SECURITY.md) |
+| **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialist LoRA adapters — the brain literally grows new regions | [Zoning](docs/zoning/how-it-works.md) |
 
 ---
 
@@ -119,7 +121,12 @@ import asyncio
 from hbllm.brain.factory import BrainFactory
 
 async def main():
+    # Cloud-backed
     brain = await BrainFactory.create("openai/gpt-4o")
+
+    # Or fully local — no API keys needed
+    # brain = await BrainFactory.create_local("./checkpoints/sft/my_domain")
+
     result = await brain.process("Analyze our server logs and design a firewall rule.")
     print(result.text)
     await brain.shutdown()
@@ -135,7 +142,7 @@ asyncio.run(main())
 
 | Section | Contents |
 |---------|----------|
-| **[Architecture](docs/architecture/)** | System overview, cognitive nodes, memory, message bus, sleep cycle |
+| **[Architecture](docs/architecture/)** | System overview, cognitive nodes, memory, message bus, sleep cycle, executive brain |
 | **[Zoning](docs/zoning/)** | LoRA routing, weighted domains, hybrid quantization |
 | **[Guides](docs/guides/)** | Quickstart, custom nodes, plugins, training, deployment, IoT/robotics |
 | **[API Reference](docs/api/)** | Brain factory, subsystems, network, model, tokenizer, Rust kernels |
@@ -156,6 +163,6 @@ We welcome contributions! Key areas:
 HBLLM Core is released under **GNU General Public License v3.0 (GPLv3)**.
 
 <div align="center">
-  <p><b>HBLLM Core</b> — Your Sovereign Personal AI.</p>
+  <p><b>HBLLM Core</b> — An AI that thinks like a person, runs on your hardware, and scales on your terms.</p>
   <p>⭐ Star this repository to support open-source, privacy-first cognitive architectures!</p>
 </div>

@@ -200,8 +200,12 @@ class CuriosityNode(Node):
             len(self.events),
             len(self.goal_queue.goals),
         )
-        if hasattr(self, "_predictive_task") and self._predictive_task:
-            self._predictive_task.cancel()
+        if hasattr(self, "_predict_loop_task") and self._predict_loop_task:
+            self._predict_loop_task.cancel()
+            try:
+                await self._predict_loop_task
+            except asyncio.CancelledError:
+                pass
 
     async def handle_message(self, message: Message) -> Message | None:
         return None

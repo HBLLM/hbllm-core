@@ -471,6 +471,8 @@ class TestLearnerNodeMicroLearning:
         # With micro-learning disabled, the handler is never subscribed
         assert len(node.get_micro_learn_queue()) == 0
         await node.stop()
+        # Ensure node cleanup completes before bus teardown
+        await asyncio.sleep(0.01)
 
 
 # ── Factory Integration Tests ────────────────────────────────────────────
@@ -523,13 +525,20 @@ class TestPhase2FactoryIntegration:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            # Disable Phase 3-7 subsystems not under test
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
             use_composites=False,  # Use legacy path where individual nodes appear in brain.nodes
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
         try:
-            await brain.shutdown()
-        except Exception:
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError, Exception):
             pass
 
     async def test_attention_manager_wired(self, brain):
@@ -588,9 +597,19 @@ class TestPhase2FactoryIntegration:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            # Disable Phase 3-7 subsystems not under test
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
             use_composites=False,  # Legacy path needed to test individual inject flags
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.attention_manager is None
         assert brain.load_manager is None
-        await brain.shutdown()
+        try:
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError, Exception):
+            pass

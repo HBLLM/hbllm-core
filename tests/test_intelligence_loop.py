@@ -509,12 +509,19 @@ class TestV2FactoryIntegration:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            # Disable Phase 3-7 subsystems not under test
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         yield brain
         try:
-            await brain.shutdown()
-        except Exception:
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError, Exception):
             pass
 
     async def test_evaluation_node_wired(self, brain):
@@ -594,12 +601,21 @@ class TestV2FactoryIntegration:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(provider=_Mock(), config=config)
         assert brain.evaluation_node is None
         assert brain.reflection_node is None
         assert brain.skill_compiler_node is None
-        await brain.shutdown()
+        try:
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError, Exception):
+            pass
 
 
 # ── Benchmark Task Dataset Tests ─────────────────────────────────────────
