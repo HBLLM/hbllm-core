@@ -67,13 +67,15 @@ class EntityState:
             for key, val in event.payload.items():
                 self.properties[key] = val
 
-            # Boost confidence but cap at 1.0
-            self.confidence = min(1.0, event.confidence * event.source_trust + 0.1)
+            # Trust-weighted event confidence (no extra bonus)
+            self.confidence = min(1.0, event.confidence * event.source_trust)
         else:
             # Event is weaker, but still contributes to overall confidence if it aligns
             self.confidence = min(1.0, self.confidence + 0.05)
 
-        self.last_updated = now
+        # Use the event's own timestamp so that confidence decay is anchored
+        # to when the observation was actually made, not when we processed it.
+        self.last_updated = event.event_timestamp
         self.source_set.add(event.origin.value)
 
     def decay_confidence(self, current_time: float, half_life_s: float = 3600.0) -> None:

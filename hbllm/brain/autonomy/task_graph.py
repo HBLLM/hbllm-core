@@ -450,15 +450,18 @@ class TaskGraphRuntime:
     def complete_task(self, task_id: str, result: dict[str, Any] | None = None) -> bool:
         """Mark a task as COMPLETED (or VERIFYING) and cascade readiness."""
         now = time.time()
+        goal_id: str | None = None
+        has_rule = False
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT verification_rule FROM task_nodes WHERE task_id = ?", (task_id,)
+                "SELECT verification_rule, goal_id FROM task_nodes WHERE task_id = ?", (task_id,)
             ).fetchone()
             if not row:
                 return False
 
             has_rule = bool(json.loads(row["verification_rule"] or "null"))
+            goal_id = row["goal_id"]
             target_status = TaskStatus.VERIFYING.value if has_rule else TaskStatus.COMPLETED.value
 
             cursor = conn.execute(
@@ -473,16 +476,15 @@ class TaskGraphRuntime:
                     TaskStatus.RUNNING.value,
                 ),
             )
-            if cursor.rowcount > 0:
-                self._running_tasks.discard(task_id)
-                if not has_rule:
-                    # Cascade immediately
-                    goal_id = conn.execute(
-                        "SELECT goal_id FROM task_nodes WHERE task_id = ?", (task_id,)
-                    ).fetchone()[0]
-                    self._update_ready_tasks(goal_id)
-                return True
-            return False
+            if cursor.rowcount == 0:
+                return False
+            self._running_tasks.discard(task_id)
+
+        # Cascade OUTSIDE the transaction so the COMPLETED status is visible
+        if not has_rule and goal_id:
+            self._update_ready_tasks(goal_id)
+            self._check_goal_completion(goal_id)
+        return True
 
     def verify_pending_tasks(self, world_state: Any) -> None:
         """Evaluate tasks in VERIFYING state against the WorldStateEngine."""
@@ -802,27 +804,30 @@ class TaskGraphRuntime:
                 "SELECT COUNT(*) FROM task_nodes WHERE goal_id = ?",
                 (goal_id,),
             ).fetchone()[0]
+            # BLOCKED is also terminal — a blocked task will never run
             terminal = conn.execute(
                 """SELECT COUNT(*) FROM task_nodes WHERE goal_id = ?
-                   AND status IN (?, ?, ?)""",
+                   AND status IN (?, ?, ?, ?)""",
                 (
                     goal_id,
                     TaskStatus.COMPLETED.value,
                     TaskStatus.FAILED.value,
                     TaskStatus.SKIPPED.value,
+                    TaskStatus.BLOCKED.value,
                 ),
             ).fetchone()[0]
 
             if total > 0 and terminal == total:
                 failed = conn.execute(
-                    "SELECT COUNT(*) FROM task_nodes WHERE goal_id = ? AND status = ?",
-                    (goal_id, TaskStatus.FAILED.value),
+                    """SELECT COUNT(*) FROM task_nodes WHERE goal_id = ?
+                       AND status IN (?, ?)""",
+                    (goal_id, TaskStatus.FAILED.value, TaskStatus.BLOCKED.value),
                 ).fetchone()[0]
 
                 new_status = GoalStatus.FAILED if failed > 0 else GoalStatus.COMPLETED
                 conn.execute(
-                    "UPDATE goals SET status = ?, completed_at = ? WHERE goal_id = ?",
-                    (new_status.value, time.time(), goal_id),
+                    "UPDATE goals SET status = ?, completed_at = ? WHERE goal_id = ? AND status != ?",
+                    (new_status.value, time.time(), goal_id, new_status.value),
                 )
                 logger.info(
                     "Goal %s → %s (%d/%d tasks completed)",
