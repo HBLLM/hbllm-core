@@ -77,6 +77,13 @@ def _test_config(tmp_path, **overrides) -> BrainConfig:
         inject_scheduler=False,
         inject_knowledge=False,
         inject_persistence=False,
+        # Disable Phase 3-7 subsystems to avoid unnecessary overhead in tests
+        inject_embodiment=False,
+        inject_human_control=False,
+        inject_causal_graph=False,
+        inject_compaction=False,
+        inject_task_graph=False,
+        inject_mesh=False,
     )
     defaults.update(overrides)
     return BrainConfig(**defaults)

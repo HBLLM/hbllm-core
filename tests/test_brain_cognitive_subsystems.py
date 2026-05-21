@@ -1,5 +1,6 @@
 """Integration test: BrainFactory creates Brain with all cognitive subsystems wired."""
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -60,6 +61,13 @@ class TestBrainCognitiveSubsystems:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            # Disable Phase 3-7 subsystems not under test
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(
             provider=_MockProvider(),
@@ -67,8 +75,8 @@ class TestBrainCognitiveSubsystems:
         )
         yield brain
         try:
-            await brain.shutdown()
-        except Exception:
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError, Exception):
             pass
 
     # ─── Subsystem Initialization ────────────────────────────────────
@@ -190,13 +198,19 @@ class TestBrainCognitiveSubsystems:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
         try:
             assert brain.revision_node is None
             assert brain.confidence_estimator is None
         finally:
-            await brain.shutdown()
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)
 
     async def test_disable_goals(self, tmp_path):
         config = BrainConfig(
@@ -210,9 +224,15 @@ class TestBrainCognitiveSubsystems:
             inject_scheduler=False,
             inject_knowledge=False,
             inject_persistence=False,
+            inject_embodiment=False,
+            inject_human_control=False,
+            inject_causal_graph=False,
+            inject_compaction=False,
+            inject_task_graph=False,
+            inject_mesh=False,
         )
         brain = await BrainFactory.create(provider=_MockProvider(), config=config)
         try:
             assert brain.goal_manager is None
         finally:
-            await brain.shutdown()
+            await asyncio.wait_for(brain.shutdown(), timeout=10.0)

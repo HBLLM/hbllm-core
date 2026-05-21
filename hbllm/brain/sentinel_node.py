@@ -146,8 +146,12 @@ class SentinelNode(Node):
 
     async def on_stop(self) -> None:
         logger.info("Stopping SentinelNode")
-        if self._poll_task:
+        if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
 
     async def handle_message(self, message: Message) -> Message | None:
         """Handle direct queries (e.g., 'list alerts', 'get context')."""
