@@ -195,5 +195,5 @@ reset to `READY` on startup via `recover_on_boot()`.
 ## Cross-References
 
 - [Adaptive Network Architecture](./adaptive-network.md) — the transport layer below this
-- [Scheduler Node](../../hbllm/brain/scheduler_node.py) — the legacy scheduler to be migrated
-- [Attention Manager](../../hbllm/brain/attention_manager.py) — memory-focused attention (complementary)
+- `hbllm/brain/scheduler_node.py` — the legacy scheduler to be migrated
+- `hbllm/brain/attention_manager.py` — memory-focused attention (complementary)
