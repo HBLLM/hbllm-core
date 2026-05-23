@@ -11,11 +11,11 @@ Unlike stateless LLMs that forget every interaction after the session ends, HBLL
 
 ---
 
-## Biological Inspiration: The Multi-Phase Consolidation
+## Biological Inspiration: The Multi-Stage Consolidation
 
-Human brains use sleep to move information from short-term hippocampus storage to long-term cortical networks. HBLLM mirrors this with a **multi-phase Sleep Cycle** orchestrated by the `SleepCycleNode`.
+Human brains use sleep to move information from short-term hippocampus storage to long-term cortical networks. HBLLM mirrors this with a **multi-stage Sleep Cycle** orchestrated by the `SleepCycleNode`.
 
-### Phase 1: Memory Replay & Consolidation (NREM)
+### Stage 1: Memory Replay & Consolidation (NREM)
 **Code:** `_consolidate_memory()`
 
 During the day, the **Episodic Memory** (System 2) records raw interaction logs. During sleep:
@@ -24,23 +24,37 @@ During the day, the **Episodic Memory** (System 2) records raw interaction logs.
 3.  **GraphRAG Clustering:** Entities and relations are extracted and clustered into thematic **Communities** in the Knowledge Graph.
 4.  **Synaptic Pruning:** Low-salience or redundant logs are archived, keeping the live vector space efficient.
 
-### Phase 1.6: Temporal Normalization
+### Stage 1.6: Temporal Normalization
 **Code:** `_normalize_temporal_references()`
 
-Relative time references in stored memories become stale and misleading over time. During this sub-phase:
+Relative time references in stored memories become stale and misleading over time. During this sub-stage:
 - Episodic memory entries are scanned for temporal keywords ("yesterday", "last week", "recently").
 - Each relative reference is annotated with an absolute date (e.g., `yesterday (2026-05-06)`) based on the memory entry's original timestamp.
 - The `temporal-reasoning` plugin's parser (`parse_temporal_references()`) is reused for detection.
 
-### Phase 1.7: Contradiction Resolution
+### Stage 1.7: Contradiction Resolution
 **Code:** `_resolve_contradictions()`
 
-As the Knowledge Graph grows, contradictory facts can accumulate (e.g., "user prefers dark mode" vs "user prefers light mode"). This sub-phase:
+As the Knowledge Graph grows, contradictory facts can accumulate (e.g., "user prefers dark mode" vs "user prefers light mode"). This sub-stage:
 - Scans all KG relations grouped by `(source, relation_type)`.
 - Detects conflicts where inherently-exclusive relation types (`prefers`, `is_a`, `has`) have multiple targets from the same source.
 - Resolves by keeping the **most recently created** fact and pruning stale entries.
 
-### Phase 2: Artificial Neuroplasticity (Continuous DPO) — REM
+### Stage 1.8: Knowledge Staleness Audit
+**Code:** `_audit_knowledge_staleness()`
+
+Scan web-sourced knowledge for entries past their Time-To-Live (TTL, e.g., 30 days).
+- Stale entries are flagged as obsolete on the bus.
+- This tells the cognitive loop to hedge or re-verify when using this old web context in active sessions.
+
+### Stage 1.9: Task Knowledge Promotion (T2 → T3)
+**Code:** `_promote_task_knowledge()`
+
+Scan episodic memory for task-scoped web research (Tier 2) that was accessed frequently across sessions (e.g., at least 3 times).
+- Promotes high-utility web context to core long-term knowledge (Tier 3) for permanent offline storage.
+- Ensures highly relevant search results are kept local for future sessions without re-searching.
+
+### Stage 2: Artificial Neuroplasticity (Continuous DPO) — REM
 **Code:** `_run_self_improvement()`
 
 This is where the brain's weights actually change.
@@ -49,7 +63,14 @@ This is where the brain's weights actually change.
 - **Read-Only Preservation (Zero Catastrophic Forgetting):** To prevent breaking the core model, the base model and *all downloaded domain adapters* are kept strictly **read-only**.
 - **Isolation:** DPO training happens locally and exclusively on a dynamically created `personalization` adapter, ensuring that private learning never leaks to other users or corrupts established domains.
 
-### Phase 3: Curiosity-Driven Exploration
+### Stage 2b: Skill Optimization
+**Code:** `_optimize_skills()`
+
+Identify flaky, low-success, or inefficient procedural skills from active sessions.
+- Automatically re-plays and optimizes custom skills in the Skill Registry.
+- Allows the system to repair its code execution routines overnight.
+
+### Stage 3: Curiosity-Driven Exploration
 **Code:** `_replay_curiosity_goals()`
 
 If the `CuriosityNode` identified knowledge gaps or "exploratory goals" during the day, they are replayed here.
@@ -57,17 +78,25 @@ If the `CuriosityNode` identified knowledge gaps or "exploratory goals" during t
 - It "imagines" potential scenarios or searches its internal Knowledge Graph to bridge conceptual distances.
 - Resulting insights are stored back in **Semantic Memory**, ready for the next active session.
 
-### Phase 4: Dream Journal
+### Stage 4: Dream Journal
 **Code:** `_generate_dream_journal()`
 
-After all phases complete, the system generates a human-readable **Dream Journal** summarizing everything it learned:
+After all stages complete, the system generates a human-readable **Dream Journal** summarizing everything it learned:
 - How many memories were compressed into long-term storage
 - How many temporal references were normalized
-- How many contradictions were detected and resolved
+- How many contradictions were resolved
 - Whether DPO training ran and what it learned
+- How many custom skills were optimized
 - How many curiosity gaps were explored
 
 The Dream Journal is stored in episodic memory and included in the `system.sleep.report` event payload, enabling any UI to display a "here's what I learned while you were away" experience.
+
+### Stage 5: Proactive Memory Warming
+**Code:** `_warm_memory_cache()`
+
+To eliminate latency when a user begins a new active session:
+- Pre-loads recent conversation topics and the last session summary into the memory fast-path cache.
+- Ensures the system "remembers" context on wakeup immediately without waiting for standard retrieval queries.
 
 ---
 

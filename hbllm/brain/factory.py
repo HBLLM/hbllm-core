@@ -777,10 +777,10 @@ class BrainFactory:
 
         if cfg.inject_embodiment:
             from hbllm.brain.embodiment.os_adapter import OSAdapter
-            from hbllm.brain.embodiment.verifier import Verifier
+            from hbllm.brain.embodiment.verifier import ExecutionVerifier
 
             brain.os_adapter = OSAdapter()
-            brain.verifier = Verifier(brain.os_adapter)
+            brain.verifier = ExecutionVerifier(brain.os_adapter)
 
         if cfg.inject_human_control:
             from hbllm.brain.control.guard import SecurityGuard

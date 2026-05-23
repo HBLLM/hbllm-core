@@ -1,9 +1,5 @@
 # Executive Brain Layer Architecture
 
-> **Module**: `core/hbllm/brain/autonomy/`  
-> **Status**: Phase 1 & 2 complete  
-> **Branch**: `feature/executive-brain-layer-phase1`
-
 ## Overview
 
 The Executive Brain Layer transforms HBLLM from a reactive request→response system

@@ -86,11 +86,11 @@ Standalone credibility scoring engine with three factors:
 
 ### Sleep Cycle Integration
 
-Two new NREM sub-phases in SleepCycleNode:
+Two new NREM sub-stages in SleepCycleNode:
 
-- **Phase 1.8: Staleness Audit**: Scans web-sourced T3 entries past their
+- **Stage 1.8: Staleness Audit**: Scans web-sourced T3 entries past their
   30-day TTL and marks them obsolete
-- **Phase 1.9: T2→T3 Promotion**: Promotes frequently-accessed Task Knowledge
+- **Stage 1.9: T2→T3 Promotion**: Promotes frequently-accessed Task Knowledge
   (3+ accesses across sessions) to permanent Core Knowledge
 
 ## Rate Limiting

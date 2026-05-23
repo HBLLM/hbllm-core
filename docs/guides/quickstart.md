@@ -23,7 +23,7 @@ Get HBLLM Core running in under 5 minutes.
 ```bash
 # Clone the repository
 git clone https://github.com/hbllm/hbllm-core.git
-cd HBLLM/core
+cd hbllm-core/core
 
 # Install in development mode
 pip install -e ".[dev]"
@@ -112,6 +112,8 @@ hbllm nodes               # List all loaded cognitive nodes
 hbllm serve --port 8000   # Start FastAPI + MCP Server
 hbllm train --model-size 125m  # Start local pre-training loop
 hbllm data --dataset fineweb   # Run data preparation pipeline
+hbllm plugin list         # List all installed dynamic plugins
+hbllm plugin new <name>   # Scaffold a new custom plugin
 ```
 
 ## Next Steps

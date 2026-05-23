@@ -165,7 +165,7 @@ Working memory is managed at the pipeline level rather than as a standalone clas
 
 ## Memory Consolidation (Sleep Cycle)
 
-During idle periods, the `SleepCycleNode` runs a 3-phase consolidation:
+During idle periods, the `SleepCycleNode` runs a 3-stage consolidation:
 
 1. **Replay** — High-salience episodic memories are replayed.
 2. **Prune** — Low-value entries are removed to prevent unbounded growth.

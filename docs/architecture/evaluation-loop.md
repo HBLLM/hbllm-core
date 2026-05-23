@@ -8,11 +8,13 @@ The `EvaluationNode` sits on the event bus and listens for `system.evaluation` e
 
 ### Scoring Dimensions
 Every interaction is scored (0.0 to 1.0) across five dimensions using an LLM-as-a-judge heuristic (or fast-path checks for simple queries):
-- **Task Success**: Did the system achieve the user's intent?
-- **Plan Validity**: If steps were generated, were they logically sound?
-- **Tool Selection**: Were the correct plugins/tools utilized?
-- **Toxicity**: Was the content safe and policy-compliant?
-- **Confidence Calibration**: Did the system's predicted confidence match actual success?
+- **Task Success** (`task_success`): Did the system achieve the user's intent?
+- **Plan Validity** (`plan_validity`): If steps were generated, were they logically sound and well-structured?
+- **Tool Accuracy** (`tool_accuracy`): Did the selected plugins/tools execute successfully?
+- **Memory Usage** (`memory_usage`): Was the retrieved context relevant and useful for addressing the query?
+- **Confidence Error** (`confidence_error`): The calibration quality, measured as the difference between the predicted confidence and the actual success level.
+
+*(Note: Safety, toxicity, and policy compliance are handled proactively by the `SentinelNode` and `GovernanceGuard` layers rather than rolling post-decision evaluation scores.)*
 
 ## 2. Micro-Learning
 
