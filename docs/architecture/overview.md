@@ -58,7 +58,7 @@ Nodes that monitor, improve, and expand the brain itself:
 - **LearnerNode** — Continuous DPO training from feedback.
 - **CuriosityNode** — Generates exploratory goals for unknown domains.
 - **SpawnerNode** — Creates new domain LoRA adapters at runtime.
-- **SleepCycleNode** — 3-phase memory consolidation (Replay → Prune → Strengthen).
+- **SleepCycleNode** — 3-stage memory consolidation (Replay → Prune → Strengthen).
 - **IdentityNode** — Ethical constraints and personality persistence.
 - **WorldModelNode** — Sandboxed AST simulation for "what-if" reasoning.
 

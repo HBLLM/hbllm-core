@@ -116,12 +116,18 @@ msg = Message(
 | `ROUTE_REQUEST` | Intent routing request |
 | `ROUTE_DECISION` | Routing decision result |
 | `TASK_DECOMPOSE` | GoT task breakdown |
+| `TASK_ASSIGNMENT` | Delegating high-level instructions |
 | `TASK_RESULT` | Task execution result |
 | `TASK_AGGREGATE` | Aggregated task results |
+| `COMMAND` | Direct control command |
+| `INSTRUCTION` | Action instruction |
 | `MEMORY_STORE` | Store to memory |
 | `MEMORY_SEARCH` | Search memory |
 | `MEMORY_RESULT` | Memory search results |
 | `HEARTBEAT` | Health check ping |
+| `HEARTBEAT_ACK` | Health check heartbeat acknowledgement |
+| `NODE_REGISTERED` | Node registration notification |
+| `NODE_DEREGISTERED` | Node deregistration notification |
 | `FEEDBACK` | User feedback on responses |
 | `LEARNING_UPDATE` | Weight update notification |
 | `SPAWN_REQUEST` | Create new domain module |
