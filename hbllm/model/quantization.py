@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from typing import cast
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -86,7 +87,39 @@ class QuantizedLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Hardware-agnostic dequantization with per-block scaling."""
-        # Check for Rust SIMD acceleration
+        # Fast decode path for single-token CPU autoregressive step
+        if (
+            rust_engine is not None
+            and hasattr(rust_engine, "gemv_4bit_simd")
+            and not x.is_cuda
+            and self.bits == 4
+            and x.shape[1] == 1
+        ):
+            x_np = x.numpy()
+            batch_size = x.shape[0]
+            w_shards_np = self.weight_shards.numpy()
+            scale_np = self.scale.numpy()
+            q_bias_np = self.q_bias.numpy()
+
+            res_batches = []
+            for b in range(batch_size):
+                # x_np[b, 0, :] has shape [in_features]
+                res_b = rust_engine.gemv_4bit_simd(
+                    x_np[b, 0, :],
+                    w_shards_np,
+                    scale_np,
+                    q_bias_np,
+                    self.group_size,
+                )
+                res_batches.append(res_b)
+
+            res_np = np.stack(res_batches)  # [batch_size, out_features]
+            out = torch.from_numpy(res_np).unsqueeze(1).to(x.device, x.dtype)
+            if self.bias_param is not None:
+                out = out + self.bias_param.view(1, 1, -1)
+            return out
+
+        # Prefill, multi-token batch, or CUDA path
         if rust_engine is not None and not x.is_cuda and self.bits == 4:
             w_flat = rust_engine.dequantize_4bit_simd(
                 self.weight_shards.numpy(),

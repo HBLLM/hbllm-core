@@ -10,6 +10,8 @@ Features:
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 
@@ -382,3 +384,85 @@ class KVCache:
             self.cpu_key_cache[:, :, :total_tokens, :],
             self.cpu_value_cache[:, :, :total_tokens, :],
         )
+
+    def save_cache(self, file_path: str, model_config: Any, tokenizer: Any) -> None:
+        """
+        Serialize the active KV cache history to disk with strict integrity hashing.
+        """
+        import hashlib
+        import pickle
+
+        # Calculate strict configuration signature
+        config_dict = {
+            "num_layers": getattr(model_config, "num_layers", 0),
+            "hidden_size": getattr(model_config, "hidden_size", 0),
+            "num_kv_heads": getattr(model_config, "num_kv_heads", 0),
+            "head_dim": getattr(model_config, "head_dim", 0),
+            "vocab_size": getattr(tokenizer, "vocab_size", 0),
+            "max_seq_len": self.max_seq_len,
+            "quantize_k": self.quantize_k,
+            "sliding_window": self.sliding_window,
+            "attention_sinks": self.attention_sinks,
+        }
+        config_str = str(sorted(config_dict.items())).encode("utf-8")
+        config_hash = hashlib.sha256(config_str).hexdigest()
+
+        # Gather active cache tensors (moved to CPU for safe persistence)
+        payload = {
+            "config_hash": config_hash,
+            "config_dict": config_dict,
+            "seq_len": self.seq_len,
+            "_total_tokens_seen": self._total_tokens_seen,
+            "key_cache": self.key_cache.cpu(),
+            "value_cache": self.value_cache.cpu(),
+            "key_scales": self.key_scales.cpu() if self.key_scales is not None else None,
+        }
+
+        with open(file_path, "wb") as f:
+            pickle.dump(payload, f)
+
+    def load_cache(self, file_path: str, model_config: Any, tokenizer: Any) -> None:
+        """
+        Load active KV cache history from disk, performing strict integrity checks.
+        """
+        import hashlib
+        import pickle
+
+        with open(file_path, "rb") as f:
+            payload = pickle.load(f)
+
+        # Re-calculate strict configuration signature
+        config_dict = {
+            "num_layers": getattr(model_config, "num_layers", 0),
+            "hidden_size": getattr(model_config, "hidden_size", 0),
+            "num_kv_heads": getattr(model_config, "num_kv_heads", 0),
+            "head_dim": getattr(model_config, "head_dim", 0),
+            "vocab_size": getattr(tokenizer, "vocab_size", 0),
+            "max_seq_len": self.max_seq_len,
+            "quantize_k": self.quantize_k,
+            "sliding_window": self.sliding_window,
+            "attention_sinks": self.attention_sinks,
+        }
+        config_str = str(sorted(config_dict.items())).encode("utf-8")
+        config_hash = hashlib.sha256(config_str).hexdigest()
+
+        # Validate integrity hash
+        if payload.get("config_hash") != config_hash:
+            raise ValueError(
+                "KV Cache reload failed: Strict integrity mismatch. The cached state does not "
+                "match the active model, tokenizer, or cache shape configuration."
+            )
+
+        # Hydrate values
+        self.seq_len = payload["seq_len"]
+        self._total_tokens_seen = payload["_total_tokens_seen"]
+
+        # Load tensors and move back to original target device
+        self.key_cache.copy_(payload["key_cache"].to(self.device))
+        self.value_cache.copy_(payload["value_cache"].to(self.device))
+
+        if self.quantize_k and self.key_scales is not None:
+            if payload["key_scales"] is not None:
+                self.key_scales.copy_(payload["key_scales"].to(self.device))
+            else:
+                raise ValueError("Expected key_scales in payload but none was found.")
