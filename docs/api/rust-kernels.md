@@ -39,6 +39,17 @@ The compute kernel provides SIMD-optimized matrix operations for quantized infer
 - **INT8 × FP16 MatMul** — Higher precision variant for sensitive layers
 - **SIMD Dot Product** — Vectorized inner product for attention scores
 - **Dequantization** — INT4/INT8 → FP16 conversion with per-channel scales
+- **Fused SIMD GEMV (`gemv_4bit_simd`)** — Dynamically dispatched register-level fused weight unpacking and matrix-vector product for single-token autoregressive decoding on CPU.
+
+### Runtime SIMD Dispatch
+
+The compute kernel auto-detects CPU instruction capabilities at initialization:
+- **AVX512** (server-grade Intel/AMD x86_64)
+- **AVX2** (standard x86_64)
+- **NEON** (Apple Silicon, ARM64)
+- **Scalar** (portable baseline fallback)
+
+The active backend is routed via `UniversalEngine` dynamic dispatch to ensure maximum portability without manual compile-time selection.
 
 ### Integration
 

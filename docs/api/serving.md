@@ -152,6 +152,18 @@ Two rate limiters are available:
 
 > 📖 **[Full Security Architecture →](../security.md)** — Identity triplet, tenant guard, audit log, encryption at rest
 
+## KV Cache & Persistence
+
+**Module:** `hbllm.serving.kv_cache.KVCache`
+
+Manages pre-allocated key-value tensors for autoregressive decoding, featuring Sliding Window Attention (SWA), Attention Sinks, and persistent serialization.
+
+### Persistent Serialization
+
+The KV Cache can be serialized to disk to preserve active cognitive contexts between boots:
+- **`save_cache(file_path, model_config, tokenizer)`** — Saves active KV tensor histories to a `.kvc` file. Generates a unique SHA-256 integrity signature from the active architecture configuration (`num_layers`, `hidden_size`, `num_kv_heads`, `head_dim`, `vocab_size`, and SWA options).
+- **`load_cache(file_path, model_config, tokenizer)`** — Reloads KV history. Performs a strict integrity validation signature check. If there is any discrepancy (e.g. mismatched model dimensions or vocabularies), it raises a descriptive `ValueError` to prevent silent state corruption.
+
 ---
 
 ## Serving Architecture
