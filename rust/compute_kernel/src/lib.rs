@@ -143,40 +143,40 @@ impl UniversalEngine {
             let row_scale = scale.row(row);
             let row_bias = bias.row(row);
             
-            let mut sum = 0.0f32;
+            let sum = {
+                #[cfg(target_arch = "aarch64")]
+                unsafe {
+                    Self::gemv_row_neon(
+                        x.as_slice().unwrap(),
+                        row_packed.as_slice().unwrap(),
+                        row_scale.as_slice().unwrap(),
+                        row_bias.as_slice().unwrap(),
+                        group_size,
+                    )
+                }
 
-            #[cfg(target_arch = "aarch64")]
-            unsafe {
-                sum = Self::gemv_row_neon(
-                    x.as_slice().unwrap(),
-                    row_packed.as_slice().unwrap(),
-                    row_scale.as_slice().unwrap(),
-                    row_bias.as_slice().unwrap(),
-                    group_size,
-                );
-            }
+                #[cfg(target_arch = "x86_64")]
+                unsafe {
+                    Self::gemv_row_x86(
+                        x.as_slice().unwrap(),
+                        row_packed.as_slice().unwrap(),
+                        row_scale.as_slice().unwrap(),
+                        row_bias.as_slice().unwrap(),
+                        group_size,
+                    )
+                }
 
-            #[cfg(target_arch = "x86_64")]
-            unsafe {
-                sum = Self::gemv_row_x86(
-                    x.as_slice().unwrap(),
-                    row_packed.as_slice().unwrap(),
-                    row_scale.as_slice().unwrap(),
-                    row_bias.as_slice().unwrap(),
-                    group_size,
-                );
-            }
-
-            #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-            {
-                sum = Self::gemv_row_scalar(
-                    x.as_slice().unwrap(),
-                    row_packed.as_slice().unwrap(),
-                    row_scale.as_slice().unwrap(),
-                    row_bias.as_slice().unwrap(),
-                    group_size,
-                );
-            }
+                #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+                {
+                    Self::gemv_row_scalar(
+                        x.as_slice().unwrap(),
+                        row_packed.as_slice().unwrap(),
+                        row_scale.as_slice().unwrap(),
+                        row_bias.as_slice().unwrap(),
+                        group_size,
+                    )
+                }
+            };
 
             out[row] = sum;
         }
