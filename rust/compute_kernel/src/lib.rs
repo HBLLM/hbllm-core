@@ -133,16 +133,18 @@ impl UniversalEngine {
         let mut out = vec![0.0f32; out_features];
 
         if x.len() != in_features {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Dimension mismatch: x length ({}) must equal in_features ({})", x.len(), in_features)
-            ));
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Dimension mismatch: x length ({}) must equal in_features ({})",
+                x.len(),
+                in_features
+            )));
         }
 
         for row in 0..out_features {
             let row_packed = packed.row(row);
             let row_scale = scale.row(row);
             let row_bias = bias.row(row);
-            
+
             let sum = {
                 #[cfg(target_arch = "aarch64")]
                 unsafe {
@@ -325,7 +327,8 @@ impl UniversalEngine {
                         + bias.get(g1).copied().unwrap_or(0.0);
 
                     sum_v = vsetq_lane_f32(vgetq_lane_f32::<0>(sum_v) + w_low * x[idx], sum_v, 0);
-                    sum_v = vsetq_lane_f32(vgetq_lane_f32::<0>(sum_v) + w_high * x[idx + 1], sum_v, 0);
+                    sum_v =
+                        vsetq_lane_f32(vgetq_lane_f32::<0>(sum_v) + w_high * x[idx + 1], sum_v, 0);
                 }
                 i += 16;
             }
@@ -402,11 +405,20 @@ impl UniversalEngine {
                 for k in 0..32 {
                     let byte = packed[i + k];
                     let idx = (i + k) * 2;
-                    
+
                     let w_low = ((byte & 0x0F) as f32) * s + b;
                     let w_high = ((byte >> 4) as f32) * s + b;
 
-                    let val_v = _mm256_set_ps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, w_high * x[idx + 1], w_low * x[idx]);
+                    let val_v = _mm256_set_ps(
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        w_high * x[idx + 1],
+                        w_low * x[idx],
+                    );
                     sum_v = _mm256_add_ps(sum_v, val_v);
                 }
 
@@ -422,7 +434,16 @@ impl UniversalEngine {
                     let w_high = ((byte >> 4) as f32) * scale.get(g1).copied().unwrap_or(1.0)
                         + bias.get(g1).copied().unwrap_or(0.0);
 
-                    let val_v = _mm256_set_ps(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, w_high * x[idx + 1], w_low * x[idx]);
+                    let val_v = _mm256_set_ps(
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        w_high * x[idx + 1],
+                        w_low * x[idx],
+                    );
                     sum_v = _mm256_add_ps(sum_v, val_v);
                 }
                 i += 32;
