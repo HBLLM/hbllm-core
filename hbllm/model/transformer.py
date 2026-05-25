@@ -400,6 +400,7 @@ class HBLLMForCausalLM(nn.Module):
         top_k: int = 50,
         top_p: float = 0.9,
         eos_token_id: int | None = None,
+        grammar_state: Any | None = None,
     ) -> torch.Tensor:
         """
         Autoregressive text generation with top-k/top-p sampling.
@@ -411,6 +412,7 @@ class HBLLMForCausalLM(nn.Module):
             top_k: Top-k filtering (0 = disabled)
             top_p: Nucleus sampling threshold
             eos_token_id: Stop generation at this token
+            grammar_state: Optional GrammarState instance to constrain output
 
         Returns:
             [batch_size, prompt_len + generated_len] full sequence
@@ -436,8 +438,14 @@ class HBLLMForCausalLM(nn.Module):
             past_key_values = out_dict.get("past_key_values")
 
             # Sample using helper
-            next_token = self._sample_logits(logits, temperature, top_k, top_p)
+            next_token = self._sample_logits(
+                logits, temperature, top_k, top_p, grammar_state=grammar_state
+            )
             input_ids = torch.cat([input_ids, next_token], dim=1)
+
+            # Advance the grammar state machine with the sampled token ID
+            if grammar_state is not None:
+                grammar_state.advance(int(next_token.item()))
 
             # Stop at EOS
             if eos_token_id is not None and (next_token == eos_token_id).all():
@@ -451,8 +459,13 @@ class HBLLMForCausalLM(nn.Module):
         temperature: float,
         top_k: int,
         top_p: float,
+        grammar_state: Any | None = None,
     ) -> torch.Tensor:
         """Helper to sample a single token from logits."""
+        if grammar_state is not None:
+            mask = grammar_state.get_logit_mask(logits.shape[-1], logits.device)
+            logits = logits + mask
+
         if temperature != 1.0:
             logits = logits / max(temperature, 1e-7)
 

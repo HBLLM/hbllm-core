@@ -31,6 +31,7 @@ HBLLM's transformer follows the LLaMA 3 / Mistral architecture with Grouped Quer
 | `export.py` | ONNX export utilities | Export for edge deployment |
 | `hf_adapter.py` | HuggingFace adapter conversion | PEFT → HBLLM state_dict |
 | `model_loader.py` | Checkpoint loading utilities | Safe loading with `weights_only=True` |
+| `grammar.py` | `GrammarState` | Incremental pushdown automaton for schema constraint logit masking |
 
 ---
 
@@ -139,6 +140,35 @@ output = prm(input_ids=step_tokens, labels=quality_labels)
 
 scores = output["scores"]  # [batch, 1] in [0.0, 1.0]
 loss = output.get("loss")  # BCE + MoE aux loss
+```
+
+---
+
+## Grammar-Constrained Sampling
+
+**Module:** `hbllm.model.grammar.GrammarState`
+
+Provides O(1) linear-time pushdown automata (PDA) constraints to guarantee structured format compliance (such as JSON) during autoregressive text generation.
+
+### Usage Example
+
+```python
+from hbllm.model.grammar import GrammarState
+from hbllm.model.transformer import HBLLMForCausalLM
+
+# Load model and tokenizer vocabulary
+model = HBLLMForCausalLM.from_pretrained("hbllm/base-125m")
+vocab_words = tokenizer.get_vocab_dict()
+
+# Instantiate the parser state
+grammar_state = GrammarState(vocab_words)
+
+# Generate perfect JSON syntactically constrained output
+output = model.generate(
+    input_ids=prompt_ids,
+    max_new_tokens=128,
+    grammar_state=grammar_state,
+)
 ```
 
 ---
