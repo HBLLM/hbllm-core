@@ -140,7 +140,7 @@ impl UniversalEngine {
             )));
         }
 
-        for row in 0..out_features {
+        for (row, out_val) in out.iter_mut().enumerate() {
             let row_packed = packed.row(row);
             let row_scale = scale.row(row);
             let row_bias = bias.row(row);
@@ -180,7 +180,7 @@ impl UniversalEngine {
                 }
             };
 
-            out[row] = sum;
+            *out_val = sum;
         }
 
         Ok(PyArray1::from_vec(py, out))
