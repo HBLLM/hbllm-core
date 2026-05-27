@@ -1,32 +1,22 @@
 """
 Unified tokenizer for HBLLM.
 
-Wraps the Rust-based BPE Vocab or falls back to tiktoken.
-Provides encode/decode with special tokens and chat templates.
+Provides a high-performance Rust-based BPE Vocab engine,
+with a mathematically-exact pure-Python fallback when the Rust extensions are not compiled.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
-# Optional dependencies
-tiktoken: Any
+# Try to import high-performance Rust Vocab
 try:
-    import tiktoken as _tiktoken
-
-    tiktoken = _tiktoken
+    from hbllm_tokenizer_rs import Vocab as RustVocab  # type: ignore
 except ImportError:
-    tiktoken = None
-
-Vocab: Any
-try:
-    from hbllm_tokenizer_rs import Vocab as _Vocab  # type: ignore
-
-    Vocab = _Vocab
-except ImportError:
-    Vocab = None
+    RustVocab = None
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +31,94 @@ ASSISTANT = chr(60) + "|assistant|" + chr(62)
 SPECIAL_TOKENS = [BOS, EOS, PAD, SYSTEM, USER, ASSISTANT]
 
 
+class PurePythonBPE:
+    """
+    A mathematically-exact pure-Python implementation of the custom byte-level BPE tokenizer.
+    Ensures complete vocabulary and token ID parity when Rust extensions are not available.
+    """
+
+    def __init__(self, vocab_data: dict[str, Any]) -> None:
+        self.vocab_size = vocab_data.get("vocab_size", 32768)
+
+        # Base byte mappings (IDs 0-255 are raw bytes)
+        self.id_to_bytes = {i: bytes([i]) for i in range(256)}
+        self.bytes_to_id = {bytes([i]): i for i in range(256)}
+
+        self.merges = vocab_data.get("merges", [])
+        self.merge_ranks = {}
+        self.merge_to_id = {}
+
+        # Reconstruct merge rules in exact rank order
+        for rule in self.merges:
+            left = rule["left"]
+            right = rule["right"]
+            merged = rule["merged"]
+            rank = rule["rank"]
+
+            self.merge_ranks[(left, right)] = rank
+            self.merge_to_id[(left, right)] = merged
+
+            # Build the byte sequence representation of the merged token
+            if left in self.id_to_bytes and right in self.id_to_bytes:
+                merged_bytes = self.id_to_bytes[left] + self.id_to_bytes[right]
+                self.id_to_bytes[merged] = merged_bytes
+                self.bytes_to_id[merged_bytes] = merged
+
+        # Reconstruct special tokens
+        self.special_tokens = vocab_data.get("special_tokens", [])
+        for sp in self.special_tokens:
+            token_str = sp["token"]
+            token_id = sp["id"]
+            token_bytes = token_str.encode("utf-8")
+            self.id_to_bytes[token_id] = token_bytes
+            self.bytes_to_id[token_bytes] = token_id
+
+    def __len__(self) -> int:
+        return len(self.id_to_bytes)
+
+    def encode(self, text: str) -> list[int]:
+        if not text:
+            return []
+
+        # Start with byte-level tokens
+        tokens = list(text.encode("utf-8"))
+
+        while len(tokens) >= 2:
+            best_rank = float("inf")
+            best_pair = None
+            best_idx = -1
+
+            # Find the merge pair with the lowest rank (highest priority)
+            for i in range(len(tokens) - 1):
+                pair = (tokens[i], tokens[i + 1])
+                rank = self.merge_ranks.get(pair)
+                if rank is not None and rank < best_rank:
+                    best_rank = rank
+                    best_pair = pair
+                    best_idx = i
+
+            if best_idx == -1:
+                break  # No more merge rules applicable
+
+            left, right = best_pair
+            merged_id = self.merge_to_id[best_pair]
+            tokens[best_idx] = merged_id
+            tokens.pop(best_idx + 1)
+
+        return tokens
+
+    def decode(self, ids: list[int]) -> str:
+        res = bytearray()
+        for i in ids:
+            b = self.id_to_bytes.get(i)
+            if b is not None:
+                res.extend(b)
+        return res.decode("utf-8", errors="replace")
+
+    def decode_to_string(self, ids: list[int]) -> str:
+        return self.decode(ids)
+
+
 class HBLLMTokenizer:
     """
     Unified tokenizer with special token support and chat templates.
@@ -53,7 +131,7 @@ class HBLLMTokenizer:
     """
 
     def __init__(self, vocab: Any | None = None, vocab_size: int = 32768) -> None:
-        self._vocab = vocab  # Rust Vocab object or None
+        self._vocab = vocab  # Rust Vocab or PurePythonBPE or None
         self._tiktoken: Any | None = None
         self._special_ids: dict[str, int] = {}
         self.vocab_size = vocab_size
@@ -64,36 +142,35 @@ class HBLLMTokenizer:
             self._init_fallback()
 
     def _init_from_vocab(self, vocab: Any) -> None:
-        """Initialize from Rust Vocab."""
+        """Initialize from Vocab object (Rust or Python)."""
         self.vocab_size = len(vocab)
         # Map special tokens to IDs (reserve last N vocab positions)
         base = self.vocab_size - len(SPECIAL_TOKENS)
         for i, token in enumerate(SPECIAL_TOKENS):
             self._special_ids[token] = base + i
-        logger.info("Tokenizer loaded from Rust Vocab (%d tokens)", self.vocab_size)
+        logger.info("Tokenizer loaded from Custom Vocab (%d tokens)", self.vocab_size)
 
     # Class-level tiktoken cache to avoid re-initialization
     _tiktoken_cache: dict[str, Any] = {}
 
     def _init_fallback(self) -> None:
-        """Fallback: use tiktoken for encoding (cached)."""
-        if tiktoken is not None:
-            try:
-                cache_key = "cl100k_base"
-                if cache_key not in HBLLMTokenizer._tiktoken_cache:
-                    HBLLMTokenizer._tiktoken_cache[cache_key] = tiktoken.get_encoding(cache_key)
-                self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
-                if self._tiktoken:
-                    self.vocab_size = self._tiktoken.n_vocab
-                    logger.info(
-                        "Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size
-                    )
-            except Exception as e:
-                logger.warning("Failed to initialize tiktoken fallback: %s", e)
-        else:
-            logger.warning("No tokenizer backend available. Encode/decode will fail.")
+        """Graceful fallback: use tiktoken if installed, else a lightweight byte-level model."""
+        try:
+            import tiktoken
 
-        # Reserve special IDs at end
+            cache_key = "cl100k_base"
+            if cache_key not in HBLLMTokenizer._tiktoken_cache:
+                HBLLMTokenizer._tiktoken_cache[cache_key] = tiktoken.get_encoding(cache_key)
+            self._tiktoken = HBLLMTokenizer._tiktoken_cache[cache_key]
+            if self._tiktoken:
+                self.vocab_size = self._tiktoken.n_vocab
+                logger.info("Tokenizer fallback: tiktoken cl100k_base (%d tokens)", self.vocab_size)
+        except ImportError:
+            # Safe zero-dependency fallback (base 256 bytes)
+            self.vocab_size = 256
+            logger.info("Tokenizer fallback: Zero-dependency 256-byte base vocabulary")
+
+        # Reserve special IDs at the end of the fallback vocabulary
         base = self.vocab_size
         for i, token in enumerate(SPECIAL_TOKENS):
             self._special_ids[token] = base + i
@@ -101,15 +178,24 @@ class HBLLMTokenizer:
 
     @classmethod
     def from_vocab(cls, path: str | Path) -> HBLLMTokenizer:
-        """Load from a Rust vocab JSON file."""
-        if Vocab is not None:
+        """Load from a BPE vocab JSON file."""
+        # 1. Try high-performance Rust Vocab first
+        if RustVocab is not None:
             try:
-                vocab = Vocab.load(str(path))
+                vocab = RustVocab.load(str(path))
                 return cls(vocab=vocab)
             except Exception as e:
-                logger.warning("Failed to load Rust vocab: %s. Falling back to tiktoken.", e)
+                logger.warning("Failed to load Rust vocab: %s. Trying pure-Python loader.", e)
 
-        logger.warning("Rust tokenizer not available, using tiktoken fallback")
+        # 2. Fallback to Pure-Python custom BPE loader
+        try:
+            with open(path, encoding="utf-8") as f:
+                vocab_data = json.load(f)
+            vocab = PurePythonBPE(vocab_data)
+            return cls(vocab=vocab)
+        except Exception as e:
+            logger.warning("Failed to load custom vocab: %s. Using fallback.", e)
+
         return cls()
 
     @classmethod
@@ -131,7 +217,8 @@ class HBLLMTokenizer:
         elif self._tiktoken is not None:
             ids.extend(self._tiktoken.encode(text))
         else:
-            raise RuntimeError("No tokenizer backend available")
+            # Zero-dependency 256-byte fallback
+            ids.extend(list(text.encode("utf-8")))
 
         if add_eos:
             ids.append(self.eos_id)
@@ -145,11 +232,14 @@ class HBLLMTokenizer:
         filtered = [i for i in ids if i not in special_values]
 
         if self._vocab is not None:
-            return str(self._vocab.decode_to_string(filtered))
+            if hasattr(self._vocab, "decode_to_string"):
+                return str(self._vocab.decode_to_string(filtered))
+            return str(self._vocab.decode(filtered))
         elif self._tiktoken is not None:
             return str(self._tiktoken.decode(filtered))
         else:
-            raise RuntimeError("No tokenizer backend available")
+            # Zero-dependency 256-byte fallback
+            return bytes(filtered).decode("utf-8", errors="replace")
 
     # ─── Special Token IDs ───────────────────────────────────────────
 
@@ -212,5 +302,13 @@ class HBLLMTokenizer:
         return self.vocab_size
 
     def __repr__(self) -> str:
-        backend = "rust" if self._vocab else "tiktoken" if self._tiktoken else "none"
+        backend = (
+            "rust"
+            if RustVocab and isinstance(self._vocab, RustVocab)
+            else "python"
+            if self._vocab
+            else "tiktoken"
+            if self._tiktoken
+            else "none"
+        )
         return f"HBLLMTokenizer(vocab_size={self.vocab_size}, backend={backend})"
