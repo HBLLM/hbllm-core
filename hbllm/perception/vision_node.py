@@ -12,6 +12,7 @@ from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+from hbllm.perception.vector_projector import MultimodalProjector
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,11 @@ class VisionNode(Node):
         self.topic_sub = "vision.process"
         self.pipeline: Any = None
         self._ocr_reader: Any = None
+        self.rust_engine: Any = None
+        self.change_detector: Any = None
+        self.projector = MultimodalProjector(llm_dim=4096)
+        self._last_caption_cache: dict[str, str] = {}
+        self._last_embedding_cache: dict[str, list[float]] = {}
 
     async def on_start(self) -> None:
         logger.info("Starting VisionNode. Loading ViT model...")
@@ -47,6 +53,22 @@ class VisionNode(Node):
         )
 
     def _load_model(self) -> None:
+        # Try loading Rust engine first
+        try:
+            import hbllm_perception_rs  # type: ignore
+
+            self.rust_engine = hbllm_perception_rs.VisionEngine()
+            self.rust_engine.load_model("mock")
+            self.change_detector = hbllm_perception_rs.ChangeDetector(threshold=5)
+            logger.info("Successfully initialized Rust-native ONNX perception engine (mock mode).")
+            return
+        except ImportError:
+            logger.info("hbllm_perception_rs not found. Falling back to PyTorch/transformers.")
+        except Exception as e:
+            logger.error(
+                "Failed to initialize hbllm_perception_rs: %s. Falling back to PyTorch.", e
+            )
+
         try:
             import torch
             from transformers import pipeline  # type: ignore
@@ -75,19 +97,63 @@ class VisionNode(Node):
         if not image_data:
             return message.create_error("No 'image_path' or 'image_data' provided in payload.")
 
-        if not self.pipeline:
-            return message.create_error("Vision pipeline not initialized.")
+        if not self.pipeline and not self.rust_engine:
+            return message.create_error("Vision pipeline and Rust engine not initialized.")
 
         try:
             import asyncio
 
+            # Check change detector
+            entity_id = message.payload.get("entity_id") or "default"
+            session_id = message.session_id or "default"
+            cache_key = f"{entity_id}:{session_id}"
+
+            changed = True
+            image_bytes = None
+            if self.change_detector:
+                try:
+                    image_bytes = self._get_image_bytes(str(image_data))
+                    changed = self.change_detector.is_changed(image_bytes)
+                except Exception as e:
+                    logger.error("Change detection failed: %s", e)
+
+            if not changed and cache_key in self._last_caption_cache:
+                logger.info("Frame unchanged for %s. Returning cached result.", cache_key)
+                caption = self._last_caption_cache[cache_key]
+                embedding = self._last_embedding_cache.get(cache_key, [])
+                return message.create_response(
+                    {"text": caption, "domain": "vision", "embedding": embedding, "cached": True}
+                )
+
+            # If changed (or first run), process image and get embedding
             caption = await asyncio.to_thread(self._process_image, str(image_data))
-            return message.create_response({"text": caption, "domain": "vision"})
+            embedding = await asyncio.to_thread(self._embed_image, str(image_data))
+
+            self._last_caption_cache[cache_key] = caption
+            self._last_embedding_cache[cache_key] = embedding
+
+            return message.create_response(
+                {"text": caption, "domain": "vision", "embedding": embedding, "cached": False}
+            )
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Vision processing error: %s", e)
             return message.create_error(f"Vision failure: {e}")
 
+    def _get_image_bytes(self, path_or_hex: str) -> bytes:
+        if len(path_or_hex) > 512:  # Likely hex
+            return bytes.fromhex(path_or_hex)
+        else:
+            with open(path_or_hex, "rb") as f:
+                return f.read()
+
     def _process_image(self, path_or_hex: str) -> str:
+        if self.rust_engine:
+            try:
+                image_bytes = self._get_image_bytes(path_or_hex)
+                return str(self.rust_engine.caption(image_bytes))
+            except Exception as e:
+                logger.error("Rust captioning failed: %s. Falling back...", e)
+
         import io
 
         from PIL import Image  # type: ignore
@@ -102,8 +168,28 @@ class VisionNode(Node):
             # Fallback to path
             image = Image.open(path_or_hex).convert("RGB")
 
-        res = self.pipeline(image)
-        return str(res[0]["generated_text"])
+        if self.pipeline:
+            res = self.pipeline(image)
+            return str(res[0]["generated_text"])
+        raise RuntimeError("No vision model pipeline is available.")
+
+    def _embed_image(self, path_or_hex: str) -> list[float]:
+        if self.rust_engine:
+            try:
+                image_bytes = self._get_image_bytes(path_or_hex)
+                return [float(v) for v in self.rust_engine.embed(image_bytes)]
+            except Exception as e:
+                logger.error("Rust embedding extraction failed: %s", e)
+
+        # Fallback pseudo-random deterministic embedding
+        import hashlib
+
+        h = hashlib.sha256(path_or_hex.encode()).digest()
+        emb = []
+        for i in range(768):
+            val = ((h[i % 32] + i) % 256) / 255.0 * 2.0 - 1.0
+            emb.append(val)
+        return emb
 
     def _extract_text_ocr(self, path_or_hex: str) -> str:
         """Extract text from image using OCR (EasyOCR with fallback)."""
@@ -210,7 +296,7 @@ class VisionNode(Node):
         payload = message.payload
         image_data = payload.get("image_path") or payload.get("image_data")
 
-        if not image_data or not self.pipeline:
+        if not image_data or (not self.pipeline and not self.rust_engine):
             return None  # Not a vision-relevant query
 
         try:
@@ -225,6 +311,9 @@ class VisionNode(Node):
                 ocr_text = await asyncio.to_thread(self._extract_text_ocr, data_str)
             except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
+
+            raw_embedding = await asyncio.to_thread(self._embed_image, data_str)
+            projected_embedding = self.projector.project_vision(raw_embedding)
 
             content = f"[Visual Analysis] {caption}"
             if ocr_text:
@@ -242,6 +331,7 @@ class VisionNode(Node):
                     "confidence": 0.85,
                     "content": content,
                     "modality": "image",
+                    "embedding": projected_embedding,
                 },
                 correlation_id=message.correlation_id,
             )

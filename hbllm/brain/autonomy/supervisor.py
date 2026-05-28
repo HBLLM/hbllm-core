@@ -76,7 +76,9 @@ class ProcessSupervisor:
         if self.recovery_callback:
             try:
                 self.recovery_callback()
-            except Exception:
-                logger.exception("ProcessSupervisor: Failed to execute hard recovery callback.")
+            except (RuntimeError, OSError, TypeError, ValueError) as exc:
+                logger.exception(
+                    "ProcessSupervisor: Failed to execute hard recovery callback: %s", exc
+                )
         else:
             logger.error("ProcessSupervisor: No recovery callback configured. System remains hung.")

@@ -23,8 +23,9 @@ static HEDGE_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static DEFINITIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\b(definitely|certainly|always|never|absolutely|exactly|proven|guaranteed|100%)\b"
-    ).unwrap()
+        r"(?i)\b(definitely|certainly|always|never|absolutely|exactly|proven|guaranteed|100%)\b",
+    )
+    .unwrap()
 });
 
 static FACTUAL_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -33,20 +34,16 @@ static FACTUAL_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
     ).unwrap()
 });
 
-static LONG_NUMERIC_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\d{6,}\b").unwrap()
-});
+static LONG_NUMERIC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{6,}\b").unwrap());
 
-static WORD_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\w+\b").unwrap()
-});
+static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\w+\b").unwrap());
 
 // ── Stopwords ───────────────────────────────────────────────────────────────
 
 static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
-        "the", "a", "an", "is", "are", "was", "were", "and", "or", "to",
-        "in", "of", "for", "on", "with", "it", "this", "that",
+        "the", "a", "an", "is", "are", "was", "were", "and", "or", "to", "in", "of", "for", "on",
+        "with", "it", "this", "that",
     ]
     .into_iter()
     .collect()
@@ -215,4 +212,142 @@ fn hbllm_confidence(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_confidence, m)?)?;
     m.add_function(wrap_pyfunction!(quick_score, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_relevance_full_overlap() {
+        // All query words appear in response
+        let score = score_relevance("rust performance", "rust has great performance");
+        assert!(score > 0.9, "Expected high relevance, got {}", score);
+    }
+
+    #[test]
+    fn test_relevance_no_overlap() {
+        let score = score_relevance("rust programming", "python django framework");
+        assert!(score < 0.3, "Expected low relevance, got {}", score);
+    }
+
+    #[test]
+    fn test_relevance_empty_query() {
+        let score = score_relevance("", "some response text");
+        assert!(
+            (score - 0.5).abs() < f64::EPSILON,
+            "Expected 0.5 for empty query, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_coherence_single_sentence() {
+        let score = score_coherence("This is one sentence");
+        assert!(
+            (score - 0.6).abs() < f64::EPSILON,
+            "Expected 0.6 for single sentence, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_coherence_repetitive() {
+        let score = score_coherence("Hello world. Hello world. Hello world.");
+        assert!(
+            score < 0.7,
+            "Expected low coherence for repetition, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_coherence_varied() {
+        let text = "Rust is a systems programming language. It focuses on safety and performance. The borrow checker prevents data races at compile time.";
+        let score = score_coherence(text);
+        assert!(
+            score > 0.7,
+            "Expected high coherence for varied text, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_factuality_no_claims() {
+        let risk = score_factuality_risk("This is a simple opinion about programming");
+        assert!(
+            risk < 0.01,
+            "Expected near-zero risk without claims, got {}",
+            risk
+        );
+    }
+
+    #[test]
+    fn test_factuality_many_claims() {
+        let risk = score_factuality_risk(
+            "Founded in 2020, born in 1990, died in 2005, the stock rose 45.2%",
+        );
+        assert!(
+            risk > 0.3,
+            "Expected high risk with many claims, got {}",
+            risk
+        );
+        assert!(risk <= 1.0, "Risk should be capped at 1.0, got {}", risk);
+    }
+
+    #[test]
+    fn test_uncertainty_hedges() {
+        let score = score_uncertainty("I think maybe perhaps this could be the answer");
+        assert!(
+            score > 0.3,
+            "Expected high uncertainty with hedges, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_uncertainty_no_hedges() {
+        let score = score_uncertainty("The function returns the computed value from the database");
+        assert!(
+            score < 0.2,
+            "Expected low uncertainty without hedges, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_detail_brief() {
+        assert!((score_detail("Hi") - 0.1).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_detail_long() {
+        let long_text = "word ".repeat(101);
+        assert!((score_detail(&long_text) - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_estimate_confidence_flags() {
+        let (overall, _, _, _, _, _, flags) = estimate_confidence(
+            "xyz", "yes", // too_brief + low_relevance
+            0.6, 0.25, 0.20, 0.25, 0.15, 0.15,
+        );
+        assert!(flags.contains(&"too_brief".to_string()));
+        assert!(flags.contains(&"low_relevance".to_string()));
+        assert!(
+            overall >= 0.0 && overall <= 1.0,
+            "Overall out of bounds: {}",
+            overall
+        );
+    }
+
+    #[test]
+    fn test_quick_score_bounded() {
+        let score = quick_score("how to learn rust", "Rust is a systems programming language focused on safety and performance. You can learn it through the official book and exercises.");
+        assert!(
+            score >= 0.0 && score <= 1.0,
+            "quick_score out of bounds: {}",
+            score
+        );
+    }
 }

@@ -20,7 +20,7 @@
 //! ## Usage
 //!
 //! ```rust
-//! use hbllm_tokenizer::trainer::{Trainer, TrainerConfig};
+//! use hbllm_tokenizer_rs::trainer::{Trainer, TrainerConfig};
 //!
 //! let config = TrainerConfig {
 //!     vocab_size: 32768,

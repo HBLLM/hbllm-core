@@ -15,8 +15,8 @@
 //! ## Usage
 //!
 //! ```rust
-//! use hbllm_data_tools::clean::{clean_text, CleanConfig};
-//! use hbllm_data_tools::dedup::{Deduplicator, DedupConfig};
+//! use hbllm_data_tools_rs::clean::{clean_text, CleanConfig};
+//! use hbllm_data_tools_rs::dedup::{Deduplicator, DedupConfig};
 //!
 //! // Clean text
 //! let config = CleanConfig::default();

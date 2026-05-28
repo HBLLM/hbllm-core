@@ -27,9 +27,6 @@ from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
-pytestmark = pytest.mark.asyncio
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -102,6 +99,7 @@ def _make_reflection_msg(rules: list[dict] | None = None) -> Message:
 # ── EvaluationNode Tests ────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestEvaluationNode:
     """Test EvaluationNode scoring and feedback loop."""
 
@@ -222,6 +220,7 @@ class TestEvaluationNode:
 # ── SkillCompilerNode Tests ──────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestSkillCompilerNode:
     """Test SkillCompilerNode pattern detection and compilation."""
 
@@ -312,6 +311,7 @@ class TestSkillCompilerNode:
 # ── ReflectionNode Tests ─────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestReflectionNode:
     """Test ReflectionNode periodic analysis and insight generation."""
 
@@ -460,6 +460,7 @@ class TestReflectionNode:
 # ── Factory Integration Tests ────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestV2FactoryIntegration:
     """Verify v2 nodes are wired into Brain via factory."""
 

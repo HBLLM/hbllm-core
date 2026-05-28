@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -72,13 +73,13 @@ class DatabasePool:
             await self._connections[-1].execute("PRAGMA wal_checkpoint(TRUNCATE);")
             await self._connections[-1].commit()
             logger.info("WAL checkpointed and truncated for %s", self.db_path)
-        except Exception as e:
+        except (sqlite3.Error, OSError) as e:
             logger.error("Failed to checkpoint WAL for %s: %s", self.db_path, e)
 
         for conn in self._connections:
             try:
                 await conn.close()
-            except Exception as e:
+            except (sqlite3.Error, OSError) as e:
                 logger.error("Error closing connection for %s: %s", self.db_path, e)
         self._connections.clear()
         logger.info("Closed DatabasePool for %s", self.db_path)

@@ -143,7 +143,7 @@ class GrpcBus:
                     return
                 message = result
             except Exception as e:
-                logger.error("Interceptor failed: %s", e)
+                logger.exception("Interceptor failed: %s", e)
                 self.metrics.record_drop(topic)
                 return
 
@@ -279,5 +279,5 @@ class _BusServiceHandler(grpc.GenericRpcHandler):
             await self._bus.publish(topic, message)
             return b"OK"
         except Exception as e:
-            logger.error("Failed to handle gRPC delivery: %s", e)
+            logger.exception("Failed to handle gRPC delivery: %s", e)
             return b"ERROR"

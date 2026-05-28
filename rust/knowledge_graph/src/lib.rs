@@ -115,10 +115,7 @@ fn jaccard_similarity(a: &str, b: &str) -> f64 {
 
 /// Find pairs of entities that are similar above a threshold.
 /// Returns Vec<(entity_a, entity_b, similarity)>.
-fn find_similar_entities(
-    entities: &[String],
-    threshold: f64,
-) -> Vec<(String, String, f64)> {
+fn find_similar_entities(entities: &[String], threshold: f64) -> Vec<(String, String, f64)> {
     let mut results = Vec::new();
 
     for i in 0..entities.len() {
@@ -161,10 +158,7 @@ fn subgraph(
 
 /// Find similar entity pairs above a similarity threshold.
 #[pyfunction]
-fn disambiguate_entities(
-    entities: Vec<String>,
-    threshold: f64,
-) -> Vec<(String, String, f64)> {
+fn disambiguate_entities(entities: Vec<String>, threshold: f64) -> Vec<(String, String, f64)> {
     find_similar_entities(&entities, threshold)
 }
 
@@ -181,4 +175,114 @@ fn hbllm_knowledge_graph(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(disambiguate_entities, m)?)?;
     m.add_function(wrap_pyfunction!(entity_similarity, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_graph() -> HashMap<String, Vec<(String, String)>> {
+        let mut adj = HashMap::new();
+        adj.insert(
+            "A".into(),
+            vec![("B".into(), "knows".into()), ("C".into(), "likes".into())],
+        );
+        adj.insert("B".into(), vec![("D".into(), "works_with".into())]);
+        adj.insert("C".into(), vec![("D".into(), "related_to".into())]);
+        adj
+    }
+
+    #[test]
+    fn test_bfs_direct_neighbor() {
+        let adj = make_graph();
+        let path = bfs_shortest_path(&adj, "A", "B", 5);
+        assert_eq!(path, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_bfs_two_hops() {
+        let adj = make_graph();
+        let path = bfs_shortest_path(&adj, "A", "D", 5);
+        assert_eq!(path.len(), 3);
+        assert_eq!(path[0], "A");
+        assert_eq!(path[2], "D");
+    }
+
+    #[test]
+    fn test_bfs_no_path() {
+        let adj = make_graph();
+        let path = bfs_shortest_path(&adj, "D", "A", 10); // No reverse edges
+        assert!(path.is_empty());
+    }
+
+    #[test]
+    fn test_bfs_same_node() {
+        let adj = make_graph();
+        let path = bfs_shortest_path(&adj, "A", "A", 5);
+        assert_eq!(path, vec!["A"]);
+    }
+
+    #[test]
+    fn test_bfs_max_depth() {
+        let adj = make_graph();
+        // A→B→D is 3 nodes (2 hops). With max_depth=1, path length limited to 1 hop.
+        let path = bfs_shortest_path(&adj, "A", "D", 1);
+        assert!(path.is_empty(), "Should not find D at depth 1");
+    }
+
+    #[test]
+    fn test_subgraph_depth_0() {
+        let adj = make_graph();
+        let (nodes, edges) = extract_subgraph(&adj, "A", 0);
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes.contains(&"A".to_string()));
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_subgraph_depth_1() {
+        let adj = make_graph();
+        let (nodes, edges) = extract_subgraph(&adj, "A", 1);
+        assert!(nodes.contains(&"A".to_string()));
+        assert!(nodes.contains(&"B".to_string()));
+        assert!(nodes.contains(&"C".to_string()));
+        assert_eq!(edges.len(), 2); // A→B and A→C
+    }
+
+    #[test]
+    fn test_jaccard_identical() {
+        let sim = jaccard_similarity("hello", "hello");
+        assert!((sim - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_jaccard_disjoint() {
+        let sim = jaccard_similarity("abc", "xyz");
+        assert!((sim - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_jaccard_empty_strings() {
+        let sim = jaccard_similarity("", "");
+        assert!((sim - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_find_similar_threshold() {
+        let entities = vec![
+            "machine learning".to_string(),
+            "machine learning model".to_string(),
+            "quantum physics".to_string(),
+        ];
+        let results = find_similar_entities(&entities, 0.5);
+        // "machine learning" and "machine learning model" should be similar
+        assert!(!results.is_empty());
+        assert!(results[0].2 >= 0.5);
+        // "quantum physics" should not match
+        let has_quantum_ml_pair = results.iter().any(|(a, b, _)| {
+            (a.contains("quantum") && b.contains("machine"))
+                || (a.contains("machine") && b.contains("quantum"))
+        });
+        assert!(!has_quantum_ml_pair);
+    }
 }

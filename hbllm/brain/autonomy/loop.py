@@ -403,8 +403,8 @@ class AutonomyCore:
                     logger.debug("Reflex '%s' fired for event %s", name, event.source)
                     await self._emit_action(action)
                     return True
-            except Exception:
-                logger.exception("Error in reflex '%s'", name)
+            except (TypeError, ValueError, KeyError, RuntimeError) as exc:
+                logger.warning("Error in reflex '%s': %s", name, exc, exc_info=True)
         return False
 
     # ── Slow Path (Periodic Tick) ─────────────────────────────────────
@@ -478,9 +478,14 @@ class AutonomyCore:
             if self.state_machine.state == CognitiveState.INTERRUPTED and not self._pending_events:
                 self.state_machine.resume_from_interruption(reason="event_queue_drained")
 
-        except Exception:
-            logger.exception("Error in cognitive tick")
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            logger.exception("Recoverable error in cognitive tick: %s", exc)
             self.state_machine.transition_to(CognitiveState.RECOVERING, reason="tick_error")
+        except Exception:
+            logger.exception("Unexpected error in cognitive tick — entering recovery")
+            self.state_machine.transition_to(
+                CognitiveState.RECOVERING, reason="tick_error_unexpected"
+            )
 
     async def _process_pending_events(self) -> None:
         """Process buffered scored events in priority order."""
@@ -578,8 +583,8 @@ class AutonomyCore:
                 if messages:
                     for msg in messages:
                         await self._emit_action(msg)
-            except Exception:
-                logger.exception("Error in proactive handler '%s'", name)
+            except (RuntimeError, ValueError, TypeError, asyncio.TimeoutError) as exc:
+                logger.warning("Error in proactive handler '%s': %s", name, exc, exc_info=True)
 
     # ── Output ────────────────────────────────────────────────────────
 

@@ -1,0 +1,25 @@
+[package]
+name = "hbllm_perception_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust-native ONNX vision engine and perception primitives for HBLLM."
+
+[lib]
+name = "hbllm_perception_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Python bindings
+pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py311"] }
+
+# ONNX Runtime
+ort = { version = "2.0.0-rc.9", features = ["load-dynamic", "ndarray"] }
+
+# Image processing (pure Rust, no system deps)
+image = { version = "0.25.0", default-features = false, features = ["png", "jpeg"] }
+
+# Tensor manipulation
+ndarray = "0.17.2"
+
+# Parallelism
+rayon = "1.8.0"

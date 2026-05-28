@@ -60,17 +60,23 @@ class MetaReasoningNode(Node):
 
     def _db_insert_feedback(self, domain: str, instruction: str, response: str) -> None:
         """Persist a negative-feedback sample to SQLite."""
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                "INSERT INTO negative_feedback (domain, instruction, response, created_at)"
-                " VALUES (?, ?, ?, ?)",
-                (domain, instruction, response, time.time()),
-            )
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    "INSERT INTO negative_feedback (domain, instruction, response, created_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (domain, instruction, response, time.time()),
+                )
+        except (sqlite3.Error, OSError) as e:
+            logger.exception("Failed to insert negative feedback to SQLite: %s", e)
 
     def _db_clear_feedback(self, domain: str) -> None:
         """Delete all feedback rows for *domain* from SQLite."""
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute("DELETE FROM negative_feedback WHERE domain = ?", (domain,))
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("DELETE FROM negative_feedback WHERE domain = ?", (domain,))
+        except (sqlite3.Error, OSError) as e:
+            logger.exception("Failed to clear SQLite feedback for domain '%s': %s", domain, e)
 
     # ── Schema init & restore ──────────────────────────────────────────────
 
@@ -154,7 +160,8 @@ class MetaReasoningNode(Node):
 
         try:
             payload = FeedbackPayload(**message.payload)
-        except Exception:
+        except (TypeError, ValueError) as e:
+            logger.debug("Failed to parse FeedbackPayload: %s", e)
             return None  # Ignore invalid
 
         domain = payload.module_id or "general"
@@ -182,7 +189,7 @@ class MetaReasoningNode(Node):
                     self._pending_tasks.add(task)
                     task.add_done_callback(self._pending_tasks.discard)
                 except Exception as e:
-                    logger.warning("Failed to persist feedback to SQLite: %s", e)
+                    logger.exception("Failed to schedule feedback persistence task: %s", e)
 
                 # Check if this crosses the systemic weakness threshold
                 if len(self.negative_feedback_buffer[domain]) >= self.weakness_threshold:
@@ -227,8 +234,8 @@ class MetaReasoningNode(Node):
             await asyncio.to_thread(_write)
             logger.info("Saved reflection dataset to %s", filepath)
 
-        except Exception as e:
-            logger.error("Failed to dump reflection dataset: %s", e)
+        except OSError as e:
+            logger.exception("Failed to dump reflection dataset: %s", e)
             return
 
         # 2. Fire the improvement signal over the bus
@@ -249,7 +256,11 @@ class MetaReasoningNode(Node):
         try:
             await asyncio.to_thread(self._db_clear_feedback, domain)
         except Exception as e:
-            logger.warning("Failed to clear SQLite feedback for domain '%s': %s", domain, e)
+            logger.exception(
+                "Failed to schedule or run SQLite feedback clear task for domain '%s': %s",
+                domain,
+                e,
+            )
 
     def stats(self) -> dict[str, Any]:
         """Return meta-reasoning statistics."""

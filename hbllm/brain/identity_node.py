@@ -221,8 +221,8 @@ class IdentityNode(Node):
                 }
             )
 
-        except Exception as e:
-            logger.error("Identity query failed: %s", e)
+        except (sqlite3.Error, OSError, ValueError, KeyError) as e:
+            logger.exception("Identity query failed: %s", e)
             return message.create_error(str(e))
 
     async def handle_update(self, message: Message) -> Message | None:
@@ -261,6 +261,6 @@ class IdentityNode(Node):
 
             return message.create_response({"status": "updated", "tenant_id": tenant_id})
 
-        except Exception as e:
-            logger.error("Identity update failed: %s", e)
+        except (sqlite3.Error, OSError, ValueError, KeyError) as e:
+            logger.exception("Identity update failed: %s", e)
             return message.create_error(str(e))

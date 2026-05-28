@@ -67,6 +67,9 @@ class PerceptionEvent:
     # Payload
     payload: dict[str, Any] = field(default_factory=dict)
 
+    # Multimodal Embedding
+    embedding: list[float] | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
@@ -82,6 +85,7 @@ class PerceptionEvent:
             "ingest_timestamp": self.ingest_timestamp,
             "logical_clock": self.logical_clock,
             "payload": self.payload,
+            "embedding": self.embedding,
         }
 
     @classmethod
@@ -100,6 +104,7 @@ class PerceptionEvent:
             ingest_timestamp=d.get("ingest_timestamp", 0.0),
             logical_clock=d.get("logical_clock", 0),
             payload=d.get("payload", {}),
+            embedding=d.get("embedding"),
         )
 
 
@@ -113,6 +118,7 @@ class RealityEventBus:
 
     def __init__(self) -> None:
         self._subscribers: list[Callable[[PerceptionEvent], Any]] = []
+        self._pre_subscribers: list[Callable[[PerceptionEvent], Any]] = []
         self._logical_clock: int = 0
         self._lock = asyncio.Lock()
 
@@ -126,12 +132,29 @@ class RealityEventBus:
         if callback in self._subscribers:
             self._subscribers.remove(callback)
 
+    def subscribe_pre(self, callback: Callable[[PerceptionEvent], Any]) -> None:
+        """Subscribe to the raw reality stream synchronously before normal subscribers."""
+        if callback not in self._pre_subscribers:
+            self._pre_subscribers.append(callback)
+
+    def unsubscribe_pre(self, callback: Callable[[PerceptionEvent], Any]) -> None:
+        """Remove a pre-subscription."""
+        if callback in self._pre_subscribers:
+            self._pre_subscribers.remove(callback)
+
     async def ingest(self, event: PerceptionEvent) -> None:
         """Ingest a new raw event from a sensor/adapter."""
         async with self._lock:
             self._logical_clock += 1
             event.logical_clock = self._logical_clock
             event.ingest_timestamp = time.time()
+
+        # Call pre-subscribers synchronously
+        for pre_sub in self._pre_subscribers:
+            try:
+                pre_sub(event)
+            except Exception as e:
+                logger.error("Error in RealityEventBus pre-subscriber: %s", e)
 
         # Fire and forget to subscribers (to avoid blocking ingestion)
         for sub in self._subscribers:

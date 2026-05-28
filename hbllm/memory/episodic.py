@@ -58,7 +58,7 @@ class EpisodicMemory:
             """)
             try:
                 await conn.execute("SELECT parent_memory_id FROM turns LIMIT 1")
-            except Exception:
+            except sqlite3.OperationalError:
                 await conn.execute("ALTER TABLE turns ADD COLUMN parent_memory_id TEXT")
             await conn.commit()
         logger.debug("Initialized EpisodicMemory at %s", self.db_path)

@@ -10,6 +10,8 @@ from hbllm.perception.reality_bus import (
     PerceptionModality,
     RealityEventBus,
 )
+from hbllm.perception.reflex_arc import ReflexArc, ReflexRule
+from hbllm.perception.vector_projector import MultimodalProjector
 from hbllm.perception.vision_node import VisionNode
 
 __all__ = [
@@ -22,4 +24,7 @@ __all__ = [
     "PerceptionModality",
     "RealityEventBus",
     "VisionNode",
+    "MultimodalProjector",
+    "ReflexArc",
+    "ReflexRule",
 ]

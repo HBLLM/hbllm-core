@@ -461,11 +461,18 @@ class WorkspaceNode(Node):
                         correlation_id=corr_id,
                     )
                     await self.bus.publish("module.evaluate", broadcast_msg)
-            except Exception as e:
+            except (TimeoutError, asyncio.TimeoutError) as e:
                 logger.warning(
                     "Execution verification timed out: %s. Accepting thought with warning.", e
                 )
                 best_thought["execution_warning"] = "Verification timed out"
+                await self._commit_to_decision(corr_id, best_thought)
+            except Exception as e:
+                logger.exception(
+                    "Unexpected error during execution verification: %s. Accepting thought with warning.",
+                    e,
+                )
+                best_thought["execution_warning"] = f"Verification error: {e}"
                 await self._commit_to_decision(corr_id, best_thought)
             return
 
@@ -684,7 +691,7 @@ class WorkspaceNode(Node):
                 "Emitted autonomous training feedback (rating=%d) for auto-training loop", rating
             )
         except Exception as e:
-            logger.warning("Failed to emit autonomous training feedback: %s", e)
+            logger.exception("Failed to emit autonomous training feedback: %s", e)
 
     async def _periodic_sweeper(self) -> None:
         """Periodically clean up blackboard entries that have exceeded max age."""

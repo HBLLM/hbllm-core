@@ -819,3 +819,95 @@ fn hbllm_compute(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<UniversalEngine>()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dequantize_scalar_single_group() {
+        // 4 packed bytes → 8 weights, all in group 0 (group_size=128)
+        let packed = vec![0x31u8, 0x42, 0x53, 0x64]; // nibbles: (1,3), (2,4), (3,5), (4,6)
+        let scale = vec![2.0f32]; // single group
+        let bias = vec![0.5f32];
+        let mut out = vec![0.0f32; 8];
+        UniversalEngine::dequantize_row_scalar(&packed, &mut out, &scale, &bias, 128);
+
+        // out[0] = (0x31 & 0x0F) * 2.0 + 0.5 = 1*2.0 + 0.5 = 2.5
+        assert!((out[0] - 2.5).abs() < f32::EPSILON, "out[0]={}", out[0]);
+        // out[1] = (0x31 >> 4) * 2.0 + 0.5 = 3*2.0 + 0.5 = 6.5
+        assert!((out[1] - 6.5).abs() < f32::EPSILON, "out[1]={}", out[1]);
+    }
+
+    #[test]
+    fn test_dequantize_scalar_nibble_extremes() {
+        // 0x0F → low=15, high=0; 0xF0 → low=0, high=15
+        let packed = vec![0x0Fu8, 0xF0];
+        let scale = vec![1.0f32];
+        let bias = vec![0.0f32];
+        let mut out = vec![0.0f32; 4];
+        UniversalEngine::dequantize_row_scalar(&packed, &mut out, &scale, &bias, 128);
+
+        assert!((out[0] - 15.0).abs() < f32::EPSILON); // 0x0F low nibble
+        assert!((out[1] - 0.0).abs() < f32::EPSILON); // 0x0F high nibble
+        assert!((out[2] - 0.0).abs() < f32::EPSILON); // 0xF0 low nibble
+        assert!((out[3] - 15.0).abs() < f32::EPSILON); // 0xF0 high nibble
+    }
+
+    #[test]
+    fn test_dequantize_scalar_multi_group() {
+        // 2 packed bytes → 4 weights. group_size=2 → group 0 covers [0,1], group 1 covers [2,3]
+        let packed = vec![0x11u8, 0x22];
+        let scale = vec![1.0f32, 10.0]; // group 0: scale=1, group 1: scale=10
+        let bias = vec![0.0f32, 0.0];
+        let mut out = vec![0.0f32; 4];
+        UniversalEngine::dequantize_row_scalar(&packed, &mut out, &scale, &bias, 2);
+
+        // out[0] = (0x11 & 0x0F) * 1.0 = 1.0 (group 0)
+        assert!((out[0] - 1.0).abs() < f32::EPSILON, "out[0]={}", out[0]);
+        // out[1] = (0x11 >> 4) * 1.0 = 1.0 (group 0)
+        assert!((out[1] - 1.0).abs() < f32::EPSILON, "out[1]={}", out[1]);
+        // out[2] = (0x22 & 0x0F) * 10.0 = 20.0 (group 1)
+        assert!((out[2] - 20.0).abs() < f32::EPSILON, "out[2]={}", out[2]);
+        // out[3] = (0x22 >> 4) * 10.0 = 20.0 (group 1)
+        assert!((out[3] - 20.0).abs() < f32::EPSILON, "out[3]={}", out[3]);
+    }
+
+    #[test]
+    fn test_gemv_scalar_identity() {
+        // Weights that produce known dot product
+        // packed = [0x10] → low=0, high=1 → weights with scale=1, bias=0 → [0.0, 1.0]
+        // x = [3.0, 5.0] → dot = 0.0*3.0 + 1.0*5.0 = 5.0
+        let packed = vec![0x10u8];
+        let scale = vec![1.0f32];
+        let bias = vec![0.0f32];
+        let x = vec![3.0f32, 5.0];
+        let sum = UniversalEngine::gemv_row_scalar(&x, &packed, &scale, &bias, 128);
+        assert!((sum - 5.0).abs() < f32::EPSILON, "sum={}", sum);
+    }
+
+    #[test]
+    fn test_gemv_scalar_zero_weights() {
+        // All-zero packed → only bias contributes
+        let packed = vec![0x00u8, 0x00];
+        let scale = vec![1.0f32];
+        let bias = vec![0.5f32]; // bias=0.5 per weight
+        let x = vec![1.0f32, 1.0, 1.0, 1.0];
+        let sum = UniversalEngine::gemv_row_scalar(&x, &packed, &scale, &bias, 128);
+        // Each weight = 0*1.0 + 0.5 = 0.5. Sum = 0.5*1 + 0.5*1 + 0.5*1 + 0.5*1 = 2.0
+        assert!((sum - 2.0).abs() < f32::EPSILON, "sum={}", sum);
+    }
+
+    #[test]
+    fn test_gemv_scalar_group_boundary() {
+        // 2 packed bytes → 4 weights. group_size=2.
+        let packed = vec![0x11u8, 0x11];
+        let scale = vec![1.0f32, 2.0]; // group 0: s=1, group 1: s=2
+        let bias = vec![0.0f32, 0.0];
+        let x = vec![1.0f32, 1.0, 1.0, 1.0];
+        let sum = UniversalEngine::gemv_row_scalar(&x, &packed, &scale, &bias, 2);
+        // group 0: w[0]=1*1=1, w[1]=1*1=1 → contrib = 1+1 = 2
+        // group 1: w[2]=1*2=2, w[3]=1*2=2 → contrib = 2+2 = 4
+        assert!((sum - 6.0).abs() < f32::EPSILON, "sum={}", sum);
+    }
+}

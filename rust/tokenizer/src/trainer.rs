@@ -250,7 +250,7 @@ mod tests {
         let vocab = trainer.train_from_text("the cat sat on the mat the cat");
 
         // Should have learned at least some merges
-        assert!(vocab.merges.len() > 0);
+        assert!(!vocab.merges.is_empty());
         assert!(vocab.len() > 256);
     }
 
@@ -289,7 +289,7 @@ mod tests {
         let vocab = trainer.train_from_text("ab ab ab ab ab cd cd");
 
         // First merge should be 'a'+'b' since it's most frequent
-        assert!(vocab.merges.len() >= 1);
+        assert!(!vocab.merges.is_empty());
         let first_merge = &vocab.merges[0];
         assert_eq!(first_merge.left, b'a' as u32);
         assert_eq!(first_merge.right, b'b' as u32);

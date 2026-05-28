@@ -9,18 +9,17 @@
 
 use pyo3::prelude::*;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
 use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[a-z]{3,}\b").unwrap());
 
 static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
-        "the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "to", "in", "of",
-        "for", "on", "with", "it", "this", "that", "be", "how", "what", "why", "when", "can",
-        "do", "does", "did", "will", "would", "should", "could", "have", "has", "had", "not",
-        "my", "i",
+        "the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "to", "in", "of", "for",
+        "on", "with", "it", "this", "that", "be", "how", "what", "why", "when", "can", "do",
+        "does", "did", "will", "would", "should", "could", "have", "has", "had", "not", "my", "i",
     ]
     .into_iter()
     .collect()
@@ -79,10 +78,7 @@ fn cluster_queries(
         if matched.len() >= min_keyword_count {
             matched.sort();
             matched.truncate(5);
-            clusters
-                .entry(matched)
-                .or_default()
-                .push(i);
+            clusters.entry(matched).or_default().push(i);
         }
     }
 
@@ -168,4 +164,102 @@ fn hbllm_concept_extract(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_query_rules, m)?)?;
     m.add_function(wrap_pyfunction!(extract_text_keywords, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_keywords_filters_stopwords() {
+        let kw = extract_keywords("the cat and the dog");
+        assert!(kw.contains("cat"));
+        assert!(kw.contains("dog"));
+        assert!(!kw.contains("the"));
+        assert!(!kw.contains("and"));
+    }
+
+    #[test]
+    fn test_extract_keywords_lowercase() {
+        let kw = extract_keywords("Rust Programming Language");
+        assert!(kw.contains("rust"));
+        assert!(kw.contains("programming"));
+        assert!(kw.contains("language"));
+    }
+
+    #[test]
+    fn test_extract_keywords_short_words_filtered() {
+        let kw = extract_keywords("go is ok");
+        // "go", "is", "ok" are all <=2 chars or stopwords → all filtered by regex [a-z]{3,}
+        assert!(kw.is_empty());
+    }
+
+    #[test]
+    fn test_count_keywords_batch() {
+        let texts = vec![
+            "rust programming".to_string(),
+            "rust performance".to_string(),
+            "python programming".to_string(),
+        ];
+        let freq = count_keywords_batch(&texts);
+        assert_eq!(freq.get("rust"), Some(&2));
+        assert_eq!(freq.get("programming"), Some(&2));
+        assert_eq!(freq.get("performance"), Some(&1));
+        assert_eq!(freq.get("python"), Some(&1));
+    }
+
+    #[test]
+    fn test_cluster_queries_groups() {
+        let queries: Vec<String> = (0..5)
+            .map(|_| "rust async programming".to_string())
+            .chain((0..5).map(|_| "python web framework".to_string()))
+            .collect();
+        let clusters = cluster_queries(&queries, 3, 2);
+        assert!(!clusters.is_empty());
+    }
+
+    #[test]
+    fn test_cluster_queries_min_frequency() {
+        let queries = vec![
+            "unique rare keyword".to_string(),
+            "another unique query".to_string(),
+        ];
+        // min_frequency=5 means no keyword appears enough
+        let clusters = cluster_queries(&queries, 5, 1);
+        assert!(clusters.is_empty());
+    }
+
+    #[test]
+    fn test_extract_rules_questions() {
+        let queries: Vec<String> = (0..10)
+            .map(|i| format!("how do I fix issue {}?", i))
+            .collect();
+        let rules = extract_rules(&queries);
+        assert!(rules.iter().any(|r| r.contains("questions")));
+    }
+
+    #[test]
+    fn test_extract_rules_howto() {
+        let queries: Vec<String> = (0..5)
+            .map(|i| format!("how to configure setting {}", i))
+            .chain(std::iter::once("what is rust?".to_string()))
+            .collect();
+        let rules = extract_rules(&queries);
+        assert!(rules.iter().any(|r| r.contains("procedural")));
+    }
+
+    #[test]
+    fn test_extract_rules_errors() {
+        let queries: Vec<String> = (0..5)
+            .map(|i| format!("fix error {} in production", i))
+            .collect();
+        let rules = extract_rules(&queries);
+        assert!(rules.iter().any(|r| r.contains("troubleshooting")));
+    }
+
+    #[test]
+    fn test_extract_rules_empty() {
+        let rules = extract_rules(&[]);
+        assert!(rules.is_empty());
+    }
 }

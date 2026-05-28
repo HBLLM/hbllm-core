@@ -10,8 +10,6 @@ import pytest
 
 from hbllm.brain.llm_interface import LLMInterface
 
-pytestmark = pytest.mark.asyncio
-
 
 class MockTokenizer:
     def encode(self, text):
@@ -56,6 +54,7 @@ def mock_llm():
     return LLMInterface(model=MockModel(), tokenizer=MockTokenizer(), device="cpu")
 
 
+@pytest.mark.asyncio
 class TestLLMInterfaceGeneration:
     async def test_generate_text(self, mock_llm):
         """Standard text generation should work."""
@@ -104,6 +103,7 @@ class TestLLMInterfaceJSONExtraction:
         assert "raw" in res
 
 
+@pytest.mark.asyncio
 class TestLLMInterfaceAdapterLoading:
     async def test_loads_tenant_adapter(self, mock_llm):
         """Should load tenant specific adapter before generation and reset after."""

@@ -153,7 +153,7 @@ class DurableBus(MessageBus):
             self._mark_delivered(msg_id)
         except Exception as e:
             self._mark_failed(msg_id, str(e))
-            logger.warning("Publish failed for %s, will retry: %s", msg_id, e)
+            logger.exception("Publish failed for %s, will retry: %s", msg_id, e)
 
     async def subscribe(
         self, topic: str, handler: MessageHandler, tenant_id: str | None = None
@@ -213,8 +213,8 @@ class DurableBus(MessageBus):
                 (msg_id, topic, payload, self._max_retries, time.time()),
             )
             self._conn.commit()
-        except Exception as e:
-            logger.error("Journal write failed: %s", e)
+        except (sqlite3.Error, OSError) as e:
+            logger.exception("Journal write failed: %s", e)
 
     def _mark_delivered(self, msg_id: str) -> None:
         """Mark message as successfully delivered."""
@@ -290,12 +290,12 @@ class DurableBus(MessageBus):
 
                     except Exception as e:
                         self._mark_failed(msg_id, str(e))
-                        logger.warning("Retry failed for %s: %s", msg_id, e)
+                        logger.exception("Retry failed for %s: %s", msg_id, e)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Retry loop error: %s", e)
+                logger.exception("Retry loop error: %s", e)
 
     # ─── Dead Letter Queue ────────────────────────────────────────────────
 

@@ -386,8 +386,8 @@ class CognitiveStateMachine:
         for hook in self._hooks:
             try:
                 hook(record)
-            except Exception:
-                logger.exception("Error in transition hook")
+            except (TypeError, ValueError, RuntimeError, AttributeError) as exc:
+                logger.warning("Error in transition hook: %s", exc, exc_info=True)
 
         return True
 

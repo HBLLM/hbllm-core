@@ -212,7 +212,46 @@ impl Vocab {
     /// Load vocabulary from a JSON file.
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let json = fs::read_to_string(path)?;
-        let vocab: Self = serde_json::from_str(&json)?;
+        let mut vocab: Self = serde_json::from_str(&json)?;
+
+        // Reconstruct skipped HashMap fields
+        let vocab_size = vocab.vocab_size;
+        vocab.id_to_bytes = HashMap::with_capacity(vocab_size as usize);
+        vocab.bytes_to_id = HashMap::with_capacity(vocab_size as usize);
+        vocab.merge_ranks = HashMap::with_capacity(vocab.merges.len());
+
+        // 1. Initialize with 256 base byte tokens
+        for byte_val in 0u32..256 {
+            let bytes = vec![byte_val as u8];
+            vocab.id_to_bytes.insert(byte_val, bytes.clone());
+            vocab.bytes_to_id.insert(bytes, byte_val);
+        }
+
+        // 2. Reconstruct merged byte sequences from merges
+        for (rank, rule) in vocab.merges.iter().enumerate() {
+            let left = rule.left;
+            let right = rule.right;
+            let merged = rule.merged;
+
+            vocab.merge_ranks.insert((left, right), rank as u32);
+
+            if let (Some(left_bytes), Some(right_bytes)) =
+                (vocab.id_to_bytes.get(&left), vocab.id_to_bytes.get(&right))
+            {
+                let mut merged_bytes = left_bytes.clone();
+                merged_bytes.extend_from_slice(right_bytes);
+                vocab.id_to_bytes.insert(merged, merged_bytes.clone());
+                vocab.bytes_to_id.insert(merged_bytes, merged);
+            }
+        }
+
+        // 3. Reconstruct special tokens
+        for sp in &vocab.special_tokens {
+            let token_bytes = sp.token.as_bytes().to_vec();
+            vocab.id_to_bytes.insert(sp.id, token_bytes.clone());
+            vocab.bytes_to_id.insert(token_bytes, sp.id);
+        }
+
         Ok(vocab)
     }
 }

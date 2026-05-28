@@ -31,8 +31,8 @@ def world_engine():
     return WorldStateEngine()
 
 
-@pytest.mark.asyncio
 class TestVerificationAndConflictResolution:
+    @pytest.mark.asyncio
     async def test_world_state_conflict_resolution(self, world_engine):
         """Test that WorldStateEngine correctly resolves conflicts using trust and recency."""
         now = time.time()

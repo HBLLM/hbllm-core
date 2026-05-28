@@ -511,8 +511,11 @@ class PlannerNode(Node):
         try:
             resp = await self.request(topic, req, timeout=90.0)
             return str(resp.payload.get("text", ""))
-        except Exception as e:
-            logger.warning("[GoT] Branch %d generation failed: %s", branch_id, e)
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            logger.warning("[GoT] Branch %d generation timed out: %s", branch_id, e)
+            return ""
+        except Exception:
+            logger.exception("[GoT] Branch %d generation failed unexpectedly", branch_id)
             return ""
 
     async def _score_thought(self, graph: ThoughtGraph, node: ThoughtNode) -> None:
@@ -544,8 +547,11 @@ class PlannerNode(Node):
                     node.metadata["execution_error"] = err
                     node.content += f"\n\n[EXECUTION FAILED]\n{err}"
                 return
-            except Exception as e:
-                logger.warning("[GoT] Execution verification failed/timed out: %s", e)
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] Execution verification timed out: %s", e)
+                # Fall through to LLM scoring if execution bus falls over
+            except Exception:
+                logger.exception("[GoT] Execution verification failed unexpectedly")
                 # Fall through to LLM scoring if execution bus falls over
 
         # 1.5. Tool Call Interception
@@ -575,9 +581,15 @@ class PlannerNode(Node):
                 graph.branch(node.id, obs_content, score=1.0, is_observation=True)
                 node.score = 1.0  # Reward emitting a valid tool call
                 return
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] Tool execution timed out: %s", e)
+                obs_content = f"Observation: Execution timed out: {str(e)}"
+                graph.branch(node.id, obs_content, score=0.1, is_observation=True)
+                node.score = 0.5
+                return
             except Exception as e:
-                logger.warning("[GoT] Tool execution failed/timed out: %s", e)
-                obs_content = f"Observation: Execution failed: {str(e)}"
+                logger.exception("[GoT] Tool execution failed unexpectedly")
+                obs_content = f"Observation: Execution failed unexpectedly: {str(e)}"
                 graph.branch(node.id, obs_content, score=0.1, is_observation=True)
                 node.score = 0.5
                 return
@@ -611,9 +623,15 @@ class PlannerNode(Node):
                 graph.branch(node.id, obs_content, score=1.0, is_observation=True)
                 node.score = 1.0  # Reward emitting a valid skill call
                 return
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] SIL execution timed out: %s", e)
+                obs_content = f"Observation: SIL execution timed out: {str(e)}"
+                graph.branch(node.id, obs_content, score=0.1, is_observation=True)
+                node.score = 0.5
+                return
             except Exception as e:
-                logger.warning("[GoT] SIL execution failed/timed out: %s", e)
-                obs_content = f"Observation: SIL execution failed: {str(e)}"
+                logger.exception("[GoT] SIL execution failed unexpectedly")
+                obs_content = f"Observation: SIL execution failed unexpectedly: {str(e)}"
                 graph.branch(node.id, obs_content, score=0.1, is_observation=True)
                 node.score = 0.5
                 return
@@ -630,8 +648,11 @@ class PlannerNode(Node):
             resp = await self.request("action.score_thought", req, timeout=5.0)
             score = resp.payload.get("score", 0.5)
             node.score = min(max(float(score), 0.0), 1.0)
-        except Exception as e:
-            logger.warning("[GoT] PRM evaluation failed/timed out, defaulting to 0.5: %s", e)
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            logger.warning("[GoT] PRM evaluation timed out, defaulting to 0.5: %s", e)
+            node.score = 0.5
+        except Exception:
+            logger.exception("[GoT] PRM evaluation failed unexpectedly, defaulting to 0.5")
             node.score = 0.5
 
     def _compress_text(self, text: str, max_chars: int = 2000) -> str:
@@ -700,8 +721,10 @@ class PlannerNode(Node):
             content = resp.payload.get("text", "")
             if content:
                 graph.branch(parent.id, content)
-        except Exception as e:
-            logger.warning("[GoT] Refinement failed: %s", e)
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            logger.warning("[GoT] Refinement timed out: %s", e)
+        except Exception:
+            logger.exception("[GoT] Refinement failed unexpectedly")
 
     async def _merge_thoughts(
         self, query: str, thought_a: str, thought_b: str, domain_hint: str = "general"
@@ -726,8 +749,11 @@ class PlannerNode(Node):
         try:
             resp = await self.request(topic, req, timeout=90.0)
             return str(resp.payload.get("text", ""))
-        except Exception as e:
-            logger.warning("[GoT] Merge failed: %s", e)
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            logger.warning("[GoT] Merge timed out: %s", e)
+            return ""
+        except Exception:
+            logger.exception("[GoT] Merge failed unexpectedly")
             return ""
 
     async def _contribute_to_workspace(self, message: Message) -> Message | None:
