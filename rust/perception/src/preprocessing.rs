@@ -4,7 +4,7 @@
 //! suitable for BLIP/SigLIP/CLIP-style vision transformers.
 //! Zero dependency on Python or PIL.
 
-use image::{DynamicImage, GenericImageView, imageops::FilterType};
+use image::{imageops::FilterType, DynamicImage, GenericImageView};
 use ndarray::Array3;
 
 /// Standard ImageNet normalization constants.
@@ -22,9 +22,15 @@ pub fn preprocess_image(img: &DynamicImage, target_size: u32) -> Array3<f32> {
     // Step 1: Resize shortest side
     let (w, h) = img.dimensions();
     let (new_w, new_h) = if w < h {
-        (target_size, (target_size as f64 * h as f64 / w as f64) as u32)
+        (
+            target_size,
+            (target_size as f64 * h as f64 / w as f64) as u32,
+        )
     } else {
-        ((target_size as f64 * w as f64 / h as f64) as u32, target_size)
+        (
+            (target_size as f64 * w as f64 / h as f64) as u32,
+            target_size,
+        )
     };
     let resized = img.resize_exact(new_w, new_h, FilterType::Lanczos3);
 
@@ -62,9 +68,7 @@ pub fn preprocess_image(img: &DynamicImage, target_size: u32) -> Array3<f32> {
 /// Returns a u64 where each bit represents one spatial position.
 pub fn perceptual_hash(img: &DynamicImage) -> u64 {
     // Resize to 8x8 grayscale
-    let small = img
-        .resize_exact(8, 8, FilterType::Lanczos3)
-        .to_luma8();
+    let small = img.resize_exact(8, 8, FilterType::Lanczos3).to_luma8();
 
     // Compute mean intensity
     let pixels: Vec<f32> = small.pixels().map(|p| p[0] as f32).collect();
@@ -115,7 +119,10 @@ mod tests {
         // All pixels are the same, so after normalization all values should be identical
         let val = tensor[[0, 0, 0]];
         // (128/255 - 0.485) / 0.229 ≈ 0.0693
-        assert!((val - 0.0693).abs() < 0.01, "Unexpected normalized value: {val}");
+        assert!(
+            (val - 0.0693).abs() < 0.01,
+            "Unexpected normalized value: {val}"
+        );
     }
 
     #[test]
@@ -123,7 +130,10 @@ mod tests {
         let img1 = make_test_image(100, 150, 200);
         let img2 = make_test_image(100, 150, 200);
         assert_eq!(perceptual_hash(&img1), perceptual_hash(&img2));
-        assert_eq!(hamming_distance(perceptual_hash(&img1), perceptual_hash(&img2)), 0);
+        assert_eq!(
+            hamming_distance(perceptual_hash(&img1), perceptual_hash(&img2)),
+            0
+        );
     }
 
     #[test]

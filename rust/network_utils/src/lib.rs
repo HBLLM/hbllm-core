@@ -114,9 +114,7 @@ impl CircuitBreaker {
             return 0.0;
         }
         match self.last_failure {
-            Some(last) => {
-                (self.recovery_timeout_secs - last.elapsed().as_secs_f64()).max(0.0)
-            }
+            Some(last) => (self.recovery_timeout_secs - last.elapsed().as_secs_f64()).max(0.0),
             None => 0.0,
         }
     }
@@ -260,7 +258,7 @@ mod tests {
     #[test]
     fn test_rate_limiter_system_bypass() {
         let mut rl = RateLimiter::new(1.0, 1.0); // Very low limit
-        // "system" tenant always allowed
+                                                 // "system" tenant always allowed
         for _ in 0..100 {
             assert!(rl.allow("system"));
         }

@@ -80,7 +80,6 @@ mod tests {
         DynamicImage::ImageRgb8(img)
     }
 
-
     #[test]
     fn test_first_frame_always_changed() {
         let det = ChangeDetector::new(5);

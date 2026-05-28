@@ -9,18 +9,17 @@
 
 use pyo3::prelude::*;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
 use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[a-z]{3,}\b").unwrap());
 
 static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
-        "the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "to", "in", "of",
-        "for", "on", "with", "it", "this", "that", "be", "how", "what", "why", "when", "can",
-        "do", "does", "did", "will", "would", "should", "could", "have", "has", "had", "not",
-        "my", "i",
+        "the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "to", "in", "of", "for",
+        "on", "with", "it", "this", "that", "be", "how", "what", "why", "when", "can", "do",
+        "does", "did", "will", "would", "should", "could", "have", "has", "had", "not", "my", "i",
     ]
     .into_iter()
     .collect()
@@ -79,10 +78,7 @@ fn cluster_queries(
         if matched.len() >= min_keyword_count {
             matched.sort();
             matched.truncate(5);
-            clusters
-                .entry(matched)
-                .or_default()
-                .push(i);
+            clusters.entry(matched).or_default().push(i);
         }
     }
 

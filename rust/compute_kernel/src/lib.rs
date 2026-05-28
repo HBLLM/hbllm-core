@@ -849,8 +849,8 @@ mod tests {
         UniversalEngine::dequantize_row_scalar(&packed, &mut out, &scale, &bias, 128);
 
         assert!((out[0] - 15.0).abs() < f32::EPSILON); // 0x0F low nibble
-        assert!((out[1] - 0.0).abs() < f32::EPSILON);  // 0x0F high nibble
-        assert!((out[2] - 0.0).abs() < f32::EPSILON);  // 0xF0 low nibble
+        assert!((out[1] - 0.0).abs() < f32::EPSILON); // 0x0F high nibble
+        assert!((out[2] - 0.0).abs() < f32::EPSILON); // 0xF0 low nibble
         assert!((out[3] - 15.0).abs() < f32::EPSILON); // 0xF0 high nibble
     }
 

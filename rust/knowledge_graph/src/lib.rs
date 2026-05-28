@@ -115,10 +115,7 @@ fn jaccard_similarity(a: &str, b: &str) -> f64 {
 
 /// Find pairs of entities that are similar above a threshold.
 /// Returns Vec<(entity_a, entity_b, similarity)>.
-fn find_similar_entities(
-    entities: &[String],
-    threshold: f64,
-) -> Vec<(String, String, f64)> {
+fn find_similar_entities(entities: &[String], threshold: f64) -> Vec<(String, String, f64)> {
     let mut results = Vec::new();
 
     for i in 0..entities.len() {
@@ -161,10 +158,7 @@ fn subgraph(
 
 /// Find similar entity pairs above a similarity threshold.
 #[pyfunction]
-fn disambiguate_entities(
-    entities: Vec<String>,
-    threshold: f64,
-) -> Vec<(String, String, f64)> {
+fn disambiguate_entities(entities: Vec<String>, threshold: f64) -> Vec<(String, String, f64)> {
     find_similar_entities(&entities, threshold)
 }
 
@@ -189,16 +183,12 @@ mod tests {
 
     fn make_graph() -> HashMap<String, Vec<(String, String)>> {
         let mut adj = HashMap::new();
-        adj.insert("A".into(), vec![
-            ("B".into(), "knows".into()),
-            ("C".into(), "likes".into()),
-        ]);
-        adj.insert("B".into(), vec![
-            ("D".into(), "works_with".into()),
-        ]);
-        adj.insert("C".into(), vec![
-            ("D".into(), "related_to".into()),
-        ]);
+        adj.insert(
+            "A".into(),
+            vec![("B".into(), "knows".into()), ("C".into(), "likes".into())],
+        );
+        adj.insert("B".into(), vec![("D".into(), "works_with".into())]);
+        adj.insert("C".into(), vec![("D".into(), "related_to".into())]);
         adj
     }
 

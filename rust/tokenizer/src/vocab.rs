@@ -235,7 +235,9 @@ impl Vocab {
 
             vocab.merge_ranks.insert((left, right), rank as u32);
 
-            if let (Some(left_bytes), Some(right_bytes)) = (vocab.id_to_bytes.get(&left), vocab.id_to_bytes.get(&right)) {
+            if let (Some(left_bytes), Some(right_bytes)) =
+                (vocab.id_to_bytes.get(&left), vocab.id_to_bytes.get(&right))
+            {
                 let mut merged_bytes = left_bytes.clone();
                 merged_bytes.extend_from_slice(right_bytes);
                 vocab.id_to_bytes.insert(merged, merged_bytes.clone());

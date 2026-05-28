@@ -28,7 +28,12 @@ fn norm(v: &[f64]) -> f64 {
 
 /// Compute cosine similarity between a query vector and a matrix of document vectors.
 /// Returns a Vec of similarity scores.
-fn cosine_similarity_batch(query: &[f64], matrix: &[f64], n_rows: usize, n_cols: usize) -> Vec<f64> {
+fn cosine_similarity_batch(
+    query: &[f64],
+    matrix: &[f64],
+    n_rows: usize,
+    n_cols: usize,
+) -> Vec<f64> {
     let query_norm = norm(query);
     if query_norm == 0.0 {
         return vec![0.0; n_rows];
@@ -184,7 +189,11 @@ mod tests {
     fn test_cosine_identical_vectors() {
         let v = vec![1.0, 2.0, 3.0];
         let scores = cosine_similarity_batch(&v, &v, 1, 3);
-        assert!((scores[0] - 1.0).abs() < 1e-6, "cos(v,v) should be 1.0, got {}", scores[0]);
+        assert!(
+            (scores[0] - 1.0).abs() < 1e-6,
+            "cos(v,v) should be 1.0, got {}",
+            scores[0]
+        );
     }
 
     #[test]
@@ -192,7 +201,11 @@ mod tests {
         let query = vec![1.0, 0.0];
         let matrix = vec![0.0, 1.0]; // single row
         let scores = cosine_similarity_batch(&query, &matrix, 1, 2);
-        assert!(scores[0].abs() < 1e-6, "cos([1,0],[0,1]) should be 0.0, got {}", scores[0]);
+        assert!(
+            scores[0].abs() < 1e-6,
+            "cos([1,0],[0,1]) should be 0.0, got {}",
+            scores[0]
+        );
     }
 
     #[test]

@@ -1,15 +1,15 @@
 //! Rust-native ONNX vision engine and perception primitives for HBLLM.
 #![allow(non_local_definitions)] // pyo3 macros generate these; not fixable on our side
 
-use std::sync::Mutex;
-use pyo3::prelude::*;
 use ort::session::Session;
+use pyo3::prelude::*;
+use std::sync::Mutex;
 
-pub mod preprocessing;
 pub mod change_detector;
+pub mod preprocessing;
 
-use preprocessing::{preprocess_image, perceptual_hash};
 use change_detector::ChangeDetector;
+use preprocessing::{perceptual_hash, preprocess_image};
 
 #[pyclass(name = "ChangeDetector", module = "hbllm_perception_rs")]
 pub struct PyChangeDetector {
@@ -27,8 +27,9 @@ impl PyChangeDetector {
     }
 
     pub fn is_changed(&self, image_bytes: &[u8]) -> PyResult<bool> {
-        let img = image::load_from_memory(image_bytes)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e)))?;
+        let img = image::load_from_memory(image_bytes).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e))
+        })?;
         Ok(self.inner.is_changed(&img))
     }
 
@@ -75,9 +76,19 @@ impl PyVisionEngine {
         let _ = ort::init();
 
         let session = Session::builder()
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create ONNX builder: {}", e)))?
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to create ONNX builder: {}",
+                    e
+                ))
+            })?
             .commit_from_file(path)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to load ONNX model from {}: {}", path, e)))?;
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to load ONNX model from {}: {}",
+                    path, e
+                ))
+            })?;
 
         let mut lock = self.session.lock().unwrap();
         *lock = Some(session);
@@ -87,8 +98,9 @@ impl PyVisionEngine {
 
     pub fn embed(&self, image_bytes: &[u8]) -> PyResult<Vec<f32>> {
         if self.mock_mode {
-            let img = image::load_from_memory(image_bytes)
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e)))?;
+            let img = image::load_from_memory(image_bytes).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e))
+            })?;
             let hash = perceptual_hash(&img);
             let mut emb = vec![0.0f32; 768];
             for (i, val) in emb.iter_mut().enumerate() {
@@ -102,11 +114,16 @@ impl PyVisionEngine {
         let mut lock = self.session.lock().unwrap();
         let session = match lock.as_mut() {
             Some(s) => s,
-            None => return Err(pyo3::exceptions::PyRuntimeError::new_err("No ONNX model loaded. Call load_model() first.")),
+            None => {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "No ONNX model loaded. Call load_model() first.",
+                ))
+            }
         };
 
-        let img = image::load_from_memory(image_bytes)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e)))?;
+        let img = image::load_from_memory(image_bytes).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e))
+        })?;
 
         let tensor3 = preprocess_image(&img, 224);
         let tensor4 = tensor3.insert_axis(ndarray::Axis(0));
@@ -114,23 +131,33 @@ impl PyVisionEngine {
         let input_name = session.inputs()[0].name().to_owned();
 
         let input_tensor = ort::value::Tensor::from_array(tensor4).map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create input tensor: {}", e))
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to create input tensor: {}",
+                e
+            ))
         })?;
 
-        let outputs = session.run(ort::inputs![input_name => input_tensor])
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("ONNX inference failed: {}", e)))?;
+        let outputs = session
+            .run(ort::inputs![input_name => input_tensor])
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("ONNX inference failed: {}", e))
+            })?;
 
         let output_value = &outputs[0];
         let output_tensor = output_value.try_extract_tensor::<f32>().map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to extract output tensor: {}", e))
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to extract output tensor: {}",
+                e
+            ))
         })?;
 
         Ok(output_tensor.1.to_vec())
     }
 
     pub fn caption(&self, image_bytes: &[u8]) -> PyResult<String> {
-        let img = image::load_from_memory(image_bytes)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e)))?;
+        let img = image::load_from_memory(image_bytes).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e))
+        })?;
         let hash = perceptual_hash(&img);
 
         if self.mock_mode {
@@ -138,12 +165,16 @@ impl PyVisionEngine {
         }
 
         // Real model fallback description
-        Ok(format!("Visual scene processed via ONNX. Perceptual signature: {:016x}", hash))
+        Ok(format!(
+            "Visual scene processed via ONNX. Perceptual signature: {:016x}",
+            hash
+        ))
     }
 
     pub fn frame_hash(&self, image_bytes: &[u8]) -> PyResult<u64> {
-        let img = image::load_from_memory(image_bytes)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e)))?;
+        let img = image::load_from_memory(image_bytes).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid image data: {}", e))
+        })?;
         Ok(perceptual_hash(&img))
     }
 }
