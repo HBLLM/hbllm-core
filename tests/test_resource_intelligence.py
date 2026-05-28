@@ -27,12 +27,10 @@ from hbllm.brain.load_manager import (
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
-pytestmark = pytest.mark.asyncio
-
-
 # ── AttentionManager Tests ───────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestAttentionManager:
     """Test memory budgets, importance scoring, and focus allocation."""
 
@@ -116,6 +114,7 @@ class TestAttentionManager:
 # ── LoadManager Tests ────────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestLoadManager:
     """Test pressure levels, degradation, and task management."""
 
@@ -308,6 +307,7 @@ class TestConfidenceEstimatorV2:
 # ── LearnerNode Micro-Learning Tests ────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestLearnerNodeMicroLearning:
     """Test v2 micro-learning enhancements to LearnerNode."""
 
@@ -478,6 +478,7 @@ class TestLearnerNodeMicroLearning:
 # ── Factory Integration Tests ────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestPhase2FactoryIntegration:
     """Verify Phase 2 nodes are wired into Brain via factory."""
 
