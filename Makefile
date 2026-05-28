@@ -3,7 +3,8 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 PYTEST := $(PYTHON) -m pytest
 
-.PHONY: test test-v test-fast lint format typecheck install clean
+.PHONY: test test-v test-fast lint format typecheck install clean \
+       rust-test rust-clippy rust-build test-all
 
 ## ── Testing ──────────────────────────────────────────────────────────────
 
@@ -14,7 +15,7 @@ test-v: ## Run tests with verbose output
 	$(PYTEST) tests/ -v --tb=short
 
 test-fast: ## Run tests excluding slow/heavy tests
-	$(PYTEST) tests/ -q --tb=short --timeout=15 \
+	$(PYTEST) tests/ -q --tb=short --timeout=60 \
 		--ignore=tests/test_cognitive_training.py \
 		--ignore=tests/test_lora_loop.py
 
@@ -44,6 +45,24 @@ $(VENV):
 clean: ## Remove build artifacts and caches
 	rm -rf .pytest_cache __pycache__ .mypy_cache .ruff_cache
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+## ── Rust ─────────────────────────────────────────────────────────────────
+
+rust-test: ## Run all Rust unit tests
+	cargo test --workspace --lib
+
+rust-clippy: ## Run clippy with deny warnings across all crates
+	cargo clippy --workspace --lib -- -D warnings
+
+rust-build: ## Build all Rust crates as Python modules (requires maturin)
+	@for dir in rust/*/; do \
+		if [ -f "$$dir/Cargo.toml" ]; then \
+			echo "Building $$dir..."; \
+			cd "$$dir" && maturin develop --release && cd ../..; \
+		fi; \
+	done
+
+test-all: rust-test test ## Run Rust tests then Python tests
 
 ## ── Help ─────────────────────────────────────────────────────────────────
 

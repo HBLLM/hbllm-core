@@ -220,7 +220,7 @@ class SemanticMemory:
                 with self._lock:
                     if self.model is None:
                         self.model = model
-            except Exception:
+            except (ImportError, OSError, RuntimeError):
                 logger.info(
                     "sentence-transformers unavailable — using TF-IDF fallback. "
                     "Install with: pip install sentence-transformers"
@@ -447,7 +447,7 @@ class SemanticMemory:
                             )
                         ],
                     )
-                except Exception as e:
+                except (OSError, ConnectionError, RuntimeError) as e:
                     logger.warning("Qdrant upsert failed (falling back to NumPy): %s", e)
 
         self._vectors_dirty = True
@@ -510,8 +510,8 @@ class SemanticMemory:
                             user_id,
                             device_id,
                         )
-                except Exception as e:
-                    logger.error(f"Failed to store vector in PostgreSQL: {e}")
+                except (OSError, ConnectionError, RuntimeError) as e:
+                    logger.error("Failed to store vector in PostgreSQL: %s", e)
 
         return doc_id
 
@@ -753,8 +753,8 @@ class SemanticMemory:
                 results.sort(key=lambda x: x["score"], reverse=True)
 
             return results
-        except Exception as e:
-            logger.error(f"PostgreSQL pgvector search failed: {e}")
+        except (OSError, ConnectionError, RuntimeError) as e:
+            logger.error("PostgreSQL pgvector search failed: %s", e)
             return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
 
     def delete(self, doc_id: str) -> bool:
@@ -800,7 +800,7 @@ class SemanticMemory:
                         collection_name=self._qdrant_collection,
                         points_selector=[doc_id],
                     )
-                except Exception as e:
+                except (OSError, ConnectionError, RuntimeError) as e:
                     logger.warning("Qdrant delete failed: %s", e)
 
             return True
@@ -826,7 +826,7 @@ class SemanticMemory:
                 try:
                     self._qdrant.delete_collection(self._qdrant_collection)
                     self._qdrant_initialized = False
-                except Exception as e:
+                except (OSError, ConnectionError, RuntimeError) as e:
                     logger.warning("Qdrant clear failed: %s", e)
 
             return count

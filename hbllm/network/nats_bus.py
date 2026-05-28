@@ -111,8 +111,8 @@ class NatsBus:
         for nats_sub in self._nats_subs.values():
             try:
                 await nats_sub.unsubscribe()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("NatsBus unsubscribe error during stop: %s", e)
         self._nats_subs.clear()
 
         # Close connection
@@ -138,7 +138,7 @@ class NatsBus:
                     return
                 message = result
             except Exception as e:
-                logger.error("Interceptor failed: %s", e)
+                logger.exception("Interceptor failed: %s", e)
                 self.metrics.record_drop(topic)
                 return
 

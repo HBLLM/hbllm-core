@@ -175,3 +175,72 @@ fn hbllm_semantic_search(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(content_hash, m)?)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cosine_identical_vectors() {
+        let v = vec![1.0, 2.0, 3.0];
+        let scores = cosine_similarity_batch(&v, &v, 1, 3);
+        assert!((scores[0] - 1.0).abs() < 1e-6, "cos(v,v) should be 1.0, got {}", scores[0]);
+    }
+
+    #[test]
+    fn test_cosine_orthogonal() {
+        let query = vec![1.0, 0.0];
+        let matrix = vec![0.0, 1.0]; // single row
+        let scores = cosine_similarity_batch(&query, &matrix, 1, 2);
+        assert!(scores[0].abs() < 1e-6, "cos([1,0],[0,1]) should be 0.0, got {}", scores[0]);
+    }
+
+    #[test]
+    fn test_cosine_zero_vector() {
+        let query = vec![0.0, 0.0, 0.0];
+        let matrix = vec![1.0, 2.0, 3.0];
+        let scores = cosine_similarity_batch(&query, &matrix, 1, 3);
+        assert_eq!(scores[0], 0.0, "Zero query should produce 0.0");
+    }
+
+    #[test]
+    fn test_cosine_batch_dimensions() {
+        let query = vec![1.0, 0.0, 0.0];
+        let matrix = vec![
+            1.0, 0.0, 0.0, // row 0: identical
+            0.0, 1.0, 0.0, // row 1: orthogonal
+            0.5, 0.5, 0.0, // row 2: partial
+        ];
+        let scores = cosine_similarity_batch(&query, &matrix, 3, 3);
+        assert_eq!(scores.len(), 3);
+        assert!((scores[0] - 1.0).abs() < 1e-6);
+        assert!(scores[1].abs() < 1e-6);
+        assert!(scores[2] > 0.5);
+    }
+
+    #[test]
+    fn test_norm_unit_vector() {
+        let v = vec![1.0, 0.0, 0.0];
+        assert!((norm(&v) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_norm_zero_vector() {
+        let v = vec![0.0, 0.0, 0.0];
+        assert_eq!(norm(&v), 0.0);
+    }
+
+    #[test]
+    fn test_content_hash_deterministic() {
+        let h1 = content_hash("hello world");
+        let h2 = content_hash("hello world");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_content_hash_different() {
+        let h1 = content_hash("hello");
+        let h2 = content_hash("world");
+        assert_ne!(h1, h2);
+    }
+}

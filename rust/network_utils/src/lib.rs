@@ -185,3 +185,95 @@ fn hbllm_network_utils(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<RateLimiter>()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_circuit_breaker_starts_closed() {
+        let cb = CircuitBreaker::new("node1".into(), 3, 30.0, 1);
+        assert_eq!(cb.state_name(), "closed");
+        assert!(cb.state == 0);
+    }
+
+    #[test]
+    fn test_circuit_breaker_opens_on_threshold() {
+        let mut cb = CircuitBreaker::new("node1".into(), 3, 30.0, 1);
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state_name(), "closed");
+        cb.record_failure(); // 3rd failure = threshold
+        assert_eq!(cb.state_name(), "open");
+    }
+
+    #[test]
+    fn test_circuit_breaker_blocks_when_open() {
+        let mut cb = CircuitBreaker::new("node1".into(), 1, 30.0, 1);
+        cb.record_failure(); // Opens immediately
+        assert!(!cb.can_execute());
+    }
+
+    #[test]
+    fn test_circuit_breaker_half_open_allows_probe() {
+        let mut cb = CircuitBreaker::new("node1".into(), 1, 0.0, 1); // 0s recovery
+        cb.record_failure(); // Opens
+        assert_eq!(cb.state_name(), "open");
+        // With 0s timeout, can_execute should transition to half_open
+        assert!(cb.can_execute());
+        assert_eq!(cb.state_name(), "half_open");
+    }
+
+    #[test]
+    fn test_circuit_breaker_closes_on_success() {
+        let mut cb = CircuitBreaker::new("node1".into(), 1, 0.0, 1);
+        cb.record_failure(); // Opens
+        cb.can_execute(); // Transitions to half_open
+        cb.record_success(); // Should close
+        assert_eq!(cb.state_name(), "closed");
+    }
+
+    #[test]
+    fn test_circuit_breaker_reset() {
+        let mut cb = CircuitBreaker::new("node1".into(), 1, 30.0, 1);
+        cb.record_failure(); // Opens
+        assert_eq!(cb.state_name(), "open");
+        cb.reset();
+        assert_eq!(cb.state_name(), "closed");
+        assert!(cb.can_execute());
+    }
+
+    #[test]
+    fn test_circuit_breaker_time_until_retry() {
+        let mut cb = CircuitBreaker::new("node1".into(), 1, 30.0, 1);
+        assert_eq!(cb.time_until_retry(), 0.0); // Not open
+        cb.record_failure(); // Opens
+        assert!(cb.time_until_retry() > 0.0);
+    }
+
+    #[test]
+    fn test_rate_limiter_allows_initial() {
+        let mut rl = RateLimiter::new(60.0, 1.5);
+        assert!(rl.allow("tenant1"));
+    }
+
+    #[test]
+    fn test_rate_limiter_system_bypass() {
+        let mut rl = RateLimiter::new(1.0, 1.0); // Very low limit
+        // "system" tenant always allowed
+        for _ in 0..100 {
+            assert!(rl.allow("system"));
+        }
+        // Empty tenant also always allowed
+        assert!(rl.allow(""));
+    }
+
+    #[test]
+    fn test_rate_limiter_reset() {
+        let mut rl = RateLimiter::new(60.0, 1.5);
+        rl.allow("tenant1");
+        rl.reset();
+        // After reset, should allow again with full burst
+        assert!(rl.allow("tenant1"));
+    }
+}
