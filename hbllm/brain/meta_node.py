@@ -256,7 +256,11 @@ class MetaReasoningNode(Node):
         try:
             await asyncio.to_thread(self._db_clear_feedback, domain)
         except Exception as e:
-            logger.exception("Failed to schedule or run SQLite feedback clear task for domain '%s': %s", domain, e)
+            logger.exception(
+                "Failed to schedule or run SQLite feedback clear task for domain '%s': %s",
+                domain,
+                e,
+            )
 
     def stats(self) -> dict[str, Any]:
         """Return meta-reasoning statistics."""

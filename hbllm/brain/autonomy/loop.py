@@ -483,7 +483,9 @@ class AutonomyCore:
             self.state_machine.transition_to(CognitiveState.RECOVERING, reason="tick_error")
         except Exception:
             logger.exception("Unexpected error in cognitive tick — entering recovery")
-            self.state_machine.transition_to(CognitiveState.RECOVERING, reason="tick_error_unexpected")
+            self.state_machine.transition_to(
+                CognitiveState.RECOVERING, reason="tick_error_unexpected"
+            )
 
     async def _process_pending_events(self) -> None:
         """Process buffered scored events in priority order."""

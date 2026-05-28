@@ -469,7 +469,8 @@ class WorkspaceNode(Node):
                 await self._commit_to_decision(corr_id, best_thought)
             except Exception as e:
                 logger.exception(
-                    "Unexpected error during execution verification: %s. Accepting thought with warning.", e
+                    "Unexpected error during execution verification: %s. Accepting thought with warning.",
+                    e,
                 )
                 best_thought["execution_warning"] = f"Verification error: {e}"
                 await self._commit_to_decision(corr_id, best_thought)

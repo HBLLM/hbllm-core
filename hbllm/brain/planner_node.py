@@ -514,7 +514,7 @@ class PlannerNode(Node):
         except (TimeoutError, asyncio.TimeoutError) as e:
             logger.warning("[GoT] Branch %d generation timed out: %s", branch_id, e)
             return ""
-        except Exception as e:
+        except Exception:
             logger.exception("[GoT] Branch %d generation failed unexpectedly", branch_id)
             return ""
 
@@ -550,7 +550,7 @@ class PlannerNode(Node):
             except (TimeoutError, asyncio.TimeoutError) as e:
                 logger.warning("[GoT] Execution verification timed out: %s", e)
                 # Fall through to LLM scoring if execution bus falls over
-            except Exception as e:
+            except Exception:
                 logger.exception("[GoT] Execution verification failed unexpectedly")
                 # Fall through to LLM scoring if execution bus falls over
 
@@ -651,7 +651,7 @@ class PlannerNode(Node):
         except (TimeoutError, asyncio.TimeoutError) as e:
             logger.warning("[GoT] PRM evaluation timed out, defaulting to 0.5: %s", e)
             node.score = 0.5
-        except Exception as e:
+        except Exception:
             logger.exception("[GoT] PRM evaluation failed unexpectedly, defaulting to 0.5")
             node.score = 0.5
 
@@ -723,7 +723,7 @@ class PlannerNode(Node):
                 graph.branch(parent.id, content)
         except (TimeoutError, asyncio.TimeoutError) as e:
             logger.warning("[GoT] Refinement timed out: %s", e)
-        except Exception as e:
+        except Exception:
             logger.exception("[GoT] Refinement failed unexpectedly")
 
     async def _merge_thoughts(
@@ -752,7 +752,7 @@ class PlannerNode(Node):
         except (TimeoutError, asyncio.TimeoutError) as e:
             logger.warning("[GoT] Merge timed out: %s", e)
             return ""
-        except Exception as e:
+        except Exception:
             logger.exception("[GoT] Merge failed unexpectedly")
             return ""
 

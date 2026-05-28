@@ -16,7 +16,6 @@ from hbllm.brain.autonomy.state_machine import CognitiveState, CognitiveStateMac
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -104,27 +103,40 @@ class TestCognitiveStateMachine:
 class TestAttentionSystem:
     def test_score_event_basic(self, attention: AttentionSystem) -> None:
         event = AttentionEvent(
-            event_id="e1", source="user.input", category="user_action", urgency=0.8,
+            event_id="e1",
+            source="user.input",
+            category="user_action",
+            urgency=0.8,
         )
         scored = attention.score_event(event, user_active=True)
         assert 0.0 <= scored.priority_score <= 1.0
 
     def test_high_urgency_scores_high(self, attention: AttentionSystem) -> None:
         event = AttentionEvent(
-            event_id="e2", source="system.critical", category="system_alert",
-            urgency=1.0, goal_alignment=1.0, temporal_relevance=1.0,
+            event_id="e2",
+            source="system.critical",
+            category="system_alert",
+            urgency=1.0,
+            goal_alignment=1.0,
+            temporal_relevance=1.0,
         )
         scored = attention.score_event(event, cognitive_load=0.0)
         assert scored.priority_score > 0.5
 
     def test_decay_reduces_repeated(self, attention: AttentionSystem) -> None:
         event1 = AttentionEvent(
-            event_id="e3", source="sensor.temp", category="sensor", urgency=0.6,
+            event_id="e3",
+            source="sensor.temp",
+            category="sensor",
+            urgency=0.6,
         )
         s1 = attention.score_event(event1)
         # Score same source again — should get decay penalty
         event2 = AttentionEvent(
-            event_id="e4", source="sensor.temp", category="sensor", urgency=0.6,
+            event_id="e4",
+            source="sensor.temp",
+            category="sensor",
+            urgency=0.6,
         )
         s2 = attention.score_event(event2)
         assert s2.priority_score <= s1.priority_score
