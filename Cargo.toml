@@ -9,5 +9,6 @@ members = [
     "rust/knowledge_graph",
     "rust/network_utils",
     "rust/concept_extract",
+    "rust/perception",
 ]
 resolver = "2"

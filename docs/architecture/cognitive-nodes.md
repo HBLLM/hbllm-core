@@ -247,7 +247,11 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 
 - **Type:** `NodeType.PERCEPTION`
 - **File:** `hbllm/perception/vision_node.py`
-- **Purpose:** Image captioning, OCR text extraction, and object detection.
+- **Purpose:** Multimodal vision processing — image captioning, OCR text extraction, and dense embedding extraction.
+- **Rust Acceleration:** Attempts to load `hbllm_perception_rs` (Rust-native ONNX engine) first, falling back to PyTorch `transformers.pipeline` if unavailable. The Rust path eliminates the `torch` dependency from the hot path and reduces inference latency by ~3–5×.
+- **Frame Caching:** Integrates a `ChangeDetector` (perceptual hashing) to skip expensive inference on static/near-identical frames. Results are cached per entity/session key.
+- **Embedding Extraction:** Produces 768-dim vision embeddings via `_embed_image()`, which are then projected to the LLM latent space (4096-dim) by `MultimodalProjector` for workspace thought publishing.
+- **Topics:** `vision.process`, `vision.ocr`, `vision.caption`, `module.evaluate`
 
 ### AudioInputNode
 
@@ -261,7 +265,41 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 - **File:** `hbllm/perception/audio_out_node.py`
 - **Purpose:** Text-to-speech with per-tenant voice configurations.
 
----
+### Perception Infrastructure
+
+#### RealityEventBus
+
+- **File:** `hbllm/perception/reality_bus.py`
+- **Purpose:** Unified ingestion pipeline for physical and digital reality events. Assigns logical clocks, ingest timestamps, and routes `PerceptionEvent`s to subscribers.
+- **Pre-subscribers:** Synchronous `subscribe_pre()` hooks fire *before* async fan-out — used by `ReflexArc` for sub-millisecond fast-path routing.
+- **Modality tiers:** `SYSTEM` (high trust), `APP` (throttled), `SENSOR` (sampled), `INFERRED` (rate-limited).
+
+#### EventNormalizer
+
+- **File:** `hbllm/perception/normalizer.py`
+- **Purpose:** Noise filtering, deduplication, and budget enforcement between the raw `RealityEventBus` and the `WorldStateEngine`.
+- **Embedding-aware dedup:** When events carry embeddings, cosine similarity is used alongside signature matching — semantically different events with the same type/subtype are preserved.
+
+#### MultimodalProjector
+
+- **File:** `hbllm/perception/vector_projector.py`
+- **Purpose:** Projects modality-specific embeddings (vision 768-dim, audio, sensor readings) into the shared LLM latent space (default 4096-dim).
+- **Weight loading:** Supports `.safetensors` trained projection weights with identity + zero-padding fallback.
+
+#### ReflexArc
+
+- **File:** `hbllm/perception/reflex_arc.py`
+- **Purpose:** Sub-millisecond autonomic fast-path that routes critical sensor alerts (fire, collision, anomaly) directly to action executors, bypassing the Global Workspace / LLM reasoning loop entirely.
+- **Rules:** Pattern-matching `ReflexRule`s with comparator support (`__gte`, `__gt`, `__lte`, `__lt`).
+- **Auditability:** Every activation is logged to `EventLog`.
+
+#### Rust Perception Engine
+
+- **Crate:** `rust/perception/` (`hbllm_perception_rs`)
+- **Build:** `cd rust/perception && maturin develop --release`
+- **Exports:** `VisionEngine` (ONNX model loading, embedding, captioning, frame hashing) and `ChangeDetector` (perceptual hash change detection with configurable Hamming distance threshold).
+- **Dependencies:** `ort` (ONNX Runtime), `image`, `ndarray`, `pyo3`
+
 
 ## Action Nodes
 

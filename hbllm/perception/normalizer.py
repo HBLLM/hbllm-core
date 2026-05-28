@@ -20,6 +20,22 @@ from hbllm.perception.reality_bus import PerceptionEvent, PerceptionModality
 logger = logging.getLogger(__name__)
 
 
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute the cosine similarity between two vectors."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot_product = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
+    for val_a, val_b in zip(a, b):
+        dot_product += val_a * val_b
+        norm_a += val_a * val_a
+        norm_b += val_b * val_b
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot_product / ((norm_a * norm_b) ** 0.5)
+
+
 class EventNormalizer:
     """Filters, deduplicates, and limits reality events before state fusion.
 
@@ -39,6 +55,9 @@ class EventNormalizer:
 
         # Deduplication cache: signature -> last_seen_time
         self._dedup_cache: dict[str, float] = {}
+
+        # Cache of last seen embeddings for signature: signature -> embedding vector
+        self._last_embeddings: dict[str, list[float]] = {}
 
         # Limits (events per minute)
         self.BUDGETS = {
@@ -71,6 +90,9 @@ class EventNormalizer:
             self._last_budget_reset = now
             # Also cleanup dedup cache
             self._dedup_cache = {k: v for k, v in self._dedup_cache.items() if now - v < 60.0}
+            self._last_embeddings = {
+                k: v for k, v in self._last_embeddings.items() if k in self._dedup_cache
+            }
 
         # 2. Enforce Budgets
         mod = event.modality
@@ -84,12 +106,23 @@ class EventNormalizer:
         last_seen = self._dedup_cache.get(sig, 0.0)
         window = self.DEDUP_WINDOWS.get(mod, 1.0)
 
-        if now - last_seen < window:
-            # We already saw this exact signature very recently. Drop it.
+        # Check if embeddings are present and semantically different
+        embeddings_different = False
+        if event.embedding is not None and sig in self._last_embeddings:
+            last_emb = self._last_embeddings[sig]
+            similarity = cosine_similarity(event.embedding, last_emb)
+            # If similarity is low (e.g. less than 0.95), they are semantically different!
+            if similarity < 0.95:
+                embeddings_different = True
+
+        if now - last_seen < window and not embeddings_different:
+            # We already saw this exact signature very recently and embedding hasn't changed. Drop it.
             return
 
         # Mark as seen
         self._dedup_cache[sig] = now
+        if event.embedding is not None:
+            self._last_embeddings[sig] = event.embedding
         self._modality_counts[mod.value] += 1
 
         # 4. Success — Write to Log (Truth Ledger)
