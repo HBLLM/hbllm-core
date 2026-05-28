@@ -1,0 +1,13 @@
+{
+    "name": "git-workflow",
+    "version": "1.0.0",
+    "description": "Exposes Git workflow capabilities to the AI agent: status, diff, branch, commit, and PR creation.",
+    "author": "HBLLM Core",
+    "entry_point": "git_workflow.py",
+    "manifest_version": 2,
+    "capabilities": ["git_status", "git_diff", "git_commit", "git_branch", "git_push"],
+    "topics": {
+        "subscribe": ["git.status", "git.diff", "git.commit", "git.branch", "git.push"],
+        "publish": []
+    }
+}

@@ -121,6 +121,8 @@ class BrainConfig:
     data_dir: str = "data"
     inject_sil: bool = True  # Skill Intelligence Layer
     inject_failure_analyzer: bool = True  # Automatic skill repair
+    inject_shell: bool = True  # Host shell command executor node
+    require_shell_approval: bool = True  # Require manual shell approval
     domain_registry: Any | None = None  # Hierarchical domain registry
     system_prompt: str = "You are a helpful AI assistant."
 
@@ -679,6 +681,18 @@ class BrainFactory:
         # Optional nodes based on config
         if cfg.inject_identity:
             nodes.append(IdentityNode(node_id="identity"))
+
+        # Host shell execution node
+        if cfg.inject_shell:
+            from hbllm.actions.shell_node import HostShellNode
+            shell_node = HostShellNode(
+                node_id="shell_executor",
+                workspace_dir=None,
+                require_manual_approval=cfg.require_shell_approval,
+                policy_engine=policy_engine,
+            )
+            nodes.append(shell_node)
+            logger.info("HostShellNode wired (manual approval=%s)", cfg.require_shell_approval)
 
         # Perception nodes (optional — require ML models to be downloaded)
         if cfg.inject_perception:

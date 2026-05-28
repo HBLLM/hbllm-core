@@ -105,8 +105,11 @@ async def test_uplink_node_tool_routing(bus):
         # Start the node correctly using the base class method which injects the bus
         await node.start(bus)
 
-        # Wait a bit for the connection to be established in background
-        await asyncio.sleep(0.1)
+        # Wait for the result to be sent back upstream (up to 3 seconds)
+        for _ in range(30):
+            if mock_ws.send.called:
+                break
+            await asyncio.sleep(0.1)
 
         # Check that the result was sent back upstream
         mock_ws.send.assert_called()

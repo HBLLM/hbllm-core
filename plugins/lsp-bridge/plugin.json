@@ -1,0 +1,13 @@
+{
+    "name": "lsp-bridge",
+    "version": "1.0.0",
+    "description": "Exposes Language Server Protocol (LSP) queries to the AI: diagnostics, definition, and references.",
+    "author": "HBLLM Core",
+    "entry_point": "lsp_bridge.py",
+    "manifest_version": 2,
+    "capabilities": ["lsp_diagnostics", "lsp_definition", "lsp_references"],
+    "topics": {
+        "subscribe": ["lsp.diagnostics", "lsp.definition", "lsp.references"],
+        "publish": []
+    }
+}

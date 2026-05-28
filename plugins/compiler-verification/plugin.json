@@ -1,0 +1,13 @@
+{
+    "name": "compiler-verification",
+    "version": "1.0.0",
+    "description": "Performs dynamic compiler checks and runs test suites in the workspace to verify code correctness.",
+    "author": "HBLLM Core",
+    "entry_point": "compiler_verification.py",
+    "manifest_version": 2,
+    "capabilities": ["workspace_compile_verify"],
+    "topics": {
+        "subscribe": ["workspace.compile.verify"],
+        "publish": ["workspace.thought"]
+    }
+}

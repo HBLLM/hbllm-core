@@ -297,7 +297,16 @@ def main():
     new_cmd = plugin_sub.add_parser("new", help="Scaffold a new plugin")
     new_cmd.add_argument("name", help="Name of the plugin to generate")
 
+    # Interactive developer agent (Claude Code / Codex alternative)
+    from hbllm.cli.agent import register_subcommand as register_agent
+    register_agent(subparsers)
+
     args = parser.parse_args()
+
+    # Lazy import to avoid pulling in heavy deps for non-agent commands
+    def _run_agent(a):
+        from hbllm.cli.agent import run_agent
+        run_agent(a)
 
     dispatch = {
         "data": run_pipeline,
@@ -306,6 +315,7 @@ def main():
         "info": run_info,
         "nodes": run_nodes,
         "plugin": run_plugin,
+        "agent": _run_agent,
     }
     dispatch[args.command](args)
 
