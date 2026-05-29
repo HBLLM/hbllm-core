@@ -330,7 +330,10 @@ class RedisBus(MessageBus):
                     s: Subscription = sub, t: str = topic, m: Message = message
                 ) -> None:
                     try:
-                        response = await s.handler(m)
+                        from hbllm.network._tenant_bridge import restore_tenant_ctx
+
+                        with restore_tenant_ctx(m):
+                            response = await s.handler(m)
                         if response is not None:
                             if response.correlation_id is None:
                                 response.correlation_id = m.id

@@ -244,7 +244,10 @@ class WebSocketTransport(Transport):
                             payload=data.get("payload", {}),
                             correlation_id=correlation_id,
                         )
-                        await self._message_handler(msg)
+                        from hbllm.network._tenant_bridge import restore_tenant_ctx
+
+                        with restore_tenant_ctx(msg):
+                            await self._message_handler(msg)
 
                     latency_ms = (time.monotonic() - start) * 1000
                     self.metrics.record_latency(latency_ms)

@@ -31,6 +31,9 @@ class TaskCapsule:
     capsule_id: str = field(default_factory=lambda: f"cap_{uuid.uuid4().hex[:8]}")
     goal_id: str = ""
 
+    # Tenant isolation (auto-populated from ambient TenantContext)
+    tenant_id: str = ""
+
     # Ownership & QoS
     ownership: CognitiveOwnership = field(
         default_factory=lambda: CognitiveOwnership("", "", "", "")
@@ -48,6 +51,16 @@ class TaskCapsule:
     causal_dependencies: list[dict[str, Any]] = field(default_factory=list)
     utility_constraints: dict[str, float] = field(default_factory=dict)
     permissions_scope: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Auto-populate tenant_id from ambient TenantContext if not set."""
+        if not self.tenant_id:
+            try:
+                from hbllm.security.tenant_guard import get_current_tenant
+
+                self.tenant_id = get_current_tenant() or "default"
+            except ImportError:
+                self.tenant_id = "default"
 
     @property
     def is_valid(self) -> bool:

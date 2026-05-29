@@ -196,7 +196,10 @@ class NatsBus:
                     return
 
                 start = time.monotonic()
-                response = await handler(message)
+                from hbllm.network._tenant_bridge import restore_tenant_ctx
+
+                with restore_tenant_ctx(message):
+                    response = await handler(message)
                 latency = (time.monotonic() - start) * 1000
                 self.metrics.record_delivery(topic, latency)
 

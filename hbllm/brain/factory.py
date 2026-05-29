@@ -579,6 +579,11 @@ class BrainFactory:
         registry = ServiceRegistry()
         await registry.start(message_bus)
 
+        # ── Tenant context propagation ───────────────────────────────
+        from hbllm.security.tenant_interceptor import TenantInterceptor
+
+        message_bus.add_interceptor(TenantInterceptor())
+
         # ── v4: Composite node path ──────────────────────────────────
         if cfg.use_composites:
             return await BrainFactory._build_composite_brain(
@@ -1023,6 +1028,11 @@ class BrainFactory:
 
         # Wire Trust Interceptor (Trust Model Pt 1)
         message_bus.add_interceptor(TrustInterceptor(registry=registry))
+
+        # Wire Tenant Interceptor (ambient context propagation)
+        from hbllm.security.tenant_interceptor import TenantInterceptor
+
+        message_bus.add_interceptor(TenantInterceptor())
 
         # Auto-discover sub-domain LoRA adapters from data/lora/
         lora_dir = Path(cfg.data_dir) / "lora"
