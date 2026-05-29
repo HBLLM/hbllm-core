@@ -77,8 +77,14 @@ class GitWorkflow(HBLLMPlugin):
 
         # 2. Commit changes
         code_commit, out_commit, err_commit = await self._run_git(["commit", "-m", commit_msg])
-        if code_commit == 0 or "nothing to commit" in out_commit or "no changes added to commit" in out_commit:
-            return message.create_response({"status": "SUCCESS", "output": out_commit or "Nothing to commit"})
+        if (
+            code_commit == 0
+            or "nothing to commit" in out_commit
+            or "no changes added to commit" in out_commit
+        ):
+            return message.create_response(
+                {"status": "SUCCESS", "output": out_commit or "Nothing to commit"}
+            )
         return message.create_error(f"Git commit failed: {err_commit}")
 
     @subscribe("git.branch")

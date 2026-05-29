@@ -42,7 +42,9 @@ class LspClient:
     async def start(self) -> None:
         """Spawn the language server and initialize it."""
         if not shutil.which(self.command[0]):
-            raise FileNotFoundError(f"LSP server executable '{self.command[0]}' not found in system PATH.")
+            raise FileNotFoundError(
+                f"LSP server executable '{self.command[0]}' not found in system PATH."
+            )
 
         self.process = await asyncio.create_subprocess_exec(
             self.command[0],
@@ -74,7 +76,9 @@ class LspClient:
         await self._send_notification("initialized", {})
         logger.info("LSP server '%s' initialized successfully.", self.command[0])
 
-    async def _send_request(self, method: str, params: dict[str, Any], timeout: float = 10.0) -> Any:
+    async def _send_request(
+        self, method: str, params: dict[str, Any], timeout: float = 10.0
+    ) -> Any:
         if not self.running or not self.process or not self.process.stdin:
             raise RuntimeError("LSP server is not running")
 
@@ -142,7 +146,9 @@ class LspClient:
                             if not future.done():
                                 if "error" in msg:
                                     future.set_exception(
-                                        RuntimeError(f"LSP error: {msg['error'].get('message', 'Unknown')}")
+                                        RuntimeError(
+                                            f"LSP error: {msg['error'].get('message', 'Unknown')}"
+                                        )
                                     )
                                 else:
                                     future.set_result(msg.get("result"))
@@ -266,7 +272,9 @@ class LspBridge(HBLLMPlugin):
         column = message.payload.get("column")  # 0-indexed
 
         if not filepath or line is None or column is None:
-            return message.create_error("Missing 'filepath', 'line', or 'column' in lsp.definition payload")
+            return message.create_error(
+                "Missing 'filepath', 'line', or 'column' in lsp.definition payload"
+            )
 
         lang = self._get_lang_from_file(filepath)
         if not lang:
@@ -297,7 +305,9 @@ class LspBridge(HBLLMPlugin):
         column = message.payload.get("column")
 
         if not filepath or line is None or column is None:
-            return message.create_error("Missing 'filepath', 'line', or 'column' in lsp.references payload")
+            return message.create_error(
+                "Missing 'filepath', 'line', or 'column' in lsp.references payload"
+            )
 
         lang = self._get_lang_from_file(filepath)
         if not lang:

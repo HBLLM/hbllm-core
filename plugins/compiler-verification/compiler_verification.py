@@ -52,7 +52,9 @@ class CompilerVerification(HBLLMPlugin):
                     custom_config = json.load(f)
                     if isinstance(custom_config, dict):
                         self.commands.update(custom_config)
-                        logger.info("Loaded custom compiler mappings: %s", list(custom_config.keys()))
+                        logger.info(
+                            "Loaded custom compiler mappings: %s", list(custom_config.keys())
+                        )
             except Exception as e:
                 logger.error("Failed to load compiler config from %s: %s", config_path, e)
 
@@ -74,7 +76,9 @@ class CompilerVerification(HBLLMPlugin):
             else:
                 return message.create_error(f"No compiler command registered for extension '{ext}'")
         else:
-            return message.create_error("Missing both 'filepath' and 'command' in verification request.")
+            return message.create_error(
+                "Missing both 'filepath' and 'command' in verification request."
+            )
 
         # 2. Run shell command
         logger.info("CompilerVerification running command: %s", cmd)

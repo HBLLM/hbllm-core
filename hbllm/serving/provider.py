@@ -426,11 +426,7 @@ class OpenAIProvider(LLMProvider):
     ):
         self._api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self._model = model
-        self._base_url = (
-            base_url
-            or os.getenv("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1"
-        )
+        self._base_url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
         if not self._api_key:
             logger.warning("OPENAI_API_KEY not set. OpenAI provider will fail.")

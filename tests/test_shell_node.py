@@ -124,6 +124,7 @@ class TestHostShellNode:
             node_id="test_shell",
             require_manual_approval=True,
         )
+
         # Mock approval prompt to immediately reject
         async def mock_approval(cmd):
             return False

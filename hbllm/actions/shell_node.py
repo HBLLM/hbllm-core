@@ -22,16 +22,16 @@ logger = logging.getLogger(__name__)
 
 # Basic safety blocklist for commands that must never be run
 COMMAND_BLOCKLIST: list[str] = [
-    r"\brm\s+-rf\s+(/|\*|\$|~)",     # Destructive deletions
-    r"\bchmod\s+.*777\b",            # Unsafe file permissions
-    r"\bcurl\s+.*\bsh\b",            # Piping network scripts directly to shell
-    r"\bwget\s+.*\bsh\b",            # Piping network scripts directly to shell
-    r"\bcat\s+.*\.env\b",            # Leaking secrets
-    r"\bcat\s+/etc/passwd\b",        # Leaking system accounts
-    r"\bdd\s+if=",                   # Low-level disk formatting
-    r"\bmkfs\b",                     # Low-level disk formatting
-    r"\breboot\b",                   # OS control
-    r"\bshutdown\b",                 # OS control
+    r"\brm\s+-rf\s+(/|\*|\$|~)",  # Destructive deletions
+    r"\bchmod\s+.*777\b",  # Unsafe file permissions
+    r"\bcurl\s+.*\bsh\b",  # Piping network scripts directly to shell
+    r"\bwget\s+.*\bsh\b",  # Piping network scripts directly to shell
+    r"\bcat\s+.*\.env\b",  # Leaking secrets
+    r"\bcat\s+/etc/passwd\b",  # Leaking system accounts
+    r"\bdd\s+if=",  # Low-level disk formatting
+    r"\bmkfs\b",  # Low-level disk formatting
+    r"\breboot\b",  # OS control
+    r"\bshutdown\b",  # OS control
 ]
 
 
@@ -83,10 +83,14 @@ class HostShellNode(Node):
 
         # ── 2. Security Check: Policy Engine (if active) ──
         if self.policy_engine:
-            res = self.policy_engine.evaluate(command, tenant_id=message.tenant_id or "default", domain="shell")
+            res = self.policy_engine.evaluate(
+                command, tenant_id=message.tenant_id or "default", domain="shell"
+            )
             if not res.passed:
                 violations = "; ".join(res.violations)
-                logger.warning("HostShellNode blocked command by Policy Engine: %s (%s)", command, violations)
+                logger.warning(
+                    "HostShellNode blocked command by Policy Engine: %s (%s)", command, violations
+                )
                 return message.create_error(f"Command rejected by governance policy: {violations}")
 
         # ── 3. Manual Interactive Approval (if configured) ──
@@ -104,7 +108,9 @@ class HostShellNode(Node):
         """Prompt console user for permission to execute command."""
         print(f"\n⚠️  [HostShellNode] AGENT REQUESTS COMMAND EXECUTION:\n   $ {command}", flush=True)
         if not sys.stdin.isatty():
-            print("❌ Stdin is not a TTY. Autorejecting in headless/non-interactive mode.", flush=True)
+            print(
+                "❌ Stdin is not a TTY. Autorejecting in headless/non-interactive mode.", flush=True
+            )
             return False
 
         try:
@@ -128,9 +134,7 @@ class HostShellNode(Node):
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=self.timeout
-                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
             except (TimeoutError, asyncio.TimeoutError):
                 try:
                     proc.kill()

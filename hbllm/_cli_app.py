@@ -299,6 +299,7 @@ def main():
 
     # Interactive developer agent (Claude Code / Codex alternative)
     from hbllm.cli.agent import register_subcommand as register_agent
+
     register_agent(subparsers)
 
     args = parser.parse_args()
@@ -306,6 +307,7 @@ def main():
     # Lazy import to avoid pulling in heavy deps for non-agent commands
     def _run_agent(a):
         from hbllm.cli.agent import run_agent
+
         run_agent(a)
 
     dispatch = {

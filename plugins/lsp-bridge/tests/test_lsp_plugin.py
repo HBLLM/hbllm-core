@@ -114,7 +114,10 @@ class TestLspBridge:
             )
             resp = await bus.request("lsp.diagnostics", query, timeout=2.0)
             assert resp.type == MessageType.ERROR
-            assert "not available" in resp.payload["error"].lower() or "not found" in resp.payload["error"].lower()
+            assert (
+                "not available" in resp.payload["error"].lower()
+                or "not found" in resp.payload["error"].lower()
+            )
 
     async def test_lsp_client_stop_graceful(self):
         """Verify LspClient.stop() handles no-process case gracefully."""

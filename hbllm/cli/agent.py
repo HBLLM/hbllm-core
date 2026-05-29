@@ -120,10 +120,14 @@ async def _run_agent(
 
         if should_index:
             if existing_source:
-                console.print(f"[bold yellow]🔄 Updating workspace index: [blue]{workspace_path}[/]...[/]")
+                console.print(
+                    f"[bold yellow]🔄 Updating workspace index: [blue]{workspace_path}[/]...[/]"
+                )
                 source_id = existing_source["source_id"]
             else:
-                console.print(f"[bold yellow]🔍 First-time run: Indexing workspace [blue]{workspace_path}[/]...[/]")
+                console.print(
+                    f"[bold yellow]🔍 First-time run: Indexing workspace [blue]{workspace_path}[/]...[/]"
+                )
                 try:
                     source = brain.knowledge_base.add_source(workspace_path, source_type="folder")
                     source_id = source.source_id
@@ -134,8 +138,12 @@ async def _run_agent(
             if source_id:
                 with console.status("[bold yellow]Ingesting and indexing codebase...[/]"):
                     try:
-                        num_chunks = await asyncio.to_thread(brain.knowledge_base.ingest_source, source_id)
-                        console.print(f"[bold green]✅ Codebase indexed: Ingested {num_chunks} chunks successfully![/]")
+                        num_chunks = await asyncio.to_thread(
+                            brain.knowledge_base.ingest_source, source_id
+                        )
+                        console.print(
+                            f"[bold green]✅ Codebase indexed: Ingested {num_chunks} chunks successfully![/]"
+                        )
                     except Exception as e:
                         console.print(f"[red]⚠️ Failed to index codebase: {e}[/]")
         else:

@@ -685,6 +685,7 @@ class BrainFactory:
         # Host shell execution node
         if cfg.inject_shell:
             from hbllm.actions.shell_node import HostShellNode
+
             shell_node = HostShellNode(
                 node_id="shell_executor",
                 workspace_dir=None,
