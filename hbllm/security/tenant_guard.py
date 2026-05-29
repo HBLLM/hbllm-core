@@ -364,4 +364,16 @@ def _extract_param(
         if idx < len(args):
             return args[idx]
 
+    # Special handling: if we are looking for tenant/user/device identifier,
+    # and one of the arguments is a Message-like object, extract from it.
+    for arg in list(args) + list(kwargs.values()):
+        if hasattr(arg, "tenant_id") and hasattr(arg, "topic"):
+            # This is a Message-like object
+            if "tenant" in param:
+                return getattr(arg, "tenant_id", None)
+            elif "user" in param:
+                return getattr(arg, "user_id", None)
+            elif "device" in param:
+                return getattr(arg, "device_id", None)
+
     return None

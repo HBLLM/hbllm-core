@@ -29,6 +29,7 @@ from hbllm.network.messages import (
 )
 from hbllm.network.node import Node, NodeType
 from hbllm.network.registry import ServiceRegistry
+from hbllm.security.tenant_guard import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             if (_use_persistence and kg_path.exists())
             else KnowledgeGraph()
         )
+        self._knowledge_graphs: dict[str, KnowledgeGraph] = {"default": self.knowledge_graph}
         # Track background tasks for graceful shutdown
         self._pending_tasks: set[asyncio.Task[Any]] = set()
 
@@ -128,7 +130,12 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         logger.info("Stopping MemoryNode — persisting semantic memory and knowledge graph")
         try:
             self.semantic_db.save_to_disk(self._persistence_dir / "semantic")
-            self.knowledge_graph.save_to_disk(self._persistence_dir / "knowledge_graph.json")
+            if str(self.db.db_path) != ":memory:":
+                for tid, kg in self._knowledge_graphs.items():
+                    if tid == "default":
+                        kg.save_to_disk(self._persistence_dir / "knowledge_graph.json")
+                    else:
+                        kg.save_to_disk(self._persistence_dir / f"knowledge_graph_{tid}.json")
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Failed to persist memory to disk: %s", e)
 
@@ -153,6 +160,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         except asyncio.CancelledError:
             pass
 
+    @require_tenant
     async def handle_improvement(self, message: Message) -> None:
         """
         Listen for improvement/reflection signals (Node M) and extract patterns (Node N)
@@ -188,6 +196,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         task.add_done_callback(self._improvement_tasks.discard)
         await task
 
+    @require_tenant
     async def handle_salience(self, message: Message) -> None:
         """
         Handle salience scores. High-salience experiences are stored in
@@ -313,11 +322,25 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         return 0
 
     async def stats(self, tenant_id: str) -> dict[str, Any]:
+        kg = self._get_kg(tenant_id)
         return {
             "episodic": {"count": 0},
             "semantic": {"count": len(self.semantic_db._data)},
-            "knowledge_graph": {"entities": self.knowledge_graph.entity_count},
+            "knowledge_graph": {"entities": kg.entity_count},
         }
+
+    def _get_kg(self, tenant_id: str | None) -> KnowledgeGraph:
+        """Get or create the KnowledgeGraph instance for a tenant."""
+        tid = tenant_id or "default"
+        if tid not in self._knowledge_graphs:
+            db_path = self.db.db_path
+            _use_persistence = str(db_path) != ":memory:" and str(self._persistence_dir) != "."
+            kg_path = self._persistence_dir / f"knowledge_graph_{tid}.json"
+            if _use_persistence and kg_path.exists():
+                self._knowledge_graphs[tid] = KnowledgeGraph.load_from_disk(kg_path)
+            else:
+                self._knowledge_graphs[tid] = KnowledgeGraph()
+        return self._knowledge_graphs[tid]
 
     async def handle_message(self, message: Message) -> Message | None:
         """
@@ -325,6 +348,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         """
         return None
 
+    @require_tenant
     async def handle_reflection(self, message: Message) -> Message | None:
         """
         Handle deep reflection events — ingest entities and relations
@@ -336,22 +360,23 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         rules = payload.get("rules", [])
 
         # 1. Ingest entities from reflection
+        kg = self._get_kg(message.tenant_id)
         for entity_info in entities:
-            self.knowledge_graph.add_entity(
+            kg.add_entity(
                 label=entity_info.get("label", ""),
                 entity_type=entity_info.get("type", "concept"),
             )
 
         # 2. Extract and add relations from the content text
         if content:
-            self.knowledge_graph.ingest_text(content, source=payload.get("category", "reflection"))
+            kg.ingest_text(content, source=payload.get("category", "reflection"))
 
         # 3. Add rule-derived relations (condition → action)
         for rule in rules:
             condition = rule.get("condition", "")
             action = rule.get("action", "")
             if condition and action:
-                self.knowledge_graph.add_relation(
+                kg.add_relation(
                     source_label=condition,
                     target_label=action,
                     relation_type="leads_to",
@@ -364,11 +389,12 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
         logger.info(
             "[MemoryNode] KnowledgeGraph updated — %d entities, %d relations",
-            self.knowledge_graph.entity_count,
-            self.knowledge_graph.relation_count,
+            kg.entity_count,
+            kg.relation_count,
         )
         return None
 
+    @require_tenant
     async def handle_knowledge_query(self, message: Message) -> Message | None:
         """
         Handle knowledge graph queries.
@@ -383,32 +409,34 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         """
         payload = message.payload
         action = payload.get("action", "neighbors")
+        tid = message.tenant_id or "default"
+        kg = self._get_kg(tid)
 
         if action == "neighbors":
             label = payload.get("entity", "")
             direction = payload.get("direction", "both")
             rel_type = payload.get("relation_type")
-            results = self.knowledge_graph.neighbors(label, direction, rel_type)
+            results = kg.neighbors(label, direction, rel_type)
             return message.create_response({"neighbors": results, "entity": label})
 
         elif action == "path":
             from_label = payload.get("from", "")
             to_label = payload.get("to", "")
             max_depth = payload.get("max_depth", 5)
-            path = self.knowledge_graph.shortest_path(from_label, to_label, max_depth)
+            path = kg.shortest_path(from_label, to_label, max_depth)
             return message.create_response({"path": path, "from": from_label, "to": to_label})
 
         elif action == "subgraph":
             label = payload.get("entity", "")
             depth = payload.get("depth", 2)
-            sg = self.knowledge_graph.subgraph(label, depth)
+            sg = kg.subgraph(label, depth)
             return message.create_response({"subgraph": sg, "entity": label})
 
         elif action == "stats":
             return message.create_response(
                 {
-                    "entity_count": self.knowledge_graph.entity_count,
-                    "relation_count": self.knowledge_graph.relation_count,
+                    "entity_count": kg.entity_count,
+                    "relation_count": kg.relation_count,
                 }
             )
 
@@ -416,7 +444,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             limit = payload.get("limit", 100)
             entities = [
                 {"id": e.id, "label": e.label, "type": e.entity_type}
-                for e in list(self.knowledge_graph._entities.values())[-limit:]
+                for e in list(kg._entities.values())[-limit:]
             ]
             return message.create_response({"entities": entities})
 
@@ -425,14 +453,12 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             member_labels = payload.get("member_labels", [])
             summary = payload.get("summary", "")
             if community_label and member_labels:
-                self.knowledge_graph.add_community(community_label, member_labels, summary)
+                kg.add_community(community_label, member_labels, summary)
             return message.create_response({"status": "success"})
 
         return None
 
     # Specific topic handlers below:
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def handle_store(self, message: Message) -> Message | None:
@@ -511,6 +537,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Memory store failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_retrieve(self, message: Message) -> Message | None:
         """
         Handles `memory.retrieve_recent` topics.
@@ -542,8 +569,6 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory retrieval failed: %s", e)
             return message.create_error(str(e))
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def handle_search(self, message: Message) -> Message | None:
@@ -577,6 +602,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Semantic search failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_skill_store(self, message: Message) -> Message | None:
         """
         Handles `memory.skill.store` topics.
@@ -608,6 +634,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Skill store failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_skill_find(self, message: Message) -> Message | None:
         """
         Handles `memory.skill.find` topics.
@@ -631,6 +658,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Skill find failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_reward_record(self, message: Message) -> Message | None:
         """
         Handles `memory.reward.record` topics.
@@ -665,6 +693,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Reward record failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_reward_query(self, message: Message) -> Message | None:
         """
         Handles `memory.reward.query` topics.
@@ -693,6 +722,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Reward query failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_browse(self, message: Message) -> Message | None:
         """
         Handles `memory.browse` — paginated episodic memory retrieval.
@@ -769,6 +799,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Memory browse failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_forget(self, message: Message) -> Message | None:
         """
         Handles `memory.forget` — selective amnesia.
@@ -875,6 +906,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             logger.error("Memory forget failed: %s", e)
             return message.create_error(str(e))
 
+    @require_tenant
     async def handle_stats(self, message: Message) -> Message | None:
         """
         Handles `memory.stats` — return counts from all memory subsystems.
@@ -903,8 +935,9 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
                 pass
 
-            kg_entities = self.knowledge_graph.entity_count
-            kg_relations = self.knowledge_graph.relation_count
+            kg = self._get_kg(tenant_id)
+            kg_entities = kg.entity_count
+            kg_relations = kg.relation_count
 
             return message.create_response(
                 {

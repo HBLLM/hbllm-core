@@ -109,3 +109,80 @@ async def test_memory_clear_respects_tenant(memory_env):
     turns = await mem.db.retrieve_recent("shared_session", limit=10, tenant_id="t2")
     assert len(turns) == 1
     assert turns[0]["content"] == "Message from t2"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_graph_tenant_isolation(memory_env):
+    """Verify that reflection entities are isolated per tenant in KnowledgeGraph."""
+    bus, mem, _ = memory_env
+
+    # Tenant A publishes reflection message
+    ref_a = Message(
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="tenant_A",
+        topic="system.reflection",
+        payload={
+            "content": "Tenant A reflections",
+            "entities": [{"label": "Apple", "type": "fruit"}],
+            "rules": []
+        }
+    )
+    await bus.publish("system.reflection", ref_a)
+    await asyncio.sleep(0.1)
+
+    # Tenant B publishes reflection message
+    ref_b = Message(
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="tenant_B",
+        topic="system.reflection",
+        payload={
+            "content": "Tenant B reflections",
+            "entities": [{"label": "Banana", "type": "fruit"}],
+            "rules": []
+        }
+    )
+    await bus.publish("system.reflection", ref_b)
+    await asyncio.sleep(0.1)
+
+    # Directly check memory node's isolated knowledge graphs
+    kg_a = mem._get_kg("tenant_A")
+    kg_b = mem._get_kg("tenant_B")
+
+    # Verify Tenant A has apple but not banana
+    assert any(e.label == "apple" for e in kg_a._entities.values())
+    assert not any(e.label == "banana" for e in kg_a._entities.values())
+
+    # Verify Tenant B has banana but not apple
+    assert any(e.label == "banana" for e in kg_b._entities.values())
+    assert not any(e.label == "apple" for e in kg_b._entities.values())
+
+    # Query via handle_knowledge_query for Tenant A
+    query_msg_a = Message(
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="tenant_A",
+        topic="knowledge.query",
+        payload={"action": "all_entities"}
+    )
+    resp_a = await mem.handle_knowledge_query(query_msg_a)
+    assert resp_a is not None
+    entities_a = resp_a.payload["entities"]
+    assert any(e["label"] == "apple" for e in entities_a)
+    assert not any(e["label"] == "banana" for e in entities_a)
+
+    # Query via handle_knowledge_query for Tenant B
+    query_msg_b = Message(
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="tenant_B",
+        topic="knowledge.query",
+        payload={"action": "all_entities"}
+    )
+    resp_b = await mem.handle_knowledge_query(query_msg_b)
+    assert resp_b is not None
+    entities_b = resp_b.payload["entities"]
+    assert any(e["label"] == "banana" for e in entities_b)
+    assert not any(e["label"] == "apple" for e in entities_b)
+

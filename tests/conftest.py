@@ -9,6 +9,12 @@ Provides data directory isolation so tests don't pollute each other.
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import MagicMock
+sys.modules["torch"] = MagicMock()
+sys.modules["torch.nn"] = MagicMock()
+sys.modules["torch.nn.functional"] = MagicMock()
+
 import asyncio
 import gc
 import logging
