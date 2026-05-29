@@ -292,6 +292,24 @@ def _validate_tenant(
     # Cross-tenant context check
     ctx_tenant = _ctx_tenant_id.get(None)
     if ctx_tenant is not None and str(tid) != ctx_tenant:
+        # Check parent-child hierarchy in central registry
+        try:
+            from hbllm.security.tenant_registry import get_tenant_registry
+
+            registry = get_tenant_registry()
+
+            # Case A: Context is a child, requested is parent
+            parent_id = registry.get_parent_id(ctx_tenant)
+            if parent_id is not None and str(tid) == parent_id:
+                return
+
+            # Case B: Context is parent, requested is child
+            req_parent_id = registry.get_parent_id(str(tid))
+            if req_parent_id is not None and req_parent_id == ctx_tenant:
+                return
+        except Exception as e:
+            logger.debug("Hierarchy resolution failed for %s -> %s: %s", ctx_tenant, tid, e)
+
         msg = (
             f"Cross-tenant access denied in {fn.__qualname__}(): "
             f"context={ctx_tenant}, requested={tid}"

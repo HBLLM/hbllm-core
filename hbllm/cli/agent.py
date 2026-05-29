@@ -51,6 +51,7 @@ async def _run_agent(
     task: str | None = None,
     index: bool = False,
     no_index: bool = False,
+    tenant_id: str = "default",
 ) -> None:
     """Boot the cognitive brain and run an interactive or one-shot loop."""
     from rich.console import Console
@@ -156,7 +157,7 @@ async def _run_agent(
     # ── One-shot mode ────────────────────────────────────────────────
     if task:
         console.print(f"\n[bold yellow]🚀 Running task: {task}[/]\n")
-        result = await brain.process(text=task, session_id="oneshot")
+        result = await brain.process(text=task, tenant_id=tenant_id, session_id="oneshot")
         console.print(Panel(result.text, border_style="green", title="Output"))
         await brain.stop()
         return
@@ -176,7 +177,9 @@ async def _run_agent(
             console.print("\n[bold yellow]🚀 Sending task to agent...[/]")
             _start_time = asyncio.get_event_loop().time()
 
-            result = await brain.process(text=user_input, session_id=session_id)
+            result = await brain.process(
+                text=user_input, tenant_id=tenant_id, session_id=session_id
+            )
             _duration = asyncio.get_event_loop().time() - _start_time
 
             console.print("\n[bold green]✨ Response from Agent:[/]")
@@ -282,7 +285,19 @@ def register_subcommands(subparsers: object) -> None:
 
 def run_agent(args: Namespace) -> None:
     """Entry point called by ``_cli_app.dispatch`` for agent subcommand."""
+    import getpass
+
+    from hbllm.security.tenant_registry import get_tenant_registry
+
     logging.getLogger("hbllm").setLevel(logging.WARNING)
+
+    # Register parent developer profile mapping
+    parent_id = getpass.getuser()
+    tenant_id = "default"
+    registry = get_tenant_registry()
+    registry.register_tenant(parent_id, parent_id=None, name=f"Developer Profile ({parent_id})")
+    registry.register_tenant(tenant_id, parent_id=parent_id, name="Default Workspace")
+
     asyncio.run(
         _run_agent(
             model=args.model,
@@ -291,15 +306,19 @@ def run_agent(args: Namespace) -> None:
             task=args.task,
             index=args.index,
             no_index=args.no_index,
+            tenant_id=tenant_id,
         )
     )
 
 
 def run_code(args: Namespace) -> None:
     """Entry point called by ``_cli_app.dispatch`` for code subcommand."""
+    import getpass
     import hashlib
     import re
     import sys
+
+    from hbllm.security.tenant_registry import get_tenant_registry
 
     logging.getLogger("hbllm").setLevel(logging.WARNING)
 
@@ -318,7 +337,15 @@ def run_code(args: Namespace) -> None:
     tenant_id = f"code_{folder_name}_{path_hash}"
     data_dir = os.path.expanduser(f"~/.hbllm/agent_data/{tenant_id}")
 
-    # 4. Execute the agent REPL loop in that context
+    # 4. Register parent developer profile mapping
+    parent_id = getpass.getuser()
+    registry = get_tenant_registry()
+    registry.register_tenant(parent_id, parent_id=None, name=f"Developer Profile ({parent_id})")
+    registry.register_tenant(
+        tenant_id, parent_id=parent_id, name=f"Workspace Project: {folder_name}"
+    )
+
+    # 5. Execute the agent REPL loop in that context
     asyncio.run(
         _run_agent(
             model=args.model,
@@ -327,5 +354,6 @@ def run_code(args: Namespace) -> None:
             task=args.task,
             index=args.index,
             no_index=args.no_index,
+            tenant_id=tenant_id,
         )
     )
