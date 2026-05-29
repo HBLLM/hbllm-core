@@ -49,6 +49,8 @@ async def _run_agent(
     require_approval: bool,
     data_dir: str,
     task: str | None = None,
+    index: bool = False,
+    no_index: bool = False,
 ) -> None:
     """Boot the cognitive brain and run an interactive or one-shot loop."""
     from rich.console import Console
@@ -104,6 +106,44 @@ async def _run_agent(
         console.print(plugins_table)
     else:
         console.print("[yellow]⚠️ No developer plugins active. Standard reasoning only.[/]")
+
+    # ── Workspace Codebase Indexing / Onboarding ────────────────────
+    if brain.knowledge_base and not no_index:
+        workspace_path = os.path.abspath(os.getcwd())
+        existing_source = None
+        for source_info in brain.knowledge_base.list_sources():
+            if os.path.abspath(source_info["path"]) == workspace_path:
+                existing_source = source_info
+                break
+
+        should_index = index or (not existing_source)
+
+        if should_index:
+            if existing_source:
+                console.print(f"[bold yellow]🔄 Updating workspace index: [blue]{workspace_path}[/]...[/]")
+                source_id = existing_source["source_id"]
+            else:
+                console.print(f"[bold yellow]🔍 First-time run: Indexing workspace [blue]{workspace_path}[/]...[/]")
+                try:
+                    source = brain.knowledge_base.add_source(workspace_path, source_type="folder")
+                    source_id = source.source_id
+                except Exception as e:
+                    console.print(f"[red]⚠️ Failed to register workspace: {e}[/]")
+                    source_id = None
+
+            if source_id:
+                with console.status("[bold yellow]Ingesting and indexing codebase...[/]"):
+                    try:
+                        num_chunks = await asyncio.to_thread(brain.knowledge_base.ingest_source, source_id)
+                        console.print(f"[bold green]✅ Codebase indexed: Ingested {num_chunks} chunks successfully![/]")
+                    except Exception as e:
+                        console.print(f"[red]⚠️ Failed to index codebase: {e}[/]")
+        else:
+            total_chunks = existing_source.get("chunk_count", 0) if existing_source else 0
+            console.print(
+                f"[dim]ℹ️ Workspace codebase already indexed ({total_chunks} chunks). "
+                f"Use --index to force re-indexing.[/]"
+            )
 
     # ── One-shot mode ────────────────────────────────────────────────
     if task:
@@ -177,6 +217,16 @@ def register_subcommand(subparsers: object) -> None:
         help="Local persistence directory for knowledge and memory",
     )
     agent_parser.add_argument(
+        "--index",
+        action="store_true",
+        help="Force full re-indexing of the workspace codebase",
+    )
+    agent_parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Skip automatic workspace codebase indexing",
+    )
+    agent_parser.add_argument(
         "task",
         nargs="?",
         default=None,
@@ -193,5 +243,7 @@ def run_agent(args: Namespace) -> None:
             require_approval=not args.no_approval,
             data_dir=args.data_dir,
             task=args.task,
+            index=args.index,
+            no_index=args.no_index,
         )
     )
