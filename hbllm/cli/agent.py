@@ -203,11 +203,12 @@ async def _run_agent(
 # ── CLI wiring ──────────────────────────────────────────────────────────────
 
 
-def register_subcommand(subparsers: object) -> None:
-    """Register the ``agent`` subcommand on the top-level CLI parser."""
+def register_subcommands(subparsers: object) -> None:
+    """Register both the ``agent`` and ``code`` subcommands on the CLI parser."""
+    # ── Subcommand: agent ──
     agent_parser = subparsers.add_parser(  # type: ignore[attr-defined]
         "agent",
-        help="Launch interactive developer agent (Claude Code / Codex alternative)",
+        help="Launch interactive developer agent in current directory",
     )
     agent_parser.add_argument(
         "--model",
@@ -241,15 +242,88 @@ def register_subcommand(subparsers: object) -> None:
         help="Optional one-shot task string. If omitted, starts interactive REPL.",
     )
 
+    # ── Subcommand: code ──
+    code_parser = subparsers.add_parser(  # type: ignore[attr-defined]
+        "code",
+        help="Start developer agent session isolated for a specific project path (like 'hbllm code .')",
+    )
+    code_parser.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="Path to the project directory to work on (defaults to '.')",
+    )
+    code_parser.add_argument(
+        "--model",
+        default="openai/gpt-4o-mini",
+        help="Model provider identifier (e.g. openai/gpt-4o, anthropic/claude-3-5-sonnet, ollama/llama3)",
+    )
+    code_parser.add_argument(
+        "--no-approval",
+        action="store_true",
+        help="Disable manual confirmation before executing local shell commands",
+    )
+    code_parser.add_argument(
+        "--index",
+        action="store_true",
+        help="Force full re-indexing of the workspace codebase",
+    )
+    code_parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Skip automatic workspace codebase indexing",
+    )
+    code_parser.add_argument(
+        "--task",
+        default=None,
+        help="Optional one-shot task string. If omitted, starts interactive REPL.",
+    )
+
 
 def run_agent(args: Namespace) -> None:
-    """Entry point called by ``_cli_app.dispatch``."""
+    """Entry point called by ``_cli_app.dispatch`` for agent subcommand."""
     logging.getLogger("hbllm").setLevel(logging.WARNING)
     asyncio.run(
         _run_agent(
             model=args.model,
             require_approval=not args.no_approval,
             data_dir=args.data_dir,
+            task=args.task,
+            index=args.index,
+            no_index=args.no_index,
+        )
+    )
+
+
+def run_code(args: Namespace) -> None:
+    """Entry point called by ``_cli_app.dispatch`` for code subcommand."""
+    import hashlib
+    import re
+    import sys
+
+    logging.getLogger("hbllm").setLevel(logging.WARNING)
+
+    # 1. Resolve target path
+    target_path = os.path.abspath(os.path.expanduser(args.path))
+    if not os.path.isdir(target_path):
+        print(f"❌ Error: Path is not a directory: {target_path}")
+        sys.exit(1)
+
+    # 2. Shift process directory to the target path
+    os.chdir(target_path)
+
+    # 3. Compute unique, stable tenant ID and corresponding data directory
+    path_hash = hashlib.sha256(target_path.encode("utf-8")).hexdigest()[:8]
+    folder_name = re.sub(r"[^a-zA-Z0-9_-]", "_", os.path.basename(target_path))
+    tenant_id = f"code_{folder_name}_{path_hash}"
+    data_dir = os.path.expanduser(f"~/.hbllm/agent_data/{tenant_id}")
+
+    # 4. Execute the agent REPL loop in that context
+    asyncio.run(
+        _run_agent(
+            model=args.model,
+            require_approval=not args.no_approval,
+            data_dir=data_dir,
             task=args.task,
             index=args.index,
             no_index=args.no_index,
