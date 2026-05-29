@@ -9,13 +9,13 @@ PYTEST := $(PYTHON) -m pytest
 ## ── Testing ──────────────────────────────────────────────────────────────
 
 test: ## Run full test suite
-	$(PYTEST) tests/ -q --tb=short
+	$(PYTEST) -q --tb=short
 
 test-v: ## Run tests with verbose output
-	$(PYTEST) tests/ -v --tb=short
+	$(PYTEST) -v --tb=short
 
 test-fast: ## Run tests excluding slow/heavy tests
-	$(PYTEST) tests/ -q --tb=short --timeout=60 \
+	$(PYTEST) -q --tb=short --timeout=60 \
 		--ignore=tests/test_cognitive_training.py \
 		--ignore=tests/test_lora_loop.py
 

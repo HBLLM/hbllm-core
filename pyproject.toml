@@ -107,10 +107,11 @@ ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP04
 known-first-party = ["hbllm"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "plugins"]
 asyncio_mode = "auto"
 timeout = 60
 timeout_method = "thread"
+addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal"
 
 [tool.mypy]
 python_version = "3.11"

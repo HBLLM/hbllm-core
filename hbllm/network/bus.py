@@ -336,10 +336,13 @@ class InProcessBus:
                     async with self._handler_semaphore:
                         _start = time.monotonic()
                         try:
-                            with trace_span(
-                                f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}
-                            ):
-                                response = await s.handler(m)
+                            from hbllm.network._tenant_bridge import restore_tenant_ctx
+
+                            with restore_tenant_ctx(m):
+                                with trace_span(
+                                    f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}
+                                ):
+                                    response = await s.handler(m)
                             latency = (time.monotonic() - _start) * 1000
                             self.metrics.record_delivery(t, latency)
                             # If handler returns a response, route it back

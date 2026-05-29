@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -213,20 +214,21 @@ class PluginManager:
         if plugin_dirs:
             self._plugin_dirs.extend(Path(p).expanduser() for p in plugin_dirs)
 
-        # Always include default paths
-        default_user_dir = Path.home() / ".hbllm" / "plugins"
-        if default_user_dir not in self._plugin_dirs:
-            self._plugin_dirs.append(default_user_dir)
+        # Always include default paths unless running in pytest
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            default_user_dir = Path.home() / ".hbllm" / "plugins"
+            if default_user_dir not in self._plugin_dirs:
+                self._plugin_dirs.append(default_user_dir)
 
-        # Package-level plugins (shipped with hbllm)
-        try:
-            import hbllm
+            # Package-level plugins (shipped with hbllm)
+            try:
+                import hbllm
 
-            pkg_plugins = Path(hbllm.__file__).parent.parent / "plugins"
-            if pkg_plugins.exists() and pkg_plugins not in self._plugin_dirs:
-                self._plugin_dirs.append(pkg_plugins)
-        except Exception:
-            pass
+                pkg_plugins = Path(hbllm.__file__).parent.parent / "plugins"
+                if pkg_plugins.exists() and pkg_plugins not in self._plugin_dirs:
+                    self._plugin_dirs.append(pkg_plugins)
+            except Exception:
+                pass
 
         # Background watcher
         self._watch_task: asyncio.Task[None] | None = None

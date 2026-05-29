@@ -207,7 +207,10 @@ class InProcessTransport(Transport):
                     async with self._handler_semaphore:
                         start = time.monotonic()
                         try:
-                            response = await s.handler(m)
+                            from hbllm.network._tenant_bridge import restore_tenant_ctx
+
+                            with restore_tenant_ctx(m):
+                                response = await s.handler(m)
                             latency_ms = (time.monotonic() - start) * 1000
                             self.metrics.record_latency(latency_ms)
                             if response is not None:
