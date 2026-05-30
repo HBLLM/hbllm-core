@@ -138,10 +138,15 @@ def test_sync_endpoints():
     # Create a valid JWT token to bypass auth middleware
     import jwt
 
-    # We manually use "test_secret" as the secret since we set it in env
-    secret_key = "test_secret"
+    # We dynamically extract the actual secret key used by JWTAuthMiddleware
+    secret_key = None
+    for middleware in core_app.user_middleware:
+        if middleware.cls.__name__ == "JWTAuthMiddleware":
+            secret_key = middleware.kwargs.get("secret_key")
 
-    # Reload auth middleware config if needed, or just mock it.
+    if not secret_key:
+        secret_key = "test_secret"
+
     token = jwt.encode(
         {"tenant_id": "tenant1", "user_id": "user1", "device_id": "device1"},
         secret_key,
@@ -155,23 +160,6 @@ def test_sync_endpoints():
         json={"memories": [{"content": "Hello", "role": "user"}]},
         headers=headers,
     )
-    # If 401, it means the middleware didn't use our "test_secret".
-    # In that case, we try to extract whatever secret it's actually using.
-    if resp.status_code == 401:
-        from hbllm.serving.auth import akm
-
-        actual_secret = akm.jwt_secret
-        token = jwt.encode(
-            {"tenant_id": "tenant1", "user_id": "user1", "device_id": "device1"},
-            actual_secret,
-            algorithm="HS256",
-        )
-        headers["Authorization"] = f"Bearer {token}"
-        resp = client.post(
-            "/v1/sync/episodic",
-            json={"memories": [{"content": "Hello", "role": "user"}]},
-            headers=headers,
-        )
 
     assert resp.status_code == 200
     assert resp.json()["synced"] == 1

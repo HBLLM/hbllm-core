@@ -65,7 +65,7 @@ async def test_chat_stream_route_registered():
 async def test_memory_route_registered():
     """Verify memory endpoint is registered."""
     routes = [r.path for r in app.routes]
-    assert "/v1/memory/{tenant_id}/{session_id}" in routes
+    assert "/v1/memory/{session_id}" in routes
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_all_core_routes_count():
         "/v1/chat",
         "/v1/chat/stream",
         "/v1/chat/ws",
-        "/v1/memory/{tenant_id}/{session_id}",
+        "/v1/memory/{session_id}",
         "/v1/feedback",
         "/v1/knowledge/{entity}",
         "/v1/knowledge/path",

@@ -88,9 +88,7 @@ _ctx_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("user_
 _ctx_device_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "device_id", default=None
 )
-_ctx_guard_mode: contextvars.ContextVar[TenantGuardMode] = contextvars.ContextVar(
-    "guard_mode", default=TenantGuardMode.WARN
-)
+_ctx_guard_mode: contextvars.ContextVar[TenantGuardMode] = contextvars.ContextVar("guard_mode")
 
 
 def _get_guard_mode() -> TenantGuardMode:
