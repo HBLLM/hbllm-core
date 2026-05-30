@@ -125,8 +125,8 @@ async def test_knowledge_graph_tenant_isolation(memory_env):
         payload={
             "content": "Tenant A reflections",
             "entities": [{"label": "Apple", "type": "fruit"}],
-            "rules": []
-        }
+            "rules": [],
+        },
     )
     await bus.publish("system.reflection", ref_a)
     await asyncio.sleep(0.1)
@@ -140,8 +140,8 @@ async def test_knowledge_graph_tenant_isolation(memory_env):
         payload={
             "content": "Tenant B reflections",
             "entities": [{"label": "Banana", "type": "fruit"}],
-            "rules": []
-        }
+            "rules": [],
+        },
     )
     await bus.publish("system.reflection", ref_b)
     await asyncio.sleep(0.1)
@@ -164,7 +164,7 @@ async def test_knowledge_graph_tenant_isolation(memory_env):
         source_node_id="test",
         tenant_id="tenant_A",
         topic="knowledge.query",
-        payload={"action": "all_entities"}
+        payload={"action": "all_entities"},
     )
     resp_a = await mem.handle_knowledge_query(query_msg_a)
     assert resp_a is not None
@@ -178,11 +178,10 @@ async def test_knowledge_graph_tenant_isolation(memory_env):
         source_node_id="test",
         tenant_id="tenant_B",
         topic="knowledge.query",
-        payload={"action": "all_entities"}
+        payload={"action": "all_entities"},
     )
     resp_b = await mem.handle_knowledge_query(query_msg_b)
     assert resp_b is not None
     entities_b = resp_b.payload["entities"]
     assert any(e["label"] == "banana" for e in entities_b)
     assert not any(e["label"] == "apple" for e in entities_b)
-

@@ -8,12 +8,6 @@ Validates:
   5. End-to-end: publish inside TenantContext → handler sees correct tenant
 """
 
-import sys
-from unittest.mock import MagicMock
-sys.modules["torch"] = MagicMock()
-sys.modules["torch.nn"] = MagicMock()
-sys.modules["torch.nn.functional"] = MagicMock()
-
 import asyncio
 
 import pytest
