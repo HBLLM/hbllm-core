@@ -294,31 +294,42 @@ def run_agent(args: Namespace) -> None:
     logging.getLogger("hbllm").setLevel(logging.WARNING)
 
     from hbllm.security.identity_resolver import resolve_sovereign_identity
+    from hbllm.security.tenant_guard import TenantContext
+    from hbllm.security.tenant_registry import get_tenant_registry
 
-    tenant_id, _ = resolve_sovereign_identity()
+    dev_tenant_id, device_id = resolve_sovereign_identity()
 
-    asyncio.run(
-        _run_agent(
-            model=args.model,
-            require_approval=not args.no_approval,
-            data_dir=args.data_dir,
-            task=args.task,
-            index=args.index,
-            no_index=args.no_index,
-            tenant_id=tenant_id,
+    # Register standard developer profile centrally
+    registry = get_tenant_registry()
+    registry.register_tenant(dev_tenant_id, parent_id=None, name="Developer Profile")
+
+    with TenantContext(dev_tenant_id, device_id=device_id):
+        asyncio.run(
+            _run_agent(
+                model=args.model,
+                require_approval=not args.no_approval,
+                data_dir=args.data_dir,
+                task=args.task,
+                index=args.index,
+                no_index=args.no_index,
+                tenant_id=dev_tenant_id,
+            )
         )
-    )
 
 
 def run_code(args: Namespace) -> None:
     """Entry point called by ``_cli_app.dispatch`` for code subcommand."""
+    import hashlib
+    import re
     import sys
 
     logging.getLogger("hbllm").setLevel(logging.WARNING)
 
     from hbllm.security.identity_resolver import resolve_sovereign_identity
+    from hbllm.security.tenant_guard import TenantContext
+    from hbllm.security.tenant_registry import get_tenant_registry
 
-    tenant_id, _ = resolve_sovereign_identity()
+    dev_tenant_id, device_id = resolve_sovereign_identity()
 
     # 1. Resolve target path
     target_path = os.path.abspath(os.path.expanduser(args.path))
@@ -329,18 +340,30 @@ def run_code(args: Namespace) -> None:
     # 2. Shift process directory to the target path
     os.chdir(target_path)
 
-    # 3. Isolate project database local storage under .hbllm/ in the project root path
+    # 3. Compute unique project identifier and register as a child of the developer centrally
+    path_hash = hashlib.sha256(target_path.encode("utf-8")).hexdigest()[:8]
+    folder_name = re.sub(r"[^a-zA-Z0-9_-]", "_", os.path.basename(target_path))
+    project_tenant_id = f"project_{folder_name}_{path_hash}"
+
+    registry = get_tenant_registry()
+    registry.register_tenant(dev_tenant_id, parent_id=None, name="Developer Profile")
+    registry.register_tenant(
+        project_tenant_id, parent_id=dev_tenant_id, name=f"Workspace Project: {folder_name} ({target_path})"
+    )
+
+    # 4. Isolate project database local storage under .hbllm/ in the project root path
     data_dir = os.path.join(target_path, ".hbllm")
 
-    # 4. Execute the agent REPL loop under the default tenant identity
-    asyncio.run(
-        _run_agent(
-            model=args.model,
-            require_approval=not args.no_approval,
-            data_dir=data_dir,
-            task=args.task,
-            index=args.index,
-            no_index=args.no_index,
-            tenant_id=tenant_id,
+    # 5. Execute the agent REPL loop under the project tenant identity context
+    with TenantContext(project_tenant_id, device_id=device_id):
+        asyncio.run(
+            _run_agent(
+                model=args.model,
+                require_approval=not args.no_approval,
+                data_dir=data_dir,
+                task=args.task,
+                index=args.index,
+                no_index=args.no_index,
+                tenant_id=project_tenant_id,
+            )
         )
-    )
