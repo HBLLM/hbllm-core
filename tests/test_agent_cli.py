@@ -84,7 +84,7 @@ def test_run_code_success() -> None:
                 # Check data directory is isolated under target_path/.hbllm
                 data_dir = call_kwargs["data_dir"]
                 assert data_dir == os.path.join(real_temp_dir, ".hbllm")
-                assert call_kwargs["tenant_id"] == "default"
+                assert call_kwargs["tenant_id"].startswith("dev_")
 
         finally:
             # Restore CWD

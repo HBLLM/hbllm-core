@@ -293,6 +293,10 @@ def run_agent(args: Namespace) -> None:
     """Entry point called by ``_cli_app.dispatch`` for agent subcommand."""
     logging.getLogger("hbllm").setLevel(logging.WARNING)
 
+    from hbllm.security.identity_resolver import resolve_sovereign_identity
+
+    tenant_id, _ = resolve_sovereign_identity()
+
     asyncio.run(
         _run_agent(
             model=args.model,
@@ -301,7 +305,7 @@ def run_agent(args: Namespace) -> None:
             task=args.task,
             index=args.index,
             no_index=args.no_index,
-            tenant_id="default",
+            tenant_id=tenant_id,
         )
     )
 
@@ -311,6 +315,10 @@ def run_code(args: Namespace) -> None:
     import sys
 
     logging.getLogger("hbllm").setLevel(logging.WARNING)
+
+    from hbllm.security.identity_resolver import resolve_sovereign_identity
+
+    tenant_id, _ = resolve_sovereign_identity()
 
     # 1. Resolve target path
     target_path = os.path.abspath(os.path.expanduser(args.path))
@@ -333,6 +341,6 @@ def run_code(args: Namespace) -> None:
             task=args.task,
             index=args.index,
             no_index=args.no_index,
-            tenant_id="default",
+            tenant_id=tenant_id,
         )
     )
