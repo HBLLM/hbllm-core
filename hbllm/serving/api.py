@@ -381,20 +381,23 @@ async def lifespan(app: FastAPI) -> Any:
         app.include_router(kb_router)
 
         # Usage & Billing endpoints
-        @app.get("/v1/usage/{tenant_id}")
-        async def get_usage(tenant_id: str, days: int = 30) -> Any:
+        @app.get("/v1/usage")
+        async def get_usage(api_req: Request, days: int = 30) -> Any:
+            tenant_id = getattr(api_req.state, "tenant_id", "default")
             return usage_tracker.get_tenant_usage(tenant_id, days)
 
-        @app.get("/v1/usage/{tenant_id}/daily")
-        async def get_daily_usage(tenant_id: str, days: int = 30) -> Any:
+        @app.get("/v1/usage/daily")
+        async def get_daily_usage(api_req: Request, days: int = 30) -> Any:
+            tenant_id = getattr(api_req.state, "tenant_id", "default")
             return {"daily": usage_tracker.get_daily_usage(tenant_id, days)}
 
         @app.get("/v1/billing/plans")
         async def list_plans() -> Any:
             return {"plans": billing.list_plans()}
 
-        @app.get("/v1/billing/{tenant_id}")
-        async def get_billing(tenant_id: str, days: int = 30) -> Any:
+        @app.get("/v1/billing")
+        async def get_billing(api_req: Request, days: int = 30) -> Any:
+            tenant_id = getattr(api_req.state, "tenant_id", "default")
             usage = usage_tracker.get_tenant_usage(tenant_id, days)
             cost = usage_tracker.estimate_cost(tenant_id, days)
             return {"usage": usage, "cost": cost}
@@ -502,30 +505,36 @@ async def lifespan(app: FastAPI) -> Any:
         @app.post("/v1/agents")
         async def create_agent(request: Request) -> Any:
             body = await request.json()
+            tenant_id = getattr(request.state, "tenant_id", None) or body.get(
+                "tenant_id", "default"
+            )
             agent = agent_registry.create_agent(
-                tenant_id=body["tenant_id"],
+                tenant_id=tenant_id,
                 name=body["name"],
                 system_prompt=body["system_prompt"],
                 tools=body.get("tools", []),
             )
             return {"agent_id": agent.agent_id, "name": agent.name}
 
-        @app.get("/v1/agents/{tenant_id}")
-        async def list_agents(tenant_id: str) -> Any:
+        @app.get("/v1/agents")
+        async def list_agents(request: Request) -> Any:
+            tenant_id = getattr(request.state, "tenant_id", "default")
             agents = agent_registry.list_agents(tenant_id)
             return {"agents": [{"agent_id": a.agent_id, "name": a.name} for a in agents]}
 
-        @app.get("/v1/agents/{tenant_id}/tools")
-        async def list_agent_tools(tenant_id: str) -> Any:
+        @app.get("/v1/agents/tools")
+        async def list_agent_tools(request: Request) -> Any:
+            tenant_id = getattr(request.state, "tenant_id", "default")
             return {"tools": agent_registry.list_tools(tenant_id)}
 
         @app.post("/v1/agents/{agent_id}/run")
         async def run_agent(agent_id: str, request: Request) -> Any:
             body = await request.json()
+            tenant_id = getattr(request.state, "tenant_id", "default")
             context = {
                 "vector_store": _state.get("vector_store"),
                 "embeddings": _state.get("embeddings"),
-                "tenant_id": body.get("tenant_id", ""),
+                "tenant_id": tenant_id,
             }
             result = await agent_registry.run_agent(
                 agent_id=agent_id,
@@ -540,9 +549,10 @@ async def lifespan(app: FastAPI) -> Any:
                 "tokens_used": result.tokens_used,
             }
 
-        @app.post("/v1/agents/{tenant_id}/tools")
-        async def register_tool(tenant_id: str, request: Request) -> Any:
+        @app.post("/v1/agents/tools")
+        async def register_tool(request: Request) -> Any:
             body = await request.json()
+            tenant_id = getattr(request.state, "tenant_id", "default")
             tool = agent_registry.register_webhook_tool(
                 tenant_id=tenant_id,
                 name=body["name"],
@@ -659,8 +669,9 @@ async def lifespan(app: FastAPI) -> Any:
             )
 
         # ── Explainable AI (XAI) ──
-        @app.get("/v1/xai/{tenant_id}/traces")
-        async def get_traces(tenant_id: str, limit: int = 50) -> Any:
+        @app.get("/v1/xai/traces")
+        async def get_traces(request: Request, limit: int = 50) -> Any:
+            tenant_id = getattr(request.state, "tenant_id", "default")
             return {"traces": xai.get_tenant_traces(tenant_id, limit)}
 
         @app.get("/v1/xai/trace/{trace_id}")
@@ -670,12 +681,14 @@ async def lifespan(app: FastAPI) -> Any:
                 raise HTTPException(status_code=404, detail="Trace not found")
             return trace
 
-        @app.get("/v1/xai/{tenant_id}/audit")
-        async def get_audit_log(tenant_id: str, limit: int = 100) -> Any:
+        @app.get("/v1/xai/audit")
+        async def get_audit_log(request: Request, limit: int = 100) -> Any:
+            tenant_id = getattr(request.state, "tenant_id", "default")
             return {"audit_log": xai.get_audit_log(tenant_id, limit)}
 
-        @app.get("/v1/xai/{tenant_id}/compliance")
-        async def compliance_report(tenant_id: str, days: int = 30) -> Any:
+        @app.get("/v1/xai/compliance")
+        async def compliance_report(request: Request, days: int = 30) -> Any:
+            tenant_id = getattr(request.state, "tenant_id", "default")
             return xai.get_compliance_report(tenant_id, days)
 
         logger.info("🧠 AGI features enabled (multi-perspective analysis, explainable AI)")
@@ -702,6 +715,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+from fastapi.responses import JSONResponse
+
+from hbllm.security.tenant_guard import TenantIsolationError
+
+
+@app.exception_handler(TenantIsolationError)
+async def tenant_isolation_exception_handler(request: Request, exc: TenantIsolationError):
+    logger.warning("Tenant isolation violation blocked: %s", exc)
+    return JSONResponse(
+        status_code=403,
+        content={"detail": f"Access denied: {str(exc)}"},
+    )
+
 
 _cors_origins = os.environ.get(
     "HBLLM_CORS_ORIGINS",
@@ -1312,10 +1339,13 @@ async def synapse_websocket(websocket: WebSocket) -> Any:
 
     await gateway.connect(websocket, tenant_id, user_id, device_id)
 
+    from hbllm.security.tenant_guard import TenantContext
+
     try:
-        while True:
-            data = await websocket.receive_text()
-            await gateway.handle_inbound_message(tenant_id, user_id, device_id, data)
+        async with TenantContext(tenant_id, user_id=user_id, device_id=device_id):
+            while True:
+                data = await websocket.receive_text()
+                await gateway.handle_inbound_message(tenant_id, user_id, device_id, data)
     except WebSocketDisconnect:
         gateway.disconnect(tenant_id, user_id, device_id)
     except Exception as e:
@@ -1566,9 +1596,10 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
         )
 
 
-@app.get("/v1/memory/{tenant_id}/{session_id}")
-async def get_memory(tenant_id: str, session_id: str, limit: int = 20) -> Any:
+@app.get("/v1/memory/{session_id}")
+async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
     """Retrieve recent conversation history for a tenant's session."""
+    tenant_id = getattr(request.state, "tenant_id", "default")
     brain = _state.get("brain")
     bus = getattr(brain, "bus", None)
     if not bus:
@@ -1917,10 +1948,60 @@ async def chat_websocket(ws: WebSocket) -> None:
     """
     Bidirectional WebSocket for real-time chat streaming.
 
-    Client sends:  {"tenant_id": "...", "text": "...", "session_id": "..."}
-    Server sends:  {"token": "...", "done": false}
-                   {"token": "", "done": true, "correlation_id": "..."}
+    Authentication: Pass a JWT token as a query parameter:
+        ws://host/v1/chat/ws?token=<jwt>
     """
+    import os
+
+    import jwt as pyjwt
+
+    from hbllm.security.tenant_guard import TenantContext
+
+    # ── 1. Extract and verify JWT ──
+    token = ws.query_params.get("token", "")
+    if not token and os.environ.get("HBLLM_ENV", "").lower() != "production":
+        from hbllm.security.identity_resolver import resolve_sovereign_identity
+
+        tenant_id, device_id = resolve_sovereign_identity()
+        user_id = "default"
+    else:
+        if not token:
+            await ws.close(code=1008, reason="Missing authentication token")
+            return
+
+        secret_key = os.environ.get("HBLLM_JWT_SECRET", "")
+        if not secret_key:
+            auth_mw = next(
+                (
+                    m
+                    for m in getattr(app, "user_middleware", [])
+                    if hasattr(m, "kwargs") and "secret_key" in m.kwargs
+                ),
+                None,
+            )
+            if auth_mw:
+                secret_key = auth_mw.kwargs.get("secret_key", "")
+
+        if not secret_key:
+            logger.warning("Chat WS: No JWT secret configured — rejecting connection")
+            await ws.close(code=1011, reason="Server auth not configured")
+            return
+
+        try:
+            payload = pyjwt.decode(token, secret_key, algorithms=["HS256"])
+            tenant_id = payload.get("tenant_id")
+            if not tenant_id:
+                await ws.close(code=1008, reason="Token missing tenant_id")
+                return
+            user_id = payload.get("user_id", "default")
+            device_id = payload.get("device_id", "default")
+        except pyjwt.ExpiredSignatureError:
+            await ws.close(code=1008, reason="Token expired")
+            return
+        except pyjwt.InvalidTokenError:
+            await ws.close(code=1008, reason="Invalid token")
+            return
+
     await ws.accept()
     import json as _json
 
@@ -1932,91 +2013,103 @@ async def chat_websocket(ws: WebSocket) -> None:
         return
 
     try:
-        while True:
-            # Receive user message
-            raw = await ws.receive_text()
-            try:
-                data = _json.loads(raw)
-            except _json.JSONDecodeError:
-                await ws.send_json({"error": "Invalid JSON"})
-                continue
+        async with TenantContext(tenant_id, user_id=user_id, device_id=device_id):
+            while True:
+                # Receive user message
+                raw = await ws.receive_text()
+                try:
+                    data = _json.loads(raw)
+                except _json.JSONDecodeError:
+                    await ws.send_json({"error": "Invalid JSON"})
+                    continue
 
-            tenant_id = data.get("tenant_id", "default")
-            session_id = data.get("session_id", str(uuid.uuid4()))
-            text = data.get("text", "")
+                session_id = data.get("session_id", str(uuid.uuid4()))
+                text = data.get("text", "")
 
-            if not text:
-                await ws.send_json({"error": "Missing 'text' field"})
-                continue
+                if not text:
+                    await ws.send_json({"error": "Missing 'text' field"})
+                    continue
 
-            correlation_id = str(uuid.uuid4())
-            response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
+                correlation_id = str(uuid.uuid4())
+                response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
-            async def output_handler(msg: Message) -> None:
-                if msg.correlation_id == correlation_id and not response_future.done():
-                    response_future.set_result(msg)
+                async def output_handler(msg: Message) -> None:
+                    if msg.correlation_id == correlation_id and not response_future.done():
+                        response_future.set_result(msg)
 
-            await bus.subscribe("sensory.output", output_handler)
+                await bus.subscribe("sensory.output", output_handler)
 
-            # Store user message
-            memory_msg = Message(
-                type=MessageType.EVENT,
-                source_node_id="api_server",
-                tenant_id=tenant_id,
-                session_id=session_id,
-                topic="memory.store",
-                payload={
-                    "session_id": session_id,
-                    "tenant_id": tenant_id,
-                    "role": "user",
-                    "content": text,
-                },
-            )
-            await bus.publish("memory.store", memory_msg)
-
-            # Route the query
-            query_msg = Message(
-                type=MessageType.QUERY,
-                source_node_id="api_server",
-                tenant_id=tenant_id,
-                session_id=session_id,
-                topic="router.query",
-                payload=QueryPayload(text=text).model_dump(),
-                correlation_id=correlation_id,
-            )
-            await bus.publish("router.query", query_msg)
-
-            # Wait for response and stream it
-            try:
-                result_msg = await asyncio.wait_for(response_future, timeout=120.0)
-                response_text = result_msg.payload.get("text", "")
-
-                # Stream token-by-token for a natural feel
-                tokens = response_text.split(" ")
-                for i, token in enumerate(tokens):
-                    piece = token if i == 0 else " " + token
-                    await ws.send_json({"token": piece, "done": False})
-
-                await ws.send_json({"token": "", "done": True, "correlation_id": correlation_id})
-
-                # Store assistant response
-                store_msg = Message(
+                # Store user message
+                memory_msg = Message(
                     type=MessageType.EVENT,
                     source_node_id="api_server",
                     tenant_id=tenant_id,
+                    user_id=user_id,
+                    device_id=device_id,
                     session_id=session_id,
                     topic="memory.store",
                     payload={
                         "session_id": session_id,
                         "tenant_id": tenant_id,
-                        "role": "assistant",
-                        "content": response_text,
+                        "role": "user",
+                        "content": text,
+                        "user_id": user_id,
+                        "device_id": device_id,
                     },
                 )
-                await bus.publish("memory.store", store_msg)
+                await bus.publish("memory.store", memory_msg)
 
-            except (TimeoutError, asyncio.TimeoutError):
-                await ws.send_json({"token": "", "done": True, "error": "timeout"})
+                # Route the query
+                query_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id="api_server",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    device_id=device_id,
+                    session_id=session_id,
+                    topic="router.query",
+                    payload=QueryPayload(text=text).model_dump(),
+                    correlation_id=correlation_id,
+                )
+                await bus.publish("router.query", query_msg)
+
+                # Wait for response and stream it
+                try:
+                    result_msg = await asyncio.wait_for(response_future, timeout=120.0)
+                    response_text = result_msg.payload.get("text", "")
+
+                    # Stream token-by-token for a natural feel
+                    tokens = response_text.split(" ")
+                    for i, token in enumerate(tokens):
+                        piece = token if i == 0 else " " + token
+                        await ws.send_json({"token": piece, "done": False})
+
+                    await ws.send_json(
+                        {"token": "", "done": True, "correlation_id": correlation_id}
+                    )
+
+                    # Store assistant response
+                    store_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id="api_server",
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        device_id=device_id,
+                        session_id=session_id,
+                        topic="memory.store",
+                        payload={
+                            "session_id": session_id,
+                            "tenant_id": tenant_id,
+                            "role": "assistant",
+                            "content": response_text,
+                            "user_id": user_id,
+                            "device_id": device_id,
+                        },
+                    )
+                    await bus.publish("memory.store", store_msg)
+
+                except (TimeoutError, asyncio.TimeoutError):
+                    await ws.send_json({"token": "", "done": True, "error": "timeout"})
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")

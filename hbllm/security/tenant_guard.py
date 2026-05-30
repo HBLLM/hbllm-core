@@ -88,9 +88,7 @@ _ctx_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("user_
 _ctx_device_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "device_id", default=None
 )
-_ctx_guard_mode: contextvars.ContextVar[TenantGuardMode] = contextvars.ContextVar(
-    "guard_mode", default=TenantGuardMode.WARN
-)
+_ctx_guard_mode: contextvars.ContextVar[TenantGuardMode] = contextvars.ContextVar("guard_mode")
 
 
 def _get_guard_mode() -> TenantGuardMode:
@@ -292,23 +290,16 @@ def _validate_tenant(
     # Cross-tenant context check
     ctx_tenant = _ctx_tenant_id.get(None)
     if ctx_tenant is not None and str(tid) != ctx_tenant:
-        # Check parent-child hierarchy in central registry
         try:
             from hbllm.security.tenant_registry import get_tenant_registry
 
             registry = get_tenant_registry()
 
-            # Case A: Context is a child, requested is parent
-            parent_id = registry.get_parent_id(ctx_tenant)
-            if parent_id is not None and str(tid) == parent_id:
-                return
-
-            # Case B: Context is parent, requested is child
-            req_parent_id = registry.get_parent_id(str(tid))
-            if req_parent_id is not None and req_parent_id == ctx_tenant:
+            # Perform deep recursive ancestor-descendant relation path check (supports DAGs)
+            if _is_hierarchically_related(registry, ctx_tenant, str(tid)):
                 return
         except Exception as e:
-            logger.debug("Hierarchy resolution failed for %s -> %s: %s", ctx_tenant, tid, e)
+            logger.debug("Recursive hierarchy check failed for %s -> %s: %s", ctx_tenant, tid, e)
 
         msg = (
             f"Cross-tenant access denied in {fn.__qualname__}(): "
@@ -318,6 +309,54 @@ def _validate_tenant(
             raise TenantIsolationError(msg, tenant_id=str(tid), operation=fn.__qualname__)
         else:
             logger.warning("TENANT_GUARD_WARN: %s", msg)
+
+
+def _get_all_ancestors(registry: Any, tenant_id: str) -> set[str]:
+    """Perform a Graph Search (BFS) walk up the lineage tree to find all ancestors.
+
+    Fully supports multi-parent DAG hierarchies (e.g. Home and Office networks).
+    """
+    visited: set[str] = set()
+    queue = [tenant_id]
+
+    # Fallback to get_parent_id if get_parents helper is not yet available
+    get_parents_fn = getattr(
+        registry,
+        "get_parents",
+        lambda t: [registry.get_parent_id(t)] if registry.get_parent_id(t) else [],
+    )
+
+    while queue:
+        curr = queue.pop(0)
+        if curr not in visited:
+            if curr != tenant_id:
+                visited.add(curr)
+            parents = get_parents_fn(curr)
+            for p in parents:
+                if p and p not in visited:
+                    queue.append(p)
+    return visited
+
+
+def _is_hierarchically_related(registry: Any, ctx_tenant: str, req_tenant: str) -> bool:
+    """Verify if two tenants are related along any multi-parent DAG lineage path.
+
+    1. Enforces strict sibling-level isolation.
+    2. Allows deep upward/downward path clearances (Platform -> Org -> Device -> Project -> Task).
+    3. Natively acts as a flat multi-tenant model if no parent hierarchies exist.
+    """
+    if ctx_tenant == req_tenant:
+        return True
+
+    # 1. Downward path (Is req_tenant a parent/ancestor of ctx_tenant?)
+    if req_tenant in _get_all_ancestors(registry, ctx_tenant):
+        return True
+
+    # 2. Upward path (Is ctx_tenant a parent/ancestor of req_tenant?)
+    if ctx_tenant in _get_all_ancestors(registry, req_tenant):
+        return True
+
+    return False
 
 
 def _validate_identity_field(
@@ -363,5 +402,17 @@ def _extract_param(
         idx = params.index(param)
         if idx < len(args):
             return args[idx]
+
+    # Special handling: if we are looking for tenant/user/device identifier,
+    # and one of the arguments is a Message-like object, extract from it.
+    for arg in list(args) + list(kwargs.values()):
+        if hasattr(arg, "tenant_id") and hasattr(arg, "topic"):
+            # This is a Message-like object
+            if "tenant" in param:
+                return getattr(arg, "tenant_id", None)
+            elif "user" in param:
+                return getattr(arg, "user_id", None)
+            elif "device" in param:
+                return getattr(arg, "device_id", None)
 
     return None

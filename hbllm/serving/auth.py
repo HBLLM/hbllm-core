@@ -59,13 +59,34 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             or request.url.path.startswith(("/admin/static", "/studio/"))
         ):
             return await call_next(request)
-        # If an upstream cloud middleware (e.g. ApiSecurityMiddleware) has already
+
+        # 1. If an upstream cloud middleware (e.g. ApiSecurityMiddleware) has already
         # authenticated the request and injected the tenant context, skip JWT verification.
         if hasattr(request.state, "tenant_id") and request.state.tenant_id:
-            return await call_next(request)
+            tenant_id = request.state.tenant_id
+            user_id = getattr(request.state, "user_id", "default")
+            device_id = getattr(request.state, "device_id", "default")
+            from hbllm.security.tenant_guard import TenantContext
+
+            async with TenantContext(tenant_id, user_id=user_id, device_id=device_id):
+                return await call_next(request)
 
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
+            # If no auth header, and we are not in production, fall back to sovereign hardware identity
+            if os.environ.get("HBLLM_ENV", "").lower() != "production":
+                from hbllm.security.identity_resolver import resolve_sovereign_identity
+                from hbllm.security.tenant_guard import TenantContext
+
+                tenant_id, device_id = resolve_sovereign_identity()
+                user_id = "default"
+                request.state.tenant_id = tenant_id
+                request.state.user_id = user_id
+                request.state.device_id = device_id
+
+                async with TenantContext(tenant_id, user_id=user_id, device_id=device_id):
+                    return await call_next(request)
+
             return JSONResponse(
                 status_code=401, content={"detail": "Missing or invalid Authorization header"}
             )
@@ -89,5 +110,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         except jwt.InvalidTokenError:
             return JSONResponse(status_code=401, content={"detail": "Invalid token signature"})
 
-        response = await call_next(request)
-        return response
+        from hbllm.security.tenant_guard import TenantContext
+
+        async with TenantContext(
+            request.state.tenant_id,
+            user_id=request.state.user_id,
+            device_id=request.state.device_id,
+        ):
+            response = await call_next(request)
+            return response

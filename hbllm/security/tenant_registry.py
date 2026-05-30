@@ -42,6 +42,17 @@ class TenantRegistry:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS tenant_parents (
+                        tenant_id TEXT,
+                        parent_id TEXT,
+                        PRIMARY KEY (tenant_id, parent_id),
+                        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+                        FOREIGN KEY (parent_id) REFERENCES tenants(id)
+                    )
+                    """
+                )
                 conn.commit()
         except sqlite3.Error as e:
             logger.error("Failed to initialize tenants database: %s", e)
@@ -69,6 +80,18 @@ class TenantRegistry:
         except sqlite3.Error as e:
             logger.error("Failed to register tenant %s: %s", tenant_id, e)
 
+    def register_parent_relationship(self, tenant_id: str, parent_id: str) -> None:
+        """Register an auxiliary parent-child relationship (supporting DAGs)."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO tenant_parents (tenant_id, parent_id) VALUES (?, ?)",
+                    (tenant_id, parent_id),
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error("Failed to register parent relation %s -> %s: %s", tenant_id, parent_id, e)
+
     def get_parent_id(self, tenant_id: str) -> str | None:
         """Retrieve the parent ID for a given child tenant."""
         try:
@@ -79,6 +102,24 @@ class TenantRegistry:
         except sqlite3.Error as e:
             logger.error("Failed to look up parent for tenant %s: %s", tenant_id, e)
             return None
+
+    def get_parents(self, tenant_id: str) -> list[str]:
+        """Retrieve all registered parents for a given tenant (default + auxiliary)."""
+        parents = []
+        default_parent = self.get_parent_id(tenant_id)
+        if default_parent:
+            parents.append(default_parent)
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT parent_id FROM tenant_parents WHERE tenant_id = ?", (tenant_id,)
+                )
+                parents.extend([str(row[0]) for row in cursor.fetchall()])
+        except sqlite3.Error as e:
+            logger.debug("Failed to query auxiliary parents for %s: %s", tenant_id, e)
+
+        return list(dict.fromkeys(parents))
 
     def get_children_ids(self, parent_id: str) -> list[str]:
         """Retrieve all registered child tenant IDs for a parent tenant."""
