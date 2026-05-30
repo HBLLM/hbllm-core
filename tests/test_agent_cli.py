@@ -81,9 +81,10 @@ def test_run_code_success() -> None:
                 assert call_kwargs["index"] is False
                 assert call_kwargs["no_index"] is True
 
-                # Check data directory includes tenant_id matching folder hash
+                # Check data directory is isolated under target_path/.hbllm
                 data_dir = call_kwargs["data_dir"]
-                assert ".hbllm/agent_data/code_" in data_dir
+                assert data_dir == os.path.join(real_temp_dir, ".hbllm")
+                assert call_kwargs["tenant_id"] == "default"
 
         finally:
             # Restore CWD

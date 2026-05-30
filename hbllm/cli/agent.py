@@ -79,7 +79,13 @@ async def _run_agent(
         system_prompt=(
             "You are a sovereign developer agent capable of writing, compiling, testing, "
             "debugging, and committing code in the local workspace. Use your tools (shell execution, "
-            "git operations, LSP queries, and compiler checks) to solve the user's tasks."
+            "git operations, LSP queries, and compiler checks) to solve the user's tasks.\n\n"
+            "### Active Workspace Scoping\n"
+            f"- Active Codebase Root: {os.getcwd()}\n"
+            f"- Local Project Databases (.hbllm/): {data_dir}\n"
+            f"- Tenant Context: {tenant_id}\n"
+            "All localized episodic logs, session graphs, and vector database indices are stored "
+            "in the local project path, while your global identity context remains cleanly bound."
         ),
         inject_knowledge=True,
         inject_persistence=True,
@@ -285,18 +291,7 @@ def register_subcommands(subparsers: object) -> None:
 
 def run_agent(args: Namespace) -> None:
     """Entry point called by ``_cli_app.dispatch`` for agent subcommand."""
-    import getpass
-
-    from hbllm.security.tenant_registry import get_tenant_registry
-
     logging.getLogger("hbllm").setLevel(logging.WARNING)
-
-    # Register parent developer profile mapping
-    parent_id = getpass.getuser()
-    tenant_id = "default"
-    registry = get_tenant_registry()
-    registry.register_tenant(parent_id, parent_id=None, name=f"Developer Profile ({parent_id})")
-    registry.register_tenant(tenant_id, parent_id=parent_id, name="Default Workspace")
 
     asyncio.run(
         _run_agent(
@@ -306,19 +301,14 @@ def run_agent(args: Namespace) -> None:
             task=args.task,
             index=args.index,
             no_index=args.no_index,
-            tenant_id=tenant_id,
+            tenant_id="default",
         )
     )
 
 
 def run_code(args: Namespace) -> None:
     """Entry point called by ``_cli_app.dispatch`` for code subcommand."""
-    import getpass
-    import hashlib
-    import re
     import sys
-
-    from hbllm.security.tenant_registry import get_tenant_registry
 
     logging.getLogger("hbllm").setLevel(logging.WARNING)
 
@@ -331,21 +321,10 @@ def run_code(args: Namespace) -> None:
     # 2. Shift process directory to the target path
     os.chdir(target_path)
 
-    # 3. Compute unique, stable tenant ID and corresponding data directory
-    path_hash = hashlib.sha256(target_path.encode("utf-8")).hexdigest()[:8]
-    folder_name = re.sub(r"[^a-zA-Z0-9_-]", "_", os.path.basename(target_path))
-    tenant_id = f"code_{folder_name}_{path_hash}"
-    data_dir = os.path.expanduser(f"~/.hbllm/agent_data/{tenant_id}")
+    # 3. Isolate project database local storage under .hbllm/ in the project root path
+    data_dir = os.path.join(target_path, ".hbllm")
 
-    # 4. Register parent developer profile mapping
-    parent_id = getpass.getuser()
-    registry = get_tenant_registry()
-    registry.register_tenant(parent_id, parent_id=None, name=f"Developer Profile ({parent_id})")
-    registry.register_tenant(
-        tenant_id, parent_id=parent_id, name=f"Workspace Project: {folder_name}"
-    )
-
-    # 5. Execute the agent REPL loop in that context
+    # 4. Execute the agent REPL loop under the default tenant identity
     asyncio.run(
         _run_agent(
             model=args.model,
@@ -354,6 +333,6 @@ def run_code(args: Namespace) -> None:
             task=args.task,
             index=args.index,
             no_index=args.no_index,
-            tenant_id=tenant_id,
+            tenant_id="default",
         )
     )
