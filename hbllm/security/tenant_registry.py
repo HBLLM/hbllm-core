@@ -113,8 +113,7 @@ class TenantRegistry:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
-                    "SELECT parent_id FROM tenant_parents WHERE tenant_id = ?",
-                    (tenant_id,)
+                    "SELECT parent_id FROM tenant_parents WHERE tenant_id = ?", (tenant_id,)
                 )
                 parents.extend([str(row[0]) for row in cursor.fetchall()])
         except sqlite3.Error as e:

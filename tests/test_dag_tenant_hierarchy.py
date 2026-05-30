@@ -54,11 +54,11 @@ def test_dag_hierarchy_operations(temp_registry: TenantRegistry) -> None:
     # Register nodes
     temp_registry.register_tenant(parent_home, parent_id=None, name="Home Server")
     temp_registry.register_tenant(parent_office, parent_id=None, name="Office SaaS Platform")
-    
+
     # laptop_C has two parents: home_A and office_B
     temp_registry.register_tenant(child_laptop, parent_id=parent_home, name="Dev Laptop")
     temp_registry.register_parent_relationship(child_laptop, parent_office)
-    
+
     temp_registry.register_tenant(child_project, parent_id=child_laptop, name="HBLLM Core Project")
     temp_registry.register_tenant(child_task, parent_id=child_project, name="Refactor CLI Task")
 

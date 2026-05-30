@@ -348,7 +348,9 @@ def run_code(args: Namespace) -> None:
     registry = get_tenant_registry()
     registry.register_tenant(dev_tenant_id, parent_id=None, name="Developer Profile")
     registry.register_tenant(
-        project_tenant_id, parent_id=dev_tenant_id, name=f"Workspace Project: {folder_name} ({target_path})"
+        project_tenant_id,
+        parent_id=dev_tenant_id,
+        name=f"Workspace Project: {folder_name} ({target_path})",
     )
 
     # 4. Isolate project database local storage under .hbllm/ in the project root path

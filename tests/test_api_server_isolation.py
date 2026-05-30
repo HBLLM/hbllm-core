@@ -1,10 +1,12 @@
 import os
-import pytest
+
 import jwt
-from fastapi.testclient import TestClient
-from hbllm.serving.api import app
-from hbllm.security.tenant_guard import TenantContext, require_tenant, TenantIsolationError
+import pytest
 from fastapi import Request
+from fastapi.testclient import TestClient
+
+from hbllm.security.tenant_guard import TenantContext, TenantIsolationError, require_tenant
+from hbllm.serving.api import app
 
 
 # ── Mock/Test Endpoints (named not starting with 'test_') ──
@@ -103,5 +105,5 @@ def test_unauthenticated_request_fallback_in_dev(jwt_secret, monkeypatch):
 def test_chat_websocket_requires_auth(client):
     """Verify `/v1/chat/ws` rejects connection with 1008 if missing token."""
     with pytest.raises(Exception):
-        with client.websocket_connect("/v1/chat/ws") as websocket:
+        with client.websocket_connect("/v1/chat/ws"):
             pass

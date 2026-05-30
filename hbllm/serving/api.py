@@ -716,8 +716,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from hbllm.security.tenant_guard import TenantIsolationError
 from fastapi.responses import JSONResponse
+
+from hbllm.security.tenant_guard import TenantIsolationError
 
 
 @app.exception_handler(TenantIsolationError)
@@ -1951,7 +1952,9 @@ async def chat_websocket(ws: WebSocket) -> None:
         ws://host/v1/chat/ws?token=<jwt>
     """
     import os
+
     import jwt as pyjwt
+
     from hbllm.security.tenant_guard import TenantContext
 
     # ── 1. Extract and verify JWT ──
