@@ -46,3 +46,46 @@ def test_speculative_equivalence():
     # and we get exactly 1 token (the resampled correct token).
     assert out.shape == (1, 1)
     assert out[0, 0].item() == 7
+
+
+def test_adaptive_speculator():
+    from hbllm.model.speculative import AdaptiveSpeculator
+
+    # 1. Setup Models - Draft and Main perfect alignment
+    draft_model = MockModel(vocab_size=10, always_predict=3)
+    main_model = MockModel(vocab_size=10, always_predict=3)
+
+    input_ids = torch.tensor([[1, 2]])
+    speculator = AdaptiveSpeculator(base_k=4, min_k=1, max_k=6)
+
+    # 2. Perfect acceptance rate over multiple steps -> should scale K up
+    for _ in range(12):
+        out, _, _ = speculate_step(
+            main_model,
+            draft_model,
+            input_ids,
+            input_ids,
+            K=speculator.K,
+            speculator=speculator,
+        )
+        assert out is not None
+
+    # After multiple 100% acceptance steps, K should scale up to max_k (6)
+    assert speculator.K == 6
+
+    # 3. Complete rejection over multiple steps -> should scale K down
+    bad_draft_model = MockModel(vocab_size=10, always_predict=9)  # conflict
+    for _ in range(12):
+        out, _, _ = speculate_step(
+            main_model,
+            bad_draft_model,
+            input_ids,
+            input_ids,
+            K=speculator.K,
+            speculator=speculator,
+        )
+        assert out is not None
+
+    # After multiple 0% acceptance steps, K should scale down to min_k (1)
+    assert speculator.K == 1
+

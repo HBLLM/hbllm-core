@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Any
 
 import pytest
 
@@ -66,3 +67,32 @@ def test_cache_stats():
     assert stats["max_size"] == 5
     assert stats["size"] == 0
     assert stats["default_ttl"] == 60.0
+
+
+class MockEmbedder:
+    def _encode(self, texts: list[str]) -> list[Any]:
+        import numpy as np
+        # Return a simple deterministic vector based on text
+        # "constraints" and "limits" get similar vectors
+        if "constraints" in texts[0] or "limits" in texts[0]:
+            return [np.array([1.0, 0.9, 0.1])]
+        else:
+            return [np.array([0.1, 0.1, 1.0])]
+
+
+@pytest.mark.asyncio
+async def test_semantic_response_cache_hit():
+    embedder = MockEmbedder()
+    cache = ResponseCache(max_size=10, ttl_seconds=60.0, embedder=embedder)
+
+    # 1. Put a response for "what are the system constraints?"
+    await cache.put("what are the system constraints?", "Limit is 100.")
+
+    # 2. Query a semantically similar string "what are the system limits?"
+    similar_entry = await cache.get_similar("what are the system limits?", threshold=0.85)
+
+    # 3. Assert it returns the cached response (hit!)
+    assert similar_entry is not None
+    assert similar_entry.value == "Limit is 100."
+    assert similar_entry.key == "what are the system constraints?"
+
