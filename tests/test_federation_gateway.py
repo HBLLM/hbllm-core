@@ -33,7 +33,7 @@ def mailbox(local_cipher: EnvelopeCipher) -> FederatedMailbox:
 # ─── 1. Cryptographic Handshake & Validation ───────────────────────────────
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_valid_envelope_accepted(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -61,7 +61,7 @@ async def test_valid_envelope_accepted(
     assert response["recipient"] == local_cipher.public_key_hex
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_invalid_signature_rejected(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -86,7 +86,7 @@ async def test_invalid_signature_rejected(
 # ─── 2. AST Code Sandbox Sanitization ───────────────────────────────────────
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_ast_sandbox_blocks_imports(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -111,7 +111,7 @@ async def test_ast_sandbox_blocks_imports(
     assert "Import" in response["reason"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_ast_sandbox_blocks_unauthorized_builtins(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -138,7 +138,7 @@ async def test_ast_sandbox_blocks_unauthorized_builtins(
 # ─── 3. Cognitive Prompt Injection & Separator Shields ──────────────────────
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cognitive_firewall_blocks_prompt_injections(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -161,7 +161,7 @@ async def test_cognitive_firewall_blocks_prompt_injections(
     assert "prompt injection" in response["reason"].lower()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_command_separator_and_path_traversal_blocked(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -276,7 +276,7 @@ def test_federation_mailbox_api_endpoint_blocked_on_attacks(
     assert "prompt injection" in response.json()["detail"].lower()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_xml_tag_containment_breakout_blocked(
     mailbox: FederatedMailbox, peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:
@@ -310,7 +310,7 @@ class MockFirewallEmbedder:
             return [np.array([0.0, 0.0, 1.0])]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_semantic_prompt_injection_blocked(
     peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
 ) -> None:

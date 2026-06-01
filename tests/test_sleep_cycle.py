@@ -229,7 +229,7 @@ async def temporal_sleep_env():
     memory = MockMemoryNodeWithTemporal(bus)
     await memory.start()
 
-    sleep_node = SleepCycleNode(node_id="sleep_temp", idle_timeout_seconds=0.5)
+    sleep_node = SleepCycleNode(node_id="sleep_temp", idle_timeout_seconds=0.0)
     await sleep_node.start(bus)
 
     yield bus, sleep_node, memory
@@ -249,7 +249,7 @@ async def contradiction_sleep_env():
     kg = MockKnowledgeNode(bus)
     await kg.start()
 
-    sleep_node = SleepCycleNode(node_id="sleep_kg", idle_timeout_seconds=0.5)
+    sleep_node = SleepCycleNode(node_id="sleep_kg", idle_timeout_seconds=0.0)
     await sleep_node.start(bus)
 
     yield bus, sleep_node, memory, kg

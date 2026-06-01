@@ -77,7 +77,9 @@ class SleepCycleNode(Node):
         await self.bus.subscribe("system.sleep.force", self._handle_force_sleep)
 
         # Start the background idle monitor
-        self._monitor_task = asyncio.create_task(self._idle_monitor_loop())
+        if self.idle_timeout_seconds is not None and self.idle_timeout_seconds > 0:
+            self._monitor_task = asyncio.create_task(self._idle_monitor_loop())
+
 
     async def on_stop(self) -> None:
         logger.info("Stopping SleepCycleNode")
