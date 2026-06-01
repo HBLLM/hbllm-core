@@ -55,6 +55,10 @@ def _init_otel() -> None:
         # Trace provider
         tracer_provider = TracerProvider(resource=resource)
 
+        # Register atexit shutdown to prevent "I/O operation on closed file" error on exit
+        import atexit
+        atexit.register(tracer_provider.shutdown)
+
         try:
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-not-found]
                 OTLPSpanExporter,
