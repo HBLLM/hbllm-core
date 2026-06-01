@@ -153,8 +153,33 @@ class GroupedQueryAttention(nn.Module):
         # reducing memory from O(n²) to O(n) for long sequences.
         dropout_p = self.config.attention_dropout if self.training else 0.0
 
-        # Convert additive mask to the format SDPA expects
-        attn_mask = attention_mask  # [batch, 1, seq_len, kv_seq_len] additive mask or None
+        # Convert additive mask to the format SDPA expects (boolean format)
+        attn_mask = attention_mask  # [batch, 1, seq_len, kv_seq_len] or None
+        is_causal_mode = False
+
+        if attn_mask is None:
+            is_causal_mode = past_key_value is None
+        else:
+            if past_key_value is None and seq_len > 1:
+                try:
+                    # Detect standard causal mask to enable direct FlashAttention-2 causal kernel
+                    temp_mask = torch.triu(
+                        torch.full((seq_len, seq_len), float("-inf"), device=attn_mask.device),
+                        diagonal=1,
+                    )
+                    if torch.allclose(attn_mask[0, 0], temp_mask, atol=1e-2) or torch.allclose(
+                        attn_mask[0, 0], temp_mask.to(attn_mask.dtype), atol=1e-2
+                    ):
+                        attn_mask = None
+                        is_causal_mode = True
+                except Exception:
+                    pass
+
+            if attn_mask is not None:
+                # Convert additive float mask (0.0 for unmasked, negative for masked)
+                # to boolean mask where True means unmasked (keep) and False means masked.
+                if attn_mask.dtype in (torch.float16, torch.float32, torch.bfloat16):
+                    attn_mask = attn_mask >= -1.0
 
         attn_output = F.scaled_dot_product_attention(
             query_states,
@@ -162,7 +187,7 @@ class GroupedQueryAttention(nn.Module):
             value_states,
             attn_mask=attn_mask,
             dropout_p=dropout_p,
-            is_causal=(attn_mask is None and past_key_value is None),
+            is_causal=is_causal_mode,
         )
 
         # Reshape back to [batch, seq_len, hidden_size]

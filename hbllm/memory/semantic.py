@@ -21,6 +21,7 @@ Usage::
     # [{"content": "Python is a programming language", "score": 0.87, ...}]
 """
 
+import asyncio
 import hashlib
 import logging
 import math
@@ -318,6 +319,14 @@ class SemanticMemory:
             func = self._tfidf_timer.function
             self._tfidf_timer = None
             func()
+
+    async def _aflush_tfidf(self) -> None:
+        """Forces pending TF-IDF encodes to complete asynchronously without blocking the event loop."""
+        if self._tfidf_timer is not None:
+            self._tfidf_timer.cancel()
+            func = self._tfidf_timer.function
+            self._tfidf_timer = None
+            await asyncio.to_thread(func)
 
     @staticmethod
     def _content_hash(content: str) -> str:
@@ -681,6 +690,7 @@ class SemanticMemory:
         device_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Async version of search that queries Postgres pgvector if available."""
+        await self._aflush_tfidf()
         pool = await self._ensure_pg_table()
         if not pool:
             return self.search(

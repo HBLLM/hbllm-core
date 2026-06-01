@@ -136,3 +136,33 @@ breaker = CircuitBreaker(
 | `HALF_OPEN` | One test call allowed to check recovery |
 
 A `CircuitBreakerRegistry` manages multiple breakers across nodes.
+
+## Federation Gateway
+
+Exposes zero-trust, ad-hoc peer-to-peer communication envelopes for independent sovereign instances:
+
+```python
+from hbllm.network.federation import EnvelopeCipher, FederatedFirewall, FederatedMailbox
+
+# 1. Initialize local keypair and Mailbox
+local_cipher = EnvelopeCipher()
+mailbox = FederatedMailbox(bus=bus, cipher=local_cipher)
+
+# 2. Register external peer DID public key
+mailbox.register_peer(alias="peer-instance", public_key_hex="peer_public_key_hex_string...")
+
+# 3. Receive and process untrusted external capsules (auto-audited by AST & prompt firewall)
+response = await mailbox.receive_envelope(envelope_package)
+if response["status"] == "success":
+    print("Payload accepted, scanned, and queued internally.")
+elif response["status"] == "blocked":
+    print(f"Hacking attempt intercepted: {response['reason']}")
+```
+
+### Sandbox Firewall Gates
+
+The `FederatedFirewall` automatically audits incoming payload variables:
+- **AST Parsing**: Rejects code containing imports, shell subprocess executions, file manipulation, or private magic parameters.
+- **Prompt Injection Scanner**: Rejects strings containing heuristic instruction override patterns (e.g. `"ignore previous instructions"`).
+- **Separator & Traversal Sanitizers**: Rejects command delimiters (`;`, `|`, `&` combined with system keywords) and path traversal queries (`../`).
+

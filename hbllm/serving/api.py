@@ -53,6 +53,18 @@ class ChatRequest(BaseModel):
     system_prompt: str | None = Field(default=None, description="Optional system prompt")
 
 
+class FederatedEnvelopeRequest(BaseModel):
+    """Encapsulated cryptographic intent envelope for P2P Federation."""
+
+    envelope: dict[str, Any] = Field(
+        ...,
+        description="The signed envelope containing the sender ID, timestamp, and target intent payload.",
+    )
+    signature: str = Field(
+        ..., description="Hex-encoded Ed25519 signature of the serialized envelope."
+    )
+
+
 class ChatResponse(BaseModel):
     """Response from the cognitive pipeline."""
 
@@ -202,6 +214,16 @@ async def _boot_brain(
         logger.info("WebRTC Gateway initialized for high-bandwidth perception")
     except ImportError:
         logger.warning("aiortc not installed. WebRTC perception plane disabled.")
+
+    # Initialize FederatedMailbox
+    try:
+        from hbllm.network.federation.mailbox import FederatedMailbox
+
+        mailbox = FederatedMailbox(bus=brain.bus, embedder=getattr(brain, "semantic_memory", None))
+        _state["federated_mailbox"] = mailbox
+        logger.info("🔒 Zero-Trust Federated Mailbox initialized successfully.")
+    except Exception as e:
+        logger.warning("Failed to initialize Federated Mailbox: %s", e)
 
     _state["brain"] = brain
     _state["plugin_manager"] = pm
@@ -1245,6 +1267,32 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     finally:
         # Always clean up subscription to prevent memory leak
         await bus.unsubscribe(sub)
+
+
+@app.post("/v1/federation/mailbox")
+async def receive_federated_envelope(request: FederatedEnvelopeRequest) -> dict[str, Any]:
+    """
+    Exposed zero-trust endpoint to receive, decrypt, and process incoming P2P federation envelopes.
+    """
+    mailbox = _state.get("federated_mailbox")
+    if not mailbox:
+        raise HTTPException(
+            status_code=503, detail="Federation mailbox is not active or enabled on this node."
+        )
+
+    envelope_package = {"envelope": request.envelope, "signature": request.signature}
+
+    result = await mailbox.receive_envelope(envelope_package)
+    if result.get("status") == "error":
+        raise HTTPException(
+            status_code=400, detail=result.get("reason", "Malformed envelope payload.")
+        )
+    elif result.get("status") == "blocked":
+        raise HTTPException(
+            status_code=403, detail=result.get("reason", "Security threat blocked.")
+        )
+
+    return result
 
 
 @app.post("/v1/chat", response_model=ChatResponse)

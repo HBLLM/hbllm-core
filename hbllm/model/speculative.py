@@ -84,6 +84,44 @@ def _model_forward(
     return logits, pkv
 
 
+class AdaptiveSpeculator:
+    """
+    Rolling historical tracker that dynamically adjusts speculative draft length K
+    based on the token acceptance rate of previous inference steps.
+    """
+
+    def __init__(
+        self, base_k: int = 4, min_k: int = 1, max_k: int = 6, window_size: int = 10
+    ) -> None:
+        self.K = base_k
+        self.min_k = min_k
+        self.max_k = max_k
+        self.window_size = window_size
+        self.history: list[float] = []
+
+    def update(self, accepted: int, proposed: int) -> int:
+        """Update acceptance history and return the new optimal K."""
+        if proposed <= 0:
+            return self.K
+
+        rate = accepted / proposed
+        self.history.append(rate)
+        if len(self.history) > self.window_size:
+            self.history.pop(0)
+
+        avg_rate = sum(self.history) / len(self.history)
+
+        # Adapt draft size dynamically
+        if avg_rate >= 0.80:
+            # High predictability: scale K up to draft more tokens in parallel
+            self.K = min(self.max_k, self.K + 1)
+        elif avg_rate <= 0.35:
+            # Low predictability: scale K down to avoid draft model overhead
+            self.K = max(self.min_k, self.K - 1)
+
+        return self.K
+
+
 def speculate_step(
     main_model: torch.nn.Module,
     draft_model: torch.nn.Module,
@@ -94,6 +132,7 @@ def speculate_step(
     top_p: float = 0.9,
     draft_past_kv: list[Any] | None = None,
     main_past_kv: list[Any] | None = None,
+    speculator: AdaptiveSpeculator | None = None,
 ) -> tuple[torch.Tensor, list[Any] | None, list[Any] | None]:
     """
     Performs one chunk step of speculative decoding with KV cache support.
@@ -118,6 +157,9 @@ def speculate_step(
     Returns:
         (accepted_tokens, updated_draft_past_kv, updated_main_past_kv)
     """
+    if speculator is not None:
+        K = speculator.K
+
     draft_tokens = []
     draft_probs_list = []
 
@@ -227,6 +269,10 @@ def speculate_step(
         updated_main_kv = trimmed_main_kv
 
     result_tokens = torch.cat(accepted_tokens, dim=1)
+
+    if speculator is not None:
+        accepted_draft = max(0, accepted_count - 1)
+        speculator.update(accepted=accepted_draft, proposed=K)
 
     logger.debug(
         "Speculative step: proposed %d, accepted %d (%.0f%% hit rate)",

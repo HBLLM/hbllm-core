@@ -136,7 +136,7 @@ class TenantContext:
         self.user_id = user_id
         self.device_id = device_id
         self.mode = mode
-        self._tokens: list[contextvars.Token] = []
+        self._tokens: list[contextvars.Token[Any]] = []
 
     def __enter__(self) -> TenantContext:
         self._tokens.append(_ctx_tenant_id.set(self.tenant_id))
@@ -177,7 +177,9 @@ def get_current_identity() -> tuple[str | None, str | None, str | None]:
 # ─── Decorators ─────────────────────────────────────────────────────────────
 
 
-def require_tenant(func: Callable | None = None, *, param: str = "tenant_id"):
+def require_tenant(
+    func: Callable[..., Any] | None = None, *, param: str = "tenant_id"
+) -> Callable[..., Any] | Any:
     """
     Decorator that enforces tenant_id is present and valid.
 
@@ -199,7 +201,7 @@ def require_tenant(func: Callable | None = None, *, param: str = "tenant_id"):
         def find(self, tid: str, query: str): ...
     """
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         if asyncio.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
@@ -223,19 +225,19 @@ def require_tenant(func: Callable | None = None, *, param: str = "tenant_id"):
 
 
 def require_identity(
-    func: Callable | None = None,
+    func: Callable[..., Any] | None = None,
     *,
     tenant_param: str = "tenant_id",
     user_param: str = "user_id",
     device_param: str = "device_id",
-):
+) -> Callable[..., Any] | Any:
     """
     Decorator that enforces the full identity triplet.
 
     Validates all three identity components are present and match context.
     """
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         if asyncio.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
@@ -266,9 +268,9 @@ def require_identity(
 
 
 def _validate_tenant(
-    fn: Callable,
-    args: tuple,
-    kwargs: dict,
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     param: str,
 ) -> None:
     """Core validation logic for tenant_id."""
@@ -360,9 +362,9 @@ def _is_hierarchically_related(registry: Any, ctx_tenant: str, req_tenant: str) 
 
 
 def _validate_identity_field(
-    fn: Callable,
-    args: tuple,
-    kwargs: dict,
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     param: str,
     ctx_var: contextvars.ContextVar[str | None],
 ) -> None:
@@ -386,14 +388,15 @@ def _validate_identity_field(
 
 
 def _extract_param(
-    fn: Callable,
-    args: tuple,
-    kwargs: dict,
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     param: str,
 ) -> str | None:
     """Extract a named parameter from function arguments."""
     if param in kwargs:
-        return kwargs[param]
+        val = kwargs[param]
+        return str(val) if val is not None else None
 
     sig = inspect.signature(fn)
     params = list(sig.parameters.keys())
@@ -401,7 +404,8 @@ def _extract_param(
     if param in params:
         idx = params.index(param)
         if idx < len(args):
-            return args[idx]
+            val = args[idx]
+            return str(val) if val is not None else None
 
     # Special handling: if we are looking for tenant/user/device identifier,
     # and one of the arguments is a Message-like object, extract from it.
@@ -409,10 +413,13 @@ def _extract_param(
         if hasattr(arg, "tenant_id") and hasattr(arg, "topic"):
             # This is a Message-like object
             if "tenant" in param:
-                return getattr(arg, "tenant_id", None)
+                val = getattr(arg, "tenant_id", None)
+                return str(val) if val is not None else None
             elif "user" in param:
-                return getattr(arg, "user_id", None)
+                val = getattr(arg, "user_id", None)
+                return str(val) if val is not None else None
             elif "device" in param:
-                return getattr(arg, "device_id", None)
+                val = getattr(arg, "device_id", None)
+                return str(val) if val is not None else None
 
     return None
