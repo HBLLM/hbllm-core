@@ -57,6 +57,7 @@ def _init_otel() -> None:
 
         # Register atexit shutdown to prevent "I/O operation on closed file" error on exit
         import atexit
+
         atexit.register(tracer_provider.shutdown)
 
         try:

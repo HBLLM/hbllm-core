@@ -88,4 +88,3 @@ def test_adaptive_speculator():
 
     # After multiple 0% acceptance steps, K should scale down to min_k (1)
     assert speculator.K == 1
-

@@ -22,7 +22,9 @@ class FederatedMailbox:
     optionally writing events to the local internal MessageBus.
     """
 
-    def __init__(self, bus: Any = None, cipher: EnvelopeCipher | None = None, embedder: Any = None) -> None:
+    def __init__(
+        self, bus: Any = None, cipher: EnvelopeCipher | None = None, embedder: Any = None
+    ) -> None:
         self.bus = bus
         self.cipher = cipher or EnvelopeCipher()
         self.embedder = embedder
@@ -51,7 +53,9 @@ class FederatedMailbox:
         signature = envelope_package.get("signature")
 
         if not envelope or not signature:
-            logger.error("Envelope validation failed: Missing payload or signature envelope structure.")
+            logger.error(
+                "Envelope validation failed: Missing payload or signature envelope structure."
+            )
             return {"status": "error", "reason": "Malformed payload packaging structure."}
 
         sender_key = envelope.get("sender")
@@ -62,16 +66,22 @@ class FederatedMailbox:
         # 2. Cryptographic signature and replay verification
         is_valid = self.cipher.verify_envelope(sender_key, envelope, signature)
         if not is_valid:
-            logger.error("Envelope validation failed: Invalid mathematical signature or timestamp expiration.")
+            logger.error(
+                "Envelope validation failed: Invalid mathematical signature or timestamp expiration."
+            )
             return {"status": "error", "reason": "Cryptographic signature validation failure."}
 
         # 3. Payload quarantine sanitization
         intent_data = envelope.get("data")
         if not isinstance(intent_data, dict):
-            logger.error("Envelope validation failed: Quarantined intent payload must be a dictionary.")
+            logger.error(
+                "Envelope validation failed: Quarantined intent payload must be a dictionary."
+            )
             return {"status": "error", "reason": "Invalid payload dictionary format."}
 
-        sanitized_data = FederatedFirewall.sanitize_payload_structure(intent_data, self.intent_schema_keys)
+        sanitized_data = FederatedFirewall.sanitize_payload_structure(
+            intent_data, self.intent_schema_keys
+        )
 
         # 4. Security gates audits
         try:
@@ -89,9 +99,10 @@ class FederatedMailbox:
             logger.warning("Threat Shield Triggered: Federation Security Error: %s", fse)
             return {"status": "blocked", "reason": str(fse)}
 
-
         # 5. Route to internal MessageBus (if available)
-        logger.info("External payload successfully validated and passed firewall gates. Processing event...")
+        logger.info(
+            "External payload successfully validated and passed firewall gates. Processing event..."
+        )
         if self.bus:
             try:
                 internal_msg = Message(

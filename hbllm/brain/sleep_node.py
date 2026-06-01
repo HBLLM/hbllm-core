@@ -80,7 +80,6 @@ class SleepCycleNode(Node):
         if self.idle_timeout_seconds is not None and self.idle_timeout_seconds > 0:
             self._monitor_task = asyncio.create_task(self._idle_monitor_loop())
 
-
     async def on_stop(self) -> None:
         logger.info("Stopping SleepCycleNode")
         if self._monitor_task:

@@ -72,6 +72,7 @@ def test_cache_stats():
 class MockEmbedder:
     def _encode(self, texts: list[str]) -> list[Any]:
         import numpy as np
+
         # Return a simple deterministic vector based on text
         # "constraints" and "limits" get similar vectors
         if "constraints" in texts[0] or "limits" in texts[0]:
@@ -95,4 +96,3 @@ async def test_semantic_response_cache_hit():
     assert similar_entry is not None
     assert similar_entry.value == "Limit is 100."
     assert similar_entry.key == "what are the system constraints?"
-

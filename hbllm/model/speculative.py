@@ -90,7 +90,9 @@ class AdaptiveSpeculator:
     based on the token acceptance rate of previous inference steps.
     """
 
-    def __init__(self, base_k: int = 4, min_k: int = 1, max_k: int = 6, window_size: int = 10) -> None:
+    def __init__(
+        self, base_k: int = 4, min_k: int = 1, max_k: int = 6, window_size: int = 10
+    ) -> None:
         self.K = base_k
         self.min_k = min_k
         self.max_k = max_k

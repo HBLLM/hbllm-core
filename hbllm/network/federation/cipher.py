@@ -34,7 +34,9 @@ class EnvelopeCipher:
         if ed25519 is not None:
             if private_key_bytes:
                 try:
-                    self._private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_key_bytes)
+                    self._private_key = ed25519.Ed25519PrivateKey.from_private_bytes(
+                        private_key_bytes
+                    )
                     self._public_key = self._private_key.public_key()
                 except Exception as e:
                     logger.error("Failed to load private bytes: %s. Generating fresh keypair.", e)
@@ -42,7 +44,9 @@ class EnvelopeCipher:
             else:
                 self._generate_fresh_keypair()
         else:
-            logger.warning("cryptography package not available. Falling back to signature mock-mode.")
+            logger.warning(
+                "cryptography package not available. Falling back to signature mock-mode."
+            )
 
     def _generate_fresh_keypair(self) -> None:
         if ed25519 is not None:
@@ -63,13 +67,15 @@ class EnvelopeCipher:
         if ed25519 is not None and self._private_key:
             signature = self._private_key.sign(serialized)
             return base64.b64encode(signature).decode("utf-8")
-        
+
         # Mock mode fallback: HMAC-SHA256
         h = hashlib.sha256(serialized)
         h.update(b"mock_private_key_fallback")
         return base64.b64encode(h.digest()).decode("utf-8")
 
-    def verify_envelope(self, sender_public_key_hex: str, payload: dict[str, Any], signature_b64: str) -> bool:
+    def verify_envelope(
+        self, sender_public_key_hex: str, payload: dict[str, Any], signature_b64: str
+    ) -> bool:
         """
         Verify that an envelope payload matches its signature and sender public key.
 
@@ -80,7 +86,9 @@ class EnvelopeCipher:
         # 1. Check expiration (e.g. 5 minutes TTL)
         timestamp = payload.get("timestamp", 0.0)
         if time.time() - timestamp > 300.0:
-            logger.warning("Envelope validation failed: Replay protection triggered (expired timestamp).")
+            logger.warning(
+                "Envelope validation failed: Replay protection triggered (expired timestamp)."
+            )
             return False
 
         serialized = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -103,7 +111,9 @@ class EnvelopeCipher:
             logger.warning("Cryptographic signature validation failed: %s", e)
             return False
 
-    def pack_envelope(self, recipient_public_hex: str, topic: str, intent_data: dict[str, Any]) -> dict[str, Any]:
+    def pack_envelope(
+        self, recipient_public_hex: str, topic: str, intent_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Pack intent data into a signed, timestamped envelope."""
         payload = {
             "topic": topic,

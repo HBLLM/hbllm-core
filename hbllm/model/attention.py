@@ -158,7 +158,7 @@ class GroupedQueryAttention(nn.Module):
         is_causal_mode = False
 
         if attn_mask is None:
-            is_causal_mode = (past_key_value is None)
+            is_causal_mode = past_key_value is None
         else:
             if past_key_value is None and seq_len > 1:
                 try:

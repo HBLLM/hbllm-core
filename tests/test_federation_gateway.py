@@ -49,7 +49,7 @@ async def test_valid_envelope_accepted(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=intent_data
+        intent_data=intent_data,
     )
 
     # 3. Process the incoming envelope package
@@ -71,7 +71,7 @@ async def test_invalid_signature_rejected(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=intent_data
+        intent_data=intent_data,
     )
 
     # Forge signature
@@ -101,7 +101,7 @@ async def test_ast_sandbox_blocks_imports(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
 
     response = await mailbox.receive_envelope(envelope_package)
@@ -126,7 +126,7 @@ async def test_ast_sandbox_blocks_unauthorized_builtins(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
 
     response = await mailbox.receive_envelope(envelope_package)
@@ -152,7 +152,7 @@ async def test_cognitive_firewall_blocks_prompt_injections(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
 
     response = await mailbox.receive_envelope(envelope_package)
@@ -174,7 +174,7 @@ async def test_command_separator_and_path_traversal_blocked(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
     response = await mailbox.receive_envelope(envelope_package)
     assert response["status"] == "blocked"
@@ -187,7 +187,7 @@ async def test_command_separator_and_path_traversal_blocked(
     envelope_package_traversal = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent_traversal
+        intent_data=malicious_intent_traversal,
     )
     response_traversal = await mailbox.receive_envelope(envelope_package_traversal)
     assert response_traversal["status"] == "blocked"
@@ -220,16 +220,13 @@ def test_federation_mailbox_api_endpoint(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=intent_data
+        intent_data=intent_data,
     )
 
     # 4. Invoke the HTTP POST API endpoint
     response = client.post(
         "/v1/federation/mailbox",
-        json={
-            "envelope": envelope_package["envelope"],
-            "signature": envelope_package["signature"]
-        }
+        json={"envelope": envelope_package["envelope"], "signature": envelope_package["signature"]},
     )
 
     # 5. Assert API responses match cryptographic assertions
@@ -259,16 +256,13 @@ def test_federation_mailbox_api_endpoint_blocked_on_attacks(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
 
     # 3. Call endpoint
     response = client.post(
         "/v1/federation/mailbox",
-        json={
-            "envelope": envelope_package["envelope"],
-            "signature": envelope_package["signature"]
-        }
+        json={"envelope": envelope_package["envelope"], "signature": envelope_package["signature"]},
     )
 
     # 4. Assert endpoint successfully blocked the threat and returned HTTP 403 Forbidden
@@ -290,7 +284,7 @@ async def test_xml_tag_containment_breakout_blocked(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
 
     response = await mailbox.receive_envelope(envelope_package)
@@ -302,6 +296,7 @@ async def test_xml_tag_containment_breakout_blocked(
 class MockFirewallEmbedder:
     def _encode(self, texts: list[str]) -> list[Any]:
         import numpy as np
+
         # Return a simple deterministic vector based on text
         # If text is an injection or one of the templates, make them identical
         if "ignore" in texts[0] or "bypass" in texts[0]:
@@ -326,12 +321,10 @@ async def test_semantic_prompt_injection_blocked(
     envelope_package = peer_cipher.pack_envelope(
         recipient_public_hex=local_cipher.public_key_hex,
         topic="federation.task.execute",
-        intent_data=malicious_intent
+        intent_data=malicious_intent,
     )
 
     response = await mailbox.receive_envelope(envelope_package)
 
     assert response["status"] == "blocked"
     assert "detected semantically" in response["reason"]
-
-

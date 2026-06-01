@@ -56,9 +56,13 @@ class ChatRequest(BaseModel):
 class FederatedEnvelopeRequest(BaseModel):
     """Encapsulated cryptographic intent envelope for P2P Federation."""
 
-    envelope: dict[str, Any] = Field(..., description="The signed envelope containing the sender ID, timestamp, and target intent payload.")
-    signature: str = Field(..., description="Hex-encoded Ed25519 signature of the serialized envelope.")
-
+    envelope: dict[str, Any] = Field(
+        ...,
+        description="The signed envelope containing the sender ID, timestamp, and target intent payload.",
+    )
+    signature: str = Field(
+        ..., description="Hex-encoded Ed25519 signature of the serialized envelope."
+    )
 
 
 class ChatResponse(BaseModel):
@@ -214,6 +218,7 @@ async def _boot_brain(
     # Initialize FederatedMailbox
     try:
         from hbllm.network.federation.mailbox import FederatedMailbox
+
         mailbox = FederatedMailbox(bus=brain.bus, embedder=getattr(brain, "semantic_memory", None))
         _state["federated_mailbox"] = mailbox
         logger.info("🔒 Zero-Trust Federated Mailbox initialized successfully.")
@@ -1271,18 +1276,21 @@ async def receive_federated_envelope(request: FederatedEnvelopeRequest) -> dict[
     """
     mailbox = _state.get("federated_mailbox")
     if not mailbox:
-        raise HTTPException(status_code=503, detail="Federation mailbox is not active or enabled on this node.")
+        raise HTTPException(
+            status_code=503, detail="Federation mailbox is not active or enabled on this node."
+        )
 
-    envelope_package = {
-        "envelope": request.envelope,
-        "signature": request.signature
-    }
+    envelope_package = {"envelope": request.envelope, "signature": request.signature}
 
     result = await mailbox.receive_envelope(envelope_package)
     if result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=result.get("reason", "Malformed envelope payload."))
+        raise HTTPException(
+            status_code=400, detail=result.get("reason", "Malformed envelope payload.")
+        )
     elif result.get("status") == "blocked":
-        raise HTTPException(status_code=403, detail=result.get("reason", "Security threat blocked."))
+        raise HTTPException(
+            status_code=403, detail=result.get("reason", "Security threat blocked.")
+        )
 
     return result
 
