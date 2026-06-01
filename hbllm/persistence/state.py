@@ -10,6 +10,7 @@ Supports:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -44,7 +45,12 @@ class BrainState:
     def __init__(self, path: str = "./brain_state.db"):
         self.path = os.path.expanduser(path)
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        # Enable 5-second busy timeout to wait for transient SQLite locks
+        self._conn = sqlite3.connect(self.path, timeout=5.0)
+        self._conn.row_factory = sqlite3.Row
+        # Enable WAL (Write-Ahead Logging) and safe synchronous modes
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_tables()
 
     def _init_tables(self) -> None:
@@ -429,7 +435,7 @@ class AsyncBrainState:
                     value,
                 )
         else:
-            self._fallback.save(key, value, tenant_id, user_id, device_id)
+            await asyncio.to_thread(self._fallback.save, key, value, tenant_id, user_id, device_id)
 
     from hbllm.security.tenant_guard import require_tenant
 
@@ -455,7 +461,7 @@ class AsyncBrainState:
                 if row:
                     return row["value"]
                 return default
-        return self._fallback.load(key, default, tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.load, key, default, tenant_id, user_id, device_id)
 
     from hbllm.security.tenant_guard import require_tenant
 
@@ -474,7 +480,7 @@ class AsyncBrainState:
                     key,
                 )
         else:
-            self._fallback.delete(key, tenant_id, user_id, device_id)
+            await asyncio.to_thread(self._fallback.delete, key, tenant_id, user_id, device_id)
 
     # ── Conversation History ──────────────────────────────────────────────
 
@@ -503,7 +509,7 @@ class AsyncBrainState:
                     metadata or {},
                 )
                 return int(row_id) if row_id else 0
-        return self._fallback.append_message(role, content, metadata, tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.append_message, role, content, metadata, tenant_id, user_id, device_id)
 
     from hbllm.security.tenant_guard import require_tenant
 
@@ -539,7 +545,7 @@ class AsyncBrainState:
                     }
                     for row in reversed(rows)
                 ]
-        return self._fallback.get_messages(limit, offset, tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.get_messages, limit, offset, tenant_id, user_id, device_id)
 
     from hbllm.security.tenant_guard import require_tenant
 
@@ -557,7 +563,7 @@ class AsyncBrainState:
                     device_id,
                 )
         else:
-            self._fallback.clear_messages(tenant_id, user_id, device_id)
+            await asyncio.to_thread(self._fallback.clear_messages, tenant_id, user_id, device_id)
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
@@ -578,7 +584,7 @@ class AsyncBrainState:
                     data,
                 )
                 return int(row_id) if row_id else 0
-        return self._fallback.checkpoint(data, tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.checkpoint, data, tenant_id, user_id, device_id)
 
     from hbllm.security.tenant_guard import require_tenant
 
@@ -599,7 +605,7 @@ class AsyncBrainState:
                 if row:
                     return {"data": row["data"], "created_at": row["created_at"]}
                 return None
-        return self._fallback.latest_checkpoint(tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.latest_checkpoint, tenant_id, user_id, device_id)
 
     from hbllm.security.tenant_guard import require_tenant
 
@@ -622,7 +628,7 @@ class AsyncBrainState:
                     {"id": row["id"], "data": row["data"], "created_at": row["created_at"]}
                     for row in rows
                 ]
-        return self._fallback.list_checkpoints(limit, tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.list_checkpoints, limit, tenant_id, user_id, device_id)
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
@@ -653,8 +659,15 @@ class AsyncBrainState:
                     duration_ms,
                 )
         else:
-            self._fallback.log_tool_call(
-                tool_name, input_data, output, duration_ms, tenant_id, user_id, device_id
+            await asyncio.to_thread(
+                self._fallback.log_tool_call,
+                tool_name,
+                input_data,
+                output,
+                duration_ms,
+                tenant_id,
+                user_id,
+                device_id,
             )
 
     from hbllm.security.tenant_guard import require_tenant
@@ -700,11 +713,11 @@ class AsyncBrainState:
                     }
                     for row in rows
                 ]
-        return self._fallback.get_tool_logs(tool_name, limit, tenant_id, user_id, device_id)
+        return await asyncio.to_thread(self._fallback.get_tool_logs, tool_name, limit, tenant_id, user_id, device_id)
 
     async def close(self) -> None:
         # DBPool handles global connection closure, but we close the fallback
-        self._fallback.close()
+        await asyncio.to_thread(self._fallback.close)
 
     @property
     async def stats(self) -> dict:
@@ -721,4 +734,4 @@ class AsyncBrainState:
                     "checkpoints": cp_count,
                     "tool_logs": tool_count,
                 }
-        return self._fallback.stats
+        return await asyncio.to_thread(lambda: self._fallback.stats)

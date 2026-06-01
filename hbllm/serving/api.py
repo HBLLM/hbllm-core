@@ -214,7 +214,7 @@ async def _boot_brain(
     # Initialize FederatedMailbox
     try:
         from hbllm.network.federation.mailbox import FederatedMailbox
-        mailbox = FederatedMailbox(bus=brain.bus)
+        mailbox = FederatedMailbox(bus=brain.bus, embedder=getattr(brain, "semantic_memory", None))
         _state["federated_mailbox"] = mailbox
         logger.info("🔒 Zero-Trust Federated Mailbox initialized successfully.")
     except Exception as e:

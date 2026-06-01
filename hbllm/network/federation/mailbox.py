@@ -22,11 +22,12 @@ class FederatedMailbox:
     optionally writing events to the local internal MessageBus.
     """
 
-    def __init__(self, bus: Any = None, cipher: EnvelopeCipher | None = None) -> None:
+    def __init__(self, bus: Any = None, cipher: EnvelopeCipher | None = None, embedder: Any = None) -> None:
         self.bus = bus
         self.cipher = cipher or EnvelopeCipher()
+        self.embedder = embedder
         self.peer_public_keys: dict[str, str] = {}  # alias -> hex
-        
+
         # Simple schema keys for standard task intent payloads
         self.intent_schema_keys = {"task_description", "context_query", "code_payload"}
 
@@ -77,7 +78,9 @@ class FederatedMailbox:
             # Audit standard textual variables
             for text_field in ("task_description", "context_query"):
                 if text_field in sanitized_data:
-                    FederatedFirewall.audit_text_field(text_field, sanitized_data[text_field])
+                    FederatedFirewall.audit_text_field(
+                        text_field, sanitized_data[text_field], embedder=self.embedder
+                    )
 
             # Audit dynamic code execution payloads
             if "code_payload" in sanitized_data:
@@ -85,6 +88,7 @@ class FederatedMailbox:
         except FederationSecurityError as fse:
             logger.warning("Threat Shield Triggered: Federation Security Error: %s", fse)
             return {"status": "blocked", "reason": str(fse)}
+
 
         # 5. Route to internal MessageBus (if available)
         logger.info("External payload successfully validated and passed firewall gates. Processing event...")
