@@ -11,7 +11,7 @@ system both short-term recall and long-term learning capabilities.
 ```mermaid
 graph TB
     subgraph "MemoryNode (Bus Interface)"
-        MN["MemoryNode<br/>memory.store / memory.retrieve"]
+        MN["MemoryNode<br/>memory.* / system.* / knowledge.query"]
     end
     subgraph "Memory Tiers"
         EM["EpisodicMemory<br/>(What happened)"]
@@ -45,10 +45,20 @@ messages and dispatches to the appropriate tier.
 
 | Topic | Direction | Purpose |
 |---|---|---|
-| `memory.store` | Subscribes | Store a new memory entry |
-| `memory.retrieve_recent` | Subscribes | Retrieve recent conversation turns |
-| `memory.search` | Subscribes | Semantic search across memory |
-| `memory.feedback` | Subscribes | Record reward/preference signal |
+| `memory.store` | Subscribes | Store a new episodic context entry (conversation turn) |
+| `memory.retrieve_recent` | Subscribes | Retrieve recent conversation history by session ID |
+| `memory.search` | Subscribes | Semantic vector search across episodic & semantic memory |
+| `memory.skill.store` | Subscribes | Persist a new composite skill sequence |
+| `memory.skill.find` | Subscribes | Search matching composite skills by prompt similarity |
+| `memory.reward.record` | Subscribes | Record feedback/reward preference signals (RLHF) |
+| `memory.reward.query` | Subscribes | Query preference weights for a given tenant and topic |
+| `system.salience` | Subscribes | Evaluate conversation salience scores and trigger reflection |
+| `system.improve` | Subscribes | Perform sleep consolidation / compaction to distill concepts |
+| `system.reflection` | Subscribes | Force reflective self-evaluation on episodic logs |
+| `knowledge.query` | Subscribes | Query entities, relations, or shortest-paths in Knowledge Graph |
+| `memory.browse` | Subscribes | Chronological/paged navigation through episodic database records |
+| `memory.forget` | Subscribes | Hard delete of episodic records (e.g. for privacy / GDPR) |
+| `memory.stats` | Subscribes | Retrieve counts, sizes, and vector database operational statistics |
 
 ### Initialization
 

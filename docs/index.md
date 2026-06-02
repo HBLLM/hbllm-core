@@ -177,7 +177,7 @@ flowchart TB
     BUS ==> ACTIONS
     BUS <--> MEMORY
     BUS <--> META
-    SWARM <==>|"SynapseGateway"| BUS
+    SWARM <==>|"SynapseGateway (Firewall Audited)"| BUS
     ZONING -.-> BRAIN
     PROVIDERS -.-> BRAIN
     CURIOSITY -->|"goals"| SLEEP

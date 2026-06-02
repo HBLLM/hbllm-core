@@ -18,17 +18,66 @@ HBLLM Core is built on four foundational principles:
 ## Layered Design
 
 ```mermaid
-graph TD
-    A["Perception Layer"] --> B["Message Bus"]
-    B --> C["Cognitive Core"]
-    B --> D["Meta-Cognitive Layer"]
-    B --> E["Memory Systems"]
-    B --> F["Action & Embodiment Layer"]
-    B --> I["Human Control Layer"]
-    E --> J["Causal Graph & Compaction"]
-    G["Zoning Model"] -.-> C
-    H["LLM Providers"] -.-> C
+graph TB
+    subgraph FED["🔒 Federation & Security Gateway"]
+        EP["🌐 External Peers / Swarms"] -- "signed envelope" --> SG["SynapseGateway / API"]
+        SG <--> FW["🛡️ Cognitive Firewall\n(XML + Cosine Prompt Shield)"]
+    end
+
+    subgraph PERCEPTION["👁️ Perception Layer"]
+        VIS["📸 Vision (OCR)"]
+        AIN["🎤 Audio In (STT)"]
+        IOT["📡 IoT/MQTT"]
+    end
+
+    subgraph BUS["⚡ Message Bus (Communication)"]
+        MB["InProcessBus / RedisBus"]
+        TI["🛡️ TrustInterceptor\n(Ed25519 + Vector Clocks)"]
+        MB <--> TI
+    end
+
+    subgraph CORE["🧠 Cognitive Core (Reasoning)"]
+        R["🔀 Router"] --> P["📋 GoT Planner"]
+        P --> W["📝 Workspace (Blackboard)"]
+        W --> C["🔍 Critic (PRM)"]
+        C --> D["⚖️ Decision Node"]
+    end
+
+    subgraph META["🧬 Meta-Cognitive Layer (Self-Model)"]
+        LEARN["🎓 Learner"]
+        SPAWN["🧬 Spawner (Neurogenesis)"]
+        SLEEP["💤 Sleep Cycle (Compaction)"]
+        CURIO["🔭 Curiosity Node"]
+        ID["🛡️ Identity & Ethics"]
+    end
+
+    subgraph MEMORY["💾 Memory Systems (6 Tiers)"]
+        EPISODIC["📖 Episodic"]
+        SEMANTIC["📚 Semantic (RAG)"]
+        PROCEDURAL["🔧 Procedural (Skills)"]
+        KG["🔗 Knowledge Graph"]
+        VALUE["❤️ Value / Prefs"]
+        WORKING["📋 Working Context"]
+    end
+
+    subgraph ACTIONS["⚡ Action & Embodiment Layer"]
+        EXEC["🖥️ Sandboxed Exec"]
+        BROWSER["🌍 Browser Node"]
+        MCP["🔌 MCP Client"]
+    end
+
+    EP -.->|"API Sync"| SG
+    SG ==> BUS
+    PERCEPTION ==> BUS
+    BUS <==> CORE
+    BUS <--> META
+    BUS <--> MEMORY
+    BUS ==> ACTIONS
+
+    SLEEP -->|"compact"| MEMORY
+    SPAWN -->|"spawn LoRAs"| CORE
 ```
+
 
 ### Layer 1: Perception
 
@@ -117,24 +166,38 @@ A typical query flows through the system as follows:
 
 ```mermaid
 sequenceDiagram
-    participant U as User
+    participant P as Peer / User
+    participant G as SynapseGateway (API)
+    participant FW as Cognitive Firewall
+    participant B as MessageBus (Trust Interceptor)
     participant R as Router
-    participant P as Planner
+    participant M as Memory Systems
+    participant Pn as GoT Planner
     participant W as Workspace
     participant C as Critic
     participant D as Decision
-    participant M as Memory
 
-    U->>R: "Analyze logs and design firewall rule"
-    R->>M: Retrieve relevant episodic/semantic context
-    M-->>R: Context retrieved
-    R->>P: Route to GoT Planner with context
-    P->>W: Generate DAG: [parse logs] → [identify patterns] → [draft rule]
-    W->>C: Submit workspace state for evaluation
-    C->>W: Score: 0.87 — suggest adding rate-limit check
-    W->>D: Refined solution ready
-    D-->>U: Final firewall rule with explanation
+    P->>G: Send encrypted/signed message envelope
+    G->>FW: Perform security audit (XML + Cosine Prompt Shield)
+    alt Injection/Breakout Detected
+        FW-->>G: Blocked (403 Forbidden / Threat Logged)
+        G-->>P: Reject message
+    else Approved
+        FW-->>G: Authorized / Decrypted payload
+        G->>B: Publish message to topic
+        B->>B: Verify Ed25519 signature & Vector Clocks
+        B->>R: Route query to Router
+        R->>M: Retrieve episodic & semantic RAG context
+        M-->>R: Context loaded
+        R->>Pn: Dispatch to GoT Planner
+        Pn->>W: Generate thinking DAG in Workspace
+        W->>C: Evaluate intermediate steps (Process Reward Model)
+        C-->>W: Step score: 0.92
+        W->>D: Synthesize final response
+        D-->>P: Deliver signed response package
+    end
 ```
+
 
 ## Next Steps
 
