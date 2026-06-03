@@ -775,12 +775,15 @@ class PlannerNode(Node):
         is_fast_path = message.payload.get("is_fast_path", False)
         _skip_intents = {"general_knowledge", "smalltalk"}
 
-        if is_fast_path or intent in _skip_intents:
+        from hbllm.brain.factory import _is_slow_cpu
+
+        if is_fast_path or intent in _skip_intents or _is_slow_cpu():
             logger.debug(
-                "[GoT] Skipping GoT for %s query (intent=%s, fast_path=%s)",
+                "[GoT] Skipping GoT for %s query (intent=%s, fast_path=%s, slow_cpu=%s)",
                 "fast-path" if is_fast_path else "simple",
                 intent,
                 is_fast_path,
+                _is_slow_cpu(),
             )
             return None
 
