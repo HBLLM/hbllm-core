@@ -200,8 +200,49 @@ class HuggingFaceModelAdapter(nn.Module):
         if device != "auto" and not load_in_4bit and not load_in_8bit:
             model = model.to(device)
 
+        # ── CPU Inference Optimizations ───────────────────────────────────
+        actual_device = next(model.parameters()).device
+        if actual_device.type == "cpu":
+            import multiprocessing
+            import os
+
+            # Use all available CPU cores for PyTorch operations
+            num_threads = int(os.getenv("HBLLM_NUM_THREADS", str(multiprocessing.cpu_count())))
+            torch.set_num_threads(num_threads)
+            torch.set_num_interop_threads(max(1, num_threads // 2))
+            logger.info("CPU inference: using %d threads", num_threads)
+
+            # BetterTransformer — fused attention kernels for CPU
+            try:
+                from optimum.bettertransformer import (
+                    BetterTransformer,  # type: ignore[import-untyped]
+                )
+
+                model = BetterTransformer.transform(model)
+                logger.info("BetterTransformer enabled for CPU inference")
+            except ImportError:
+                logger.debug("optimum not installed, skipping BetterTransformer")
+            except Exception as e:
+                logger.debug("BetterTransformer not supported for this model: %s", e)
+
+            # torch.compile — fuses ops and eliminates Python overhead (PyTorch 2.0+)
+            # Note: compilation on older CPUs is extremely slow and can freeze startup/inference.
+            if os.getenv("HBLLM_CPU_COMPILE") == "true":
+                try:
+                    model = torch.compile(model, mode="reduce-overhead", fullgraph=False)  # type: ignore[assignment]
+                    logger.info("torch.compile enabled (mode=reduce-overhead)")
+                except Exception as e:
+                    logger.debug("torch.compile not available or failed: %s", e)
+
+            model.eval()
+
         param_count = sum(p.numel() for p in model.parameters())
-        logger.info("Loaded %s: %.1fM parameters", model_name_or_path, param_count / 1e6)
+        logger.info(
+            "Loaded %s: %.1fM parameters on %s",
+            model_name_or_path,
+            param_count / 1e6,
+            actual_device,
+        )
 
         # Build HBLLM-compatible ModelConfig
         hbllm_config = ModelConfig(

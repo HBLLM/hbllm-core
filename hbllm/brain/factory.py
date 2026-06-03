@@ -72,6 +72,41 @@ from hbllm.training.reward_model import RewardModel
 logger = logging.getLogger(__name__)
 
 
+def _is_slow_cpu() -> bool:
+    import os
+
+    try:
+        import torch
+
+        # If CUDA or MPS is available, we have a fast GPU/coprocessor
+        has_cuda = torch.cuda.is_available()
+        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        return not (has_cuda or has_mps)
+    except ImportError:
+        return True
+
+
+def _default_api_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 60.0
+    return float(os.getenv("HBLLM_API_TIMEOUT", str(default_val)))
+
+
+def _default_stream_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 30.0
+    return float(os.getenv("HBLLM_STREAM_TIMEOUT", str(default_val)))
+
+
+def _default_total_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 60.0
+    return float(os.getenv("HBLLM_TOTAL_TIMEOUT", str(default_val)))
+
+
 @dataclass
 class BrainConfig:
     """Configuration for Brain creation."""
@@ -115,7 +150,9 @@ class BrainConfig:
     inject_scheduler: bool = True  # v3: Proactive agent capabilities
     inject_fuzzy_logic: bool = False  # Fuzzy reasoning (requires scikit-fuzzy)
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
-    total_timeout: float = 60.0
+    total_timeout: float = field(default_factory=_default_total_timeout)
+    api_timeout: float = field(default_factory=_default_api_timeout)
+    stream_timeout: float = field(default_factory=_default_stream_timeout)
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
     data_dir: str = "data"
@@ -1238,6 +1275,20 @@ class BrainFactory:
 
         if cfg.inject_metrics:
             brain.cognitive_metrics = CognitiveMetrics(data_dir=cfg.data_dir)
+
+        # Wire references in MetaCognition composite and its sub-nodes
+        if meta:
+            meta._cognitive_metrics = brain.cognitive_metrics
+            meta._goal_manager = brain.goal_manager
+            meta._self_model = brain.self_model
+            if meta.evaluation:
+                meta.evaluation.cognitive_metrics = brain.cognitive_metrics
+                meta.evaluation.goal_manager = brain.goal_manager
+                meta.evaluation.self_model = brain.self_model
+            if meta.reflection:
+                meta.reflection.cognitive_metrics = brain.cognitive_metrics
+                meta.reflection.goal_manager = brain.goal_manager
+                meta.reflection.self_model = brain.self_model
 
         if cfg.inject_cost_optimizer:
             brain.token_optimizer = TokenOptimizer()

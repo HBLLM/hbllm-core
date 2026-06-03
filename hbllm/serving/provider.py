@@ -19,7 +19,7 @@ import logging
 import os
 import random
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -157,6 +157,18 @@ class LocalProvider(LLMProvider):
         **kwargs: Any,
     ) -> LLMResponse:
         self._ensure_loaded()
+        return await asyncio.to_thread(
+            self._generate_sync, messages, max_tokens, temperature, top_p, **kwargs
+        )
+
+    def _generate_sync(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        **kwargs: Any,
+    ) -> LLMResponse:
         import torch
 
         tenant_id = kwargs.get("tenant_id")
@@ -170,12 +182,35 @@ class LocalProvider(LLMProvider):
             "llm.generate",
             {"provider": "local", "model": "hbllm-local", "max_tokens": str(max_tokens)},
         ):
-            prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-            input_ids = self._tokenizer.encode(prompt, add_bos=True)
+            import inspect
+
+            apply_sig = inspect.signature(self._tokenizer.apply_chat_template)
+            has_tokenize = "tokenize" in apply_sig.parameters or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in apply_sig.parameters.values()
+            )
+            if has_tokenize:
+                prompt = self._tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+            else:
+                prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+
+            if isinstance(prompt, list):
+                input_ids = prompt
+            else:
+                sig = inspect.signature(self._tokenizer.encode)
+                if "add_bos" in sig.parameters:
+                    input_ids = self._tokenizer.encode(prompt, add_bos=True)
+                else:
+                    input_ids = self._tokenizer.encode(prompt)
             input_tensor = torch.tensor([input_ids], dtype=torch.long)
 
             if hasattr(self._model, "device"):
                 input_tensor = input_tensor.to(self._model.device)
+
+            eos_token_id = getattr(
+                self._tokenizer, "eos_id", getattr(self._tokenizer, "eos_token_id", None)
+            )
 
             with torch.no_grad():
                 output = self._model.generate(
@@ -183,7 +218,7 @@ class LocalProvider(LLMProvider):
                     max_new_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    eos_token_id=self._tokenizer.eos_id,
+                    eos_token_id=eos_token_id,
                 )
 
             # Decode only new tokens
@@ -207,8 +242,42 @@ class LocalProvider(LLMProvider):
         temperature: float = 0.7,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Stream tokens from the local model one at a time, using Speculative Decoding if configured."""
+        """Stream tokens from the local model one at a time, offloaded to a thread to keep the event loop free."""
         self._ensure_loaded()
+        import queue
+        import threading
+
+        token_queue: queue.Queue[str | None] = queue.Queue()
+
+        def _run() -> None:
+            try:
+                for token in self._stream_sync(messages, max_tokens, temperature, **kwargs):
+                    token_queue.put(token)
+            except Exception as e:
+                logger.error("Error in local streaming thread: %s", e)
+            finally:
+                token_queue.put(None)
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+        while True:
+            try:
+                token = await asyncio.to_thread(token_queue.get, timeout=90.0)
+            except Exception:
+                break
+            if token is None:
+                break
+            yield token
+
+    def _stream_sync(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Synchronous local token streaming."""
         import torch
 
         tenant_id = kwargs.get("tenant_id")
@@ -218,15 +287,34 @@ class LocalProvider(LLMProvider):
             except ValueError:
                 pass
 
-        prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-        input_ids = self._tokenizer.encode(prompt, add_bos=True)
+        import inspect
+
+        apply_sig = inspect.signature(self._tokenizer.apply_chat_template)
+        has_tokenize = "tokenize" in apply_sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in apply_sig.parameters.values()
+        )
+        if has_tokenize:
+            prompt = self._tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        else:
+            prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+
+        if isinstance(prompt, list):
+            input_ids = prompt
+        else:
+            sig = inspect.signature(self._tokenizer.encode)
+            if "add_bos" in sig.parameters:
+                input_ids = self._tokenizer.encode(prompt, add_bos=True)
+            else:
+                input_ids = self._tokenizer.encode(prompt)
         input_tensor = torch.tensor([input_ids], dtype=torch.long)
 
         if hasattr(self._model, "device"):
             input_tensor = input_tensor.to(self._model.device)
 
         top_p = kwargs.get("top_p", 0.9)
-        eos_id = self._tokenizer.eos_id
+        eos_id = getattr(self._tokenizer, "eos_id", getattr(self._tokenizer, "eos_token_id", None))
 
         # Phase 4: Speculative Decoding Integration
         has_draft_model = hasattr(self, "_draft_model") and self._draft_model is not None

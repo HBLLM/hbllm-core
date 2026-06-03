@@ -112,7 +112,7 @@ class ProviderLLM:
     async def generate_json(
         self,
         prompt: str,
-        max_tokens: int = 256,
+        max_tokens: int = 64,
     ) -> dict[str, Any]:
         """
         Generate structured JSON from the provider.

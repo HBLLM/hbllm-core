@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import logging
 import os
+import pathlib
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
@@ -139,7 +140,7 @@ class WebRTCOfferRequest(BaseModel):
 
 # ─── Global State ─────────────────────────────────────────────────────────────
 
-_state: dict[str, Any] = {}
+from hbllm.serving.state import _get_node_map, _state
 
 
 async def _boot_brain(
@@ -184,8 +185,59 @@ async def _boot_brain(
         inject_symbolic_logic=True,
     )
 
-    logger.info("Initializing Brain factory with model: %s", model_size)
-    brain = await BrainFactory.create_local(model_size=model_size, config=config, bus=bus)
+    provider_name = os.getenv("HBLLM_PROVIDER")
+    provider_model = os.getenv("HBLLM_PROVIDER_MODEL")
+
+    # Known external provider prefixes — anything else with "/" is a HuggingFace model ID
+    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local"}
+
+    is_provider = False
+    if provider_name:
+        is_provider = True
+    elif "/" in model_size and not os.path.exists(model_size):
+        # Check if the prefix is a known provider (e.g. "openai/gpt-4o")
+        # vs a HuggingFace model ID (e.g. "Qwen/Qwen2.5-0.5B")
+        prefix = model_size.split("/")[0].lower()
+        if prefix in _KNOWN_PROVIDERS:
+            is_provider = True
+        else:
+            # Treat as a HuggingFace model ID → load locally
+            is_provider = False
+            logger.info("Detected HuggingFace model ID: %s — routing to local loading", model_size)
+
+    if is_provider:
+        if "/" in model_size and not provider_name:
+            prov = model_size
+        else:
+            prov = (
+                f"{provider_name}/{provider_model}"
+                if provider_model
+                else (provider_name or model_size)
+            )
+
+        logger.info("Initializing Brain factory with external provider: %s", prov)
+
+        provider_kwargs = {}
+        base_url = (
+            os.getenv("HBLLM_PROVIDER_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or os.getenv("OLLAMA_BASE_URL")
+        )
+        if base_url:
+            provider_kwargs["base_url"] = base_url
+
+        api_key = (
+            os.getenv("HBLLM_PROVIDER_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("ANTHROPIC_API_KEY")
+        )
+        if api_key:
+            provider_kwargs["api_key"] = api_key
+
+        brain = await BrainFactory.create(provider=prov, config=config, bus=bus, **provider_kwargs)
+    else:
+        logger.info("Initializing Brain factory with local model: %s", model_size)
+        brain = await BrainFactory.create_local(model_size=model_size, config=config, bus=bus)
 
     # 3. Load External Plugins
     import pathlib
@@ -193,7 +245,9 @@ async def _boot_brain(
     from hbllm.network.plugin_manager import PluginManager
 
     plugin_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "plugins"
-    pm = PluginManager(plugin_dirs=[plugin_dir], bus=brain.bus, registry=brain.registry, app=app)
+    pm = PluginManager(
+        plugin_dirs=[plugin_dir], bus=brain.bus, registry=brain.registry, app=app, brain=brain
+    )
     pm.discover()
     await pm.load_all()
 
@@ -226,6 +280,8 @@ async def _boot_brain(
         logger.warning("Failed to initialize Federated Mailbox: %s", e)
 
     _state["brain"] = brain
+    _state["config"] = config
+    _state["bus"] = bus
     _state["plugin_manager"] = pm
     _state["bus_type"] = bus_type
     _state["mode"] = "full"
@@ -767,6 +823,12 @@ app.add_middleware(
 app.add_middleware(JWTAuthMiddleware)
 
 
+# ─── Studio Router Registration ───────────────────────────────────────────────
+from hbllm.serving.studio import router as studio_router
+
+app.include_router(studio_router)
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     """Check server health and node count."""
@@ -791,301 +853,6 @@ async def metrics() -> Any:
     return brain.bus.metrics.snapshot()
 
 
-@app.get("/studio/stats")
-async def studio_stats() -> Any:
-    """Aggregated cognitive subsystem stats for HBLLM Studio dashboard."""
-    brain = _state.get("brain")
-    nodes = getattr(brain, "nodes", [])
-    result: dict[str, Any] = {
-        "mode": _state.get("mode", "unknown"),
-        "node_count": len(nodes),
-    }
-
-    # Build a lookup by node class name for targeted extraction
-    node_map: dict[str, Any] = {}
-    for node in nodes:
-        cls_name = type(node).__name__
-        node_map[cls_name] = node
-
-    # ── Node health ──
-    node_health = []
-    for node in nodes:
-        info = node.get_info()
-        node_health.append(
-            {
-                "id": info.node_id,
-                "name": type(node).__name__.replace("Node", "").replace("Manager", " Mgr"),
-                "status": "healthy" if node._running else "unhealthy",
-                "type": info.node_type.value
-                if hasattr(info.node_type, "value")
-                else str(info.node_type),
-            }
-        )
-    result["nodes"] = node_health
-
-    # ── Cognitive metrics ──
-    from hbllm.brain.cognitive_metrics import CognitiveMetrics
-
-    cm = node_map.get("CognitiveMetrics")
-    if cm and isinstance(cm, CognitiveMetrics):
-        result["metrics"] = cm.get_dashboard_metrics()
-
-    # ── Self model ──
-    from hbllm.brain.self_model import SelfModel
-
-    sm = node_map.get("SelfModel")
-    if sm and isinstance(sm, SelfModel):
-        result["self_model"] = sm.get_metrics()
-
-    # ── Skill registry ──
-    from hbllm.brain.skill_registry import SkillRegistry
-
-    sr = node_map.get("SkillRegistry")
-    if sr and isinstance(sr, SkillRegistry):
-        result["skills"] = sr.stats()
-
-    # ── Goals ──
-    from hbllm.brain.goal_manager import GoalManager
-
-    gm = node_map.get("GoalManager")
-    if gm and isinstance(gm, GoalManager):
-        result["goals"] = gm.stats()
-
-    # ── Evaluation ──
-    from hbllm.brain.evaluation_node import EvaluationNode
-
-    ev = node_map.get("EvaluationNode")
-    if ev and isinstance(ev, EvaluationNode):
-        result["evaluation"] = ev.stats()
-
-    # ── Attention ──
-    from hbllm.brain.attention_manager import AttentionManager
-
-    am = node_map.get("AttentionManager")
-    if am and isinstance(am, AttentionManager):
-        result["attention"] = am.stats()
-
-    # ── Load manager ──
-    from hbllm.brain.load_manager import LoadManager
-
-    lm = node_map.get("LoadManager")
-    if lm and isinstance(lm, LoadManager):
-        result["load_manager"] = lm.stats()
-
-    # ── Collective ──
-    from hbllm.brain.collective_node import CollectiveNode
-
-    cn = node_map.get("CollectiveNode")
-    if cn and isinstance(cn, CollectiveNode):
-        collective_stats = cn.stats
-        result["collective"] = {
-            "instance_id": cn.instance_id,
-            "stats": dict(collective_stats),
-            "peers": [
-                {
-                    "instance_id": p.instance_id,
-                    "domains": p.domains,
-                    "load": p.load,
-                    "performance": p.performance,
-                }
-                for p in cn.peer_profiles.values()
-            ],
-            "recent_activity": [],  # Future: wire to event log
-        }
-
-    # ── Reflection ──
-    from hbllm.brain.reflection_node import ReflectionNode
-
-    rn = node_map.get("ReflectionNode")
-    if rn and isinstance(rn, ReflectionNode):
-        result["reflection"] = rn.stats()
-
-    # ── Skill compiler ──
-    from hbllm.brain.skill_compiler_node import SkillCompilerNode
-
-    sc = node_map.get("SkillCompilerNode")
-    if sc and isinstance(sc, SkillCompilerNode):
-        result["skill_compiler"] = sc.stats()
-
-    # ── Bus metrics ──
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if bus and hasattr(bus, "metrics"):
-        result["bus_metrics"] = bus.metrics.snapshot()
-
-    return result
-
-
-@app.get("/studio/memory")
-async def studio_memory() -> Any:
-    """Memory subsystem stats for Studio — episodic, semantic, procedural, value."""
-    brain = _state.get("brain")
-    nodes = getattr(brain, "nodes", [])
-    node_map: dict[str, Any] = {}
-    for node in nodes:
-        node_map[type(node).__name__] = node
-
-    result: dict[str, Any] = {}
-
-    from hbllm.memory.memory_node import MemoryNode
-
-    mem = node_map.get("MemoryNode")
-    if mem and isinstance(mem, MemoryNode):
-        # Episodic
-        try:
-            ep_stats = mem.db.stats() if hasattr(mem.db, "stats") else {}
-            result["episodic"] = (
-                ep_stats
-                if ep_stats
-                else {
-                    "db_path": str(mem.db.db_path),
-                    "status": "active",
-                }
-            )
-        except Exception:
-            result["episodic"] = {"status": "active"}
-
-        # Semantic
-        try:
-            sem = mem.semantic_db
-            result["semantic"] = {
-                "total_entries": len(sem._entries) if hasattr(sem, "_entries") else 0,
-                "priority_entries": sum(
-                    1
-                    for e in (sem._entries if hasattr(sem, "_entries") else [])
-                    if getattr(e, "is_priority", False)
-                ),
-                "status": "active",
-            }
-        except Exception:
-            result["semantic"] = {"status": "active", "total_entries": 0}
-
-        # Procedural
-        try:
-            proc = mem.procedural_db
-            result["procedural"] = {
-                "db_path": str(proc.db_path) if hasattr(proc, "db_path") else "N/A",
-                "status": "active",
-            }
-        except Exception:
-            result["procedural"] = {"status": "active"}
-
-        # Value
-        try:
-            val = mem.value_db
-            result["value"] = {
-                "db_path": str(val.db_path) if hasattr(val, "db_path") else "N/A",
-                "status": "active",
-            }
-        except Exception:
-            result["value"] = {"status": "active"}
-
-        # Knowledge Graph summary
-        try:
-            kg = mem.knowledge_graph
-            result["knowledge_graph"] = {
-                "entity_count": kg.entity_count,
-                "relation_count": kg.relation_count,
-            }
-        except Exception:
-            result["knowledge_graph"] = {"entity_count": 0, "relation_count": 0}
-
-    return result
-
-
-@app.get("/studio/knowledge")
-async def studio_knowledge() -> Any:
-    """Knowledge Graph contents for Studio — entities, relations, subgraphs."""
-    brain = _state.get("brain")
-    nodes = getattr(brain, "nodes", [])
-    node_map: dict[str, Any] = {}
-    for node in nodes:
-        node_map[type(node).__name__] = node
-
-    result: dict[str, Any] = {"entities": [], "relations": [], "stats": {}}
-
-    from hbllm.memory.memory_node import MemoryNode
-
-    mem = node_map.get("MemoryNode")
-    if mem and isinstance(mem, MemoryNode):
-        kg = mem.knowledge_graph
-        result["stats"] = {
-            "entity_count": kg.entity_count,
-            "relation_count": kg.relation_count,
-        }
-        # Entities
-        if hasattr(kg, "_entities"):
-            result["entities"] = [
-                {
-                    "id": e.id,
-                    "label": e.label,
-                    "type": e.entity_type,
-                }
-                for e in list(kg._entities.values())[:100]
-            ]
-        # Relations
-        if hasattr(kg, "_relations"):
-            result["relations"] = [
-                {
-                    "source": r.source_id,
-                    "target": r.target_id,
-                    "type": r.relation_type,
-                    "weight": r.weight,
-                }
-                for r in list(kg._relations)[:200]
-            ]
-
-    return result
-
-
-@app.get("/studio/lora")
-async def studio_lora() -> Any:
-    """LoRA adapter status for Studio — pending, active, rejected."""
-    import glob
-
-    data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
-    lora_dir = os.path.join(data_dir, "lora")
-
-    result: dict[str, Any] = {
-        "lora_dir": lora_dir,
-        "active_adapters": [],
-        "pending_adapters": [],
-        "rejected_count": 0,
-        "self_improve_status": "idle",
-    }
-
-    # Scan for LoRA files
-    if os.path.exists(lora_dir):
-        for pt_file in glob.glob(os.path.join(lora_dir, "**/*.pt"), recursive=True):
-            name = os.path.basename(pt_file)
-            size_mb = os.path.getsize(pt_file) / (1024 * 1024)
-            mtime = os.path.getmtime(pt_file)
-            entry = {
-                "name": name,
-                "path": pt_file,
-                "size_mb": round(size_mb, 2),
-                "modified": mtime,
-            }
-            if name.endswith(".pending.pt"):
-                result["pending_adapters"].append(entry)
-            else:
-                result["active_adapters"].append(entry)
-
-    # Check self-improve worker status
-    brain = _state.get("brain")
-    nodes = getattr(brain, "nodes", [])
-    for node in nodes:
-        if type(node).__name__ == "SleepNode":
-            result["self_improve_status"] = "active" if node._running else "idle"
-            if hasattr(node, "_dpo_cycles"):
-                result["dpo_cycles"] = node._dpo_cycles
-            if hasattr(node, "_consolidation_cycles"):
-                result["consolidation_cycles"] = node._consolidation_cycles
-            break
-
-    return result
-
-
 # ─── Provider-based Chat (lightweight) ────────────────────────────────────────
 
 
@@ -1097,9 +864,18 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
 
     # Resolve provider: request override → state default
     if request.provider:
-        provider = get_provider(request.provider)
+        if (
+            request.provider == "local"
+            and _state.get("brain")
+            and hasattr(_state["brain"], "provider")
+        ):
+            provider = _state["brain"].provider
+        else:
+            provider = get_provider(request.provider)
     elif "provider" in _state:
         provider = _state["provider"]
+    elif _state.get("brain") and hasattr(_state["brain"], "provider"):
+        provider = _state["brain"].provider
     else:
         raise HTTPException(status_code=503, detail="No LLM provider configured")
 
@@ -1187,6 +963,11 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
 
 async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     """Handle chat using the full brain pipeline."""
+    from hbllm.brain.factory import BrainConfig
+
+    config = _state.get("config") or BrainConfig()
+    timeout = config.api_timeout
+
     bus = _state["bus"]
     correlation_id = str(uuid.uuid4())
 
@@ -1231,7 +1012,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     await bus.publish("router.query", query_msg)
 
     try:
-        result_msg = await asyncio.wait_for(response_future, timeout=120.0)
+        result_msg = await asyncio.wait_for(response_future, timeout=timeout)
         response_text = result_msg.payload.get("text", "")
         source = result_msg.payload.get("source", "decision")
 
@@ -1263,7 +1044,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
             source_node=source,
         )
     except (TimeoutError, asyncio.TimeoutError):
-        raise HTTPException(status_code=504, detail="Pipeline timed out (30s)")
+        raise HTTPException(status_code=504, detail=f"Pipeline timed out ({int(timeout)}s)")
     finally:
         # Always clean up subscription to prevent memory leak
         await bus.unsubscribe(sub)
@@ -1487,13 +1268,18 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
     )
     await bus.publish("router.query", query_msg)
 
+    from hbllm.brain.factory import BrainConfig
+
+    config = _state.get("config") or BrainConfig()
+    timeout = config.stream_timeout
+
     async def event_generator() -> Any:
         import json as _json
 
         try:
             while True:
                 try:
-                    chunk = await asyncio.wait_for(token_queue.get(), timeout=30.0)
+                    chunk = await asyncio.wait_for(token_queue.get(), timeout=timeout)
                 except (TimeoutError, asyncio.TimeoutError):
                     yield f"data: {_json.dumps({'token': '', 'done': True, 'error': 'timeout'})}\n\n"
                     break
@@ -1523,6 +1309,11 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     """
     OpenAI-compatible chat completions endpoint for AI coding assistants like Cursor, Claude Code, etc.
     """
+    from hbllm.brain.factory import BrainConfig
+
+    config = _state.get("config") or BrainConfig()
+    api_timeout = config.api_timeout
+    stream_timeout = config.stream_timeout
     tenant_id = getattr(api_req.state, "tenant_id", "default")
     session_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
@@ -1560,7 +1351,7 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
         await bus.publish("router.query", query_msg)
 
         try:
-            result_msg = await asyncio.wait_for(response_future, timeout=60.0)
+            result_msg = await asyncio.wait_for(response_future, timeout=api_timeout)
             response_text = result_msg.payload.get("text", "")
 
             return {
@@ -1582,7 +1373,7 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
                 },
             }
         except (TimeoutError, asyncio.TimeoutError):
-            raise HTTPException(status_code=504, detail="Pipeline timed out (60s)")
+            raise HTTPException(status_code=504, detail=f"Pipeline timed out ({int(api_timeout)}s)")
         finally:
             await bus.unsubscribe(sub)
 
@@ -1618,7 +1409,7 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
 
                 while True:
                     try:
-                        chunk = await asyncio.wait_for(token_queue.get(), timeout=30.0)
+                        chunk = await asyncio.wait_for(token_queue.get(), timeout=stream_timeout)
                     except (TimeoutError, asyncio.TimeoutError):
                         yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': request.model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'timeout'}]})}\n\n"
                         break
@@ -1978,8 +1769,8 @@ async def list_rules() -> Any:
     """List extracted if→then rules from the RuleExtractorNode."""
     # Find the rule extractor node in the running nodes
     brain = _state.get("brain")
-    nodes = getattr(brain, "nodes", [])
-    for node in nodes:
+    node_map = _get_node_map(brain)
+    for node in node_map.values():
         if hasattr(node, "rules"):
             return {
                 "rules": [r.to_dict() for r in node.rules],
@@ -2121,9 +1912,14 @@ async def chat_websocket(ws: WebSocket) -> None:
                 )
                 await bus.publish("router.query", query_msg)
 
+                from hbllm.brain.factory import BrainConfig
+
+                config = _state.get("config") or BrainConfig()
+                api_timeout = config.api_timeout
+
                 # Wait for response and stream it
                 try:
-                    result_msg = await asyncio.wait_for(response_future, timeout=120.0)
+                    result_msg = await asyncio.wait_for(response_future, timeout=api_timeout)
                     response_text = result_msg.payload.get("text", "")
 
                     # Stream token-by-token for a natural feel
