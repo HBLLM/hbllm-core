@@ -68,6 +68,7 @@ class MetaCognition(Node):
         from hbllm.brain.reflection_node import ReflectionNode
 
         self._meta = MetaReasoningNode(node_id=f"{self.node_id}.meta")
+        self._meta.node_identity = self.node_identity
 
         self._evaluation = EvaluationNode(
             node_id=f"{self.node_id}.evaluation",
@@ -76,6 +77,7 @@ class MetaCognition(Node):
             self_model=self._self_model,
             skill_registry=self._skill_registry,
         )
+        self._evaluation.node_identity = self.node_identity
 
         self._reflection = ReflectionNode(
             node_id=f"{self.node_id}.reflection",
@@ -84,8 +86,10 @@ class MetaCognition(Node):
             self_model=self._self_model,
             skill_registry=self._skill_registry,
         )
+        self._reflection.node_identity = self.node_identity
 
         self._curiosity = CuriosityNode(node_id=f"{self.node_id}.curiosity")
+        self._curiosity.node_identity = self.node_identity
 
         bus = self.bus
         for sub in [self._meta, self._evaluation, self._reflection, self._curiosity]:

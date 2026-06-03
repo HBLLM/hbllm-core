@@ -61,10 +61,12 @@ class SocialLayer(Node):
             node_id=f"{self.node_id}.collective",
             skill_registry=self._skill_registry,
         )
+        self._collective.node_identity = self.node_identity
 
         self._identity = IdentityNode(
             node_id=f"{self.node_id}.identity",
         )
+        self._identity.node_identity = self.node_identity
 
         bus = self.bus
         for sub in [self._collective, self._identity]:

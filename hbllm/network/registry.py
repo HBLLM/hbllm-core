@@ -219,7 +219,8 @@ class ServiceRegistry:
 
     async def has_permission(self, node_id: str, scope: str) -> bool:
         """Check if a node has permission to access a specific scope."""
-        info = self._nodes.get(node_id)
+        parent_id = node_id.split(".")[0]
+        info = self._nodes.get(parent_id)
         if not info:
             return False
         # 'admin' scope grants all permissions
@@ -227,16 +228,19 @@ class ServiceRegistry:
 
     async def verify_message(self, message: Message) -> bool:
         """Verify the cryptographic signature and causal ordering of a message."""
-        if message.source_node_id in self._revoked_nodes:
-            logger.warning(
-                "[Registry] verify_message failed: Node '%s' is REVOKED", message.source_node_id
-            )
+        source_id = message.source_node_id
+        parent_id = source_id.split(".")[0]
+
+        if source_id in self._revoked_nodes or parent_id in self._revoked_nodes:
+            logger.warning("[Registry] verify_message failed: Node '%s' is REVOKED", source_id)
             return False
 
-        info = self._nodes.get(message.source_node_id)
+        info = self._nodes.get(parent_id)
         if not info:
             logger.debug(
-                "[Registry] verify_message failed: Node '%s' not found", message.source_node_id
+                "[Registry] verify_message failed: Node '%s' (parent '%s') not found",
+                source_id,
+                parent_id,
             )
             return False
         if not info.public_key:

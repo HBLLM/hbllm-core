@@ -76,14 +76,17 @@ class MemorySystem(Node):
             node_id=f"{self.node_id}.memory",
             registry=self._registry,
         )
+        self._memory.node_identity = self.node_identity
         self._experience = ExperienceNode(
             node_id=f"{self.node_id}.experience",
             llm=self._llm,
         )
+        self._experience.node_identity = self.node_identity
         self._sleep = SleepCycleNode(
             node_id=f"{self.node_id}.sleep",
             llm=self._llm,
         )
+        self._sleep.node_identity = self.node_identity
 
         bus = self.bus
         for sub in [self._memory, self._experience, self._sleep]:

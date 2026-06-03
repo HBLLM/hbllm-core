@@ -219,6 +219,8 @@ class CollectiveNode(Node):
         # Cap on simultaneous in-flight elections to prevent unbounded dict growth
         self._max_concurrent_elections: int = 50
         self.skill_registry = skill_registry
+        self.recent_activity: list[dict[str, Any]] = []
+        self.active_delegations: dict[str, dict[str, Any]] = {}
 
         # Stats
         self._stats = {
@@ -302,6 +304,16 @@ class CollectiveNode(Node):
         self.seen_checksums.add(digest.checksum)
         self.broadcast_log.append(digest)
         self._stats["broadcasts_sent"] += 1
+
+        self.recent_activity.append(
+            {
+                "type": "skill",
+                "text": f"Broadcast knowledge digest for domain: {digest.domain}",
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
+        if len(self.recent_activity) > 20:
+            self.recent_activity.pop(0)
 
         # Broadcast to peers
         await self.publish(
@@ -508,6 +520,15 @@ class CollectiveNode(Node):
                 return
 
             self._stats["digests_integrated"] += 1
+            self.recent_activity.append(
+                {
+                    "type": "skill",
+                    "text": f"Integrated {artifact_type} digest from peer {digest.source_instance_id}",
+                    "time": time.strftime("%H:%M:%S"),
+                }
+            )
+            if len(self.recent_activity) > 20:
+                self.recent_activity.pop(0)
             logger.info(
                 "Integrated %s digest from peer %s (domain=%s)",
                 artifact_type,
@@ -677,6 +698,17 @@ class CollectiveNode(Node):
         )
         self._stats["votes_requested"] += 1
 
+        self.recent_activity.append(
+            {
+                "type": "vote",
+                "text": f"Requested consensus votes for query: '{query}'",
+                "strategy": vote_strategy.value,
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
+        if len(self.recent_activity) > 20:
+            self.recent_activity.pop(0)
+
         # Wait for responses with timeout
         try:
             await asyncio.wait_for(
@@ -756,6 +788,16 @@ class CollectiveNode(Node):
             ),
         )
         self._stats["votes_cast"] += 1
+
+        self.recent_activity.append(
+            {
+                "type": "vote",
+                "text": f"Voted on query from peer {requester}",
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
+        if len(self.recent_activity) > 20:
+            self.recent_activity.pop(0)
 
         return None
 
@@ -922,6 +964,26 @@ class CollectiveNode(Node):
 
         delegation_id = uuid.uuid4().hex[:12]
 
+        # Track delegation locally
+        self.active_delegations[delegation_id] = {
+            "id": delegation_id,
+            "query": query,
+            "domain": domain,
+            "peer": best_peer.instance_id,
+            "status": "pending",
+            "timestamp": time.time(),
+        }
+
+        self.recent_activity.append(
+            {
+                "type": "delegate",
+                "text": f"Delegating task to peer {best_peer.instance_id} (domain: {domain})",
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
+        if len(self.recent_activity) > 20:
+            self.recent_activity.pop(0)
+
         # Set up response collection
         self._pending_votes[delegation_id] = []
         self._vote_events[delegation_id] = asyncio.Event()
@@ -953,6 +1015,8 @@ class CollectiveNode(Node):
         except asyncio.TimeoutError:
             self._pending_votes.pop(delegation_id, None)
             self._vote_events.pop(delegation_id, None)
+            if delegation_id in self.active_delegations:
+                self.active_delegations[delegation_id]["status"] = "timeout"
             return DelegationResult(
                 delegated=False,
                 target_instance=best_peer.instance_id,
@@ -964,6 +1028,16 @@ class CollectiveNode(Node):
 
         if responses:
             resp = responses[0]
+            if delegation_id in self.active_delegations:
+                self.active_delegations[delegation_id]["status"] = "completed"
+            # Keep only last 10 delegations in memory to avoid leaks
+            if len(self.active_delegations) > 10:
+                oldest_key = min(
+                    self.active_delegations.keys(),
+                    key=lambda k: self.active_delegations[k]["timestamp"],
+                )
+                self.active_delegations.pop(oldest_key, None)
+
             return DelegationResult(
                 delegated=True,
                 target_instance=resp.responder_id,
@@ -975,6 +1049,8 @@ class CollectiveNode(Node):
                 },
             )
 
+        if delegation_id in self.active_delegations:
+            self.active_delegations[delegation_id]["status"] = "failed"
         return DelegationResult(
             delegated=False,
             target_instance=best_peer.instance_id,

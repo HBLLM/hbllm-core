@@ -66,7 +66,9 @@ class LearningLoop(Node):
         from hbllm.brain.world_model_node import WorldModelNode
 
         self._learner = LearnerNode(node_id=f"{self.node_id}.learner")
+        self._learner.node_identity = self.node_identity
         self._world_model = WorldModelNode(node_id=f"{self.node_id}.world_model")
+        self._world_model.node_identity = self.node_identity
 
         bus = self.bus
         for sub in [self._learner, self._world_model]:
@@ -85,6 +87,7 @@ class LearningLoop(Node):
                     model=provider._model,
                     tokenizer=provider._tokenizer,
                 )
+                self._spawner.node_identity = self.node_identity
                 await self._spawner.start(bus)
 
         # Process Reward Model (optional — may require ML model / torch)
@@ -94,6 +97,7 @@ class LearningLoop(Node):
             self._process_reward = ProcessRewardNode(
                 node_id=f"{self.node_id}.prm",
             )
+            self._process_reward.node_identity = self.node_identity
             await self._process_reward.start(bus)
         except Exception:
             logger.debug("ProcessRewardNode not available, skipping")

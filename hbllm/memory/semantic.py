@@ -157,6 +157,7 @@ class SemanticMemory:
         hybrid_alpha: float = 0.7,
         use_qdrant: bool = False,
         qdrant_path: str | None = None,
+        max_documents: int = 5000,
     ):
         """
         Args:
@@ -165,6 +166,7 @@ class SemanticMemory:
                           Only used when both dense + sparse indexes are available.
             use_qdrant: If True and qdrant-client is installed, use Qdrant HNSW backend.
             qdrant_path: Optional path for persistent Qdrant disk storage.
+            max_documents: Max documents to keep in memory in fallback mode.
         """
         self.model_name = model_name
         self.model: Any | None = None
@@ -183,6 +185,7 @@ class SemanticMemory:
         self._lock = threading.RLock()
         self._tfidf_timer: threading.Timer | None = None
         self._closed = False
+        self.max_documents = max_documents
 
         # ── PostgreSQL/pgvector Backend ──────────────────────────────────
         from hbllm.persistence.db_pool import DBPool
@@ -399,6 +402,21 @@ class SemanticMemory:
         if content_hash in self._content_hashes:
             logger.debug("Duplicate content detected — skipping store")
             return None
+
+        # Evict oldest document if we reached memory limit
+        if len(self.ids) >= self.max_documents:
+            oldest_id = self.ids.pop(0)
+            oldest_doc = self.documents.pop(oldest_id, None)
+            if oldest_doc:
+                oldest_hash = self._content_hash(oldest_doc["content"])
+                self._content_hashes.discard(oldest_hash)
+            if self._vector_list:
+                self._vector_list.pop(0)
+            if self._sparse_list:
+                self._sparse_list.pop(0)
+            self._vectors_dirty = True
+            self._sparse_dirty = True
+
         self._content_hashes.add(content_hash)
 
         if self._use_tfidf or self.model is None:

@@ -537,7 +537,7 @@ class WebResearchNode(Node):
                     "query": query[:200],
                     "findings_count": len(findings),
                     "rejected_count": len(credibility) - len(findings),
-                    "tiers": {f.tier.value for f in findings},
+                    "tiers": sorted(list({f.tier.value for f in findings})),
                     "sources": [c.to_dict() for c in credibility],
                 },
             ),

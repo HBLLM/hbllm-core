@@ -65,18 +65,22 @@ class ResourceManager(Node):
         from hbllm.brain.workspace_node import WorkspaceNode
 
         self._workspace = WorkspaceNode(node_id=f"{self.node_id}.workspace")
+        self._workspace.node_identity = self.node_identity
 
         self._attention = AttentionManager(node_id=f"{self.node_id}.attention")
+        self._attention.node_identity = self.node_identity
 
         self._load_manager = LoadManager(
             node_id=f"{self.node_id}.load",
             monitor_interval=self._monitor_interval,
         )
+        self._load_manager.node_identity = self.node_identity
 
         self._scheduler = SchedulerNode(
             node_id=f"{self.node_id}.scheduler",
             data_dir=self._data_dir,
         )
+        self._scheduler.node_identity = self.node_identity
 
         bus = self.bus
         for sub in [self._workspace, self._attention, self._load_manager, self._scheduler]:

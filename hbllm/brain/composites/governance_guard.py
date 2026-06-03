@@ -78,6 +78,7 @@ class GovernanceGuard(Node):
             node_id=f"{self.node_id}.sentinel",
             policy_engine=self._policy_engine,
         )
+        self._sentinel.node_identity = self.node_identity
         await self._sentinel.start(self.bus)
 
         logger.info("GovernanceGuard started with: policy_engine, sentinel, confidence_estimator")

@@ -56,10 +56,27 @@ class EpisodicMemory:
                 CREATE INDEX IF NOT EXISTS idx_tenant_session_time
                 ON turns(tenant_id, session_id, timestamp_iso DESC)
             """)
-            try:
-                await conn.execute("SELECT parent_memory_id FROM turns LIMIT 1")
-            except sqlite3.OperationalError:
-                await conn.execute("ALTER TABLE turns ADD COLUMN parent_memory_id TEXT")
+            # Verify and migrate all missing columns dynamically
+            cursor = await conn.execute("PRAGMA table_info(turns)")
+            existing_columns = {row[1] for row in await cursor.fetchall()}
+
+            expected_columns = {
+                "tenant_id": "TEXT NOT NULL DEFAULT 'default'",
+                "user_id": "TEXT",
+                "device_id": "TEXT",
+                "scope": "TEXT NOT NULL DEFAULT 'episodic'",
+                "domain": "TEXT",
+                "metadata": "TEXT",
+                "vector_clock": "TEXT",
+                "authority_score": "INTEGER DEFAULT 50",
+                "parent_memory_id": "TEXT",
+            }
+
+            for col, definition in expected_columns.items():
+                if col not in existing_columns:
+                    logger.info("Migrating episodic turns table: adding missing column '%s'", col)
+                    await conn.execute(f"ALTER TABLE turns ADD COLUMN {col} {definition}")
+
             await conn.commit()
         logger.debug("Initialized EpisodicMemory at %s", self.db_path)
 

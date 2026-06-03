@@ -145,14 +145,14 @@ class DurableBus(MessageBus):
             self._seen_ids = set(list(self._seen_ids)[-5000:])
 
         # Journal
-        self._journal(msg_id, topic, message)
+        await asyncio.to_thread(self._journal, msg_id, topic, message)
 
         # Publish
         try:
             await self._inner.publish(topic, message)
-            self._mark_delivered(msg_id)
+            await asyncio.to_thread(self._mark_delivered, msg_id)
         except Exception as e:
-            self._mark_failed(msg_id, str(e))
+            await asyncio.to_thread(self._mark_failed, msg_id, str(e))
             logger.exception("Publish failed for %s, will retry: %s", msg_id, e)
 
     async def subscribe(

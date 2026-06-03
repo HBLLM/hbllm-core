@@ -207,8 +207,16 @@ class LearnerNode(Node):
             await self._broadcast_complete()
             return None
 
-        # Empty the queue so we don't double train if it crashes midway
-        await asyncio.to_thread(os.remove, self.queue_path)
+        # Rename the file to temporary staging path so we don't lose data if crashed
+        temp_queue_path = self.queue_path + ".tmp"
+
+        def _stage_file():
+            if os.path.exists(self.queue_path):
+                if os.path.exists(temp_queue_path):
+                    os.remove(temp_queue_path)
+                os.rename(self.queue_path, temp_queue_path)
+
+        await asyncio.to_thread(_stage_file)
 
         if self.training_task and not self.training_task.done():
             logger.warning("[LearnerNode] DPO already running.")
@@ -346,16 +354,54 @@ class LearnerNode(Node):
             if self._training_steps > 0 and self._lora_injected:
                 self._save_adapter()
 
+        temp_queue_path = self.queue_path + ".tmp"
         try:
             await asyncio.to_thread(_train)
             logger.info(
                 "LearnerNode DPO training complete (%d total steps). Broadcasting update...",
                 self._training_steps,
             )
+
+            def _clean_backup():
+                p = Path(temp_queue_path)
+                if p.exists():
+                    p.unlink()
+
+            await asyncio.to_thread(_clean_backup)
             await self._broadcast_complete()
 
         except Exception as e:
             logger.error("LearnerNode background DPO task failed: %s", e)
+
+            def _restore_queue() -> None:
+                try:
+                    temp_p = Path(temp_queue_path)
+                    if temp_p.exists():
+                        with temp_p.open() as f:
+                            temp_data = json.load(f)
+                        curr_data = []
+                        p = Path(self.queue_path)
+                        if p.exists():
+                            try:
+                                with p.open() as f:
+                                    curr_data = json.load(f)
+                                    if not isinstance(curr_data, list):
+                                        curr_data = []
+                            except Exception:
+                                curr_data = []
+                        merged = temp_data + curr_data
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        with p.open("w") as f:
+                            json.dump(merged, f)
+                        temp_p.unlink()
+                        logger.info(
+                            "Restored %d DPO pairs from backup due to training failure",
+                            len(temp_data),
+                        )
+                except Exception as ex:
+                    logger.error("Failed to restore DPO queue backup: %s", ex)
+
+            await asyncio.to_thread(_restore_queue)
             await self._broadcast_complete()
 
     async def _broadcast_complete(self) -> None:
