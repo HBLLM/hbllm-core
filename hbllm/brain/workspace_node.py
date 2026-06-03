@@ -315,7 +315,7 @@ class WorkspaceNode(Node):
                     correlation_id=corr_id,
                 )
                 await self.bus.publish("module.evaluate", broadcast_msg)
-            return None
+                return None
 
         # Check if expected thoughts have arrived and resolve early if possible
         await self._check_early_consensus(corr_id)

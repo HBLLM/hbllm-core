@@ -422,6 +422,7 @@ class RouterNode(Node):
             )
             # [Option 3] Hybrid Fallback Mechanism
             from hbllm.brain.factory import _is_slow_cpu
+
             if confidence < self.fallback_threshold and self.llm and not _is_slow_cpu():
                 logger.info(
                     "Vector confidence %.3f < fallback threshold %.3f. Triggering SLM fallback...",
@@ -466,7 +467,12 @@ class RouterNode(Node):
             )
             self.unknown_counts["general_unknown"] += 1
 
-            if self.unknown_counts["general_unknown"] >= self.spawn_trigger_count:
+            from hbllm.brain.factory import _is_slow_cpu
+
+            if (
+                self.unknown_counts["general_unknown"] >= self.spawn_trigger_count
+                and not _is_slow_cpu()
+            ):
                 logger.warning("Unknown threshold reached! Triggering Module Spawning...")
 
                 # Extract topic name via LLM
