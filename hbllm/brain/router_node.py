@@ -210,6 +210,7 @@ class RouterNode(Node):
         # Pre-bootstrap centroids async on startup to avoid first-query delay
         if self.use_vectors:
             import asyncio
+
             loop = asyncio.get_running_loop()
             loop.run_in_executor(None, self._bootstrap_centroids)
 
@@ -236,8 +237,30 @@ class RouterNode(Node):
         # Quick lookup for common greetings/smalltalk to bypass slow ML inference on CPU
         text_stripped = text.lower().strip("?!. ")
         is_smalltalk_greeting = text_stripped in {
-            "hi", "hello", "hey", "hola", "greetings", "good morning",
-            "good afternoon", "good evening", "howdy", "sup", "yo", "what's up"
+            "hi",
+            "hello",
+            "hey",
+            "hola",
+            "greetings",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "howdy",
+            "sup",
+            "yo",
+            "what's up",
+            "what is your name",
+            "what's your name",
+            "whats your name",
+            "who are you",
+            "what are you",
+            "who is this",
+            "who's this",
+            "whos this",
+            "how are you",
+            "how's it going",
+            "hows it going",
+            "how is it going",
         }
 
         # 1. Similarity-Based Classification
@@ -260,19 +283,28 @@ class RouterNode(Node):
                 "sup": "Not much! How can I help you today?",
                 "yo": "Yo! How can I help you today?",
                 "what's up": "Not much! How can I help you today?",
+                "what is your name": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "what's your name": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "whats your name": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "who are you": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "what are you": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "who is this": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "who's this": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "whos this": "I am HBLLM, a modular cognitive AI architecture. How can I help you today?",
+                "how are you": "I'm doing well, thank you for asking! How can I assist you today?",
+                "how's it going": "Everything is running smoothly! How can I help you today?",
+                "hows it going": "Everything is running smoothly! How can I help you today?",
+                "how is it going": "Everything is running smoothly! How can I help you today?",
             }
             response_text = greeting_map.get(text_stripped, "Hello! How can I help you today?")
-            
+
             response_msg = Message(
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
                 tenant_id=message.tenant_id,
                 session_id=message.session_id,
                 topic="sensory.output",
-                payload={
-                    "text": response_text,
-                    "source": "smalltalk_router_fastpath"
-                },
+                payload={"text": response_text, "source": "smalltalk_router_fastpath"},
                 correlation_id=message.correlation_id or message.id,
             )
             await self.bus.publish("sensory.output", response_msg)
@@ -280,6 +312,7 @@ class RouterNode(Node):
         elif self.use_vectors:
             if not self._bootstrapped:
                 import asyncio
+
                 # If background bootstrap is running, wait for it to complete
                 while self._bootstrapping:
                     await asyncio.sleep(0.5)
