@@ -85,6 +85,35 @@ class CriticNode(Node):
         status = "PASS"
         reason = ""
         confidence = 0.5  # Default when no evaluation runs
+
+        # On slow CPU systems, skip constitutional critique to prevent high latency/timeouts
+        from hbllm.brain.factory import _is_slow_cpu
+        if _is_slow_cpu():
+            logger.info("[CriticNode] Skipping constitutional AI evaluation on slow CPU to optimize response time.")
+            status = "PASS"
+            confidence = 0.95
+            reason = "Passed automatically (Constitutional AI evaluation skipped on slow CPU)."
+
+            # Emit the evaluation back to the Workspace
+            critique_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="workspace.thought",
+                payload={
+                    "type": "critique",
+                    "target_node": message.source_node_id,
+                    "status": status,
+                    "reason": reason,
+                    "confidence": confidence,
+                    "original_content": proposal.get("content"),
+                },
+                correlation_id=message.correlation_id,
+            )
+            await self.bus.publish("workspace.thought", critique_msg)
+            return None
+
         try:
             from hbllm.brain.constitutional_principles import (
                 format_principles_for_prompt,

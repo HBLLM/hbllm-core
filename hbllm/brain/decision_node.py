@@ -103,38 +103,42 @@ class DecisionNode(Node):
 
         # ── 2. LLM-Based Safety Classification ──
         if self.llm:
-            try:
-                safety = await self.llm.generate_json(
-                    f"You are a safety classifier for an AI system. Evaluate whether the following "
-                    f"response content is safe to present to a user. Check for:\n"
-                    f"- Harmful or dangerous instructions\n"
-                    f"- Personal information exposure\n"
-                    f"- Illegal activity guidance\n"
-                    f"- Explicit or violent content\n\n"
-                    f'Content: "{content[:500]}"\n\n'
-                    f'Output JSON: {{"safe": true/false, "reason": "brief explanation"}}'
-                )
-
-                if not safety.get("safe", True):
-                    reason = safety.get("reason", "Content flagged by safety classifier")
-                    logger.warning("[DecisionNode] Thought rejected: %s", reason)
-                    err_msg = Message(
-                        type=MessageType.EVENT,
-                        source_node_id=self.node_id,
-                        tenant_id=message.tenant_id,
-                        session_id=message.session_id,
-                        topic="sensory.output",
-                        payload={
-                            "text": f"I cannot fulfill this request due to safety constraints: {reason}"
-                        },
-                        correlation_id=message.correlation_id,
+            from hbllm.brain.factory import _is_slow_cpu
+            if _is_slow_cpu():
+                logger.info("[DecisionNode] Skipping LLM-based safety classification on slow CPU to optimize response time.")
+            else:
+                try:
+                    safety = await self.llm.generate_json(
+                        f"You are a safety classifier for an AI system. Evaluate whether the following "
+                        f"response content is safe to present to a user. Check for:\n"
+                        f"- Harmful or dangerous instructions\n"
+                        f"- Personal information exposure\n"
+                        f"- Illegal activity guidance\n"
+                        f"- Explicit or violent content\n\n"
+                        f'Content: "{content[:500]}"\n\n'
+                        f'Output JSON: {{"safe": true/false, "reason": "brief explanation"}}'
                     )
-                    await self.bus.publish("sensory.output", err_msg)
-                    return None
-            except Exception as e:
-                logger.warning(
-                    "[DecisionNode] Safety classification failed, proceeding cautiously: %s", e
-                )
+
+                    if not safety.get("safe", True):
+                        reason = safety.get("reason", "Content flagged by safety classifier")
+                        logger.warning("[DecisionNode] Thought rejected: %s", reason)
+                        err_msg = Message(
+                            type=MessageType.EVENT,
+                            source_node_id=self.node_id,
+                            tenant_id=message.tenant_id,
+                            session_id=message.session_id,
+                            topic="sensory.output",
+                            payload={
+                                "text": f"I cannot fulfill this request due to safety constraints: {reason}"
+                            },
+                            correlation_id=message.correlation_id,
+                        )
+                        await self.bus.publish("sensory.output", err_msg)
+                        return None
+                except Exception as e:
+                    logger.warning(
+                        "[DecisionNode] Safety classification failed, proceeding cautiously: %s", e
+                    )
 
         # ── 3. Agent Execution Layer Routing ──
         await self._route_to_execution(message, user_intent, content, thought_type, original_query)

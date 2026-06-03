@@ -421,7 +421,8 @@ class RouterNode(Node):
                 confidence,
             )
             # [Option 3] Hybrid Fallback Mechanism
-            if confidence < self.fallback_threshold and self.llm:
+            from hbllm.brain.factory import _is_slow_cpu
+            if confidence < self.fallback_threshold and self.llm and not _is_slow_cpu():
                 logger.info(
                     "Vector confidence %.3f < fallback threshold %.3f. Triggering SLM fallback...",
                     confidence,
@@ -445,6 +446,12 @@ class RouterNode(Node):
                     logger.warning(
                         "SLM fallback also failed with low confidence (%.3f)", slm_confidence
                     )
+            elif confidence < self.fallback_threshold and self.llm and _is_slow_cpu():
+                logger.info(
+                    "Vector confidence %.3f < fallback threshold %.3f. Skipping SLM fallback on slow CPU.",
+                    confidence,
+                    self.fallback_threshold,
+                )
 
         elif self.llm:
             # Fallback to LLM if vector encoder isn't available at all
