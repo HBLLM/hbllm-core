@@ -1,0 +1,20 @@
+# Governance policies for Weather Plugin
+
+policies:
+  - name: "weather_no_safety_claims"
+    type: "transform"
+    action: "append"
+    content: "\n\n🌤️ **Disclaimer**: Weather data is from Open-Meteo's models and may not reflect exact local conditions. For severe weather or safety-critical decisions, always check official meteorological services."
+    pattern: "(severe|storm|hurricane|tornado|flood|lightning|extreme|dangerous).*(weather|condition|forecast)"
+    description: "Add safety disclaimer when discussing severe weather events"
+    severity: "medium"
+    priority: -10
+
+  - name: "weather_health_disclaimer"
+    type: "transform"
+    action: "append"
+    content: "\n\n⚕️ **Health Note**: Weather-based health advice is general guidance only. Consult a healthcare professional for medical decisions."
+    pattern: "(heat.?stroke|hypothermia|allergy|asthma|UV|sun.?burn|frostbite)"
+    description: "Add health disclaimer when weather intersects with health advice"
+    severity: "low"
+    priority: -10

@@ -1,0 +1,35 @@
+# Prompt templates for Weather Plugin
+
+prompts:
+  weather_report: |
+    Present the weather for {location}:
+    
+    Temperature: {temperature}°C (feels like {feels_like}°C)
+    Conditions: {conditions}
+    Humidity: {humidity}%
+    Wind: {wind_speed} km/h from {wind_direction}
+    UV Index: {uv_index}
+    
+    Present this conversationally — as if you're a helpful assistant giving a morning weather brief.
+    Include practical advice (e.g., "bring an umbrella" or "wear sunscreen").
+
+  weather_comparison: |
+    Compare weather between locations:
+    
+    {comparison_data}
+    
+    Present as a clean comparison highlighting:
+    - Temperature differences
+    - Contrasting conditions
+    - Which location is more comfortable right now
+
+  outfit_suggestion: |
+    Suggest an outfit based on today's weather in {location}:
+    
+    Temperature: {temperature}°C
+    Conditions: {conditions}
+    Wind: {wind_speed} km/h
+    Rain chance: {precipitation}mm
+    UV Index: {uv_index}
+    
+    Give practical, friendly clothing advice. Consider both comfort and weather protection.

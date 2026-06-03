@@ -1,0 +1,48 @@
+# Skills for Weather Plugin
+
+skills:
+  - name: "Get Current Weather"
+    category: "information"
+    description: "Fetch and present current weather conditions for a location"
+    steps:
+      - "Geocode the location name to coordinates"
+      - "Fetch current weather from Open-Meteo API"
+      - "Parse temperature, conditions, wind, humidity, UV"
+      - "Present as a conversational weather brief with practical advice"
+    tools_used: ["weather_current"]
+    success_criteria: "Accurate weather data presented with actionable advice"
+    examples:
+      - input: "What's the weather in Colombo?"
+        steps: ["Geocode: Colombo → 6.93°N, 79.85°E", "API fetch current conditions", "Parse: 31°C, partly cloudy, humidity 78%, UV 9", "Present: 'It's 31°C and partly cloudy in Colombo. UV index is high — wear sunscreen if heading out.'"]
+      - input: "Is it raining in London right now?"
+        steps: ["Geocode: London → 51.51°N, -0.13°W", "API fetch current", "Parse: 12°C, light rain, wind 15km/h", "Present: 'Yes, it's currently raining lightly in London at 12°C. Bring an umbrella.'"]
+
+  - name: "Compare Weather"
+    category: "information"
+    description: "Compare current weather conditions between two or more locations"
+    steps:
+      - "Geocode all requested locations"
+      - "Fetch current weather for each location"
+      - "Build comparison table"
+      - "Highlight significant differences and recommend the more comfortable option"
+    tools_used: ["weather_current"]
+    success_criteria: "Clear side-by-side comparison with a recommendation"
+    examples:
+      - input: "Compare weather in Tokyo vs New York"
+        steps: ["Geocode both cities", "Fetch weather for each", "Tokyo: 22°C sunny vs NYC: 15°C cloudy", "Present comparison, note: 'Tokyo is warmer and sunnier today'"]
+
+  - name: "Outfit Suggestion"
+    category: "lifestyle"
+    description: "Suggest appropriate clothing based on current or forecasted weather"
+    steps:
+      - "Get weather conditions for the user's location"
+      - "Consider temperature, rain chance, wind, and UV"
+      - "Generate practical clothing recommendation"
+      - "Account for indoor/outdoor activities if mentioned"
+    tools_used: ["weather_current"]
+    success_criteria: "Practical, weather-appropriate outfit advice"
+    examples:
+      - input: "What should I wear today? I'm in Sydney"
+        steps: ["Fetch: Sydney 26°C, sunny, UV 8, 5% rain", "Warm + high UV = light clothes + sun protection", "Suggest: 'Light breathable clothes, sunglasses, and sunscreen. No need for a jacket.'"]
+      - input: "Heading out for a run in Boston, what should I wear?"
+        steps: ["Fetch: Boston 5°C, overcast, wind 20km/h", "Cold + windy = layers", "Suggest: 'Running tights, long-sleeve base layer, windbreaker, gloves. It's quite chilly with wind.'"]
