@@ -220,6 +220,8 @@ class ServiceRegistry:
     async def has_permission(self, node_id: str, scope: str) -> bool:
         """Check if a node has permission to access a specific scope."""
         parent_id = node_id.split(".")[0]
+        if parent_id in ("api_server", "system"):
+            return True
         info = self._nodes.get(parent_id)
         if not info:
             return False
