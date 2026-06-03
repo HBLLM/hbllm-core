@@ -317,7 +317,92 @@ class WorkspaceNode(Node):
                 await self.bus.publish("module.evaluate", broadcast_msg)
             return None
 
+        # Check if expected thoughts have arrived and resolve early if possible
+        await self._check_early_consensus(corr_id)
+
         return None
+
+    async def _check_early_consensus(self, corr_id: str) -> None:
+        """
+        Check if the expected thoughts have arrived and resolve early if possible.
+        """
+        board = self.blackboards.get(corr_id)
+        if not board or bool(board.get("resolved", False)):
+            return
+
+        domain_hint = board["original_query"].get("domain_hint")
+        if isinstance(domain_hint, dict):
+            expected_domain = (
+                max(domain_hint.items(), key=lambda x: x[1])[0] if domain_hint else "general"
+            )
+        elif isinstance(domain_hint, str) and domain_hint:
+            expected_domain = domain_hint
+        else:
+            expected_domain = "general"
+
+        base_expected_domain = expected_domain.split(".")[0]
+        expected_thought_type = f"intuition_{base_expected_domain}"
+
+        # Check if we have received the expected domain thought
+        has_expected_thought = any(
+            t.get("type") == expected_thought_type for t in board["thoughts"]
+        )
+
+        if not has_expected_thought:
+            return
+
+        # Check if the Critic Node is active
+        critic_active = False
+        from hbllm.network.node import _ACTIVE_NODES
+
+        for node_id, node in list(_ACTIVE_NODES.items()):
+            if "critic" in node_id or (
+                hasattr(node, "capabilities") and "critic" in node.capabilities
+            ):
+                critic_active = True
+                break
+
+        # Check if we have a critique for this specific thought
+        has_critique = any(t.get("type") == "critique" for t in board["thoughts"])
+
+        from hbllm.brain.factory import _is_slow_cpu
+
+        is_slow = _is_slow_cpu()
+
+        # Determine if we should wait for planner
+        planner_active = False
+        if not is_slow:
+            for node_id, node in list(_ACTIVE_NODES.items()):
+                if "planner" in node_id or (
+                    hasattr(node, "capabilities") and "planner" in node.capabilities
+                ):
+                    planner_active = True
+                    break
+
+        intent = board["original_query"].get("intent", "general_knowledge")
+        is_fast_path = board["original_query"].get("is_fast_path", False)
+        expect_planner = (
+            not is_slow
+            and planner_active
+            and not is_fast_path
+            and intent not in ("general_knowledge", "smalltalk")
+        )
+
+        has_planner_thought = any(t.get("type") == "graph_of_thoughts" for t in board["thoughts"])
+
+        critic_ready = is_slow or not critic_active or has_critique
+        planner_ready = not expect_planner or has_planner_thought
+
+        if critic_ready and planner_ready:
+            logger.info(
+                "[WorkspaceNode] Resolving early consensus for %s: expected thought '%s' received (slow_cpu=%s, critic_active=%s, has_critique=%s)",
+                corr_id,
+                expected_thought_type,
+                is_slow,
+                critic_active,
+                has_critique,
+            )
+            await self._finalize_board(corr_id)
 
     def _spawn_watcher(self, corr_id: str) -> None:
         """Create a tracked consensus watcher task with automatic cleanup."""
