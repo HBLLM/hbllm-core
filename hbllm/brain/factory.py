@@ -518,10 +518,11 @@ class BrainFactory:
         else:
             dev = device
 
-        # Load model
+        # Force float32 precision on CPU to avoid slow bfloat16/float16 emulation overhead
         from hbllm.model.model_loader import load_model
 
-        model = load_model(source=model_size, device=dev)
+        dtype_to_use = "float32" if dev == "cpu" else "auto"
+        model = load_model(source=model_size, device=dev, dtype=dtype_to_use)
 
         tokenizer = getattr(model, "tokenizer", None)
         if tokenizer is None:
@@ -763,6 +764,26 @@ class BrainFactory:
 
             nodes.append(LogicNode(node_id="logic", llm=llm))
             logger.info("LogicNode wired (Z3 theorem prover)")
+
+        # Register and start default DomainModuleNode instances if using LocalProvider
+        if (
+            type(llm_provider).__name__ == "LocalProvider"
+            and getattr(llm_provider, "_model", None) is not None
+        ):
+            from hbllm.modules.base_module import DomainModuleNode
+
+            model = llm_provider._model
+            tokenizer = llm_provider._tokenizer
+            for domain in ["general", "coding", "math"]:
+                nodes.append(
+                    DomainModuleNode(
+                        node_id=f"domain_{domain}",
+                        domain_name=domain,
+                        model=model,
+                        tokenizer=tokenizer,
+                        lora_state_dict=None,
+                    )
+                )
 
         # 4. Start all nodes on the bus
         for node in nodes:
@@ -1190,6 +1211,27 @@ class BrainFactory:
             await _register_node(registry, lnode)
             await lnode.start(message_bus)
             nodes.append(lnode)
+
+        # Register and start default DomainModuleNode instances if using LocalProvider
+        if (
+            type(llm_provider).__name__ == "LocalProvider"
+            and getattr(llm_provider, "_model", None) is not None
+        ):
+            from hbllm.modules.base_module import DomainModuleNode
+
+            model = llm_provider._model
+            tokenizer = llm_provider._tokenizer
+            for domain in ["general", "coding", "math"]:
+                dnode = DomainModuleNode(
+                    node_id=f"domain_{domain}",
+                    domain_name=domain,
+                    model=model,
+                    tokenizer=tokenizer,
+                    lora_state_dict=None,
+                )
+                await _register_node(registry, dnode)
+                await dnode.start(message_bus)
+                nodes.append(dnode)
 
         # Create pipeline
         pipeline_config = PipelineConfig(

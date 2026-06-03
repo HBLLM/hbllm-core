@@ -64,7 +64,7 @@ class DecisionNode(Node):
         user_intent = original_query.get("intent", "answer")
         thought_type = thought.get("type", "intuition")
         confidence = thought.get("confidence", 0.0)
-        content = thought.get("content", "")
+        content = thought.get("content") or ""
 
         logger.info(
             "[DecisionNode] Evaluating %s thought (Confidence: %s)...", thought_type, confidence

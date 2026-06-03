@@ -111,50 +111,61 @@ class RouterNode(Node):
         # [Improvement 8] Persistent Centroids — survive restarts
         self._centroids_path: Path | None = None  # Set by factory
 
+        self._bootstrapped = False
+        self._bootstrapping = False
+
     def _bootstrap_centroids(self) -> None:
         """Bootstrap domain embeddings from the DomainRegistry."""
-        if not self.use_vectors:
+        if not self.use_vectors or self._bootstrapped:
             return
 
-        if self.encoder is None:
-            import onnxruntime as ort  # type: ignore[import-untyped]
-            from huggingface_hub import hf_hub_download
-            from tokenizers import Tokenizer  # type: ignore[import-untyped]
+        self._bootstrapping = True
+        try:
+            if self.encoder is None:
+                import onnxruntime as ort  # type: ignore[import-untyped]
+                from huggingface_hub import hf_hub_download
+                from tokenizers import Tokenizer  # type: ignore[import-untyped]
 
-            logger.info("Initializing ONNX Edge Vector Model (paraphrase-MiniLM-L3-v2)")
+                logger.info("Initializing ONNX Edge Vector Model (paraphrase-MiniLM-L3-v2)")
 
-            # Using INT8 quantized model for extreme low-memory footprint (~15MB RAM)
-            model_path = hf_hub_download(
-                repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx"
-            )
-            tokenizer_path = hf_hub_download(
-                repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json"
-            )
+                # Using INT8 quantized model for extreme low-memory footprint (~15MB RAM)
+                model_path = hf_hub_download(
+                    repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="onnx/model_quantized.onnx"
+                )
+                tokenizer_path = hf_hub_download(
+                    repo_id="Xenova/paraphrase-MiniLM-L3-v2", filename="tokenizer.json"
+                )
 
-            self._tokenizer = Tokenizer.from_file(tokenizer_path)
-            if self._tokenizer:
-                self._tokenizer.enable_truncation(max_length=128)
-                self._tokenizer.enable_padding(length=128)
+                self._tokenizer = Tokenizer.from_file(tokenizer_path)
+                if self._tokenizer:
+                    self._tokenizer.enable_truncation(max_length=128)
+                    self._tokenizer.enable_padding(length=128)
 
-            # Start strict C++ CPU Execution Provider
-            self.encoder = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-            if self.encoder:
-                self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
+                # Start strict C++ CPU Execution Provider
+                self.encoder = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+                if self.encoder:
+                    self._onnx_inputs = [i.name for i in self.encoder.get_inputs()]
 
-        # Bootstrap from registry centroid texts
-        for domain_name, centroid_text in self.domain_registry.centroid_texts().items():
-            emb = self._encode_text(centroid_text)
-            self.domain_centroids[domain_name] = emb
+            # Bootstrap from registry centroid texts
+            for domain_name, centroid_text in self.domain_registry.centroid_texts().items():
+                emb = self._encode_text(centroid_text)
+                self.domain_centroids[domain_name] = emb
 
-        # Bootstrap intents
-        for intent in self.known_intents:
-            # e.g. "code_generation" -> "code generation"
-            text = intent.replace("_", " ")
-            emb = self._encode_text(text)
-            self.intent_centroids[intent] = emb
+            # Bootstrap intents
+            for intent in self.known_intents:
+                # e.g. "code_generation" -> "code generation"
+                text = intent.replace("_", " ")
+                emb = self._encode_text(text)
+                self.intent_centroids[intent] = emb
 
-        # [Improvement 8] Load persisted centroids (overwrite bootstrapped ones)
-        self._load_centroids()
+            # [Improvement 8] Load persisted centroids (overwrite bootstrapped ones)
+            self._load_centroids()
+            self._bootstrapped = True
+            logger.info("Successfully bootstrapped ONNX vector router centroids")
+        except Exception as e:
+            logger.error("Failed to bootstrap router centroids: %s", e)
+        finally:
+            self._bootstrapping = False
 
     def _encode_text(self, text: str) -> Any:
         """Encodes text using the ONNX lightweight CPU architecture natively."""
@@ -196,6 +207,12 @@ class RouterNode(Node):
         # Phase 12: Swarm integration
         await self.bus.subscribe("system.swarm.transfer", self._handle_swarm_transfer)
 
+        # Pre-bootstrap centroids async on startup to avoid first-query delay
+        if self.use_vectors:
+            import asyncio
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, self._bootstrap_centroids)
+
     async def on_stop(self) -> None:
         """Save learned centroids on shutdown."""
         logger.info("Stopping RouterNode")
@@ -216,14 +233,59 @@ class RouterNode(Node):
 
         self.last_activity_time = time.time()
 
+        # Quick lookup for common greetings/smalltalk to bypass slow ML inference on CPU
+        text_stripped = text.lower().strip("?!. ")
+        is_smalltalk_greeting = text_stripped in {
+            "hi", "hello", "hey", "hola", "greetings", "good morning",
+            "good afternoon", "good evening", "howdy", "sup", "yo", "what's up"
+        }
+
         # 1. Similarity-Based Classification
         target_domain: Any = self.default_domain
         confidence = 0.5
         intent = "general_knowledge"
 
-        if self.use_vectors:
-            if not self.domain_centroids:
-                self._bootstrap_centroids()
+        if is_smalltalk_greeting:
+            logger.info("Router quick smalltalk match for query: '%s'", text)
+            greeting_map = {
+                "hi": "Hello! How can I help you today?",
+                "hello": "Hello! How can I help you today?",
+                "hey": "Hey there! How can I help you today?",
+                "hola": "¡Hola! ¿En qué puedo ayudarte hoy?",
+                "greetings": "Greetings! How can I help you today?",
+                "good morning": "Good morning! How can I help you today?",
+                "good afternoon": "Good afternoon! How can I help you today?",
+                "good evening": "Good evening! How can I help you today?",
+                "howdy": "Howdy! How can I help you today?",
+                "sup": "Not much! How can I help you today?",
+                "yo": "Yo! How can I help you today?",
+                "what's up": "Not much! How can I help you today?",
+            }
+            response_text = greeting_map.get(text_stripped, "Hello! How can I help you today?")
+            
+            response_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                topic="sensory.output",
+                payload={
+                    "text": response_text,
+                    "source": "smalltalk_router_fastpath"
+                },
+                correlation_id=message.correlation_id or message.id,
+            )
+            await self.bus.publish("sensory.output", response_msg)
+            return None
+        elif self.use_vectors:
+            if not self._bootstrapped:
+                import asyncio
+                # If background bootstrap is running, wait for it to complete
+                while self._bootstrapping:
+                    await asyncio.sleep(0.5)
+                # If still not bootstrapped, run it synchronously as fallback
+                if not self._bootstrapped:
+                    self._bootstrap_centroids()
 
             import numpy as np
 

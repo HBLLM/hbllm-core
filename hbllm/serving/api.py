@@ -173,16 +173,20 @@ async def _boot_brain(
     await bus.start()
 
     # 2. Delegate cognitive loading to unified factory
-    from hbllm.brain.factory import BrainConfig, BrainFactory
+    from hbllm.brain.factory import BrainConfig, BrainFactory, _is_slow_cpu
+
+    is_slow = _is_slow_cpu()
+    if is_slow:
+        logger.info("Slow CPU-only system detected. Dynamically disabling perception, fuzzy logic, and symbolic logic nodes to save RAM/CPU.")
 
     # We use create_local for overarching OSS usage by default
     config = BrainConfig(
         inject_memory=True,
         inject_identity=True,
         inject_curiosity=True,
-        inject_perception=True,
-        inject_fuzzy_logic=True,
-        inject_symbolic_logic=True,
+        inject_perception=not is_slow,
+        inject_fuzzy_logic=not is_slow,
+        inject_symbolic_logic=not is_slow,
     )
 
     provider_name = os.getenv("HBLLM_PROVIDER")

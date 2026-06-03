@@ -112,8 +112,15 @@ class WorkspaceNode(Node):
                 await self._send_error_fallback(cid, "System overloaded. Please try again.")
 
         # Initialize a new Blackboard session for this specific User Query
+        from hbllm.brain.factory import _is_slow_cpu
+
+        is_slow = _is_slow_cpu()
+
         is_fast_path = payload.get("is_fast_path", False)
-        thinking_time = 0.5 if is_fast_path else self._thinking_deadline
+        # On slow CPU systems, give fast-path nodes 15s (instead of 0.5s) to submit their thoughts
+        thinking_time = (15.0 if is_slow else 0.5) if is_fast_path else self._thinking_deadline
+        # Scale absolute deadline: 60s for CPU fast-path, 300s for CPU complex path
+        abs_deadline = (60.0 if is_slow else 5.0) if is_fast_path else (300.0 if is_slow else 120.0)
 
         self.blackboards[correlation_id] = {
             "tenant_id": message.tenant_id,
@@ -122,11 +129,10 @@ class WorkspaceNode(Node):
             "thoughts": [],
             "start_time": time.monotonic(),
             "last_update": time.monotonic(),
-            # Fast-path uses 0.5s deadline; complex uses full thinking deadline
             "deadline": time.monotonic() + thinking_time,
             "resolved": False,
             "turn_count": 0,  # Track internal monologue turns
-            "absolute_deadline": time.monotonic() + (5.0 if is_fast_path else 120.0),
+            "absolute_deadline": time.monotonic() + abs_deadline,
             "is_fast_path": is_fast_path,
         }
 
@@ -364,8 +370,20 @@ class WorkspaceNode(Node):
         # ── Inject memory context before consensus ──
         await self._inject_memory_context(corr_id, board)
 
-        # Select highest confidence thought
-        best_thought = max(board["thoughts"], key=lambda t: float(t["confidence"]))
+        # Select highest confidence thought (ignoring feedback/metadata thoughts like critiques or simulations)
+        candidate_thoughts = [
+            t for t in board["thoughts"] if t.get("type") not in ("critique", "simulation_result")
+        ]
+
+        if not candidate_thoughts:
+            logger.warning("Workspace deadline expired with ZERO candidate thoughts generated.")
+            await self._send_error_fallback(
+                corr_id,
+                "I wasn't able to form a clear response to that. Could you rephrase your question?",
+            )
+            return
+
+        best_thought = max(candidate_thoughts, key=lambda t: float(t["confidence"]))
         logger.info(
             "Workspace reached Consensus! Selecting %s thought from %s",
             best_thought["type"],
