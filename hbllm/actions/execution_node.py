@@ -286,7 +286,9 @@ class ExecutionNode(Node):
             try:
                 # Build a restricted environment: strip PATH and dangerous env vars
                 safe_env = {
-                    "PATH": "",
+                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+                    if not sys.platform.startswith("win")
+                    else "",
                     "PYTHONDONTWRITEBYTECODE": "1",
                     "PYTHONHASHSEED": "0",
                 }

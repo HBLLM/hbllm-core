@@ -31,8 +31,8 @@ class TrustInterceptor:
         Intercepts message and verifies trust.
         Returns message if valid, None if invalid/untrusted.
         """
-        # System messages bypass trust checks (for now)
-        if message.source_node_id == "system":
+        # System and API server messages bypass trust checks (for now)
+        if message.source_node_id in ("system", "api_server"):
             return message
 
         # 1. Replay Protection
