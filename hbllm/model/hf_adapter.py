@@ -154,9 +154,9 @@ class HuggingFaceModelAdapter(nn.Module):
 
         resolved_dtype = _resolve_dtype(dtype)
         if resolved_dtype != "auto":
-            model_kwargs["torch_dtype"] = resolved_dtype
+            model_kwargs["dtype"] = resolved_dtype
         else:
-            model_kwargs["torch_dtype"] = "auto"
+            model_kwargs["dtype"] = "auto"
 
         if load_in_4bit:
             try:
