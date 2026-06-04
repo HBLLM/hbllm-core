@@ -2,8 +2,9 @@
 
 import pytest
 import torch
-from hbllm.serving.provider import LocalProvider
+
 from hbllm.model.tokenizer import HBLLMTokenizer
+from hbllm.serving.provider import LocalProvider
 
 
 class MockModel:

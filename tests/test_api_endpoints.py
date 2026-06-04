@@ -133,4 +133,3 @@ async def test_studio_routes_registered():
     ]
     for ep in expected_studio_routes:
         assert ep in routes, f"Missing studio route: {ep}"
-

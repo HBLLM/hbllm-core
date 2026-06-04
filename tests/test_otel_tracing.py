@@ -195,8 +195,9 @@ class TestSafeStdoutWrapper:
         assert captured.out == "hello"
 
     def test_write_no_exception_on_closed_stream(self, monkeypatch):
-        from hbllm.network.tracing import SafeStdoutWrapper
         import sys
+
+        from hbllm.network.tracing import SafeStdoutWrapper
 
         # Mock a closed stream
         class ClosedStream:

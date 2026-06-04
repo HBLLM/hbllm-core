@@ -388,11 +388,7 @@ class WorkspaceNode(Node):
         # Planner: on CPU it runs a shallow GoT for complex queries, so we wait
         # for it unless it's a simple/fast-path intent (where it returns None)
         _simple_intents = {"general_knowledge", "smalltalk"}
-        expect_planner = (
-            planner_active
-            and not is_fast_path
-            and intent not in _simple_intents
-        )
+        expect_planner = planner_active and not is_fast_path and intent not in _simple_intents
 
         has_planner_thought = any(t.get("type") == "graph_of_thoughts" for t in board["thoughts"])
 

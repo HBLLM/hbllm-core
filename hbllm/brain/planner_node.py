@@ -870,4 +870,3 @@ class PlannerNode(Node):
             if is_slow:
                 self.branch_factor = saved_branch
                 self.max_depth = saved_depth
-

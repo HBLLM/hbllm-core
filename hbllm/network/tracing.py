@@ -38,6 +38,7 @@ class SafeStdoutWrapper:
     def write(self, data: str) -> int:
         try:
             import sys
+
             if sys.stdout is not None:
                 sys.stdout.write(data)
         except (ValueError, OSError, AttributeError):
@@ -47,6 +48,7 @@ class SafeStdoutWrapper:
     def flush(self) -> None:
         try:
             import sys
+
             if sys.stdout is not None:
                 sys.stdout.flush()
         except (ValueError, OSError, AttributeError):

@@ -102,9 +102,10 @@ def load_model(
 def _load_native(size: str, device: str, dtype: str = "auto") -> nn.Module:
     """Load a native HBLLM model by preset size."""
     import torch
+
     from hbllm.model.config import get_config
-    from hbllm.model.transformer import HBLLMForCausalLM
     from hbllm.model.hf_adapter import _resolve_dtype
+    from hbllm.model.transformer import HBLLMForCausalLM
 
     config = get_config(size)
     model = HBLLMForCausalLM(config)
@@ -134,7 +135,9 @@ def _load_native(size: str, device: str, dtype: str = "auto") -> nn.Module:
         import os
 
         # Default to 1 thread on low-core/slow CPU systems where synchronization overhead is high
-        default_threads = 1 if multiprocessing.cpu_count() <= 4 else max(1, multiprocessing.cpu_count() // 2)
+        default_threads = (
+            1 if multiprocessing.cpu_count() <= 4 else max(1, multiprocessing.cpu_count() // 2)
+        )
         num_threads = int(os.getenv("HBLLM_NUM_THREADS", str(default_threads)))
         torch.set_num_threads(num_threads)
         try:
@@ -146,6 +149,7 @@ def _load_native(size: str, device: str, dtype: str = "auto") -> nn.Module:
         # BetterTransformer if supported/optimum installed
         try:
             from optimum.bettertransformer import BetterTransformer
+
             model = BetterTransformer.transform(model)
             logger.info("BetterTransformer enabled for native CPU inference")
         except ImportError:

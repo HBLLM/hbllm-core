@@ -5,7 +5,7 @@ Provides real-time weather data lookup via the Open-Meteo API (free, no key requ
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

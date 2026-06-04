@@ -297,22 +297,30 @@ class DecisionNode(Node):
 
         # ── Harmful content patterns ──
         _harmful_patterns = [
-            (r"\b(?:how\s+to\s+(?:make|build|create)\s+(?:a\s+)?(?:bomb|explosive|weapon))",
-             "Dangerous weapon/explosive instructions detected"),
-            (r"\b(?:synthesiz(?:e|ing)\s+(?:drugs?|meth|fentanyl|poison))",
-             "Drug synthesis instructions detected"),
-            (r"\b(?:hack(?:ing)?\s+(?:into|someone|password|account))",
-             "Unauthorized access instructions detected"),
-            (r"\b(?:(?:kill|murder|assassinate|harm)\s+(?:someone|a\s+person|yourself|people))",
-             "Violence instructions detected"),
-            (r"\b(?:credit\s*card\s*(?:number|info)|social\s*security\s*(?:number|ssn))\b",
-             "Personal information exposure detected"),
-            (r"\b(?:child\s+(?:porn|abuse|exploitation))\b",
-             "CSAM content detected"),
+            (
+                r"\b(?:how\s+to\s+(?:make|build|create)\s+(?:a\s+)?(?:bomb|explosive|weapon))",
+                "Dangerous weapon/explosive instructions detected",
+            ),
+            (
+                r"\b(?:synthesiz(?:e|ing)\s+(?:drugs?|meth|fentanyl|poison))",
+                "Drug synthesis instructions detected",
+            ),
+            (
+                r"\b(?:hack(?:ing)?\s+(?:into|someone|password|account))",
+                "Unauthorized access instructions detected",
+            ),
+            (
+                r"\b(?:(?:kill|murder|assassinate|harm)\s+(?:someone|a\s+person|yourself|people))",
+                "Violence instructions detected",
+            ),
+            (
+                r"\b(?:credit\s*card\s*(?:number|info)|social\s*security\s*(?:number|ssn))\b",
+                "Personal information exposure detected",
+            ),
+            (r"\b(?:child\s+(?:porn|abuse|exploitation))\b", "CSAM content detected"),
         ]
         for pattern, reason in _harmful_patterns:
             if re.search(pattern, content_lower):
                 return (True, reason)
 
         return (False, "")
-

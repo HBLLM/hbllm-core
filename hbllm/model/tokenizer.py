@@ -225,9 +225,7 @@ class HBLLMTokenizer:
 
         return ids
 
-    def decode(
-        self, ids: list[int], skip_special_tokens: bool = True, **kwargs: Any
-    ) -> str:
+    def decode(self, ids: list[int], skip_special_tokens: bool = True, **kwargs: Any) -> str:
         """Decode token IDs to text."""
         # Filter out special tokens
         if skip_special_tokens:

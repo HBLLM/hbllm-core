@@ -177,7 +177,9 @@ async def _boot_brain(
 
     is_slow = _is_slow_cpu()
     if is_slow:
-        logger.info("Slow CPU-only system detected. Dynamically disabling perception, fuzzy logic, and symbolic logic nodes to save RAM/CPU.")
+        logger.info(
+            "Slow CPU-only system detected. Dynamically disabling perception, fuzzy logic, and symbolic logic nodes to save RAM/CPU."
+        )
 
     # We use create_local for overarching OSS usage by default
     config = BrainConfig(

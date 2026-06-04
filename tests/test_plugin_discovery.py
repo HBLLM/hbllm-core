@@ -39,7 +39,8 @@ async def test_plugins() -> None:
 
 
 async def test_v2_plugin_integration() -> None:
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
+
     from hbllm.network.plugin_manager import PluginManager
 
     # Create mock brain and plugin manager
@@ -50,8 +51,9 @@ async def test_v2_plugin_integration() -> None:
     mock_bpm.unload_bundle = AsyncMock()
     mock_brain.plugin_manager = mock_bpm
 
-    import tempfile
     import json
+    import tempfile
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         plugin_dir = tmp_path / "test_v2_plugin"
@@ -61,14 +63,14 @@ async def test_v2_plugin_integration() -> None:
             "name": "test_v2_plugin",
             "version": "1.2.3",
             "description": "Test v2 bundle description",
-            "manifest_version": 2
+            "manifest_version": 2,
         }
         manifest_file.write_text(json.dumps(manifest_data))
 
         # Discover
         pm = PluginManager(plugin_dirs=[tmp_path], brain=mock_brain)
         discovered = pm.discover()
-        
+
         assert len(discovered) == 1
         info = discovered[0]
         assert info.name == "test_v2_plugin"
@@ -94,7 +96,7 @@ async def test_v2_plugin_integration() -> None:
         # Simulate deleting the plugin directory (uninstall)
         manifest_file.unlink()
         plugin_dir.rmdir()
-        
+
         # Discover again
         discovered_after = pm.discover()
         assert len(discovered_after) == 0

@@ -521,6 +521,7 @@ class BrainFactory:
         # Force float32 precision on CPU to avoid slow emulation overhead,
         # but allow bfloat16 on macOS (Darwin) for HuggingFace models as it is highly accelerated and 8x faster.
         import platform
+
         from hbllm.model.model_loader import load_model
 
         is_native_preset = model_size.lower().strip() in {"125m", "500m", "1.5b", "7b", "13b"}
@@ -535,8 +536,9 @@ class BrainFactory:
 
         tokenizer = getattr(model, "tokenizer", None)
         if tokenizer is None:
-            from hbllm.model.tokenizer import HBLLMTokenizer
             import os
+
+            from hbllm.model.tokenizer import HBLLMTokenizer
 
             vocab_paths = [
                 "data/training/vocab.json",

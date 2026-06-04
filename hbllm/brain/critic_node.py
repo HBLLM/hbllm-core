@@ -272,4 +272,3 @@ class CriticNode(Node):
             "Passed rule-based constitutional check (lightweight CPU mode).",
             0.85,
         )
-

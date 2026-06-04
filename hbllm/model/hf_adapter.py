@@ -207,7 +207,9 @@ class HuggingFaceModelAdapter(nn.Module):
             import os
 
             # Default to 1 thread on low-core/slow CPU systems where synchronization overhead is high
-            default_threads = 1 if multiprocessing.cpu_count() <= 4 else max(1, multiprocessing.cpu_count() // 2)
+            default_threads = (
+                1 if multiprocessing.cpu_count() <= 4 else max(1, multiprocessing.cpu_count() // 2)
+            )
             num_threads = int(os.getenv("HBLLM_NUM_THREADS", str(default_threads)))
             torch.set_num_threads(num_threads)
             torch.set_num_interop_threads(max(1, num_threads // 2))
