@@ -32,6 +32,27 @@ _tracer: Any | None = None
 _meter: Any | None = None
 
 
+class SafeStdoutWrapper:
+    """Wrapper around sys.stdout to prevent ValueError when writing to a closed stream during shutdown."""
+
+    def write(self, data: str) -> int:
+        try:
+            import sys
+            if sys.stdout is not None:
+                sys.stdout.write(data)
+        except (ValueError, OSError, AttributeError):
+            pass
+        return len(data)
+
+    def flush(self) -> None:
+        try:
+            import sys
+            if sys.stdout is not None:
+                sys.stdout.flush()
+        except (ValueError, OSError, AttributeError):
+            pass
+
+
 def _init_otel() -> None:
     """Lazily initialize OpenTelemetry SDK."""
     global _tracer, _meter
@@ -69,7 +90,7 @@ def _init_otel() -> None:
         except ImportError:
             from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 
-            exporter = ConsoleSpanExporter()
+            exporter = ConsoleSpanExporter(out=SafeStdoutWrapper())
 
         tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(tracer_provider)

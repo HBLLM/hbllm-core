@@ -172,10 +172,47 @@ class TestProviderTracing:
         assert "trace_span" in source
 
     def test_local_provider_has_tracing(self):
-        """LocalProvider.generate should reference trace_span."""
+        """LocalProvider should reference trace_span in its generation path."""
         import inspect
 
         from hbllm.serving.provider import LocalProvider
 
-        source = inspect.getsource(LocalProvider.generate)
+        # trace_span is in _generate_sync, which generate() delegates to
+        source = inspect.getsource(LocalProvider._generate_sync)
         assert "trace_span" in source
+
+
+class TestSafeStdoutWrapper:
+    """Tests for the SafeStdoutWrapper."""
+
+    def test_write_to_normal_stdout(self, capsys):
+        from hbllm.network.tracing import SafeStdoutWrapper
+
+        wrapper = SafeStdoutWrapper()
+        wrapper.write("hello")
+        wrapper.flush()
+        captured = capsys.readouterr()
+        assert captured.out == "hello"
+
+    def test_write_no_exception_on_closed_stream(self, monkeypatch):
+        from hbllm.network.tracing import SafeStdoutWrapper
+        import sys
+
+        # Mock a closed stream
+        class ClosedStream:
+            @property
+            def closed(self):
+                return True
+
+            def write(self, data):
+                raise ValueError("I/O operation on closed file.")
+
+            def flush(self):
+                raise ValueError("I/O operation on closed file.")
+
+        monkeypatch.setattr(sys, "stdout", ClosedStream())
+        wrapper = SafeStdoutWrapper()
+
+        # These should not raise ValueError
+        assert wrapper.write("test") == 4
+        wrapper.flush()
