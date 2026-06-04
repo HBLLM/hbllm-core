@@ -71,7 +71,7 @@ def load_model(
 
     # Check if it's a native HBLLM preset
     if source_lower in _NATIVE_PRESETS:
-        return _load_native(source_lower, device)
+        return _load_native(source_lower, device, dtype)
 
     # Check if it's a local path
     if Path(source).is_dir():
@@ -99,19 +99,69 @@ def load_model(
     )
 
 
-def _load_native(size: str, device: str) -> nn.Module:
+def _load_native(size: str, device: str, dtype: str = "auto") -> nn.Module:
     """Load a native HBLLM model by preset size."""
+    import torch
     from hbllm.model.config import get_config
     from hbllm.model.transformer import HBLLMForCausalLM
+    from hbllm.model.hf_adapter import _resolve_dtype
 
     config = get_config(size)
     model = HBLLMForCausalLM(config)
 
-    if device != "auto" and device != "cpu":
-        model = model.to(device)
+    # Resolve device
+    if device == "auto":
+        if torch.cuda.is_available():
+            actual_device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            actual_device = "mps"
+        else:
+            actual_device = "cpu"
+    else:
+        actual_device = device
+
+    if actual_device != "cpu":
+        model = model.to(actual_device)
+
+    # Cast to resolved dtype
+    resolved_dtype = _resolve_dtype(dtype)
+    if resolved_dtype != "auto" and isinstance(resolved_dtype, torch.dtype):
+        model = model.to(dtype=resolved_dtype)
+
+    # CPU optimizations
+    if actual_device == "cpu":
+        import multiprocessing
+        import os
+
+        # Default to 1 thread on low-core/slow CPU systems where synchronization overhead is high
+        default_threads = 1 if multiprocessing.cpu_count() <= 4 else max(1, multiprocessing.cpu_count() // 2)
+        num_threads = int(os.getenv("HBLLM_NUM_THREADS", str(default_threads)))
+        torch.set_num_threads(num_threads)
+        try:
+            torch.set_num_interop_threads(max(1, num_threads // 2))
+        except RuntimeError:
+            pass  # Already set in this process; safe to ignore
+        logger.info("Native CPU inference: using %d threads", num_threads)
+
+        # BetterTransformer if supported/optimum installed
+        try:
+            from optimum.bettertransformer import BetterTransformer
+            model = BetterTransformer.transform(model)
+            logger.info("BetterTransformer enabled for native CPU inference")
+        except ImportError:
+            logger.debug("optimum not installed, skipping BetterTransformer")
+        except Exception as e:
+            logger.debug("BetterTransformer not supported for native model: %s", e)
+
+        model.eval()
 
     param_count = sum(p.numel() for p in model.parameters())
-    logger.info("Loaded native HBLLM model '%s': %.1fM parameters", size, param_count / 1e6)
+    logger.info(
+        "Loaded native HBLLM model '%s': %.1fM parameters on %s",
+        size,
+        param_count / 1e6,
+        actual_device,
+    )
 
     return model
 
