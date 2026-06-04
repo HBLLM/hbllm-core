@@ -518,17 +518,41 @@ class BrainFactory:
         else:
             dev = device
 
-        # Force float32 precision on CPU to avoid slow bfloat16/float16 emulation overhead
+        # Force float32 precision on CPU to avoid slow emulation overhead,
+        # but allow bfloat16 on macOS (Darwin) for HuggingFace models as it is highly accelerated and 8x faster.
+        import platform
         from hbllm.model.model_loader import load_model
 
-        dtype_to_use = "float32" if dev == "cpu" else "auto"
+        is_native_preset = model_size.lower().strip() in {"125m", "500m", "1.5b", "7b", "13b"}
+        if dev == "cpu":
+            if platform.system() == "Darwin" and not is_native_preset:
+                dtype_to_use = "bfloat16"
+            else:
+                dtype_to_use = "float32"
+        else:
+            dtype_to_use = "auto"
         model = load_model(source=model_size, device=dev, dtype=dtype_to_use)
 
         tokenizer = getattr(model, "tokenizer", None)
         if tokenizer is None:
             from hbllm.model.tokenizer import HBLLMTokenizer
+            import os
 
-            tokenizer = HBLLMTokenizer()
+            vocab_paths = [
+                "data/training/vocab.json",
+                "core/data/training/vocab.json",
+                "../data/training/vocab.json",
+            ]
+            loaded = False
+            for p in vocab_paths:
+                if os.path.exists(p):
+                    logger.info("Loading native tokenizer from %s", p)
+                    tokenizer = HBLLMTokenizer.from_vocab(p)
+                    loaded = True
+                    break
+            if not loaded:
+                logger.warning("Native vocab not found, using fallback tokenizer")
+                tokenizer = HBLLMTokenizer()
 
         is_native = type(model).__name__ == "HBLLMForCausalLM"
 

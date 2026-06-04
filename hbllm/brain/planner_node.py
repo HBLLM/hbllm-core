@@ -381,8 +381,12 @@ class PlannerNode(Node):
         # Run until depth budget or time budget exhausted
         import time
 
-        deadline = time.time() + 15.0  # 15 seconds thinking budget per query
-        max_iterations = 20
+        from hbllm.brain.factory import _is_slow_cpu
+
+        _cpu_mode = _is_slow_cpu()
+        # Reduced budget on CPU: 5s / 3 iterations vs 15s / 20 iterations on GPU
+        deadline = time.time() + (5.0 if _cpu_mode else 15.0)
+        max_iterations = 3 if _cpu_mode else 20
         iteration = 0
 
         while time.time() < deadline and iteration < max_iterations:
@@ -777,15 +781,34 @@ class PlannerNode(Node):
 
         from hbllm.brain.factory import _is_slow_cpu
 
-        if is_fast_path or intent in _skip_intents or _is_slow_cpu():
+        is_slow = _is_slow_cpu()
+
+        # Always skip for fast-path and simple intents (regardless of hardware)
+        if is_fast_path or intent in _skip_intents:
             logger.debug(
-                "[GoT] Skipping GoT for %s query (intent=%s, fast_path=%s, slow_cpu=%s)",
+                "[GoT] Skipping GoT for %s query (intent=%s, fast_path=%s)",
                 "fast-path" if is_fast_path else "simple",
                 intent,
                 is_fast_path,
-                _is_slow_cpu(),
             )
             return None
+
+        # On CPU: run shallow GoT with reduced parameters for complex queries
+        if is_slow:
+            logger.info(
+                "[GoT] Running shallow GoT on CPU for complex query (intent=%s)",
+                intent,
+            )
+            saved_branch = self.branch_factor
+            saved_depth = self.max_depth
+            try:
+                self.branch_factor = 1
+                self.max_depth = 1
+                # Fall through to the GoT execution below
+            except Exception:
+                self.branch_factor = saved_branch
+                self.max_depth = saved_depth
+                raise
 
         # Check cache first
         cache_key = self._cache_key(text)
@@ -799,45 +822,52 @@ class PlannerNode(Node):
             else:
                 self._response_cache.pop(cache_key, None)
 
-        if cached_content is None:
-            # Create a synthetic planning request
-            plan_msg = Message(
-                type=MessageType.QUERY,
+        try:
+            if cached_content is None:
+                # Create a synthetic planning request
+                plan_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    tenant_id=message.tenant_id,
+                    session_id=message.session_id,
+                    topic="planner.decompose",
+                    payload={"text": text},
+                    correlation_id=message.correlation_id or message.id,
+                )
+
+                result = await self.handle_message(plan_msg)
+                if result is None:
+                    return None
+                cached_content = result.payload.get("text", "")
+
+            if not cached_content:
+                return None
+
+            # Post as a workspace thought
+            thought_msg = Message(
+                type=MessageType.EVENT,
                 source_node_id=self.node_id,
                 tenant_id=message.tenant_id,
                 session_id=message.session_id,
-                topic="planner.decompose",
-                payload={"text": text},
+                topic="workspace.thought",
+                payload={
+                    "type": "graph_of_thoughts",
+                    "confidence": 0.8,  # GoT thoughts get a confidence boost
+                    "content": cached_content,
+                    "metadata": {
+                        "source": "got_planner",
+                        "branch_factor": self.branch_factor,
+                        "max_depth": self.max_depth,
+                    },
+                },
                 correlation_id=message.correlation_id or message.id,
             )
-
-            result = await self.handle_message(plan_msg)
-            if result is None:
-                return None
-            cached_content = result.payload.get("text", "")
-
-        if not cached_content:
+            await self.bus.publish("workspace.thought", thought_msg)
+            logger.debug("[GoT] Posted workspace thought for: %s", text[:60])
             return None
+        finally:
+            # Restore original parameters if we were in shallow CPU mode
+            if is_slow:
+                self.branch_factor = saved_branch
+                self.max_depth = saved_depth
 
-        # Post as a workspace thought
-        thought_msg = Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            tenant_id=message.tenant_id,
-            session_id=message.session_id,
-            topic="workspace.thought",
-            payload={
-                "type": "graph_of_thoughts",
-                "confidence": 0.8,  # GoT thoughts get a confidence boost
-                "content": cached_content,
-                "metadata": {
-                    "source": "got_planner",
-                    "branch_factor": self.branch_factor,
-                    "max_depth": self.max_depth,
-                },
-            },
-            correlation_id=message.correlation_id or message.id,
-        )
-        await self.bus.publish("workspace.thought", thought_msg)
-        logger.debug("[GoT] Posted workspace thought for: %s", text[:60])
-        return None

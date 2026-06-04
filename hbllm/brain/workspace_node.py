@@ -117,8 +117,8 @@ class WorkspaceNode(Node):
         is_slow = _is_slow_cpu()
 
         is_fast_path = payload.get("is_fast_path", False)
-        # On slow CPU systems, give fast-path nodes 15s (instead of 0.5s) to submit their thoughts
-        thinking_time = (15.0 if is_slow else 0.5) if is_fast_path else self._thinking_deadline
+        # On slow CPU systems, give fast-path nodes 20s to accommodate lightweight critic/planner
+        thinking_time = (20.0 if is_slow else 0.5) if is_fast_path else self._thinking_deadline
         # Scale absolute deadline: 60s for CPU fast-path, 300s for CPU complex path
         abs_deadline = (60.0 if is_slow else 5.0) if is_fast_path else (300.0 if is_slow else 120.0)
 
@@ -369,29 +369,48 @@ class WorkspaceNode(Node):
 
         is_slow = _is_slow_cpu()
 
-        # Determine if we should wait for planner
+        # Determine if we should wait for planner (now runs on all hardware)
         planner_active = False
-        if not is_slow:
-            for node_id, node in list(_ACTIVE_NODES.items()):
-                if "planner" in node_id or (
-                    hasattr(node, "capabilities") and "planner" in node.capabilities
-                ):
-                    planner_active = True
-                    break
+        for node_id, node in list(_ACTIVE_NODES.items()):
+            if "planner" in node_id or (
+                hasattr(node, "capabilities") and "planner" in node.capabilities
+            ):
+                planner_active = True
+                break
 
         intent = board["original_query"].get("intent", "general_knowledge")
         is_fast_path = board["original_query"].get("is_fast_path", False)
+
+        # On CPU, the critic now runs a fast rule-based check, so always wait for it
+        # (it's effectively instant and doesn't require LLM inference)
+        critic_ready = not critic_active or has_critique
+
+        # Planner: on CPU it runs a shallow GoT for complex queries, so we wait
+        # for it unless it's a simple/fast-path intent (where it returns None)
+        _simple_intents = {"general_knowledge", "smalltalk"}
         expect_planner = (
-            not is_slow
-            and planner_active
+            planner_active
             and not is_fast_path
-            and intent not in ("general_knowledge", "smalltalk")
+            and intent not in _simple_intents
         )
 
         has_planner_thought = any(t.get("type") == "graph_of_thoughts" for t in board["thoughts"])
 
-        critic_ready = is_slow or not critic_active or has_critique
         planner_ready = not expect_planner or has_planner_thought
+
+        logger.info(
+            "[DEBUG_CONSENSUS] %s: expected_type=%s has_expected=%s is_slow=%s critic_active=%s has_critique=%s expect_planner=%s has_planner=%s critic_ready=%s planner_ready=%s",
+            corr_id,
+            expected_thought_type,
+            has_expected_thought,
+            is_slow,
+            critic_active,
+            has_critique,
+            expect_planner,
+            has_planner_thought,
+            critic_ready,
+            planner_ready,
+        )
 
         if critic_ready and planner_ready:
             logger.info(

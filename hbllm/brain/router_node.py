@@ -420,10 +420,8 @@ class RouterNode(Node):
                 target_domain,
                 confidence,
             )
-            # [Option 3] Hybrid Fallback Mechanism
-            from hbllm.brain.factory import _is_slow_cpu
-
-            if confidence < self.fallback_threshold and self.llm and not _is_slow_cpu():
+            # [Option 3] Hybrid Fallback Mechanism — runs on all hardware
+            if confidence < self.fallback_threshold and self.llm:
                 logger.info(
                     "Vector confidence %.3f < fallback threshold %.3f. Triggering SLM fallback...",
                     confidence,
@@ -447,18 +445,12 @@ class RouterNode(Node):
                     logger.warning(
                         "SLM fallback also failed with low confidence (%.3f)", slm_confidence
                     )
-            elif confidence < self.fallback_threshold and self.llm and _is_slow_cpu():
-                logger.info(
-                    "Vector confidence %.3f < fallback threshold %.3f. Skipping SLM fallback on slow CPU.",
-                    confidence,
-                    self.fallback_threshold,
-                )
 
         elif self.llm:
             # Fallback to LLM if vector encoder isn't available at all
             target_domain, intent, confidence = await self._fallback_llm_classification(text)
 
-        # 2. Self-Expansion Logic
+        # 2. Self-Expansion Logic — runs on all hardware
         if confidence < self.unknown_threshold:
             logger.warning(
                 "Router confidence too low (%.2f) for query: '%s'. Marking unknown.",
@@ -467,19 +459,16 @@ class RouterNode(Node):
             )
             self.unknown_counts["general_unknown"] += 1
 
-            from hbllm.brain.factory import _is_slow_cpu
-
-            if (
-                self.unknown_counts["general_unknown"] >= self.spawn_trigger_count
-                and not _is_slow_cpu()
-            ):
+            if self.unknown_counts["general_unknown"] >= self.spawn_trigger_count:
                 logger.warning("Unknown threshold reached! Triggering Module Spawning...")
 
-                # Extract topic name via LLM
+                # Extract topic name via LLM (skip on CPU to avoid latency)
+                from hbllm.brain.factory import _is_slow_cpu
+
                 topic_guess = (
                     target_domain if target_domain != self.default_domain else "new_domain"
                 )
-                if self.llm:
+                if self.llm and not _is_slow_cpu():
                     topic_result = await self.llm.generate_json(
                         f"What academic or technical domain does this query belong to? "
                         f'Query: "{text}"\n'
