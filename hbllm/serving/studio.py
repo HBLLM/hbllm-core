@@ -608,11 +608,11 @@ async def studio_memory() -> Any:
         try:
             sem = mem.semantic_db
             result["semantic"] = {
-                "total_entries": len(sem._entries) if hasattr(sem, "_entries") else 0,
+                "total_entries": len(sem.documents) if hasattr(sem, "documents") else 0,
                 "priority_entries": sum(
                     1
-                    for e in (sem._entries if hasattr(sem, "_entries") else [])
-                    if getattr(e, "is_priority", False)
+                    for e in (sem.documents.values() if hasattr(sem, "documents") else [])
+                    if e.get("metadata", {}).get("is_priority", False)
                 ),
                 "status": "active",
             }
@@ -688,7 +688,7 @@ async def studio_knowledge() -> Any:
                     "type": r.relation_type,
                     "weight": r.weight,
                 }
-                for r in list(kg._relations)[:200]
+                for r in list(kg._relations.values())[:200]
             ]
 
     return result

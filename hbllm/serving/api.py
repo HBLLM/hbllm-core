@@ -43,9 +43,7 @@ class ChatRequest(BaseModel):
     tenant_id: str = Field(default="", description="Unique tenant identifier (overridden by JWT)")
     user_id: str = Field(default="", description="User identifier (overridden by JWT)")
     device_id: str = Field(default="", description="Device identifier (overridden by JWT)")
-    session_id: str = Field(
-        default_factory=lambda: str(uuid.uuid4()), description="Session identifier"
-    )
+    session_id: str = Field(default="default_session", description="Session identifier")
     text: str = Field(..., min_length=1, description="User message text")
     model_size: str = Field(default="125M", description="Model size to use")
     provider: str | None = Field(
@@ -889,10 +887,27 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
 
     # Build messages
     messages = []
-    system_content = request.system_prompt or (
-        "You are HBLLM, an advanced AI assistant powered by a modular cognitive architecture. "
-        "Be helpful, concise, and accurate."
-    )
+
+    bus = _state.get("bus")
+    system_content = request.system_prompt
+    if not system_content:
+        if bus:
+            try:
+                from hbllm.brain.prompt_helper import get_dynamic_system_prompt
+
+                system_content = await get_dynamic_system_prompt(
+                    bus, request.tenant_id, "api_server"
+                )
+            except Exception as e:
+                logger.warning("Failed to generate dynamic system prompt: %s", e)
+        if not system_content:
+            system_content = (
+                "You are Sentra, an advanced cognitive AI assistant powered by the HBLLM modular architecture. "
+                "You have access to various cognitive and tool modules, including a BrowserNode (which allows "
+                "you to browse the web and search for real-time information), an ExecutionNode (for running "
+                "Python code in a secure sandbox), a LogicNode (powered by Z3 for symbolic reasoning), and a "
+                "persistent memory node. Be helpful, precise, and accurate."
+            )
 
     # ── RAG: inject relevant knowledge base context ──
     rag_context = ""
@@ -921,7 +936,37 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
         except Exception as e:
             logger.warning("RAG retrieval failed: %s", e)
 
+    # ── Retrieve and format conversation history ──
+    history = []
+    if bus:
+        try:
+            hist_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id="api_server",
+                tenant_id=request.tenant_id,
+                session_id=request.session_id,
+                topic="memory.retrieve_recent",
+                payload={"session_id": request.session_id, "limit": 30},
+                correlation_id=correlation_id,
+            )
+            hist_resp = await bus.request("memory.retrieve_recent", hist_msg, timeout=3.0)
+            history = hist_resp.payload.get("turns", [])
+        except Exception as e:
+            logger.warning("Failed to retrieve conversation history: %s", e)
+
+    # Exclude the current query if it has already been saved to the DB
+    if history and history[-1].get("role") == "user" and history[-1].get("content") == request.text:
+        history = history[:-1]
+
+    # Filter to only user/assistant turns
+    filtered_history = [t for t in history if t.get("role") in ("user", "assistant")]
+
     messages.append({"role": "system", "content": system_content})
+
+    # Append history turns in chronological order
+    for turn in filtered_history:
+        messages.append({"role": turn.get("role"), "content": turn.get("content", "")})
+
     messages.append({"role": "user", "content": sanitize_input(request.text)})
 
     # Apply policy engine if available
@@ -1005,6 +1050,39 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     )
     await bus.publish("memory.store", memory_msg)
 
+    # ── Retrieve and format conversation history ──
+    history = []
+    try:
+        hist_msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="api_server",
+            tenant_id=request.tenant_id,
+            session_id=request.session_id,
+            topic="memory.retrieve_recent",
+            payload={"session_id": request.session_id, "limit": 30},
+            correlation_id=correlation_id,
+        )
+        hist_resp = await bus.request("memory.retrieve_recent", hist_msg, timeout=3.0)
+        history = hist_resp.payload.get("turns", [])
+    except Exception as e:
+        logger.warning("Failed to retrieve conversation history: %s", e)
+
+    # Exclude the current query if it has already been saved to the DB
+    if history and history[-1].get("role") == "user" and history[-1].get("content") == request.text:
+        history = history[:-1]
+
+    # Filter to only user/assistant turns
+    filtered_history = [t for t in history if t.get("role") in ("user", "assistant")]
+
+    prompt_text = request.text
+    if filtered_history:
+        flattened_history = ""
+        for turn in filtered_history:
+            role = turn.get("role", "user").capitalize()
+            content = turn.get("content", "")
+            flattened_history += f"{role}: {content}\n\n"
+        prompt_text = flattened_history + f"User: {request.text}\n\nAssistant:"
+
     # Send to router
     query_msg = Message(
         type=MessageType.QUERY,
@@ -1014,7 +1092,7 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
         device_id=request.device_id,
         session_id=request.session_id,
         topic="router.query",
-        payload=QueryPayload(text=sanitize_input(request.text)).model_dump(),
+        payload=QueryPayload(text=sanitize_input(prompt_text)).model_dump(),
         correlation_id=correlation_id,
     )
     await bus.publish("router.query", query_msg)

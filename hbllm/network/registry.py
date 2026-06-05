@@ -54,6 +54,7 @@ class ServiceRegistry:
         if self._bus:
             # Lifecycle listener
             await self._bus.subscribe("node.lifecycle", self._handle_lifecycle_message)
+            await self._bus.subscribe("registry.discover", self._handle_discover_query)
 
         logger.info("ServiceRegistry started (interval=%.1fs)", self._health_check_interval)
 
@@ -64,6 +65,27 @@ class ServiceRegistry:
             logger.info("[Registry] Received dying gasp from node: %s", node_id)
             await self.deregister(node_id)
         return None
+
+    async def _handle_discover_query(self, message: Message) -> Message | None:
+        """Handle incoming discovery request."""
+        try:
+            node_type_str = message.payload.get("node_type")
+            node_type = NodeType(node_type_str) if node_type_str else None
+            capability = message.payload.get("capability")
+            healthy_only = message.payload.get("healthy_only", True)
+            device_tier_str = message.payload.get("device_tier")
+            device_tier = DeviceTier(device_tier_str) if device_tier_str else None
+
+            nodes = await self.discover(
+                node_type=node_type,
+                capability=capability,
+                healthy_only=healthy_only,
+                device_tier=device_tier,
+            )
+            return message.create_response({"nodes": [n.model_dump() for n in nodes]})
+        except Exception as e:
+            logger.exception("Registry discovery query failed: %s", e)
+            return message.create_error(str(e))
 
     async def stop(self) -> None:
         """Stop the registry."""

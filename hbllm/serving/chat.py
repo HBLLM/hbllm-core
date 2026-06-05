@@ -473,15 +473,33 @@ async def async_main(args: argparse.Namespace) -> None:
             history = hist_resp.payload.get("turns", [])
 
             # 3. Send query to Router
-            # The Router will now push it to the `WorkspaceNode` instead of
-            # fulfilling it directly, so we just publish and let the async output listener handle it.
+            # Exclude the current query if it has already been saved to the DB
+            if (
+                history
+                and history[-1].get("role") == "user"
+                and history[-1].get("content") == user_input
+            ):
+                history = history[:-1]
+
+            # Filter to only user/assistant turns
+            filtered_history = [t for t in history if t.get("role") in ("user", "assistant")]
+
+            prompt_text = user_input
+            if filtered_history:
+                flattened_history = ""
+                for turn in filtered_history:
+                    role = turn.get("role", "user").capitalize()
+                    content = turn.get("content", "")
+                    flattened_history += f"{role}: {content}\n\n"
+                prompt_text = flattened_history + f"User: {user_input}\n\nAssistant:"
+
             query_msg = Message(
                 type=MessageType.QUERY,
                 source_node_id=user_node_id,
                 tenant_id="local_user",
                 session_id=session_id,
                 topic="router.query",
-                payload=QueryPayload(text=user_input, context=history).model_dump(),
+                payload=QueryPayload(text=prompt_text).model_dump(),
             )
 
             await bus.publish("router.query", query_msg)

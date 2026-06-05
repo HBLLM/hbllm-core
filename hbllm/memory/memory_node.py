@@ -57,17 +57,24 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         )
         self.registry = registry
         # Ensure the memory directory exists
-        db_path = Path(db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        if str(db_path) != ":memory:":
+            db_path = Path(db_path).resolve()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            db_path = Path(db_path)
 
         self.db = EpisodicMemory(db_path)
-        self.procedural_db = ProceduralMemory(db_path.parent / "procedural_memory.db")
-        self.value_db = ValueMemory(db_path.parent / "value_memory.db")
+        self.procedural_db = ProceduralMemory(
+            db_path.parent / "procedural_memory.db" if str(db_path) != ":memory:" else ":memory:"
+        )
+        self.value_db = ValueMemory(
+            db_path.parent / "value_memory.db" if str(db_path) != ":memory:" else ":memory:"
+        )
 
         # Load SemanticMemory + KnowledgeGraph from disk if previously persisted
         # Skip for in-memory db paths (e.g. ":memory:" used in tests)
         self._persistence_dir = db_path.parent
-        _use_persistence = str(db_path) != ":memory:" and str(self._persistence_dir) != "."
+        _use_persistence = str(db_path) != ":memory:"
         semantic_dir = self._persistence_dir / "semantic"
         kg_path = self._persistence_dir / "knowledge_graph.json"
         self.semantic_db = (
@@ -325,9 +332,13 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
     async def stats(self, tenant_id: str) -> dict[str, Any]:
         kg = self._get_kg(tenant_id)
+        try:
+            episodic_count = await self.db.get_turn_count(tenant_id)
+        except Exception:
+            episodic_count = 0
         return {
-            "episodic": {"count": 0},
-            "semantic": {"count": len(self.semantic_db._data)},
+            "episodic": {"count": episodic_count},
+            "semantic": {"count": self.semantic_db.count},
             "knowledge_graph": {"entities": kg.entity_count},
         }
 

@@ -47,7 +47,13 @@ class ProviderLLM:
     def __init__(
         self,
         provider: LLMProvider,
-        system_prompt: str = "You are a helpful AI assistant.",
+        system_prompt: str = (
+            "You are Sentra, an advanced cognitive AI assistant powered by the HBLLM modular architecture. "
+            "You have access to various cognitive and tool modules, including a BrowserNode (which allows "
+            "you to browse the web and search for real-time information), an ExecutionNode (for running "
+            "Python code in a secure sandbox), a LogicNode (powered by Z3 for symbolic reasoning), and a "
+            "persistent memory node. Be helpful, precise, and accurate."
+        ),
     ):
         self.provider = provider
         self.system_prompt = system_prompt
@@ -88,6 +94,7 @@ class ProviderLLM:
         prompt: str,
         max_tokens: int = 256,
         temperature: float = 0.7,
+        system_prompt: str | None = None,
     ) -> str:
         """
         Generate free-form text from the provider.
@@ -96,11 +103,12 @@ class ProviderLLM:
             prompt: The input prompt string.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
+            system_prompt: Optional override for the system prompt.
 
         Returns:
             Generated text string.
         """
-        messages = self._build_messages(prompt)
+        messages = self._build_messages(prompt, system_override=system_prompt)
         response = await self.provider.generate(
             messages,
             max_tokens=max_tokens,
@@ -147,6 +155,7 @@ class ProviderLLM:
         prompt: str,
         max_tokens: int = 256,
         temperature: float = 0.7,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
         """
         Stream response tokens from the provider.
@@ -154,7 +163,7 @@ class ProviderLLM:
         Yields tokens one at a time. Falls back to yielding the full
         response as a single chunk if the provider doesn't support streaming.
         """
-        messages = self._build_messages(prompt)
+        messages = self._build_messages(prompt, system_override=system_prompt)
         async for token in self.provider.stream(
             messages,
             max_tokens=max_tokens,

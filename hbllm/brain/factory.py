@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -155,13 +156,19 @@ class BrainConfig:
     stream_timeout: float = field(default_factory=_default_stream_timeout)
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
-    data_dir: str = "data"
+    data_dir: str = field(default_factory=lambda: os.environ.get("HBLLM_DATA_DIR", "data"))
     inject_sil: bool = True  # Skill Intelligence Layer
     inject_failure_analyzer: bool = True  # Automatic skill repair
     inject_shell: bool = True  # Host shell command executor node
     require_shell_approval: bool = True  # Require manual shell approval
     domain_registry: Any | None = None  # Hierarchical domain registry
-    system_prompt: str = "You are a helpful AI assistant."
+    system_prompt: str = (
+        "You are Sentra, an advanced cognitive AI assistant powered by the HBLLM modular architecture. "
+        "You have access to various cognitive and tool modules, including a BrowserNode (which allows "
+        "you to browse the web and search for real-time information), an ExecutionNode (for running "
+        "Python code in a secure sandbox), a LogicNode (powered by Z3 for symbolic reasoning), and a "
+        "persistent memory node. Be helpful, precise, and accurate."
+    )
 
     # ── Mode selection ────────────────────────────────────────────
     use_composites: bool = True  # Use consolidated composite nodes (v4)
@@ -722,7 +729,7 @@ class BrainFactory:
             DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
             WorkspaceNode(node_id="workspace"),
             # Memory (episodic + semantic + procedural + value + knowledge graph)
-            MemoryNode(node_id="memory"),
+            MemoryNode(node_id="memory", db_path=Path(cfg.data_dir) / "working_memory.db"),
             # Experience & meta-cognitive layer
             ExperienceNode(node_id="experience", llm=llm),
             MetaReasoningNode(node_id="meta"),
@@ -792,7 +799,7 @@ class BrainFactory:
             nodes.append(LogicNode(node_id="logic", llm=llm))
             logger.info("LogicNode wired (Z3 theorem prover)")
 
-        # Register and start default DomainModuleNode instances if using LocalProvider
+        # Register and start default DomainModuleNode instances
         if (
             type(llm_provider).__name__ == "LocalProvider"
             and getattr(llm_provider, "_model", None) is not None
@@ -809,6 +816,17 @@ class BrainFactory:
                         model=model,
                         tokenizer=tokenizer,
                         lora_state_dict=None,
+                    )
+                )
+        else:
+            from hbllm.modules.base_module import DomainModuleNode
+
+            for domain in ["general", "coding", "math"]:
+                nodes.append(
+                    DomainModuleNode(
+                        node_id=f"domain_{domain}",
+                        domain_name=domain,
+                        llm=llm,
                     )
                 )
 
@@ -1151,7 +1169,9 @@ class BrainFactory:
         # 2. MemorySystem
         memory_sys = None
         if cfg.inject_memory_system:
-            memory_sys = MemorySystem(llm=llm, registry=registry)
+            memory_sys = MemorySystem(
+                llm=llm, registry=registry, db_path=Path(cfg.data_dir) / "working_memory.db"
+            )
 
         # 3. GovernanceGuard (created before MetaCognition so policy_engine is available)
         governance = None
@@ -1239,7 +1259,7 @@ class BrainFactory:
             await lnode.start(message_bus)
             nodes.append(lnode)
 
-        # Register and start default DomainModuleNode instances if using LocalProvider
+        # Register and start default DomainModuleNode instances
         if (
             type(llm_provider).__name__ == "LocalProvider"
             and getattr(llm_provider, "_model", None) is not None
@@ -1255,6 +1275,18 @@ class BrainFactory:
                     model=model,
                     tokenizer=tokenizer,
                     lora_state_dict=None,
+                )
+                await _register_node(registry, dnode)
+                await dnode.start(message_bus)
+                nodes.append(dnode)
+        else:
+            from hbllm.modules.base_module import DomainModuleNode
+
+            for domain in ["general", "coding", "math"]:
+                dnode = DomainModuleNode(
+                    node_id=f"domain_{domain}",
+                    domain_name=domain,
+                    llm=llm,
                 )
                 await _register_node(registry, dnode)
                 await dnode.start(message_bus)

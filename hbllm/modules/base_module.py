@@ -35,10 +35,11 @@ class DomainModuleNode(Node):
         self,
         node_id: str,
         domain_name: str,
-        model: torch.nn.Module,
-        tokenizer: Any,
+        model: torch.nn.Module | None = None,
+        tokenizer: Any = None,
         lora_state_dict: dict[str, torch.Tensor] | None = None,
         capabilities: list[str] | None = None,
+        llm: Any = None,
     ):
         super().__init__(
             node_id=node_id, node_type=NodeType.DOMAIN_MODULE, capabilities=capabilities
@@ -46,8 +47,9 @@ class DomainModuleNode(Node):
         self.domain_name = domain_name
         self.model = model
         self.tokenizer = tokenizer
+        self.llm = llm
 
-        self.has_lora = lora_state_dict is not None
+        self.has_lora = lora_state_dict is not None and self.model is not None
         if self.has_lora:
             logger.info("DomainModuleNode '%s' registering LoRA adapter...", self.domain_name)
             LoRAManager.add_adapter(self.model, self.domain_name, lora_state_dict)
@@ -122,6 +124,65 @@ class DomainModuleNode(Node):
         if not is_targeted:
             return None
 
+        if self.llm is not None:
+            logger.info(
+                "Domain '%s' generating response using external LLM for prompt: %s...",
+                self.domain_name,
+                prompt[:30],
+            )
+            try:
+                from hbllm.brain.prompt_helper import get_dynamic_system_prompt
+
+                tenant = message.tenant_id or "default"
+                system_prompt = await get_dynamic_system_prompt(self.bus, tenant, self.node_id)
+
+                start_time = time.monotonic()
+                response_text = await self.llm.generate(
+                    prompt, max_tokens=256, system_prompt=system_prompt
+                )
+                latency_ms = int((time.monotonic() - start_time) * 1000)
+                logger.info(
+                    "Domain '%s' finished generating using external LLM in %d ms.",
+                    self.domain_name,
+                    latency_ms,
+                )
+
+                thought_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    tenant_id=message.tenant_id,
+                    session_id=message.session_id,
+                    topic="workspace.thought",
+                    payload={
+                        "type": f"intuition_{self.domain_name}",
+                        "confidence": 0.8,  # Base LLM confidence
+                        "content": response_text,
+                        "metrics": {
+                            "latency_ms": latency_ms,
+                            "tokens_generated": len(response_text) // 4,
+                            "domain": self.domain_name,
+                        },
+                    },
+                    correlation_id=message.correlation_id,
+                )
+                await self.bus.publish("workspace.thought", thought_msg)
+                return None
+            except Exception as e:
+                logger.error(
+                    "External LLM generation failed for domain '%s': %s", self.domain_name, e
+                )
+                return None
+
+        model = self.model
+        tokenizer = self.tokenizer
+
+        if model is None or tokenizer is None:
+            logger.error(
+                "DomainModuleNode '%s' has no model/tokenizer nor external LLM configured.",
+                self.domain_name,
+            )
+            return None
+
         logger.info(
             "Domain '%s' generating response for prompt: %s...", self.domain_name, prompt[:30]
         )
@@ -129,21 +190,21 @@ class DomainModuleNode(Node):
         try:
             # 1. Page in LoRA (Asynchronous PCIe VRAM transfer) and set ContextVar (O(1) Lock-Free mapping)
             if self.has_lora:
-                LoRAManager.page_in(self.model, domain_hint)
-                LoRAManager.set_active_adapter(self.model, domain_hint)
+                LoRAManager.page_in(model, domain_hint)
+                LoRAManager.set_active_adapter(model, domain_hint)
             else:
-                LoRAManager.set_active_adapter(self.model, None)
+                LoRAManager.set_active_adapter(model, None)
 
             # 2. Tokenize and Generate
-            device = next(self.model.parameters()).device
+            device = next(model.parameters()).device
 
             async def _generate_async() -> str:
-                enc = self.tokenizer.encode(prompt)
+                enc = tokenizer.encode(prompt)
                 if hasattr(enc, "ids"):
                     enc = enc.ids
                 input_ids = torch.tensor([enc], dtype=torch.long).to(device)
 
-                self.model.eval()
+                model.eval()
                 out_tokens = input_ids[0].tolist()
                 past_key_values = None
 
@@ -154,7 +215,7 @@ class DomainModuleNode(Node):
                     model_input = input_ids[:, -1:] if past_key_values else input_ids
 
                     with torch.no_grad():
-                        outputs = self.model(
+                        outputs = model(
                             model_input, past_key_values=past_key_values, use_cache=True
                         )
 
@@ -170,10 +231,10 @@ class DomainModuleNode(Node):
                     # Yield to asyncio to allow other DomainModuleNodes to compute their own tokens concurrently!
                     await asyncio.sleep(0.001)
 
-                if hasattr(self.tokenizer, "decode_to_string"):
-                    return str(self.tokenizer.decode_to_string(out_tokens))
+                if hasattr(tokenizer, "decode_to_string"):
+                    return str(tokenizer.decode_to_string(out_tokens))
                 else:
-                    return self.tokenizer.decode(out_tokens, skip_special_tokens=True)
+                    return str(tokenizer.decode(out_tokens, skip_special_tokens=True))
 
             start_time = time.monotonic()
             response_text = await _generate_async()
@@ -207,9 +268,9 @@ class DomainModuleNode(Node):
             torch.cuda.CudaError if hasattr(torch, "cuda") else RuntimeError,
             ValueError,
         ) as e:
-            logger.error("Generation failed: %s", e)
+            logger.error("Domain generation failed: %s", e)
             return None
 
         finally:
             if self.has_lora:
-                LoRAManager.page_out(self.model, domain_hint)
+                LoRAManager.page_out(model, domain_hint)

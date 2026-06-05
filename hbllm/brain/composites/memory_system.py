@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hbllm.network.node import Node, NodeType
@@ -40,6 +41,7 @@ class MemorySystem(Node):
         *,
         llm: ProviderLLM | None = None,
         registry: ServiceRegistry | None = None,
+        db_path: str | Path | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -60,6 +62,7 @@ class MemorySystem(Node):
         self.description = "Unified memory lifecycle (store → experience → consolidate)"
         self._llm = llm
         self._registry = registry
+        self._db_path = db_path
 
         # Sub-nodes
         self._memory: Any = None
@@ -74,6 +77,7 @@ class MemorySystem(Node):
 
         self._memory = MemoryNode(
             node_id=f"{self.node_id}.memory",
+            db_path=self._db_path or "working_memory.db",
             registry=self._registry,
         )
         self._memory.node_identity = self.node_identity
