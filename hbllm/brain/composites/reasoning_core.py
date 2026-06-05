@@ -106,6 +106,7 @@ class ReasoningCore(Node):
             branch_factor=self._branch_factor,
             max_depth=self._max_depth,
             policy_engine=self._policy_engine,
+            llm=self._llm,
         )
         self._planner.node_identity = self.node_identity
 

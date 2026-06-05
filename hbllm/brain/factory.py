@@ -716,6 +716,7 @@ class BrainFactory:
                 branch_factor=cfg.planner_branch_factor,
                 max_depth=cfg.planner_max_depth,
                 policy_engine=policy_engine,
+                llm=llm,
             ),
             CriticNode(node_id="critic", llm=llm),
             DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
