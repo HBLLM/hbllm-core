@@ -101,29 +101,8 @@ class DecisionNode(Node):
             except Exception as e:
                 logger.warning("[DecisionNode] PolicyEngine evaluation failed: %s", e)
 
-        # ── 2. Safety Classification (rule-based on CPU, LLM-based on GPU) ──
-        from hbllm.brain.factory import _is_slow_cpu
-
-        if _is_slow_cpu():
-            # Fast regex-based safety gate on CPU (no LLM cost)
-            is_unsafe, reason = self._fast_safety_check(content)
-            if is_unsafe:
-                logger.warning("[DecisionNode] Rule-based safety check REJECTED: %s", reason)
-                err_msg = Message(
-                    type=MessageType.EVENT,
-                    source_node_id=self.node_id,
-                    tenant_id=message.tenant_id,
-                    session_id=message.session_id,
-                    topic="sensory.output",
-                    payload={
-                        "text": f"I cannot fulfill this request due to safety constraints: {reason}"
-                    },
-                    correlation_id=message.correlation_id,
-                )
-                await self.bus.publish("sensory.output", err_msg)
-                return None
-            logger.debug("[DecisionNode] Rule-based safety check passed on CPU.")
-        elif self.llm:
+        # ── 2. LLM-Based Safety Classification ──
+        if self.llm:
             try:
                 safety = await self.llm.generate_json(
                     f"You are a safety classifier for an AI system. Evaluate whether the following "
@@ -284,43 +263,4 @@ class DecisionNode(Node):
             ),
         )
 
-    def _fast_safety_check(self, content: str) -> tuple[bool, str]:
-        """
-        Fast, zero-LLM safety check using regex patterns.
 
-        Returns (is_unsafe, reason). Mirrors the CriticNode's rule-based
-        constitutional check but adapted for the decision gate's block/pass flow.
-        """
-        import re
-
-        content_lower = content.lower().strip()
-
-        # ── Harmful content patterns ──
-        _harmful_patterns = [
-            (
-                r"\b(?:how\s+to\s+(?:make|build|create)\s+(?:a\s+)?(?:bomb|explosive|weapon))",
-                "Dangerous weapon/explosive instructions detected",
-            ),
-            (
-                r"\b(?:synthesiz(?:e|ing)\s+(?:drugs?|meth|fentanyl|poison))",
-                "Drug synthesis instructions detected",
-            ),
-            (
-                r"\b(?:hack(?:ing)?\s+(?:into|someone|password|account))",
-                "Unauthorized access instructions detected",
-            ),
-            (
-                r"\b(?:(?:kill|murder|assassinate|harm)\s+(?:someone|a\s+person|yourself|people))",
-                "Violence instructions detected",
-            ),
-            (
-                r"\b(?:credit\s*card\s*(?:number|info)|social\s*security\s*(?:number|ssn))\b",
-                "Personal information exposure detected",
-            ),
-            (r"\b(?:child\s+(?:porn|abuse|exploitation))\b", "CSAM content detected"),
-        ]
-        for pattern, reason in _harmful_patterns:
-            if re.search(pattern, content_lower):
-                return (True, reason)
-
-        return (False, "")

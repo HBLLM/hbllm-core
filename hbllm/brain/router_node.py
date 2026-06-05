@@ -462,13 +462,11 @@ class RouterNode(Node):
             if self.unknown_counts["general_unknown"] >= self.spawn_trigger_count:
                 logger.warning("Unknown threshold reached! Triggering Module Spawning...")
 
-                # Extract topic name via LLM (skip on CPU to avoid latency)
-                from hbllm.brain.factory import _is_slow_cpu
-
+                # Extract topic name via LLM
                 topic_guess = (
                     target_domain if target_domain != self.default_domain else "new_domain"
                 )
-                if self.llm and not _is_slow_cpu():
+                if self.llm:
                     topic_result = await self.llm.generate_json(
                         f"What academic or technical domain does this query belong to? "
                         f'Query: "{text}"\n'
