@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+import weakref
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,9 @@ from hbllm.security.identity import NodeIdentity
 
 if TYPE_CHECKING:
     from hbllm.network.bus import MessageBus
+
+
+_ACTIVE_NODES: weakref.WeakValueDictionary[str, Node] = weakref.WeakValueDictionary()
 
 
 class NodeType(StrEnum):
@@ -115,7 +119,22 @@ class Node(ABC):
         self.node_type = node_type
         self.capabilities = capabilities or []
         self.capability_metadata = capability_metadata or {}
-        self.scopes = scopes or ["public"]
+        # Core administrative node types get "admin" scope by default, others get "public"
+        default_scopes = (
+            ["admin"]
+            if node_type
+            in (
+                NodeType.CORE,
+                NodeType.MEMORY,
+                NodeType.LEARNER,
+                NodeType.PLANNER,
+                NodeType.META,
+                NodeType.SYSTEM,
+                NodeType.ROUTER,
+            )
+            else ["public"]
+        )
+        self.scopes = scopes or default_scopes
         self.device_tier = device_tier
         self.authority_score = 50  # Default authority
         self.description = ""
@@ -126,6 +145,7 @@ class Node(ABC):
         self.node_identity = NodeIdentity.generate()  # Temporary key if not loaded
         # Authority Hierarchy: Vector Clock
         self.clock = VectorClock(node_id=self.node_id)
+        _ACTIVE_NODES[self.node_id] = self
 
     @property
     def bus(self) -> MessageBus:
@@ -158,8 +178,44 @@ class Node(ABC):
     async def start(self, bus: MessageBus) -> None:
         """Start the node and register with the bus."""
         self._bus = bus
+        _ACTIVE_NODES[self.node_id] = self
         self._start_time = time.monotonic()
         self._running = True
+
+        # Auto-signing monkeypatch on the bus instance if not already done
+        if not getattr(bus, "_auto_sign_wrapped", False):
+            original_publish = bus.publish
+            original_request = bus.request
+
+            async def wrapped_publish(topic: str, message: Message) -> None:
+                node = _ACTIVE_NODES.get(message.source_node_id)
+                if node:
+                    if not message.vector_clock:
+                        node.clock.increment()
+                        message.vector_clock = node.clock.to_dict()
+                    if not message.signature:
+                        message.signature = node.node_identity.sign(message.signable_data)
+                await original_publish(topic, message)
+
+            async def wrapped_request(
+                topic: str, message: Message, timeout: float = 90.0
+            ) -> Message:
+                node = _ACTIVE_NODES.get(message.source_node_id)
+                if node:
+                    if not message.vector_clock:
+                        node.clock.increment()
+                        message.vector_clock = node.clock.to_dict()
+                    if not message.signature:
+                        message.signature = node.node_identity.sign(message.signable_data)
+                return await original_request(topic, message, timeout=timeout)
+
+            try:
+                bus.publish = wrapped_publish  # type: ignore
+                bus.request = wrapped_request  # type: ignore
+                bus._auto_sign_wrapped = True  # type: ignore
+            except (AttributeError, TypeError):
+                pass
+
         await self.on_start()
 
     async def stop(self) -> None:

@@ -55,6 +55,7 @@ class SleepCycleNode(Node):
         self._pending_goals: list[str] = []
         self.llm = llm  # Used for local GraphRAG clustering
         self.self_model = self_model  # For targeted DPO training on weak domains
+        self._active_queries: dict[str, float] = {}
 
     @property
     def is_sleeping(self) -> bool:
@@ -69,6 +70,7 @@ class SleepCycleNode(Node):
         logger.info("Starting SleepCycleNode (Idle timeout: %s seconds)", self.idle_timeout_seconds)
         # Listen to router queries to track user activity
         await self.bus.subscribe("router.query", self._check_activity)
+        await self.bus.subscribe("sensory.output", self._on_sensory_output)
 
         # Accumulate curiosity goals for processing during sleep
         await self.bus.subscribe("system.sleep.goal", self._collect_goal)
@@ -100,9 +102,15 @@ class SleepCycleNode(Node):
             logger.debug("[SleepNode] Queued curiosity goal: %s", goal[:80])
         return None
 
+    async def _on_sensory_output(self, message: Message) -> None:
+        corr_id = message.correlation_id or message.id
+        self._active_queries.pop(corr_id, None)
+
     async def _check_activity(self, message: Message) -> Message | None:
         """Update our internal timestamp whenever a user query flows through the system."""
         self._last_system_activity = time.time()
+        corr_id = message.correlation_id or message.id
+        self._active_queries[corr_id] = time.time()
 
         if self.is_sleeping:
             logger.info(
@@ -119,6 +127,16 @@ class SleepCycleNode(Node):
 
         while self._running:
             await asyncio.sleep(check_interval)
+
+            # Prune stale active queries (> 300s) to prevent leaks
+            now = time.time()
+            stale_keys = [k for k, t in self._active_queries.items() if now - t > 300.0]
+            for k in stale_keys:
+                self._active_queries.pop(k, None)
+
+            # If there are active queries, push the idle timer forward
+            if self._active_queries:
+                self._last_system_activity = now
 
             if not self.is_sleeping:
                 idle_time = time.time() - self._last_system_activity

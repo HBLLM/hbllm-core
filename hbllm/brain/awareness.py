@@ -345,11 +345,15 @@ class CognitiveAwareness(Node):
         self._loop_task = asyncio.create_task(self._awareness_loop())
 
     async def on_stop(self) -> None:
+        import asyncio
+
         self._running = False
         if self._loop_task:
             self._loop_task.cancel()
             try:
                 await self._loop_task
+            except asyncio.CancelledError:
+                pass
             except Exception:
                 pass
         logger.info("CognitiveAwareness stopped")

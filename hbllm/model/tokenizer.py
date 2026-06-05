@@ -225,11 +225,14 @@ class HBLLMTokenizer:
 
         return ids
 
-    def decode(self, ids: list[int]) -> str:
+    def decode(self, ids: list[int], skip_special_tokens: bool = True, **kwargs: Any) -> str:
         """Decode token IDs to text."""
         # Filter out special tokens
-        special_values = set(self._special_ids.values())
-        filtered = [i for i in ids if i not in special_values]
+        if skip_special_tokens:
+            special_values = set(self._special_ids.values())
+            filtered = [i for i in ids if i not in special_values]
+        else:
+            filtered = ids
 
         if self._vocab is not None:
             if hasattr(self._vocab, "decode_to_string"):

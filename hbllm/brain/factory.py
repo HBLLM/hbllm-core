@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -72,6 +73,41 @@ from hbllm.training.reward_model import RewardModel
 logger = logging.getLogger(__name__)
 
 
+def _is_slow_cpu() -> bool:
+    import os
+
+    try:
+        import torch
+
+        # If CUDA or MPS is available, we have a fast GPU/coprocessor
+        has_cuda = torch.cuda.is_available()
+        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        return not (has_cuda or has_mps)
+    except ImportError:
+        return True
+
+
+def _default_api_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 60.0
+    return float(os.getenv("HBLLM_API_TIMEOUT", str(default_val)))
+
+
+def _default_stream_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 30.0
+    return float(os.getenv("HBLLM_STREAM_TIMEOUT", str(default_val)))
+
+
+def _default_total_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 60.0
+    return float(os.getenv("HBLLM_TOTAL_TIMEOUT", str(default_val)))
+
+
 @dataclass
 class BrainConfig:
     """Configuration for Brain creation."""
@@ -115,16 +151,24 @@ class BrainConfig:
     inject_scheduler: bool = True  # v3: Proactive agent capabilities
     inject_fuzzy_logic: bool = False  # Fuzzy reasoning (requires scikit-fuzzy)
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
-    total_timeout: float = 60.0
+    total_timeout: float = field(default_factory=_default_total_timeout)
+    api_timeout: float = field(default_factory=_default_api_timeout)
+    stream_timeout: float = field(default_factory=_default_stream_timeout)
     planner_branch_factor: int = 3
     planner_max_depth: int = 2
-    data_dir: str = "data"
+    data_dir: str = field(default_factory=lambda: os.environ.get("HBLLM_DATA_DIR", "data"))
     inject_sil: bool = True  # Skill Intelligence Layer
     inject_failure_analyzer: bool = True  # Automatic skill repair
     inject_shell: bool = True  # Host shell command executor node
     require_shell_approval: bool = True  # Require manual shell approval
     domain_registry: Any | None = None  # Hierarchical domain registry
-    system_prompt: str = "You are a helpful AI assistant."
+    system_prompt: str = (
+        "You are Sentra, an advanced cognitive AI assistant powered by the HBLLM modular architecture. "
+        "You have access to various cognitive and tool modules, including a BrowserNode (which allows "
+        "you to browse the web and search for real-time information), an ExecutionNode (for running "
+        "Python code in a secure sandbox), a LogicNode (powered by Z3 for symbolic reasoning), and a "
+        "persistent memory node. Be helpful, precise, and accurate."
+    )
 
     # ── Mode selection ────────────────────────────────────────────
     use_composites: bool = True  # Use consolidated composite nodes (v4)
@@ -481,16 +525,43 @@ class BrainFactory:
         else:
             dev = device
 
-        # Load model
+        # Force float32 precision on CPU to avoid slow emulation overhead,
+        # but allow bfloat16 on macOS (Darwin) for HuggingFace models as it is highly accelerated and 8x faster.
+        import platform
+
         from hbllm.model.model_loader import load_model
 
-        model = load_model(source=model_size, device=dev)
+        is_native_preset = model_size.lower().strip() in {"125m", "500m", "1.5b", "7b", "13b"}
+        if dev == "cpu":
+            if platform.system() == "Darwin" and not is_native_preset:
+                dtype_to_use = "bfloat16"
+            else:
+                dtype_to_use = "float32"
+        else:
+            dtype_to_use = "auto"
+        model = load_model(source=model_size, device=dev, dtype=dtype_to_use)
 
         tokenizer = getattr(model, "tokenizer", None)
         if tokenizer is None:
+            import os
+
             from hbllm.model.tokenizer import HBLLMTokenizer
 
-            tokenizer = HBLLMTokenizer()
+            vocab_paths = [
+                "data/training/vocab.json",
+                "core/data/training/vocab.json",
+                "../data/training/vocab.json",
+            ]
+            loaded = False
+            for p in vocab_paths:
+                if os.path.exists(p):
+                    logger.info("Loading native tokenizer from %s", p)
+                    tokenizer = HBLLMTokenizer.from_vocab(p)
+                    loaded = True
+                    break
+            if not loaded:
+                logger.warning("Native vocab not found, using fallback tokenizer")
+                tokenizer = HBLLMTokenizer()
 
         is_native = type(model).__name__ == "HBLLMForCausalLM"
 
@@ -652,12 +723,13 @@ class BrainFactory:
                 branch_factor=cfg.planner_branch_factor,
                 max_depth=cfg.planner_max_depth,
                 policy_engine=policy_engine,
+                llm=llm,
             ),
             CriticNode(node_id="critic", llm=llm),
             DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
             WorkspaceNode(node_id="workspace"),
             # Memory (episodic + semantic + procedural + value + knowledge graph)
-            MemoryNode(node_id="memory"),
+            MemoryNode(node_id="memory", db_path=Path(cfg.data_dir) / "working_memory.db"),
             # Experience & meta-cognitive layer
             ExperienceNode(node_id="experience", llm=llm),
             MetaReasoningNode(node_id="meta"),
@@ -726,6 +798,37 @@ class BrainFactory:
 
             nodes.append(LogicNode(node_id="logic", llm=llm))
             logger.info("LogicNode wired (Z3 theorem prover)")
+
+        # Register and start default DomainModuleNode instances
+        if (
+            type(llm_provider).__name__ == "LocalProvider"
+            and getattr(llm_provider, "_model", None) is not None
+        ):
+            from hbllm.modules.base_module import DomainModuleNode
+
+            model = llm_provider._model
+            tokenizer = llm_provider._tokenizer
+            for domain in ["general", "coding", "math"]:
+                nodes.append(
+                    DomainModuleNode(
+                        node_id=f"domain_{domain}",
+                        domain_name=domain,
+                        model=model,
+                        tokenizer=tokenizer,
+                        lora_state_dict=None,
+                    )
+                )
+        else:
+            from hbllm.modules.base_module import DomainModuleNode
+
+            for domain in ["general", "coding", "math"]:
+                nodes.append(
+                    DomainModuleNode(
+                        node_id=f"domain_{domain}",
+                        domain_name=domain,
+                        llm=llm,
+                    )
+                )
 
         # 4. Start all nodes on the bus
         for node in nodes:
@@ -1066,7 +1169,9 @@ class BrainFactory:
         # 2. MemorySystem
         memory_sys = None
         if cfg.inject_memory_system:
-            memory_sys = MemorySystem(llm=llm, registry=registry)
+            memory_sys = MemorySystem(
+                llm=llm, registry=registry, db_path=Path(cfg.data_dir) / "working_memory.db"
+            )
 
         # 3. GovernanceGuard (created before MetaCognition so policy_engine is available)
         governance = None
@@ -1154,6 +1259,39 @@ class BrainFactory:
             await lnode.start(message_bus)
             nodes.append(lnode)
 
+        # Register and start default DomainModuleNode instances
+        if (
+            type(llm_provider).__name__ == "LocalProvider"
+            and getattr(llm_provider, "_model", None) is not None
+        ):
+            from hbllm.modules.base_module import DomainModuleNode
+
+            model = llm_provider._model
+            tokenizer = llm_provider._tokenizer
+            for domain in ["general", "coding", "math"]:
+                dnode = DomainModuleNode(
+                    node_id=f"domain_{domain}",
+                    domain_name=domain,
+                    model=model,
+                    tokenizer=tokenizer,
+                    lora_state_dict=None,
+                )
+                await _register_node(registry, dnode)
+                await dnode.start(message_bus)
+                nodes.append(dnode)
+        else:
+            from hbllm.modules.base_module import DomainModuleNode
+
+            for domain in ["general", "coding", "math"]:
+                dnode = DomainModuleNode(
+                    node_id=f"domain_{domain}",
+                    domain_name=domain,
+                    llm=llm,
+                )
+                await _register_node(registry, dnode)
+                await dnode.start(message_bus)
+                nodes.append(dnode)
+
         # Create pipeline
         pipeline_config = PipelineConfig(
             total_timeout=cfg.total_timeout,
@@ -1238,6 +1376,20 @@ class BrainFactory:
 
         if cfg.inject_metrics:
             brain.cognitive_metrics = CognitiveMetrics(data_dir=cfg.data_dir)
+
+        # Wire references in MetaCognition composite and its sub-nodes
+        if meta:
+            meta._cognitive_metrics = brain.cognitive_metrics
+            meta._goal_manager = brain.goal_manager
+            meta._self_model = brain.self_model
+            if meta.evaluation:
+                meta.evaluation.cognitive_metrics = brain.cognitive_metrics
+                meta.evaluation.goal_manager = brain.goal_manager
+                meta.evaluation.self_model = brain.self_model
+            if meta.reflection:
+                meta.reflection.cognitive_metrics = brain.cognitive_metrics
+                meta.reflection.goal_manager = brain.goal_manager
+                meta.reflection.self_model = brain.self_model
 
         if cfg.inject_cost_optimizer:
             brain.token_optimizer = TokenOptimizer()

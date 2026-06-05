@@ -195,3 +195,18 @@ async def test_ollama_provider_init():
     # Custom model
     provider = OllamaProvider(model="mixtral:8x7b")
     assert provider.name == "ollama/mixtral:8x7b"
+
+
+@pytest.mark.asyncio
+async def test_groq_provider_init():
+    from hbllm.serving.provider import GroqProvider, get_provider
+
+    # Defaults
+    provider = get_provider("groq", api_key="dummy_key")
+    assert isinstance(provider, GroqProvider)
+    assert provider.name == "groq/llama-3.3-70b-versatile"
+    assert provider._base_url == "https://api.groq.com/openai/v1"
+
+    # Custom model
+    provider = get_provider("groq/llama3-70b-8192", api_key="dummy_key")
+    assert provider.name == "groq/llama3-70b-8192"

@@ -1,6 +1,6 @@
 ---
 title: "HBLLM Core — An AI That Thinks Like a Person"
-description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 28+ cognitive nodes, 5 memory systems, and cryptographic trust for absolute privacy."
+description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 28+ cognitive nodes, 6 memory systems, and cryptographic trust for absolute privacy."
 ---
 
 <!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, Privacy-First AI, On-Premise AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Multi-Tenant AI -->

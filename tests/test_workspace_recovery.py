@@ -56,7 +56,7 @@ async def test_workspace_fallback_on_zero_thoughts():
 
 @pytest.mark.asyncio
 async def test_workspace_absolute_deadline_cap():
-    """Workspace has a hard 30s cap regardless of deadline extensions."""
+    """Workspace has a hard cap regardless of deadline extensions."""
     bus = InProcessBus()
     await bus.start()
 
@@ -78,7 +78,11 @@ async def test_workspace_absolute_deadline_cap():
     board = list(workspace.blackboards.values())[0]
     assert "absolute_deadline" in board
     assert board["absolute_deadline"] > time.monotonic()
-    assert board["absolute_deadline"] <= time.monotonic() + 121  # ~120s from now
+
+    from hbllm.brain.factory import _is_slow_cpu
+
+    max_offset = 301 if _is_slow_cpu() else 121
+    assert board["absolute_deadline"] <= time.monotonic() + max_offset
 
     await workspace.stop()
     await bus.stop()

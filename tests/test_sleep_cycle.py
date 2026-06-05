@@ -94,6 +94,16 @@ async def test_sleep_cycle_interrupted_by_user(simulated_sleep_env):
     )
     await bus.publish("router.query", msg)
 
+    # Signal query completion so it can go to sleep later
+    completion = Message(
+        type=MessageType.EVENT,
+        source_node_id="gateway",
+        topic="sensory.output",
+        payload={"text": "Hello response"},
+        correlation_id=msg.id,
+    )
+    await bus.publish("sensory.output", completion)
+
     # Wait another half timeout (total 0.6s since start)
     await asyncio.sleep(0.3)
 

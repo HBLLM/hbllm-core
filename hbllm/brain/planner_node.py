@@ -262,6 +262,7 @@ class PlannerNode(Node):
         max_depth: int = 2,
         policy_engine: PolicyEngine | None = None,
         cache_ttl_seconds: float = 3600.0,
+        llm: ProviderLLM | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -276,7 +277,7 @@ class PlannerNode(Node):
         self._response_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
-        self.llm: ProviderLLM | None = None
+        self.llm = llm
 
     async def on_start(self) -> None:
         """Subscribe to planning requests and workspace updates."""
@@ -499,6 +500,13 @@ class PlannerNode(Node):
     ) -> str:
         """Generate one diverse initial thought."""
         prompt = f"Exploring Approach {branch_id} to solve: {query}"
+        if self.llm:
+            try:
+                res = await self.llm.generate(prompt)
+                return str(res)
+            except Exception as e:
+                logger.warning("[GoT] Direct LLM thought generation failed: %s", e)
+
         topic = (
             f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
         )
@@ -707,6 +715,15 @@ class PlannerNode(Node):
             f'If you want to delegate a complex sub-task to the Skill Intelligence Layer, output exactly <skill_call task="describe task">fallback args</skill_call>.\n'
             f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
+        if self.llm:
+            try:
+                content = await self.llm.generate(prompt)
+                if content:
+                    graph.branch(parent.id, content)
+                return
+            except Exception as e:
+                logger.warning("[GoT] Direct LLM refinement failed: %s", e)
+
         topic = (
             f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
         )
@@ -737,6 +754,13 @@ class PlannerNode(Node):
             f"Approach B: {thought_b[:200]}\n"
             f"Provide a unified, improved answer."
         )
+        if self.llm:
+            try:
+                res = await self.llm.generate(prompt)
+                return str(res)
+            except Exception as e:
+                logger.warning("[GoT] Direct LLM merge failed: %s", e)
+
         topic = (
             f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
         )
@@ -775,6 +799,7 @@ class PlannerNode(Node):
         is_fast_path = message.payload.get("is_fast_path", False)
         _skip_intents = {"general_knowledge", "smalltalk"}
 
+        # Always skip for fast-path and simple intents (regardless of hardware)
         if is_fast_path or intent in _skip_intents:
             logger.debug(
                 "[GoT] Skipping GoT for %s query (intent=%s, fast_path=%s)",

@@ -98,6 +98,7 @@ class ReasoningCore(Node):
             domain_registry=self._domain_registry,
         )
         self._router._centroids_path = Path(self._data_dir) / "router_centroids.json"
+        self._router.node_identity = self.node_identity
 
         # Planner
         self._planner = PlannerNode(
@@ -105,13 +106,16 @@ class ReasoningCore(Node):
             branch_factor=self._branch_factor,
             max_depth=self._max_depth,
             policy_engine=self._policy_engine,
+            llm=self._llm,
         )
+        self._planner.node_identity = self.node_identity
 
         # Critic
         self._critic = CriticNode(
             node_id=f"{self.node_id}.critic",
             llm=self._llm,
         )
+        self._critic.node_identity = self.node_identity
 
         # Decision
         self._decision = DecisionNode(
@@ -119,6 +123,7 @@ class ReasoningCore(Node):
             llm=self._llm,
             policy_engine=self._policy_engine,
         )
+        self._decision.node_identity = self.node_identity
 
         # Revision (not a Node subclass — no bus start needed)
         self._revision = RevisionNode()

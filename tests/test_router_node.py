@@ -153,3 +153,58 @@ async def test_self_learning_vector_routing():
     finally:
         await router.stop()
         await bus.stop()
+
+
+@pytest.mark.asyncio
+async def test_router_greetings():
+    """
+    Test that expanded smalltalk greetings (including identity questions)
+    are routed to the fast-path (sensory.output) directly.
+    """
+    bus = InProcessBus()
+    await bus.start()
+
+    router = RouterNode("test_router")
+    await router.start(bus)
+
+    outputs = []
+
+    async def _capture_output(msg: Message):
+        outputs.append(msg)
+
+    await bus.subscribe("sensory.output", _capture_output)
+
+    try:
+        # Test basic identity query
+        query_msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="user_api",
+            topic="router.query",
+            payload={"text": "what is your name?"},
+            correlation_id="greetings_test_1",
+        )
+        await bus.publish("router.query", query_msg)
+        await asyncio.sleep(0.1)
+
+        assert len(outputs) == 1, "Greeting was not intercepted by fast-path router"
+        payload = outputs[0].payload
+        assert "HBLLM" in payload["text"]
+        assert payload["source"] == "smalltalk_router_fastpath"
+
+        # Test another basic greeting
+        query_msg2 = Message(
+            type=MessageType.QUERY,
+            source_node_id="user_api",
+            topic="router.query",
+            payload={"text": "how's it going?"},
+            correlation_id="greetings_test_2",
+        )
+        await bus.publish("router.query", query_msg2)
+        await asyncio.sleep(0.1)
+
+        assert len(outputs) == 2
+        assert "running smoothly" in outputs[1].payload["text"].lower()
+
+    finally:
+        await router.stop()
+        await bus.stop()

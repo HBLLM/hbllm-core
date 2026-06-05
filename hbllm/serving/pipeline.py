@@ -53,6 +53,26 @@ class PipelineResult:
         }
 
 
+def _is_slow_cpu() -> bool:
+    import os
+
+    try:
+        import torch
+
+        has_cuda = torch.cuda.is_available()
+        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        return not (has_cuda or has_mps)
+    except ImportError:
+        return True
+
+
+def _default_total_timeout() -> float:
+    import os
+
+    default_val = 300.0 if _is_slow_cpu() else 60.0
+    return float(os.getenv("HBLLM_TOTAL_TIMEOUT", str(default_val)))
+
+
 @dataclass
 class PipelineConfig:
     """Configuration for the cognitive pipeline."""
@@ -60,7 +80,7 @@ class PipelineConfig:
     router_timeout: float = 15.0
     workspace_timeout: float = 30.0
     decision_timeout: float = 30.0
-    total_timeout: float = 60.0
+    total_timeout: float = field(default_factory=_default_total_timeout)
     max_context_tokens: int = 131072  # 128k context support via SWA + Cognitive RAG
     inject_memory: bool = True
     inject_identity: bool = True

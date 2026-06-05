@@ -85,6 +85,7 @@ class CriticNode(Node):
         status = "PASS"
         reason = ""
         confidence = 0.5  # Default when no evaluation runs
+
         try:
             from hbllm.brain.constitutional_principles import (
                 format_principles_for_prompt,

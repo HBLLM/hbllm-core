@@ -261,26 +261,32 @@ class GrpcBus:
             await channel.close()
 
 
-class _BusServiceHandler(grpc.GenericRpcHandler):
-    """Generic gRPC service handler for the bus."""
+if _HAS_GRPC:
 
-    def __init__(self, bus: GrpcBus):
-        self._bus = bus
-        self._serializer = bus._serializer
+    class _BusServiceHandler(grpc.GenericRpcHandler):
+        """Generic gRPC service handler for the bus."""
 
-    def service(self, handler_call_details: Any) -> Any:
-        if handler_call_details.method == "/hbllm.Bus/Deliver":
-            return grpc.unary_unary_rpc_method_handler(self._handle_deliver)
-        return None
+        def __init__(self, bus: GrpcBus):
+            self._bus = bus
+            self._serializer = bus._serializer
 
-    async def _handle_deliver(self, request: bytes, context: Any) -> bytes:
-        """Handle an incoming message delivery."""
-        try:
-            parts = request.split(b"\x00", 1)
-            topic = parts[0].decode()
-            message = self._serializer.deserialize(parts[1])
-            await self._bus.publish(topic, message)
-            return b"OK"
-        except Exception as e:
-            logger.exception("Failed to handle gRPC delivery: %s", e)
-            return b"ERROR"
+        def service(self, handler_call_details: Any) -> Any:
+            if handler_call_details.method == "/hbllm.Bus/Deliver":
+                return grpc.unary_unary_rpc_method_handler(self._handle_deliver)
+            return None
+
+        async def _handle_deliver(self, request: bytes, context: Any) -> bytes:
+            """Handle an incoming message delivery."""
+            try:
+                parts = request.split(b"\x00", 1)
+                topic = parts[0].decode()
+                message = self._serializer.deserialize(parts[1])
+                await self._bus.publish(topic, message)
+                return b"OK"
+            except Exception as e:
+                logger.exception("Failed to handle gRPC delivery: %s", e)
+                return b"ERROR"
+else:
+
+    class _BusServiceHandler:  # type: ignore[no-redef]
+        pass

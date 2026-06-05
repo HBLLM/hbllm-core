@@ -25,7 +25,7 @@ async def mock_isolation_error_endpoint():
 
 @pytest.fixture
 def jwt_secret():
-    return "test_secret_key"
+    return "test_secret_key_for_jwt_testing_32ch"
 
 
 @pytest.fixture

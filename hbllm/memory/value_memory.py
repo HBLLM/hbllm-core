@@ -49,6 +49,16 @@ class ValueMemory:
                     created_at TEXT NOT NULL
                 )
             """)
+            # Schema migrations for existing databases that lack user_id or device_id columns
+            try:
+                await conn.execute("ALTER TABLE rewards ADD COLUMN user_id TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                await conn.execute("ALTER TABLE rewards ADD COLUMN device_id TEXT DEFAULT ''")
+            except Exception:
+                pass
+
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rewards_tenant_topic
                 ON rewards(tenant_id, topic)

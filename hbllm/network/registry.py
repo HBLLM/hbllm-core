@@ -54,6 +54,7 @@ class ServiceRegistry:
         if self._bus:
             # Lifecycle listener
             await self._bus.subscribe("node.lifecycle", self._handle_lifecycle_message)
+            await self._bus.subscribe("registry.discover", self._handle_discover_query)
 
         logger.info("ServiceRegistry started (interval=%.1fs)", self._health_check_interval)
 
@@ -64,6 +65,27 @@ class ServiceRegistry:
             logger.info("[Registry] Received dying gasp from node: %s", node_id)
             await self.deregister(node_id)
         return None
+
+    async def _handle_discover_query(self, message: Message) -> Message | None:
+        """Handle incoming discovery request."""
+        try:
+            node_type_str = message.payload.get("node_type")
+            node_type = NodeType(node_type_str) if node_type_str else None
+            capability = message.payload.get("capability")
+            healthy_only = message.payload.get("healthy_only", True)
+            device_tier_str = message.payload.get("device_tier")
+            device_tier = DeviceTier(device_tier_str) if device_tier_str else None
+
+            nodes = await self.discover(
+                node_type=node_type,
+                capability=capability,
+                healthy_only=healthy_only,
+                device_tier=device_tier,
+            )
+            return message.create_response({"nodes": [n.model_dump() for n in nodes]})
+        except Exception as e:
+            logger.exception("Registry discovery query failed: %s", e)
+            return message.create_error(str(e))
 
     async def stop(self) -> None:
         """Stop the registry."""
@@ -219,7 +241,10 @@ class ServiceRegistry:
 
     async def has_permission(self, node_id: str, scope: str) -> bool:
         """Check if a node has permission to access a specific scope."""
-        info = self._nodes.get(node_id)
+        parent_id = node_id.split(".")[0]
+        if parent_id in ("api_server", "system"):
+            return True
+        info = self._nodes.get(parent_id)
         if not info:
             return False
         # 'admin' scope grants all permissions
@@ -227,16 +252,19 @@ class ServiceRegistry:
 
     async def verify_message(self, message: Message) -> bool:
         """Verify the cryptographic signature and causal ordering of a message."""
-        if message.source_node_id in self._revoked_nodes:
-            logger.warning(
-                "[Registry] verify_message failed: Node '%s' is REVOKED", message.source_node_id
-            )
+        source_id = message.source_node_id
+        parent_id = source_id.split(".")[0]
+
+        if source_id in self._revoked_nodes or parent_id in self._revoked_nodes:
+            logger.warning("[Registry] verify_message failed: Node '%s' is REVOKED", source_id)
             return False
 
-        info = self._nodes.get(message.source_node_id)
+        info = self._nodes.get(parent_id)
         if not info:
             logger.debug(
-                "[Registry] verify_message failed: Node '%s' not found", message.source_node_id
+                "[Registry] verify_message failed: Node '%s' (parent '%s') not found",
+                source_id,
+                parent_id,
             )
             return False
         if not info.public_key:

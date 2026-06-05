@@ -106,12 +106,18 @@ ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP04
 [tool.ruff.lint.isort]
 known-first-party = ["hbllm"]
 
+[tool.ruff.lint.per-file-ignores]
+"plugins/**/*.py" = ["N999"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins"]
 asyncio_mode = "auto"
 timeout = 60
 timeout_method = "thread"
 addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal"
+filterwarnings = [
+    "ignore:The PyTorch API of nested tensors is in prototype stage:UserWarning",
+]
 
 [tool.mypy]
 python_version = "3.11"

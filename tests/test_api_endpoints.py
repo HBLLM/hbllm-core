@@ -95,3 +95,41 @@ async def test_all_core_routes_count():
     ]
     for ep in expected:
         assert ep in routes, f"Missing route: {ep}"
+
+
+@pytest.mark.asyncio
+async def test_studio_routes_registered():
+    """Verify all Studio and dashboard compatibility routes are registered."""
+    routes = [r.path for r in app.routes]
+    expected_studio_routes = [
+        "/api/emotion/state",
+        "/api/swarm/status",
+        "/api/temporal/timeline",
+        "/api/synapsis/config",
+        "/api/synapsis/status",
+        "/api/synapsis/test",
+        "/api/synapsis/connect",
+        "/api/synapsis/disconnect",
+        "/api/persona/profile",
+        "/api/persona/override",
+        "/api/persona/reset",
+        "/api/memory/stats",
+        "/api/memory/browse",
+        "/api/memory/search",
+        "/api/memory/forget",
+        "/api/memory/export",
+        "/api/knowledge-graph/entities",
+        "/api/knowledge-graph/stats",
+        "/api/knowledge-graph/neighbors",
+        "/studio/stats",
+        "/studio/memory",
+        "/studio/knowledge",
+        "/studio/lora",
+        "/api/plugins",
+        "/api/plugins/{plugin_name}/toggle",
+        "/api/plugins/marketplace",
+        "/api/plugins/install",
+        "/api/plugins/uninstall",
+    ]
+    for ep in expected_studio_routes:
+        assert ep in routes, f"Missing studio route: {ep}"

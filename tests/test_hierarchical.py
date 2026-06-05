@@ -125,7 +125,7 @@ def test_sync_endpoints():
     """Test the memory sync endpoints in the Core API."""
     import os
 
-    os.environ["HBLLM_JWT_SECRET"] = "test_secret"
+    os.environ["HBLLM_JWT_SECRET"] = "test_secret_key_for_jwt_testing_32ch"
 
     client = TestClient(core_app)
 
@@ -145,7 +145,7 @@ def test_sync_endpoints():
             secret_key = middleware.kwargs.get("secret_key")
 
     if not secret_key:
-        secret_key = "test_secret"
+        secret_key = "test_secret_key_for_jwt_testing_32ch"
 
     token = jwt.encode(
         {"tenant_id": "tenant1", "user_id": "user1", "device_id": "device1"},

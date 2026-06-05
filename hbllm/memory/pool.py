@@ -58,6 +58,14 @@ class DatabasePool:
             else:
                 conn = await self._create_connection()
             yield conn
+        except Exception:
+            if conn is not None:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+                conn = None
+            raise
         finally:
             if conn is not None:
                 self._connections.append(conn)

@@ -69,24 +69,29 @@ class SkillEngine(Node):
             skill_registry=self._skill_registry,
             llm=self._llm,
         )
+        self._compiler.node_identity = self.node_identity
 
         self._intelligence = SkillIntelligenceNode(
             node_id=f"{self.node_id}.intelligence",
             skill_registry=self._skill_registry,
         )
+        self._intelligence.node_identity = self.node_identity
 
         self._induction = SkillInductionNode(
             node_id=f"{self.node_id}.induction",
         )
+        self._induction.node_identity = self.node_identity
 
         self._failure_analyzer = FailureAnalyzerNode(
             node_id=f"{self.node_id}.failure_analyzer",
             llm=self._llm,
         )
+        self._failure_analyzer.node_identity = self.node_identity
 
         self._rule_extractor = RuleExtractorNode(
             node_id=f"{self.node_id}.rule_extractor",
         )
+        self._rule_extractor.node_identity = self.node_identity
 
         bus = self.bus
         for sub in [
