@@ -888,7 +888,7 @@ class GroqProvider(OpenAIProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "llama3-8b-8192",
+        model: str = "llama-3.3-70b-versatile",
         base_url: str | None = None,
         **kwargs: Any,
     ):

@@ -195,7 +195,7 @@ async def _boot_brain(
     provider_model = os.getenv("HBLLM_PROVIDER_MODEL")
 
     # Known external provider prefixes — anything else with "/" is a HuggingFace model ID
-    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local"}
+    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local", "groq"}
 
     is_provider = False
     if provider_name:
@@ -228,6 +228,7 @@ async def _boot_brain(
             os.getenv("HBLLM_PROVIDER_BASE_URL")
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("OLLAMA_BASE_URL")
+            or os.getenv("GROQ_BASE_URL")
         )
         if base_url:
             provider_kwargs["base_url"] = base_url
@@ -236,6 +237,7 @@ async def _boot_brain(
             os.getenv("HBLLM_PROVIDER_API_KEY")
             or os.getenv("OPENAI_API_KEY")
             or os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("GROQ_API_KEY")
         )
         if api_key:
             provider_kwargs["api_key"] = api_key

@@ -204,7 +204,7 @@ async def test_groq_provider_init():
     # Defaults
     provider = get_provider("groq", api_key="dummy_key")
     assert isinstance(provider, GroqProvider)
-    assert provider.name == "groq/llama3-8b-8192"
+    assert provider.name == "groq/llama-3.3-70b-versatile"
     assert provider._base_url == "https://api.groq.com/openai/v1"
 
     # Custom model
