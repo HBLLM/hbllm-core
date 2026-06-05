@@ -882,6 +882,27 @@ class OllamaProvider(LLMProvider):
         return f"ollama/{self._model}"
 
 
+class GroqProvider(OpenAIProvider):
+    """Calls Groq Cloud API."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "llama3-8b-8192",
+        base_url: str | None = None,
+        **kwargs: Any,
+    ):
+        api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        base_url = base_url or os.getenv("GROQ_BASE_URL") or "https://api.groq.com/openai/v1"
+        super().__init__(api_key=api_key, model=model, base_url=base_url)
+        if not self._api_key:
+            logger.warning("GROQ_API_KEY not set. Groq provider will fail.")
+
+    @property
+    def name(self) -> str:
+        return f"groq/{self._model}"
+
+
 # ─── Registry ────────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, type[LLMProvider]] = {
@@ -889,6 +910,7 @@ _PROVIDERS: dict[str, type[LLMProvider]] = {
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
     "ollama": OllamaProvider,
+    "groq": GroqProvider,
 }
 
 

@@ -222,7 +222,7 @@ def register_subcommands(subparsers: object) -> None:
     agent_parser.add_argument(
         "--model",
         default="openai/gpt-4o-mini",
-        help="Model provider identifier (e.g. openai/gpt-4o, anthropic/claude-3-5-sonnet, ollama/llama3)",
+        help="Model provider identifier (e.g. openai/gpt-4o, anthropic/claude-3-5-sonnet, ollama/llama3, groq/llama3-8b-8192)",
     )
     agent_parser.add_argument(
         "--no-approval",
@@ -265,7 +265,7 @@ def register_subcommands(subparsers: object) -> None:
     code_parser.add_argument(
         "--model",
         default="openai/gpt-4o-mini",
-        help="Model provider identifier (e.g. openai/gpt-4o, anthropic/claude-3-5-sonnet, ollama/llama3)",
+        help="Model provider identifier (e.g. openai/gpt-4o, anthropic/claude-3-5-sonnet, ollama/llama3, groq/llama3-8b-8192)",
     )
     code_parser.add_argument(
         "--no-approval",
