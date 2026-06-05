@@ -104,6 +104,8 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         await self.bus.subscribe("memory.browse", self.handle_browse)
         await self.bus.subscribe("memory.forget", self.handle_forget)
         await self.bus.subscribe("memory.stats", self.handle_stats)
+        await self.bus.subscribe("memory.feedback", self.handle_feedback)
+        await self.bus.subscribe("memory.consolidate", self.handle_consolidate)
         # Tracking for handle_improvement which was previously untracked
         self._improvement_tasks: set[asyncio.Task[Any]] = set()
 
@@ -963,4 +965,53 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory stats failed: %s", e)
+            return message.create_error(str(e))
+
+    @require_tenant
+    async def handle_feedback(self, message: Message) -> Message | None:
+        """
+        Handles `memory.feedback` topics.
+        Expected payload:
+            note_id: str
+            useful: bool (default True)
+        """
+        try:
+            payload = message.payload
+            note_id = payload.get("note_id")
+            useful = payload.get("useful", True)
+
+            if not note_id:
+                return message.create_error("Missing 'note_id'")
+
+            new_usefulness = await asyncio.to_thread(self.semantic_db.feedback, note_id, useful)
+
+            if new_usefulness is None:
+                return message.create_error(f"Memory with ID {note_id} not found", code="NOT_FOUND")
+
+            return message.create_response(
+                {"status": "updated", "note_id": note_id, "usefulness": new_usefulness}
+            )
+        except Exception as e:
+            logger.error("Memory feedback failed: %s", e)
+            return message.create_error(str(e))
+
+    @require_tenant
+    async def handle_consolidate(self, message: Message) -> Message | None:
+        """
+        Handles `memory.consolidate` topics.
+        Expected payload:
+            threshold: Optional[float]
+        """
+        try:
+            payload = message.payload
+            threshold = payload.get("threshold")
+            tenant_id = message.tenant_id or "default"
+
+            res = await asyncio.to_thread(
+                self.semantic_db.consolidate, tenant_id=tenant_id, threshold=threshold
+            )
+
+            return message.create_response(res)
+        except Exception as e:
+            logger.error("Memory consolidate failed: %s", e)
             return message.create_error(str(e))

@@ -262,5 +262,3 @@ class DecisionNode(Node):
                 },
             ),
         )
-
-

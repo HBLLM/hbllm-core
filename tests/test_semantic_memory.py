@@ -1,8 +1,13 @@
 """Tests for SemanticMemory — vector search with TF-IDF fallback."""
 
 import pytest
+import pytest_asyncio
 
+from hbllm.memory.interface import MemoryType
+from hbllm.memory.memory_node import MemoryNode
 from hbllm.memory.semantic import SemanticMemory, _TfIdfEmbedder
+from hbllm.network.bus import InProcessBus
+from hbllm.network.messages import Message, MessageType
 
 # ── TF-IDF Embedder Tests ───────────────────────────────────────────────────
 
@@ -124,3 +129,159 @@ def test_search_returns_scores(sem_mem):
     assert len(results) >= 1
     assert "score" in results[0]
     assert results[0]["score"] > 0
+
+
+# ── Enhanced Features Tests (Fuzzy Dedup, Usefulness, Consolidation) ─────────
+
+
+def test_fuzzy_deduplication(sem_mem):
+    """Verify that near-duplicate documents within the same tenant return the existing doc ID."""
+    doc_id1 = sem_mem.store(
+        "The quick brown fox jumps over the lazy dog",
+        tenant_id="tenant_a"
+    )
+    assert doc_id1 is not None
+
+    # Exact duplicate should return same ID
+    doc_id2 = sem_mem.store(
+        "The quick brown fox jumps over the lazy dog",
+        tenant_id="tenant_a"
+    )
+    assert doc_id2 == doc_id1
+
+    # Fuzzy duplicate (high similarity) in same tenant should return same ID
+    doc_id3 = sem_mem.store(
+        "The quick brown fox jumped over the lazy dog",
+        tenant_id="tenant_a"
+    )
+    assert doc_id3 == doc_id1
+    assert sem_mem.count == 1
+
+    # Same content but in a different tenant should NOT deduplicate (security boundary)
+    doc_id_other_tenant = sem_mem.store(
+        "The quick brown fox jumps over the lazy dog",
+        tenant_id="tenant_b"
+    )
+    assert doc_id_other_tenant != doc_id1
+    assert sem_mem.count == 2
+
+
+def test_safe_save_disabled(sem_mem):
+    """Verify safe_save=False skips fuzzy deduplication."""
+    sem_mem.safe_save = False
+    doc_id1 = sem_mem.store("Python is an awesome programming language", tenant_id="t1")
+    doc_id2 = sem_mem.store("Python is a truly awesome programming language", tenant_id="t1")
+    assert doc_id1 != doc_id2
+    assert sem_mem.count == 2
+
+
+def test_usefulness_feedback_ranking(sem_mem):
+    """Verify that usefulness feedback boosts search scores."""
+    # Store two different docs
+    doc_id_py = sem_mem.store("Python is a popular language", tenant_id="t1")
+    doc_id_js = sem_mem.store("JavaScript is a popular language", tenant_id="t1")
+
+    # Initial search
+    res1 = sem_mem.search("popular language", tenant_id="t1")
+    score_py_1 = next(r["score"] for r in res1 if r["id"] == doc_id_py)
+    score_js_1 = next(r["score"] for r in res1 if r["id"] == doc_id_js)
+
+    # Apply positive feedback to JavaScript doc
+    new_usefulness = sem_mem.feedback(doc_id_js, useful=True)
+    assert new_usefulness == 1
+
+    # Search again
+    res2 = sem_mem.search("popular language", tenant_id="t1")
+    score_py_2 = next(r["score"] for r in res2 if r["id"] == doc_id_py)
+    score_js_2 = next(r["score"] for r in res2 if r["id"] == doc_id_js)
+
+    # Score of Python should remain unchanged
+    assert score_py_1 == pytest.approx(score_py_2)
+    # Score of JavaScript should have increased due to usefulness boost
+    assert score_js_2 > score_js_1
+
+
+def test_consolidation(sem_mem):
+    """Verify consolidation merges similar documents within a tenant and blends tags."""
+    sem_mem.safe_save = False  # Disable safe save to store duplicates first
+    _ = sem_mem.store(
+        "Software engineering involves writing clean code",
+        metadata={"tags": ["dev"]},
+        tenant_id="t1"
+    )
+    doc_id2 = sem_mem.store(
+        "Software engineering includes writing clean code",
+        metadata={"tags": ["coding"]},
+        tenant_id="t1"
+    )
+    # Also add one doc in different tenant
+    sem_mem.store(
+        "Software engineering involves writing clean code",
+        metadata={"tags": ["other"]},
+        tenant_id="t2"
+    )
+
+    assert sem_mem.count == 3
+
+    # Consolidate tenant t1
+    res = sem_mem.consolidate(tenant_id="t1", threshold=0.6)
+    assert res["removed"] == 1
+    assert sem_mem.count == 2
+
+    # Check merged tags
+    keeper = sem_mem.documents[doc_id2]
+    tags = keeper["metadata"]["tags"]
+    assert "dev" in tags
+    assert "coding" in tags
+    # Tenant t2 doc should not be removed
+    assert len([d for d in sem_mem.documents.values() if d["metadata"]["tenant_id"] == "t2"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_node_handlers(tmp_path):
+    """Verify MemoryNode handles feedback and consolidate messages over the bus."""
+    bus = InProcessBus()
+    await bus.start()
+
+    node = MemoryNode(node_id="mem_node_test", db_path=tmp_path / "test.db")
+    # Force TF-IDF mode
+    node.semantic_db._use_tfidf = True
+    await node.start(bus)
+
+    # Store a document first
+    _ = await node.store(
+        memory_type=MemoryType.SEMANTIC,
+        data="Cognitive architectures are complex systems",
+        tenant_id="t1"
+    )
+    all_docs = node.semantic_db.get_all()
+    assert len(all_docs) == 1
+    stored_doc_id = all_docs[0]["id"]
+
+    # 1. Test feedback handler
+    feedback_msg = Message(
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="t1",
+        topic="memory.feedback",
+        payload={"note_id": stored_doc_id, "useful": True}
+    )
+    resp = await bus.request("memory.feedback", feedback_msg)
+    assert resp is not None
+    assert resp.payload["status"] == "updated"
+    assert resp.payload["usefulness"] == 1
+
+    # 2. Test consolidate handler
+    consolidate_msg = Message(
+        type=MessageType.EVENT,
+        source_node_id="test",
+        tenant_id="t1",
+        topic="memory.consolidate",
+        payload={"threshold": 0.8}
+    )
+    resp_c = await bus.request("memory.consolidate", consolidate_msg)
+    assert resp_c is not None
+    assert "removed" in resp_c.payload
+
+    await node.stop()
+    await bus.stop()

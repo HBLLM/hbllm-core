@@ -158,6 +158,9 @@ class SemanticMemory:
         use_qdrant: bool = False,
         qdrant_path: str | None = None,
         max_documents: int = 5000,
+        safe_save: bool = True,
+        dedup_threshold: float = 0.95,
+        feedback_weight: float = 0.15,
     ):
         """
         Args:
@@ -186,6 +189,9 @@ class SemanticMemory:
         self._tfidf_timer: threading.Timer | None = None
         self._closed = False
         self.max_documents = max_documents
+        self.safe_save = safe_save
+        self.dedup_threshold = dedup_threshold
+        self.feedback_weight = feedback_weight
 
         # ── PostgreSQL/pgvector Backend ──────────────────────────────────
         from hbllm.persistence.db_pool import DBPool
@@ -397,11 +403,27 @@ class SemanticMemory:
             logger.warning("Attempted to store empty content — skipping")
             return None
 
-        # Deduplication: skip if this exact content was already stored
+        # Deduplication: skip if this exact content was already stored under this tenant
         content_hash = self._content_hash(content)
-        if content_hash in self._content_hashes:
+        tenant_hash_key = f"{tenant_id or 'default'}:{content_hash}"
+        if tenant_hash_key in self._content_hashes or content_hash in self._content_hashes:
             logger.debug("Duplicate content detected — skipping store")
+            for doc_id, doc in self.documents.items():
+                if self._content_hash(doc["content"]) == content_hash:
+                    if (doc.get("metadata") or {}).get("tenant_id") == tenant_id:
+                        return doc_id
             return None
+
+        # Fuzzy Deduplication
+        if self.safe_save:
+            dup_id = self._find_duplicate(content, tenant_id)
+            if dup_id:
+                logger.info(
+                    "Fuzzy duplicate memory detected (similarity >= %s) — returning existing doc_id %s",
+                    self.dedup_threshold,
+                    dup_id,
+                )
+                return dup_id
 
         # Evict oldest document if we reached memory limit
         if len(self.ids) >= self.max_documents:
@@ -417,7 +439,7 @@ class SemanticMemory:
             self._vectors_dirty = True
             self._sparse_dirty = True
 
-        self._content_hashes.add(content_hash)
+        self._content_hashes.add(tenant_hash_key)
 
         if self._use_tfidf or self.model is None:
             self._load_model()
@@ -648,6 +670,14 @@ class SemanticMemory:
         else:
             final_scores = dense_scores
 
+        # --- Usefulness boosting ---
+        for idx, doc_id in enumerate(self.ids):
+            doc = self.documents[doc_id]
+            meta = doc.get("metadata") or {}
+            usefulness = int(meta.get("usefulness", 0) or 0)
+            boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
+            final_scores[idx] += boost
+
         # --- Reward boosting ---
         if reward_scores:
             for idx, doc_id in enumerate(self.ids):
@@ -767,6 +797,12 @@ class SemanticMemory:
                     if reward_scores and doc_id in reward_scores:
                         score += reward_boost * reward_scores[doc_id]
 
+                    # Apply usefulness boost if stored in metadata
+                    meta = row["metadata"] or {}
+                    usefulness = int(meta.get("usefulness", 0) or 0)
+                    boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
+                    score += boost
+
                     results.append(
                         {
                             "id": doc_id,
@@ -801,7 +837,10 @@ class SemanticMemory:
 
             # Remove content hash
             removed_doc = self.documents[doc_id]
-            self._content_hashes.discard(self._content_hash(removed_doc["content"]))
+            removed_tenant = (removed_doc.get("metadata") or {}).get("tenant_id")
+            removed_hash = self._content_hash(removed_doc["content"])
+            self._content_hashes.discard(f"{removed_tenant or 'default'}:{removed_hash}")
+            self._content_hashes.discard(removed_hash)
 
             index = self.ids.index(doc_id)
             self.ids.pop(index)
@@ -956,3 +995,126 @@ class SemanticMemory:
 
         logger.info("SemanticMemory loaded from %s (%d docs)", load_dir, len(mem.ids))
         return mem
+
+    def _find_duplicate(self, content: str, tenant_id: str | None) -> str | None:
+        """Find a duplicate document in the same tenant using cosine similarity."""
+        if not self.documents or self.vectors is None:
+            return None
+        query_vec = self._encode([content])[0]
+        if _HAS_RUST_SEARCH:
+            dense_scores = np.asarray(
+                _rust_cosine(
+                    query_vec.astype(np.float64),
+                    self.vectors.astype(np.float64),
+                )
+            )
+        else:
+            norms = np.linalg.norm(self.vectors, axis=1)
+            query_norm = np.linalg.norm(query_vec)
+            if query_norm == 0:
+                return None
+            dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
+
+        if tenant_id and tenant_id != "system":
+            tenant_mask = np.array(
+                [
+                    self.documents[doc_id]["metadata"].get("tenant_id") == tenant_id
+                    for doc_id in self.ids
+                ]
+            )
+            dense_scores[~tenant_mask] = -1.0
+
+        best_idx = int(np.argmax(dense_scores))
+        if dense_scores[best_idx] >= self.dedup_threshold:
+            return self.ids[best_idx]
+        return None
+
+    def feedback(self, doc_id: str, useful: bool = True) -> int | None:
+        """Adjust a memory's usefulness (used by search re-ranking)."""
+        with self._lock:
+            doc = self.documents.get(doc_id)
+            if not doc:
+                return None
+            meta = doc.setdefault("metadata", {})
+            usefulness = int(meta.get("usefulness", 0) or 0)
+            usefulness = max(0, usefulness + (1 if useful else -1))
+            meta["usefulness"] = usefulness
+            doc["usefulness"] = usefulness
+
+            if self._use_qdrant and self._qdrant is not None and self._qdrant_initialized:
+                try:
+                    self._qdrant.set_payload(
+                        collection_name=self._qdrant_collection,
+                        payload={"metadata": meta},
+                        points=[doc_id],
+                    )
+                except Exception as e:
+                    logger.warning("Qdrant set_payload failed: %s", e)
+            return usefulness
+
+    def consolidate(
+        self, tenant_id: str | None = None, threshold: float | None = None
+    ) -> dict[str, Any]:
+        """Self-optimization: merge near-duplicate memories within a tenant."""
+        thr = threshold if threshold is not None else self.dedup_threshold
+        with self._lock:
+            if not self.documents or self.vectors is None:
+                return {"tenant_id": tenant_id, "removed": 0, "merged_into": {}}
+
+            target_ids = []
+            target_vectors = []
+            for idx, doc_id in enumerate(self.ids):
+                doc_tenant = self.documents[doc_id].get("metadata", {}).get("tenant_id")
+                if tenant_id is None or doc_tenant == tenant_id:
+                    target_ids.append(doc_id)
+                    target_vectors.append(self._vector_list[idx][0])
+
+            if len(target_ids) <= 1:
+                return {"tenant_id": tenant_id, "removed": 0, "merged_into": {}}
+
+            removed = 0
+            merged_into: dict[str, list[str]] = {}
+            alive_ids = set(target_ids)
+
+            for k_idx in reversed(range(len(target_ids))):
+                keeper_id = target_ids[k_idx]
+                if keeper_id not in alive_ids:
+                    continue
+
+                keeper_vector = target_vectors[k_idx]
+
+                for d_idx in reversed(range(k_idx)):
+                    dup_id = target_ids[d_idx]
+                    if dup_id not in alive_ids:
+                        continue
+
+                    dup_vector = target_vectors[d_idx]
+                    k_norm = np.linalg.norm(keeper_vector)
+                    d_norm = np.linalg.norm(dup_vector)
+                    if k_norm == 0 or d_norm == 0:
+                        continue
+                    sim = np.dot(keeper_vector, dup_vector) / (k_norm * d_norm + 1e-9)
+
+                    if sim >= thr:
+                        keeper_doc = self.documents[keeper_id]
+                        dup_doc = self.documents[dup_id]
+
+                        k_meta = keeper_doc.setdefault("metadata", {})
+                        d_meta = dup_doc.get("metadata", {})
+
+                        # Merge tags (handle lists safely)
+                        k_tags = list(set(k_meta.get("tags", [])) | set(d_meta.get("tags", [])))
+                        k_meta["tags"] = k_tags
+
+                        # Merge usefulness
+                        k_use = int(k_meta.get("usefulness", 0) or 0)
+                        d_use = int(d_meta.get("usefulness", 0) or 0)
+                        k_meta["usefulness"] = max(k_use, d_use)
+                        keeper_doc["usefulness"] = max(k_use, d_use)
+
+                        self.delete(dup_id)
+                        alive_ids.discard(dup_id)
+                        removed += 1
+                        merged_into.setdefault(keeper_id, []).append(dup_id)
+
+            return {"tenant_id": tenant_id, "removed": removed, "merged_into": merged_into}
