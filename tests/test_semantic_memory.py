@@ -136,31 +136,21 @@ def test_search_returns_scores(sem_mem):
 
 def test_fuzzy_deduplication(sem_mem):
     """Verify that near-duplicate documents within the same tenant return the existing doc ID."""
-    doc_id1 = sem_mem.store(
-        "The quick brown fox jumps over the lazy dog",
-        tenant_id="tenant_a"
-    )
+    doc_id1 = sem_mem.store("The quick brown fox jumps over the lazy dog", tenant_id="tenant_a")
     assert doc_id1 is not None
 
     # Exact duplicate should return same ID
-    doc_id2 = sem_mem.store(
-        "The quick brown fox jumps over the lazy dog",
-        tenant_id="tenant_a"
-    )
+    doc_id2 = sem_mem.store("The quick brown fox jumps over the lazy dog", tenant_id="tenant_a")
     assert doc_id2 == doc_id1
 
     # Fuzzy duplicate (high similarity) in same tenant should return same ID
-    doc_id3 = sem_mem.store(
-        "The quick brown fox jumped over the lazy dog",
-        tenant_id="tenant_a"
-    )
+    doc_id3 = sem_mem.store("The quick brown fox jumped over the lazy dog", tenant_id="tenant_a")
     assert doc_id3 == doc_id1
     assert sem_mem.count == 1
 
     # Same content but in a different tenant should NOT deduplicate (security boundary)
     doc_id_other_tenant = sem_mem.store(
-        "The quick brown fox jumps over the lazy dog",
-        tenant_id="tenant_b"
+        "The quick brown fox jumps over the lazy dog", tenant_id="tenant_b"
     )
     assert doc_id_other_tenant != doc_id1
     assert sem_mem.count == 2
@@ -207,18 +197,18 @@ def test_consolidation(sem_mem):
     _ = sem_mem.store(
         "Software engineering involves writing clean code",
         metadata={"tags": ["dev"]},
-        tenant_id="t1"
+        tenant_id="t1",
     )
     doc_id2 = sem_mem.store(
         "Software engineering includes writing clean code",
         metadata={"tags": ["coding"]},
-        tenant_id="t1"
+        tenant_id="t1",
     )
     # Also add one doc in different tenant
     sem_mem.store(
         "Software engineering involves writing clean code",
         metadata={"tags": ["other"]},
-        tenant_id="t2"
+        tenant_id="t2",
     )
 
     assert sem_mem.count == 3
@@ -252,7 +242,7 @@ async def test_memory_node_handlers(tmp_path):
     _ = await node.store(
         memory_type=MemoryType.SEMANTIC,
         data="Cognitive architectures are complex systems",
-        tenant_id="t1"
+        tenant_id="t1",
     )
     all_docs = node.semantic_db.get_all()
     assert len(all_docs) == 1
@@ -264,7 +254,7 @@ async def test_memory_node_handlers(tmp_path):
         source_node_id="test",
         tenant_id="t1",
         topic="memory.feedback",
-        payload={"note_id": stored_doc_id, "useful": True}
+        payload={"note_id": stored_doc_id, "useful": True},
     )
     resp = await bus.request("memory.feedback", feedback_msg)
     assert resp is not None
@@ -277,7 +267,7 @@ async def test_memory_node_handlers(tmp_path):
         source_node_id="test",
         tenant_id="t1",
         topic="memory.consolidate",
-        payload={"threshold": 0.8}
+        payload={"threshold": 0.8},
     )
     resp_c = await bus.request("memory.consolidate", consolidate_msg)
     assert resp_c is not None
