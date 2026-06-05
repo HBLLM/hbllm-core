@@ -135,23 +135,24 @@ def test_search_returns_scores(sem_mem):
 
 
 def test_fuzzy_deduplication(sem_mem):
-    """Verify that near-duplicate documents within the same tenant return the existing doc ID."""
+    """Verify that near-duplicate documents within the same tenant return None."""
     doc_id1 = sem_mem.store("The quick brown fox jumps over the lazy dog", tenant_id="tenant_a")
     assert doc_id1 is not None
 
-    # Exact duplicate should return same ID
+    # Exact duplicate should return None
     doc_id2 = sem_mem.store("The quick brown fox jumps over the lazy dog", tenant_id="tenant_a")
-    assert doc_id2 == doc_id1
+    assert doc_id2 is None
 
-    # Fuzzy duplicate (high similarity) in same tenant should return same ID
+    # Fuzzy duplicate (high similarity) in same tenant should return None
     doc_id3 = sem_mem.store("The quick brown fox jumped over the lazy dog", tenant_id="tenant_a")
-    assert doc_id3 == doc_id1
+    assert doc_id3 is None
     assert sem_mem.count == 1
 
     # Same content but in a different tenant should NOT deduplicate (security boundary)
     doc_id_other_tenant = sem_mem.store(
         "The quick brown fox jumps over the lazy dog", tenant_id="tenant_b"
     )
+    assert doc_id_other_tenant is not None
     assert doc_id_other_tenant != doc_id1
     assert sem_mem.count == 2
 

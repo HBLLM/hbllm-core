@@ -408,10 +408,6 @@ class SemanticMemory:
         tenant_hash_key = f"{tenant_id or 'default'}:{content_hash}"
         if tenant_hash_key in self._content_hashes or content_hash in self._content_hashes:
             logger.debug("Duplicate content detected — skipping store")
-            for doc_id, doc in self.documents.items():
-                if self._content_hash(doc["content"]) == content_hash:
-                    if (doc.get("metadata") or {}).get("tenant_id") == tenant_id:
-                        return doc_id
             return None
 
         # Fuzzy Deduplication
@@ -419,11 +415,10 @@ class SemanticMemory:
             dup_id = self._find_duplicate(content, tenant_id)
             if dup_id:
                 logger.info(
-                    "Fuzzy duplicate memory detected (similarity >= %s) — returning existing doc_id %s",
+                    "Fuzzy duplicate memory detected (similarity >= %s) — returning None",
                     self.dedup_threshold,
-                    dup_id,
                 )
-                return dup_id
+                return None
 
         # Evict oldest document if we reached memory limit
         if len(self.ids) >= self.max_documents:
