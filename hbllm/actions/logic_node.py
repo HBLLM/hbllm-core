@@ -49,7 +49,9 @@ class LogicNode(Node):
         Triggered when a new query lands on the Global Workspace Blackboard.
         """
         payload = message.payload
-        text = str(payload.get("text", ""))
+        # Prefer augmented_prompt (with memory context) for inference
+        metadata = payload.get("metadata", {}) or {}
+        text = str(metadata.get("augmented_prompt") or payload.get("text", ""))
 
         # 1. Intent Detection — use LLM to determine if this is a logic problem
         if not self.llm:
