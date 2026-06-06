@@ -151,10 +151,45 @@ class RouterNode(Node):
                 emb = self._encode_text(centroid_text)
                 self.domain_centroids[domain_name] = emb
 
-            # Bootstrap intents
+            # Bootstrap intents with richer descriptions for better semantic matching
+            _intent_descriptions: dict[str, str] = {
+                "web_search": (
+                    "web search lookup find current latest recent news today "
+                    "who is the president prime minister leader of country "
+                    "what is the price weather score result status update "
+                    "real-time information live breaking trending "
+                    "search the internet browse the web look up online"
+                ),
+                "general_knowledge": (
+                    "general knowledge facts trivia explain concept theory "
+                    "how does something work definition meaning history"
+                ),
+                "code_generation": (
+                    "write code program function class script implement "
+                    "fix bug debug error syntax programming"
+                ),
+                "math_reasoning": (
+                    "calculate solve equation math formula proof statistics "
+                    "algebra geometry calculus probability"
+                ),
+                "complex_reasoning": (
+                    "analyze compare evaluate reason argue logic "
+                    "complex multi-step problem critical thinking"
+                ),
+                "tool_synthesis": (
+                    "use tool API call function execute run command "
+                    "integrate service automate workflow"
+                ),
+                "fuzzy_reasoning": (
+                    "uncertain ambiguous vague maybe possibly "
+                    "approximate estimate guess probability"
+                ),
+                "unknown_topic": (
+                    "unknown unrecognized unfamiliar new topic never seen before novel category"
+                ),
+            }
             for intent in self.known_intents:
-                # e.g. "code_generation" -> "code generation"
-                text = intent.replace("_", " ")
+                text = _intent_descriptions.get(intent, intent.replace("_", " "))
                 emb = self._encode_text(text)
                 self.intent_centroids[intent] = emb
 
@@ -235,7 +270,7 @@ class RouterNode(Node):
         self.last_activity_time = time.time()
 
         # Quick lookup for common greetings/smalltalk to bypass slow ML inference on CPU
-        text_stripped = text.lower().strip("?!. ")
+        text_stripped = text.strip().lower().strip("?!.")
         is_smalltalk_greeting = text_stripped in {
             "hi",
             "hello",
@@ -309,6 +344,12 @@ class RouterNode(Node):
             )
             await self.bus.publish("sensory.output", response_msg)
             return None
+        elif self._is_web_search_query(text_stripped):
+            # Heuristic: detect factual/current-event queries that need web search
+            logger.info("Router heuristic web_search match for query: '%s'", text[:50])
+            target_domain = "general"
+            confidence = 0.90
+            intent = "web_search"
         elif self.use_vectors:
             if not self._bootstrapped:
                 import asyncio
@@ -856,3 +897,77 @@ class RouterNode(Node):
             return DeviceTier.EDGE
 
         return DeviceTier.SERVER
+
+    @staticmethod
+    def _is_web_search_query(text: str) -> bool:
+        """Heuristic to detect queries that need real-time web search.
+
+        Catches common patterns for factual/current-event questions that the
+        vector router tends to misclassify as general_knowledge because the
+        embedding space doesn't distinguish "LLM already knows this" from
+        "needs a live lookup."
+        """
+        import re
+
+        # Patterns that strongly indicate need for current/real-time information
+        _WEB_SEARCH_PATTERNS: list[re.Pattern[str]] = [
+            # "Who is/us/iz the [current/new] president/PM/leader of X" (typo-tolerant)
+            re.compile(
+                r"\bwho\s+\w+\s+(?:the\s+)?(?:current|new|present|acting)?\s*"
+                r"(?:president|prime\s+minister|ceo|leader|king|queen|chancellor|mayor|governor)\b",
+                re.IGNORECASE,
+            ),
+            # Standalone "president/PM of [country]" without requiring "who is"
+            re.compile(
+                r"\b(?:current|new|present|acting)\s+"
+                r"(?:president|prime\s+minister|leader|king|queen|chancellor|governor)"
+                r"\s+of\b",
+                re.IGNORECASE,
+            ),
+            # "president of sri lanka / usa / india" etc.
+            re.compile(
+                r"\b(?:president|prime\s+minister|leader|chancellor|governor)\s+of\s+\w",
+                re.IGNORECASE,
+            ),
+            # "latest/recent/breaking news about X"
+            re.compile(
+                r"\b(?:latest|recent|breaking|current|today'?s?)\s+(?:news|updates|developments|headlines)\b",
+                re.IGNORECASE,
+            ),
+            # "what is the current/today's price/score/weather/status/rate"
+            re.compile(
+                r"\b(?:what\s+is|what's)\s+(?:the\s+)?(?:current|today'?s?|latest|live|real[- ]?time)\s+"
+                r"(?:price|stock|score|weather|temperature|exchange\s+rate|status|result)\b",
+                re.IGNORECASE,
+            ),
+            # "search for / look up / find me / google"
+            re.compile(
+                r"\b(?:search\s+(?:for|about)|look\s+up|find\s+me|google|browse)\b",
+                re.IGNORECASE,
+            ),
+            # "search it / search this / look it up" — follow-up requests
+            re.compile(
+                r"\b(?:search|look\s+up|find|google)\s+(?:it|this|that)\b",
+                re.IGNORECASE,
+            ),
+            # "can you search / can you find / can you look up"
+            re.compile(
+                r"\b(?:can|could|please)\s+(?:you\s+)?(?:search|find|look\s+up|google)\b",
+                re.IGNORECASE,
+            ),
+            # "how much does X cost [now/today]"
+            re.compile(
+                r"\b(?:how\s+much\s+(?:does|is|do))\b.*\b(?:cost|worth|price)\b",
+                re.IGNORECASE,
+            ),
+            # "what happened [today/yesterday/recently] in X"
+            re.compile(
+                r"\b(?:what\s+happened|what's\s+happening|what\s+is\s+happening)\b",
+                re.IGNORECASE,
+            ),
+        ]
+
+        for pattern in _WEB_SEARCH_PATTERNS:
+            if pattern.search(text):
+                return True
+        return False
