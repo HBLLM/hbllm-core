@@ -157,7 +157,7 @@ class TestCognitivePipeline:
 
     async def test_start_stop(self, pipeline):
         pipe, _ = pipeline
-        assert pipe._subscription is not None
+        assert len(pipe._subscriptions) > 0
 
     async def test_timeout_returns_error(self, pipeline):
         pipe, _ = pipeline

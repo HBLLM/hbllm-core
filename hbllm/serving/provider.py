@@ -18,6 +18,14 @@ import json
 import logging
 import os
 import random
+
+# Sanitize proxy environment variables to prevent httpx/urllib crashing on ::1 IPv6 address
+for _env_var in ("NO_PROXY", "no_proxy"):
+    _env_val = os.environ.get(_env_var, "")
+    if _env_val:
+        _cleaned = ",".join(_part for _part in _env_val.split(",") if "::1" not in _part)
+        os.environ[_env_var] = _cleaned
+
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
@@ -532,14 +540,25 @@ class OpenAIProvider(LLMProvider):
     ) -> LLMResponse:
         import httpx
 
+        if not self._api_key:
+            if "api.groq.com" in self._base_url:
+                raise ValueError(
+                    "GROQ_API_KEY is not set. Please set the GROQ_API_KEY environment variable."
+                )
+            elif "api.openai.com" in self._base_url:
+                raise ValueError(
+                    "OPENAI_API_KEY is not set. Please set the OPENAI_API_KEY environment variable."
+                )
+
         with trace_span(
             "llm.generate",
             {"provider": "openai", "model": self._model, "max_tokens": str(max_tokens)},
         ):
             headers: dict[str, str] = {
-                "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             }
+            if self._api_key:
+                headers["Authorization"] = f"Bearer {self._api_key}"
             payload = {
                 "model": self._model,
                 "messages": messages,
@@ -584,10 +603,21 @@ class OpenAIProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         import httpx
 
+        if not self._api_key:
+            if "api.groq.com" in self._base_url:
+                raise ValueError(
+                    "GROQ_API_KEY is not set. Please set the GROQ_API_KEY environment variable."
+                )
+            elif "api.openai.com" in self._base_url:
+                raise ValueError(
+                    "OPENAI_API_KEY is not set. Please set the OPENAI_API_KEY environment variable."
+                )
+
         headers: dict[str, str] = {
-            "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         payload = {
             "model": self._model,
             "messages": messages,
@@ -648,6 +678,11 @@ class AnthropicProvider(LLMProvider):
         **kwargs: Any,
     ) -> LLMResponse:
         import httpx
+
+        if not self._api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is not set. Please set the ANTHROPIC_API_KEY environment variable."
+            )
 
         with trace_span(
             "llm.generate",
@@ -712,6 +747,11 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         """Stream tokens from Anthropic's SSE API."""
         import httpx
+
+        if not self._api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY is not set. Please set the ANTHROPIC_API_KEY environment variable."
+            )
 
         system = ""
         user_messages = []

@@ -117,3 +117,49 @@ class TestLLMInterfaceAdapterLoading:
         await mock_llm.generate("Hello", max_tokens=1, tenant_id="invalid")
         # Attempted invalid, caught ValueError, fallback to default, then generate, then reset to default
         assert mock_llm.model.adapter_calls == ["default", "default"]
+
+
+@pytest.mark.asyncio
+async def test_provider_missing_api_key_validation():
+    import os
+
+    from hbllm.serving.provider import AnthropicProvider, GroqProvider, OpenAIProvider
+
+    # Force empty env keys
+    orig_openai = os.environ.pop("OPENAI_API_KEY", None)
+    orig_groq = os.environ.pop("GROQ_API_KEY", None)
+    orig_anthropic = os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    try:
+        # 1. Groq Provider
+        groq = GroqProvider(api_key="")
+        with pytest.raises(ValueError, match="GROQ_API_KEY is not set"):
+            await groq.generate([{"role": "user", "content": "hi"}])
+        with pytest.raises(ValueError, match="GROQ_API_KEY is not set"):
+            async for _ in groq.stream([{"role": "user", "content": "hi"}]):
+                pass
+
+        # 2. OpenAI Provider with default URL
+        openai = OpenAIProvider(api_key="")
+        with pytest.raises(ValueError, match="OPENAI_API_KEY is not set"):
+            await openai.generate([{"role": "user", "content": "hi"}])
+        with pytest.raises(ValueError, match="OPENAI_API_KEY is not set"):
+            async for _ in openai.stream([{"role": "user", "content": "hi"}]):
+                pass
+
+        # 3. Anthropic Provider
+        anthropic = AnthropicProvider(api_key="")
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is not set"):
+            await anthropic.generate([{"role": "user", "content": "hi"}])
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is not set"):
+            async for _ in anthropic.stream([{"role": "user", "content": "hi"}]):
+                pass
+
+    finally:
+        # Restore original env variables
+        if orig_openai is not None:
+            os.environ["OPENAI_API_KEY"] = orig_openai
+        if orig_groq is not None:
+            os.environ["GROQ_API_KEY"] = orig_groq
+        if orig_anthropic is not None:
+            os.environ["ANTHROPIC_API_KEY"] = orig_anthropic

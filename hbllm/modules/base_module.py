@@ -76,7 +76,10 @@ class DomainModuleNode(Node):
         except (TypeError, ValueError, KeyError) as e:
             return message.create_error(f"Invalid QueryPayload: {e}")
 
-        prompt = getattr(payload, "text", "")
+        # Prefer augmented_prompt (with memory context + history) for inference,
+        # fall back to raw text if not provided (e.g. for greeting fast-paths)
+        payload_metadata = getattr(payload, "metadata", {}) or {}
+        prompt = payload_metadata.get("augmented_prompt") or getattr(payload, "text", "")
         domain_hint = getattr(payload, "domain_hint", "general")
 
         # Domain eligibility check (supports hierarchical sub-domains)
