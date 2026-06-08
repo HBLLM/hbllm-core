@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -525,6 +526,8 @@ class MemoryNode(Node, UnifiedMemoryInterface):
                             "user_id": payload.user_id or message.user_id,
                             "device_id": payload.device_id or message.device_id,
                             "scope": payload.scope,
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                            **(payload.metadata or {}),
                         },
                         is_priority=False,
                         tenant_id=payload.tenant_id or message.tenant_id,

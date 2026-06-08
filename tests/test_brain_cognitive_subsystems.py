@@ -14,7 +14,7 @@ from hbllm.brain.revision_node import RevisionNode
 from hbllm.brain.self_model import SelfModel
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.world_state import WorldStateEngine
-from hbllm.data.interaction_miner import InteractionMiner
+from hbllm.data.interaction_miner import AsyncInteractionMiner, InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
 from hbllm.serving.provider import LLMProvider, LLMResponse
@@ -135,7 +135,7 @@ class TestBrainCognitiveSubsystems:
 
     async def test_interaction_miner_initialized(self, brain):
         assert brain.interaction_miner is not None
-        assert isinstance(brain.interaction_miner, InteractionMiner)
+        assert isinstance(brain.interaction_miner, (InteractionMiner, AsyncInteractionMiner))
 
     # ─── Subsystem Functional Tests ──────────────────────────────────
 

@@ -272,6 +272,7 @@ class SleepCycleNode(Node):
                     "session_id": "default_session",
                     "role": "system",
                     "content": f"[CONSOLIDATED MEMORY] User discussed {len(turns) // 2} topics. Key facts extracted and embedded.",
+                    "metadata": {"type": "memory_summary", "source": "sleep_cycle"},
                 },
             )
             await self.bus.publish("memory.store", store_msg)
@@ -743,6 +744,7 @@ class SleepCycleNode(Node):
                     "role": "system",
                     "content": journal,
                     "domain": "sleep_cycle",
+                    "metadata": {"type": "dream_journal", "source": "sleep_cycle"},
                 },
             )
             await self.bus.publish("memory.store", store_msg)

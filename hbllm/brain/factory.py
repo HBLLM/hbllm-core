@@ -151,6 +151,8 @@ class BrainConfig:
     inject_scheduler: bool = True  # v3: Proactive agent capabilities
     inject_fuzzy_logic: bool = False  # Fuzzy reasoning (requires scikit-fuzzy)
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
+    inject_browser: bool = True  # Browse web / search via DuckDuckGo
+    inject_execution: bool = True  # Python sandboxed code execution
     total_timeout: float = field(default_factory=_default_total_timeout)
     api_timeout: float = field(default_factory=_default_api_timeout)
     stream_timeout: float = field(default_factory=_default_stream_timeout)
@@ -746,6 +748,20 @@ class BrainFactory:
             SleepCycleNode(node_id="sleep", llm=llm),
         ]
 
+        # Browser Node (DuckDuckGo search + scraping)
+        if cfg.inject_browser:
+            from hbllm.actions.browser_node import BrowserNode
+
+            nodes.append(BrowserNode(node_id="browser"))
+            logger.info("BrowserNode wired (web search & scrape)")
+
+        # Execution Node (sandboxed python execution)
+        if cfg.inject_execution:
+            from hbllm.actions.execution_node import ExecutionNode
+
+            nodes.append(ExecutionNode(node_id="execution"))
+            logger.info("ExecutionNode wired (sandboxed python execution)")
+
         # Proactive governance sentinel
         sentinel_node = None
         if cfg.inject_sentinel and policy_engine:
@@ -953,6 +969,7 @@ class BrainFactory:
                 goal_manager=brain.goal_manager,
                 self_model=brain.self_model,
                 skill_registry=brain.skill_registry,
+                db_path=Path(cfg.data_dir) / "evaluations.db",
             )
             await _register_node(registry, eval_node)
             await eval_node.start(message_bus)
@@ -1186,6 +1203,7 @@ class BrainFactory:
                 goal_manager=None,
                 self_model=None,
                 skill_registry=skill_registry,
+                data_dir=cfg.data_dir,
             )
 
         # 5. SkillEngine
@@ -1258,6 +1276,26 @@ class BrainFactory:
             await _register_node(registry, lnode)
             await lnode.start(message_bus)
             nodes.append(lnode)
+
+        # Browser Node (DuckDuckGo search + scraping)
+        if cfg.inject_browser:
+            from hbllm.actions.browser_node import BrowserNode
+
+            bnode = BrowserNode(node_id="browser")
+            await _register_node(registry, bnode)
+            await bnode.start(message_bus)
+            nodes.append(bnode)
+            logger.info("BrowserNode wired (web search & scrape)")
+
+        # Execution Node (sandboxed python execution)
+        if cfg.inject_execution:
+            from hbllm.actions.execution_node import ExecutionNode
+
+            enode = ExecutionNode(node_id="execution")
+            await _register_node(registry, enode)
+            await enode.start(message_bus)
+            nodes.append(enode)
+            logger.info("ExecutionNode wired (sandboxed python execution)")
 
         # Register and start default DomainModuleNode instances
         if (
@@ -1339,7 +1377,7 @@ class BrainFactory:
         brain.cognition_router = CognitionRouter()
         brain.reward_model = RewardModel(data_dir=cfg.data_dir)
         brain.policy_optimizer = PolicyOptimizer()
-        brain.interaction_miner = InteractionMiner(data_dir=cfg.data_dir)
+        brain.interaction_miner = AsyncInteractionMiner(data_dir=cfg.data_dir)
 
         # Map composite sub-components to legacy Brain attributes
         if governance:

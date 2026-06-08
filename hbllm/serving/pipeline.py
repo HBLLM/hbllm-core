@@ -115,19 +115,21 @@ class CognitivePipeline:
         self.registry = registry
         self.config = config or PipelineConfig()
         self._response_futures: dict[str, asyncio.Future[Message]] = {}
-        self._subscription: Subscription | None = None
+        self._subscriptions: list[Subscription] = []
 
     async def start(self) -> None:
-        """Subscribe to decision output to capture final responses."""
-        self._subscription = await self.bus.subscribe(
-            "decision.output", self._handle_decision_output
-        )
+        """Subscribe to decision output and sensory output to capture final responses."""
+        self._subscriptions = [
+            await self.bus.subscribe("decision.output", self._handle_decision_output),
+            await self.bus.subscribe("sensory.output", self._handle_decision_output),
+        ]
         logger.info("CognitivePipeline started")
 
     async def stop(self) -> None:
         """Clean up subscriptions and pending futures."""
-        if self._subscription:
-            await self.bus.unsubscribe(self._subscription)
+        if self._subscriptions:
+            for sub in self._subscriptions:
+                await self.bus.unsubscribe(sub)
 
         for future in self._response_futures.values():
             if not future.done():
@@ -146,7 +148,7 @@ class CognitivePipeline:
             correlation_id=correlation_id,
         )
         await self.bus.publish("system.thought", msg)
-        logger.debug("[Thought] %s", text)
+        logger.info("[Thought] %s", text)
 
     async def process(
         self,
@@ -378,15 +380,30 @@ class CognitivePipeline:
         """
         if not text:
             return "trivial"
-        words = text.split()
-        if (
-            len(words) < 6
-            and "?" not in text
-            and "how" not in text.lower()
-            and "why" not in text.lower()
-        ):
-            # Very short statements (e.g., "Hello", "Good morning", "Thanks")
+
+        # If it needs web search, it's complex
+        try:
+            from hbllm.brain.router_node import RouterNode
+
+            if RouterNode._is_web_search_query(text):
+                return "complex"
+        except ImportError:
+            pass
+
+        # Any explicit question mark → complex
+        if "?" in text:
+            return "complex"
+
+        # Question words at the start of a token → complex
+        query_words = text.lower().split()
+        question_words = {"who", "what", "where", "when", "why", "how", "which"}
+        if query_words and query_words[0] in question_words:
+            return "complex"
+
+        # Very short statements (e.g., "Hello", "Good morning", "Thanks")
+        if len(query_words) < 6:
             return "trivial"
+
         return "complex"
 
     async def _fast_path(
@@ -457,21 +474,39 @@ class CognitivePipeline:
     ) -> None:
         """Store the interaction in memory (fire-and-forget)."""
         try:
-            store_msg = Message(
+            # 1. Store user query
+            user_msg = Message(
                 type=MessageType.EVENT,
                 source_node_id="pipeline",
                 topic="memory.store",
                 tenant_id=tenant_id,
                 session_id=session_id,
                 payload={
-                    "query": query,
-                    "response": response.get("text", ""),
+                    "session_id": session_id,
+                    "role": "user",
+                    "content": query,
                     "correlation_id": correlation_id,
                 },
             )
-            await self.bus.publish("memory.store", store_msg)
+            await self.bus.publish("memory.store", user_msg)
+
+            # 2. Store assistant response
+            assistant_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id="pipeline",
+                topic="memory.store",
+                tenant_id=tenant_id,
+                session_id=session_id,
+                payload={
+                    "session_id": session_id,
+                    "role": "assistant",
+                    "content": response.get("text", response.get("response", "")),
+                    "correlation_id": correlation_id,
+                },
+            )
+            await self.bus.publish("memory.store", assistant_msg)
         except Exception:
-            logger.debug("Post-process memory store failed, non-critical")
+            logger.exception("Post-process memory store failed")
 
     async def health(self) -> dict[str, Any]:
         """Pipeline health check."""

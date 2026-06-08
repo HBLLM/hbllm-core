@@ -200,12 +200,55 @@ async def tool_file_write(path: str, content: str) -> ToolResult:
 
 
 async def tool_web_search(query: str) -> ToolResult:
-    """Search the web using DuckDuckGo (no API key required)."""
-    try:
-        from duckduckgo_search import DDGS
+    """Search the web using DuckDuckGo HTML endpoint (no API key required).
 
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=5))
+    Bypasses the duckduckgo_search DDGS library which has a bug that
+    hardcodes the 'bing' backend and returns empty results.  Instead we
+    POST directly to https://html.duckduckgo.com/html and parse with lxml.
+    """
+    try:
+        import requests as _requests  # type: ignore
+        from lxml.html import document_fromstring  # type: ignore
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://html.duckduckgo.com/",
+        }
+        resp = _requests.post(
+            "https://html.duckduckgo.com/html",
+            data={"q": query, "b": ""},
+            headers=headers,
+            timeout=10,
+        )
+        resp.raise_for_status()
+
+        tree = document_fromstring(resp.content)
+        results: list[dict[str, str]] = []
+        cache: set[str] = set()
+        for div in tree.xpath("//div[h2]"):
+            hrefs = div.xpath("./a/@href")
+            href = str(hrefs[0]) if hrefs else ""
+            if (
+                not href
+                or href in cache
+                or href.startswith(
+                    ("http://www.google.com/search?q=", "https://duckduckgo.com/y.js?ad_domain")
+                )
+            ):
+                continue
+            cache.add(href)
+            titles = div.xpath("./h2/a/text()")
+            title = str(titles[0]).strip() if titles else ""
+            bodies = div.xpath("./a//text()")
+            body = "".join(str(x) for x in bodies).strip() if bodies else ""
+            results.append({"title": title, "href": href, "body": body})
+            if len(results) >= 5:
+                break
+
         formatted = []
         for r in results:
             formatted.append(
@@ -218,7 +261,7 @@ async def tool_web_search(query: str) -> ToolResult:
             tool="web_search",
             success=False,
             output="",
-            error="duckduckgo-search not installed. Run: pip install duckduckgo-search",
+            error="Missing dependencies. Run: pip install requests lxml",
         )
     except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
         return ToolResult(tool="web_search", success=False, output="", error=str(e))

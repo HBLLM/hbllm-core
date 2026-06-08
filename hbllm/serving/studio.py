@@ -28,15 +28,36 @@ async def get_emotion_state(agent_name: str = "assistant", tenant_id: str = "def
     brain = _state.get("brain")
     if not brain:
         return {"valence": 0.0, "arousal": 0.0, "emotion_label": "neutral", "status": "not_loaded"}
+
+    # Try brain node map first
     node_map = _get_node_map(brain)
     emotion_node = node_map.get("EmotionNode")
+
+    # Fall back to plugin manager's loaded nodes
+    if not emotion_node:
+        pm = _state.get("plugin_manager")
+        if pm:
+            for node in getattr(pm, "_loaded_nodes", []):
+                if hasattr(node, "current_valence") and hasattr(node, "current_arousal"):
+                    emotion_node = node
+                    break
+
     if emotion_node:
         valence = getattr(emotion_node, "current_valence", 0.0)
         arousal = getattr(emotion_node, "current_arousal", 0.0)
+        label = "neutral"
+        if valence > 0.3:
+            label = "happy"
+        elif valence > 0.0:
+            label = "content"
+        elif valence < -0.3:
+            label = "sad"
+        elif valence < 0.0:
+            label = "uneasy"
         return {
             "valence": valence,
             "arousal": arousal,
-            "emotion_label": "neutral" if valence == 0.0 else ("happy" if valence > 0.0 else "sad"),
+            "emotion_label": label,
             "status": "active",
         }
     return {"valence": 0.0, "arousal": 0.0, "emotion_label": "neutral", "status": "not_loaded"}
@@ -473,11 +494,26 @@ async def studio_stats() -> Any:
         if not hasattr(node, "get_info"):
             continue
         info = node.get_info()
+        status = "healthy"
+        if hasattr(node, "health_check"):
+            try:
+                h_report = await node.health_check()
+                status = (
+                    h_report.status.value
+                    if hasattr(h_report.status, "value")
+                    else str(h_report.status)
+                )
+            except Exception as e:
+                logger.error("Failed to run health check for node %s: %s", name, e)
+                status = "unhealthy"
+        else:
+            status = "healthy" if getattr(node, "_running", True) else "unhealthy"
+
         node_health.append(
             {
                 "id": info.node_id,
                 "name": name.replace("Node", "").replace("Manager", " Mgr"),
-                "status": "healthy" if getattr(node, "_running", True) else "unhealthy",
+                "status": status,
                 "type": info.node_type.value
                 if hasattr(info.node_type, "value")
                 else str(info.node_type),

@@ -227,6 +227,7 @@ class ExecutionNode(Node):
             else:
                 logger.warning("unshare not found. Network isolation disabled.")
         await self.bus.subscribe("action.execute_code", self.handle_message)
+        await self.bus.subscribe("task.execute.python", self.handle_message)
 
     async def on_stop(self) -> None:
         logger.info("Stopping ExecutionNode")

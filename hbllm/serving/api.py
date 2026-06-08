@@ -14,7 +14,17 @@ import os
 import pathlib
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+
+# Sanitize proxy environment variables to prevent httpx/urllib crashing on ::1 IPv6 address
+for _env_var in ("NO_PROXY", "no_proxy"):
+    _env_val = os.environ.get(_env_var, "")
+    if _env_val:
+        _cleaned = ",".join(_part for _part in _env_val.split(",") if "::1" not in _part)
+        os.environ[_env_var] = _cleaned
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.brain.prompt_helper import ChatContext
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -859,6 +869,117 @@ async def metrics() -> Any:
     return brain.bus.metrics.snapshot()
 
 
+# ─── Shared Memory Recall Layer ───────────────────────────────────────────────
+
+
+async def _prepare_chat_context(
+    bus: Any,
+    tenant_id: str,
+    session_id: str,
+    user_text: str,
+    user_id: str,
+    device_id: str,
+    correlation_id: str,
+) -> tuple[list[dict[str, Any]], ChatContext]:
+    """
+    Shared memory recall layer for all chat paths.
+
+    Fetches history once, runs the 4-layer cognitive memory recall pipeline,
+    and optionally compresses recalled context if it exceeds ~300 tokens.
+
+    Returns:
+        (filtered_history, ChatContext)
+    """
+    from hbllm.brain.prompt_helper import ChatContext
+
+    # 1. Fetch history ONCE
+    history: list[dict[str, Any]] = []
+    try:
+        hist_msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="api_server",
+            tenant_id=tenant_id,
+            session_id=session_id,
+            topic="memory.retrieve_recent",
+            payload={"session_id": session_id, "limit": 30},
+            correlation_id=correlation_id,
+        )
+        hist_resp = await bus.request("memory.retrieve_recent", hist_msg, timeout=3.0)
+        history = hist_resp.payload.get("turns", [])
+    except Exception as e:
+        logger.warning("Failed to retrieve conversation history: %s", e)
+
+    # Exclude current query if already saved
+    if history and history[-1].get("role") == "user" and history[-1].get("content") == user_text:
+        history = history[:-1]
+
+    # Filter to user/assistant turns
+    filtered_history = [t for t in history if t.get("role") in ("user", "assistant")]
+
+    # 2. Run 4-layer memory recall
+    ctx = ChatContext()
+    try:
+        from hbllm.brain.prompt_helper import get_chat_memories
+
+        ctx = await get_chat_memories(bus, tenant_id, session_id, user_text, filtered_history)
+    except Exception as e:
+        logger.warning("Memory recall failed (non-fatal): %s", e)
+
+    # 3. Context compression (if recalled_context > ~300 tokens / 1200 chars)
+    if len(ctx.recalled_context) > 1200:
+        provider = None
+        if _state.get("provider"):
+            provider = _state["provider"]
+        elif _state.get("brain") and hasattr(_state["brain"], "provider"):
+            provider = _state["brain"].provider
+
+        if provider:
+            original_recalled = ctx.recalled_context
+            try:
+                compress_resp = await provider.generate(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Compress the following recalled memories into a concise "
+                                "bullet-point list of key facts relevant to the user's query. "
+                                "Keep only essential information. Be extremely concise."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"User query: {user_text}\n\n"
+                                f"Recalled memories:\n{ctx.recalled_context}"
+                            ),
+                        },
+                    ]
+                )
+                ctx.recalled_context = compress_resp.content
+                logger.debug(
+                    "[ContextLayer] Compressed recalled context: %d → %d chars",
+                    len(original_recalled),
+                    len(ctx.recalled_context),
+                )
+            except Exception as e:
+                # Strict fallback: truncate oldest memories instead of using raw
+                logger.warning("Context compression failed — truncating oldest: %s", e)
+                ctx.recalled_context = ctx.recalled_context[:1200]
+                last_sep = ctx.recalled_context.rfind("\n---\n")
+                if last_sep > 600:
+                    ctx.recalled_context = ctx.recalled_context[:last_sep]
+
+    logger.debug(
+        "[ContextLayer] Prepared context: history=%d, recent=%d, recalled=%d, summary=%d chars",
+        len(filtered_history),
+        len(ctx.recent_turns),
+        len(ctx.recalled_context),
+        len(ctx.summary_context),
+    )
+
+    return filtered_history, ctx
+
+
 # ─── Provider-based Chat (lightweight) ────────────────────────────────────────
 
 
@@ -936,30 +1057,32 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
         except Exception as e:
             logger.warning("RAG retrieval failed: %s", e)
 
-    # ── Retrieve and format conversation history ──
-    history = []
+    # ── Shared context layer: retrieve history + memory recall ──
+    filtered_history: list[dict[str, Any]] = []
+    ctx = None
     if bus:
-        try:
-            hist_msg = Message(
-                type=MessageType.QUERY,
-                source_node_id="api_server",
-                tenant_id=request.tenant_id,
-                session_id=request.session_id,
-                topic="memory.retrieve_recent",
-                payload={"session_id": request.session_id, "limit": 30},
-                correlation_id=correlation_id,
-            )
-            hist_resp = await bus.request("memory.retrieve_recent", hist_msg, timeout=3.0)
-            history = hist_resp.payload.get("turns", [])
-        except Exception as e:
-            logger.warning("Failed to retrieve conversation history: %s", e)
+        from hbllm.brain.prompt_helper import ChatContext
 
-    # Exclude the current query if it has already been saved to the DB
-    if history and history[-1].get("role") == "user" and history[-1].get("content") == request.text:
-        history = history[:-1]
+        filtered_history, ctx = await _prepare_chat_context(
+            bus,
+            request.tenant_id,
+            request.session_id,
+            request.text,
+            request.user_id,
+            request.device_id,
+            correlation_id,
+        )
 
-    # Filter to only user/assistant turns
-    filtered_history = [t for t in history if t.get("role") in ("user", "assistant")]
+    # Inject memory context into system prompt
+    if ctx and ctx.summary_context:
+        system_content += (
+            "\n\n--- Sleep Summaries ---\n" + ctx.summary_context + "\n--- End Summaries ---"
+        )
+    if ctx and ctx.recalled_context:
+        system_content += (
+            "\n\n--- Recalled Memories ---\n" + ctx.recalled_context + "\n--- End Memories ---\n"
+            "Use the above recalled memories to inform your answer when relevant."
+        )
 
     messages.append({"role": "system", "content": system_content})
 
@@ -1050,40 +1173,46 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     )
     await bus.publish("memory.store", memory_msg)
 
-    # ── Retrieve and format conversation history ──
-    history = []
-    try:
-        hist_msg = Message(
-            type=MessageType.QUERY,
-            source_node_id="api_server",
-            tenant_id=request.tenant_id,
-            session_id=request.session_id,
-            topic="memory.retrieve_recent",
-            payload={"session_id": request.session_id, "limit": 30},
-            correlation_id=correlation_id,
-        )
-        hist_resp = await bus.request("memory.retrieve_recent", hist_msg, timeout=3.0)
-        history = hist_resp.payload.get("turns", [])
-    except Exception as e:
-        logger.warning("Failed to retrieve conversation history: %s", e)
+    # ── Shared context layer: retrieve history + memory recall ──
+    filtered_history, ctx = await _prepare_chat_context(
+        bus,
+        request.tenant_id,
+        request.session_id,
+        request.text,
+        request.user_id,
+        request.device_id,
+        correlation_id,
+    )
 
-    # Exclude the current query if it has already been saved to the DB
-    if history and history[-1].get("role") == "user" and history[-1].get("content") == request.text:
-        history = history[:-1]
+    # Build augmented prompt with memory context injected (for downstream modules)
+    # IMPORTANT: Keep QueryPayload.text as the RAW user query so the router's
+    # greeting/intent detection works correctly. Pass the enriched prompt in
+    # metadata["augmented_prompt"] for domain modules to use during inference.
+    augmented_prompt = request.text
+    context_prefix = ""
+    if ctx.summary_context:
+        context_prefix += f"[Memory Summaries]\n{ctx.summary_context}\n\n"
+    if ctx.recalled_context:
+        context_prefix += f"[Recalled Context]\n{ctx.recalled_context}\n\n"
 
-    # Filter to only user/assistant turns
-    filtered_history = [t for t in history if t.get("role") in ("user", "assistant")]
-
-    prompt_text = request.text
     if filtered_history:
         flattened_history = ""
         for turn in filtered_history:
             role = turn.get("role", "user").capitalize()
             content = turn.get("content", "")
             flattened_history += f"{role}: {content}\n\n"
-        prompt_text = flattened_history + f"User: {request.text}\n\nAssistant:"
+        augmented_prompt = (
+            context_prefix + flattened_history + f"User: {request.text}\n\nAssistant:"
+        )
+    elif context_prefix:
+        augmented_prompt = context_prefix + f"User: {request.text}\n\nAssistant:"
 
-    # Send to router
+    # Send to router — text is the RAW query for classification,
+    # augmented_prompt carries the full context for inference
+    query_metadata: dict[str, Any] = {}
+    if augmented_prompt != request.text:
+        query_metadata["augmented_prompt"] = sanitize_input(augmented_prompt)
+
     query_msg = Message(
         type=MessageType.QUERY,
         source_node_id="api_server",
@@ -1092,7 +1221,11 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
         device_id=request.device_id,
         session_id=request.session_id,
         topic="router.query",
-        payload=QueryPayload(text=sanitize_input(prompt_text)).model_dump(),
+        payload=QueryPayload(
+            text=sanitize_input(request.text),
+            context=filtered_history,
+            metadata=query_metadata,
+        ).model_dump(),
         correlation_id=correlation_id,
     )
     await bus.publish("router.query", query_msg)

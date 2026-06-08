@@ -59,9 +59,6 @@ class InteractionMiner:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id TEXT DEFAULT '',
-                    user_id TEXT DEFAULT '',
-                    device_id TEXT DEFAULT '',
                     query TEXT NOT NULL,
                     response TEXT NOT NULL,
                     reward REAL DEFAULT 0.0,
@@ -72,12 +69,15 @@ class InteractionMiner:
                     created_at REAL NOT NULL
                 )
             """)
+            for col in ["tenant_id", "user_id", "device_id"]:
+                try:
+                    conn.execute(f"ALTER TABLE interactions ADD COLUMN {col} TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS mined_samples (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id TEXT DEFAULT '',
-                    user_id TEXT DEFAULT '',
-                    device_id TEXT DEFAULT '',
                     instruction TEXT NOT NULL,
                     response TEXT NOT NULL,
                     quality_score REAL NOT NULL,
@@ -87,6 +87,11 @@ class InteractionMiner:
                     created_at REAL NOT NULL
                 )
             """)
+            for col in ["tenant_id", "user_id", "device_id"]:
+                try:
+                    conn.execute(f"ALTER TABLE mined_samples ADD COLUMN {col} TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_interactions_reward ON interactions(reward DESC)"
             )
