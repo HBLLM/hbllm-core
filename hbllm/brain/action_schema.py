@@ -24,6 +24,7 @@ class ActionType(Enum):
     IOT_COMMAND = "iot_command"
     MCP_TOOL = "mcp_tool"
     CLARIFY = "clarify"  # confidence too low — ask the user to clarify
+    SHELL_EXECUTION = "shell_execution"
 
 
 class RiskLevel(Enum):
@@ -44,6 +45,7 @@ _ACTION_RISK: dict[ActionType, RiskLevel] = {
     ActionType.CODE_EXECUTION: RiskLevel.HIGH,
     ActionType.IOT_COMMAND: RiskLevel.HIGH,
     ActionType.MCP_TOOL: RiskLevel.HIGH,
+    ActionType.SHELL_EXECUTION: RiskLevel.HIGH,
 }
 
 

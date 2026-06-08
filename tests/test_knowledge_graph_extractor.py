@@ -78,10 +78,7 @@ See [Google](https://google.com) for details.
             "app": {
                 "name": "HBLLM Studio",
                 "port": "${APP_PORT}",
-                "database": {
-                    "host": "localhost",
-                    "user": "root"
-                }
+                "database": {"host": "localhost", "user": "root"},
             }
         }
         with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
@@ -91,7 +88,6 @@ See [Google](https://google.com) for details.
 
 
 class TestKnowledgeGraphExtractor:
-
     def test_folder_structure_extraction(self, temp_project):
         """Verifies FolderExtractor traverses structure and generates contains relations with stable IDs."""
         extractor = FolderExtractor(str(temp_project))
@@ -117,9 +113,7 @@ class TestKnowledgeGraphExtractor:
 
         # Verify contains relationships
         contains_rels = [
-            (r.source_id, r.target_id)
-            for r in result.relations
-            if r.relation_type == "contains"
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "contains"
         ]
         assert ("folder::.", "folder::src") in contains_rels
         assert ("folder::src", "file::src/extractor.py") in contains_rels
@@ -142,7 +136,9 @@ class TestKnowledgeGraphExtractor:
         assert entities_map["section::docs/index.md#h1_1"].attributes["category"] == "knowledge"
 
         # Verify contains links from document -> section -> subsection
-        contains_rels = [(r.source_id, r.target_id) for r in result.relations if r.relation_type == "contains"]
+        contains_rels = [
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "contains"
+        ]
         assert ("file::docs/index.md", "section::docs/index.md#h1_1") in contains_rels
         assert ("section::docs/index.md#h1_1", "section::docs/index.md#h2_1") in contains_rels
 
@@ -173,7 +169,9 @@ class TestKnowledgeGraphExtractor:
         assert "property::config.json#app.database.host" in entities_map
 
         # Verify contains links
-        contains_rels = [(r.source_id, r.target_id) for r in result.relations if r.relation_type == "contains"]
+        contains_rels = [
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "contains"
+        ]
         assert ("file::config.json", "property::config.json#app") in contains_rels
         assert ("property::config.json#app", "property::config.json#app.name") in contains_rels
 
@@ -184,7 +182,9 @@ class TestKnowledgeGraphExtractor:
 
         # Verify environment variable reference detection
         assert "env::APP_PORT" in entities_map
-        refers_to_rels = [(r.source_id, r.target_id) for r in result.relations if r.relation_type == "refers_to"]
+        refers_to_rels = [
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "refers_to"
+        ]
         assert ("property::config.json#app.port", "env::APP_PORT") in refers_to_rels
 
     def test_python_ast_extraction(self, temp_project):
@@ -206,13 +206,23 @@ class TestKnowledgeGraphExtractor:
 
         # Verify class inheritance link (placeholder node constructed)
         assert "class::placeholder#CustomBase" in entities_map
-        inherits_rels = [(r.source_id, r.target_id) for r in result.relations if r.relation_type == "inherits"]
-        assert ("class::src/extractor.py#ExtractorSystem", "class::placeholder#CustomBase") in inherits_rels
+        inherits_rels = [
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "inherits"
+        ]
+        assert (
+            "class::src/extractor.py#ExtractorSystem",
+            "class::placeholder#CustomBase",
+        ) in inherits_rels
 
         # Verify imported symbols (with detailed symbol info encoded in placeholder target ID)
         assert "code::import#hbllm.memory.knowledge_graph.KnowledgeGraph" in entities_map
-        imports_rels = [(r.source_id, r.target_id) for r in result.relations if r.relation_type == "imports"]
-        assert ("file::src/extractor.py", "code::import#hbllm.memory.knowledge_graph.KnowledgeGraph") in imports_rels
+        imports_rels = [
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "imports"
+        ]
+        assert (
+            "file::src/extractor.py",
+            "code::import#hbllm.memory.knowledge_graph.KnowledgeGraph",
+        ) in imports_rels
 
     def test_two_pass_reference_resolution(self, temp_project):
         """Verifies KnowledgeGraphExtractor correctly resolves placeholders to actual stable IDs in the second pass."""
@@ -224,20 +234,42 @@ class TestKnowledgeGraphExtractor:
         # CustomBase should be resolved from class::placeholder#CustomBase -> class::src/extractor.py#CustomBase
         assert "class::placeholder#CustomBase" not in entities_map
 
-        inherits_rels = [(r.source_id, r.target_id) for r in result.relations if r.relation_type == "inherits"]
-        assert ("class::src/extractor.py#ExtractorSystem", "class::src/extractor.py#CustomBase") in inherits_rels
+        inherits_rels = [
+            (r.source_id, r.target_id) for r in result.relations if r.relation_type == "inherits"
+        ]
+        assert (
+            "class::src/extractor.py#ExtractorSystem",
+            "class::src/extractor.py#CustomBase",
+        ) in inherits_rels
 
     def test_incremental_pruning(self, temp_project):
         """Verifies KnowledgeGraph.remove_by_source cleans up prior source-associated nodes and relations."""
         kg = KnowledgeGraph()
 
         # Add legacy nodes with source ID 'src_1'
-        kg.add_entity_by_id("file::legacy.py", "legacy.py", "module", {"source_id": "src_1", "category": "structure"})
-        kg.add_entity_by_id("class::legacy.py#OldClass", "OldClass", "class", {"source_id": "src_1", "category": "code"})
-        kg.add_relation_by_ids("file::legacy.py", "class::legacy.py#OldClass", "contains", metadata={"source_id": "src_1"})
+        kg.add_entity_by_id(
+            "file::legacy.py",
+            "legacy.py",
+            "module",
+            {"source_id": "src_1", "category": "structure"},
+        )
+        kg.add_entity_by_id(
+            "class::legacy.py#OldClass",
+            "OldClass",
+            "class",
+            {"source_id": "src_1", "category": "code"},
+        )
+        kg.add_relation_by_ids(
+            "file::legacy.py",
+            "class::legacy.py#OldClass",
+            "contains",
+            metadata={"source_id": "src_1"},
+        )
 
         # Add unrelated node with source ID 'src_2'
-        kg.add_entity_by_id("file::keep.py", "keep.py", "module", {"source_id": "src_2", "category": "structure"})
+        kg.add_entity_by_id(
+            "file::keep.py", "keep.py", "module", {"source_id": "src_2", "category": "structure"}
+        )
 
         assert kg.entity_count == 3
         assert kg.relation_count == 1

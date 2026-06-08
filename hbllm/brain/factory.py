@@ -1297,6 +1297,24 @@ class BrainFactory:
             nodes.append(enode)
             logger.info("ExecutionNode wired (sandboxed python execution)")
 
+        # Host shell execution node
+        if cfg.inject_shell:
+            from hbllm.actions.shell_node import HostShellNode
+
+            shell_node = HostShellNode(
+                node_id="shell_executor",
+                workspace_dir=None,
+                require_manual_approval=os.getenv("HBLLM_REQUIRE_SHELL_APPROVAL", "true").lower()
+                == "true",
+                policy_engine=governance.policy_engine if governance else None,
+            )
+            await _register_node(registry, shell_node)
+            await shell_node.start(message_bus)
+            nodes.append(shell_node)
+            logger.info(
+                "HostShellNode wired (manual approval=%s)", shell_node.require_manual_approval
+            )
+
         # Register and start default DomainModuleNode instances
         if (
             type(llm_provider).__name__ == "LocalProvider"

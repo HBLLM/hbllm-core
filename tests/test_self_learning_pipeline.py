@@ -38,6 +38,7 @@ async def _setup_pipeline(
     await bus.start()
 
     from unittest.mock import MagicMock
+
     model = MagicMock() if mock_model else None
     tokenizer = MagicMock() if mock_model else None
 

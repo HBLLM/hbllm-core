@@ -387,8 +387,7 @@ class KnowledgeGraph:
         """Remove all entities and relations associated with a specific source ID."""
         # Find relations to remove
         rels_to_remove = [
-            rk for rk, rel in self._relations.items()
-            if rel.metadata.get("source_id") == source_id
+            rk for rk, rel in self._relations.items() if rel.metadata.get("source_id") == source_id
         ]
 
         # Remove these relations
@@ -402,7 +401,8 @@ class KnowledgeGraph:
 
         # Find entities to remove
         entities_to_remove = [
-            eid for eid, entity in self._entities.items()
+            eid
+            for eid, entity in self._entities.items()
             if entity.attributes.get("source_id") == source_id
         ]
 
@@ -430,7 +430,15 @@ class KnowledgeGraph:
             return identifier
 
         # Check potential prefixed structural IDs
-        for prefix in ("file::", "folder::", "section::", "class::", "function::", "tag::", "url::"):
+        for prefix in (
+            "file::",
+            "folder::",
+            "section::",
+            "class::",
+            "function::",
+            "tag::",
+            "url::",
+        ):
             potential_id = f"{prefix}{identifier}"
             if potential_id in self._entities:
                 return potential_id
@@ -445,7 +453,6 @@ class KnowledgeGraph:
                 return eid
 
         return hashed  # Fallback to hashed ID
-
 
     def add_community(
         self,
@@ -562,7 +569,9 @@ class KnowledgeGraph:
 
         # BFS using deque for O(1) popleft
         visited = {start}
-        queue = deque([(start, [self._entities[start].attributes.get("name", self._entities[start].label)])])
+        queue = deque(
+            [(start, [self._entities[start].attributes.get("name", self._entities[start].label)])]
+        )
 
         while queue:
             current, path = queue.popleft()
@@ -640,7 +649,7 @@ class KnowledgeGraph:
                 "label": e.attributes.get("name", e.label),
                 "type": e.entity_type,
                 "category": e.attributes.get("category", "other"),
-                "attributes": e.attributes
+                "attributes": e.attributes,
             }
             for eid in visited_entities
             if (e := self._entities.get(eid))
@@ -649,8 +658,12 @@ class KnowledgeGraph:
             {
                 "source": r.source_id,
                 "target": r.target_id,
-                "source_label": self._entities[r.source_id].attributes.get("name", self._entities[r.source_id].label),
-                "target_label": self._entities[r.target_id].attributes.get("name", self._entities[r.target_id].label),
+                "source_label": self._entities[r.source_id].attributes.get(
+                    "name", self._entities[r.source_id].label
+                ),
+                "target_label": self._entities[r.target_id].attributes.get(
+                    "name", self._entities[r.target_id].label
+                ),
                 "type": r.relation_type,
                 "weight": r.weight,
             }
@@ -661,7 +674,6 @@ class KnowledgeGraph:
         ]
 
         return {"entities": entities, "relations": relations}
-
 
     # ── Text ingestion ───────────────────────────────────────────────────
 

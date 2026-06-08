@@ -89,7 +89,24 @@ class ActionPlanner:
         if intent == "mcp_tool" or original_query.get("mcp_tool_name"):
             return self._plan_mcp_tool(content, original_query)
 
-        # ── content-based fallback (code detection) ────────────────────────
+        # ── content-based tool call detection ──────────────────────────────
+        tool_call = self._extract_tool_call(content)
+        if tool_call:
+            tool_name, args = tool_call
+            return ActionPlan(
+                action_type=ActionType.MCP_TOOL,
+                content=content,
+                metadata={
+                    "tool_name": tool_name,
+                    "arguments": args,
+                    "is_direct_tool_call": True,
+                },
+            )
+
+        # ── content-based fallback (code / shell detection) ────────────────
+        if thought_type == "shell_execution" or "```bash" in content or "```sh" in content:
+            return self._plan_shell_execution(content, original_query)
+
         if thought_type == "code_execution" or "```python" in content:
             return self._plan_code_execution(content, original_query)
 
@@ -199,3 +216,63 @@ class ActionPlanner:
 
         # Last resort: return the raw content
         return content
+
+    def _plan_shell_execution(self, content: str, original_query: dict[str, Any]) -> ActionPlan:
+        command = self._extract_shell_command(content)
+        return ActionPlan(
+            action_type=ActionType.SHELL_EXECUTION,
+            content=command,
+            metadata={"raw_content": content},
+        )
+
+    @staticmethod
+    def _extract_shell_command(content: str) -> str:
+        """Extract shell command from markdown fenced sh/bash blocks."""
+        match = re.search(r"```(?:bash|sh)\s*\n(.*?)\n```", content, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        # Fallback: try splitting on the fence markers
+        if "```bash" in content:
+            try:
+                return content.split("```bash")[1].split("```")[0].strip()
+            except (IndexError, ValueError):
+                pass
+        if "```sh" in content:
+            try:
+                return content.split("```sh")[1].split("```")[0].strip()
+            except (IndexError, ValueError):
+                pass
+        return content
+
+    @staticmethod
+    def _extract_tool_call(content: str) -> tuple[str, dict[str, Any]] | None:
+        """Extract tool call name and arguments from XML or JSON blocks in content."""
+        import json
+
+        # 1. XML match: <tool_call name="tool_name">JSON_ARGS</tool_call>
+        xml_match = re.search(
+            r"<tool_call\s+name=[\"'](.*?)[\"']>(.*?)</tool_call>",
+            content,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if xml_match:
+            tool_name = xml_match.group(1).strip()
+            args_str = xml_match.group(2).strip()
+            try:
+                args = json.loads(args_str) if args_str else {}
+            except json.JSONDecodeError:
+                args = {"raw_arguments": args_str}
+            return tool_name, args
+
+        # 2. Markdown json block check
+        json_match = re.search(r"```json\s*\n(.*?)\n```", content, re.DOTALL | re.IGNORECASE)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(1).strip())
+                if isinstance(data, dict) and ("tool_call" in data or "tool" in data):
+                    tool_name = data.get("tool_call") or data.get("tool")
+                    args = data.get("arguments") or data.get("args") or {}
+                    return str(tool_name), args
+            except Exception:
+                pass
+        return None

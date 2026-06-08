@@ -52,6 +52,7 @@ async def get_dynamic_system_prompt(bus: MessageBus, tenant_id: str, source_node
     has_execution = False
     has_logic = False
     has_memory = False
+    nodes = []
 
     try:
         discover_msg = Message(
@@ -77,6 +78,56 @@ async def get_dynamic_system_prompt(bus: MessageBus, tenant_id: str, source_node
     except Exception as e:
         logger.warning("Failed to discover active nodes from registry: %s", e)
 
+    tools_list = []
+    try:
+        for n in nodes:
+            node_id = n.get("node_id", "")
+            caps = n.get("capabilities", [])
+            desc = n.get("description", "") or ""
+
+            # Skip base/cognitive/routing nodes
+            if node_id in (
+                "router",
+                "workspace",
+                "decision",
+                "critic",
+                "meta_node",
+                "identity",
+                "cognitive_awareness",
+                "scheduler",
+                "load_manager",
+                "attention",
+                "evaluation",
+                "reflection",
+                "process_reward",
+            ):
+                continue
+
+            if not caps:
+                continue
+
+            clean_caps = [
+                c
+                for c in caps
+                if c
+                not in (
+                    "routing",
+                    "intent_classification",
+                    "task_decomposition",
+                    "graph_of_thoughts",
+                    "aggregation",
+                )
+            ]
+            if not clean_caps:
+                continue
+
+            if not desc:
+                desc = f"Serves capabilities: {', '.join(clean_caps)}"
+
+            tools_list.append(f"- `{node_id}`: {desc} (capabilities: {', '.join(clean_caps)})")
+    except Exception as e:
+        logger.warning("Failed to parse toolbox list from registry: %s", e)
+
     capabilities_parts = []
     if has_browser:
         capabilities_parts.append(
@@ -99,6 +150,19 @@ async def get_dynamic_system_prompt(bus: MessageBus, tenant_id: str, source_node
             caps_str = ", ".join(capabilities_parts[:-1]) + ", and " + capabilities_parts[-1]
         system_prompt += (
             f" You have access to various cognitive and tool modules, including {caps_str}."
+        )
+
+    # Append toolbox of dynamically registered tools/plugins
+    if tools_list:
+        system_prompt += "\n\nAvailable Toolbox & Capabilities:\n" + "\n".join(tools_list)
+        system_prompt += (
+            "\n\nTo execute a tool call, output an XML-style `<tool_call>` block anywhere in your response:\n"
+            '<tool_call name="tool_name">\n'
+            "{\n"
+            '  "arg_name": "arg_value"\n'
+            "}\n"
+            "</tool_call>\n"
+            "The system will execute the tool and return the output for you to synthesize."
         )
 
     # Append goals

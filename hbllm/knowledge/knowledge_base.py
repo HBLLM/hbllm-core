@@ -416,7 +416,11 @@ class KnowledgeBase:
                     len(struct_res.relations),
                 )
             except Exception as kg_err:
-                logger.error("Failed to extract structural knowledge graph from source %s: %s", source_id, kg_err)
+                logger.error(
+                    "Failed to extract structural knowledge graph from source %s: %s",
+                    source_id,
+                    kg_err,
+                )
 
             logger.info(
                 "Ingested source '%s': %d files, %d chunks",
