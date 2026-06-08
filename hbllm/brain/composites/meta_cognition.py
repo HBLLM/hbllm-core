@@ -10,6 +10,7 @@ Combining them creates a single self-aware monitoring surface.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hbllm.network.node import Node, NodeType
@@ -37,6 +38,7 @@ class MetaCognition(Node):
         goal_manager: GoalManager | None = None,
         self_model: SelfModel | None = None,
         skill_registry: SkillRegistry | None = None,
+        data_dir: str = "data",
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -54,6 +56,7 @@ class MetaCognition(Node):
         self._goal_manager = goal_manager
         self._self_model = self_model
         self._skill_registry = skill_registry
+        self.data_dir = data_dir
 
         # Sub-nodes
         self._meta: Any = None
@@ -76,6 +79,7 @@ class MetaCognition(Node):
             goal_manager=self._goal_manager,
             self_model=self._self_model,
             skill_registry=self._skill_registry,
+            db_path=Path(self.data_dir) / "evaluations.db",
         )
         self._evaluation.node_identity = self.node_identity
 

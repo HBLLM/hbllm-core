@@ -244,3 +244,73 @@ async def test_stats_aggregation(eval_env):
     assert stats["total_evaluated"] == 5
     assert stats["avg_overall_score"] == 0.75
     assert stats["window_size"] == 5
+
+
+@pytest.mark.asyncio
+async def test_sqlite_persistence(tmp_path):
+    """Verify evaluations are stored in SQLite and hydrated on startup."""
+    import sqlite3
+
+    db_file = tmp_path / "evaluations.db"
+
+    bus = InProcessBus()
+    await bus.start()
+
+    # 1. Start a node with the DB path
+    node1 = EvaluationNode(node_id="eval_persistent", db_path=db_file)
+    await node1.start(bus)
+
+    # Verify DB file is created and schema is set up
+    assert db_file.exists()
+
+    # Send experience message to trigger evaluation and persistence
+    experience_msg = Message(
+        type=MessageType.EVENT,
+        source_node_id="decision_node",
+        topic="system.experience",
+        payload={
+            "text": "Hello world response.",
+            "intent": "answer",
+            "confidence": 0.8,
+            "tools_used": [],
+            "memory_hits": 1,
+            "plan_steps": [],
+        },
+        correlation_id="corr-12345",
+    )
+    await bus.publish("system.experience", experience_msg)
+    await asyncio.sleep(0.3)
+
+    # Verify report is in-memory on node1
+    assert node1._total_evaluated == 1
+    assert len(node1._evaluations) == 1
+
+    # Verify report is saved to SQLite
+    with sqlite3.connect(str(db_file)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM evaluations").fetchone()
+        assert row is not None
+        assert row["correlation_id"] == "corr-12345"
+        assert row["overall_score"] > 0.4
+
+    await node1.stop()
+    await bus.stop()
+
+    # 2. Start a new node with the same DB file and verify it hydrates on start
+    bus2 = InProcessBus()
+    await bus2.start()
+
+    node2 = EvaluationNode(node_id="eval_persistent_restored", db_path=db_file)
+    await node2.start(bus2)
+
+    # Verify node2 is hydrated on startup
+    assert node2._total_evaluated == 1
+    assert len(node2._evaluations) == 1
+    assert node2._evaluations[0].correlation_id == "corr-12345"
+
+    stats = node2.stats()
+    assert stats["total_evaluated"] == 1
+    assert stats["avg_overall_score"] > 0.4
+
+    await node2.stop()
+    await bus2.stop()

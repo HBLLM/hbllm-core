@@ -21,9 +21,13 @@ Flow:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
@@ -85,6 +89,7 @@ class EvaluationNode(Node):
         evaluation_window: int = 100,
         goal_trigger_interval: float = 300.0,  # 5 minutes
         weights: dict[str, float] | None = None,
+        db_path: str | Path | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -116,12 +121,117 @@ class EvaluationNode(Node):
         self._total_evaluated = 0
         self._total_flagged = 0
 
+        self._db_path = Path(db_path) if db_path else None
+
     async def on_start(self) -> None:
         logger.info("Starting EvaluationNode (Intelligence Feedback Loop)")
+        if self._db_path:
+            await asyncio.to_thread(self._init_db)
+            await asyncio.to_thread(self._restore_from_db)
         await self.bus.subscribe("system.experience", self._handle_experience)
         await self.bus.subscribe("sensory.output", self._handle_output)
         await self.bus.subscribe("system.feedback", self._handle_feedback)
         await self.bus.subscribe("evaluation.query", self._handle_query)
+
+    def _init_db(self) -> None:
+        """Initialize SQLite database for persistent evaluations."""
+        if not self._db_path:
+            return
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    correlation_id TEXT UNIQUE NOT NULL,
+                    timestamp REAL NOT NULL,
+                    task_success REAL NOT NULL,
+                    plan_validity REAL NOT NULL,
+                    tool_accuracy REAL NOT NULL,
+                    memory_usage REAL NOT NULL,
+                    confidence_error REAL NOT NULL,
+                    overall_score REAL NOT NULL,
+                    flags TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_timestamp ON evaluations(timestamp)")
+
+    def _restore_from_db(self) -> None:
+        """Restore in-memory history and stats counters from SQLite on startup."""
+        if not self._db_path:
+            return
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT correlation_id, timestamp, task_success, plan_validity, "
+                    "tool_accuracy, memory_usage, confidence_error, overall_score, flags "
+                    "FROM evaluations ORDER BY timestamp DESC LIMIT ?",
+                    (self.evaluation_window,),
+                ).fetchall()
+
+                restored = []
+                for row in reversed(rows):
+                    try:
+                        flags = json.loads(row["flags"])
+                    except Exception:
+                        flags = []
+                    restored.append(
+                        EvaluationReport(
+                            correlation_id=row["correlation_id"],
+                            timestamp=row["timestamp"],
+                            task_success=row["task_success"],
+                            plan_validity=row["plan_validity"],
+                            tool_accuracy=row["tool_accuracy"],
+                            memory_usage=row["memory_usage"],
+                            confidence_error=row["confidence_error"],
+                            overall_score=row["overall_score"],
+                            flags=flags,
+                        )
+                    )
+                self._evaluations = restored
+
+                total_evaluated_row = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()
+                self._total_evaluated = total_evaluated_row[0] if total_evaluated_row else 0
+
+                total_flagged_row = conn.execute(
+                    "SELECT COUNT(*) FROM evaluations WHERE flags != '[]'"
+                ).fetchone()
+                self._total_flagged = total_flagged_row[0] if total_flagged_row else 0
+
+                logger.info(
+                    "Restored %d evaluations from DB (total_evaluated=%d, total_flagged=%d)",
+                    len(self._evaluations),
+                    self._total_evaluated,
+                    self._total_flagged,
+                )
+        except Exception as e:
+            logger.exception("Failed to restore evaluations from SQLite: %s", e)
+
+    def _persist_evaluation(self, report: EvaluationReport) -> None:
+        """Write a single evaluation report to SQLite."""
+        if not self._db_path:
+            return
+        try:
+            with sqlite3.connect(str(self._db_path)) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO evaluations ("
+                    "correlation_id, timestamp, task_success, plan_validity, "
+                    "tool_accuracy, memory_usage, confidence_error, overall_score, flags"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        report.correlation_id,
+                        report.timestamp,
+                        report.task_success,
+                        report.plan_validity,
+                        report.tool_accuracy,
+                        report.memory_usage,
+                        report.confidence_error,
+                        report.overall_score,
+                        json.dumps(report.flags),
+                    ),
+                )
+        except Exception as e:
+            logger.exception("Failed to persist evaluation report to SQLite: %s", e)
 
     async def on_stop(self) -> None:
         logger.info(
@@ -406,6 +516,9 @@ class EvaluationNode(Node):
 
     async def _publish_evaluation(self, report: EvaluationReport, original: Message) -> None:
         """Publish evaluation and trigger downstream loop."""
+        if self._db_path:
+            await asyncio.to_thread(self._persist_evaluation, report)
+
         # 1. Publish evaluation event
         eval_msg = Message(
             type=MessageType.EVENT,

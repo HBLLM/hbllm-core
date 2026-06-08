@@ -71,7 +71,8 @@ class TestAttentionManager:
 
     async def test_should_reject_near_capacity_low_importance(self, attn: AttentionManager):
         """Near capacity, low-importance items should be rejected."""
-        attn.update_item_count("episodic", 490)  # 98% of 500
+        max_items = attn.get_budget("episodic").max_items
+        attn.update_item_count("episodic", int(max_items * 0.98))  # 98% of capacity
         assert not attn.should_accept("episodic", importance=0.1)
 
     async def test_importance_scoring(self, attn: AttentionManager):

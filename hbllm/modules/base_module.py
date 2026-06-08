@@ -141,7 +141,7 @@ class DomainModuleNode(Node):
 
                 start_time = time.monotonic()
                 response_text = await self.llm.generate(
-                    prompt, max_tokens=256, system_prompt=system_prompt
+                    prompt, max_tokens=1024, system_prompt=system_prompt
                 )
                 latency_ms = int((time.monotonic() - start_time) * 1000)
                 logger.info(

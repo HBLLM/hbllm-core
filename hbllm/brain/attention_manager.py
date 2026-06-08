@@ -12,6 +12,7 @@ while ensuring critical knowledge is always accessible.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -93,10 +94,10 @@ class AttentionManager(Node):
 
         # Memory budgets
         limits = default_memory_limits or {
-            "episodic": 500,
-            "semantic": 1000,
-            "procedural": 200,
-            "value": 100,
+            "episodic": 10000,
+            "semantic": 5000,
+            "procedural": 500,
+            "value": 200,
         }
         self._budgets: dict[str, MemoryBudget] = {
             name: MemoryBudget(memory_type=name, max_items=limit) for name, limit in limits.items()
@@ -112,6 +113,7 @@ class AttentionManager(Node):
         # Stats
         self._prune_count = 0
         self._rebalance_count = 0
+        self._polling_task: asyncio.Task[None] | None = None
 
     async def on_start(self) -> None:
         logger.info("Starting AttentionManager (budget=%d tokens)", self.total_context_budget)
@@ -119,6 +121,7 @@ class AttentionManager(Node):
         await self.bus.subscribe("system.sleep.prune_trigger", self._handle_prune)
         await self.bus.subscribe("attention.query", self._handle_query)
         await self.bus.subscribe("attention.score", self._handle_score_request)
+        self._polling_task = asyncio.create_task(self._poll_memory_stats())
 
     async def on_stop(self) -> None:
         logger.info(
@@ -126,6 +129,41 @@ class AttentionManager(Node):
             self._prune_count,
             self._rebalance_count,
         )
+        if self._polling_task:
+            self._polling_task.cancel()
+
+    async def _poll_memory_stats(self) -> None:
+        """Periodically poll memory nodes for item counts to update budgets."""
+        while self._running:
+            try:
+                # Wait for initial bus registration
+                await asyncio.sleep(5.0)
+                if not self._running:
+                    break
+
+                msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id=self.node_id,
+                    tenant_id="default",
+                    topic="memory.stats",
+                    payload={"tenant_id": "default"},
+                )
+                reply = await self.bus.request("memory.stats", msg, timeout=4.0)
+                if reply and reply.type != MessageType.ERROR:
+                    stats = reply.payload
+                    if "episodic" in stats:
+                        self.update_item_count("episodic", stats["episodic"].get("turns", 0))
+                    if "semantic" in stats:
+                        self.update_item_count("semantic", stats["semantic"].get("documents", 0))
+                    if "procedural" in stats:
+                        self.update_item_count("procedural", stats["procedural"].get("skills", 0))
+                    if "value" in stats:
+                        self.update_item_count("value", stats["value"].get("rewards", 0))
+            except Exception as e:
+                logger.debug("Failed to poll memory stats for attention budget: %s", e)
+
+            # Poll every 10 seconds
+            await asyncio.sleep(10.0)
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
@@ -182,7 +220,7 @@ class AttentionManager(Node):
             # Prune lowest scores
             sorted_ids = sorted(
                 self._importance_scores,
-                key=self._importance_scores.get,  # type: ignore[arg-type]
+                key=lambda mid: self._importance_scores.get(mid, 0.0),
             )
             for mid in sorted_ids[: len(sorted_ids) // 4]:
                 del self._importance_scores[mid]

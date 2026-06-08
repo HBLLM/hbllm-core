@@ -969,6 +969,7 @@ class BrainFactory:
                 goal_manager=brain.goal_manager,
                 self_model=brain.self_model,
                 skill_registry=brain.skill_registry,
+                db_path=Path(cfg.data_dir) / "evaluations.db",
             )
             await _register_node(registry, eval_node)
             await eval_node.start(message_bus)
@@ -1202,6 +1203,7 @@ class BrainFactory:
                 goal_manager=None,
                 self_model=None,
                 skill_registry=skill_registry,
+                data_dir=cfg.data_dir,
             )
 
         # 5. SkillEngine
