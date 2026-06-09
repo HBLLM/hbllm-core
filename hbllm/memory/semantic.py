@@ -595,7 +595,8 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+        explain: bool = False,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """
         Search for the most semantically similar documents to the query.
 
@@ -667,6 +668,9 @@ class SemanticMemory:
         else:
             final_scores = dense_scores
 
+        # Save base similarity scores before applying any boosts
+        base_similarities = final_scores.copy()
+
         # --- Usefulness boosting ---
         for idx, doc_id in enumerate(self.ids):
             doc = self.documents[doc_id]
@@ -729,7 +733,48 @@ class SemanticMemory:
             doc_id = self.ids[idx]
             res = self.documents[doc_id].copy()
             res["score"] = float(final_scores[idx])
+
+            # Calculate individual component scores
+            meta = res.get("metadata") or {}
+            usefulness = int(meta.get("usefulness", 0) or 0)
+            u_boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
+
+            r_boost = 0.0
+            if reward_scores and doc_id in reward_scores:
+                r_boost = reward_boost * reward_scores[doc_id]
+
+            p_boost = 0.0
+            if priming_boosts:
+                doc_cat = meta.get("domain") or meta.get("category")
+                if doc_cat and doc_cat in priming_boosts:
+                    p_boost = priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+
+            res["score_breakdown"] = {
+                "similarity": float(base_similarities[idx]),
+                "usefulness_boost": float(u_boost),
+                "reward_boost": float(r_boost),
+                "priming_boost": float(p_boost),
+            }
             results.append(res)
+
+        if explain:
+            return {
+                "results": results,
+                "explanations": [
+                    {
+                        "doc_id": r["id"],
+                        "score_breakdown": r["score_breakdown"],
+                        "domain": r.get("metadata", {}).get("domain")
+                        or r.get("metadata", {}).get("category"),
+                    }
+                    for r in results
+                ],
+                "global_stats": {
+                    "query": query,
+                    "total_documents": len(self.documents),
+                    "priming_applied": bool(priming_boosts),
+                },
+            }
 
         return results
 
@@ -745,7 +790,8 @@ class SemanticMemory:
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+        explain: bool = False,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Async version of search that queries Postgres pgvector if available."""
         await self._aflush_tfidf()
         pool = await self._ensure_pg_table()
@@ -760,6 +806,7 @@ class SemanticMemory:
                 tenant_id,
                 user_id,
                 device_id,
+                explain,
             )
 
         if not query or not query.strip():
@@ -777,6 +824,7 @@ class SemanticMemory:
                 tenant_id,
                 user_id,
                 device_id,
+                explain,
             )
 
         query_vec = self.model.encode([query])[0]
@@ -784,10 +832,7 @@ class SemanticMemory:
         results = []
         try:
             async with pool.acquire() as conn:
-                # We use the <-> operator for L2 distance (or cosine distance). pgvector uses <=> for cosine distance.
-                # Let's use <=> (cosine distance) since we use cosine similarity locally.
-                # Order by distance ASC
-
+                # We use the <=> operator for cosine distance.
                 sql = """
                     SELECT id, content, metadata, 1 - (embedding <=> $1) AS score
                     FROM semantic_memory
@@ -816,23 +861,28 @@ class SemanticMemory:
 
                 for row in rows:
                     doc_id = str(row["id"])
-                    score = float(row["score"])
+                    base_similarity = float(row["score"])
+                    score = base_similarity
 
                     # Apply reward boosting if any
+                    r_boost = 0.0
                     if reward_scores and doc_id in reward_scores:
-                        score += reward_boost * reward_scores[doc_id]
+                        r_boost = reward_boost * reward_scores[doc_id]
+                        score += r_boost
 
                     # Apply usefulness boost if stored in metadata
                     meta = row["metadata"] or {}
                     usefulness = int(meta.get("usefulness", 0) or 0)
-                    boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
-                    score += boost
+                    u_boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
+                    score += u_boost
 
                     # Apply priming boost
+                    p_boost = 0.0
                     if priming_boosts:
                         doc_cat = meta.get("domain") or meta.get("category")
                         if doc_cat and doc_cat in priming_boosts:
-                            score += priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+                            p_boost = priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+                            score += p_boost
 
                     results.append(
                         {
@@ -840,12 +890,37 @@ class SemanticMemory:
                             "content": row["content"],
                             "metadata": row["metadata"],
                             "score": score,
+                            "score_breakdown": {
+                                "similarity": base_similarity,
+                                "usefulness_boost": float(u_boost),
+                                "reward_boost": float(r_boost),
+                                "priming_boost": float(p_boost),
+                            },
                         }
                     )
 
             # Sort again if rewards/priming changed the order
             if reward_scores or priming_boosts:
                 results.sort(key=lambda x: x["score"], reverse=True)
+
+            if explain:
+                return {
+                    "results": results,
+                    "explanations": [
+                        {
+                            "doc_id": r["id"],
+                            "score_breakdown": r["score_breakdown"],
+                            "domain": r.get("metadata", {}).get("domain")
+                            or r.get("metadata", {}).get("category"),
+                        }
+                        for r in results
+                    ],
+                    "global_stats": {
+                        "query": query,
+                        "total_documents": -1,  # Database backend total is unqueried
+                        "priming_applied": bool(priming_boosts),
+                    },
+                }
 
             return results
         except (OSError, ConnectionError, RuntimeError) as e:
@@ -860,7 +935,79 @@ class SemanticMemory:
                 tenant_id,
                 user_id,
                 device_id,
+                explain,
             )
+
+    def get_ranking_differential(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Compute score differentials between consecutive documents in search results.
+
+        Explains why the top documents outranked their immediate successors.
+        """
+        differentials = []
+        if len(results) < 2:
+            return differentials
+
+        for i in range(len(results) - 1):
+            doc_a = results[i]
+            doc_b = results[i + 1]
+            breakdown_a = doc_a.get("score_breakdown", {})
+            breakdown_b = doc_b.get("score_breakdown", {})
+
+            # Compute deltas (A - B)
+            total_delta = doc_a["score"] - doc_b["score"]
+            sim_delta = breakdown_a.get("similarity", 0.0) - breakdown_b.get("similarity", 0.0)
+            usefulness_delta = breakdown_a.get("usefulness_boost", 0.0) - breakdown_b.get("usefulness_boost", 0.0)
+            reward_delta = breakdown_a.get("reward_boost", 0.0) - breakdown_b.get("reward_boost", 0.0)
+            priming_delta = breakdown_a.get("priming_boost", 0.0) - breakdown_b.get("priming_boost", 0.0)
+
+            # Generate natural language explanation of the win
+            reasons = []
+            if sim_delta > 0:
+                reasons.append(f"higher base semantic similarity (+{sim_delta:.3f})")
+            elif sim_delta < 0:
+                reasons.append(f"lower base similarity ({sim_delta:.3f})")
+
+            if priming_delta > 0:
+                reasons.append(f"SNN priming bias advantage (+{priming_delta:.3f})")
+            elif priming_delta < 0:
+                reasons.append(f"SNN priming bias deficit ({priming_delta:.3f})")
+
+            if reward_delta > 0:
+                reasons.append(f"value preference boost (+{reward_delta:.3f})")
+            elif reward_delta < 0:
+                reasons.append(f"value preference deficit ({reward_delta:.3f})")
+
+            if usefulness_delta > 0:
+                reasons.append(f"usefulness feedback boost (+{usefulness_delta:.3f})")
+            elif usefulness_delta < 0:
+                reasons.append(f"usefulness feedback deficit ({usefulness_delta:.3f})")
+
+            doc_a_id = doc_a.get("id", "unknown")
+            doc_b_id = doc_b.get("id", "unknown")
+            explanation_str = f"Document '{doc_a_id[:8]}' outranked '{doc_b_id[:8]}' by {total_delta:.3f}. "
+            if reasons:
+                explanation_str += "Key drivers: " + ", ".join(reasons) + "."
+            else:
+                explanation_str += "Minimal overall score difference."
+
+            differentials.append(
+                {
+                    "rank_a": i + 1,
+                    "rank_b": i + 2,
+                    "doc_a_id": doc_a_id,
+                    "doc_b_id": doc_b_id,
+                    "deltas": {
+                        "total": float(total_delta),
+                        "similarity": float(sim_delta),
+                        "usefulness": float(usefulness_delta),
+                        "reward": float(reward_delta),
+                        "priming": float(priming_delta),
+                    },
+                    "explanation": explanation_str,
+                }
+            )
+        return differentials
 
     def delete(self, doc_id: str) -> bool:
         """

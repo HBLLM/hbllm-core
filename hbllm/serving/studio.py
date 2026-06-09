@@ -181,6 +181,225 @@ async def disconnect_synapsis():
     return {"status": "success", "message": "Disconnected from Synapsis network."}
 
 
+@router.get("/api/snn/status")
+async def get_snn_status():
+    from hbllm.network.metrics import MetricsCollector
+    collector = MetricsCollector.get_instance()
+
+    # Extract priming category potentials
+    categories = ["physics", "math", "coding", "finance", "personal", "general"]
+    priming_potentials = {}
+
+    # Try to extract exact real-time potentials from MemoryNode primer if available
+    brain = _state.get("brain")
+    memory_node = None
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+
+    for cat in categories:
+        neuron_id = f"priming_{cat}"
+        # Fall back to metrics collector value
+        pot = collector._mem_gauges.get(f"snn_potential:{neuron_id}", 0.0)
+        threshold = 1.0
+
+        # If memory node is active, get precise current values
+        if memory_node and hasattr(memory_node, "primer"):
+            acc = memory_node.primer.categories.get(cat)
+            if acc:
+                pot = acc.get_potential()
+                threshold = acc.neuron.config.threshold
+
+        priming_potentials[cat] = {
+            "potential": pot,
+            "threshold": threshold,
+            "history": collector.get_snn_history(neuron_id),
+        }
+
+    # Extract attention fatigue potential
+    attn_pot = collector._mem_gauges.get("snn_potential:human_attention_fatigue", 0.0)
+    attn_threshold = 0.8
+    refractory_time = 0.0
+
+    attention_fatigue = {
+        "potential": attn_pot,
+        "threshold": attn_threshold,
+        "refractory_time_remaining": refractory_time,
+        "history": collector.get_snn_history("human_attention_fatigue"),
+    }
+
+    # Extract any reflex rules from metrics collector
+    reflexes = {}
+    for key in list(collector._mem_gauges.keys()):
+        if key.startswith("snn_potential:reflex_"):
+            neuron_id = key.replace("snn_potential:", "")
+            reflexes[neuron_id] = {
+                "potential": collector._mem_gauges[key],
+                "threshold": 1.0,
+                "history": collector.get_snn_history(neuron_id),
+            }
+
+    return {
+        "status": "success",
+        "priming_categories": priming_potentials,
+        "attention_fatigue": attention_fatigue,
+        "reflex_rules": reflexes,
+    }
+
+
+@router.post("/api/snn/stimulate")
+async def stimulate_snn_neuron(request: Request):
+    body = await request.json()
+    category = body.get("category")
+    charge = float(body.get("charge", 0.5))
+
+    if not category:
+        raise HTTPException(status_code=400, detail="Category is required")
+
+    brain = _state.get("brain")
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+        if memory_node and hasattr(memory_node, "primer"):
+            memory_node.primer.stimulate_category(category, charge)
+            # Force update metrics collector immediately
+            pot = memory_node.primer.categories[category].get_potential()
+            from hbllm.network.metrics import MetricsCollector
+            MetricsCollector.get_instance().record_snn_potential(f"priming_{category}", pot)
+            return {
+                "status": "success",
+                "message": f"Stimulated category {category} with {charge} charge.",
+            }
+
+    # Fallback if MemoryNode is not loaded
+    from hbllm.network.metrics import MetricsCollector
+    collector = MetricsCollector.get_instance()
+    neuron_id = f"priming_{category}"
+    cur_pot = collector._mem_gauges.get(f"snn_potential:{neuron_id}", 0.0)
+    new_pot = min(1.0, cur_pot + charge)
+    collector.record_snn_potential(neuron_id, new_pot)
+    return {
+        "status": "success",
+        "message": f"Stimulated fallback metrics for category {category}.",
+    }
+
+
+@router.post("/api/snn/replay")
+async def replay_cognitive_search(request: Request):
+    body = await request.json()
+    query = body.get("query")
+    priming_state = body.get("priming_state", {})
+    tenant_id = getattr(request.state, "tenant_id", "default")
+
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
+
+    brain = _state.get("brain")
+    if not brain:
+        # Fallback Mock Comparison if brain is not running
+        mock_unprimed = [
+            {
+                "id": "doc1",
+                "content": "Introduction to string theory and quantum loop gravity.",
+                "metadata": {"domain": "physics"},
+                "score": 0.75,
+                "score_breakdown": {
+                    "similarity": 0.75,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": 0.0,
+                },
+            },
+            {
+                "id": "doc2",
+                "content": "Writing clean asynchronous Python code and modules.",
+                "metadata": {"domain": "coding"},
+                "score": 0.62,
+                "score_breakdown": {
+                    "similarity": 0.62,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": 0.0,
+                },
+            },
+        ]
+
+        # Stimulate coding in primed results
+        coding_prime = priming_state.get("coding", 0.0)
+        coding_boost = 0.15 * coding_prime
+        mock_primed = [
+            {
+                "id": "doc2",
+                "content": "Writing clean asynchronous Python code and modules.",
+                "metadata": {"domain": "coding"},
+                "score": 0.62 + coding_boost,
+                "score_breakdown": {
+                    "similarity": 0.62,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": coding_boost,
+                },
+            },
+            {
+                "id": "doc1",
+                "content": "Introduction to string theory and quantum loop gravity.",
+                "metadata": {"domain": "physics"},
+                "score": 0.75,
+                "score_breakdown": {
+                    "similarity": 0.75,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": 0.0,
+                },
+            },
+        ]
+        if mock_primed[0]["score"] < mock_primed[1]["score"]:
+            mock_primed = [mock_primed[1], mock_primed[0]]
+
+        from hbllm.memory.semantic import SemanticMemory
+        sm = SemanticMemory()
+        differentials = sm.get_ranking_differential(mock_primed)
+        return {
+            "status": "success",
+            "unprimed": mock_unprimed,
+            "primed": mock_primed,
+            "differentials": differentials,
+        }
+
+    # Query MemoryNode
+    node_map = _get_node_map(brain)
+    memory_node = node_map.get("MemoryNode")
+    if not memory_node:
+        raise HTTPException(status_code=503, detail="MemoryNode not loaded in brain")
+
+    sem_db = memory_node.semantic_db
+
+    # 1. Unprimed Search (baseline)
+    unprimed_env = sem_db.search(
+        query=query, top_k=5, tenant_id=tenant_id, priming_boosts=None, explain=True
+    )
+
+    # 2. Primed Search (replayed state)
+    primed_env = sem_db.search(
+        query=query, top_k=5, tenant_id=tenant_id, priming_boosts=priming_state, explain=True
+    )
+
+    unprimed_results = (
+        unprimed_env["results"] if isinstance(unprimed_env, dict) else unprimed_env
+    )
+    primed_results = primed_env["results"] if isinstance(primed_env, dict) else primed_env
+
+    # Compute ranking differentials
+    differentials = sem_db.get_ranking_differential(primed_results)
+
+    return {
+        "status": "success",
+        "unprimed": unprimed_results,
+        "primed": primed_results,
+        "differentials": differentials,
+    }
+
+
 @router.get("/api/persona/profile")
 async def get_persona_profile(request: Request):
     tenant_id = getattr(request.state, "tenant_id", "default")

@@ -12,7 +12,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Generator
 from typing import Any
 
@@ -53,6 +53,10 @@ class MetricsCollector:
         self._mem_counters: dict[str, float] = defaultdict(float)
         self._mem_histograms: dict[str, list[float]] = defaultdict(list)
         self._mem_gauges: dict[str, float] = defaultdict(float)
+        # SNN Telemetry history cache (rolling deque of max 100 entries per neuron)
+        self._snn_history: dict[str, deque[tuple[float, float]]] = defaultdict(
+            lambda: deque(maxlen=100)
+        )
 
         # Prometheus metrics (initialized in _init_prometheus)
         self._requests_total: Any = None
@@ -234,10 +238,20 @@ class MetricsCollector:
 
     def record_snn_potential(self, neuron_id: str, potential: float) -> None:
         """Record SNN neuron membrane potential (gauge)."""
+        # Record history with a real timestamp
+        self._snn_history[neuron_id].append((time.time(), potential))
+
         if HAS_PROMETHEUS and self._snn_potentials:
             self._snn_potentials.labels(neuron_id=neuron_id).set(potential)
         else:
             self._mem_gauges[f"snn_potential:{neuron_id}"] = potential
+
+    def get_snn_history(self, neuron_id: str) -> list[dict[str, float]]:
+        """Retrieve the rolling potential history for a specific neuron."""
+        history = self._snn_history.get(neuron_id)
+        if not history:
+            return []
+        return [{"timestamp": t, "potential": v} for t, v in list(history)]
 
     def record_snn_spike(self, neuron_id: str, strength: float = 1.0) -> None:
         """Record SNN neuron spike (counter increment)."""
