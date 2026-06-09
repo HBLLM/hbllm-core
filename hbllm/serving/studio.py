@@ -598,6 +598,24 @@ async def studio_stats() -> Any:
     if rn and isinstance(rn, ReflectionNode):
         result["reflection"] = rn.stats()
 
+    # ── Learning (LearnerNode) ──
+    from hbllm.brain.learner_node import LearnerNode
+
+    ln = node_map.get("LearnerNode")
+    if ln and isinstance(ln, LearnerNode):
+        learning_stats = ln.micro_learning_stats()
+        # Add DPO queue depth from disk
+        dpo_queue_depth = 0
+        try:
+            dpo_path = pathlib.Path(ln.queue_path)
+            if dpo_path.exists():
+                with dpo_path.open() as f:
+                    dpo_queue_depth = len(json.load(f))
+        except Exception:
+            pass
+        learning_stats["dpo_queue_depth"] = dpo_queue_depth
+        result["learning"] = learning_stats
+
     # ── Skill compiler ──
     from hbllm.brain.skill_compiler_node import SkillCompilerNode
 
@@ -712,6 +730,8 @@ async def studio_knowledge() -> Any:
                     "id": e.id,
                     "label": e.label,
                     "type": e.entity_type,
+                    "category": e.attributes.get("category", "other"),
+                    "name": e.attributes.get("name", e.label),
                 }
                 for e in list(kg._entities.values())[:100]
             ]
@@ -775,6 +795,155 @@ async def studio_lora() -> Any:
             result["consolidation_cycles"] = sleep_node._consolidation_cycles
 
     return result
+
+
+# ─── Learning Pipeline Endpoints ──────────────────────────────────────────
+
+
+@router.get("/studio/learning")
+async def studio_learning() -> Any:
+    """Detailed self-learning pipeline status for real-time observability.
+
+    Combines LearnerNode stats, EvaluationNode aggregate, ReflectionNode
+    insights, and DPO queue preview into a single diagnostic view.
+    """
+    brain = _state.get("brain")
+    node_map = _get_node_map(brain)
+    result: dict[str, Any] = {"status": "active"}
+
+    # ── LearnerNode stats ──
+    from hbllm.brain.learner_node import LearnerNode
+
+    ln = node_map.get("LearnerNode")
+    if ln and isinstance(ln, LearnerNode):
+        result["learner"] = ln.micro_learning_stats()
+        # DPO queue on disk
+        dpo_queue_depth = 0
+        dpo_preview: list[str] = []
+        try:
+            dpo_path = pathlib.Path(ln.queue_path)
+            if dpo_path.exists():
+                with dpo_path.open() as f:
+                    queue = json.load(f)
+                    dpo_queue_depth = len(queue)
+                    # Preview: first 5 prompt prefixes
+                    for entry in queue[:5]:
+                        if isinstance(entry, (list, tuple)) and len(entry) > 0:
+                            dpo_preview.append(str(entry[0])[:80])
+        except Exception:
+            pass
+        result["learner"]["dpo_queue_depth"] = dpo_queue_depth
+        result["learner"]["dpo_queue_preview"] = dpo_preview
+        # Micro-learn queue preview
+        micro_queue = ln.get_micro_learn_queue()
+        result["learner"]["micro_queue_preview"] = [
+            {"query": item.get("query", "")[:80], "score": item.get("score", 0.0)}
+            for item in micro_queue[:5]
+        ]
+    else:
+        result["learner"] = {"status": "not_found"}
+
+    # ── EvaluationNode aggregate ──
+    from hbllm.brain.evaluation_node import EvaluationNode
+
+    ev = node_map.get("EvaluationNode")
+    if ev and isinstance(ev, EvaluationNode):
+        result["evaluation"] = ev.stats()
+    else:
+        result["evaluation"] = {"status": "not_found"}
+
+    # ── ReflectionNode insights ──
+    from hbllm.brain.reflection_node import ReflectionNode
+
+    rn = node_map.get("ReflectionNode")
+    if rn and isinstance(rn, ReflectionNode):
+        result["reflection"] = rn.stats()
+    else:
+        result["reflection"] = {"status": "not_found"}
+
+    return result
+
+
+@router.post("/studio/learning/trigger")
+async def studio_learning_trigger(request: Request) -> Any:
+    """Inject a synthetic evaluation event to test the learning pipeline.
+
+    This publishes a system.evaluation event on the bus, which the LearnerNode
+    listens to. Use low scores (<0.3) to trigger micro-learn queueing, then
+    follow up with a high score (>0.85) on the same query to trigger actual
+    micro-learning correction.
+
+    Body:
+        {
+            "query": "What is the capital of France?",
+            "response": "I'm not sure, maybe London?",
+            "score": 0.15
+        }
+    """
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
+    if not bus:
+        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
+
+    body = await request.json()
+    query = body.get("query", "")
+    response = body.get("response", "")
+    score = float(body.get("score", 0.5))
+
+    if not query or not response:
+        raise HTTPException(status_code=400, detail="query and response are required")
+
+    import uuid
+
+    eval_msg = Message(
+        type=MessageType.EVENT,
+        source_node_id="api_server",
+        topic="system.evaluation",
+        payload={
+            "correlation_id": str(uuid.uuid4()),
+            "timestamp": time.time(),
+            "task_success": score,
+            "plan_validity": score,
+            "tool_accuracy": 0.8,
+            "memory_usage": 0.5,
+            "confidence_error": max(0.0, 1.0 - score),
+            "overall_score": score,
+            "query": query,
+            "response": response,
+            "flags": ["synthetic_trigger"],
+            "dimensions": {
+                "task_success": score,
+                "plan_validity": score,
+            },
+        },
+    )
+    await bus.publish("system.evaluation", eval_msg)
+
+    # Determine what should happen based on score
+    from hbllm.brain.learner_node import LearnerNode
+
+    node_map = _get_node_map(brain)
+    ln = node_map.get("LearnerNode")
+    threshold_info = {}
+    if ln and isinstance(ln, LearnerNode):
+        threshold_info = {
+            "micro_learn_threshold": ln.micro_learn_threshold,
+            "distillation_threshold": ln.distillation_threshold,
+        }
+
+    expected_action = "no_action"
+    if score < (threshold_info.get("micro_learn_threshold", 0.3)):
+        expected_action = "queued_for_micro_learning"
+    elif score > (threshold_info.get("distillation_threshold", 0.85)):
+        expected_action = "banked_for_distillation"
+
+    return {
+        "status": "published",
+        "score": score,
+        "expected_action": expected_action,
+        "thresholds": threshold_info,
+        "tip": "To trigger micro-learning: send a low-score event, then a high-score event with the same query.",
+    }
 
 
 # ─── Plugin Management Endpoints ───────────────────────────────────────────

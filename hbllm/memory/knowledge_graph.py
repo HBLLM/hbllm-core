@@ -317,6 +317,143 @@ class KnowledgeGraph:
         self._incoming[target.id].append(rel.key)
         return rel
 
+    def add_entity_by_id(
+        self,
+        entity_id: str,
+        label: str,
+        entity_type: str = "concept",
+        attributes: dict[str, Any] | None = None,
+    ) -> Entity:
+        """Add or update an entity with an explicit ID. Returns the entity."""
+        if entity_id in self._entities:
+            existing = self._entities[entity_id]
+            if label:
+                existing.label = label.strip().lower()
+            if attributes:
+                existing.attributes.update(attributes)
+            self._entities.move_to_end(entity_id)  # Update LRU
+            return existing
+
+        entity = Entity(
+            id=entity_id,
+            label=label.strip().lower(),
+            entity_type=entity_type,
+            attributes=attributes or {},
+        )
+        self._entities[entity_id] = entity
+        self._evict_lru()  # Check bounds
+        return entity
+
+    def add_relation_by_ids(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        weight: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+        valid_from: float | None = None,
+        valid_until: float | None = None,
+    ) -> Relation:
+        """Add a directed relation between two entities using their IDs."""
+        # Ensure source and target entities exist. If not, construct placeholder ones.
+        if source_id not in self._entities:
+            self.add_entity_by_id(entity_id=source_id, label=source_id.split("::")[-1])
+        if target_id not in self._entities:
+            self.add_entity_by_id(entity_id=target_id, label=target_id.split("::")[-1])
+
+        rel = Relation(
+            source_id=source_id,
+            target_id=target_id,
+            relation_type=relation_type,
+            weight=weight,
+            metadata=metadata or {},
+            valid_from=valid_from,
+            valid_until=valid_until,
+        )
+
+        if rel.key in self._relations:
+            existing = self._relations[rel.key]
+            existing.weight = max(existing.weight, weight)
+            if metadata:
+                existing.metadata.update(metadata)
+            return existing
+
+        self._relations[rel.key] = rel
+        self._outgoing[source_id].append(rel.key)
+        self._incoming[target_id].append(rel.key)
+        return rel
+
+    def remove_by_source(self, source_id: str) -> None:
+        """Remove all entities and relations associated with a specific source ID."""
+        # Find relations to remove
+        rels_to_remove = [
+            rk for rk, rel in self._relations.items() if rel.metadata.get("source_id") == source_id
+        ]
+
+        # Remove these relations
+        for rk in rels_to_remove:
+            rel = self._relations.pop(rk, None)
+            if rel:
+                if rk in self._outgoing.get(rel.source_id, []):
+                    self._outgoing[rel.source_id].remove(rk)
+                if rk in self._incoming.get(rel.target_id, []):
+                    self._incoming[rel.target_id].remove(rk)
+
+        # Find entities to remove
+        entities_to_remove = [
+            eid
+            for eid, entity in self._entities.items()
+            if entity.attributes.get("source_id") == source_id
+        ]
+
+        for eid in entities_to_remove:
+            self._entities.pop(eid, None)
+            # Clean up outgoing relations for the entity
+            out_rels = self._outgoing.pop(eid, [])
+            for rk in out_rels:
+                rel = self._relations.pop(rk, None)
+                if rel:
+                    if rk in self._incoming.get(rel.target_id, []):
+                        self._incoming[rel.target_id].remove(rk)
+
+            # Clean up incoming relations for the entity
+            in_rels = self._incoming.pop(eid, [])
+            for rk in in_rels:
+                rel = self._relations.pop(rk, None)
+                if rel:
+                    if rk in self._outgoing.get(rel.source_id, []):
+                        self._outgoing[rel.source_id].remove(rk)
+
+    def _resolve_entity_id(self, identifier: str) -> str:
+        """Resolve a label or ID to the corresponding entity ID in the graph."""
+        if identifier in self._entities:
+            return identifier
+
+        # Check potential prefixed structural IDs
+        for prefix in (
+            "file::",
+            "folder::",
+            "section::",
+            "class::",
+            "function::",
+            "tag::",
+            "url::",
+        ):
+            potential_id = f"{prefix}{identifier}"
+            if potential_id in self._entities:
+                return potential_id
+
+        hashed = _entity_id(identifier)
+        if hashed in self._entities:
+            return hashed
+
+        norm = identifier.strip().lower()
+        for eid, entity in self._entities.items():
+            if entity.label.strip().lower() == norm:
+                return eid
+
+        return hashed  # Fallback to hashed ID
+
     def add_community(
         self,
         community_label: str,
@@ -358,14 +495,14 @@ class KnowledgeGraph:
         Get neighbors of an entity.
 
         Args:
-            label: Entity label to query.
+            label: Entity label or ID to query.
             direction: "out", "in", or "both".
             relation_type: Filter by relation type (optional).
 
         Returns:
             List of dicts with neighbor entity info and relation.
         """
-        eid = _entity_id(label)
+        eid = self._resolve_entity_id(label)
         if eid not in self._entities:
             return []
 
@@ -380,7 +517,8 @@ class KnowledgeGraph:
                 if target:
                     results.append(
                         {
-                            "entity": target.label,
+                            "entity": target.attributes.get("name", target.label),
+                            "entity_id": target.id,
                             "entity_type": target.entity_type,
                             "relation": rel.relation_type,
                             "direction": "out",
@@ -397,7 +535,8 @@ class KnowledgeGraph:
                 if source:
                     results.append(
                         {
-                            "entity": source.label,
+                            "entity": source.attributes.get("name", source.label),
+                            "entity_id": source.id,
                             "entity_type": source.entity_type,
                             "relation": rel.relation_type,
                             "direction": "in",
@@ -419,18 +558,20 @@ class KnowledgeGraph:
         Returns:
             List of entity labels on the path, or None if no path exists.
         """
-        start = _entity_id(from_label)
-        end = _entity_id(to_label)
+        start = self._resolve_entity_id(from_label)
+        end = self._resolve_entity_id(to_label)
 
         if start not in self._entities or end not in self._entities:
             return None
 
         if start == end:
-            return [self._entities[start].label]
+            return [self._entities[start].attributes.get("name", self._entities[start].label)]
 
-        # BFS using deque for O(1) popleft (list.pop(0) is O(n))
+        # BFS using deque for O(1) popleft
         visited = {start}
-        queue = deque([(start, [self._entities[start].label])])
+        queue = deque(
+            [(start, [self._entities[start].attributes.get("name", self._entities[start].label)])]
+        )
 
         while queue:
             current, path = queue.popleft()
@@ -443,22 +584,28 @@ class KnowledgeGraph:
                 rel = self._relations[rk]
                 next_id = rel.target_id
                 if next_id not in visited:
-                    new_path = path + [self._entities[next_id].label]
-                    if next_id == end:
-                        return new_path
-                    visited.add(next_id)
-                    queue.append((next_id, new_path))
+                    next_node = self._entities.get(next_id)
+                    if next_node:
+                        next_name = next_node.attributes.get("name", next_node.label)
+                        new_path = path + [next_name]
+                        if next_id == end:
+                            return new_path
+                        visited.add(next_id)
+                        queue.append((next_id, new_path))
 
             # Also expand incoming edges (undirected traversal)
             for rk in self._incoming.get(current, []):
                 rel = self._relations[rk]
                 next_id = rel.source_id
                 if next_id not in visited:
-                    new_path = path + [self._entities[next_id].label]
-                    if next_id == end:
-                        return new_path
-                    visited.add(next_id)
-                    queue.append((next_id, new_path))
+                    next_node = self._entities.get(next_id)
+                    if next_node:
+                        next_name = next_node.attributes.get("name", next_node.label)
+                        new_path = path + [next_name]
+                        if next_id == end:
+                            return new_path
+                        visited.add(next_id)
+                        queue.append((next_id, new_path))
 
         return None
 
@@ -469,7 +616,7 @@ class KnowledgeGraph:
         Returns:
             Dict with "entities" and "relations" lists.
         """
-        seed = _entity_id(label)
+        seed = self._resolve_entity_id(label)
         if seed not in self._entities:
             return {"entities": [], "relations": []}
 
@@ -497,14 +644,26 @@ class KnowledgeGraph:
             frontier = next_frontier
 
         entities = [
-            {"id": e.id, "label": e.label, "type": e.entity_type, "attributes": e.attributes}
+            {
+                "id": e.id,
+                "label": e.attributes.get("name", e.label),
+                "type": e.entity_type,
+                "category": e.attributes.get("category", "other"),
+                "attributes": e.attributes,
+            }
             for eid in visited_entities
             if (e := self._entities.get(eid))
         ]
         relations = [
             {
-                "source": self._entities[r.source_id].label,
-                "target": self._entities[r.target_id].label,
+                "source": r.source_id,
+                "target": r.target_id,
+                "source_label": self._entities[r.source_id].attributes.get(
+                    "name", self._entities[r.source_id].label
+                ),
+                "target_label": self._entities[r.target_id].attributes.get(
+                    "name", self._entities[r.target_id].label
+                ),
                 "type": r.relation_type,
                 "weight": r.weight,
             }

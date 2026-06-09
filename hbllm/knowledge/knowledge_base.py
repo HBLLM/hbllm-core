@@ -370,6 +370,58 @@ class KnowledgeBase:
             self._save_manifest()
             self._save_vectors()
 
+            # ── Ingest to Knowledge Graph ──
+            try:
+                from hbllm.knowledge.extractor import KnowledgeGraphExtractor
+                from hbllm.memory.knowledge_graph import KnowledgeGraph
+
+                kg_path = self.data_dir.parent / "knowledge_graph.json"
+                if kg_path.exists():
+                    kg = KnowledgeGraph.load_from_disk(kg_path)
+                else:
+                    kg = KnowledgeGraph()
+
+                # Prune old associations for this source
+                kg.remove_by_source(source_id)
+
+                # Extract new structure
+                extractor = KnowledgeGraphExtractor(source.path)
+                struct_res = extractor.extract()
+
+                # Add source_id stamp to newly extracted nodes and edges
+                for entity in struct_res.entities:
+                    entity.attributes["source_id"] = source_id
+                    kg.add_entity_by_id(
+                        entity_id=entity.id,
+                        label=entity.label,
+                        entity_type=entity.entity_type,
+                        attributes=entity.attributes,
+                    )
+
+                for r in struct_res.relations:
+                    r.metadata["source_id"] = source_id
+                    kg.add_relation_by_ids(
+                        source_id=r.source_id,
+                        target_id=r.target_id,
+                        relation_type=r.relation_type,
+                        weight=r.weight,
+                        metadata=r.metadata,
+                    )
+
+                # Persist updated graph to disk
+                kg.save_to_disk(kg_path)
+                logger.info(
+                    "Extracted structure into KnowledgeGraph: %d entities, %d relations",
+                    len(struct_res.entities),
+                    len(struct_res.relations),
+                )
+            except Exception as kg_err:
+                logger.error(
+                    "Failed to extract structural knowledge graph from source %s: %s",
+                    source_id,
+                    kg_err,
+                )
+
             logger.info(
                 "Ingested source '%s': %d files, %d chunks",
                 source.name,

@@ -182,6 +182,7 @@ class DecisionNode(Node):
             ActionType.MCP_TOOL: self._exec_mcp_tool,
             ActionType.CLARIFY: self._exec_clarify,
             ActionType.TEXT_RESPONSE: self._exec_text_response,
+            ActionType.SHELL_EXECUTION: self._exec_shell_execution,
         }
 
         handler = dispatch.get(plan.action_type, self._exec_text_response)
@@ -348,28 +349,72 @@ class DecisionNode(Node):
     async def _exec_mcp_tool(
         self, plan: ActionPlan, message: Message, original_query: dict[str, Any]
     ) -> None:
-        """Dispatch an MCP tool call."""
-        logger.info("[DecisionNode] Dispatching to MCP Client Node.")
+        """Dispatch a tool call (MCP tool or native plugin tool) and synthesize results."""
+        logger.info("[DecisionNode] Dispatching to Tool Execution.")
+        tool_name = plan.metadata.get("tool_name", "")
+        arguments = plan.metadata.get("arguments", {})
+
         try:
-            mcp_msg = self._make_msg(
+            # Try unified tool topic first: action.tool.{tool_name}
+            topic = f"action.tool.{tool_name}"
+            tool_msg = self._make_msg(
                 message,
-                "mcp.tool_call",
+                topic,
                 {
-                    "tool_name": plan.metadata.get("tool_name", ""),
-                    "arguments": plan.metadata.get("arguments", {}),
-                    "content": plan.content,
+                    "tool_name": tool_name,
+                    "arguments": arguments,
                 },
                 MessageType.QUERY,
             )
-            mcp_resp = await self.bus.request("mcp.tool_call", mcp_msg, timeout=15.0)
-            if mcp_resp.type == MessageType.ERROR:
-                result_text = f"MCP tool call failed: {mcp_resp.payload.get('error')}"
+            tool_resp = await self.bus.request(topic, tool_msg, timeout=15.0)
+            if tool_resp.type == MessageType.ERROR:
+                result_text = f"Tool call failed: {tool_resp.payload.get('error')}"
             else:
-                result_text = mcp_resp.payload.get("text", str(mcp_resp.payload))
+                if "output" in tool_resp.payload:
+                    result_text = str(tool_resp.payload["output"])
+                elif "text" in tool_resp.payload:
+                    result_text = str(tool_resp.payload["text"])
+                else:
+                    result_text = str(tool_resp.payload)
         except Exception as e:
-            result_text = f"MCP timeout or error: {e}"
+            logger.warning("Unified tool execution failed, trying fallback: %s", e)
+            try:
+                # Fallback to mcp.tool_call
+                fallback_msg = self._make_msg(
+                    message,
+                    "mcp.tool_call",
+                    {
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                        "content": plan.content,
+                    },
+                    MessageType.QUERY,
+                )
+                fallback_resp = await self.bus.request("mcp.tool_call", fallback_msg, timeout=15.0)
+                if fallback_resp.type == MessageType.ERROR:
+                    result_text = f"Tool call failed: {fallback_resp.payload.get('error')}"
+                else:
+                    result_text = fallback_resp.payload.get("text", str(fallback_resp.payload))
+            except Exception as ex:
+                result_text = f"Tool execution error: {ex}"
 
-        await self._publish_output(message, result_text, source="mcp")
+        # Synthesize result back to the user via LLM
+        import json
+
+        final_text = await self._synthesize_result(
+            result_text,
+            original_query,
+            synthesis_prompt=(
+                "You are a helpful assistant. Present the results of the tool execution "
+                "to the user. Synthesize a clean, direct answer based on the output.\n\n"
+                f"User Query: {original_query.get('text', '')}\n\n"
+                f"Tool Called: {tool_name}\n"
+                f"Arguments: {json.dumps(arguments)}\n\n"
+                f"Tool Output:\n{result_text}"
+            ),
+            fallback_prefix=f"Tool '{tool_name}' executed. Result:",
+        )
+        await self._publish_output(message, final_text, source="tool_execution")
 
     async def _exec_clarify(
         self, plan: ActionPlan, message: Message, original_query: dict[str, Any]
@@ -470,3 +515,50 @@ class DecisionNode(Node):
             "sensory.output",
             self._make_msg(message, "sensory.output", {"text": text, "source": source}),
         )
+
+    async def _exec_shell_execution(
+        self, plan: ActionPlan, message: Message, original_query: dict[str, Any]
+    ) -> None:
+        """Execute a shell command via HostShellNode and synthesize results."""
+        logger.info("[DecisionNode] Dispatching to HostShellNode.")
+        command = plan.content
+
+        try:
+            shell_msg = self._make_msg(
+                message, "action.execute_shell", {"command": command}, MessageType.QUERY
+            )
+            shell_resp = await self.bus.request("action.execute_shell", shell_msg, timeout=15.0)
+            if shell_resp.type == MessageType.ERROR:
+                result_text = f"Command failed: {shell_resp.payload.get('error')}"
+            else:
+                status = shell_resp.payload.get("status")
+                stdout = shell_resp.payload.get("output", "")
+                stderr = shell_resp.payload.get("error", "")
+                exit_code = shell_resp.payload.get("exit_code", -1)
+
+                if status == "SUCCESS":
+                    result_text = f"STDOUT:\n{stdout}"
+                    if stderr:
+                        result_text += f"\nSTDERR:\n{stderr}"
+                else:
+                    result_text = f"Command exited with code {exit_code}.\n"
+                    if stdout:
+                        result_text += f"STDOUT:\n{stdout}\n"
+                    if stderr:
+                        result_text += f"STDERR:\n{stderr}"
+        except Exception as e:
+            result_text = f"Command timeout or error: {e}"
+
+        final_text = await self._synthesize_result(
+            result_text,
+            original_query,
+            synthesis_prompt=(
+                "You are a helpful assistant. Present the results of the shell command execution "
+                "to the user. If the command printed output, explain it. If it failed, explain why.\n\n"
+                f"User Query: {original_query.get('text', '')}\n\n"
+                f"Command Executed:\n{command}\n\n"
+                f"Execution Output:\n{result_text}"
+            ),
+            fallback_prefix="Executed command. Result:",
+        )
+        await self._publish_output(message, final_text, source="shell_execution")

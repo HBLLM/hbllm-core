@@ -46,6 +46,10 @@ def _get_node_map(brain) -> dict[str, Any]:
             "_attention",
             "_load_manager",
             "_scheduler",
+            "_learner",
+            "_world_model",
+            "_process_reward",
+            "_spawner",
         ]:
             val = getattr(node, attr_name, None)
             if val is not None:
@@ -79,6 +83,9 @@ def _get_node_map(brain) -> dict[str, Any]:
             "attention",
             "load_manager",
             "scheduler",
+            "learner",
+            "world_model",
+            "process_reward",
         ]:
             try:
                 val = getattr(node, prop_name, None)
