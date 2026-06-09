@@ -63,6 +63,8 @@ class MetricsCollector:
         self._active_nodes: Any = None
         self._healthy_nodes: Any = None
         self._active_requests: Any = None
+        self._snn_potentials: Any = None
+        self._snn_spikes_total: Any = None
         self._info: Any = None
 
         if HAS_PROMETHEUS:
@@ -127,6 +129,16 @@ class MetricsCollector:
         self._active_requests = Gauge(
             "hbllm_active_requests",
             "Currently in-flight requests",
+        )
+        self._snn_potentials = Gauge(
+            "hbllm_snn_potentials",
+            "Active membrane potentials of SNN neurons",
+            ["neuron_id"],
+        )
+        self._snn_spikes_total = Counter(
+            "hbllm_snn_spikes_total",
+            "Total SNN spikes fired by neuron",
+            ["neuron_id"],
         )
         self._info = Info(
             "hbllm_build",
@@ -219,6 +231,20 @@ class MetricsCollector:
             self._mem_gauges["active_requests"] = max(
                 0.0, self._mem_gauges["active_requests"] - 1.0
             )
+
+    def record_snn_potential(self, neuron_id: str, potential: float) -> None:
+        """Record SNN neuron membrane potential (gauge)."""
+        if HAS_PROMETHEUS and self._snn_potentials:
+            self._snn_potentials.labels(neuron_id=neuron_id).set(potential)
+        else:
+            self._mem_gauges[f"snn_potential:{neuron_id}"] = potential
+
+    def record_snn_spike(self, neuron_id: str, strength: float = 1.0) -> None:
+        """Record SNN neuron spike (counter increment)."""
+        if HAS_PROMETHEUS and self._snn_spikes_total:
+            self._snn_spikes_total.labels(neuron_id=neuron_id).inc(strength)
+        else:
+            self._mem_counters[f"snn_spikes:{neuron_id}"] += strength
 
     @contextlib.contextmanager
     def measure_latency(self, stage: str) -> Generator[None, None, None]:

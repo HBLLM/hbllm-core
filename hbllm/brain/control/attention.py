@@ -40,7 +40,9 @@ class HumanAttentionModel:
             reset_potential=0.0,
             refractory_period=600.0,
         )
-        self.fatigue_accumulator = SpikingAccumulator(self.config)
+        self.fatigue_accumulator = SpikingAccumulator(
+            self.config, neuron_id="human_attention_fatigue"
+        )
 
     def record_interruption(self, severity: float = 0.1) -> None:
         """Called whenever the system prompts the user (e.g., Explanation-First approval)."""
@@ -59,7 +61,7 @@ class HumanAttentionModel:
             logger.warning(
                 "HumanAttentionModel: Interruption threshold breached (strength %.2f)! "
                 "Activating focus mode protection.",
-                spike_event.strength
+                spike_event.strength,
             )
             self.state.focus_mode_active = True
 
@@ -103,4 +105,3 @@ class HumanAttentionModel:
             return False
 
         return True
-

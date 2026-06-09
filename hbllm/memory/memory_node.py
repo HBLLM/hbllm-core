@@ -18,6 +18,7 @@ from typing import Any
 from hbllm.memory.episodic import EpisodicMemory
 from hbllm.memory.interface import MemoryType, SearchResult, UnifiedMemoryInterface
 from hbllm.memory.knowledge_graph import KnowledgeGraph
+from hbllm.memory.priming import WorkingMemoryPrimer
 from hbllm.memory.procedural import ProceduralMemory
 from hbllm.memory.semantic import SemanticMemory
 from hbllm.memory.value_memory import ValueMemory
@@ -89,6 +90,8 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             else KnowledgeGraph()
         )
         self._knowledge_graphs: dict[str, KnowledgeGraph] = {"default": self.knowledge_graph}
+        # Synaptic Priming Layer
+        self.primer = WorkingMemoryPrimer()
         # Track background tasks for graceful shutdown
         self._pending_tasks: set[asyncio.Task[Any]] = set()
 
@@ -114,6 +117,11 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         await self.bus.subscribe("memory.stats", self.handle_stats)
         await self.bus.subscribe("memory.feedback", self.handle_feedback)
         await self.bus.subscribe("memory.consolidate", self.handle_consolidate)
+
+        # Synaptic priming subscriptions
+        await self.bus.subscribe("router.query", self._on_router_query)
+        await self.bus.subscribe("workspace.thought", self._on_workspace_thought)
+
         # Tracking for handle_improvement which was previously untracked
         self._improvement_tasks: set[asyncio.Task[Any]] = set()
 
@@ -599,10 +607,14 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             if not query:
                 return message.create_error("Missing 'query_text'")
 
+            # Fetch current SNN working memory priming boosts
+            priming_boosts = self.primer.get_boosts()
+
             results = await asyncio.to_thread(
                 self.semantic_db.search,
                 query,
                 limit,
+                priming_boosts=priming_boosts,
                 tenant_id=message.tenant_id,
                 user_id=message.user_id,
                 device_id=message.device_id,
@@ -617,6 +629,22 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Semantic search failed: %s", e)
             return message.create_error(str(e))
+
+    async def _on_router_query(self, message: Message) -> None:
+        """Stimulate the primer using text/content of the user's query."""
+        text = message.payload.get("text", "")
+        if text:
+            await asyncio.to_thread(self.primer.stimulate_by_text, text)
+
+    async def _on_workspace_thought(self, message: Message) -> None:
+        """Stimulate the primer based on reasoning thoughts."""
+        content = message.payload.get("content", "")
+        if content:
+            await asyncio.to_thread(self.primer.stimulate_by_text, content)
+
+        domain = message.payload.get("domain")
+        if domain:
+            await asyncio.to_thread(self.primer.stimulate_category, domain, 0.5)
 
     @require_tenant
     async def handle_skill_store(self, message: Message) -> Message | None:
@@ -910,6 +938,8 @@ class MemoryNode(Node, UnifiedMemoryInterface):
                 deleted_episodic,
                 deleted_semantic,
             )
+            # Reset the synaptic working memory primer state
+            self.primer.reset()
             return message.create_response(
                 {
                     "status": "forgotten",

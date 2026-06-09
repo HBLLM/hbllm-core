@@ -12,6 +12,23 @@ HBLLM Core is built on four foundational principles:
 3.  **Causal Consistency** — Maintains a unified chronological memory state across all distributed nodes.
 4.  **Hardware Efficiency** — Decouples intelligence from model inference, enabling complex reasoning on CPU-only devices.
 
+## Core Architectural Rules & Layer Separation
+
+To maintain cognitive predictability, transparency, and prevent black-box decision collapse, HBLLM enforces a strict separation of concerns across its cognitive layers:
+
+*   **SNN Layer (Dynamics: Time + Intensity)**:
+    *   *Role:* Temporal integration, decay dynamics, and spiking events.
+    *   *Rule:* **SNN layers modify weights and priorities, not hard decisions.** SNNs act as continuous-time integrators of event intensity to bias downstream retrieval weights or trigger reflexes, but they do not make final cognitive routing or reasoning decisions.
+*   **Memory Layer (Storage: Facts + Embeddings + Graph)**:
+    *   *Role:* Data storage of factual information, embeddings, procedural skills, and relational graphs.
+*   **Retrieval Layer (Ranking: Blending Signals)**:
+    *   *Role:* Blends dense, sparse, knowledge graph, and SNN priming/boost signals into unified ranked lists.
+*   **LLM Layer (Reasoning: Final Synthesis)**:
+    *   *Role:* Performs final synthesis and reasoning over retrieved memories, workspace thoughts, and planning DAGs.
+*   **Telemetry Layer (Observation: No Influence)**:
+    *   *Role:* Observability, metrics collection, and logging.
+    *   *Rule:* **Telemetry must remain strictly observational and have no influence** on the system's cognitive states or decisions.
+
 !!! info "Why This Matters for Hardware"
     Traditional LLMs require 80GB+ VRAM for a 70B model. HBLLM's cognitive nodes are **zero-parameter pure logic** — they add no GPU load. Only the base model (125M–1.5B) requires compute, and it runs efficiently on CPU via Rust SIMD kernels with INT4 quantization.
 

@@ -39,9 +39,11 @@ class LIFNeuron:
     once the membrane potential crosses a configured threshold.
     """
 
-    def __init__(self, config: LIFConfig) -> None:
+    def __init__(self, config: LIFConfig, neuron_id: str = "unknown") -> None:
         self.config = config
+        self.neuron_id = neuron_id
         self.v = 0.0  # Membrane potential
+        self.last_reported_v = 0.0
         self.last_update_time: float | None = None
         self.refractory_time_remaining: float = 0.0
 
@@ -91,11 +93,28 @@ class LIFNeuron:
             # Activate refractory period
             self.refractory_time_remaining = self.config.refractory_period
 
+        # 5. Record SNN telemetry via MetricsCollector (Tier 2 delta-filtered)
+        if (
+            abs(self.v - self.last_reported_v) >= 0.05
+            or fired
+            or (self.v == 0.0 and self.last_reported_v != 0.0)
+        ):
+            from hbllm.network.metrics import MetricsCollector
+
+            MetricsCollector.get_instance().record_snn_potential(self.neuron_id, self.v)
+            self.last_reported_v = self.v
+
+        if fired:
+            from hbllm.network.metrics import MetricsCollector
+
+            MetricsCollector.get_instance().record_snn_spike(self.neuron_id, strength)
+
         return SpikeEvent(fired=fired, strength=strength, timestamp=timestamp)
 
     def reset_state(self) -> None:
         """Reset the dynamic states of the neuron."""
         self.v = 0.0
+        self.last_reported_v = 0.0
         self.last_update_time = None
         self.refractory_time_remaining = 0.0
 
@@ -108,8 +127,8 @@ class SpikingAccumulator:
     error counts, resource load, or threat level over time.
     """
 
-    def __init__(self, config: LIFConfig) -> None:
-        self.neuron = LIFNeuron(config)
+    def __init__(self, config: LIFConfig, neuron_id: str = "unknown") -> None:
+        self.neuron = LIFNeuron(config, neuron_id=neuron_id)
 
     def stimulate(self, value: float, timestamp: float | None = None) -> SpikeEvent:
         """

@@ -26,7 +26,9 @@ class TestLIFNeuron:
     """Tests for the Leaky Integrate-and-Fire (LIF) neuron model."""
 
     def test_basic_stimulation_and_spike(self):
-        config = LIFConfig(threshold=1.0, decay_half_life=10.0, reset_potential=0.0, refractory_period=0.0)
+        config = LIFConfig(
+            threshold=1.0, decay_half_life=10.0, reset_potential=0.0, refractory_period=0.0
+        )
         neuron = LIFNeuron(config)
 
         # Initial step
@@ -43,7 +45,9 @@ class TestLIFNeuron:
 
     def test_time_based_decay(self):
         # With half-life of 2.0s, potential decays by 50% in 2.0 seconds
-        config = LIFConfig(threshold=2.0, decay_half_life=2.0, reset_potential=0.0, refractory_period=0.0)
+        config = LIFConfig(
+            threshold=2.0, decay_half_life=2.0, reset_potential=0.0, refractory_period=0.0
+        )
         neuron = LIFNeuron(config)
 
         neuron.step(1.0, timestamp=100.0)
@@ -58,7 +62,9 @@ class TestLIFNeuron:
         assert pytest.approx(neuron.v) == 0.25
 
     def test_instant_decay(self):
-        config = LIFConfig(threshold=1.0, decay_half_life=0.0, reset_potential=0.0, refractory_period=0.0)
+        config = LIFConfig(
+            threshold=1.0, decay_half_life=0.0, reset_potential=0.0, refractory_period=0.0
+        )
         neuron = LIFNeuron(config)
 
         neuron.step(0.5, timestamp=100.0)
@@ -67,7 +73,9 @@ class TestLIFNeuron:
         assert neuron.v == 0.0
 
     def test_refractory_period(self):
-        config = LIFConfig(threshold=1.0, decay_half_life=100.0, reset_potential=0.0, refractory_period=2.0)
+        config = LIFConfig(
+            threshold=1.0, decay_half_life=100.0, reset_potential=0.0, refractory_period=2.0
+        )
         neuron = LIFNeuron(config)
 
         # Fire spike at t=100
@@ -116,7 +124,7 @@ class TestHumanAttentionModelSpiking:
         model = HumanAttentionModel()
 
         # Single mild interruption
-        model.record_interruption(severity=0.1) # stimulus = 0.15 + 0.1 = 0.25
+        model.record_interruption(severity=0.1)  # stimulus = 0.15 + 0.1 = 0.25
         assert model.state.approval_fatigue == 0.25
         assert not model.state.focus_mode_active
 
@@ -181,7 +189,7 @@ class TestHumanAttentionModelSpiking:
         assert model.can_interrupt(action_criticality=0.5)
 
         # Heavy fatigue spike
-        model.record_interruption(severity=0.8) # triggers spike, focus mode activated
+        model.record_interruption(severity=0.8)  # triggers spike, focus mode activated
 
         # Critical action (>= 0.9) bypasses focus protection
         assert model.can_interrupt(action_criticality=0.95)
@@ -201,8 +209,10 @@ class TestSpikingReflexRule:
             trigger={"event_type": "resource_monitor", "cpu_usage": 1.0},
             action_topic="system.action.throttle",
             action_payload={"reason": "CPU Overload"},
-            config=LIFConfig(threshold=100.0, decay_half_life=2.0, reset_potential=0.0, refractory_period=0.0),
-            current_multiplier=50.0  # Each cpu_usage input will be scaled by 50
+            config=LIFConfig(
+                threshold=100.0, decay_half_life=2.0, reset_potential=0.0, refractory_period=0.0
+            ),
+            current_multiplier=50.0,  # Each cpu_usage input will be scaled by 50
         )
 
         reflex_arc = ReflexArc(bus, [rule])
@@ -233,7 +243,7 @@ class TestSpikingReflexRule:
             action_topic="system.action.alert",
             action_payload={},
             config=LIFConfig(threshold=10.0, decay_half_life=0.5),
-            current_multiplier=8.0
+            current_multiplier=8.0,
         )
         reflex_arc = ReflexArc(bus, [rule])
 

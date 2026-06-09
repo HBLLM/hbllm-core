@@ -95,9 +95,12 @@ class SpikingReflexRule(ReflexRule):
             reset_potential=0.0,
             refractory_period=0.0,
         )
-        self.accumulator = SpikingAccumulator(self.config)
+        neuron_id = f"reflex_{action_topic.replace('.', '_')}"
+        self.accumulator = SpikingAccumulator(self.config, neuron_id=neuron_id)
         self.current_multiplier = current_multiplier
         self.last_spike_event: SpikeEvent | None = None
+        self.last_reported_v = 0.0
+        self.bus: RealityEventBus | None = None
 
     def matches(self, event: PerceptionEvent) -> bool:
         """
@@ -135,6 +138,28 @@ class SpikingReflexRule(ReflexRule):
         spike_event = self.accumulator.stimulate(stimulus, timestamp=now)
         self.last_spike_event = spike_event
 
+        # Publish SNN telemetry to RealityEventBus (Tier 2 delta-filtered or Tier 1 spike)
+        if self.bus and (
+            spike_event.fired
+            or abs(self.accumulator.neuron.v - self.last_reported_v) >= 0.05
+            or (self.accumulator.neuron.v == 0.0 and self.last_reported_v != 0.0)
+        ):
+            telemetry = PerceptionEvent(
+                event_type="snn_telemetry",
+                sub_type="reflex_potential",
+                payload={
+                    "neuron_id": self.accumulator.neuron.neuron_id,
+                    "potential": self.accumulator.neuron.v,
+                    "refractory_time_remaining": self.accumulator.neuron.refractory_time_remaining,
+                    "fired": spike_event.fired,
+                    "strength": spike_event.strength,
+                },
+            )
+            self.last_reported_v = self.accumulator.neuron.v
+            import asyncio
+
+            asyncio.create_task(self.bus.ingest(telemetry))
+
         if spike_event.fired:
             if isinstance(self.action_payload, dict):
                 self.action_payload["spike_strength"] = spike_event.strength
@@ -165,6 +190,8 @@ class ReflexArc:
         """Process event and fire matching reflex rules immediately."""
         start_time = time.perf_counter()
         for rule in self.rules:
+            if isinstance(rule, SpikingReflexRule):
+                rule.bus = self.bus
             if rule.matches(event):
                 latency_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -199,9 +226,7 @@ class ReflexArc:
                                 "action_topic": rule.action_topic,
                                 "action_payload": rule.action_payload,
                                 "latency_ms": latency_ms,
-                                "spike_strength": getattr(
-                                    rule.last_spike_event, "strength", None
-                                )
+                                "spike_strength": getattr(rule.last_spike_event, "strength", None)
                                 if isinstance(rule, SpikingReflexRule)
                                 else None,
                             },
@@ -212,4 +237,3 @@ class ReflexArc:
 
                 self.fired_actions.append((rule.action_topic, rule.action_payload))
                 break
-

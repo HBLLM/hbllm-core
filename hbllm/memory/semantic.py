@@ -590,6 +590,8 @@ class SemanticMemory:
         top_k: int = 3,
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
+        priming_boosts: dict[str, float] | None = None,
+        priming_boost_weight: float = 0.15,
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
@@ -679,6 +681,15 @@ class SemanticMemory:
                 if doc_id in reward_scores:
                     final_scores[idx] += reward_boost * reward_scores[doc_id]
 
+        # --- Synaptic Priming boost ---
+        if priming_boosts:
+            for idx, doc_id in enumerate(self.ids):
+                doc = self.documents[doc_id]
+                meta = doc.get("metadata") or {}
+                doc_cat = meta.get("domain") or meta.get("category")
+                if doc_cat and doc_cat in priming_boosts:
+                    final_scores[idx] += priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+
         # --- Security: Hard Partition Masking ---
         if tenant_id and tenant_id != "system":
             tenant_mask = np.array(
@@ -722,12 +733,15 @@ class SemanticMemory:
 
         return results
 
+    @require_tenant
     async def asearch(
         self,
         query: str,
         top_k: int = 3,
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
+        priming_boosts: dict[str, float] | None = None,
+        priming_boost_weight: float = 0.15,
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
@@ -737,7 +751,15 @@ class SemanticMemory:
         pool = await self._ensure_pg_table()
         if not pool:
             return self.search(
-                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+                query,
+                top_k,
+                reward_scores,
+                reward_boost,
+                priming_boosts,
+                priming_boost_weight,
+                tenant_id,
+                user_id,
+                device_id,
             )
 
         if not query or not query.strip():
@@ -746,7 +768,15 @@ class SemanticMemory:
         self._load_model()
         if self.model is None:
             return self.search(
-                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+                query,
+                top_k,
+                reward_scores,
+                reward_boost,
+                priming_boosts,
+                priming_boost_weight,
+                tenant_id,
+                user_id,
+                device_id,
             )
 
         query_vec = self.model.encode([query])[0]
@@ -798,6 +828,12 @@ class SemanticMemory:
                     boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
                     score += boost
 
+                    # Apply priming boost
+                    if priming_boosts:
+                        doc_cat = meta.get("domain") or meta.get("category")
+                        if doc_cat and doc_cat in priming_boosts:
+                            score += priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+
                     results.append(
                         {
                             "id": doc_id,
@@ -807,14 +843,24 @@ class SemanticMemory:
                         }
                     )
 
-            # Sort again if rewards changed the order
-            if reward_scores:
+            # Sort again if rewards/priming changed the order
+            if reward_scores or priming_boosts:
                 results.sort(key=lambda x: x["score"], reverse=True)
 
             return results
         except (OSError, ConnectionError, RuntimeError) as e:
             logger.error("PostgreSQL pgvector search failed: %s", e)
-            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
+            return self.search(
+                query,
+                top_k,
+                reward_scores,
+                reward_boost,
+                priming_boosts,
+                priming_boost_weight,
+                tenant_id,
+                user_id,
+                device_id,
+            )
 
     def delete(self, doc_id: str) -> bool:
         """
