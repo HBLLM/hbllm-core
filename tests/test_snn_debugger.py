@@ -45,7 +45,9 @@ class TestExplainableRetrievalAndDifferentials:
     def test_search_score_breakdown(self):
         mem = SemanticMemory()
 
-        doc_a = mem.store("quantum computing theory gravity", metadata={"domain": "physics", "usefulness": 5})
+        doc_a = mem.store(
+            "quantum computing theory gravity", metadata={"domain": "physics", "usefulness": 5}
+        )
         mem.store("quantum calculus equations theorem", metadata={"domain": "math"})
 
         # Search with explain=True
@@ -55,7 +57,7 @@ class TestExplainableRetrievalAndDifferentials:
             top_k=2,
             priming_boosts=priming_boosts,
             priming_boost_weight=0.15,
-            explain=True
+            explain=True,
         )
 
         assert isinstance(env, dict)
@@ -93,7 +95,7 @@ class TestExplainableRetrievalAndDifferentials:
                     "usefulness_boost": 0.03,
                     "reward_boost": 0.0,
                     "priming_boost": 0.12,
-                }
+                },
             },
             {
                 "id": "doc_runnerup",
@@ -104,8 +106,8 @@ class TestExplainableRetrievalAndDifferentials:
                     "usefulness_boost": 0.02,
                     "reward_boost": 0.0,
                     "priming_boost": 0.0,
-                }
-            }
+                },
+            },
         ]
 
         differentials = mem.get_ranking_differential(results)
@@ -169,10 +171,7 @@ class TestSNNServingEndpoints:
         # When brain is not loaded in TestClient, it runs the mock fallback comparison path
         payload = {
             "query": "quantum loop gravity coding",
-            "priming_state": {
-                "coding": 0.8,
-                "physics": 0.4
-            }
+            "priming_state": {"coding": 0.8, "physics": 0.4},
         }
         response = client.post("/api/snn/replay", json=payload)
         assert response.status_code == 200

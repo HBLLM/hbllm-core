@@ -193,6 +193,18 @@ class SemanticMemory:
         self.dedup_threshold = dedup_threshold
         self.feedback_weight = feedback_weight
 
+        # ── Hebbian Synaptic Plasticity Matrix ──────────────────────────
+        self.synaptic_weights = {}
+        categories = ["physics", "math", "coding", "finance", "personal", "general"]
+        for cat in categories:
+            self.synaptic_weights[cat] = {
+                other: 1.0 if cat == other else 0.0 for other in categories
+            }
+
+        # Rolling history of priming boosts at search time to align credit assignment on feedback
+        self._retrieval_priming_history = {}
+        self._priming_history_keys = []
+
         # ── PostgreSQL/pgvector Backend ──────────────────────────────────
         from hbllm.persistence.db_pool import DBPool
 
@@ -691,8 +703,15 @@ class SemanticMemory:
                 doc = self.documents[doc_id]
                 meta = doc.get("metadata") or {}
                 doc_cat = meta.get("domain") or meta.get("category")
-                if doc_cat and doc_cat in priming_boosts:
-                    final_scores[idx] += priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+                if doc_cat:
+                    boost_sum = 0.0
+                    for prime_cat, potential in priming_boosts.items():
+                        if potential > 0.01:
+                            w = self.synaptic_weights.setdefault(prime_cat, {}).setdefault(
+                                doc_cat, 1.0 if prime_cat == doc_cat else 0.0
+                            )
+                            boost_sum += w * min(1.0, potential)
+                    final_scores[idx] += priming_boost_weight * boost_sum
 
         # --- Security: Hard Partition Masking ---
         if tenant_id and tenant_id != "system":
@@ -746,8 +765,14 @@ class SemanticMemory:
             p_boost = 0.0
             if priming_boosts:
                 doc_cat = meta.get("domain") or meta.get("category")
-                if doc_cat and doc_cat in priming_boosts:
-                    p_boost = priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+                if doc_cat:
+                    for prime_cat, potential in priming_boosts.items():
+                        if potential > 0.01:
+                            w = self.synaptic_weights.setdefault(prime_cat, {}).setdefault(
+                                doc_cat, 1.0 if prime_cat == doc_cat else 0.0
+                            )
+                            p_boost += w * min(1.0, potential)
+                    p_boost = priming_boost_weight * p_boost
 
             res["score_breakdown"] = {
                 "similarity": float(base_similarities[idx]),
@@ -756,6 +781,18 @@ class SemanticMemory:
                 "priming_boost": float(p_boost),
             }
             results.append(res)
+
+        # Record search-time priming history for credit assignment during subsequent feedback
+        if priming_boosts:
+            if len(self._retrieval_priming_history) > 200:
+                oldest_keys = self._priming_history_keys[:100]
+                for k in oldest_keys:
+                    self._retrieval_priming_history.pop(k, None)
+                self._priming_history_keys = self._priming_history_keys[100:]
+
+            for r in results:
+                self._retrieval_priming_history[r["id"]] = priming_boosts.copy()
+                self._priming_history_keys.append(r["id"])
 
         if explain:
             return {
@@ -873,15 +910,23 @@ class SemanticMemory:
                     # Apply usefulness boost if stored in metadata
                     meta = row["metadata"] or {}
                     usefulness = int(meta.get("usefulness", 0) or 0)
-                    u_boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
+                    u_boost = self.feedback_weight * (
+                        math.log1p(max(usefulness, 0)) / math.log1p(10)
+                    )
                     score += u_boost
 
                     # Apply priming boost
                     p_boost = 0.0
                     if priming_boosts:
                         doc_cat = meta.get("domain") or meta.get("category")
-                        if doc_cat and doc_cat in priming_boosts:
-                            p_boost = priming_boost_weight * min(1.0, priming_boosts[doc_cat])
+                        if doc_cat:
+                            for prime_cat, potential in priming_boosts.items():
+                                if potential > 0.01:
+                                    w = self.synaptic_weights.setdefault(prime_cat, {}).setdefault(
+                                        doc_cat, 1.0 if prime_cat == doc_cat else 0.0
+                                    )
+                                    p_boost += w * min(1.0, potential)
+                            p_boost = priming_boost_weight * p_boost
                             score += p_boost
 
                     results.append(
@@ -902,6 +947,18 @@ class SemanticMemory:
             # Sort again if rewards/priming changed the order
             if reward_scores or priming_boosts:
                 results.sort(key=lambda x: x["score"], reverse=True)
+
+            # Record search-time priming history for credit assignment during subsequent feedback
+            if priming_boosts:
+                if len(self._retrieval_priming_history) > 200:
+                    oldest_keys = self._priming_history_keys[:100]
+                    for k in oldest_keys:
+                        self._retrieval_priming_history.pop(k, None)
+                    self._priming_history_keys = self._priming_history_keys[100:]
+
+                for r in results:
+                    self._retrieval_priming_history[r["id"]] = priming_boosts.copy()
+                    self._priming_history_keys.append(r["id"])
 
             if explain:
                 return {
@@ -957,9 +1014,15 @@ class SemanticMemory:
             # Compute deltas (A - B)
             total_delta = doc_a["score"] - doc_b["score"]
             sim_delta = breakdown_a.get("similarity", 0.0) - breakdown_b.get("similarity", 0.0)
-            usefulness_delta = breakdown_a.get("usefulness_boost", 0.0) - breakdown_b.get("usefulness_boost", 0.0)
-            reward_delta = breakdown_a.get("reward_boost", 0.0) - breakdown_b.get("reward_boost", 0.0)
-            priming_delta = breakdown_a.get("priming_boost", 0.0) - breakdown_b.get("priming_boost", 0.0)
+            usefulness_delta = breakdown_a.get("usefulness_boost", 0.0) - breakdown_b.get(
+                "usefulness_boost", 0.0
+            )
+            reward_delta = breakdown_a.get("reward_boost", 0.0) - breakdown_b.get(
+                "reward_boost", 0.0
+            )
+            priming_delta = breakdown_a.get("priming_boost", 0.0) - breakdown_b.get(
+                "priming_boost", 0.0
+            )
 
             # Generate natural language explanation of the win
             reasons = []
@@ -985,7 +1048,9 @@ class SemanticMemory:
 
             doc_a_id = doc_a.get("id", "unknown")
             doc_b_id = doc_b.get("id", "unknown")
-            explanation_str = f"Document '{doc_a_id[:8]}' outranked '{doc_b_id[:8]}' by {total_delta:.3f}. "
+            explanation_str = (
+                f"Document '{doc_a_id[:8]}' outranked '{doc_b_id[:8]}' by {total_delta:.3f}. "
+            )
             if reasons:
                 explanation_str += "Key drivers: " + ", ".join(reasons) + "."
             else:
@@ -1130,6 +1195,10 @@ class SemanticMemory:
             with open(save_dir / "hashes.json", "w") as f:
                 json.dump(list(self._content_hashes), f)
 
+            # Save Hebbian synaptic weights separately (Split Persistence)
+            with open(save_dir / "synaptic_matrix.json", "w") as f:
+                json.dump(self.synaptic_weights, f)
+
             logger.info("SemanticMemory saved to %s (%d docs)", save_dir, len(self.ids))
 
     @classmethod
@@ -1181,6 +1250,15 @@ class SemanticMemory:
             with open(hashes_path) as f:
                 mem._content_hashes = set(json.load(f))
 
+        # Load Hebbian synaptic weights (Split Persistence)
+        synaptic_path = load_dir / "synaptic_matrix.json"
+        if synaptic_path.exists():
+            try:
+                with open(synaptic_path) as f:
+                    mem.synaptic_weights = json.load(f)
+            except Exception as e:
+                logger.warning("Failed to load synaptic matrix: %s", e)
+
         logger.info("SemanticMemory loaded from %s (%d docs)", load_dir, len(mem.ids))
         return mem
 
@@ -1218,7 +1296,7 @@ class SemanticMemory:
         return None
 
     def feedback(self, doc_id: str, useful: bool = True) -> int | None:
-        """Adjust a memory's usefulness (used by search re-ranking)."""
+        """Adjust a memory's usefulness (used by search re-ranking) and update Hebbian synaptic weights."""
         with self._lock:
             doc = self.documents.get(doc_id)
             if not doc:
@@ -1228,6 +1306,32 @@ class SemanticMemory:
             usefulness = max(0, usefulness + (1 if useful else -1))
             meta["usefulness"] = usefulness
             doc["usefulness"] = usefulness
+
+            # --- Hebbian Plasticity Update ---
+            doc_cat = meta.get("domain") or meta.get("category")
+            history = self._retrieval_priming_history.pop(doc_id, None)
+            if history and doc_cat:
+                learning_rate = 0.05
+                decay_rate = 0.01  # Homeostatic regulation factor
+                feedback_score = 1.0 if useful else -0.6
+
+                for prime_cat, potential in history.items():
+                    if potential > 0.01:
+                        cat_weights = self.synaptic_weights.setdefault(prime_cat, {})
+
+                        # 1. Homeostatic decay: apply to all connection weights for the active category
+                        for domain in list(cat_weights.keys()):
+                            cat_weights[domain] *= 1.0 - decay_rate
+
+                        # 2. LTP / LTD: reinforce the connection to target document domain
+                        if doc_cat not in cat_weights:
+                            cat_weights[doc_cat] = 1.0 if prime_cat == doc_cat else 0.0
+
+                        delta = learning_rate * potential * feedback_score
+                        new_w = cat_weights[doc_cat] + delta
+
+                        # 3. Clip weights to [0.0, 1.0]
+                        cat_weights[doc_cat] = max(0.0, min(1.0, new_w))
 
             if self._use_qdrant and self._qdrant is not None and self._qdrant_initialized:
                 try:

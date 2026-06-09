@@ -184,6 +184,7 @@ async def disconnect_synapsis():
 @router.get("/api/snn/status")
 async def get_snn_status():
     from hbllm.network.metrics import MetricsCollector
+
     collector = MetricsCollector.get_instance()
 
     # Extract priming category potentials
@@ -265,6 +266,7 @@ async def stimulate_snn_neuron(request: Request):
             # Force update metrics collector immediately
             pot = memory_node.primer.categories[category].get_potential()
             from hbllm.network.metrics import MetricsCollector
+
             MetricsCollector.get_instance().record_snn_potential(f"priming_{category}", pot)
             return {
                 "status": "success",
@@ -273,6 +275,7 @@ async def stimulate_snn_neuron(request: Request):
 
     # Fallback if MemoryNode is not loaded
     from hbllm.network.metrics import MetricsCollector
+
     collector = MetricsCollector.get_instance()
     neuron_id = f"priming_{category}"
     cur_pot = collector._mem_gauges.get(f"snn_potential:{neuron_id}", 0.0)
@@ -357,6 +360,7 @@ async def replay_cognitive_search(request: Request):
             mock_primed = [mock_primed[1], mock_primed[0]]
 
         from hbllm.memory.semantic import SemanticMemory
+
         sm = SemanticMemory()
         differentials = sm.get_ranking_differential(mock_primed)
         return {
@@ -384,9 +388,7 @@ async def replay_cognitive_search(request: Request):
         query=query, top_k=5, tenant_id=tenant_id, priming_boosts=priming_state, explain=True
     )
 
-    unprimed_results = (
-        unprimed_env["results"] if isinstance(unprimed_env, dict) else unprimed_env
-    )
+    unprimed_results = unprimed_env["results"] if isinstance(unprimed_env, dict) else unprimed_env
     primed_results = primed_env["results"] if isinstance(primed_env, dict) else primed_env
 
     # Compute ranking differentials
@@ -1080,6 +1082,22 @@ async def studio_learning() -> Any:
     else:
         result["reflection"] = {"status": "not_found"}
 
+    # ── Synaptic Plasticity Weights ──
+    synaptic_weights = {}
+    memory_node = None
+    if brain:
+        memory_node = node_map.get("MemoryNode")
+    if memory_node and hasattr(memory_node, "semantic_db"):
+        synaptic_weights = memory_node.semantic_db.synaptic_weights
+    else:
+        categories = ["physics", "math", "coding", "finance", "personal", "general"]
+        for cat in categories:
+            synaptic_weights[cat] = {other: 1.0 if cat == other else 0.0 for other in categories}
+
+    if "learner" not in result or not isinstance(result["learner"], dict):
+        result["learner"] = {}
+    result["learner"]["synaptic_weights"] = synaptic_weights
+
     return result
 
 
@@ -1163,6 +1181,35 @@ async def studio_learning_trigger(request: Request) -> Any:
         "thresholds": threshold_info,
         "tip": "To trigger micro-learning: send a low-score event, then a high-score event with the same query.",
     }
+
+
+@router.post("/studio/learning/reset_weights")
+async def studio_learning_reset_weights() -> Any:
+    """Reset Hebbian synaptic weight matrix to defaults."""
+    brain = _state.get("brain")
+    memory_node = None
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+
+    categories = ["physics", "math", "coding", "finance", "personal", "general"]
+    if memory_node and hasattr(memory_node, "semantic_db"):
+        db = memory_node.semantic_db
+        with db._lock:
+            db.synaptic_weights = {}
+            for cat in categories:
+                db.synaptic_weights[cat] = {
+                    other: 1.0 if cat == other else 0.0 for other in categories
+                }
+            db._retrieval_priming_history = {}
+            db._priming_history_keys = []
+
+            try:
+                db.save_to_disk(memory_node._persistence_dir / "semantic")
+            except Exception as e:
+                logger.error("Failed to save reset synaptic weights: %s", e)
+
+    return {"status": "success", "message": "Synaptic connection weights reset to default."}
 
 
 # ─── Plugin Management Endpoints ───────────────────────────────────────────
