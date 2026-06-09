@@ -298,8 +298,13 @@ async def replay_cognitive_search(request: Request):
         raise HTTPException(status_code=400, detail="Query is required")
 
     brain = _state.get("brain")
-    if not brain:
-        # Fallback Mock Comparison if brain is not running
+    memory_node = None
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+
+    if not memory_node:
+        # Fallback Mock Comparison if brain is not running or MemoryNode is not loaded
         mock_unprimed = [
             {
                 "id": "doc1",
@@ -369,12 +374,6 @@ async def replay_cognitive_search(request: Request):
             "primed": mock_primed,
             "differentials": differentials,
         }
-
-    # Query MemoryNode
-    node_map = _get_node_map(brain)
-    memory_node = node_map.get("MemoryNode")
-    if not memory_node:
-        raise HTTPException(status_code=503, detail="MemoryNode not loaded in brain")
 
     sem_db = memory_node.semantic_db
 
