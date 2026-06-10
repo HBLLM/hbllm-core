@@ -478,6 +478,29 @@ class MemoryNode(Node, UnifiedMemoryInterface):
                 kg.add_community(community_label, member_labels, summary)
             return message.create_response({"status": "success"})
 
+        elif action == "all_relations":
+            limit = payload.get("limit", 100)
+            relations = [
+                {
+                    "source_id": r.source_id,
+                    "target_id": r.target_id,
+                    "relation_type": r.relation_type,
+                    "weight": r.weight,
+                    "created_at": r.created_at,
+                    "metadata": r.metadata,
+                }
+                for r in list(kg._relations.values())[-limit:]
+            ]
+            return message.create_response({"relations": relations})
+
+        elif action == "remove_relation":
+            source_id = payload.get("source_id")
+            target_id = payload.get("target_id")
+            relation_type = payload.get("relation_type")
+            if source_id and target_id and relation_type:
+                kg.remove_relation(source_id, target_id, relation_type)
+            return message.create_response({"status": "success"})
+
         return None
 
     # Specific topic handlers below:

@@ -383,6 +383,20 @@ class KnowledgeGraph:
         self._incoming[target_id].append(rel.key)
         return rel
 
+    def remove_relation(self, source_id: str, target_id: str, relation_type: str) -> None:
+        """Remove a relation from the graph by source, target and type."""
+        key = f"{source_id}--{relation_type}-->{target_id}"
+        rel = self._relations.pop(key, None)
+        if rel:
+            try:
+                self._outgoing[source_id].remove(key)
+            except ValueError:
+                pass
+            try:
+                self._incoming[target_id].remove(key)
+            except ValueError:
+                pass
+
     def remove_by_source(self, source_id: str) -> None:
         """Remove all entities and relations associated with a specific source ID."""
         # Find relations to remove
