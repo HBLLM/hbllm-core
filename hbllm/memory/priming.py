@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
+
 from hbllm.brain.snn import LIFConfig, SpikingAccumulator
 
 
@@ -25,7 +27,7 @@ class WorkingMemoryPrimer:
     def __init__(self, config: LIFConfig | None = None) -> None:
         # Default config: slow decay half-life of 60.0s (representing short-term cognitive focus)
         self.config = config or LIFConfig(
-            threshold=1.0,
+            threshold=99.0,
             decay_half_life=60.0,
             reset_potential=0.0,
             refractory_period=0.0,
@@ -122,9 +124,38 @@ class WorkingMemoryPrimer:
                 stimulus = min(1.0, hits * charge)
                 accumulator.stimulate(stimulus, timestamp=now)
 
+    def stimulate_by_vector(
+        self, query_vector: np.ndarray, centroids: dict[int, np.ndarray]
+    ) -> None:
+        """Project query vector onto centroids and stimulate corresponding cluster accumulators."""
+        if not centroids:
+            return
+        now = time.time()
+        q_norm = np.linalg.norm(query_vector)
+        if q_norm == 0:
+            return
+        for cluster_id, centroid in centroids.items():
+            c_norm = np.linalg.norm(centroid)
+            if c_norm == 0:
+                continue
+            similarity = float(np.dot(query_vector, centroid) / (q_norm * c_norm + 1e-9))
+            if similarity >= 0.35:
+                # Stimulus = max(0.0, similarity - 0.35)^2 * 3.0
+                stimulus = ((similarity - 0.35) ** 2) * 3.0
+                cluster_key = f"cluster_{cluster_id}"
+                if cluster_key not in self.categories:
+                    self.categories[cluster_key] = SpikingAccumulator(
+                        self.config, neuron_id=f"priming_{cluster_key}"
+                    )
+                self.categories[cluster_key].stimulate(stimulus, timestamp=now)
+
     def stimulate_category(self, category: str, charge: float = 0.5) -> None:
         """Directly stimulate a category accumulator (e.g. from RouterNode intent)."""
         accumulator = self.categories.get(category)
+        if not accumulator and category.startswith("cluster_"):
+            accumulator = SpikingAccumulator(self.config, neuron_id=f"priming_{category}")
+            self.categories[category] = accumulator
+
         if accumulator:
             accumulator.stimulate(charge, timestamp=time.time())
 

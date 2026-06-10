@@ -189,7 +189,6 @@ async def get_snn_status():
 
     # Extract priming category potentials
     categories = ["physics", "math", "coding", "finance", "personal", "general"]
-    priming_potentials = {}
 
     # Try to extract exact real-time potentials from MemoryNode primer if available
     brain = _state.get("brain")
@@ -198,11 +197,30 @@ async def get_snn_status():
         node_map = _get_node_map(brain)
         memory_node = node_map.get("MemoryNode")
 
-    for cat in categories:
+    # If memory node is active, discover all dynamic clusters/categories
+    all_cats = list(categories)
+    if memory_node and hasattr(memory_node, "primer"):
+        for cat in memory_node.primer.categories.keys():
+            if cat not in all_cats:
+                all_cats.append(cat)
+
+    priming_potentials = {}
+    for cat in all_cats:
         neuron_id = f"priming_{cat}"
         # Fall back to metrics collector value
         pot = collector._mem_gauges.get(f"snn_potential:{neuron_id}", 0.0)
         threshold = 1.0
+
+        label = cat
+        # Try to get descriptive cluster label if it's a dynamic cluster
+        if cat.startswith("cluster_") and memory_node and hasattr(memory_node, "semantic_db"):
+            try:
+                cluster_id = int(cat.split("_")[1])
+                label = memory_node.semantic_db.cluster_manager.get_cluster_label(
+                    cluster_id, memory_node.semantic_db.documents
+                )
+            except (ValueError, IndexError):
+                pass
 
         # If memory node is active, get precise current values
         if memory_node and hasattr(memory_node, "primer"):
@@ -212,6 +230,7 @@ async def get_snn_status():
                 threshold = acc.neuron.config.threshold
 
         priming_potentials[cat] = {
+            "label": label,
             "potential": pot,
             "threshold": threshold,
             "history": collector.get_snn_history(neuron_id),
@@ -1083,19 +1102,37 @@ async def studio_learning() -> Any:
 
     # ── Synaptic Plasticity Weights ──
     synaptic_weights = {}
+    cluster_stats = {}
+    cluster_labels = {}
     memory_node = None
     if brain:
         memory_node = node_map.get("MemoryNode")
     if memory_node and hasattr(memory_node, "semantic_db"):
         synaptic_weights = memory_node.semantic_db.synaptic_weights
+        cluster_stats = memory_node.semantic_db.cluster_manager.cluster_stats
+        # Generate friendly labels for all categories/clusters
+        for cat in list(synaptic_weights.keys()):
+            if cat.startswith("cluster_"):
+                try:
+                    cluster_id = int(cat.split("_")[1])
+                    cluster_labels[cat] = memory_node.semantic_db.cluster_manager.get_cluster_label(
+                        cluster_id, memory_node.semantic_db.documents
+                    )
+                except (ValueError, IndexError):
+                    cluster_labels[cat] = cat
+            else:
+                cluster_labels[cat] = cat
     else:
         categories = ["physics", "math", "coding", "finance", "personal", "general"]
         for cat in categories:
             synaptic_weights[cat] = {other: 1.0 if cat == other else 0.0 for other in categories}
+            cluster_labels[cat] = cat
 
     if "learner" not in result or not isinstance(result["learner"], dict):
         result["learner"] = {}
     result["learner"]["synaptic_weights"] = synaptic_weights
+    result["learner"]["cluster_stats"] = cluster_stats
+    result["learner"]["cluster_labels"] = cluster_labels
 
     return result
 
