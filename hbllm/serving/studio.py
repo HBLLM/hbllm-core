@@ -181,6 +181,245 @@ async def disconnect_synapsis():
     return {"status": "success", "message": "Disconnected from Synapsis network."}
 
 
+@router.get("/api/snn/status")
+async def get_snn_status():
+    from hbllm.network.metrics import MetricsCollector
+
+    collector = MetricsCollector.get_instance()
+
+    # Extract priming category potentials
+    categories = ["physics", "math", "coding", "finance", "personal", "general"]
+
+    # Try to extract exact real-time potentials from MemoryNode primer if available
+    brain = _state.get("brain")
+    memory_node = None
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+
+    # If memory node is active, discover all dynamic clusters/categories
+    all_cats = list(categories)
+    if memory_node and hasattr(memory_node, "primer"):
+        for cat in memory_node.primer.categories.keys():
+            if cat not in all_cats:
+                all_cats.append(cat)
+
+    priming_potentials = {}
+    for cat in all_cats:
+        neuron_id = f"priming_{cat}"
+        # Fall back to metrics collector value
+        pot = collector._mem_gauges.get(f"snn_potential:{neuron_id}", 0.0)
+        threshold = 1.0
+
+        label = cat
+        # Try to get descriptive cluster label if it's a dynamic cluster
+        if cat.startswith("cluster_") and memory_node and hasattr(memory_node, "semantic_db"):
+            try:
+                cluster_id = int(cat.split("_")[1])
+                label = memory_node.semantic_db.cluster_manager.get_cluster_label(
+                    cluster_id, memory_node.semantic_db.documents
+                )
+            except (ValueError, IndexError):
+                pass
+
+        # If memory node is active, get precise current values
+        if memory_node and hasattr(memory_node, "primer"):
+            acc = memory_node.primer.categories.get(cat)
+            if acc:
+                pot = acc.get_potential()
+                threshold = acc.neuron.config.threshold
+
+        priming_potentials[cat] = {
+            "label": label,
+            "potential": pot,
+            "threshold": threshold,
+            "history": collector.get_snn_history(neuron_id),
+        }
+
+    # Extract attention fatigue potential
+    attn_pot = collector._mem_gauges.get("snn_potential:human_attention_fatigue", 0.0)
+    attn_threshold = 0.8
+    refractory_time = 0.0
+
+    attention_fatigue = {
+        "potential": attn_pot,
+        "threshold": attn_threshold,
+        "refractory_time_remaining": refractory_time,
+        "history": collector.get_snn_history("human_attention_fatigue"),
+    }
+
+    # Extract any reflex rules from metrics collector
+    reflexes = {}
+    for key in list(collector._mem_gauges.keys()):
+        if key.startswith("snn_potential:reflex_"):
+            neuron_id = key.replace("snn_potential:", "")
+            reflexes[neuron_id] = {
+                "potential": collector._mem_gauges[key],
+                "threshold": 1.0,
+                "history": collector.get_snn_history(neuron_id),
+            }
+
+    return {
+        "status": "success",
+        "priming_categories": priming_potentials,
+        "attention_fatigue": attention_fatigue,
+        "reflex_rules": reflexes,
+    }
+
+
+@router.post("/api/snn/stimulate")
+async def stimulate_snn_neuron(request: Request):
+    body = await request.json()
+    category = body.get("category")
+    charge = float(body.get("charge", 0.5))
+
+    if not category:
+        raise HTTPException(status_code=400, detail="Category is required")
+
+    brain = _state.get("brain")
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+        if memory_node and hasattr(memory_node, "primer"):
+            memory_node.primer.stimulate_category(category, charge)
+            # Force update metrics collector immediately
+            pot = memory_node.primer.categories[category].get_potential()
+            from hbllm.network.metrics import MetricsCollector
+
+            MetricsCollector.get_instance().record_snn_potential(f"priming_{category}", pot)
+            return {
+                "status": "success",
+                "message": f"Stimulated category {category} with {charge} charge.",
+            }
+
+    # Fallback if MemoryNode is not loaded
+    from hbllm.network.metrics import MetricsCollector
+
+    collector = MetricsCollector.get_instance()
+    neuron_id = f"priming_{category}"
+    cur_pot = collector._mem_gauges.get(f"snn_potential:{neuron_id}", 0.0)
+    new_pot = min(1.0, cur_pot + charge)
+    collector.record_snn_potential(neuron_id, new_pot)
+    return {
+        "status": "success",
+        "message": f"Stimulated fallback metrics for category {category}.",
+    }
+
+
+@router.post("/api/snn/replay")
+async def replay_cognitive_search(request: Request):
+    body = await request.json()
+    query = body.get("query")
+    priming_state = body.get("priming_state", {})
+    tenant_id = getattr(request.state, "tenant_id", "default")
+
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
+
+    brain = _state.get("brain")
+    memory_node = None
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+
+    if not memory_node:
+        # Fallback Mock Comparison if brain is not running or MemoryNode is not loaded
+        mock_unprimed = [
+            {
+                "id": "doc1",
+                "content": "Introduction to string theory and quantum loop gravity.",
+                "metadata": {"domain": "physics"},
+                "score": 0.75,
+                "score_breakdown": {
+                    "similarity": 0.75,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": 0.0,
+                },
+            },
+            {
+                "id": "doc2",
+                "content": "Writing clean asynchronous Python code and modules.",
+                "metadata": {"domain": "coding"},
+                "score": 0.62,
+                "score_breakdown": {
+                    "similarity": 0.62,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": 0.0,
+                },
+            },
+        ]
+
+        # Stimulate coding in primed results
+        coding_prime = priming_state.get("coding", 0.0)
+        coding_boost = 0.15 * coding_prime
+        mock_primed = [
+            {
+                "id": "doc2",
+                "content": "Writing clean asynchronous Python code and modules.",
+                "metadata": {"domain": "coding"},
+                "score": 0.62 + coding_boost,
+                "score_breakdown": {
+                    "similarity": 0.62,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": coding_boost,
+                },
+            },
+            {
+                "id": "doc1",
+                "content": "Introduction to string theory and quantum loop gravity.",
+                "metadata": {"domain": "physics"},
+                "score": 0.75,
+                "score_breakdown": {
+                    "similarity": 0.75,
+                    "usefulness_boost": 0.0,
+                    "reward_boost": 0.0,
+                    "priming_boost": 0.0,
+                },
+            },
+        ]
+        if mock_primed[0]["score"] < mock_primed[1]["score"]:
+            mock_primed = [mock_primed[1], mock_primed[0]]
+
+        from hbllm.memory.semantic import SemanticMemory
+
+        sm = SemanticMemory()
+        differentials = sm.get_ranking_differential(mock_primed)
+        return {
+            "status": "success",
+            "unprimed": mock_unprimed,
+            "primed": mock_primed,
+            "differentials": differentials,
+        }
+
+    sem_db = memory_node.semantic_db
+
+    # 1. Unprimed Search (baseline)
+    unprimed_env = sem_db.search(
+        query=query, top_k=5, tenant_id=tenant_id, priming_boosts=None, explain=True
+    )
+
+    # 2. Primed Search (replayed state)
+    primed_env = sem_db.search(
+        query=query, top_k=5, tenant_id=tenant_id, priming_boosts=priming_state, explain=True
+    )
+
+    unprimed_results = unprimed_env["results"] if isinstance(unprimed_env, dict) else unprimed_env
+    primed_results = primed_env["results"] if isinstance(primed_env, dict) else primed_env
+
+    # Compute ranking differentials
+    differentials = sem_db.get_ranking_differential(primed_results)
+
+    return {
+        "status": "success",
+        "unprimed": unprimed_results,
+        "primed": primed_results,
+        "differentials": differentials,
+    }
+
+
 @router.get("/api/persona/profile")
 async def get_persona_profile(request: Request):
     tenant_id = getattr(request.state, "tenant_id", "default")
@@ -861,6 +1100,40 @@ async def studio_learning() -> Any:
     else:
         result["reflection"] = {"status": "not_found"}
 
+    # ── Synaptic Plasticity Weights ──
+    synaptic_weights = {}
+    cluster_stats = {}
+    cluster_labels = {}
+    memory_node = None
+    if brain:
+        memory_node = node_map.get("MemoryNode")
+    if memory_node and hasattr(memory_node, "semantic_db"):
+        synaptic_weights = memory_node.semantic_db.synaptic_weights
+        cluster_stats = memory_node.semantic_db.cluster_manager.cluster_stats
+        # Generate friendly labels for all categories/clusters
+        for cat in list(synaptic_weights.keys()):
+            if cat.startswith("cluster_"):
+                try:
+                    cluster_id = int(cat.split("_")[1])
+                    cluster_labels[cat] = memory_node.semantic_db.cluster_manager.get_cluster_label(
+                        cluster_id, memory_node.semantic_db.documents
+                    )
+                except (ValueError, IndexError):
+                    cluster_labels[cat] = cat
+            else:
+                cluster_labels[cat] = cat
+    else:
+        categories = ["physics", "math", "coding", "finance", "personal", "general"]
+        for cat in categories:
+            synaptic_weights[cat] = {other: 1.0 if cat == other else 0.0 for other in categories}
+            cluster_labels[cat] = cat
+
+    if "learner" not in result or not isinstance(result["learner"], dict):
+        result["learner"] = {}
+    result["learner"]["synaptic_weights"] = synaptic_weights
+    result["learner"]["cluster_stats"] = cluster_stats
+    result["learner"]["cluster_labels"] = cluster_labels
+
     return result
 
 
@@ -944,6 +1217,35 @@ async def studio_learning_trigger(request: Request) -> Any:
         "thresholds": threshold_info,
         "tip": "To trigger micro-learning: send a low-score event, then a high-score event with the same query.",
     }
+
+
+@router.post("/studio/learning/reset_weights")
+async def studio_learning_reset_weights() -> Any:
+    """Reset Hebbian synaptic weight matrix to defaults."""
+    brain = _state.get("brain")
+    memory_node = None
+    if brain:
+        node_map = _get_node_map(brain)
+        memory_node = node_map.get("MemoryNode")
+
+    categories = ["physics", "math", "coding", "finance", "personal", "general"]
+    if memory_node and hasattr(memory_node, "semantic_db"):
+        db = memory_node.semantic_db
+        with db._lock:
+            db.synaptic_weights = {}
+            for cat in categories:
+                db.synaptic_weights[cat] = {
+                    other: 1.0 if cat == other else 0.0 for other in categories
+                }
+            db._retrieval_priming_history = {}
+            db._priming_history_keys = []
+
+            try:
+                db.save_to_disk(memory_node._persistence_dir / "semantic")
+            except Exception as e:
+                logger.error("Failed to save reset synaptic weights: %s", e)
+
+    return {"status": "success", "message": "Synaptic connection weights reset to default."}
 
 
 # ─── Plugin Management Endpoints ───────────────────────────────────────────

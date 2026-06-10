@@ -28,12 +28,15 @@ import math
 import os
 import re
 import threading
+import time
 import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from hbllm.memory.latent_cluster import LatentClusterManager
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +195,21 @@ class SemanticMemory:
         self.safe_save = safe_save
         self.dedup_threshold = dedup_threshold
         self.feedback_weight = feedback_weight
+
+        # ── Hebbian Synaptic Plasticity Matrix ──────────────────────────
+        self.synaptic_weights = {}
+        categories = ["physics", "math", "coding", "finance", "personal", "general"]
+        for cat in categories:
+            self.synaptic_weights[cat] = {
+                other: 1.0 if cat == other else 0.0 for other in categories
+            }
+
+        # ── Latent Memory Clusters ──────────────────────────────────────
+        self.cluster_manager = LatentClusterManager()
+
+        # Rolling history of priming boosts at search time to align credit assignment on feedback
+        self._retrieval_priming_history = {}
+        self._priming_history_keys = []
 
         # ── PostgreSQL/pgvector Backend ──────────────────────────────────
         from hbllm.persistence.db_pool import DBPool
@@ -459,6 +477,7 @@ class SemanticMemory:
             self.documents[doc_id] = doc
             self.ids.append(doc_id)
             self._schedule_tfidf_encode()
+            embedding = self._tfidf.encode([content])[0]
         else:
             # Dense embeddings + sparse TF-IDF for hybrid search
             if self.model is None:
@@ -477,6 +496,21 @@ class SemanticMemory:
                 self._sparse_list.append(sparse_vec)
                 self._sparse_dirty = True
 
+        # Assign document to a latent cluster using LatentClusterManager
+        cluster_id = self.cluster_manager.assign_to_cluster(doc_id, embedding, content)
+        meta.setdefault("domain", f"cluster_{cluster_id}")
+        meta.setdefault("category", f"cluster_{cluster_id}")
+
+        # Initialize connection weights in synaptic_weights matrix for the new cluster
+        cluster_key = f"cluster_{cluster_id}"
+        if cluster_key not in self.synaptic_weights:
+            self.synaptic_weights[cluster_key] = {cluster_key: 1.0}
+            for other_cat in list(self.synaptic_weights.keys()):
+                if other_cat != cluster_key:
+                    self.synaptic_weights[other_cat][cluster_key] = 0.0
+                    self.synaptic_weights[cluster_key][other_cat] = 0.0
+
+        if not self._use_tfidf:
             # ── Qdrant Sidecar Index ─────────────────────────────────────
             if self._use_qdrant and self._qdrant is not None:
                 try:
@@ -590,10 +624,14 @@ class SemanticMemory:
         top_k: int = 3,
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
+        priming_boosts: dict[str, float] | None = None,
+        priming_boost_weight: float = 0.15,
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+        explain: bool = False,
+        primer: Any | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """
         Search for the most semantically similar documents to the query.
 
@@ -624,6 +662,11 @@ class SemanticMemory:
 
         # --- Compute dense similarity ---
         query_vec = self._encode([query])[0]
+
+        # Project query vector onto centroids and stimulate SNN primer
+        if primer is not None:
+            primer.stimulate_by_vector(query_vec, self.cluster_manager.centroids)
+            priming_boosts = primer.get_boosts()
 
         if _HAS_RUST_SEARCH:
             # Rust-accelerated cosine similarity
@@ -665,6 +708,9 @@ class SemanticMemory:
         else:
             final_scores = dense_scores
 
+        # Save base similarity scores before applying any boosts
+        base_similarities = final_scores.copy()
+
         # --- Usefulness boosting ---
         for idx, doc_id in enumerate(self.ids):
             doc = self.documents[doc_id]
@@ -678,6 +724,36 @@ class SemanticMemory:
             for idx, doc_id in enumerate(self.ids):
                 if doc_id in reward_scores:
                     final_scores[idx] += reward_boost * reward_scores[doc_id]
+
+        # --- Synaptic Priming boost ---
+        if priming_boosts:
+            for idx, doc_id in enumerate(self.ids):
+                doc = self.documents[doc_id]
+                meta = doc.get("metadata") or {}
+                doc_cats = []
+                cluster_id = self.cluster_manager.cluster_assignments.get(doc_id)
+                if cluster_id is not None:
+                    doc_cats.append(f"cluster_{cluster_id}")
+                orig_domain = meta.get("domain")
+                if orig_domain and orig_domain not in doc_cats:
+                    doc_cats.append(orig_domain)
+                orig_category = meta.get("category")
+                if orig_category and orig_category not in doc_cats:
+                    doc_cats.append(orig_category)
+
+                if doc_cats:
+                    boost_sum = 0.0
+                    for prime_cat, potential in priming_boosts.items():
+                        if potential > 0.01:
+                            max_w = 0.0
+                            for d_cat in doc_cats:
+                                w = self.synaptic_weights.setdefault(prime_cat, {}).setdefault(
+                                    d_cat, 1.0 if prime_cat == d_cat else 0.0
+                                )
+                                if w > max_w:
+                                    max_w = w
+                            boost_sum += max_w * min(1.0, potential)
+                    final_scores[idx] += priming_boost_weight * boost_sum
 
         # --- Security: Hard Partition Masking ---
         if tenant_id and tenant_id != "system":
@@ -718,26 +794,122 @@ class SemanticMemory:
             doc_id = self.ids[idx]
             res = self.documents[doc_id].copy()
             res["score"] = float(final_scores[idx])
+
+            # Increment activation count for the retrieved document's cluster
+            meta = res.get("metadata") or {}
+            cluster_id = self.cluster_manager.cluster_assignments.get(doc_id)
+            if cluster_id is not None:
+                if cluster_id in self.cluster_manager.cluster_stats:
+                    stats = self.cluster_manager.cluster_stats[cluster_id]
+                    stats["activation_count"] += 1
+                    stats["last_used"] = time.time()
+
+            # Calculate individual component scores
+            usefulness = int(meta.get("usefulness", 0) or 0)
+            u_boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
+
+            r_boost = 0.0
+            if reward_scores and doc_id in reward_scores:
+                r_boost = reward_boost * reward_scores[doc_id]
+
+            p_boost = 0.0
+            if priming_boosts:
+                doc_cats = []
+                if cluster_id is not None:
+                    doc_cats.append(f"cluster_{cluster_id}")
+                orig_domain = meta.get("domain")
+                if orig_domain and orig_domain not in doc_cats:
+                    doc_cats.append(orig_domain)
+                orig_category = meta.get("category")
+                if orig_category and orig_category not in doc_cats:
+                    doc_cats.append(orig_category)
+
+                if doc_cats:
+                    boost_sum = 0.0
+                    for prime_cat, potential in priming_boosts.items():
+                        if potential > 0.01:
+                            max_w = 0.0
+                            for d_cat in doc_cats:
+                                w = self.synaptic_weights.setdefault(prime_cat, {}).setdefault(
+                                    d_cat, 1.0 if prime_cat == d_cat else 0.0
+                                )
+                                if w > max_w:
+                                    max_w = w
+                            boost_sum += max_w * min(1.0, potential)
+                    p_boost = priming_boost_weight * boost_sum
+
+            res["score_breakdown"] = {
+                "similarity": float(base_similarities[idx]),
+                "usefulness_boost": float(u_boost),
+                "reward_boost": float(r_boost),
+                "priming_boost": float(p_boost),
+            }
             results.append(res)
+
+        # Record search-time priming history for credit assignment during subsequent feedback
+        if priming_boosts:
+            if len(self._retrieval_priming_history) > 200:
+                oldest_keys = self._priming_history_keys[:100]
+                for k in oldest_keys:
+                    self._retrieval_priming_history.pop(k, None)
+                self._priming_history_keys = self._priming_history_keys[100:]
+
+            for r in results:
+                self._retrieval_priming_history[r["id"]] = priming_boosts.copy()
+                self._priming_history_keys.append(r["id"])
+
+        if explain:
+            return {
+                "results": results,
+                "explanations": [
+                    {
+                        "doc_id": r["id"],
+                        "score_breakdown": r["score_breakdown"],
+                        "domain": r.get("metadata", {}).get("domain")
+                        or r.get("metadata", {}).get("category"),
+                    }
+                    for r in results
+                ],
+                "global_stats": {
+                    "query": query,
+                    "total_documents": len(self.documents),
+                    "priming_applied": bool(priming_boosts),
+                },
+            }
 
         return results
 
+    @require_tenant
     async def asearch(
         self,
         query: str,
         top_k: int = 3,
         reward_scores: dict[str, float] | None = None,
         reward_boost: float = 0.1,
+        priming_boosts: dict[str, float] | None = None,
+        priming_boost_weight: float = 0.15,
         tenant_id: str | None = None,
         user_id: str | None = None,
         device_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+        explain: bool = False,
+        primer: Any | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Async version of search that queries Postgres pgvector if available."""
         await self._aflush_tfidf()
         pool = await self._ensure_pg_table()
         if not pool:
             return self.search(
-                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+                query,
+                top_k,
+                reward_scores,
+                reward_boost,
+                priming_boosts,
+                priming_boost_weight,
+                tenant_id,
+                user_id,
+                device_id,
+                explain,
+                primer=primer,
             )
 
         if not query or not query.strip():
@@ -746,18 +918,30 @@ class SemanticMemory:
         self._load_model()
         if self.model is None:
             return self.search(
-                query, top_k, reward_scores, reward_boost, tenant_id, user_id, device_id
+                query,
+                top_k,
+                reward_scores,
+                reward_boost,
+                priming_boosts,
+                priming_boost_weight,
+                tenant_id,
+                user_id,
+                device_id,
+                explain,
+                primer=primer,
             )
 
         query_vec = self.model.encode([query])[0]
 
+        # Project query vector onto centroids and stimulate SNN primer
+        if primer is not None:
+            primer.stimulate_by_vector(query_vec, self.cluster_manager.centroids)
+            priming_boosts = primer.get_boosts()
+
         results = []
         try:
             async with pool.acquire() as conn:
-                # We use the <-> operator for L2 distance (or cosine distance). pgvector uses <=> for cosine distance.
-                # Let's use <=> (cosine distance) since we use cosine similarity locally.
-                # Order by distance ASC
-
+                # We use the <=> operator for cosine distance.
                 sql = """
                     SELECT id, content, metadata, 1 - (embedding <=> $1) AS score
                     FROM semantic_memory
@@ -786,17 +970,58 @@ class SemanticMemory:
 
                 for row in rows:
                     doc_id = str(row["id"])
-                    score = float(row["score"])
+                    base_similarity = float(row["score"])
+                    score = base_similarity
 
                     # Apply reward boosting if any
+                    r_boost = 0.0
                     if reward_scores and doc_id in reward_scores:
-                        score += reward_boost * reward_scores[doc_id]
+                        r_boost = reward_boost * reward_scores[doc_id]
+                        score += r_boost
 
                     # Apply usefulness boost if stored in metadata
                     meta = row["metadata"] or {}
                     usefulness = int(meta.get("usefulness", 0) or 0)
-                    boost = self.feedback_weight * (math.log1p(max(usefulness, 0)) / math.log1p(10))
-                    score += boost
+                    u_boost = self.feedback_weight * (
+                        math.log1p(max(usefulness, 0)) / math.log1p(10)
+                    )
+                    score += u_boost
+
+                    # Apply priming boost
+                    p_boost = 0.0
+                    cluster_id = self.cluster_manager.cluster_assignments.get(doc_id)
+                    if priming_boosts:
+                        doc_cats = []
+                        if cluster_id is not None:
+                            doc_cats.append(f"cluster_{cluster_id}")
+                        orig_domain = meta.get("domain")
+                        if orig_domain and orig_domain not in doc_cats:
+                            doc_cats.append(orig_domain)
+                        orig_category = meta.get("category")
+                        if orig_category and orig_category not in doc_cats:
+                            doc_cats.append(orig_category)
+
+                        if doc_cats:
+                            boost_sum = 0.0
+                            for prime_cat, potential in priming_boosts.items():
+                                if potential > 0.01:
+                                    max_w = 0.0
+                                    for d_cat in doc_cats:
+                                        w = self.synaptic_weights.setdefault(
+                                            prime_cat, {}
+                                        ).setdefault(d_cat, 1.0 if prime_cat == d_cat else 0.0)
+                                        if w > max_w:
+                                            max_w = w
+                                    boost_sum += max_w * min(1.0, potential)
+                            p_boost = priming_boost_weight * boost_sum
+                            score += p_boost
+
+                    # Increment activation count for the retrieved document's cluster
+                    if cluster_id is not None:
+                        if cluster_id in self.cluster_manager.cluster_stats:
+                            stats = self.cluster_manager.cluster_stats[cluster_id]
+                            stats["activation_count"] += 1
+                            stats["last_used"] = time.time()
 
                     results.append(
                         {
@@ -804,17 +1029,144 @@ class SemanticMemory:
                             "content": row["content"],
                             "metadata": row["metadata"],
                             "score": score,
+                            "score_breakdown": {
+                                "similarity": base_similarity,
+                                "usefulness_boost": float(u_boost),
+                                "reward_boost": float(r_boost),
+                                "priming_boost": float(p_boost),
+                            },
                         }
                     )
 
-            # Sort again if rewards changed the order
-            if reward_scores:
+            # Sort again if rewards/priming changed the order
+            if reward_scores or priming_boosts:
                 results.sort(key=lambda x: x["score"], reverse=True)
+
+            # Record search-time priming history for credit assignment during subsequent feedback
+            if priming_boosts:
+                if len(self._retrieval_priming_history) > 200:
+                    oldest_keys = self._priming_history_keys[:100]
+                    for k in oldest_keys:
+                        self._retrieval_priming_history.pop(k, None)
+                    self._priming_history_keys = self._priming_history_keys[100:]
+
+                for r in results:
+                    self._retrieval_priming_history[r["id"]] = priming_boosts.copy()
+                    self._priming_history_keys.append(r["id"])
+
+            if explain:
+                return {
+                    "results": results,
+                    "explanations": [
+                        {
+                            "doc_id": r["id"],
+                            "score_breakdown": r["score_breakdown"],
+                            "domain": r.get("metadata", {}).get("domain")
+                            or r.get("metadata", {}).get("category"),
+                        }
+                        for r in results
+                    ],
+                    "global_stats": {
+                        "query": query,
+                        "total_documents": -1,  # Database backend total is unqueried
+                        "priming_applied": bool(priming_boosts),
+                    },
+                }
 
             return results
         except (OSError, ConnectionError, RuntimeError) as e:
             logger.error("PostgreSQL pgvector search failed: %s", e)
-            return self.search(query, top_k, reward_scores, reward_boost, tenant_id)
+            return self.search(
+                query,
+                top_k,
+                reward_scores,
+                reward_boost,
+                priming_boosts,
+                priming_boost_weight,
+                tenant_id,
+                user_id,
+                device_id,
+                explain,
+            )
+
+    def get_ranking_differential(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Compute score differentials between consecutive documents in search results.
+
+        Explains why the top documents outranked their immediate successors.
+        """
+        differentials = []
+        if len(results) < 2:
+            return differentials
+
+        for i in range(len(results) - 1):
+            doc_a = results[i]
+            doc_b = results[i + 1]
+            breakdown_a = doc_a.get("score_breakdown", {})
+            breakdown_b = doc_b.get("score_breakdown", {})
+
+            # Compute deltas (A - B)
+            total_delta = doc_a["score"] - doc_b["score"]
+            sim_delta = breakdown_a.get("similarity", 0.0) - breakdown_b.get("similarity", 0.0)
+            usefulness_delta = breakdown_a.get("usefulness_boost", 0.0) - breakdown_b.get(
+                "usefulness_boost", 0.0
+            )
+            reward_delta = breakdown_a.get("reward_boost", 0.0) - breakdown_b.get(
+                "reward_boost", 0.0
+            )
+            priming_delta = breakdown_a.get("priming_boost", 0.0) - breakdown_b.get(
+                "priming_boost", 0.0
+            )
+
+            # Generate natural language explanation of the win
+            reasons = []
+            if sim_delta > 0:
+                reasons.append(f"higher base semantic similarity (+{sim_delta:.3f})")
+            elif sim_delta < 0:
+                reasons.append(f"lower base similarity ({sim_delta:.3f})")
+
+            if priming_delta > 0:
+                reasons.append(f"SNN priming bias advantage (+{priming_delta:.3f})")
+            elif priming_delta < 0:
+                reasons.append(f"SNN priming bias deficit ({priming_delta:.3f})")
+
+            if reward_delta > 0:
+                reasons.append(f"value preference boost (+{reward_delta:.3f})")
+            elif reward_delta < 0:
+                reasons.append(f"value preference deficit ({reward_delta:.3f})")
+
+            if usefulness_delta > 0:
+                reasons.append(f"usefulness feedback boost (+{usefulness_delta:.3f})")
+            elif usefulness_delta < 0:
+                reasons.append(f"usefulness feedback deficit ({usefulness_delta:.3f})")
+
+            doc_a_id = doc_a.get("id", "unknown")
+            doc_b_id = doc_b.get("id", "unknown")
+            explanation_str = (
+                f"Document '{doc_a_id[:8]}' outranked '{doc_b_id[:8]}' by {total_delta:.3f}. "
+            )
+            if reasons:
+                explanation_str += "Key drivers: " + ", ".join(reasons) + "."
+            else:
+                explanation_str += "Minimal overall score difference."
+
+            differentials.append(
+                {
+                    "rank_a": i + 1,
+                    "rank_b": i + 2,
+                    "doc_a_id": doc_a_id,
+                    "doc_b_id": doc_b_id,
+                    "deltas": {
+                        "total": float(total_delta),
+                        "similarity": float(sim_delta),
+                        "usefulness": float(usefulness_delta),
+                        "reward": float(reward_delta),
+                        "priming": float(priming_delta),
+                    },
+                    "explanation": explanation_str,
+                }
+            )
+        return differentials
 
     def delete(self, doc_id: str) -> bool:
         """
@@ -937,6 +1289,14 @@ class SemanticMemory:
             with open(save_dir / "hashes.json", "w") as f:
                 json.dump(list(self._content_hashes), f)
 
+            # Save Hebbian synaptic weights separately (Split Persistence)
+            with open(save_dir / "synaptic_matrix.json", "w") as f:
+                json.dump(self.synaptic_weights, f)
+
+            # Save latent cluster manager details
+            with open(save_dir / "latent_clusters.json", "w") as f:
+                json.dump(self.cluster_manager.to_dict(), f)
+
             logger.info("SemanticMemory saved to %s (%d docs)", save_dir, len(self.ids))
 
     @classmethod
@@ -988,6 +1348,24 @@ class SemanticMemory:
             with open(hashes_path) as f:
                 mem._content_hashes = set(json.load(f))
 
+        # Load Hebbian synaptic weights (Split Persistence)
+        synaptic_path = load_dir / "synaptic_matrix.json"
+        if synaptic_path.exists():
+            try:
+                with open(synaptic_path) as f:
+                    mem.synaptic_weights = json.load(f)
+            except Exception as e:
+                logger.warning("Failed to load synaptic matrix: %s", e)
+
+        # Load latent cluster manager details
+        clusters_path = load_dir / "latent_clusters.json"
+        if clusters_path.exists():
+            try:
+                with open(clusters_path) as f:
+                    mem.cluster_manager.from_dict(json.load(f))
+            except Exception as e:
+                logger.warning("Failed to load latent clusters: %s", e)
+
         logger.info("SemanticMemory loaded from %s (%d docs)", load_dir, len(mem.ids))
         return mem
 
@@ -1025,7 +1403,7 @@ class SemanticMemory:
         return None
 
     def feedback(self, doc_id: str, useful: bool = True) -> int | None:
-        """Adjust a memory's usefulness (used by search re-ranking)."""
+        """Adjust a memory's usefulness (used by search re-ranking) and update Hebbian synaptic weights."""
         with self._lock:
             doc = self.documents.get(doc_id)
             if not doc:
@@ -1035,6 +1413,65 @@ class SemanticMemory:
             usefulness = max(0, usefulness + (1 if useful else -1))
             meta["usefulness"] = usefulness
             doc["usefulness"] = usefulness
+
+            # --- Hebbian Plasticity Update ---
+            doc_cats = []
+            cluster_id = self.cluster_manager.cluster_assignments.get(doc_id)
+            if cluster_id is not None:
+                doc_cats.append(f"cluster_{cluster_id}")
+            orig_domain = meta.get("domain")
+            if orig_domain and orig_domain not in doc_cats:
+                doc_cats.append(orig_domain)
+            orig_category = meta.get("category")
+            if orig_category and orig_category not in doc_cats:
+                doc_cats.append(orig_category)
+
+            # Track positive feedback for success rate
+            for d_cat in doc_cats:
+                if d_cat.startswith("cluster_"):
+                    try:
+                        c_id = int(d_cat.split("_")[1])
+                        if c_id in self.cluster_manager.cluster_stats:
+                            stats = self.cluster_manager.cluster_stats[c_id]
+                            if useful:
+                                stats["positive_feedback_count"] += 1
+                            # Recompute success rate: positive_feedback_count / (activation_count or 1)
+                            if stats["activation_count"] > 0:
+                                stats["success_rate"] = (
+                                    float(stats["positive_feedback_count"])
+                                    / stats["activation_count"]
+                                )
+                            else:
+                                stats["success_rate"] = (
+                                    1.0 if stats["positive_feedback_count"] > 0 else 0.0
+                                )
+                    except (ValueError, IndexError):
+                        pass
+
+            history = self._retrieval_priming_history.pop(doc_id, None)
+            if history and doc_cats:
+                learning_rate = 0.05
+                decay_rate = 0.01  # Homeostatic regulation factor
+                feedback_score = 1.0 if useful else -0.6
+
+                for prime_cat, potential in history.items():
+                    if potential > 0.01:
+                        cat_weights = self.synaptic_weights.setdefault(prime_cat, {})
+
+                        # 1. Homeostatic decay: apply to all connection weights for the active category
+                        for domain in list(cat_weights.keys()):
+                            cat_weights[domain] *= 1.0 - decay_rate
+
+                        # 2. LTP / LTD: reinforce the connection to target document domains
+                        for d_cat in doc_cats:
+                            if d_cat not in cat_weights:
+                                cat_weights[d_cat] = 1.0 if prime_cat == d_cat else 0.0
+
+                            delta = learning_rate * potential * feedback_score
+                            new_w = cat_weights[d_cat] + delta
+
+                            # 3. Clip weights to [0.0, 1.0]
+                            cat_weights[d_cat] = max(0.0, min(1.0, new_w))
 
             if self._use_qdrant and self._qdrant is not None and self._qdrant_initialized:
                 try:
@@ -1111,5 +1548,27 @@ class SemanticMemory:
                         alive_ids.discard(dup_id)
                         removed += 1
                         merged_into.setdefault(keeper_id, []).append(dup_id)
+
+            # Perform latent cluster maintenance
+            doc_vectors_dict = {}
+            for idx, doc_id in enumerate(self.ids):
+                if not self._use_tfidf and self._vector_list:
+                    doc_vectors_dict[doc_id] = self._vector_list[idx][0]
+                elif self._sparse_list:
+                    doc_vectors_dict[doc_id] = self._sparse_list[idx][0]
+
+            self.cluster_manager.maintain_clusters(doc_vectors_dict, self.synaptic_weights)
+
+            # Update document metadata categories for any re-assigned documents
+            for doc_id, c_id in self.cluster_manager.cluster_assignments.items():
+                if doc_id in self.documents:
+                    doc_meta = self.documents[doc_id].setdefault("metadata", {})
+                    # Only overwrite if it is missing or starts with "cluster_"
+                    if not doc_meta.get("domain") or doc_meta.get("domain").startswith("cluster_"):
+                        doc_meta["domain"] = f"cluster_{c_id}"
+                    if not doc_meta.get("category") or doc_meta.get("category").startswith(
+                        "cluster_"
+                    ):
+                        doc_meta["category"] = f"cluster_{c_id}"
 
             return {"tenant_id": tenant_id, "removed": removed, "merged_into": merged_into}

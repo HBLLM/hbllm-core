@@ -28,5 +28,5 @@ Humans must be able to gracefully stop or reverse autonomous behavior.
 ## Human Cognitive Load Model (`hbllm/brain/control/attention.py`)
 
 Constant interruptions lead to alert fatigue, causing users to blindly approve actions.
-- Tracks a `user_attention_budget` and `approval_fatigue` metric.
+- **Spiking Gating:** Tracks a `user_attention_budget` and `approval_fatigue` metric backed by a Leaky Integrate-and-Fire (LIF) spiking neuron model. Interruptions stimulate the neuron, and rapid prompts build charge. Spiking triggers focus mode protection and sets a refractory cooling period.
 - The system will batch `SENSITIVE` requests or defer non-urgent tasks to prevent overwhelming the user with permission prompts.

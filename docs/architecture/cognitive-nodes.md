@@ -290,8 +290,8 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 
 - **File:** `hbllm/perception/reflex_arc.py`
 - **Purpose:** Sub-millisecond autonomic fast-path that routes critical sensor alerts (fire, collision, anomaly) directly to action executors, bypassing the Global Workspace / LLM reasoning loop entirely.
-- **Rules:** Pattern-matching `ReflexRule`s with comparator support (`__gte`, `__gt`, `__lte`, `__lt`).
-- **Auditability:** Every activation is logged to `EventLog`.
+- **Rules:** Supports pattern-matching `ReflexRule`s and event-accumulating `SpikingReflexRule`s. Spiking rules leverage a Leaky Integrate-and-Fire (LIF) neuron model to trigger actions only when cumulative input currents from high-frequency events exceed spiking thresholds.
+- **Auditability:** Every activation is logged to `EventLog`, including the recorded `spike_strength` indicating priority/urgency.
 
 #### Rust Perception Engine
 
