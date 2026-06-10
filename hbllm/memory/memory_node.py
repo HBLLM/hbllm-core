@@ -305,7 +305,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
         if MemoryType.SEMANTIC in types_to_search:
             sem_res = await asyncio.to_thread(
-                self.semantic_db.search, query, top_k=limit, tenant_id=tenant_id
+                self.semantic_db.search, query, top_k=limit, tenant_id=tenant_id, primer=self.primer
             )
             for r in sem_res:
                 results.append(
@@ -618,6 +618,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
                 tenant_id=message.tenant_id,
                 user_id=message.user_id,
                 device_id=message.device_id,
+                primer=self.primer,
             )
 
             return message.create_response(
