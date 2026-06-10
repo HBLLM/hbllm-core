@@ -30,11 +30,13 @@ async def memory_bus_system():
 
     # Patch ServiceRegistry.verify_message to bypass cryptographic validation in tests
     import hbllm.network.registry
+
     async def mock_verify_message(*args, **kwargs):
         return True
 
     # We patch it locally on the registry for the mock system
     import sys
+
     if "hbllm.network.registry" in sys.modules:
         sys.modules["hbllm.network.registry"].ServiceRegistry.verify_message = mock_verify_message
 
