@@ -20,7 +20,7 @@ from hbllm.network.messages import Message, MessageType
 
 
 @pytest.fixture
-async def memory_bus_system():
+async def memory_bus_system(monkeypatch):
     """Boot a mock InProcessBus and MemoryNode with an in-memory database."""
     bus = InProcessBus()
     await bus.start()
@@ -34,11 +34,9 @@ async def memory_bus_system():
     async def mock_verify_message(*args, **kwargs):
         return True
 
-    # We patch it locally on the registry for the mock system
-    import sys
-
-    if "hbllm.network.registry" in sys.modules:
-        sys.modules["hbllm.network.registry"].ServiceRegistry.verify_message = mock_verify_message
+    monkeypatch.setattr(
+        hbllm.network.registry.ServiceRegistry, "verify_message", mock_verify_message
+    )
 
     yield bus, memory
 
