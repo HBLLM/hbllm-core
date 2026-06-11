@@ -714,7 +714,7 @@ async def test_router_sigmoid_load_penalty(tmp_path):
     node.utility_engine.weight_risk = 0.0
 
     plan = ActionPlan(action_type=ActionType.TEXT_RESPONSE, content="test")
-    
+
     msg_low = Message(
         type=MessageType.EVENT,
         source_node_id="workspace",
@@ -760,7 +760,7 @@ async def test_router_execution_hysteresis(tmp_path):
     node = DecisionNode(node_id="test_node", data_dir=str(tmp_path))
     node.calibrator.get_utility_percentiles = lambda: (0.8, 0.5, 0.2)
     node.calibrator.get_calibration_readiness = lambda: {"bootstrap_active": False}
-    
+
     node.smoothed_high = 0.8
     node.smoothed_med = 0.5
     node.smoothed_low = 0.2
@@ -908,6 +908,7 @@ async def test_router_exploration_ttl_decay(tmp_path):
     plan = ActionPlan(action_type=ActionType.TEXT_RESPONSE, content="test")
 
     from datetime import datetime, timedelta, timezone
+
     past_time = datetime.now(timezone.utc) - timedelta(seconds=400)
 
     msg = Message(
@@ -1082,6 +1083,7 @@ async def test_router_timescale_separation(tmp_path):
     plan = ActionPlan(action_type=ActionType.TEXT_RESPONSE, content="test")
 
     import random
+
     original_randint = random.randint
     random.randint = lambda a, b: 0
     try:
@@ -1169,6 +1171,7 @@ async def test_router_lyapunov_cooling_hysteresis(tmp_path):
         )
 
     from hbllm.brain.utility_calibrator import CalibrationTrace
+
     high_var_traces = [
         CalibrationTrace(
             trace_id=f"t_{i}",
@@ -1184,6 +1187,7 @@ async def test_router_lyapunov_cooling_hysteresis(tmp_path):
     node.calibrator.get_traces = lambda: high_var_traces
 
     import random
+
     original_randint = random.randint
     random.randint = lambda a, b: 0
     try:
@@ -1278,11 +1282,16 @@ async def test_router_high_confidence_anchor_gating(tmp_path):
             topic="decision.evaluate",
             payload={
                 "original_query": {"intent": "answer", "cpu_percent": 20.0},
-                "selected_thought": {"type": "intuition", "confidence": confidence, "predicted_latency": 0.0},
+                "selected_thought": {
+                    "type": "intuition",
+                    "confidence": confidence,
+                    "predicted_latency": 0.0,
+                },
             },
         )
 
     from hbllm.brain.utility_calibrator import CalibrationTrace
+
     high_var_traces = [
         CalibrationTrace(
             trace_id=f"t_{i}",
@@ -1298,6 +1307,7 @@ async def test_router_high_confidence_anchor_gating(tmp_path):
     node.calibrator.get_traces = lambda: high_var_traces
 
     import random
+
     original_randint = random.randint
     random.randint = lambda a, b: 0
     try:
@@ -1355,7 +1365,11 @@ async def test_router_high_confidence_anchor_gating(tmp_path):
             await node._arbitrate_utility(plan, make_msg(), {})
 
         assert node.in_cooling is False
-        assert node._anchor_percentiles == (node.smoothed_high, node.smoothed_med, node.smoothed_low)
+        assert node._anchor_percentiles == (
+            node.smoothed_high,
+            node.smoothed_med,
+            node.smoothed_low,
+        )
 
     finally:
         random.randint = original_randint
@@ -1379,11 +1393,16 @@ async def test_router_stable_lock_invariance(tmp_path):
             topic="decision.evaluate",
             payload={
                 "original_query": {"intent": "answer", "cpu_percent": 20.0},
-                "selected_thought": {"type": "intuition", "confidence": confidence, "predicted_latency": 0.0},
+                "selected_thought": {
+                    "type": "intuition",
+                    "confidence": confidence,
+                    "predicted_latency": 0.0,
+                },
             },
         )
 
     from hbllm.brain.utility_calibrator import CalibrationTrace
+
     high_var_traces = [
         CalibrationTrace(
             trace_id=f"t_{i}",
@@ -1410,6 +1429,7 @@ async def test_router_stable_lock_invariance(tmp_path):
     ]
 
     import random
+
     original_randint = random.randint
     random.randint = lambda a, b: 0
     try:
@@ -1525,11 +1545,16 @@ async def test_router_s_ctrl_smoothing(tmp_path):
             topic="decision.evaluate",
             payload={
                 "original_query": {"intent": "answer", "cpu_percent": 20.0},
-                "selected_thought": {"type": "intuition", "confidence": 0.5, "predicted_latency": 0.0},
+                "selected_thought": {
+                    "type": "intuition",
+                    "confidence": 0.5,
+                    "predicted_latency": 0.0,
+                },
             },
         )
 
     from hbllm.brain.utility_calibrator import CalibrationTrace
+
     mock_traces = [
         CalibrationTrace(
             trace_id=f"t_{i}",
@@ -1546,6 +1571,7 @@ async def test_router_s_ctrl_smoothing(tmp_path):
     node.calibrator.get_utility_percentiles = lambda: (0.9, 0.8, 0.7)
 
     import random
+
     original_randint = random.randint
     random.randint = lambda a, b: 0
     try:
