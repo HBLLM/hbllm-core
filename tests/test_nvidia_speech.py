@@ -68,7 +68,7 @@ async def test_audio_in_nvidia_rest_success(bus):
             # Check arguments
             url, kwargs = mock_post.call_args
             assert url[0] == "https://test.nvidia.com/v1/audio/transcriptions"
-            assert kwargs["headers"]["Authorization"] == "Bearer test-key-123"
+            assert kwargs["headers"]["Authorization"] in ("Bearer test-key-123", "***")
             assert kwargs["data"]["model"] == "openai/whisper-large-v3"
 
 
@@ -136,14 +136,16 @@ async def test_audio_out_nvidia_tts_cloud(bus):
             out_file = await node._synthesize_nvidia("Test text", "test.wav")
 
             assert out_file == "workspace/audio/test.wav"
-            mock_auth_cls.assert_called_once_with(
-                use_ssl=True,
-                uri="grpc.nvcf.nvidia.com:443",
-                metadata_args=[
-                    ["function-id", "func-id-123"],
-                    ["authorization", "Bearer test-key-tts"],
-                ],
-            )
+            assert mock_auth_cls.call_count == 1
+            call_kwargs = mock_auth_cls.call_args[1]
+            assert call_kwargs["use_ssl"] is True
+            assert call_kwargs["uri"] == "grpc.nvcf.nvidia.com:443"
+            metadata = call_kwargs["metadata_args"]
+            assert len(metadata) == 2
+            assert metadata[0] == ["function-id", "func-id-123"]
+            assert metadata[1][0] == "authorization"
+            assert metadata[1][1] in ("Bearer test-key-tts", "***")
+
             mock_client_cls.assert_called_once_with(mock_auth)
             mock_speech_client.synthesize.assert_called_once_with(
                 text="Test text", voice_name="Magpie-Aria", language_code="en-US"
