@@ -124,7 +124,7 @@ class TestDecisionNodeShellExecution:
     """Verify that DecisionNode dispatches and synthesizes SHELL_EXECUTION."""
 
     @pytest.mark.asyncio
-    async def test_exec_shell_execution_success(self):
+    async def test_exec_shell_execution_success(self, tmp_path):
         bus = InProcessBus()
         await bus.start()
 
@@ -152,36 +152,41 @@ class TestDecisionNodeShellExecution:
             async def generate(self, prompt, **kwargs):
                 return f"Synthesized: {prompt}"
 
-        node = DecisionNode(node_id="decision_shell", llm=MockSynthesisLLM())
+        node = DecisionNode(
+            node_id="decision_shell", llm=MockSynthesisLLM(), data_dir=str(tmp_path)
+        )
+        node.utility_engine.weight_risk = 0.0
+        node.calibrator.get_calibration_readiness = lambda: {"bootstrap_active": False}
         await node.start(bus)
 
-        # Setup decision evaluate message with SHELL_EXECUTION
-        msg = Message(
-            type=MessageType.EVENT,
-            source_node_id="workspace_01",
-            topic="decision.evaluate",
-            payload={
-                "original_query": {"intent": "answer", "text": "run command"},
-                "selected_thought": {
-                    "type": "shell_execution",
-                    "confidence": 0.9,
-                    "content": "echo 'hello'",
+        try:
+            # Setup decision evaluate message with SHELL_EXECUTION
+            msg = Message(
+                type=MessageType.EVENT,
+                source_node_id="workspace_01",
+                topic="decision.evaluate",
+                payload={
+                    "original_query": {"intent": "answer", "text": "run command"},
+                    "selected_thought": {
+                        "type": "shell_execution",
+                        "confidence": 0.9,
+                        "content": "echo 'hello'",
+                    },
                 },
-            },
-        )
+            )
 
-        await node.evaluate_workspace_decision(msg)
-        await asyncio.sleep(0.2)
+            await node.evaluate_workspace_decision(msg)
+            await asyncio.sleep(0.2)
 
-        assert len(outputs) == 1
-        assert "Synthesized:" in outputs[0].payload["text"]
-        assert "hello\n" in outputs[0].payload["text"]
-
-        await node.stop()
-        await bus.stop()
+            assert len(outputs) == 1
+            assert "Synthesized:" in outputs[0].payload["text"]
+            assert "hello\n" in outputs[0].payload["text"]
+        finally:
+            await node.stop()
+            await bus.stop()
 
     @pytest.mark.asyncio
-    async def test_exec_shell_execution_failure(self):
+    async def test_exec_shell_execution_failure(self, tmp_path):
         bus = InProcessBus()
         await bus.start()
 
@@ -201,32 +206,35 @@ class TestDecisionNodeShellExecution:
         await bus.subscribe("sensory.output", capture_output)
 
         # No LLM -> falls back to text response
-        node = DecisionNode(node_id="decision_shell", llm=None)
+        node = DecisionNode(node_id="decision_shell", llm=None, data_dir=str(tmp_path))
+        node.utility_engine.weight_risk = 0.0
+        node.calibrator.get_calibration_readiness = lambda: {"bootstrap_active": False}
         await node.start(bus)
 
-        msg = Message(
-            type=MessageType.EVENT,
-            source_node_id="workspace_01",
-            topic="decision.evaluate",
-            payload={
-                "original_query": {"intent": "answer", "text": "run bad command"},
-                "selected_thought": {
-                    "type": "shell_execution",
-                    "confidence": 0.9,
-                    "content": "false",
+        try:
+            msg = Message(
+                type=MessageType.EVENT,
+                source_node_id="workspace_01",
+                topic="decision.evaluate",
+                payload={
+                    "original_query": {"intent": "answer", "text": "run bad command"},
+                    "selected_thought": {
+                        "type": "shell_execution",
+                        "confidence": 0.9,
+                        "content": "false",
+                    },
                 },
-            },
-        )
+            )
 
-        await node.evaluate_workspace_decision(msg)
-        await asyncio.sleep(0.2)
+            await node.evaluate_workspace_decision(msg)
+            await asyncio.sleep(0.2)
 
-        assert len(outputs) == 1
-        assert "Command exited with code 1" in outputs[0].payload["text"]
-        assert "some_error" in outputs[0].payload["text"]
-
-        await node.stop()
-        await bus.stop()
+            assert len(outputs) == 1
+            assert "Command exited with code 1" in outputs[0].payload["text"]
+            assert "some_error" in outputs[0].payload["text"]
+        finally:
+            await node.stop()
+            await bus.stop()
 
 
 # ── End-to-End Brain Loop Test ────────────────────────────────────────────────
@@ -316,6 +324,12 @@ async def test_e2e_shell_execution_flow(tmp_path):
         provider=provider,
         config=_test_config(tmp_path),
     )
+
+    # Disable risk constraints and bootstrap mode to allow shell execution in tests
+    brain.reasoning_core._decision.utility_engine.weight_risk = 0.0
+    brain.reasoning_core._decision.calibrator.get_calibration_readiness = lambda: {
+        "bootstrap_active": False
+    }
 
     outputs = []
     correlation_id = "e2e_shell_test_corr"
