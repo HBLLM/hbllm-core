@@ -12,6 +12,8 @@ from hbllm.brain.sentinel_node import SentinelNode
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.sleep_node import SleepCycleNode
 from hbllm.brain.spawner_node import SpawnerNode
+from hbllm.brain.utility_calibrator import CalibrationTrace, UtilityCalibrator
+from hbllm.brain.utility_engine import CognitiveUtilityEngine, ThoughtBudget, UtilityBreakdown
 from hbllm.brain.workspace_node import WorkspaceNode
 from hbllm.brain.world_model_node import WorldModelNode
 from hbllm.brain.world_state import SimulationInterface, WorldStateEngine
@@ -45,6 +47,11 @@ __all__ = [
     "SkillRegistry",
     "SleepCycleNode",
     "SpawnerNode",
+    "ThoughtBudget",
+    "CognitiveUtilityEngine",
+    "UtilityBreakdown",
+    "CalibrationTrace",
+    "UtilityCalibrator",
     "WorkspaceNode",
     "WorldModelNode",
     "WorldStateEngine",
