@@ -8,6 +8,7 @@ try:
     import riva.client  # noqa: F401
 except ImportError:
     import importlib.machinery
+
     riva_spec = importlib.machinery.ModuleSpec("riva", None)
     riva_mock = MagicMock()
     riva_mock.__spec__ = riva_spec
