@@ -17,6 +17,9 @@ except ImportError:
     riva_client_mock = MagicMock()
     riva_client_mock.__spec__ = riva_client_spec
 
+    # Link the submodule onto the parent package so attribute access works correctly
+    riva_mock.client = riva_client_mock
+
     sys.modules["riva"] = riva_mock
     sys.modules["riva.client"] = riva_client_mock
 
