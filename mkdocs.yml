@@ -124,6 +124,7 @@ nav:
   - Architecture:
       - Overview: architecture/overview.md
       - Cognitive Nodes: architecture/cognitive-nodes.md
+      - Decision & Control Plane: architecture/decision-gatekeeper.md
       - Sleep Cycle: architecture/sleep-cycle.md
       - Web Research: architecture/web-research.md
       - Self-Model: architecture/self-model.md

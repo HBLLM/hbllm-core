@@ -50,18 +50,18 @@ In distributed environments, every node functions as an autonomous security prin
 
 The `NodeType` enum defines the categories of nodes:
 
-| Value | Constant | Purpose |
-|---|---|---|
-| `router` | `NodeType.ROUTER` | Intent classification and domain routing |
-| `core` | `NodeType.CORE` | Core reasoning (Critic, Decision, Workspace) |
-| `domain_module` | `NodeType.DOMAIN_MODULE` | Domain-specific LoRA modules |
-| `memory` | `NodeType.MEMORY` | Memory storage and retrieval |
-| `planner` | `NodeType.PLANNER` | Task decomposition and GoT planning |
-| `learner` | `NodeType.LEARNER` | Continuous learning and DPO training |
-| `detector` | `NodeType.DETECTOR` | Perception and sensor input |
-| `spawner` | `NodeType.SPAWNER` | Neurogenesis — creating new domain modules |
-| `meta` | `NodeType.META` | Meta-cognitive self-monitoring |
-| `perception` | `NodeType.PERCEPTION` | Audio/Vision input processing |
+| Value           | Constant                 | Purpose                                      |
+| --------------- | ------------------------ | -------------------------------------------- |
+| `router`        | `NodeType.ROUTER`        | Intent classification and domain routing     |
+| `core`          | `NodeType.CORE`          | Core reasoning (Critic, Decision, Workspace) |
+| `domain_module` | `NodeType.DOMAIN_MODULE` | Domain-specific LoRA modules                 |
+| `memory`        | `NodeType.MEMORY`        | Memory storage and retrieval                 |
+| `planner`       | `NodeType.PLANNER`       | Task decomposition and GoT planning          |
+| `learner`       | `NodeType.LEARNER`       | Continuous learning and DPO training         |
+| `detector`      | `NodeType.DETECTOR`      | Perception and sensor input                  |
+| `spawner`       | `NodeType.SPAWNER`       | Neurogenesis — creating new domain modules   |
+| `meta`          | `NodeType.META`          | Meta-cognitive self-monitoring               |
+| `perception`    | `NodeType.PERCEPTION`    | Audio/Vision input processing                |
 
 ---
 
@@ -94,8 +94,13 @@ The `NodeType` enum defines the categories of nodes:
 ### DecisionNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/decision_node.py`
+- **File:** [decision_node.py](hbllm/brain/decision_node.py)
 - **Purpose:** Synthesizes the final output from workspace state, confidence scores, and critic feedback.
+- **Upgrades:** Integrates a Bounded Rationality 3-tier validation path:
+    1. **Level 1: Safety Gate**: Enforces risk-based filters (regular expression checks for low/medium risk, LLM-backed classifiers for high-risk tools).
+    2. **Level 2: Policy Router Control Loop**: Regulates utility thresholds and routing behaviors using a 3-variable control loop (State Estimator $S_{\text{diag}}(t)$, Control Signal $S_{\text{ctrl}}(t)$, and Regulator Schmitt trigger). Includes stable-lock invariance checks to prevent threshold oscillations.
+    3. **Level 3: Budget Controller**: Halves max tokens under high compute loads, monitors virtual memory usage via `psutil`, and applies a quadratic replanning penalty ($0.05 \cdot \text{depth}^2$) to suppress deep recursive routing.
+- **Reference:** For a detailed breakdown, see [Decision & Control Plane](decision-gatekeeper.md).
 
 ### ProcessRewardNode
 
@@ -170,8 +175,12 @@ The `NodeType` enum defines the categories of nodes:
 ### WorldModelNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/world_model_node.py`
+- **File:** [world_model_node.py](hbllm/brain/world_model_node.py)
 - **Purpose:** Sandboxed AST-level simulation for "what-if" reasoning. Validates code execution plans by analyzing imports and potential side effects.
+- **Upgrades:** Extended to handle physical action dry-runs and simulated repository/code world modifications:
+    - **AST Static Analysis**: Parses Python code to compile and check imports against `dangerous_imports` (blocking modules like `os`, `subprocess`, `sys`, `shutil`, `socket`).
+    - **Heuristic & LLM Evaluation**: Uses Regex blocklists for bash command safety (blocking `rm -rf`, fork bombs, etc.) alongside optional LLM-based systems safety evaluations.
+    - **Repository Mutation Simulation**: Simulates file writes and deletions in a virtual state (`_virtual_files`), parsing dependencies dynamically (`simulate_parse_imports`) and running dry-run compilations (`simulate_compilation`) to predict build success or failure before writing to disk.
 
 ### ExperienceNode
 
@@ -256,14 +265,22 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 ### AudioInputNode
 
 - **Type:** `NodeType.PERCEPTION`
-- **File:** `hbllm/perception/audio_in_node.py`
+- **File:** [audio_in_node.py](hbllm/perception/audio_in_node.py)
 - **Purpose:** Speech-to-text streaming transcription.
+- **Upgrades:** Implements high-fidelity cloud routing with robust local fallbacks:
+    - **NVIDIA Cloud Whisper API**: When `NVIDIA_API_KEY` is active, routes requests to the NVIDIA Cloud Whisper API using the `openai/whisper-large-v3` model.
+    - **Local Fallback**: Automatically falls back to a thread-safe local Whisper model (`whisper.load_model(model_size)`) if cloud API calls fail or timeout.
+    - **Streaming Buffering**: Accumulates PCM chunks from `sensory.audio.stream` messages and flushes them when silence timeout is reached or final chunk is received.
 
 ### AudioOutputNode
 
 - **Type:** `NodeType.PERCEPTION`
-- **File:** `hbllm/perception/audio_out_node.py`
+- **File:** [audio_out_node.py](hbllm/perception/audio_out_node.py)
 - **Purpose:** Text-to-speech with per-tenant voice configurations.
+- **Upgrades:** Integrates dual-path cloud and local synthesis engines:
+    - **NVIDIA Riva TTS Client**: Interfaces with the `riva.client` gRPC library for cloud or local Riva/NIM text-to-speech synthesis (using `Magpie-Multilingual.EN-US.Aria` by default).
+    - **Local SpeechT5 Fallback**: If `riva.client` is missing or gRPC synthesis fails, falls back to local PyTorch `SpeechT5` (`microsoft/speecht5_tts` and HifiGan vocoder) with tenant-specific custom speaker xvectors.
+    - **Text Chunking**: Sentence-splits long text (>450 chars) to maintain synthesize voice consistency and quality.
 
 ### Perception Infrastructure
 
