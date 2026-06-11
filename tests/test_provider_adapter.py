@@ -210,3 +210,18 @@ async def test_groq_provider_init():
     # Custom model
     provider = get_provider("groq/llama3-70b-8192", api_key="dummy_key")
     assert provider.name == "groq/llama3-70b-8192"
+
+
+@pytest.mark.asyncio
+async def test_nvidia_provider_init():
+    from hbllm.serving.provider import NvidiaProvider, get_provider
+
+    # Defaults
+    provider = get_provider("nvidia", api_key="dummy_key")
+    assert isinstance(provider, NvidiaProvider)
+    assert provider.name == "nvidia/meta/llama-3.1-70b-instruct"
+    assert provider._base_url == "https://integrate.api.nvidia.com/v1"
+
+    # Custom model
+    provider = get_provider("nvidia/nvidia/llama-3.1-nemotron-70b-instruct", api_key="dummy_key")
+    assert provider.name == "nvidia/nvidia/llama-3.1-nemotron-70b-instruct"

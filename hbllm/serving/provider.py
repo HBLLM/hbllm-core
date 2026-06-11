@@ -549,6 +549,10 @@ class OpenAIProvider(LLMProvider):
                 raise ValueError(
                     "OPENAI_API_KEY is not set. Please set the OPENAI_API_KEY environment variable."
                 )
+            elif "integrate.api.nvidia.com" in self._base_url:
+                raise ValueError(
+                    "NVIDIA_API_KEY is not set. Please set the NVIDIA_API_KEY environment variable."
+                )
 
         with trace_span(
             "llm.generate",
@@ -611,6 +615,10 @@ class OpenAIProvider(LLMProvider):
             elif "api.openai.com" in self._base_url:
                 raise ValueError(
                     "OPENAI_API_KEY is not set. Please set the OPENAI_API_KEY environment variable."
+                )
+            elif "integrate.api.nvidia.com" in self._base_url:
+                raise ValueError(
+                    "NVIDIA_API_KEY is not set. Please set the NVIDIA_API_KEY environment variable."
                 )
 
         headers: dict[str, str] = {
@@ -943,6 +951,27 @@ class GroqProvider(OpenAIProvider):
         return f"groq/{self._model}"
 
 
+class NvidiaProvider(OpenAIProvider):
+    """Calls NVIDIA NIM / API Catalog."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "meta/llama-3.1-70b-instruct",
+        base_url: str | None = None,
+        **kwargs: Any,
+    ):
+        api_key = api_key or os.getenv("NVIDIA_API_KEY", "")
+        base_url = base_url or os.getenv("NVIDIA_BASE_URL") or "https://integrate.api.nvidia.com/v1"
+        super().__init__(api_key=api_key, model=model, base_url=base_url)
+        if not self._api_key:
+            logger.warning("NVIDIA_API_KEY not set. NVIDIA provider will fail.")
+
+    @property
+    def name(self) -> str:
+        return f"nvidia/{self._model}"
+
+
 # ─── Registry ────────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, type[LLMProvider]] = {
@@ -951,6 +980,7 @@ _PROVIDERS: dict[str, type[LLMProvider]] = {
     "anthropic": AnthropicProvider,
     "ollama": OllamaProvider,
     "groq": GroqProvider,
+    "nvidia": NvidiaProvider,
 }
 
 

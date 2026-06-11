@@ -83,16 +83,7 @@ class AudioInputNode(Node):
         try:
             import asyncio
 
-            # Offload heavy whisper STT inference to thread
-            def _transcribe() -> str:
-                self._load_model()
-                if self.model is None:
-                    raise RuntimeError("Whisper model not loaded")
-                logger.info("Transcribing audio file: %s", file_path)
-                result = self.model.transcribe(file_path, fp16=False)
-                return str(result["text"]).strip()
-
-            transcription = await asyncio.to_thread(_transcribe)
+            transcription = await self._transcribe_file(file_path)
             logger.info("Transcribed text: '%s'", transcription)
 
             # Formulate the response so the Caller knows we succeeded
@@ -181,27 +172,24 @@ class AudioInputNode(Node):
             combined = b"".join(buf["chunks"])
             sample_rate = int(buf.get("sample_rate", 16000))
 
-            def _transcribe_bytes() -> str:
-                # Write raw PCM to a temp wav file
-                import wave
+            # Write raw PCM to a temp wav file
+            import os
+            import wave
 
-                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            try:
+                with wave.open(tmp.name, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)  # 16-bit
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(combined)
+
+                transcription = await self._transcribe_file(tmp.name)
+            finally:
                 try:
-                    with wave.open(tmp.name, "wb") as wf:
-                        wf.setnchannels(1)
-                        wf.setsampwidth(2)  # 16-bit
-                        wf.setframerate(sample_rate)
-                        wf.writeframes(combined)
-
-                    self._load_model()
-                    if self.model is None:
-                        raise RuntimeError("Whisper model not loaded")
-                    result = self.model.transcribe(tmp.name, fp16=False)
-                    return str(result["text"]).strip()
-                finally:
                     os.unlink(tmp.name)
-
-            transcription = await asyncio.to_thread(_transcribe_bytes)
+                except Exception:
+                    pass
 
             if transcription:
                 logger.info("Stream transcribed (%s): '%s'", session_id, transcription[:60])
@@ -232,16 +220,7 @@ class AudioInputNode(Node):
             return None  # Not an audio-relevant query
 
         try:
-            import asyncio
-
-            def _transcribe() -> str:
-                self._load_model()
-                if self.model is None:
-                    raise RuntimeError("Whisper model not loaded")
-                result = self.model.transcribe(audio_path, fp16=False)
-                return str(result["text"]).strip()
-
-            transcription = await asyncio.to_thread(_transcribe)
+            transcription = await self._transcribe_file(audio_path)
 
             # Post as a competing thought on the Workspace blackboard
             thought_msg = Message(
@@ -263,3 +242,55 @@ class AudioInputNode(Node):
             logger.warning("AudioInputNode workspace thought failed: %s", e)
 
         return None
+
+    async def _transcribe_file(self, file_path: str) -> str:
+        """Transcribe an audio file using NVIDIA cloud Whisper API (if configured) or local Whisper."""
+        import os
+
+        import httpx
+
+        nvidia_api_key = os.getenv("NVIDIA_API_KEY")
+        if nvidia_api_key:
+            nvidia_asr_url = os.getenv(
+                "NVIDIA_ASR_URL", "https://integrate.api.nvidia.com/v1/audio/transcriptions"
+            )
+            logger.info(
+                "Transcribing audio file via NVIDIA Cloud Whisper API at %s: %s",
+                nvidia_asr_url,
+                file_path,
+            )
+            try:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    headers = {
+                        "Authorization": f"Bearer {nvidia_api_key}",
+                    }
+                    with open(file_path, "rb") as f:
+                        files = {"file": (os.path.basename(file_path), f, "audio/wav")}
+                        data = {"model": "openai/whisper-large-v3"}
+                        resp = await client.post(
+                            nvidia_asr_url,
+                            headers=headers,
+                            files=files,
+                            data=data,
+                        )
+                        resp.raise_for_status()
+                        result_json = resp.json()
+                        return str(result_json.get("text", "")).strip()
+            except Exception as e:
+                logger.warning(
+                    "NVIDIA Cloud Whisper transcription failed, falling back to local Whisper: %s",
+                    e,
+                )
+
+        # Fallback to local Whisper
+        import asyncio
+
+        def _transcribe() -> str:
+            self._load_model()
+            if self.model is None:
+                raise RuntimeError("Whisper model not loaded")
+            logger.info("Transcribing audio file locally: %s", file_path)
+            result = self.model.transcribe(file_path, fp16=False)
+            return str(result["text"]).strip()
+
+        return await asyncio.to_thread(_transcribe)
