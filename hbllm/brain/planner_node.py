@@ -20,6 +20,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hbllm.brain.utility_engine import CognitiveUtilityEngine, ThoughtBudget, UtilityBreakdown
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
@@ -263,6 +264,7 @@ class PlannerNode(Node):
         policy_engine: PolicyEngine | None = None,
         cache_ttl_seconds: float = 3600.0,
         llm: ProviderLLM | None = None,
+        utility_engine: CognitiveUtilityEngine | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -278,6 +280,21 @@ class PlannerNode(Node):
         self._cache_hits = 0
         self._cache_misses = 0
         self.llm = llm
+        self.utility_engine = utility_engine or CognitiveUtilityEngine()
+
+    def _count_tokens(self, text: str) -> int:
+        """Estimate or count the number of tokens in text."""
+        if self.llm and hasattr(self.llm, "tokenizer") and self.llm.tokenizer:
+            try:
+                enc = self.llm.tokenizer.encode(text)
+                if hasattr(enc, "ids"):
+                    return len(enc.ids)
+                elif isinstance(enc, list):
+                    return len(enc)
+            except Exception:
+                pass
+        # Fallback to rough character-based token estimation (4 chars per token)
+        return max(1, len(text) // 4)
 
     async def on_start(self) -> None:
         """Subscribe to planning requests and workspace updates."""
@@ -328,25 +345,39 @@ class PlannerNode(Node):
                 self._response_cache.pop(cache_key, None)
                 logger.debug("[GoT] Cache EXPIRED for query")
 
+        # Instantiate ThoughtBudget
+        budget_payload = message.payload.get("thought_budget", {})
+        max_tokens = budget_payload.get("max_tokens", 8192)
+        max_time_ms = budget_payload.get("max_time_ms", 15000.0)
+        max_branches = budget_payload.get("max_branches", 20)
+        budget = ThoughtBudget(
+            max_tokens=max_tokens, max_time_ms=max_time_ms, max_branches=max_branches
+        )
+
         self._cache_misses += 1
         logger.info("[GoT] Starting Graph-of-Thoughts for: '%s...'", text[:40])
 
         graph = ThoughtGraph()
 
         # ── Step 1: Root Node & Initial Plausible Branches ────────────────
-        import time
-
         root_node = graph.add_root("Root Query: " + text[:50], score=0.5)
 
         initial_thoughts = await asyncio.gather(
-            *[self._generate_thought(text, i + 1, domain_hint) for i in range(self.branch_factor)]
+            *[
+                self._generate_thought(text, i + 1, domain_hint, budget)
+                for i in range(self.branch_factor)
+            ]
         )
 
         branch_nodes = []
-        for thought_text in initial_thoughts:
-            if thought_text:
-                child = graph.branch(root_node.id, thought_text)
-                branch_nodes.append(child)
+        for i, res_tuple in enumerate(initial_thoughts):
+            if res_tuple:
+                thought_text, tokens, latency = res_tuple
+                if thought_text:
+                    child = graph.branch(root_node.id, thought_text)
+                    child.metadata["tokens_used"] = tokens
+                    child.metadata["latency_ms"] = latency
+                    branch_nodes.append(child)
 
         if not branch_nodes:
             return message.create_error("MCTS: All initial branches failed.")
@@ -373,26 +404,64 @@ class PlannerNode(Node):
         # Score the initial unblocked roots
         unblocked_branches = [n for n in branch_nodes if not n.metadata.get("policy_blocked")]
         if unblocked_branches:
-            await asyncio.gather(*[self._score_thought(graph, node) for node in unblocked_branches])
+            await asyncio.gather(
+                *[self._score_thought(graph, node, budget) for node in unblocked_branches]
+            )
             # Backpropagate initial scores
             for node in unblocked_branches:
                 graph.backpropagate(node.id, node.score)
 
+        # Compute utility for policy-blocked initial nodes
+        blocked_branches = [n for n in branch_nodes if n.metadata.get("policy_blocked")]
+        for node in blocked_branches:
+            tokens_used = node.metadata.get("tokens_used", 0)
+            latency_ms = node.metadata.get("latency_ms", 0.0)
+            breakdown = self.utility_engine.calculate_utility(
+                progress_score=node.score,
+                tokens_used=tokens_used,
+                latency_ms=latency_ms,
+                risk_score=1.0,
+            )
+            node.metadata["utility_breakdown"] = breakdown.to_dict()
+            node.metadata["utility_score"] = breakdown.utility
+
         # ── Step 3: MCTS Compute Loop (Infinite Test-Time Compute) ────────
         # Run until depth budget or time budget exhausted
-        import time
-
-        deadline = time.time() + 15.0  # 15 seconds thinking budget per query
-        max_iterations = 20
         iteration = 0
 
-        while time.time() < deadline and iteration < max_iterations:
+        while not budget.is_exhausted() and iteration < budget.max_branches:
+            # Marginal Utility Gating: check if we should think more
+            scored_nodes = [n for n in graph.nodes.values() if "utility_breakdown" in n.metadata]
+            if len(scored_nodes) >= 2:
+                avg_token_cost = sum(
+                    n.metadata["utility_breakdown"]["token_cost"] for n in scored_nodes
+                ) / len(scored_nodes)
+                avg_latency_cost = sum(
+                    n.metadata["utility_breakdown"]["latency_cost"] for n in scored_nodes
+                ) / len(scored_nodes)
+                expected_step_cost = avg_token_cost + avg_latency_cost
+
+                best_utility = max(n.metadata["utility_score"] for n in scored_nodes)
+                best_score = max(n.score for n in scored_nodes)
+
+                expected_new_progress = min(1.0, best_score + 0.05)
+                expected_next_utility = expected_new_progress - expected_step_cost
+                marginal_utility = expected_next_utility - best_utility
+
+                if marginal_utility < 0:
+                    logger.info(
+                        "[MCTS] Terminating search early due to negative marginal utility (%.3f). Best Utility: %.3f",
+                        marginal_utility,
+                        best_utility,
+                    )
+                    break
+
             # 1. Selection
             leaf = graph.select_leaf_uct(root_node.id, c_param=1.414)
 
             # 2. Expansion (only expand if we've already scored it and haven't hit max depth)
             if leaf.visits > 0 and leaf.depth < self.max_depth:
-                await self._refine_thought(graph, leaf, text, iteration, domain_hint)
+                await self._refine_thought(graph, leaf, text, iteration, domain_hint, budget)
 
                 # Pick one of the newly expanded children to simulate
                 unvisited = [
@@ -403,7 +472,7 @@ class PlannerNode(Node):
 
             # 3. Simulation & Scoring
             if leaf.visits == 0:
-                await self._score_thought(graph, leaf)
+                await self._score_thought(graph, leaf, budget)
                 reward = leaf.score
             else:
                 # If we selected a terminal node that can't expand, re-simulate or just use existing score
@@ -438,13 +507,16 @@ class PlannerNode(Node):
         )[:2]
 
         if len(top_leaves) >= 2 and top_leaves[0].q_value > 0.5:
-            merged_content = await self._merge_thoughts(
-                text, top_leaves[0].content, top_leaves[1].content, domain_hint
-            )
-            if merged_content:
-                merged_node = graph.merge([n.id for n in top_leaves], merged_content)
-                await self._score_thought(graph, merged_node)
-                graph.backpropagate(merged_node.id, merged_node.score)
+            if not budget.is_exhausted():
+                merged_content, merge_tokens, merge_latency = await self._merge_thoughts(
+                    text, top_leaves[0].content, top_leaves[1].content, domain_hint, budget
+                )
+                if merged_content:
+                    merged_node = graph.merge([n.id for n in top_leaves], merged_content)
+                    merged_node.metadata["tokens_used"] = merge_tokens
+                    merged_node.metadata["latency_ms"] = merge_latency
+                    await self._score_thought(graph, merged_node, budget)
+                    graph.backpropagate(merged_node.id, merged_node.score)
 
         # ── Step 7: Select best path ──────────────────────────────────────
         best_path = graph.best_path()
@@ -476,7 +548,15 @@ class PlannerNode(Node):
         # Cache the result
         self._cache_response(cache_key, final_text)
 
-        return message.create_response({"text": final_text, "domain": "planner"})
+        return message.create_response(
+            {
+                "text": final_text,
+                "domain": "planner",
+                "thought_budget_status": budget.to_dict(),
+                "best_path_utility": [n.metadata.get("utility_breakdown") for n in best_path],
+                "total_nodes_explored": graph_stats["total_nodes"],
+            }
+        )
 
     # ── Cache helpers ─────────────────────────────────────────────────────
 
@@ -496,41 +576,80 @@ class PlannerNode(Node):
     # ── Private helpers ───────────────────────────────────────────────────
 
     async def _generate_thought(
-        self, query: str, branch_id: int, domain_hint: str = "general"
-    ) -> str:
-        """Generate one diverse initial thought."""
+        self,
+        query: str,
+        branch_id: int,
+        domain_hint: str = "general",
+        budget: ThoughtBudget | None = None,
+    ) -> tuple[str, int, float]:
+        """Generate one diverse initial thought. Returns (content, tokens_used, latency_ms)."""
+        import time
+
+        start_t = time.time()
+        tokens_used = 0
+
         prompt = f"Exploring Approach {branch_id} to solve: {query}"
+        prompt_tokens = self._count_tokens(prompt)
+        tokens_used += prompt_tokens
+        if budget:
+            budget.spend_branch(1)
+            budget.spend_tokens(prompt_tokens)
+
+        content = ""
         if self.llm:
             try:
                 res = await self.llm.generate(prompt)
-                return str(res)
+                content = str(res)
             except Exception as e:
                 logger.warning("[GoT] Direct LLM thought generation failed: %s", e)
 
-        topic = (
-            f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
-        )
-        req = Message(
-            type=MessageType.QUERY,
-            source_node_id=self.node_id,
-            topic=topic,
-            payload={"text": prompt},
-        )
-        try:
-            resp = await self.request(topic, req, timeout=90.0)
-            return str(resp.payload.get("text", ""))
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            logger.warning("[GoT] Branch %d generation timed out: %s", branch_id, e)
-            return ""
-        except Exception:
-            logger.exception("[GoT] Branch %d generation failed unexpectedly", branch_id)
-            return ""
+        if not content:
+            topic = (
+                f"domain.{domain_hint}.query"
+                if domain_hint != "general"
+                else "domain.general.query"
+            )
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"text": prompt},
+            )
+            try:
+                resp = await self.request(topic, req, timeout=90.0)
+                content = str(resp.payload.get("text", ""))
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] Branch %d generation timed out: %s", branch_id, e)
+            except Exception:
+                logger.exception("[GoT] Branch %d generation failed unexpectedly", branch_id)
 
-    async def _score_thought(self, graph: ThoughtGraph, node: ThoughtNode) -> None:
+        response_tokens = self._count_tokens(content)
+        tokens_used += response_tokens
+        if budget:
+            budget.spend_tokens(response_tokens)
+
+        latency_ms = (time.time() - start_t) * 1000.0
+        return content, tokens_used, latency_ms
+
+    async def _score_thought(
+        self, graph: ThoughtGraph, node: ThoughtNode, budget: ThoughtBudget | None = None
+    ) -> None:
         """Score a thought node by querying the evaluation domain or ExecutionNode/ToolRouter."""
+        import time
 
         if node.metadata.get("is_observation"):
             node.score = 1.0  # Observations are always factual steps
+            # Compute utility for observations too
+            tokens_used = node.metadata.get("tokens_used", 0)
+            latency_ms = node.metadata.get("latency_ms", 0.0)
+            breakdown = self.utility_engine.calculate_utility(
+                progress_score=node.score,
+                tokens_used=tokens_used,
+                latency_ms=latency_ms,
+                risk_score=0.0,
+            )
+            node.metadata["utility_breakdown"] = breakdown.to_dict()
+            node.metadata["utility_score"] = breakdown.utility
             return
 
         # 1. Deterministic verification for Python code
@@ -554,13 +673,10 @@ class PlannerNode(Node):
                     err = resp.payload.get("error", "Unknown execution error")
                     node.metadata["execution_error"] = err
                     node.content += f"\n\n[EXECUTION FAILED]\n{err}"
-                return
             except (TimeoutError, asyncio.TimeoutError) as e:
                 logger.warning("[GoT] Execution verification timed out: %s", e)
-                # Fall through to LLM scoring if execution bus falls over
             except Exception:
                 logger.exception("[GoT] Execution verification failed unexpectedly")
-                # Fall through to LLM scoring if execution bus falls over
 
         # 1.5. Tool Call Interception
         tool_match = re.search(
@@ -568,7 +684,11 @@ class PlannerNode(Node):
             node.content,
             re.DOTALL | re.IGNORECASE,
         )
-        if tool_match:
+        if (
+            tool_match
+            and "execution_output" not in node.metadata
+            and "execution_error" not in node.metadata
+        ):
             tool_name = tool_match.group(1).strip()
             tool_args_str = tool_match.group(2).strip()
             req = Message(
@@ -588,19 +708,16 @@ class PlannerNode(Node):
                 # Expand the tree deterministically with the observation
                 graph.branch(node.id, obs_content, score=1.0, is_observation=True)
                 node.score = 1.0  # Reward emitting a valid tool call
-                return
             except (TimeoutError, asyncio.TimeoutError) as e:
                 logger.warning("[GoT] Tool execution timed out: %s", e)
                 obs_content = f"Observation: Execution timed out: {str(e)}"
                 graph.branch(node.id, obs_content, score=0.1, is_observation=True)
                 node.score = 0.5
-                return
             except Exception as e:
                 logger.exception("[GoT] Tool execution failed unexpectedly")
                 obs_content = f"Observation: Execution failed unexpectedly: {str(e)}"
                 graph.branch(node.id, obs_content, score=0.1, is_observation=True)
                 node.score = 0.5
-                return
 
         # 1.6. Skill Call Interception (SIL)
         skill_match = re.search(
@@ -608,7 +725,12 @@ class PlannerNode(Node):
             node.content,
             re.DOTALL | re.IGNORECASE,
         )
-        if skill_match:
+        if (
+            skill_match
+            and "execution_output" not in node.metadata
+            and "execution_error" not in node.metadata
+            and not tool_match
+        ):
             task_desc = skill_match.group(1).strip()
             req = Message(
                 type=MessageType.QUERY,
@@ -630,38 +752,52 @@ class PlannerNode(Node):
 
                 graph.branch(node.id, obs_content, score=1.0, is_observation=True)
                 node.score = 1.0  # Reward emitting a valid skill call
-                return
             except (TimeoutError, asyncio.TimeoutError) as e:
                 logger.warning("[GoT] SIL execution timed out: %s", e)
                 obs_content = f"Observation: SIL execution timed out: {str(e)}"
                 graph.branch(node.id, obs_content, score=0.1, is_observation=True)
                 node.score = 0.5
-                return
             except Exception as e:
                 logger.exception("[GoT] SIL execution failed unexpectedly")
                 obs_content = f"Observation: SIL execution failed unexpectedly: {str(e)}"
                 graph.branch(node.id, obs_content, score=0.1, is_observation=True)
                 node.score = 0.5
-                return
 
-        # 2. Use Process Reward Model (PRM) network via event bus
-        req = Message(
-            type=MessageType.QUERY,
-            source_node_id=self.node_id,
-            topic="action.score_thought",
-            payload={"content": node.content},
+        # If not evaluated by deterministic checkers, use Process Reward Model (PRM)
+        if node.score == 0.0:
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="action.score_thought",
+                payload={"content": node.content},
+            )
+            if budget:
+                budget.spend_tokens(self._count_tokens(node.content))
+
+            try:
+                # PRM scoring is extremely fast (single forward pass)
+                resp = await self.request("action.score_thought", req, timeout=5.0)
+                score = resp.payload.get("score", 0.5)
+                node.score = min(max(float(score), 0.0), 1.0)
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] PRM evaluation timed out, defaulting to 0.5: %s", e)
+                node.score = 0.5
+            except Exception:
+                logger.exception("[GoT] PRM evaluation failed unexpectedly, defaulting to 0.5")
+                node.score = 0.5
+
+        # Compute utility score
+        tokens_used = node.metadata.get("tokens_used", 0)
+        latency_ms = node.metadata.get("latency_ms", 0.0)
+        risk_score = 1.0 if node.metadata.get("policy_blocked") else 0.0
+        breakdown = self.utility_engine.calculate_utility(
+            progress_score=node.score,
+            tokens_used=tokens_used,
+            latency_ms=latency_ms,
+            risk_score=risk_score,
         )
-        try:
-            # PRM scoring is extremely fast (single forward pass)
-            resp = await self.request("action.score_thought", req, timeout=5.0)
-            score = resp.payload.get("score", 0.5)
-            node.score = min(max(float(score), 0.0), 1.0)
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            logger.warning("[GoT] PRM evaluation timed out, defaulting to 0.5: %s", e)
-            node.score = 0.5
-        except Exception:
-            logger.exception("[GoT] PRM evaluation failed unexpectedly, defaulting to 0.5")
-            node.score = 0.5
+        node.metadata["utility_breakdown"] = breakdown.to_dict()
+        node.metadata["utility_score"] = breakdown.utility
 
     def _compress_text(self, text: str, max_chars: int = 2000) -> str:
         """Middle-out truncation for excessively long strings."""
@@ -680,8 +816,14 @@ class PlannerNode(Node):
         query: str,
         refinement_id: int,
         domain_hint: str = "general",
+        budget: ThoughtBudget | None = None,
     ) -> None:
         """Refine a thought by branching deeper with an adaptive context window."""
+        import time
+
+        start_t = time.time()
+        tokens_used = 0
+
         trajectory = parent.trajectory_history + [parent.content]
         compressed_traj = [self._compress_text(txt) for txt in trajectory]
 
@@ -715,38 +857,66 @@ class PlannerNode(Node):
             f'If you want to delegate a complex sub-task to the Skill Intelligence Layer, output exactly <skill_call task="describe task">fallback args</skill_call>.\n'
             f"If the trajectory contains the final answer, provide a conclusive explanation without tool calls."
         )
+
+        prompt_tokens = self._count_tokens(prompt)
+        tokens_used += prompt_tokens
+        if budget:
+            budget.spend_branch(1)
+            budget.spend_tokens(prompt_tokens)
+
+        content = ""
         if self.llm:
             try:
                 content = await self.llm.generate(prompt)
-                if content:
-                    graph.branch(parent.id, content)
-                return
             except Exception as e:
                 logger.warning("[GoT] Direct LLM refinement failed: %s", e)
 
-        topic = (
-            f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
-        )
-        req = Message(
-            type=MessageType.QUERY,
-            source_node_id=self.node_id,
-            topic=topic,
-            payload={"text": prompt},
-        )
-        try:
-            resp = await self.request(topic, req, timeout=90.0)
-            content = resp.payload.get("text", "")
-            if content:
-                graph.branch(parent.id, content)
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            logger.warning("[GoT] Refinement timed out: %s", e)
-        except Exception:
-            logger.exception("[GoT] Refinement failed unexpectedly")
+        if not content:
+            topic = (
+                f"domain.{domain_hint}.query"
+                if domain_hint != "general"
+                else "domain.general.query"
+            )
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"text": prompt},
+            )
+            try:
+                resp = await self.request(topic, req, timeout=90.0)
+                content = resp.payload.get("text", "")
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] Refinement timed out: %s", e)
+            except Exception:
+                logger.exception("[GoT] Refinement failed unexpectedly")
+
+        response_tokens = self._count_tokens(content)
+        tokens_used += response_tokens
+        if budget:
+            budget.spend_tokens(response_tokens)
+
+        latency_ms = (time.time() - start_t) * 1000.0
+
+        if content:
+            child = graph.branch(parent.id, content)
+            child.metadata["tokens_used"] = tokens_used
+            child.metadata["latency_ms"] = latency_ms
 
     async def _merge_thoughts(
-        self, query: str, thought_a: str, thought_b: str, domain_hint: str = "general"
-    ) -> str:
-        """Merge two complementary thoughts into a synthesis."""
+        self,
+        query: str,
+        thought_a: str,
+        thought_b: str,
+        domain_hint: str = "general",
+        budget: ThoughtBudget | None = None,
+    ) -> tuple[str, int, float]:
+        """Merge two complementary thoughts into a synthesis. Returns (content, tokens_used, latency_ms)."""
+        import time
+
+        start_t = time.time()
+        tokens_used = 0
+
         prompt = (
             f"Synthesize these two approaches into a single, comprehensive solution:\n"
             f"Query: {query}\n"
@@ -754,31 +924,48 @@ class PlannerNode(Node):
             f"Approach B: {thought_b[:200]}\n"
             f"Provide a unified, improved answer."
         )
+
+        prompt_tokens = self._count_tokens(prompt)
+        tokens_used += prompt_tokens
+        if budget:
+            budget.spend_branch(1)
+            budget.spend_tokens(prompt_tokens)
+
+        content = ""
         if self.llm:
             try:
                 res = await self.llm.generate(prompt)
-                return str(res)
+                content = str(res)
             except Exception as e:
                 logger.warning("[GoT] Direct LLM merge failed: %s", e)
 
-        topic = (
-            f"domain.{domain_hint}.query" if domain_hint != "general" else "domain.general.query"
-        )
-        req = Message(
-            type=MessageType.QUERY,
-            source_node_id=self.node_id,
-            topic=topic,
-            payload={"text": prompt},
-        )
-        try:
-            resp = await self.request(topic, req, timeout=90.0)
-            return str(resp.payload.get("text", ""))
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            logger.warning("[GoT] Merge timed out: %s", e)
-            return ""
-        except Exception:
-            logger.exception("[GoT] Merge failed unexpectedly")
-            return ""
+        if not content:
+            topic = (
+                f"domain.{domain_hint}.query"
+                if domain_hint != "general"
+                else "domain.general.query"
+            )
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"text": prompt},
+            )
+            try:
+                resp = await self.request(topic, req, timeout=90.0)
+                content = str(resp.payload.get("text", ""))
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning("[GoT] Merge timed out: %s", e)
+            except Exception:
+                logger.exception("[GoT] Merge failed unexpectedly")
+
+        response_tokens = self._count_tokens(content)
+        tokens_used += response_tokens
+        if budget:
+            budget.spend_tokens(response_tokens)
+
+        latency_ms = (time.time() - start_t) * 1000.0
+        return content, tokens_used, latency_ms
 
     async def _contribute_to_workspace(self, message: Message) -> Message | None:
         """

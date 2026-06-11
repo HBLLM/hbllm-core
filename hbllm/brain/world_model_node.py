@@ -6,6 +6,8 @@ Before the Cognitive Workspace commits to executing physical actions
 to predict the outcome. If the simulation predicts failure or a safety
 violation, the World Model rejects the thought back to the Blackboard
 for the Intuition Engine to rewrite.
+
+Narrowed strictly to a Repository / Code World model simulation.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -33,7 +35,12 @@ class WorldModelNode(Node):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
-            capabilities=["simulation", "ast_parsing", "outcome_prediction"],
+            capabilities=[
+                "simulation",
+                "ast_parsing",
+                "outcome_prediction",
+                "code_world_simulation",
+            ],
         )
         self.llm = llm
         # A list of inherently dangerous modules we want to prevent the LLM from executing
@@ -49,6 +56,10 @@ class WorldModelNode(Node):
             re.compile(r"\bwget\b.*\|\s*\bsh\b", re.IGNORECASE),
             re.compile(r"\b>\/dev\/sd", re.IGNORECASE),
         ]
+
+        # Virtual repository state
+        self._virtual_files: dict[str, str] = {}
+        self._virtual_dependencies: dict[str, list[str]] = {}
 
     async def on_start(self) -> None:
         logger.info("Starting WorldModelNode (System 3 Simulation Engine)")
@@ -132,6 +143,33 @@ class WorldModelNode(Node):
                 {"status": "simulation_result", "prediction": overall_status, "content": reason}
             )
 
+        elif action_type == "repository_mutation":
+            file_path = payload.get("file_path", "")
+            content = payload.get("content", "")
+            mutation_type = payload.get("mutation_type", "write")
+
+            if mutation_type == "write":
+                self._virtual_files[file_path] = content
+                self.simulate_parse_imports(file_path, content)
+                comp_result = self.simulate_compilation(file_path)
+                return message.create_response(
+                    {
+                        "status": "simulation_result",
+                        "prediction": comp_result["status"],
+                        "content": f"Simulated write to {file_path}. " + comp_result["reason"],
+                    }
+                )
+            elif mutation_type == "delete":
+                self._virtual_files.pop(file_path, None)
+                self._virtual_dependencies.pop(file_path, None)
+                return message.create_response(
+                    {
+                        "status": "simulation_result",
+                        "prediction": "SUCCESS",
+                        "content": f"Simulated deletion of {file_path} succeeded.",
+                    }
+                )
+
         return None
 
     def _simulate_ast(self, code: str) -> dict[str, str]:
@@ -210,3 +248,31 @@ class WorldModelNode(Node):
             "status": "SUCCESS",
             "reason": f"Heuristic prediction: {action_type} appears safe in sandbox.",
         }
+
+    # ── Code World Simulation Extensions ──────────────────────────────
+
+    def simulate_parse_imports(self, file_path: str, content: str) -> list[str]:
+        imports = []
+        try:
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        imports.append(node.module)
+        except Exception:
+            pass
+        self._virtual_dependencies[file_path] = imports
+        return imports
+
+    def simulate_compilation(self, file_path: str) -> dict[str, Any]:
+        content = self._virtual_files.get(file_path, "")
+        try:
+            compile(content, file_path, "exec")
+            return {"status": "SUCCESS", "reason": "Compilation build succeeded."}
+        except SyntaxError as e:
+            return {"status": "FAILURE", "reason": f"SyntaxError: {str(e)}"}
+        except Exception as e:
+            return {"status": "FAILURE", "reason": f"Compilation failed: {str(e)}"}
