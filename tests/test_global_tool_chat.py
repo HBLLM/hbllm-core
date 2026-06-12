@@ -206,39 +206,43 @@ async def test_decision_node_executes_mcp_tool():
             return {"safe": True}
 
     node = DecisionNode(node_id="decision_test", llm=MockSynthesisLLM())
+    node.utility_engine.weight_risk = 0.0
+    node.utility_engine.weight_token = 0.0
+    node.utility_engine.weight_latency = 0.0
     await node.start(bus)
 
-    msg = Message(
-        type=MessageType.EVENT,
-        source_node_id="workspace_01",
-        topic="decision.evaluate",
-        payload={
-            "original_query": {"intent": "answer", "text": "what is the weather in Tokyo?"},
-            "selected_thought": {
-                "type": "intuition_general",
-                "confidence": 0.9,
-                "content": (
-                    "Checking weather:\n"
-                    '<tool_call name="weather_lookup">\n'
-                    "{\n"
-                    '  "location": "Tokyo"\n'
-                    "}\n"
-                    "</tool_call>"
-                ),
+    try:
+        msg = Message(
+            type=MessageType.EVENT,
+            source_node_id="workspace_01",
+            topic="decision.evaluate",
+            payload={
+                "original_query": {"intent": "answer", "text": "what is the weather in Tokyo?"},
+                "selected_thought": {
+                    "type": "intuition_general",
+                    "confidence": 0.9,
+                    "content": (
+                        "Checking weather:\n"
+                        '<tool_call name="weather_lookup">\n'
+                        "{\n"
+                        '  "location": "Tokyo"\n'
+                        "}\n"
+                        "</tool_call>"
+                    ),
+                },
             },
-        },
-    )
+        )
 
-    await node.evaluate_workspace_decision(msg)
-    await asyncio.sleep(0.5)
+        await node.evaluate_workspace_decision(msg)
+        await asyncio.sleep(0.5)
 
-    assert mock_tool_called.is_set()
-    assert len(outputs) == 1
-    assert "Synthesized" in outputs[0].payload["text"]
-    assert outputs[0].payload["source"] == "tool_execution"
-
-    await node.stop()
-    await bus.stop()
+        assert mock_tool_called.is_set()
+        assert len(outputs) == 1
+        assert "Synthesized" in outputs[0].payload["text"]
+        assert outputs[0].payload["source"] == "tool_execution"
+    finally:
+        await node.stop()
+        await bus.stop()
 
 
 # ── End-to-End Brain Loop Test for Global Tool/Plugin Calls ──────────────────
@@ -361,6 +365,17 @@ async def test_e2e_global_tool_execution_flow(tmp_path):
         provider=provider,
         config=_test_config(tmp_path),
     )
+
+    # Disable utility penalties to bypass policy routing constraint in E2E tool run
+    for node in brain.nodes:
+        if isinstance(node, DecisionNode):
+            node.utility_engine.weight_risk = 0.0
+            node.utility_engine.weight_token = 0.0
+            node.utility_engine.weight_latency = 0.0
+        elif hasattr(node, "decision") and node.decision is not None:
+            node.decision.utility_engine.weight_risk = 0.0
+            node.decision.utility_engine.weight_token = 0.0
+            node.decision.utility_engine.weight_latency = 0.0
 
     # Register custom mock domain expert
     mock_domain = MockDomainNode(node_id="domain_weather_mock")

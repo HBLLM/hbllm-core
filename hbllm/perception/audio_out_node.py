@@ -102,11 +102,19 @@ class AudioOutputNode(Node):
         if not text:
             return message.create_error("Missing 'text' in payload")
 
-        # Clean the text (SpeechT5 has limited character support)
+        # Clean the text
         import re
 
         clean_text = re.sub(r"[^A-Za-z0-9 .,?!\'-]", "", text)
 
+        filename = f"response_{message.id[:8]}.wav"
+
+        # Attempt NVIDIA TTS first (Cloud or Local gRPC Riva)
+        out_file = await self._synthesize_nvidia(clean_text, filename)
+        if out_file:
+            return message.create_response({"audio_path": out_file})
+
+        # Fallback to local SpeechT5
         # Chunk long text into segments for better quality
         chunks = self._chunk_text(clean_text, max_len=450)
 
@@ -135,11 +143,10 @@ class AudioOutputNode(Node):
                 # Concatenate all chunks
                 combined = np.concatenate(all_speech) if len(all_speech) > 1 else all_speech[0]
 
-                filename = f"response_{message.id[:8]}.wav"
                 out_path = self.output_dir / filename
 
                 sf.write(str(out_path), combined, samplerate=16000)
-                logger.info("Saved TTS Audio to: %s (%d chunks)", out_path, len(chunks))
+                logger.info("Saved TTS Audio locally to: %s (%d chunks)", out_path, len(chunks))
 
                 # Attempt to play natively on macOS
                 import os
@@ -150,7 +157,6 @@ class AudioOutputNode(Node):
                 return str(out_path)
 
             out_file = await asyncio.to_thread(_synthesize)
-
             return message.create_response({"audio_path": out_file})
 
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
@@ -194,3 +200,72 @@ class AudioOutputNode(Node):
             chunks.append(current)
 
         return chunks if chunks else [text[:max_len]]
+
+    async def _synthesize_nvidia(self, clean_text: str, filename: str) -> str | None:
+        """Synthesize speech using NVIDIA Riva gRPC client (cloud or local)."""
+        import os
+
+        nvidia_api_key = os.getenv("NVIDIA_API_KEY")
+        nvidia_tts_uri = os.getenv("NVIDIA_TTS_URI", "grpc.nvcf.nvidia.com:443")
+        nvidia_tts_function_id = os.getenv("NVIDIA_TTS_FUNCTION_ID")
+        nvidia_tts_voice_name = os.getenv("NVIDIA_TTS_VOICE_NAME", "Magpie-Multilingual.EN-US.Aria")
+
+        is_cloud = "grpc.nvcf.nvidia.com" in nvidia_tts_uri
+        if is_cloud and (not nvidia_api_key or not nvidia_tts_function_id):
+            logger.debug(
+                "NVIDIA cloud TTS requires both NVIDIA_API_KEY and NVIDIA_TTS_FUNCTION_ID."
+            )
+            return None
+
+        try:
+            import riva.client  # type: ignore
+        except ImportError:
+            logger.debug(
+                "nvidia-riva-client library not installed. Falling back to local SpeechT5."
+            )
+            return None
+
+        logger.info("Synthesizing audio via NVIDIA Riva/NIM service at %s", nvidia_tts_uri)
+        try:
+            if is_cloud:
+                auth = riva.client.Auth(
+                    use_ssl=True,
+                    uri=nvidia_tts_uri,
+                    metadata_args=[
+                        ["function-id", nvidia_tts_function_id],
+                        ["authorization", f"Bearer {nvidia_api_key}"],
+                    ],
+                )
+            else:
+                auth = riva.client.Auth(use_ssl=False, uri=nvidia_tts_uri)
+
+            tts_client = riva.client.SpeechSynthesisService(auth)
+
+            import asyncio
+
+            def _grpc_call():
+                return tts_client.synthesize(
+                    text=clean_text, voice_name=nvidia_tts_voice_name, language_code="en-US"
+                )
+
+            response = await asyncio.to_thread(_grpc_call)
+
+            out_path = self.output_dir / filename
+            with open(out_path, "wb") as f:
+                f.write(response.audio)
+
+            logger.info("Saved NVIDIA Riva TTS Audio to: %s", out_path)
+
+            # Play natively on macOS
+            import os
+
+            if os.uname().sysname == "Darwin":
+                os.system(f"afplay {out_path} &")
+
+            return str(out_path)
+
+        except Exception as e:
+            logger.warning(
+                "NVIDIA Riva Speech synthesis failed, falling back to local SpeechT5: %s", e
+            )
+            return None

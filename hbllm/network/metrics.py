@@ -240,11 +240,10 @@ class MetricsCollector:
         """Record SNN neuron membrane potential (gauge)."""
         # Record history with a real timestamp
         self._snn_history[neuron_id].append((time.time(), potential))
+        self._mem_gauges[f"snn_potential:{neuron_id}"] = potential
 
         if HAS_PROMETHEUS and self._snn_potentials:
             self._snn_potentials.labels(neuron_id=neuron_id).set(potential)
-        else:
-            self._mem_gauges[f"snn_potential:{neuron_id}"] = potential
 
     def get_snn_history(self, neuron_id: str) -> list[dict[str, float]]:
         """Retrieve the rolling potential history for a specific neuron."""

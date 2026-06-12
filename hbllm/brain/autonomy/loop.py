@@ -218,11 +218,50 @@ class AutonomyCore:
         # Transition to OBSERVING
         self.state_machine.transition_to(CognitiveState.OBSERVING, reason="autonomy_boot")
 
+        # Run startup recovery
+        asyncio.create_task(self._recover_active_goals())
+
         logger.info(
             "AutonomyCore started. Fast-path topics: %s, tick=%.1fs",
             self._fast_path_topics,
             self.state_machine.tick_interval,
         )
+
+    async def _recover_active_goals(self) -> None:
+        """Startup recovery phase: check for incomplete/blocked goals and resume them."""
+        import os
+
+        logger.info("[AutonomyCore] Initiating startup recovery phase...")
+        try:
+            from hbllm.brain.goal_manager import GoalManager, GoalStatus
+
+            goal_manager = GoalManager(data_dir=os.environ.get("HBLLM_DATA_DIR", "data"))
+            active_goals = goal_manager.get_active_goals()
+
+            for goal in active_goals:
+                if goal.status in (GoalStatus.ACTIVE, GoalStatus.BLOCKED, GoalStatus.PENDING):
+                    journal = goal.execution_journal
+                    logger.info(
+                        "[AutonomyCore] Recovering goal '%s' (%s) from checkpoint: '%s'",
+                        goal.name,
+                        goal.goal_id,
+                        journal.get("checkpoint", "None"),
+                    )
+                    # Publish a recovery thought to the internal thought bus
+                    msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id="autonomy",
+                        topic="autonomy.thought",
+                        payload={
+                            "text": f"Recovering goal {goal.name}. Resuming from checkpoint: {journal.get('checkpoint', 'start')}",
+                            "goal_id": goal.goal_id,
+                            "checkpoint": journal.get("checkpoint"),
+                            "next_action": journal.get("next_action"),
+                        },
+                    )
+                    await self._bus.publish("autonomy.thought", msg)
+        except Exception as e:
+            logger.error("[AutonomyCore] Startup recovery failed: %s", e)
 
     async def stop(self) -> None:
         """Stop the cognitive heartbeat gracefully."""

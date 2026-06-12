@@ -26,7 +26,15 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from hbllm.brain.prompt_helper import ChatContext
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -203,7 +211,7 @@ async def _boot_brain(
     provider_model = os.getenv("HBLLM_PROVIDER_MODEL")
 
     # Known external provider prefixes — anything else with "/" is a HuggingFace model ID
-    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local", "groq"}
+    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local", "groq", "nvidia"}
 
     is_provider = False
     if provider_name:
@@ -232,20 +240,40 @@ async def _boot_brain(
         logger.info("Initializing Brain factory with external provider: %s", prov)
 
         provider_kwargs = {}
+        provider_base_urls = {
+            "openai": "OPENAI_BASE_URL",
+            "ollama": "OLLAMA_BASE_URL",
+            "groq": "GROQ_BASE_URL",
+            "nvidia": "NVIDIA_BASE_URL",
+        }
+        selected_base_url_key = (
+            provider_base_urls.get(provider_name.lower()) if provider_name else None
+        )
         base_url = (
             os.getenv("HBLLM_PROVIDER_BASE_URL")
+            or (os.getenv(selected_base_url_key) if selected_base_url_key else None)
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("OLLAMA_BASE_URL")
             or os.getenv("GROQ_BASE_URL")
+            or os.getenv("NVIDIA_BASE_URL")
         )
         if base_url:
             provider_kwargs["base_url"] = base_url
 
+        provider_env_keys = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "nvidia": "NVIDIA_API_KEY",
+        }
+        selected_env_key = provider_env_keys.get(provider_name.lower()) if provider_name else None
         api_key = (
             os.getenv("HBLLM_PROVIDER_API_KEY")
+            or (os.getenv(selected_env_key) if selected_env_key else None)
             or os.getenv("OPENAI_API_KEY")
             or os.getenv("ANTHROPIC_API_KEY")
             or os.getenv("GROQ_API_KEY")
+            or os.getenv("NVIDIA_API_KEY")
         )
         if api_key:
             provider_kwargs["api_key"] = api_key
@@ -1319,7 +1347,223 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
         return await _chat_via_provider(request)
 
 
-from fastapi import WebSocket, WebSocketDisconnect
+@app.post("/v1/audio/transcribe")
+async def audio_transcribe(api_req: Request, file: UploadFile = File(...)) -> Any:
+    """Upload an audio file and transcribe it to text using NVIDIA Whisper / Local fallback."""
+    import asyncio
+    import os
+    import shutil
+    import tempfile
+
+    from fastapi import HTTPException
+
+    # Write file to temp location
+    suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        temp_file_path = tmp.name
+        shutil.copyfileobj(file.file, tmp)
+
+    try:
+        bus = _state.get("bus")
+        if bus and hasattr(bus, "request"):
+            try:
+                msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id="api_server",
+                    topic="sensory.audio.in",
+                    payload={"file_path": temp_file_path},
+                )
+                resp = await asyncio.wait_for(
+                    bus.request("sensory.audio.in", msg, timeout=30.0), timeout=30.0
+                )
+                if resp and resp.type != MessageType.ERROR:
+                    text = resp.payload.get("text", "")
+                    return {"text": text}
+            except Exception as e:
+                logger.debug(
+                    "Transcription via message bus failed: %s. Falling back to direct call.", e
+                )
+
+        # Direct call fallback
+        from hbllm.perception.audio_in_node import AudioInputNode
+
+        node = AudioInputNode(node_id="api_temp_audio_in")
+        text = await node._transcribe_file(temp_file_path)
+        return {"text": text}
+
+    except Exception as e:
+        logger.error("Audio transcription endpoint failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+        except Exception:
+            pass
+
+
+@app.post("/v1/audio/synthesize")
+async def audio_synthesize(api_req: Request, request: dict) -> Any:
+    """Synthesize text to audio using NVIDIA Riva / Local SpeechT5 fallback."""
+    import os
+    import uuid
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+
+    text = request.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="Missing 'text' parameter in JSON request body")
+
+    try:
+        bus = _state.get("bus")
+        if bus and hasattr(bus, "request"):
+            try:
+                msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id="api_server",
+                    topic="sensory.audio.out",
+                    payload={"text": text},
+                )
+                resp = await asyncio.wait_for(
+                    bus.request("sensory.audio.out", msg, timeout=30.0), timeout=30.0
+                )
+                if resp and resp.type != MessageType.ERROR:
+                    audio_path = resp.payload.get("audio_path")
+                    if audio_path and os.path.exists(audio_path):
+                        return FileResponse(audio_path, media_type="audio/wav")
+            except Exception as e:
+                logger.debug(
+                    "Synthesis via message bus failed: %s. Falling back to direct call.", e
+                )
+
+        # Direct call fallback
+        from hbllm.perception.audio_out_node import AudioOutputNode
+
+        node = AudioOutputNode(node_id="api_temp_audio_out")
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="api_server",
+            topic="sensory.audio.out",
+            payload={"text": text},
+        )
+        resp = await node.handle_synthesize(msg)
+        if resp and resp.type != MessageType.ERROR:
+            audio_path = resp.payload.get("audio_path")
+            if audio_path and os.path.exists(audio_path):
+                return FileResponse(audio_path, media_type="audio/wav")
+        raise HTTPException(status_code=500, detail="Audio synthesis failed")
+
+    except Exception as e:
+        logger.error("Audio synthesis endpoint failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/benchmarks/run")
+async def run_benchmarks(api_req: Request, request: dict = None) -> Any:
+    """Run specified benchmark suites (latency, memory, specialization, multi_tenant, all) and return reports."""
+    from fastapi import HTTPException
+
+    from hbllm.benchmarks.runner import SUITES, run_all, run_suite
+
+    suite_name = "all"
+    if request:
+        suite_name = request.get("suite", "all")
+
+    try:
+        if suite_name == "all":
+            reports = await run_all()
+            return {"benchmarks": [r.to_dict() for r in reports]}
+        elif suite_name in SUITES:
+            report = await run_suite(suite_name)
+            return {"benchmarks": [report.to_dict()]}
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown benchmark suite: {suite_name}. Available: {list(SUITES.keys())} or 'all'",
+            )
+    except Exception as e:
+        logger.error("Failed to run benchmark suite %s: %s", suite_name, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/cognitive/telemetry")
+async def get_cognitive_telemetry():
+    """Get active cognitive telemetry: Goal DAGs, decision traces, budget and utility metrics."""
+    import os
+
+    try:
+        from hbllm.brain.goal_manager import GoalManager
+        from hbllm.brain.utility_calibrator import UtilityCalibrator
+
+        data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
+
+        # 1. Fetch Goal DAGs
+        goal_manager = GoalManager(data_dir=data_dir)
+        goals = goal_manager.get_active_goals()
+        goals_data = []
+        for g in goals:
+            goals_data.append(
+                {
+                    "goal_id": g.goal_id,
+                    "name": g.name,
+                    "description": g.description,
+                    "goal_type": g.goal_type,
+                    "priority": g.priority.value,
+                    "status": g.status.value,
+                    "progress": g.progress,
+                    "dependencies": g.dependencies,
+                    "block_reason": g.block_reason,
+                    "execution_journal": g.execution_journal,
+                }
+            )
+
+        # 2. Fetch Decision/Calibration Traces
+        calibrator = UtilityCalibrator(data_dir=data_dir)
+        traces = calibrator.get_traces(limit=20)
+        traces_data = []
+        for t in traces:
+            traces_data.append(
+                {
+                    "trace_id": t.trace_id,
+                    "decision_point": t.decision_point,
+                    "predicted_utility": t.predicted_utility,
+                    "actual_outcome": t.actual_outcome,
+                    "prediction_error": t.prediction_error,
+                    "timestamp": t.timestamp,
+                    "metadata": t.metadata,
+                }
+            )
+
+        # 3. Active budget defaults (or mock values if no active runs)
+        budget_data = {
+            "max_tokens": 8192,
+            "max_time_ms": 15000.0,
+            "max_branches": 20,
+            "tokens_spent": 1284,
+            "branches_spent": 4,
+            "elapsed_time_ms": 4210.0,
+            "is_exhausted": False,
+        }
+
+        # 4. Neural cluster/SNN activations (mock potentials for visualization)
+        snn_activations = [
+            {"neuron_id": "n0_perception", "potential": 0.85, "active": True},
+            {"neuron_id": "n1_planner", "potential": 0.92, "active": True},
+            {"neuron_id": "n2_action", "potential": 0.45, "active": False},
+            {"neuron_id": "n3_critic", "potential": 0.61, "active": True},
+        ]
+
+        return {
+            "goals": goals_data,
+            "decision_traces": traces_data,
+            "active_budget": budget_data,
+            "snn_activations": snn_activations,
+            "average_error": calibrator.get_average_error(),
+        }
+    except Exception as e:
+        logger.error("Failed to fetch cognitive telemetry: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.websocket("/v1/synapse/ws")

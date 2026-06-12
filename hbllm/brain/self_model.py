@@ -12,6 +12,7 @@ Integration:
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -31,6 +32,22 @@ class CapabilityScore:
     sample_count: int
     trend: str  # improving | stable | declining
     last_updated: float
+
+
+@dataclass
+class CapabilityProfile:
+    capability: str
+    confidence: float
+    success_rate: float
+    avg_cost: dict[str, float]  # avg_tokens, avg_latency_ms
+    last_validated: float
+
+
+@dataclass
+class ExperienceRecord:
+    capability: str
+    executions_count: int
+    validation_runs: list[dict[str, Any]]
 
 
 class SelfModel:
@@ -73,6 +90,23 @@ class SelfModel:
                     confidence REAL DEFAULT 0.5,
                     latency_ms REAL DEFAULT 0,
                     created_at REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS capability_profiles (
+                    capability TEXT PRIMARY KEY,
+                    confidence REAL NOT NULL,
+                    success_rate REAL NOT NULL,
+                    avg_tokens REAL DEFAULT 0.0,
+                    avg_latency_ms REAL DEFAULT 0.0,
+                    last_validated REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS experience_records (
+                    capability TEXT PRIMARY KEY,
+                    executions_count INTEGER DEFAULT 0,
+                    validation_runs TEXT DEFAULT '[]'
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_perf_domain ON performance_log(domain)")
@@ -245,3 +279,91 @@ class SelfModel:
             "improving": [c.domain for c in caps if c.trend == "improving"],
             "declining": [c.domain for c in caps if c.trend == "declining"],
         }
+
+    # ─── Competence Tracking (Phase 5) ──────────────────────────────
+
+    def get_capability_profile(self, capability: str) -> CapabilityProfile | None:
+        """Get capability profile."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM capability_profiles WHERE capability = ?",
+                (capability,),
+            ).fetchone()
+        if not row:
+            return None
+        return CapabilityProfile(
+            capability=row["capability"],
+            confidence=row["confidence"],
+            success_rate=row["success_rate"],
+            avg_cost={
+                "avg_tokens": row["avg_tokens"],
+                "avg_latency_ms": row["avg_latency_ms"],
+            },
+            last_validated=row["last_validated"],
+        )
+
+    def get_experience_record(self, capability: str) -> ExperienceRecord | None:
+        """Get experience record."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM experience_records WHERE capability = ?",
+                (capability,),
+            ).fetchone()
+        if not row:
+            return None
+        return ExperienceRecord(
+            capability=row["capability"],
+            executions_count=row["executions_count"],
+            validation_runs=json.loads(row["validation_runs"] or "[]"),
+        )
+
+    def record_experience(
+        self,
+        capability: str,
+        success: bool,
+        tokens_used: int,
+        latency_ms: float,
+        validation_info: dict[str, Any] | None = None,
+    ) -> None:
+        """Record capability execution experience and update capability profile."""
+        now = time.time()
+
+        # Update experience record
+        rec = self.get_experience_record(capability)
+        if rec:
+            count = rec.executions_count + 1
+            runs = rec.validation_runs
+            if validation_info:
+                runs.append(validation_info)
+        else:
+            count = 1
+            runs = [validation_info] if validation_info else []
+
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO experience_records (capability, executions_count, validation_runs) VALUES (?, ?, ?)",
+                (capability, count, json.dumps(runs)),
+            )
+
+        # Update capability profile
+        prof = self.get_capability_profile(capability)
+        if prof:
+            new_success_rate = (prof.success_rate * (count - 1) + (1.0 if success else 0.0)) / count
+            new_tokens = (prof.avg_cost.get("avg_tokens", 0.0) * (count - 1) + tokens_used) / count
+            new_latency = (
+                prof.avg_cost.get("avg_latency_ms", 0.0) * (count - 1) + latency_ms
+            ) / count
+            new_confidence = (prof.confidence * (count - 1) + (1.0 if success else 0.0)) / count
+        else:
+            new_success_rate = 1.0 if success else 0.0
+            new_tokens = float(tokens_used)
+            new_latency = latency_ms
+            new_confidence = 0.8  # initial baseline confidence
+
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO capability_profiles (capability, confidence, success_rate, avg_tokens, avg_latency_ms, last_validated) VALUES (?, ?, ?, ?, ?, ?)",
+                (capability, new_confidence, new_success_rate, new_tokens, new_latency, now),
+            )

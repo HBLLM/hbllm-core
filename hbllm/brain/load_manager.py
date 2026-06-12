@@ -161,6 +161,7 @@ class LoadManager(Node):
         await self.bus.subscribe("system.task.started", self._handle_task_start)
         await self.bus.subscribe("system.task.completed", self._handle_task_complete)
         await self.bus.subscribe("load.query", self._handle_query)
+        await self.bus.subscribe("workspace.thought", self._handle_thought_utility)
 
         self._running = True
         self._monitor_task = asyncio.create_task(self._monitor_loop())
@@ -365,3 +366,28 @@ class LoadManager(Node):
             "total_tasks_queued": self._tasks_queued,
             "total_tasks_processed": self._tasks_processed,
         }
+
+    async def _handle_thought_utility(self, message: Message) -> None:
+        """Dynamically adjust load policies using recent utility scores."""
+        try:
+            metadata = message.payload.get("metadata", {})
+            utility = metadata.get("utility_score")
+            if utility is not None:
+                # If utility is extremely low (< 0.2), temporarily degrade policy to conserve resources
+                if utility < 0.2:
+                    if self._current_policy.level == "normal":
+                        self._current_policy = self.policies["elevated"]
+                        logger.info(
+                            "[LoadManager] Dynamically degraded policy to 'elevated' due to low utility: %.2f",
+                            utility,
+                        )
+                elif utility > 0.6:
+                    # Restore to normal if it was degraded due to utility
+                    if self._current_policy.level == "elevated":
+                        self._current_policy = self.policies["normal"]
+                        logger.info(
+                            "[LoadManager] Restored policy to 'normal' due to high utility: %.2f",
+                            utility,
+                        )
+        except Exception as e:
+            logger.debug("[LoadManager] Error handling thought utility: %s", e)

@@ -121,6 +121,7 @@ class AttentionManager(Node):
         await self.bus.subscribe("system.sleep.prune_trigger", self._handle_prune)
         await self.bus.subscribe("attention.query", self._handle_query)
         await self.bus.subscribe("attention.score", self._handle_score_request)
+        await self.bus.subscribe("workspace.thought", self._handle_thought_utility)
         self._polling_task = asyncio.create_task(self._poll_memory_stats())
 
     async def on_stop(self) -> None:
@@ -400,3 +401,34 @@ class AttentionManager(Node):
             "prune_cycles": self._prune_count,
             "rebalance_cycles": self._rebalance_count,
         }
+
+    async def _handle_thought_utility(self, message: Message) -> None:
+        """Dynamically adjust context allocations using utility scores."""
+        try:
+            metadata = message.payload.get("metadata", {})
+            utility = metadata.get("utility_score")
+            domain = metadata.get("domain", "general")
+            if utility is not None and domain in self._focus:
+                alloc = self._focus[domain]
+                # If utility is high, allocate more context space
+                if utility > 0.7:
+                    alloc.context_tokens = min(alloc.context_tokens + 256, 4096)
+                    alloc.priority = min(alloc.priority + 0.1, 1.0)
+                    logger.info(
+                        "[AttentionManager] Increased context tokens for domain '%s' to %d due to high utility: %.2f",
+                        domain,
+                        alloc.context_tokens,
+                        utility,
+                    )
+                # If utility is low, contract context space
+                elif utility < 0.3:
+                    alloc.context_tokens = max(alloc.context_tokens - 256, 512)
+                    alloc.priority = max(alloc.priority - 0.1, 0.1)
+                    logger.info(
+                        "[AttentionManager] Contracted context tokens for domain '%s' to %d due to low utility: %.2f",
+                        domain,
+                        alloc.context_tokens,
+                        utility,
+                    )
+        except Exception as e:
+            logger.debug("[AttentionManager] Error handling thought utility: %s", e)

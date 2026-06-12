@@ -27,10 +27,11 @@ logger = logging.getLogger(__name__)
 
 class GoalStatus(StrEnum):
     PENDING = "pending"
+    BLOCKED = "blocked"
     ACTIVE = "active"
-    PAUSED = "paused"
     COMPLETED = "completed"
-    FAILED = "failed"
+    ABANDONED = "abandoned"
+    FAILED = "abandoned"
 
 
 class GoalPriority(StrEnum):
@@ -58,6 +59,10 @@ class Goal:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     deadline: float | None = None
+
+    dependencies: list[str] = field(default_factory=list)
+    block_reason: str = ""
+    execution_journal: dict[str, Any] = field(default_factory=dict)
 
 
 class GoalManager:
@@ -97,6 +102,16 @@ class GoalManager:
                     deadline REAL
                 )
             """)
+            # Add DAG and journals columns if not present
+            for col, col_type in [
+                ("dependencies", "TEXT DEFAULT '[]'"),
+                ("block_reason", "TEXT DEFAULT ''"),
+                ("execution_journal", "TEXT DEFAULT '{}'"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE goals ADD COLUMN {col} {col_type}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
 
     # ─── Goal CRUD ───────────────────────────────────────────────────
 
@@ -108,6 +123,7 @@ class GoalManager:
         priority: GoalPriority = GoalPriority.MEDIUM,
         success_criteria: str = "",
         deadline: float | None = None,
+        dependencies: list[str] | None = None,
     ) -> Goal:
         """Create a new goal."""
         goal_id = f"goal_{int(time.time())}_{hash(name) % 10000}"
@@ -119,9 +135,11 @@ class GoalManager:
             priority=priority,
             success_criteria=success_criteria,
             deadline=deadline,
+            dependencies=dependencies or [],
         )
         self._save(goal)
         logger.info("Created goal: %s [%s] priority=%s", name, goal_type, priority.value)
+        self._resolve_dag_states()
         return goal
 
     def _save(self, goal: Goal) -> None:
@@ -132,8 +150,8 @@ class GoalManager:
                 INSERT OR REPLACE INTO goals
                 (goal_id, name, description, goal_type, priority, status,
                  progress, success_criteria, sub_goals, actions_taken,
-                 metadata, created_at, updated_at, deadline)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 metadata, created_at, updated_at, deadline, dependencies, block_reason, execution_journal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     goal.goal_id,
@@ -150,6 +168,9 @@ class GoalManager:
                     goal.created_at,
                     now,
                     goal.deadline,
+                    json.dumps(goal.dependencies),
+                    goal.block_reason,
+                    json.dumps(goal.execution_journal),
                 ),
             )
 
@@ -162,7 +183,7 @@ class GoalManager:
             if not row:
                 return
 
-            actions = json.loads(row[0])
+            actions = json.loads(row[0] or "[]")
             if action:
                 actions.append(f"[{time.strftime('%Y-%m-%d %H:%M')}] {action}")
 
@@ -173,6 +194,37 @@ class GoalManager:
                 "WHERE goal_id = ?",
                 (min(1.0, progress), status, json.dumps(actions), time.time(), goal_id),
             )
+        self._resolve_dag_states()
+
+    def update_goal_status(self, goal_id: str, status: GoalStatus, block_reason: str = "") -> None:
+        """Update goal status and block reason."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ?",
+                (status.value, block_reason, time.time(), goal_id),
+            )
+
+    def update_execution_journal(
+        self,
+        goal_id: str,
+        checkpoint: str,
+        completed_steps: list[str],
+        blocked_reason: str = "",
+        next_action: str = "",
+    ) -> None:
+        """Update the structured execution journal for a goal."""
+        journal = {
+            "goal_id": goal_id,
+            "checkpoint": checkpoint,
+            "completed_steps": completed_steps,
+            "blocked_reason": blocked_reason,
+            "next_action": next_action,
+        }
+        with sqlite3.connect(str(self._db_path)) as conn:
+            conn.execute(
+                "UPDATE goals SET execution_journal = ?, updated_at = ? WHERE goal_id = ?",
+                (json.dumps(journal), time.time(), goal_id),
+            )
 
     def complete_goal(self, goal_id: str) -> None:
         self.update_progress(goal_id, 1.0, "Goal completed")
@@ -180,14 +232,40 @@ class GoalManager:
     def fail_goal(self, goal_id: str, reason: str = "") -> None:
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
-                "UPDATE goals SET status = ?, updated_at = ? WHERE goal_id = ?",
-                (GoalStatus.FAILED.value, time.time(), goal_id),
+                "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ?",
+                (GoalStatus.ABANDONED.value, reason, time.time(), goal_id),
             )
+        self._resolve_dag_states()
+
+    def _resolve_dag_states(self) -> None:
+        """Resolve blocked/pending states based on goal dependency DAG."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute("SELECT goal_id, status, dependencies FROM goals").fetchall()
+
+        status_map = {r[0]: r[1] for r in rows}
+        dep_map = {r[0]: json.loads(r[2] or "[]") for r in rows}
+
+        for goal_id, current_status in status_map.items():
+            if current_status in ("pending", "blocked"):
+                deps = dep_map.get(goal_id, [])
+                uncompleted_deps = [d for d in deps if status_map.get(d) != "completed"]
+
+                if uncompleted_deps:
+                    if current_status != "blocked":
+                        self.update_goal_status(
+                            goal_id,
+                            GoalStatus.BLOCKED,
+                            block_reason=f"Blocked by dependencies: {', '.join(uncompleted_deps)}",
+                        )
+                else:
+                    if current_status == "blocked":
+                        self.update_goal_status(goal_id, GoalStatus.PENDING, block_reason="")
 
     # ─── Scheduling ──────────────────────────────────────────────────
 
     def next_goal(self) -> Goal | None:
         """Get the highest-priority pending/active goal."""
+        self._resolve_dag_states()
         priority_order = {
             GoalPriority.CRITICAL.value: 0,
             GoalPriority.HIGH.value: 1,
@@ -212,7 +290,7 @@ class GoalManager:
         Execute a goal asynchronously.
         This bridges the goal persistence with the actual execution engine.
         """
-        if goal.status.value in (GoalStatus.COMPLETED.value, GoalStatus.FAILED.value):
+        if goal.status.value in (GoalStatus.COMPLETED.value, GoalStatus.ABANDONED.value):
             return
 
         logger.info("Executing goal: %s (type: %s)", goal.name, goal.goal_type)
@@ -230,9 +308,10 @@ class GoalManager:
             self.fail_goal(goal.goal_id, str(e))
 
     def get_active_goals(self) -> list[Goal]:
+        self._resolve_dag_states()
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(
-                "SELECT * FROM goals WHERE status IN ('pending', 'active') ORDER BY created_at DESC"
+                "SELECT * FROM goals WHERE status IN ('pending', 'active', 'blocked') ORDER BY created_at DESC"
             ).fetchall()
         return [self._row_to_goal(r) for r in rows]
 
@@ -300,18 +379,21 @@ class GoalManager:
             status=GoalStatus(row[5]),
             progress=row[6],
             success_criteria=row[7],
-            sub_goals=json.loads(row[8]),
-            actions_taken=json.loads(row[9]),
-            metadata=json.loads(row[10]),
+            sub_goals=json.loads(row[8] or "[]"),
+            actions_taken=json.loads(row[9] or "[]"),
+            metadata=json.loads(row[10] or "{}"),
             created_at=row[11],
             deadline=row[13],
+            dependencies=json.loads(row[14] or "[]") if len(row) > 14 else [],
+            block_reason=row[15] if len(row) > 15 else "",
+            execution_journal=json.loads(row[16] or "{}") if len(row) > 16 else {},
         )
 
     def stats(self) -> dict[str, Any]:
         with sqlite3.connect(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0]
             active = conn.execute(
-                "SELECT COUNT(*) FROM goals WHERE status IN ('pending','active')"
+                "SELECT COUNT(*) FROM goals WHERE status IN ('pending','active','blocked')"
             ).fetchone()[0]
             completed = conn.execute(
                 "SELECT COUNT(*) FROM goals WHERE status = 'completed'"

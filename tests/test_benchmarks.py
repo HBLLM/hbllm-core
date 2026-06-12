@@ -117,3 +117,17 @@ async def test_run_suite():
 async def test_run_invalid_suite():
     with pytest.raises(ValueError):
         await run_suite("nonexistent")
+
+
+def test_benchmarks_api_endpoint():
+    from fastapi.testclient import TestClient
+
+    from hbllm.serving.api import app
+
+    client = TestClient(app)
+    response = client.post("/v1/benchmarks/run", json={"suite": "memory"})
+    assert response.status_code == 200
+    data = response.json()
+    assert "benchmarks" in data
+    assert len(data["benchmarks"]) == 1
+    assert data["benchmarks"][0]["suite"] == "memory"
