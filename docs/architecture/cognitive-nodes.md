@@ -94,7 +94,7 @@ The `NodeType` enum defines the categories of nodes:
 ### DecisionNode
 
 - **Type:** `NodeType.CORE`
-- **File:** [decision_node.py](hbllm/brain/decision_node.py)
+- **File:** `hbllm/brain/decision_node.py`
 - **Purpose:** Synthesizes the final output from workspace state, confidence scores, and critic feedback.
 - **Upgrades:** Integrates a Bounded Rationality 3-tier validation path:
     1. **Level 1: Safety Gate**: Enforces risk-based filters (regular expression checks for low/medium risk, LLM-backed classifiers for high-risk tools).
@@ -175,7 +175,7 @@ The `NodeType` enum defines the categories of nodes:
 ### WorldModelNode
 
 - **Type:** `NodeType.CORE`
-- **File:** [world_model_node.py](hbllm/brain/world_model_node.py)
+- **File:** `hbllm/brain/world_model_node.py`
 - **Purpose:** Sandboxed AST-level simulation for "what-if" reasoning. Validates code execution plans by analyzing imports and potential side effects.
 - **Upgrades:** Extended to handle physical action dry-runs and simulated repository/code world modifications:
     - **AST Static Analysis**: Parses Python code to compile and check imports against `dangerous_imports` (blocking modules like `os`, `subprocess`, `sys`, `shutil`, `socket`).
@@ -265,7 +265,7 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 ### AudioInputNode
 
 - **Type:** `NodeType.PERCEPTION`
-- **File:** [audio_in_node.py](hbllm/perception/audio_in_node.py)
+- **File:** `hbllm/perception/audio_in_node.py`
 - **Purpose:** Speech-to-text streaming transcription.
 - **Upgrades:** Implements high-fidelity cloud routing with robust local fallbacks:
     - **NVIDIA Cloud Whisper API**: When `NVIDIA_API_KEY` is active, routes requests to the NVIDIA Cloud Whisper API using the `openai/whisper-large-v3` model.
@@ -275,7 +275,7 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 ### AudioOutputNode
 
 - **Type:** `NodeType.PERCEPTION`
-- **File:** [audio_out_node.py](hbllm/perception/audio_out_node.py)
+- **File:** `hbllm/perception/audio_out_node.py`
 - **Purpose:** Text-to-speech with per-tenant voice configurations.
 - **Upgrades:** Integrates dual-path cloud and local synthesis engines:
     - **NVIDIA Riva TTS Client**: Interfaces with the `riva.client` gRPC library for cloud or local Riva/NIM text-to-speech synthesis (using `Magpie-Multilingual.EN-US.Aria` by default).
