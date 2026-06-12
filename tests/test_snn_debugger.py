@@ -132,6 +132,10 @@ class TestSNNServingEndpoints:
     @pytest.fixture
     def client(self, monkeypatch):
         monkeypatch.setenv("HBLLM_ENV", "development")
+        from hbllm.serving.state import _state
+
+        monkeypatch.setitem(_state, "brain", None)
+        monkeypatch.setitem(_state, "synapse_gateway", None)
         return TestClient(app)
 
     def test_snn_status_endpoint(self, client):
