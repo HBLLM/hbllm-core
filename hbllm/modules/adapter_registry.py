@@ -13,6 +13,8 @@ Features:
   - Safe torch loading (weights_only=True).
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
@@ -20,10 +22,12 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import torch
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,8 @@ def verify_sha256(file_path: str | Path, expected_hash: str) -> bool:
 
 def safe_torch_load(path: str | Path) -> dict[str, Any]:
     """Load a torch checkpoint safely (no arbitrary code execution)."""
+    import torch
+
     return cast(dict[str, Any], torch.load(path, map_location="cpu", weights_only=True))
 
 
@@ -463,6 +469,8 @@ class AdapterRegistry:
             },
         }
         path.parent.mkdir(parents=True, exist_ok=True)
+        import torch
+
         torch.save(payload, path)
 
         # Compute and write hash file
@@ -476,6 +484,8 @@ class AdapterRegistry:
         if not path.exists():
             return {}
         # load with weights_only=True still allows the metadata dict
+        import torch
+
         payload = torch.load(path, map_location="cpu", weights_only=True)
         if isinstance(payload, dict) and ADAPTER_METADATA_KEY in payload:
             return cast(dict[str, Any], payload[ADAPTER_METADATA_KEY])
