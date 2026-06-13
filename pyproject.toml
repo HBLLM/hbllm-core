@@ -4,36 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hbllm"
-version = "0.1.0"
+version = "1.0.0"
 description = "HBLLM Core — Human Brain LLM cognitive architecture"
 requires-python = ">=3.11"
 license = {text = "GPL-3.0-only"}
 authors = [
     {name = "HBLLM Team"},
 ]
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/hbllm/hbllm"
+Documentation = "https://docs.hbllm.dev"
+Repository = "https://github.com/hbllm/hbllm"
+Changelog = "https://github.com/hbllm/hbllm/blob/main/CHANGELOG.md"
 
 dependencies = [
-    # Core ML
-    "torch>=2.2.0",
-    "transformers>=4.40.0",
-    "onnxruntime>=1.17.0",
-    "huggingface-hub>=0.22.0",
-    "datasets>=2.18.0",
-    "tokenizers>=0.15.0",
-    "safetensors>=0.4.0",
-
-    # Training
-    "wandb>=0.16.0",
-    "accelerate>=0.28.0",
-
     # Data
     "numpy>=1.26.0",
     "pyarrow>=15.0.0",
     "zstandard>=0.22.0",
-
-    # Reasoning Engines
-    "z3-solver>=4.12.0",
-    "scikit-fuzzy>=0.5.0",
 
     # Memory & Storage
     "qdrant-client>=1.8.0",
@@ -52,7 +42,6 @@ dependencies = [
     "Pillow>=10.0.0",
     "orjson>=3.9.0",
     "uvloop>=0.19.0; sys_platform != 'win32'",
-    "aiortc>=1.8.0",
 
     # API
     "fastapi>=0.110.0",
@@ -64,14 +53,40 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local = [
+    # Core ML — only needed for local model loading
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "onnxruntime>=1.17.0",
+    "huggingface-hub>=0.22.0",
+    "datasets>=2.18.0",
+    "tokenizers>=0.15.0",
+    "safetensors>=0.4.0",
+    # Reasoning engines
+    "z3-solver>=4.12.0",
+    "scikit-fuzzy>=0.5.0",
+    # Training
+    "wandb>=0.16.0",
+    "accelerate>=0.28.0",
+]
 gpu = [
+    "hbllm[local]",
     "deepspeed>=0.14.0",
     "chromadb>=0.4.0",
+]
+embodiment = [
+    "aiortc>=1.8.0",
 ]
 observability = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+]
+full = [
+    "hbllm[local]",
+    "hbllm[gpu]",
+    "hbllm[embodiment]",
+    "hbllm[observability]",
 ]
 dev = [
     "pytest>=8.0.0",

@@ -287,6 +287,7 @@ class CognitivePipeline:
                 logger.debug("Memory retrieval timed out, continuing without")
                 context["memory"] = []
             except Exception:
+                logger.warning("Memory retrieval failed, continuing without", exc_info=True)
                 context["memory"] = []
 
         # Identity retrieval
@@ -307,6 +308,7 @@ class CognitivePipeline:
             except (TimeoutError, asyncio.TimeoutError):
                 context["identity"] = {}
             except Exception:
+                logger.warning("Identity retrieval failed, continuing without", exc_info=True)
                 context["identity"] = {}
 
         # Curiosity goals
@@ -327,6 +329,9 @@ class CognitivePipeline:
             except (TimeoutError, asyncio.TimeoutError):
                 context["curiosity_goals"] = []
             except Exception:
+                logger.warning(
+                    "Curiosity goals retrieval failed, continuing without", exc_info=True
+                )
                 context["curiosity_goals"] = []
 
         return context
@@ -450,6 +455,7 @@ class CognitivePipeline:
                 "confidence": 0.9,
             }
         except Exception:
+            logger.warning("Fast-path LLM call failed, using fallback", exc_info=True)
             return {
                 "text": "I'm here! What's on your mind?",
                 "source_node": "fast_path_fallback",
@@ -576,6 +582,7 @@ class CognitivePipeline:
                 except (TimeoutError, asyncio.TimeoutError):
                     context_parts.append(f"[Image {i + 1}]: (could not process)")
                 except Exception:
+                    logger.warning("Image %d caption failed", i + 1, exc_info=True)
                     context_parts.append(f"[Image {i + 1}]: (processing error)")
 
         # Process audio → transcript
@@ -598,6 +605,7 @@ class CognitivePipeline:
             except (TimeoutError, asyncio.TimeoutError):
                 context_parts.append("[Audio]: (could not transcribe)")
             except Exception:
+                logger.warning("Audio transcription failed", exc_info=True)
                 context_parts.append("[Audio]: (transcription error)")
 
         # Combine text + multi-modal context

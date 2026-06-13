@@ -110,7 +110,9 @@ class SynapseGateway:
         self.active_connections[key] = websocket
         self.device_capabilities[key] = []
         self.known_devices.add(key)
-        logger.info(f"Edge device connected: tenant={tenant_id} user={user_id} device={device_id}")
+        logger.info(
+            "Edge device connected: tenant=%s user=%s device=%s", tenant_id, user_id, device_id
+        )
 
         if self.audit_log:
             self.audit_log.log(
@@ -124,12 +126,12 @@ class SynapseGateway:
         # Flush any pending outbound messages (QoS 1)
         pending_msgs = self._outbound_queues.pop(key, [])
         if pending_msgs:
-            logger.info(f"Flushing {len(pending_msgs)} pending messages to {device_id}")
+            logger.info("Flushing %d pending messages to %s", len(pending_msgs), device_id)
             for msg in pending_msgs:
                 try:
                     await websocket.send_text(orjson.dumps(msg).decode("utf-8"))
                 except Exception as e:
-                    logger.error(f"Failed to flush message to {device_id}: {e}")
+                    logger.error("Failed to flush message to %s: %s", device_id, e)
                     self.disconnect(tenant_id, user_id, device_id)
                     break
 
@@ -158,7 +160,7 @@ class SynapseGateway:
                 pass
 
         logger.info(
-            f"Edge device disconnected: tenant={tenant_id} user={user_id} device={device_id}"
+            "Edge device disconnected: tenant=%s user=%s device=%s", tenant_id, user_id, device_id
         )
 
         if self.audit_log:
@@ -194,7 +196,7 @@ class SynapseGateway:
         if not ws:
             # Only buffer if the device is known to have connected before in this session
             if key not in self.known_devices:
-                logger.warning(f"Targeting unknown device {device_id}, cannot buffer.")
+                logger.warning("Targeting unknown device %s, cannot buffer.", device_id)
                 return False
 
             # Device offline: buffer the message for when it reconnects
@@ -204,17 +206,17 @@ class SynapseGateway:
             # Prevent unbounded memory growth (keep last 100 messages)
             if len(self._outbound_queues[key]) < 100:
                 self._outbound_queues[key].append(message)
-                logger.info(f"Buffered message for disconnected device {device_id}")
+                logger.info("Buffered message for disconnected device %s", device_id)
                 return True
             else:
-                logger.warning(f"Outbound queue full for device {device_id}, dropping message")
+                logger.warning("Outbound queue full for device %s, dropping message", device_id)
                 return False
 
         try:
             await ws.send_text(orjson.dumps(message).decode("utf-8"))
             return True
         except Exception as e:
-            logger.error(f"Failed to send message to device {device_id}: {e}")
+            logger.error("Failed to send message to device %s: %s", device_id, e)
             self.disconnect(tenant_id, user_id, device_id)
 
             # Re-queue the failed message if not full
@@ -289,7 +291,7 @@ class SynapseGateway:
 
         success = await self.send_to_device(tenant_id, user_id, device_id, outbound_msg)
         if not success:
-            logger.warning(f"Failed to route {message.type} to disconnected device {device_id}")
+            logger.warning("Failed to route %s to disconnected device %s", message.type, device_id)
 
     async def handle_inbound_message(
         self,
@@ -334,7 +336,7 @@ class SynapseGateway:
                     new_nodes.append(node)
 
                 self.device_nodes[(tenant_id, user_id, device_id)] = new_nodes
-                logger.info(f"Device {device_id} registered tools: {tools}")
+                logger.info("Device %s registered tools: %s", device_id, tools)
 
                 if self.audit_log:
                     self.audit_log.log(
@@ -381,9 +383,9 @@ class SynapseGateway:
                     )
                     await self.bus.publish(target_topic, bridged_msg)
             else:
-                logger.debug(f"Unknown message type from edge device {device_id}: {msg_type}")
+                logger.debug("Unknown message type from edge device %s: %s", device_id, msg_type)
 
         except orjson.JSONDecodeError:
-            logger.warning(f"Invalid JSON from device {device_id}: {text_data}")
+            logger.warning("Invalid JSON from device %s: %s", device_id, text_data[:200])
         except Exception as e:
-            logger.error(f"Error handling edge message from {device_id}: {e}")
+            logger.error("Error handling edge message from %s: %s", device_id, e)

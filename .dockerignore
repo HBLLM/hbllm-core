@@ -1,0 +1,49 @@
+# ─── Build artifacts ──────────────────────────────────────────────────────────
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist/
+build/
+.eggs/
+
+# ─── Virtual environments ────────────────────────────────────────────────────
+venv/
+.venv/
+llama_venv/
+
+# ─── Data & State (never ship in image) ──────────────────────────────────────
+data/
+*.db
+*.db-wal
+*.db-shm
+models/
+checkpoints/
+logs/
+
+# ─── Development & CI ────────────────────────────────────────────────────────
+.git/
+.github/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+tests/
+docs/
+examples/
+plugins/
+
+# ─── IDE & OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# ─── Rust build cache ────────────────────────────────────────────────────────
+rust/compute_kernel/target/
+
+# ─── Misc ────────────────────────────────────────────────────────────────────
+*.log
+.env
+.env.local
+pytest_run.log

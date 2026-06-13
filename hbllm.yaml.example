@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# HBLLM Core — Configuration Reference
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy this file to 'hbllm.yaml' in your working directory and modify as needed.
+# All values shown are defaults. Omit any section to use defaults.
+#
+# The system loads config in this order:
+#   1. Explicit path passed to HBLLMCoreConfig.load()
+#   2. HBLLM_CONFIG_PATH environment variable
+#   3. ./hbllm.yaml in the current working directory
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Environment identity: development | staging | production
+env: development
+
+# ── Security & Multi-Tenant Isolation ────────────────────────────────────────
+security:
+  # Tenant isolation enforcement level:
+  #   off    — No enforcement (development only, single-user)
+  #   warn   — Log violations but allow operations to proceed
+  #   strict — Raise TenantIsolationError on any violation (production)
+  tenant_guard_mode: warn
+
+  # Data separation strategy:
+  #   shared    — Logical separation (WHERE tenant_id = ?)
+  #   namespace — Per-tenant database files
+  #   dedicated — Fully isolated storage backends
+  isolation_level: shared
+
+  # Append-only audit trail (SOC2/GDPR-compliant)
+  audit_enabled: true
+  audit_db_path: data/audit.db
+
+  # Per-tenant rate limiting (requests per minute)
+  rate_limit_enabled: true
+  rate_limit_rpm: 60
+
+  # Encryption at rest for sensitive tenant data
+  #   auto — Generate key on first run
+  #   env  — Read from HBLLM_ENCRYPTION_KEY env var
+  #   file — Read from encryption_key_path
+  #   vault — (future) Read from HashiCorp Vault
+  encryption_key_source: auto
+  encryption_key_env_var: HBLLM_ENCRYPTION_KEY
+  encryption_key_path: data/encryption.key
+
+# ── Storage & Persistence ────────────────────────────────────────────────────
+data_dir: ./data
+checkpoints_dir: ./checkpoints
+
+# ── Cluster & Distributed Topology ──────────────────────────────────────────
+# cluster:
+#   node_id: "node-1"
+#   role: primary            # primary | replica | edge
+#   peers: []                # List of peer URLs for federation
+#   heartbeat_interval: 10.0
+
+# ── Adapter Registry (LoRA Hot-Swap) ────────────────────────────────────────
+# adapters:
+#   registry_path: data/adapters
+#   max_loaded: 3
+#   verify_checksums: true
