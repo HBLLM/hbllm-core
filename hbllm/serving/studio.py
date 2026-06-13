@@ -420,6 +420,216 @@ async def replay_cognitive_search(request: Request):
     }
 
 
+@router.get("/api/snn/expression")
+async def get_snn_expression_status():
+    """Return ExpressionStream state: rendering tiers, content plans, PRM scores."""
+    brain = _state.get("brain")
+    node_map = _get_node_map(brain) if brain else {}
+
+    # Try to find ExpressionStream from DecisionNode
+    decision_node = node_map.get("DecisionNode")
+    expression_stream = (
+        getattr(decision_node, "_expression_stream", None) if decision_node else None
+    )
+
+    result = {
+        "status": "active" if expression_stream else "not_loaded",
+        "rendering_tiers": {
+            "broca": {
+                "label": "Broca (v4)",
+                "tokens": "~80",
+                "description": "SNN decides content, LLM is grammar-only",
+            },
+            "shallow": {
+                "label": "Shallow (v3)",
+                "tokens": "~300",
+                "description": "SNN reasons, LLM renders text",
+            },
+            "deep": {
+                "label": "Deep (v1-v2)",
+                "tokens": "~600",
+                "description": "LLM handles everything",
+            },
+        },
+        "last_render": None,
+        "content_plans": [],
+        "prm_scores": [],
+        "token_savings": [],
+    }
+
+    if expression_stream:
+        # Extract last render info
+        last_meta = getattr(expression_stream, "_last_render_metadata", None)
+        if last_meta and isinstance(last_meta, dict):
+            result["last_render"] = {
+                "tier": last_meta.get("tier", "deep"),
+                "token_count": last_meta.get("token_count", 0),
+                "thought_count": last_meta.get("thought_count", 0),
+                "prm_score": last_meta.get("prm_score", 0.0),
+            }
+
+        # Extract content plans from planner
+        planner = getattr(expression_stream, "_content_planner", None)
+        if planner:
+            last_plans = getattr(planner, "_last_plans", [])
+            for plan in last_plans[-5:]:
+                result["content_plans"].append(
+                    {
+                        "content_type": getattr(plan, "content_type", "unknown"),
+                        "key_points": getattr(plan, "key_points", []),
+                        "emphasis": getattr(plan, "emphasis", 0.5),
+                    }
+                )
+
+        # Extract PRM reward history
+        prm = getattr(expression_stream, "_trained_prm", None)
+        if prm:
+            history = getattr(prm, "_score_history", [])
+            for entry in history[-20:]:
+                result["prm_scores"].append(
+                    {
+                        "score": entry.get("score", 0.0)
+                        if isinstance(entry, dict)
+                        else float(entry),
+                        "timestamp": entry.get("timestamp", 0.0)
+                        if isinstance(entry, dict)
+                        else 0.0,
+                    }
+                )
+
+    return result
+
+
+@router.get("/api/snn/comprehension")
+async def get_snn_comprehension_status():
+    """Return ComprehensionStream state: concepts, associations, causal chains."""
+    brain = _state.get("brain")
+    node_map = _get_node_map(brain) if brain else {}
+
+    decision_node = node_map.get("DecisionNode")
+    comp_stream = None
+    if decision_node:
+        expr_stream = getattr(decision_node, "_expression_stream", None)
+        if expr_stream:
+            comp_stream = getattr(expr_stream, "_comprehension_stream", None)
+
+    result = {
+        "status": "active" if comp_stream else "not_loaded",
+        "channels": [
+            {"name": "entity", "description": "Named entities and key nouns"},
+            {"name": "clause", "description": "Clause boundary detection"},
+            {"name": "discourse", "description": "Discourse markers and connectives"},
+            {"name": "surprise", "description": "Unexpected or novel content"},
+            {"name": "constraint", "description": "Requirements and conditions"},
+        ],
+        "last_concepts": [],
+        "last_associations": [],
+        "last_causal_chains": [],
+    }
+
+    if comp_stream:
+        # Extract last understanding state
+        last_state = getattr(comp_stream, "_last_state", None)
+        if last_state:
+            for concept in getattr(last_state, "concepts", [])[:10]:
+                result["last_concepts"].append(
+                    {
+                        "text": getattr(concept, "text", ""),
+                        "domain_activation": getattr(concept, "domain_activation", {}),
+                        "channel_metadata": getattr(concept, "channel_metadata", {}),
+                    }
+                )
+            for assoc in getattr(last_state, "associations", [])[:10]:
+                result["last_associations"].append(
+                    {
+                        "type": getattr(assoc, "association_type", ""),
+                        "source_idx": getattr(assoc, "source_idx", 0),
+                        "target_idx": getattr(assoc, "target_idx", 0),
+                        "confidence": getattr(assoc, "confidence", 0.0),
+                    }
+                )
+            for chain in getattr(last_state, "causal_chains", [])[:5]:
+                result["last_causal_chains"].append(
+                    {
+                        "depth": getattr(chain, "depth", 0),
+                        "probability": getattr(chain, "combined_probability", 0.0),
+                        "snn_confidence": getattr(chain, "snn_confidence", 0.0),
+                    }
+                )
+
+    return result
+
+
+@router.get("/api/snn/plasticity")
+async def get_snn_plasticity_status():
+    """Return STDP plasticity stats: weight summaries, training history."""
+    brain = _state.get("brain")
+    node_map = _get_node_map(brain) if brain else {}
+
+    decision_node = node_map.get("DecisionNode")
+    trained_prm = None
+    if decision_node:
+        expr_stream = getattr(decision_node, "_expression_stream", None)
+        if expr_stream:
+            trained_prm = getattr(expr_stream, "_trained_prm", None)
+
+    result = {
+        "status": "active" if trained_prm else "not_loaded",
+        "stdp_rule": {
+            "learning_rate": 0.01,
+            "time_constant": 20.0,
+            "description": "Spike-Timing-Dependent Plasticity: strengthens causal (pre→post) connections",
+        },
+        "networks": [],
+        "training_stats": None,
+    }
+
+    if trained_prm:
+        # PRM network info
+        prm_net = getattr(trained_prm, "_network", None)
+        if prm_net:
+            layers = getattr(prm_net, "layer_names", [])
+            result["networks"].append(
+                {
+                    "name": "TrainedPRM",
+                    "architecture": "6→8→4→2",
+                    "layers": list(layers),
+                    "step_count": getattr(prm_net, "step_count", 0),
+                }
+            )
+
+        # Training collector stats
+        collector = getattr(trained_prm, "_collector", None)
+        if collector:
+            examples = getattr(collector, "_examples", [])
+            result["training_stats"] = {
+                "total_examples": len(examples),
+                "last_accuracy": getattr(collector, "_last_accuracy", None),
+                "last_weight_delta": getattr(collector, "_last_weight_delta", None),
+                "batch_threshold": 20,
+                "ready_for_batch": len(examples) >= 20,
+            }
+
+    # Also check ContentPlanner network
+    if decision_node:
+        expr_stream = getattr(decision_node, "_expression_stream", None)
+        if expr_stream:
+            content_planner = getattr(expr_stream, "_content_planner", None)
+            if content_planner:
+                cp_net = getattr(content_planner, "_network", None)
+                if cp_net:
+                    result["networks"].append(
+                        {
+                            "name": "ContentPlanner",
+                            "architecture": "8→12→6→3",
+                            "layers": list(getattr(cp_net, "layer_names", [])),
+                            "step_count": getattr(cp_net, "step_count", 0),
+                        }
+                    )
+
+    return result
+
+
 @router.get("/api/persona/profile")
 async def get_persona_profile(request: Request):
     tenant_id = getattr(request.state, "tenant_id", "default")
