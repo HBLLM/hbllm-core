@@ -57,4 +57,5 @@ class UnderstandingState:
     all_memories: list[ActivatedMemory] = field(default_factory=list)
     salience_map: list[float] = field(default_factory=list)
     associations: list[Any] = field(default_factory=list)
+    causal_chains: list[Any] = field(default_factory=list)
 

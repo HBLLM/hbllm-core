@@ -522,6 +522,28 @@ def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
         except Exception as e:
             logger.debug("AssociationLayer not available (non-fatal): %s", e)
 
+        # Try to create CausalReasoner for multi-hop causal reasoning
+        causal_reasoner = None
+        try:
+            from hbllm.brain.causality.causal_graph import CausalGraph
+            from hbllm.brain.snn.reasoning.reasoner import CausalReasoner
+            from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
+
+            # Use data_dir from router_node if available, else default
+            data_dir = getattr(router_node, "data_dir", "data")
+            causal_graph = CausalGraph(data_dir=data_dir)
+            reasoning_net = ReasoningNetwork(stdp_rule=assoc_stdp if assoc_stdp else None)
+            causal_reasoner = CausalReasoner(
+                causal_graph=causal_graph,
+                reasoning_network=reasoning_net,
+                max_depth=3,
+                min_probability=0.3,
+                top_k=5,
+            )
+            logger.info("CausalReasoner wired to ComprehensionStream")
+        except Exception as e:
+            logger.debug("CausalReasoner not available (non-fatal): %s", e)
+
         stream = ComprehensionStream(
             ensemble=ensemble,
             lexical_buffer=lexical_buffer,
@@ -529,6 +551,7 @@ def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
             domain_centroids=router_node.domain_centroids,
             memory_search_fn=None,  # No memory coupling in v1; wired later if needed
             association_layer=association_layer,
+            causal_reasoner=causal_reasoner,
         )
         router_node.comprehension_stream = stream
         logger.info("ComprehensionStream wired to RouterNode")

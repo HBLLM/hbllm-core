@@ -58,6 +58,7 @@ class ComprehensionStream:
         domain_centroids: dict[str, Any],
         memory_search_fn: MemorySearchFn | None = None,
         association_layer: Any | None = None,
+        causal_reasoner: Any | None = None,
     ) -> None:
         """Initialize the comprehension stream.
 
@@ -73,6 +74,9 @@ class ComprehensionStream:
             association_layer: Optional AssociationLayer for discovering
                                concept relationships. If None, associations
                                are not computed.
+            causal_reasoner: Optional CausalReasoner for multi-hop causal
+                             graph traversal. If None, causal reasoning
+                             is skipped.
         """
         self.ensemble = ensemble
         self.lexical_buffer = lexical_buffer
@@ -80,6 +84,7 @@ class ComprehensionStream:
         self.domain_centroids = domain_centroids
         self.memory_search_fn = memory_search_fn
         self.association_layer = association_layer
+        self.causal_reasoner = causal_reasoner
 
         # Per-query state
         self._word_buffer: list[str] = []
@@ -252,6 +257,17 @@ class ComprehensionStream:
             except Exception:
                 logger.debug(
                     "AssociationLayer failed (non-fatal), skipping associations"
+                )
+
+        # Run causal reasoning over concept texts
+        if self.causal_reasoner is not None and self._concepts:
+            try:
+                concept_ids = [c.text for c in self._concepts]
+                chains = self.causal_reasoner.reason(concept_ids)
+                state.causal_chains = chains
+            except Exception:
+                logger.debug(
+                    "CausalReasoner failed (non-fatal), skipping causal chains"
                 )
 
         # Reset per-query state
