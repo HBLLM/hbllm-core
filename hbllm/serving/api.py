@@ -392,6 +392,29 @@ async def lifespan(app: FastAPI) -> Any:
 
     model_size = os.getenv("HBLLM_MODEL_SIZE", "125m")
 
+    # ── Production secret validation ──────────────────────────────────────────
+    hbllm_env = os.getenv("HBLLM_ENV", "development").lower()
+    if hbllm_env == "production":
+        _INSECURE_DEFAULTS = {
+            "super-secret-key-change-me",
+            "super-secret-jwt-change-me",
+            "super-secret-csrf-change-me",
+            "admin_password_change_me",
+        }
+        _SECRET_VARS = {
+            "HBLLM_SECRET_KEY": os.getenv("HBLLM_SECRET_KEY", ""),
+            "HBLLM_JWT_SECRET": os.getenv("HBLLM_JWT_SECRET", ""),
+            "HBLLM_CSRF_SECRET": os.getenv("HBLLM_CSRF_SECRET", ""),
+            "HBLLM_ADMIN_PASS": os.getenv("HBLLM_ADMIN_PASS", ""),
+        }
+        insecure_found = [k for k, v in _SECRET_VARS.items() if v in _INSECURE_DEFAULTS or not v]
+        if insecure_found:
+            raise RuntimeError(
+                f"HBLLM_ENV=production but the following secrets are missing or use insecure "
+                f"defaults: {', '.join(insecure_found)}. Set them to secure values before deploying."
+            )
+        logger.info("Production security validation passed")
+
     # Initialize Core Config & Security components
     config = HBLLMCoreConfig.load()
     if config.security.audit_enabled:
@@ -401,7 +424,8 @@ async def lifespan(app: FastAPI) -> Any:
         await _boot_brain(app=app, model_size=model_size)
         logger.info("Full brain pipeline active")
     except Exception as e:
-        logger.warning("Full brain boot failed (%s). Falling back to provider mode.", e)
+        logger.error("Full brain boot failed: %s — falling back to provider-only mode.", e)
+        _state["brain_degraded"] = True
         await _boot_provider_mode()
 
     # ── Cloud features (SaaS layer) — graceful fallback for OSS mode ──
@@ -841,6 +865,10 @@ app = FastAPI(
 from fastapi.responses import JSONResponse
 
 from hbllm.security.tenant_guard import TenantIsolationError
+from hbllm.serving.errors import HBLLMError, hbllm_error_handler, unhandled_exception_handler
+from hbllm.serving.middleware import RequestIDMiddleware
+
+# ─── Exception Handlers ───────────────────────────────────────────────────────
 
 
 @app.exception_handler(TenantIsolationError)
@@ -848,9 +876,17 @@ async def tenant_isolation_exception_handler(request: Request, exc: TenantIsolat
     logger.warning("Tenant isolation violation blocked: %s", exc)
     return JSONResponse(
         status_code=403,
-        content={"detail": f"Access denied: {str(exc)}"},
+        content={
+            "error": {"code": "FORBIDDEN", "message": "Access denied: tenant isolation violation"}
+        },
     )
 
+
+app.add_exception_handler(HBLLMError, hbllm_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(Exception, unhandled_exception_handler)  # type: ignore[arg-type]
+
+
+# ─── Middleware Stack (order matters: outermost first) ────────────────────────
 
 _cors_origins = os.environ.get(
     "HBLLM_CORS_ORIGINS",
@@ -861,9 +897,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _cors_origins],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key"],
 )
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(JWTAuthMiddleware)
 
 
@@ -879,12 +917,50 @@ async def health_check() -> HealthResponse:
     brain = _state.get("brain")
     node_count = len(brain.nodes) if brain else 0
     mode = _state.get("mode", "unknown")
-    _state.get("provider")
     return HealthResponse(
         status="healthy",
         nodes_registered=node_count,
         bus_type=_state.get("bus_type", "unknown"),
         provider_mode=mode,
+    )
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    """Kubernetes liveness probe — returns 200 if the process is running."""
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready() -> dict[str, Any]:
+    """Kubernetes readiness probe — checks brain, bus, and provider availability."""
+    checks: dict[str, Any] = {}
+    overall_ready = True
+
+    # Brain check
+    brain = _state.get("brain")
+    if brain:
+        checks["brain"] = "ok"
+    elif _state.get("mode") == "provider":
+        checks["brain"] = "degraded (provider-only mode)"
+    else:
+        checks["brain"] = "not_initialized"
+        overall_ready = False
+
+    # Bus check
+    bus = _state.get("bus")
+    checks["bus"] = "ok" if bus else "not_initialized"
+
+    # Provider check
+    provider = _state.get("provider")
+    if not provider and brain:
+        provider = getattr(brain, "provider", None)
+    checks["provider"] = "ok" if provider else "not_configured"
+
+    status_code = 200 if overall_ready else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ready" if overall_ready else "not_ready", "checks": checks},
     )
 
 
@@ -1460,7 +1536,7 @@ async def audio_synthesize(api_req: Request, request: dict) -> Any:
 
 
 @app.post("/v1/benchmarks/run")
-async def run_benchmarks(api_req: Request, request: dict = None) -> Any:
+async def run_benchmarks(api_req: Request, request: dict | None = None) -> Any:
     """Run specified benchmark suites (latency, memory, specialization, multi_tenant, all) and return reports."""
     from fastapi import HTTPException
 
@@ -1641,7 +1717,7 @@ async def synapse_websocket(websocket: WebSocket) -> Any:
     except WebSocketDisconnect:
         gateway.disconnect(tenant_id, user_id, device_id)
     except Exception as e:
-        logger.error(f"Synapse WebSocket error: {e}")
+        logger.error("Synapse WebSocket error: %s", e)
         gateway.disconnect(tenant_id, user_id, device_id)
 
 
@@ -1664,8 +1740,8 @@ async def webrtc_offer(api_req: Request, request: WebRTCOfferRequest) -> Any:
         )
         return answer
     except Exception as e:
-        logger.error(f"WebRTC negotiation failed for {device_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("WebRTC negotiation failed for %s: %s", device_id, e)
+        raise HTTPException(status_code=500, detail="WebRTC negotiation failed")
 
 
 @app.post("/v1/chat/stream")
