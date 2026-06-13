@@ -18,7 +18,6 @@ from hbllm.brain.causality.causal_graph import CausalGraph, CausalLink
 from hbllm.brain.snn.reasoning.reasoner import CausalChain, CausalReasoner
 from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # ReasoningNetwork Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -30,12 +29,14 @@ class TestReasoningNetwork:
     def test_high_confidence_for_strong_chain(self) -> None:
         """Strong, short, recent chain → high confidence."""
         net = ReasoningNetwork()
-        score = net.evaluate({
-            "chain_probability": 0.95,
-            "chain_length": 1.0,  # 1 hop
-            "recency": 0.99,
-            "diversity": 0.8,
-        })
+        score = net.evaluate(
+            {
+                "chain_probability": 0.95,
+                "chain_length": 1.0,  # 1 hop
+                "recency": 0.99,
+                "diversity": 0.8,
+            }
+        )
         assert 0.0 <= score <= 1.0
         # Strong features should produce reasonable confidence
         assert score > 0.3
@@ -43,30 +44,36 @@ class TestReasoningNetwork:
     def test_low_confidence_for_weak_chain(self) -> None:
         """Weak, long chain → lower confidence."""
         net = ReasoningNetwork()
-        strong = net.evaluate({
-            "chain_probability": 0.9,
-            "chain_length": 1.0,
-            "recency": 0.9,
-            "diversity": 0.8,
-        })
-        weak = net.evaluate({
-            "chain_probability": 0.1,
-            "chain_length": 0.33,  # 3 hops
-            "recency": 0.2,
-            "diversity": 0.3,
-        })
+        strong = net.evaluate(
+            {
+                "chain_probability": 0.9,
+                "chain_length": 1.0,
+                "recency": 0.9,
+                "diversity": 0.8,
+            }
+        )
+        weak = net.evaluate(
+            {
+                "chain_probability": 0.1,
+                "chain_length": 0.33,  # 3 hops
+                "recency": 0.2,
+                "diversity": 0.3,
+            }
+        )
         # Strong should outrank weak
         assert strong >= weak
 
     def test_zero_features_returns_valid(self) -> None:
         """All zero features → valid confidence."""
         net = ReasoningNetwork()
-        score = net.evaluate({
-            "chain_probability": 0.0,
-            "chain_length": 0.0,
-            "recency": 0.0,
-            "diversity": 0.0,
-        })
+        score = net.evaluate(
+            {
+                "chain_probability": 0.0,
+                "chain_length": 0.0,
+                "recency": 0.0,
+                "diversity": 0.0,
+            }
+        )
         assert 0.0 <= score <= 1.0
 
     def test_missing_features_handled(self) -> None:
@@ -101,24 +108,44 @@ class TestCausalReasoner:
 
         # Build a chain: A → B → C → D
         now = time.time()
-        g._insert(CausalLink(
-            link_id="link_ab", source_id="concept_A", target_id="concept_B",
-            probability=0.9, created_at=now,
-        ))
-        g._insert(CausalLink(
-            link_id="link_bc", source_id="concept_B", target_id="concept_C",
-            probability=0.8, created_at=now,
-        ))
-        g._insert(CausalLink(
-            link_id="link_cd", source_id="concept_C", target_id="concept_D",
-            probability=0.7, created_at=now,
-        ))
+        g._insert(
+            CausalLink(
+                link_id="link_ab",
+                source_id="concept_A",
+                target_id="concept_B",
+                probability=0.9,
+                created_at=now,
+            )
+        )
+        g._insert(
+            CausalLink(
+                link_id="link_bc",
+                source_id="concept_B",
+                target_id="concept_C",
+                probability=0.8,
+                created_at=now,
+            )
+        )
+        g._insert(
+            CausalLink(
+                link_id="link_cd",
+                source_id="concept_C",
+                target_id="concept_D",
+                probability=0.7,
+                created_at=now,
+            )
+        )
 
         # Also: A → E (separate branch)
-        g._insert(CausalLink(
-            link_id="link_ae", source_id="concept_A", target_id="concept_E",
-            probability=0.95, created_at=now,
-        ))
+        g._insert(
+            CausalLink(
+                link_id="link_ae",
+                source_id="concept_A",
+                target_id="concept_E",
+                probability=0.95,
+                created_at=now,
+            )
+        )
 
         return g
 
@@ -224,10 +251,15 @@ class TestStreamCausalIntegration:
     def causal_graph(self, tmp_path):
         g = CausalGraph(data_dir=str(tmp_path / "causal"))
         now = time.time()
-        g._insert(CausalLink(
-            link_id="link_1", source_id="test concept", target_id="effect_1",
-            probability=0.9, created_at=now,
-        ))
+        g._insert(
+            CausalLink(
+                link_id="link_1",
+                source_id="test concept",
+                target_id="effect_1",
+                probability=0.9,
+                created_at=now,
+            )
+        )
         return g
 
     def _make_stream(self, causal_graph=None, with_reasoner=True):
@@ -239,7 +271,10 @@ class TestStreamCausalIntegration:
 
         ensemble = ComprehensionEnsemble(domain="general")
         lexical_buffer = LexicalBuffer()
-        encoder = lambda text: np.random.randn(384)
+
+        def encoder(text):
+            return np.random.randn(384)
+
         domain_centroids = {"general": np.random.randn(384)}
 
         reasoner = None
@@ -258,9 +293,7 @@ class TestStreamCausalIntegration:
     async def test_stream_with_causal_reasoner(self, causal_graph) -> None:
         stream = self._make_stream(causal_graph, with_reasoner=True)
 
-        state = await stream.comprehend(
-            "My Laravel API returns 500 errors on auth routes"
-        )
+        state = await stream.comprehend("My Laravel API returns 500 errors on auth routes")
 
         assert hasattr(state, "causal_chains")
         assert isinstance(state.causal_chains, list)

@@ -158,8 +158,7 @@ class CausalReasoner:
 
         if result:
             logger.info(
-                "CausalReasoner found %d chains from %d concepts "
-                "(top confidence: %.3f)",
+                "CausalReasoner found %d chains from %d concepts (top confidence: %.3f)",
                 len(result),
                 len(concept_ids),
                 result[0].snn_confidence,
@@ -167,9 +166,7 @@ class CausalReasoner:
 
         return result
 
-    def reason_between(
-        self, source_id: str, target_id: str
-    ) -> list[CausalChain]:
+    def reason_between(self, source_id: str, target_id: str) -> list[CausalChain]:
         """Find causal paths between two specific concepts.
 
         Uses BFS to find all paths from source_id that reach target_id
@@ -215,9 +212,7 @@ class CausalReasoner:
         matching.sort(key=lambda c: c.snn_confidence, reverse=True)
         return matching[: self._top_k]
 
-    def _traverse_forward(
-        self, start_id: str, max_depth: int
-    ) -> list[list[CausalLink]]:
+    def _traverse_forward(self, start_id: str, max_depth: int) -> list[list[CausalLink]]:
         """BFS forward traversal of the causal graph.
 
         Discovers all paths from start_id by following ``get_effects()``
@@ -234,9 +229,7 @@ class CausalReasoner:
         all_paths: list[list[CausalLink]] = []
 
         # BFS queue: (current_node_id, current_path, visited_set)
-        queue: list[tuple[str, list[CausalLink], set[str]]] = [
-            (start_id, [], {start_id})
-        ]
+        queue: list[tuple[str, list[CausalLink], set[str]]] = [(start_id, [], {start_id})]
 
         while queue:
             current_id, current_path, visited = queue.pop(0)
@@ -266,9 +259,7 @@ class CausalReasoner:
 
         return all_paths
 
-    def _extract_features(
-        self, chain: list[CausalLink]
-    ) -> dict[str, float]:
+    def _extract_features(self, chain: list[CausalLink]) -> dict[str, float]:
         """Extract SNN input features from a causal chain.
 
         Features are all normalized to [0, 1]:

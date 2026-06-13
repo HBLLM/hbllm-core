@@ -215,9 +215,7 @@ class ThoughtController:
         )
         return current
 
-    def _compute_coherence(
-        self, goal: ThoughtGoal, prev_text: str
-    ) -> float:
+    def _compute_coherence(self, goal: ThoughtGoal, prev_text: str) -> float:
         """Compute coherence current from goal + previous fragment.
 
         Checks lexical overlap and domain continuity to estimate

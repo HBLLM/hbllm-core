@@ -228,9 +228,7 @@ class AssociationLayer:
                 if "association" in spikes_result:
                     for neuron_idx, spike in enumerate(spikes_result["association"]):
                         if spike.fired and spike.strength > self.min_strength:
-                            assoc_type = _ASSOCIATION_TYPES.get(
-                                neuron_idx, "similar"
-                            )
+                            assoc_type = _ASSOCIATION_TYPES.get(neuron_idx, "similar")
                             associations.append(
                                 ConceptAssociation(
                                     source_idx=i,
@@ -310,9 +308,7 @@ class AssociationLayer:
         if domains_a and domains_b:
             shared = set(domains_a.keys()) & set(domains_b.keys())
             total = set(domains_a.keys()) | set(domains_b.keys())
-            features["domain_overlap"] = (
-                len(shared) / max(1, len(total))
-            )
+            features["domain_overlap"] = len(shared) / max(1, len(total))
         else:
             features["domain_overlap"] = 0.0
 

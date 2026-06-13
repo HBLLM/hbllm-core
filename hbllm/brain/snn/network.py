@@ -90,9 +90,7 @@ class NeuronLayer:
         ]
         self._last_spikes: list[SpikeEvent] = []
 
-    def step(
-        self, currents: list[float], timestamp: float
-    ) -> list[SpikeEvent]:
+    def step(self, currents: list[float], timestamp: float) -> list[SpikeEvent]:
         """Step all neurons with their individual input currents.
 
         Args:
@@ -108,13 +106,11 @@ class NeuronLayer:
         """
         if len(currents) != self.neuron_count:
             raise ValueError(
-                f"Layer '{self.name}' expects {self.neuron_count} currents, "
-                f"got {len(currents)}"
+                f"Layer '{self.name}' expects {self.neuron_count} currents, got {len(currents)}"
             )
 
         spikes = [
-            neuron.step(current, timestamp)
-            for neuron, current in zip(self.neurons, currents)
+            neuron.step(current, timestamp) for neuron, current in zip(self.neurons, currents)
         ]
         self._last_spikes = spikes
         return spikes
@@ -208,19 +204,15 @@ class LayerProjection:
         if initial_weights is not None:
             if len(initial_weights) != source_size:
                 raise ValueError(
-                    f"Weight matrix rows ({len(initial_weights)}) "
-                    f"!= source_size ({source_size})"
+                    f"Weight matrix rows ({len(initial_weights)}) != source_size ({source_size})"
                 )
             self._weights: list[list[_ProjectionWeight]] = []
             for i, row in enumerate(initial_weights):
                 if len(row) != target_size:
                     raise ValueError(
-                        f"Weight matrix row {i} cols ({len(row)}) "
-                        f"!= target_size ({target_size})"
+                        f"Weight matrix row {i} cols ({len(row)}) != target_size ({target_size})"
                     )
-                self._weights.append([
-                    _ProjectionWeight(weight=w, base_weight=w) for w in row
-                ])
+                self._weights.append([_ProjectionWeight(weight=w, base_weight=w) for w in row])
         else:
             # Uniform initialization
             default_w = 1.0 / max(1, source_size)
@@ -232,9 +224,7 @@ class LayerProjection:
                 for _ in range(source_size)
             ]
 
-    def project(
-        self, source_spikes: list[SpikeEvent], timestamp: float
-    ) -> list[float]:
+    def project(self, source_spikes: list[SpikeEvent], timestamp: float) -> list[float]:
         """Convert source spikes to target input currents.
 
         For each target neuron *j*, computes::
@@ -323,15 +313,11 @@ class LayerProjection:
 
     def get_weight_matrix(self) -> list[list[float]]:
         """Get the current weight matrix as plain floats."""
-        return [
-            [pw.weight for pw in row] for row in self._weights
-        ]
+        return [[pw.weight for pw in row] for row in self._weights]
 
     def get_total_updates(self) -> int:
         """Total STDP updates across all connections."""
-        return sum(
-            pw.update_count for row in self._weights for pw in row
-        )
+        return sum(pw.update_count for row in self._weights for pw in row)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize projection for persistence."""
@@ -354,9 +340,7 @@ class LayerProjection:
         }
 
     @classmethod
-    def from_dict(
-        cls, data: dict[str, Any], stdp_rule: Any | None = None
-    ) -> LayerProjection:
+    def from_dict(cls, data: dict[str, Any], stdp_rule: Any | None = None) -> LayerProjection:
         """Restore from persisted state."""
         proj = cls(
             source_name=data["source_name"],
@@ -468,9 +452,7 @@ class SpikingNetwork:
             return self._layer_order
 
         # Build adjacency: which layers feed into which
-        incoming: dict[str, set[str]] = {
-            name: set() for name in self._layers
-        }
+        incoming: dict[str, set[str]] = {name: set() for name in self._layers}
         for proj in self._projections:
             # Skip self-connections for ordering purposes
             if proj.source_name != proj.target_name:
@@ -534,7 +516,7 @@ class SpikingNetwork:
                 # Pad if needed
                 while len(currents) < layer.neuron_count:
                     currents.append(0.0)
-                currents = currents[:layer.neuron_count]
+                currents = currents[: layer.neuron_count]
             else:
                 currents = [0.0] * layer.neuron_count
 
@@ -544,9 +526,7 @@ class SpikingNetwork:
                     continue
                 if proj.source_name not in all_spikes:
                     continue  # source hasn't been stepped yet
-                projected = proj.project(
-                    all_spikes[proj.source_name], timestamp
-                )
+                projected = proj.project(all_spikes[proj.source_name], timestamp)
                 for j in range(layer.neuron_count):
                     currents[j] += projected[j]
 
@@ -576,10 +556,7 @@ class SpikingNetwork:
 
     def get_all_spikes(self) -> dict[str, list[bool]]:
         """Get binary spike vectors for all layers from last step."""
-        return {
-            name: layer.get_spike_vector()
-            for name, layer in self._layers.items()
-        }
+        return {name: layer.get_spike_vector() for name, layer in self._layers.items()}
 
     @property
     def step_count(self) -> int:
@@ -624,9 +601,7 @@ class SpikingNetwork:
         }
 
     @classmethod
-    def from_dict(
-        cls, data: dict[str, Any], stdp_rule: Any | None = None
-    ) -> SpikingNetwork:
+    def from_dict(cls, data: dict[str, Any], stdp_rule: Any | None = None) -> SpikingNetwork:
         """Restore from persisted state."""
         net = cls(name=data.get("name", "spiking_network"))
         net._step_count = data.get("step_count", 0)
@@ -667,9 +642,7 @@ class SpikingNetwork:
         )
 
     @classmethod
-    def load(
-        cls, path: str | Path, stdp_rule: Any | None = None
-    ) -> SpikingNetwork:
+    def load(cls, path: str | Path, stdp_rule: Any | None = None) -> SpikingNetwork:
         """Load network from a JSON file."""
         path = Path(path)
         if not path.exists():

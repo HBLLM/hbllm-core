@@ -136,7 +136,7 @@ class PRMTrainer:
         for epoch in range(self._epochs):
             # Process in batches
             for batch_start in range(0, len(examples), self._batch_size):
-                batch = examples[batch_start:batch_start + self._batch_size]
+                batch = examples[batch_start : batch_start + self._batch_size]
 
                 for example in batch:
                     self._train_example(network, example)
@@ -165,8 +165,7 @@ class PRMTrainer:
         self._history.append(metrics)
 
         logger.info(
-            "PRMTrainer: %d examples × %d epochs, "
-            "accuracy %.1f%% → %.1f%%, Δw=%.4f, %.1fms",
+            "PRMTrainer: %d examples × %d epochs, accuracy %.1f%% → %.1f%%, Δw=%.4f, %.1fms",
             len(examples),
             self._epochs,
             pre_accuracy * 100,
@@ -248,9 +247,7 @@ class PRMTrainer:
                 weights.extend(row)
         return weights
 
-    def _compute_weight_delta(
-        self, before: list[float], after: list[float]
-    ) -> float:
+    def _compute_weight_delta(self, before: list[float], after: list[float]) -> float:
         """Compute total absolute weight change."""
         if len(before) != len(after):
             return 0.0

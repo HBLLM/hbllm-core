@@ -139,7 +139,8 @@ class ReasoningNetwork:
         ]
 
         self._network.connect(
-            "evidence", "evaluation",
+            "evidence",
+            "evaluation",
             initial_weights=evidence_to_eval,
             stdp_rule=stdp_rule,
         )
@@ -161,7 +162,8 @@ class ReasoningNetwork:
         ]
 
         self._network.connect(
-            "evaluation", "confidence",
+            "evaluation",
+            "confidence",
             initial_weights=eval_to_conf,
             stdp_rule=stdp_rule,
         )

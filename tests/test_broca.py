@@ -33,7 +33,6 @@ from hbllm.brain.snn.expression.shallow_renderer import RenderingContext
 from hbllm.brain.snn.expression.trained_prm import TrainedPRM
 from hbllm.brain.snn.network import SpikingNetwork
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # ContentNode Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -89,16 +88,18 @@ class TestContentPlanNetwork:
 
     def test_decide_returns_valid_keys(self) -> None:
         net = ContentPlanNetwork()
-        result = net.decide({
-            "concept_salience": 0.9,
-            "domain_strength": 0.7,
-            "association_count": 0.5,
-            "causal_confidence": 0.6,
-            "memory_density": 0.3,
-            "constraint_strength": 0.1,
-            "concept_novelty": 0.4,
-            "query_specificity": 0.8,
-        })
+        result = net.decide(
+            {
+                "concept_salience": 0.9,
+                "domain_strength": 0.7,
+                "association_count": 0.5,
+                "causal_confidence": 0.6,
+                "memory_density": 0.3,
+                "constraint_strength": 0.1,
+                "concept_novelty": 0.4,
+                "query_specificity": 0.8,
+            }
+        )
         assert "content_type" in result
         assert "include" in result
         assert "emphasize" in result
@@ -112,11 +113,13 @@ class TestContentPlanNetwork:
 
     def test_high_salience_produces_assertion(self) -> None:
         net = ContentPlanNetwork()
-        result = net.decide({
-            "concept_salience": 1.0,
-            "domain_strength": 0.9,
-            "query_specificity": 0.9,
-        })
+        result = net.decide(
+            {
+                "concept_salience": 1.0,
+                "domain_strength": 0.9,
+                "query_specificity": 0.9,
+            }
+        )
         # High salience + specificity should trend toward assertion
         assert result["content_type"] in CONTENT_TYPES
 
@@ -133,17 +136,21 @@ class TestContentPlanner:
     def context(self):
         return RenderingContext(
             concepts=["SNN architecture", "LIF neurons", "STDP plasticity"],
-            associations=[{
-                "association_type": "similar",
-                "source_text": "SNN architecture",
-                "target_text": "LIF neurons",
-                "strength": 0.8,
-            }],
-            causal_chains=[{
-                "source_concept": "STDP plasticity",
-                "conclusion": "adaptive weights",
-                "snn_confidence": 0.75,
-            }],
+            associations=[
+                {
+                    "association_type": "similar",
+                    "source_text": "SNN architecture",
+                    "target_text": "LIF neurons",
+                    "strength": 0.8,
+                }
+            ],
+            causal_chains=[
+                {
+                    "source_concept": "STDP plasticity",
+                    "conclusion": "adaptive weights",
+                    "snn_confidence": 0.75,
+                }
+            ],
             goals=[
                 ThoughtGoal(
                     id="g1",

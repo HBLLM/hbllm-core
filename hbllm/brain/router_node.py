@@ -556,9 +556,7 @@ class RouterNode(Node):
                 # Refine domain using multi-concept signals
                 if understanding.domain_activations:
                     strong_domains = {
-                        d: s
-                        for d, s in understanding.domain_activations.items()
-                        if s > 0.5
+                        d: s for d, s in understanding.domain_activations.items() if s > 0.5
                     }
                     if len(strong_domains) > 1:
                         # Multi-domain query detected — use weighted blend
@@ -576,13 +574,10 @@ class RouterNode(Node):
                         for c in understanding.concepts
                     ],
                     "memories": [
-                        {"id": m.id, "content": m.content[:200]}
-                        for m in understanding.all_memories
+                        {"id": m.id, "content": m.content[:200]} for m in understanding.all_memories
                     ],
                     "salience_peak": (
-                        max(understanding.salience_map)
-                        if understanding.salience_map
-                        else 0
+                        max(understanding.salience_map) if understanding.salience_map else 0
                     ),
                 }
                 logger.debug(

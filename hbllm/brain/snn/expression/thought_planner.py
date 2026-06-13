@@ -84,9 +84,7 @@ class ThoughtPlanner:
                 )
 
             # Extract memory hints from activated memories
-            memory_hints = [
-                m.content[:200] for m in concept.activated_memories
-            ]
+            memory_hints = [m.content[:200] for m in concept.activated_memories]
 
             # Extract constraint metadata from channel_metadata
             constraints = {

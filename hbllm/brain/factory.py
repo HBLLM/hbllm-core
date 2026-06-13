@@ -488,16 +488,12 @@ def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
             )
             # Create a temporary ensemble to get static weights
             _tmp = ComprehensionEnsemble(domain="general")
-            plastic_weights = PlasticWeightMatrix(
-                _tmp._signal_weights, stdp_rule
-            )
+            plastic_weights = PlasticWeightMatrix(_tmp._signal_weights, stdp_rule)
             logger.info("STDP plasticity enabled for ComprehensionEnsemble")
         except Exception as e:
             logger.debug("STDP plasticity not available (non-fatal): %s", e)
 
-        ensemble = ComprehensionEnsemble(
-            domain="general", plastic_weights=plastic_weights
-        )
+        ensemble = ComprehensionEnsemble(domain="general", plastic_weights=plastic_weights)
 
         # Try to create AssociationLayer for concept relationship detection
         association_layer = None
@@ -604,9 +600,7 @@ def _wire_expression_stream(
                 w_min=0.0,
                 w_max=2.0,
             )
-            ctrl_plastic = PlasticWeightMatrix(
-                controller._static_weights, stdp_rule
-            )
+            ctrl_plastic = PlasticWeightMatrix(controller._static_weights, stdp_rule)
             controller.plastic_weights = ctrl_plastic
             logger.info("STDP plasticity enabled for ThoughtController")
         except Exception as e:
@@ -664,8 +658,8 @@ def _wire_expression_stream(
         content_planner = None
         broca_encoder = None
         try:
-            from hbllm.brain.snn.expression.content_planner import ContentPlanner
             from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder
+            from hbllm.brain.snn.expression.content_planner import ContentPlanner
 
             content_planner = ContentPlanner()
             broca_encoder = BrocaEncoder()

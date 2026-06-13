@@ -119,9 +119,7 @@ class SNNCalibrator:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         return self._data_dir / f"snn_weights_{domain}.json"
 
-    def save_weights(
-        self, domain: str, weight_matrix: PlasticWeightMatrix
-    ) -> None:
+    def save_weights(self, domain: str, weight_matrix: PlasticWeightMatrix) -> None:
         """Persist learned weights for a domain.
 
         Args:
@@ -158,6 +156,6 @@ class SNNCalibrator:
         if path is None:
             return None
 
-        from hbllm.brain.snn.plasticity import PlasticWeightMatrix as PWM
+        from hbllm.brain.snn.plasticity import PlasticWeightMatrix
 
-        return PWM.load(path, static_weights, stdp_rule)
+        return PlasticWeightMatrix.load(path, static_weights, stdp_rule)

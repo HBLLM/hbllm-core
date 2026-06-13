@@ -24,11 +24,11 @@ from hbllm.brain.snn.comprehension.ensemble import (
     ComprehensionEnsemble,
 )
 from hbllm.brain.snn.comprehension.lexical import (
-    LexicalBuffer,
-    LexicalSignals,
     _CONSTRAINT_WORDS,
     _STOPWORDS,
     _TECHNICAL_TERMS,
+    LexicalBuffer,
+    LexicalSignals,
 )
 from hbllm.brain.snn.comprehension.models import (
     ActivatedMemory,
@@ -36,7 +36,6 @@ from hbllm.brain.snn.comprehension.models import (
     UnderstandingState,
 )
 from hbllm.brain.snn.comprehension.stream import ComprehensionStream
-
 
 # ── LexicalBuffer tests ──────────────────────────────────────────────────
 
@@ -208,8 +207,12 @@ class TestComprehensionEnsemble:
 
     def test_code_domain_higher_thresholds(self):
         """Code domain should have higher thresholds than general."""
-        assert DOMAIN_PARAMS["code"]["entity_threshold"] > DOMAIN_PARAMS["general"]["entity_threshold"]
-        assert DOMAIN_PARAMS["code"]["clause_threshold"] > DOMAIN_PARAMS["general"]["clause_threshold"]
+        assert (
+            DOMAIN_PARAMS["code"]["entity_threshold"] > DOMAIN_PARAMS["general"]["entity_threshold"]
+        )
+        assert (
+            DOMAIN_PARAMS["code"]["clause_threshold"] > DOMAIN_PARAMS["general"]["clause_threshold"]
+        )
 
     def test_step_returns_fired_channels(self):
         """Step with strong signals should eventually fire neurons."""
@@ -380,9 +383,7 @@ class TestComprehensionStream:
     async def test_concepts_have_embeddings(self):
         """Each concept should have a non-zero embedding."""
         stream = self._make_stream()
-        result = await stream.comprehend(
-            "The server crashed after deploying the new configuration"
-        )
+        result = await stream.comprehend("The server crashed after deploying the new configuration")
 
         for concept in result.concepts:
             assert concept.embedding is not None
@@ -404,9 +405,7 @@ class TestComprehensionStream:
     async def test_memory_retrieval(self):
         """When memory_search_fn is provided, memories should be populated."""
         stream = self._make_stream(with_memory=True)
-        result = await stream.comprehend(
-            "Explain how Redis caching works with a Laravel backend"
-        )
+        result = await stream.comprehend("Explain how Redis caching works with a Laravel backend")
 
         assert len(result.all_memories) >= 1
         assert all(isinstance(m, ActivatedMemory) for m in result.all_memories)
@@ -501,7 +500,11 @@ class TestSNNCalibrator:
         for i in range(15):
             cal.record_outcome(
                 domain="coding",
-                params_used={"entity_threshold": 0.8, "clause_threshold": 1.0, "discourse_threshold": 1.5},
+                params_used={
+                    "entity_threshold": 0.8,
+                    "clause_threshold": 1.0,
+                    "discourse_threshold": 1.5,
+                },
                 num_concepts=3,
                 response_quality=0.7,
                 memory_relevance=0.6,
@@ -547,7 +550,11 @@ class TestSNNCalibrator:
         for i in range(10):
             cal.record_outcome(
                 domain="general",
-                params_used={"entity_threshold": 0.9, "clause_threshold": 1.2, "discourse_threshold": 1.8},
+                params_used={
+                    "entity_threshold": 0.9,
+                    "clause_threshold": 1.2,
+                    "discourse_threshold": 1.8,
+                },
                 num_concepts=1,
                 response_quality=0.2,
                 memory_relevance=0.1,
@@ -557,7 +564,11 @@ class TestSNNCalibrator:
         for i in range(10):
             cal.record_outcome(
                 domain="general",
-                params_used={"entity_threshold": 0.5, "clause_threshold": 0.7, "discourse_threshold": 1.0},
+                params_used={
+                    "entity_threshold": 0.5,
+                    "clause_threshold": 0.7,
+                    "discourse_threshold": 1.0,
+                },
                 num_concepts=4,
                 response_quality=0.9,
                 memory_relevance=0.85,
@@ -575,7 +586,11 @@ class TestSNNCalibrator:
         for i in range(10):
             cal.record_outcome(
                 domain="general",
-                params_used={"entity_threshold": 0.1, "clause_threshold": 0.1, "discourse_threshold": 0.1},
+                params_used={
+                    "entity_threshold": 0.1,
+                    "clause_threshold": 0.1,
+                    "discourse_threshold": 0.1,
+                },
                 num_concepts=10,
                 response_quality=1.0,
                 memory_relevance=1.0,
@@ -583,7 +598,11 @@ class TestSNNCalibrator:
         for i in range(5):
             cal.record_outcome(
                 domain="general",
-                params_used={"entity_threshold": 5.0, "clause_threshold": 5.0, "discourse_threshold": 5.0},
+                params_used={
+                    "entity_threshold": 5.0,
+                    "clause_threshold": 5.0,
+                    "discourse_threshold": 5.0,
+                },
                 num_concepts=0,
                 response_quality=0.0,
                 memory_relevance=0.0,
