@@ -622,6 +622,34 @@ def _wire_expression_stream(
             min_acceptable_reward=0.4,
         )
 
+        # Try to create TrainedPRM for learnable reward scoring
+        trained_prm = None
+        try:
+            from hbllm.brain.snn.expression.trained_prm import TrainedPRM
+
+            prm_stdp = None
+            try:
+                from hbllm.brain.snn.plasticity import STDPRule as _PRMSTDPRule
+
+                prm_stdp = _PRMSTDPRule(
+                    learning_rate=0.01,
+                    time_constant=0.5,
+                    w_min=0.0,
+                    w_max=2.0,
+                )
+            except Exception:
+                pass
+
+            trained_prm = TrainedPRM(
+                reward_evaluator=evaluator,
+                stdp_rule=prm_stdp,
+                fallback_threshold=50,
+                snn_blend_weight=0.6,
+            )
+            logger.info("TrainedPRM wired to ExpressionStream")
+        except Exception as e:
+            logger.debug("TrainedPRM not available (non-fatal): %s", e)
+
         # Bind LLM generate function if available
         llm_generate = None
         if llm is not None and hasattr(llm, "generate"):
@@ -639,6 +667,7 @@ def _wire_expression_stream(
             llm_generate=llm_generate,
             max_revisions=1,
             enable_gating=True,
+            trained_prm=trained_prm,
         )
 
         decision_node.expression_stream = stream

@@ -76,6 +76,7 @@ class ExpressionStream:
         llm_generate: LLMGenerateFn | None = None,
         max_revisions: int = 1,
         enable_gating: bool = True,
+        trained_prm: Any | None = None,
     ) -> None:
         self.planner = planner
         self.controller = controller
@@ -83,6 +84,7 @@ class ExpressionStream:
         self.llm_generate = llm_generate
         self.max_revisions = max_revisions
         self.enable_gating = enable_gating
+        self.trained_prm = trained_prm
 
     async def express(
         self,
@@ -143,20 +145,32 @@ class ExpressionStream:
                 prev_fragment_text=prev_fragment_text,
             )
 
-            # Step 2c: Evaluate the fragment (preserve generation metadata)
+            # Step 2c: Evaluate the fragment
             gen_metadata = fragment.metadata.copy()
-            evaluated = self.evaluator.evaluate(
-                fragment_text=fragment.text,
-                goal=goal,
-                prev_fragment_text=prev_fragment_text,
-            )
+            if self.trained_prm is not None:
+                evaluated = self.trained_prm.evaluate(
+                    fragment_text=fragment.text,
+                    goal=goal,
+                    prev_fragment_text=prev_fragment_text,
+                )
+            else:
+                evaluated = self.evaluator.evaluate(
+                    fragment_text=fragment.text,
+                    goal=goal,
+                    prev_fragment_text=prev_fragment_text,
+                )
             gen_metadata.update(evaluated.metadata)
             evaluated.metadata = gen_metadata
 
             # Step 2d: Revise if needed
             revision_count = 0
+            _should_revise = (
+                self.trained_prm.should_revise(evaluated)
+                if self.trained_prm is not None
+                else self.evaluator.should_revise(evaluated)
+            )
             while (
-                self.evaluator.should_revise(evaluated)
+                _should_revise
                 and revision_count < self.max_revisions
                 and self.llm_generate is not None
             ):
@@ -172,14 +186,32 @@ class ExpressionStream:
                 )
 
                 rev_metadata = revised.metadata.copy()
-                evaluated = self.evaluator.evaluate(
-                    fragment_text=revised.text,
-                    goal=goal,
-                    prev_fragment_text=prev_fragment_text,
-                )
+                if self.trained_prm is not None:
+                    evaluated = self.trained_prm.evaluate(
+                        fragment_text=revised.text,
+                        goal=goal,
+                        prev_fragment_text=prev_fragment_text,
+                    )
+                else:
+                    evaluated = self.evaluator.evaluate(
+                        fragment_text=revised.text,
+                        goal=goal,
+                        prev_fragment_text=prev_fragment_text,
+                    )
                 rev_metadata.update(evaluated.metadata)
                 evaluated.metadata = rev_metadata
                 evaluated.revision_count = revision_count
+
+                _should_revise = (
+                    self.trained_prm.should_revise(evaluated)
+                    if self.trained_prm is not None
+                    else self.evaluator.should_revise(evaluated)
+                )
+
+            # Record outcome for PRM training
+            if self.trained_prm is not None:
+                was_accepted = revision_count == 0
+                self.trained_prm.record_outcome(evaluated, accepted=was_accepted)
 
             # Record for coherence tracking
             self.controller.record_generation(evaluated.text)

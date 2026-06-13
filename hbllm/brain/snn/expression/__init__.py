@@ -10,7 +10,7 @@ Pipeline::
     UnderstandingState → ThoughtPlanner → thought goals[]
         → for each goal:
             ThoughtController (SNN gate) → LLM generation
-            → RewardEvaluator → accept / revise
+            → RewardEvaluator / TrainedPRM → accept / revise
         → assembled response
 
 Public API
@@ -19,6 +19,7 @@ Public API
     ThoughtPlanner
     ThoughtController
     RewardEvaluator
+    TrainedPRM
     ExpressionStream
     ThoughtGoal
     ThoughtFragment
@@ -36,13 +37,22 @@ from hbllm.brain.snn.expression.models import (
 from hbllm.brain.snn.expression.reward_evaluator import RewardEvaluator
 from hbllm.brain.snn.expression.thought_controller import ThoughtController
 from hbllm.brain.snn.expression.thought_planner import ThoughtPlanner
+from hbllm.brain.snn.expression.trained_prm import (
+    RewardNetwork,
+    TrainedPRM,
+    TrainingCollector,
+)
 
 __all__ = [
     "ThoughtPlanner",
     "ThoughtController",
     "RewardEvaluator",
+    "TrainedPRM",
+    "RewardNetwork",
+    "TrainingCollector",
     "ExpressionStream",
     "ThoughtGoal",
     "ThoughtFragment",
     "ExpressionResult",
 ]
+
