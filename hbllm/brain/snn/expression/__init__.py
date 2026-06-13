@@ -20,6 +20,7 @@ Public API
     ThoughtController
     RewardEvaluator
     TrainedPRM
+    ShallowRenderer
     ExpressionStream
     ThoughtGoal
     ThoughtFragment
@@ -42,6 +43,11 @@ from hbllm.brain.snn.expression.trained_prm import (
     TrainedPRM,
     TrainingCollector,
 )
+from hbllm.brain.snn.expression.shallow_renderer import (
+    RenderingContext,
+    RenderPromptBuilder,
+    ShallowRenderer,
+)
 
 __all__ = [
     "ThoughtPlanner",
@@ -50,6 +56,9 @@ __all__ = [
     "TrainedPRM",
     "RewardNetwork",
     "TrainingCollector",
+    "ShallowRenderer",
+    "RenderingContext",
+    "RenderPromptBuilder",
     "ExpressionStream",
     "ThoughtGoal",
     "ThoughtFragment",

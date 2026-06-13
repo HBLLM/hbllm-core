@@ -650,6 +650,16 @@ def _wire_expression_stream(
         except Exception as e:
             logger.debug("TrainedPRM not available (non-fatal): %s", e)
 
+        # Try to create ShallowRenderer for v3 rendering mode
+        shallow_renderer = None
+        try:
+            from hbllm.brain.snn.expression.shallow_renderer import ShallowRenderer
+
+            shallow_renderer = ShallowRenderer(min_confidence=0.3)
+            logger.info("ShallowRenderer wired to ExpressionStream")
+        except Exception as e:
+            logger.debug("ShallowRenderer not available (non-fatal): %s", e)
+
         # Bind LLM generate function if available
         llm_generate = None
         if llm is not None and hasattr(llm, "generate"):
@@ -668,6 +678,8 @@ def _wire_expression_stream(
             max_revisions=1,
             enable_gating=True,
             trained_prm=trained_prm,
+            shallow_renderer=shallow_renderer,
+            shallow_mode=shallow_renderer is not None,
         )
 
         decision_node.expression_stream = stream

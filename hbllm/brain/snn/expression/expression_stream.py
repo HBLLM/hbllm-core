@@ -77,6 +77,8 @@ class ExpressionStream:
         max_revisions: int = 1,
         enable_gating: bool = True,
         trained_prm: Any | None = None,
+        shallow_renderer: Any | None = None,
+        shallow_mode: bool = False,
     ) -> None:
         self.planner = planner
         self.controller = controller
@@ -85,6 +87,8 @@ class ExpressionStream:
         self.max_revisions = max_revisions
         self.enable_gating = enable_gating
         self.trained_prm = trained_prm
+        self.shallow_renderer = shallow_renderer
+        self.shallow_mode = shallow_mode
 
     async def express(
         self,
@@ -138,12 +142,45 @@ class ExpressionStream:
                             break
 
             # Step 2b: Generate text for this goal
-            fragment = await self._generate_for_goal(
-                goal=goal,
-                base_thought=base_thought,
-                original_query=original_query,
-                prev_fragment_text=prev_fragment_text,
-            )
+            # If shallow mode is active, use shallow rendering prompts
+            use_shallow = False
+            if (
+                self.shallow_mode
+                and self.shallow_renderer is not None
+                and self.llm_generate is not None
+            ):
+                try:
+                    render_ctx = self.shallow_renderer.build_context(
+                        understanding, goals, original_query, base_thought
+                    )
+                    if self.shallow_renderer.should_use_shallow(render_ctx):
+                        shallow_prompt = self.shallow_renderer.render_prompt(
+                            render_ctx, goal, prev_fragment_text
+                        )
+                        text = await self.llm_generate(shallow_prompt)
+                        estimated_tokens = max(1, len(text) // 4)
+                        fragment = ThoughtFragment(
+                            goal_id=goal.id,
+                            text=text,
+                            metadata={
+                                "tokens": estimated_tokens,
+                                "source": "shallow",
+                                "render_confidence": render_ctx.confidence,
+                            },
+                        )
+                        use_shallow = True
+                except Exception:
+                    logger.debug(
+                        "ShallowRenderer failed (non-fatal), using deep path"
+                    )
+
+            if not use_shallow:
+                fragment = await self._generate_for_goal(
+                    goal=goal,
+                    base_thought=base_thought,
+                    original_query=original_query,
+                    prev_fragment_text=prev_fragment_text,
+                )
 
             # Step 2c: Evaluate the fragment
             gen_metadata = fragment.metadata.copy()
