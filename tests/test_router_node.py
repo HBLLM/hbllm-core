@@ -80,7 +80,10 @@ async def test_self_learning_vector_routing():
         await bus.publish("router.query", query_msg)
 
         # Wait for router to process
-        await asyncio.sleep(0.1)
+        for _ in range(100):
+            if len(decisions) == 1:
+                break
+            await asyncio.sleep(0.02)
 
         assert len(decisions) == 1, f"Expected 1 decision, got {len(decisions)}"
 
@@ -120,7 +123,12 @@ async def test_self_learning_vector_routing():
             correlation_id="routing_test_2",
         )
         await bus.publish("router.query", query_msg2)
-        await asyncio.sleep(0.1)
+
+        # Wait for router to process
+        for _ in range(100):
+            if len(decisions) == 2:
+                break
+            await asyncio.sleep(0.02)
 
         # 3. Check where it routed and how confidence changed
         assert len(decisions) == 2, f"Expected 2 decisions, got {len(decisions)}"
