@@ -61,6 +61,15 @@ class SkillCallMockProvider(LLMProvider):
         # Conclusion after observation
         elif "observation" in user_msg_lower or "sil perfectly executed" in user_msg_lower:
             content = '{"thought": "Successfully completed Deploy Website skill. Output: Deploy successful!", "score": 0.95}'
+        # ExpressionStream prompts (deep path: "generating one section",
+        # shallow: "RENDER", broca: "TYPE:") — must check BEFORE planner
+        # because ExpressionStream prompts also contain "generate" + "thought"
+        elif (
+            "generating one section" in user_msg_lower
+            or "render" in user_msg_lower
+            or user_msg_lower.startswith("type:")
+        ):
+            content = "Successfully completed Deploy Website skill. Output: Deploy successful!"
         # Planner / thought generation / general evaluate
         elif "generate" in user_msg_lower and "thought" in user_msg_lower:
             content = '{"thought": "I will execute the Deploy Website skill:\\n<skill_call task=\\"Deploy Website\\">deploy args</skill_call>", "score": 0.95}'
