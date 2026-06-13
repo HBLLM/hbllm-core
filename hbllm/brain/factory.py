@@ -1020,6 +1020,32 @@ class BrainFactory:
         if cfg.inject_comprehension:
             _wire_expression_stream(decision_node, router_node, llm)
 
+            # Wire memory search into ComprehensionStream for per-concept retrieval
+            comp_stream = getattr(router_node, "comprehension_stream", None)
+            if comp_stream is not None and comp_stream.memory_search_fn is None:
+                # Find the MemoryNode from the node list
+                memory_node = None
+                for n in nodes:
+                    if getattr(n, "node_id", None) == "memory":
+                        memory_node = n
+                        break
+                if memory_node is not None and hasattr(memory_node, "semantic_db"):
+
+                    async def _mem_search(
+                        text: str, top_k: int = 3, tenant_id: str = "default"
+                    ) -> list:
+                        import asyncio
+
+                        return await asyncio.to_thread(
+                            memory_node.semantic_db.search,
+                            text,
+                            top_k=top_k,
+                            tenant_id=tenant_id,
+                        )
+
+                    comp_stream.memory_search_fn = _mem_search
+                    logger.info("ComprehensionStream memory_search_fn wired to MemoryNode")
+
         # Browser Node (DuckDuckGo search + scraping)
         if cfg.inject_browser:
             from hbllm.actions.browser_node import BrowserNode

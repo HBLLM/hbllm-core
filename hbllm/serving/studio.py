@@ -428,9 +428,7 @@ async def get_snn_expression_status():
 
     # Try to find ExpressionStream from DecisionNode
     decision_node = node_map.get("DecisionNode")
-    expression_stream = (
-        getattr(decision_node, "_expression_stream", None) if decision_node else None
-    )
+    expression_stream = getattr(decision_node, "expression_stream", None) if decision_node else None
 
     result = {
         "status": "active" if expression_stream else "not_loaded",
@@ -509,7 +507,7 @@ async def get_snn_comprehension_status():
     decision_node = node_map.get("DecisionNode")
     comp_stream = None
     if decision_node:
-        expr_stream = getattr(decision_node, "_expression_stream", None)
+        expr_stream = getattr(decision_node, "expression_stream", None)
         if expr_stream:
             comp_stream = getattr(expr_stream, "_comprehension_stream", None)
 
@@ -569,7 +567,7 @@ async def get_snn_plasticity_status():
     decision_node = node_map.get("DecisionNode")
     trained_prm = None
     if decision_node:
-        expr_stream = getattr(decision_node, "_expression_stream", None)
+        expr_stream = getattr(decision_node, "expression_stream", None)
         if expr_stream:
             trained_prm = getattr(expr_stream, "_trained_prm", None)
 
@@ -612,7 +610,7 @@ async def get_snn_plasticity_status():
 
     # Also check ContentPlanner network
     if decision_node:
-        expr_stream = getattr(decision_node, "_expression_stream", None)
+        expr_stream = getattr(decision_node, "expression_stream", None)
         if expr_stream:
             content_planner = getattr(expr_stream, "_content_planner", None)
             if content_planner:

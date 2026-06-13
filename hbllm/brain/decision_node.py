@@ -1127,6 +1127,20 @@ class DecisionNode(Node):
             result.revision_count,
         )
 
+        # Trigger batch SNN training if enough examples have accumulated
+        prm_trainer = getattr(self, "_prm_trainer", None)
+        if prm_trainer is not None:
+            try:
+                metrics = prm_trainer.maybe_train()
+                if metrics is not None:
+                    logger.info(
+                        "[DecisionNode] PRMTrainer batch: acc=%.1f%%, Δw=%.4f",
+                        metrics.accuracy * 100,
+                        metrics.mean_weight_delta,
+                    )
+            except Exception as e:
+                logger.debug("[DecisionNode] PRMTrainer batch failed (non-fatal): %s", e)
+
         return result
 
     async def _publish_output(self, message: Message, text: str, source: str = "decision") -> None:
