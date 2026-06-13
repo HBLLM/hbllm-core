@@ -13,12 +13,6 @@ authors = [
 ]
 readme = "README.md"
 
-[project.urls]
-Homepage = "https://github.com/hbllm/hbllm"
-Documentation = "https://docs.hbllm.dev"
-Repository = "https://github.com/hbllm/hbllm"
-Changelog = "https://github.com/hbllm/hbllm/blob/main/CHANGELOG.md"
-
 dependencies = [
     # Data
     "numpy>=1.26.0",
@@ -51,6 +45,12 @@ dependencies = [
     "PyJWT>=2.8.0",
     "cryptography>=42.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hbllm/hbllm"
+Documentation = "https://docs.hbllm.dev"
+Repository = "https://github.com/hbllm/hbllm"
+Changelog = "https://github.com/hbllm/hbllm/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 local = [
