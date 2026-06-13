@@ -11,7 +11,6 @@ from hbllm.brain.self_model import SelfModel
 from hbllm.brain.sentinel_node import SentinelNode
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.sleep_node import SleepCycleNode
-from hbllm.brain.spawner_node import SpawnerNode
 from hbllm.brain.utility_calibrator import CalibrationTrace, UtilityCalibrator
 from hbllm.brain.utility_engine import CognitiveUtilityEngine, ThoughtBudget, UtilityBreakdown
 from hbllm.brain.workspace_node import WorkspaceNode
@@ -27,6 +26,10 @@ def __getattr__(name: str):
         from hbllm.brain.process_reward_node import ProcessRewardNode
 
         return ProcessRewardNode
+    if name == "SpawnerNode":
+        from hbllm.brain.spawner_node import SpawnerNode
+
+        return SpawnerNode
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -231,6 +231,98 @@ The `NodeType` enum defines the categories of nodes:
 
 ---
 
+## SNN Cognitive Stream
+
+The SNN Cognitive Stream is a pipeline of Spiking Neural Network components that handles structured comprehension, reasoning, and expression. All multi-layer SNN networks learn via Spike-Timing-Dependent Plasticity (STDP).
+
+### ComprehensionStream
+
+- **File:** `hbllm/brain/snn/comprehension/comprehension_stream.py`
+- **Purpose:** Extracts structured concepts from user input using a 5-channel LIF neuron ensemble (entity, clause, discourse, surprise, constraint). ONNX embeddings fire only on concept boundary spikes — 3× faster than per-token embedding.
+- **Architecture:** 5-channel LIF ensemble with lexical signal input
+
+### AssociationLayer
+
+- **File:** `hbllm/brain/snn/comprehension/association_layer.py`
+- **Purpose:** Discovers relationships between extracted concepts (causal, temporal, contrast, elaboration).
+- **Architecture:** 4→8→2 multi-layer SNN with STDP
+
+### CausalReasoner
+
+- **File:** `hbllm/brain/snn/reasoning/causal_reasoner.py`
+- **Purpose:** Builds multi-hop causal graphs from concept associations and evaluates reasoning chain quality.
+- **Architecture:** Graph-based + SNN scoring
+
+### ReasoningNetwork
+
+- **File:** `hbllm/brain/snn/reasoning/reasoning_network.py`
+- **Purpose:** Evaluates the quality of causal reasoning chains via SNN processing.
+- **Architecture:** 4→6→2 multi-layer SNN with STDP
+
+### ThoughtPlanner
+
+- **File:** `hbllm/brain/snn/expression/thought_planner.py`
+- **Purpose:** Symbolic decomposition of UnderstandingState into ordered ThoughtGoals for expression.
+- **Architecture:** Rule-based (symbolic, no SNN)
+
+### ThoughtController
+
+- **File:** `hbllm/brain/snn/expression/thought_controller.py`
+- **Purpose:** SNN gating that determines when each thought goal should fire during expression.
+- **Architecture:** 3-neuron LIF ensemble
+
+### ExpressionStream
+
+- **File:** `hbllm/brain/snn/expression/expression_stream.py`
+- **Purpose:** Orchestrates the full thought→text pipeline with 3-tier fallback rendering (Broca → Shallow → Deep).
+- **Integration:** Consumes `UnderstandingState` from ComprehensionStream, produces final response text.
+
+### ContentPlanner (v4)
+
+- **File:** `hbllm/brain/snn/expression/content_planner.py`
+- **Purpose:** SNN-driven content decisions: selects content type (assertion/explanation/example/transition/caveat), key points, and emphasis for each thought goal.
+- **Architecture:** 8→12→6→3 multi-layer SNN (ContentPlanNetwork)
+
+### BrocaEncoder (v4)
+
+- **File:** `hbllm/brain/snn/expression/broca_encoder.py`
+- **Purpose:** Builds ultra-minimal ~80-token prompts (TYPE/TONE/SAY/MAX format). The LLM receives only grammar/fluency tasks — all reasoning is done by SNN.
+- **Token Savings:** 87% reduction from deep mode (~600 → ~80 tokens)
+
+### ShallowRenderer (v3)
+
+- **File:** `hbllm/brain/snn/expression/shallow_renderer.py`
+- **Purpose:** Intermediate rendering tier. Builds ~300-token prompts where the SNN handles reasoning and the LLM handles text rendering of pre-decided conclusions.
+
+### TrainedPRM
+
+- **File:** `hbllm/brain/snn/expression/trained_prm.py`
+- **Purpose:** SNN-based reward evaluator that scores expression output quality. Learns online via STDP from accept/revise labels.
+- **Architecture:** 6→8→4→2 multi-layer SNN with STDP + TrainingCollector persistence
+
+### PRMTrainer
+
+- **File:** `hbllm/brain/snn/expression/prm_trainer.py`
+- **Purpose:** Batch STDP training sweeps over accumulated TrainingCollector data. Measures pre/post accuracy and weight deltas.
+- **Trigger:** Runs when ≥20 new training examples are collected.
+
+### SpikingNetwork (Infrastructure)
+
+- **File:** `hbllm/brain/snn/network.py`
+- **Purpose:** Core multi-layer SNN infrastructure. Provides `NeuronLayer`, `LayerProjection`, and `SpikingNetwork` with configurable LIF neurons and STDP-enabled connections.
+
+### STDP Plasticity (Infrastructure)
+
+- **File:** `hbllm/brain/snn/plasticity.py`
+- **Purpose:** Spike-Timing-Dependent Plasticity implementation. Strengthens causal (pre→post) connections and weakens anti-causal ones.
+
+### SNN Debugger (Infrastructure)
+
+- **File:** `hbllm/brain/snn/debugger.py`
+- **Purpose:** Live introspection of neuron potentials, spike history, and weight matrices for any SNN network.
+
+---
+
 ## Edge & Gateway Nodes
 
 To support the hierarchical distributed architecture, HBLLM uses specialized gateway nodes to bridge the central MessageBus to remote edges securely.

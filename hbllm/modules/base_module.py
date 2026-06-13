@@ -11,9 +11,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import torch
+if TYPE_CHECKING:
+    import torch
 
 from hbllm.modules.lora import LoRAManager
 from hbllm.network.messages import Message, MessageType, QueryPayload
@@ -205,6 +206,8 @@ class DomainModuleNode(Node):
                 enc = tokenizer.encode(prompt)
                 if hasattr(enc, "ids"):
                     enc = enc.ids
+                import torch
+
                 input_ids = torch.tensor([enc], dtype=torch.long).to(device)
 
                 model.eval()
@@ -268,7 +271,6 @@ class DomainModuleNode(Node):
 
         except (
             RuntimeError,
-            torch.cuda.CudaError if hasattr(torch, "cuda") else RuntimeError,
             ValueError,
         ) as e:
             logger.error("Domain generation failed: %s", e)

@@ -21,9 +21,16 @@ By implementing a **3-tier validation path**, it ensures that intermediate plans
                        │ Controller           │    recursion depth)
                        └──────────┬───────────┘
                                   │
+                       ┌──────────▼───────────┐
+                       │ ExpressionStream     │ → (SNN-gated rendering)
+                       │ (3-tier fallback)    │    Broca → Shallow → Deep
+                       └──────────┬───────────┘
+                                  │
                                   ▼
-                            Action Execution
+                            Action / Output
 ```
+
+> **ExpressionStream Integration (v4):** After safety, policy, and budget checks pass, the DecisionNode delegates text generation to the ExpressionStream. The stream uses ComprehensionStream data to decompose the response into thought goals, generates each goal through SNN-gated rendering tiers, and evaluates output quality via TrainedPRM.
 
 ---
 

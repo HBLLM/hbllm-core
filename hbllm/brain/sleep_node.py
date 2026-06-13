@@ -202,6 +202,11 @@ class SleepCycleNode(Node):
                 return
             report["skills_optimized"] = await self._optimize_skills()
 
+            # ── Phase 2c: SNN Weight Consolidation ────────────────────────
+            if not self.is_sleeping:
+                return
+            report["snn_weights_saved"] = await self._consolidate_snn_weights()
+
             # ── Phase 3: Curiosity Goal Replay ───────────────────────────
             if not self.is_sleeping:
                 return
@@ -465,6 +470,114 @@ class SleepCycleNode(Node):
         logger.info("[SleepNode] Replayed %d curiosity goals.", replayed)
         return replayed
 
+    async def _consolidate_snn_weights(self) -> int:
+        """Phase 2c: Persist STDP-learned SNN weights so they survive restarts.
+
+        Saves weight matrices from:
+          - TrainedPRM (reward scoring network)
+          - ContentPlanner (content decision network)
+          - ThoughtController (gating plastic weights)
+
+        Returns:
+            Number of weight matrices saved.
+        """
+        import json
+        from pathlib import Path
+
+        logger.info("[SleepNode] Phase 2c: Consolidating SNN weights...")
+        saved = 0
+
+        # Find DecisionNode and its ExpressionStream
+        brain = None
+        if self._bus:
+            # Try to get brain reference from state
+            try:
+                from hbllm.serving.state import _state
+
+                brain = _state.get("brain")
+            except Exception:
+                pass
+
+        if not brain:
+            logger.debug("[SleepNode] No brain reference available for SNN consolidation.")
+            return 0
+
+        # Build node map
+        node_map: dict[str, Any] = {}
+        for node in getattr(brain, "nodes", []):
+            cls_name = type(node).__name__
+            node_map[cls_name] = node
+
+        decision_node = node_map.get("DecisionNode")
+        if not decision_node:
+            return 0
+
+        expression_stream = getattr(decision_node, "expression_stream", None)
+        if not expression_stream:
+            logger.debug("[SleepNode] No ExpressionStream — skipping SNN consolidation.")
+            return 0
+
+        import os
+
+        data_dir = Path(os.environ.get("HBLLM_DATA_DIR", "data"))
+        snn_dir = data_dir / "snn_weights"
+        snn_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save TrainedPRM network weights
+        trained_prm = getattr(expression_stream, "trained_prm", None)
+        if trained_prm is not None:
+            try:
+                network = getattr(trained_prm, "_network", None)
+                if network and hasattr(network, "export_weights"):
+                    weights = network.export_weights()
+                    (snn_dir / "prm_weights.json").write_text(json.dumps(weights, default=str))
+                    saved += 1
+                    logger.info("[SleepNode] Saved TrainedPRM weights (%d layers)", len(weights))
+            except Exception as e:
+                logger.warning("[SleepNode] Failed to save PRM weights: %s", e)
+
+        # Save ContentPlanner network weights
+        content_planner = getattr(expression_stream, "content_planner", None)
+        if content_planner is not None:
+            try:
+                network = getattr(content_planner, "_network", None)
+                if network and hasattr(network, "export_weights"):
+                    weights = network.export_weights()
+                    (snn_dir / "content_planner_weights.json").write_text(
+                        json.dumps(weights, default=str)
+                    )
+                    saved += 1
+                    logger.info(
+                        "[SleepNode] Saved ContentPlanner weights (%d layers)", len(weights)
+                    )
+            except Exception as e:
+                logger.warning("[SleepNode] Failed to save ContentPlanner weights: %s", e)
+
+        # Save ThoughtController plastic weights
+        controller = getattr(expression_stream, "controller", None)
+        if controller is not None:
+            plastic = getattr(controller, "plastic_weights", None)
+            if plastic is not None:
+                try:
+                    weights = {}
+                    if hasattr(plastic, "weights"):
+                        # PlasticWeightMatrix — save as nested lists
+                        w = plastic.weights
+                        if hasattr(w, "tolist"):
+                            weights["matrix"] = w.tolist()
+                        else:
+                            weights["matrix"] = [[float(v) for v in row] for row in w]
+                    (snn_dir / "controller_plastic.json").write_text(
+                        json.dumps(weights, default=str)
+                    )
+                    saved += 1
+                    logger.info("[SleepNode] Saved ThoughtController plastic weights")
+                except Exception as e:
+                    logger.warning("[SleepNode] Failed to save controller weights: %s", e)
+
+        logger.info("[SleepNode] SNN weight consolidation complete: %d matrices saved.", saved)
+        return saved
+
     # ── Gap Closers: Contradiction Detection, Temporal Normalization, Dream Journal ──
 
     async def _resolve_contradictions(self) -> int:
@@ -722,6 +835,14 @@ class SleepCycleNode(Node):
         skills = report.get("skills_optimized", 0)
         if skills:
             sections.append(f"⚡ Skill Optimization: Replayed and optimized {skills} skill(s).")
+
+        # Phase 2c: SNN Weights
+        snn_saved = report.get("snn_weights_saved", 0)
+        if snn_saved:
+            sections.append(
+                f"🔌 SNN Consolidation: Persisted {snn_saved} STDP-learned weight "
+                f"matrix(es) for next startup."
+            )
 
         # Phase 3: Curiosity
         goals = report.get("goals_replayed", 0)

@@ -16,9 +16,12 @@ HBLLM Core is built on four foundational principles:
 
 To maintain cognitive predictability, transparency, and prevent black-box decision collapse, HBLLM enforces a strict separation of concerns across its cognitive layers:
 
-*   **SNN Layer (Dynamics: Time + Intensity)**:
-    *   *Role:* Temporal integration, decay dynamics, and spiking events.
-    *   *Rule:* **SNN layers modify weights and priorities, not hard decisions.** SNNs act as continuous-time integrators of event intensity to bias downstream retrieval weights or trigger reflexes, but they do not make final cognitive routing or reasoning decisions.
+*   **SNN Layer (Dynamics: Time + Intensity + Content Planning)**:
+    *   *Role:* Temporal integration, decay dynamics, spiking events, and content planning.
+    *   *Rule:* **SNN layers drive both soft biases and hard content decisions.**
+      - In **comprehension/gating**, SNNs act as continuous-time integrators that bias retrieval weights and trigger reflexes.
+      - In **expression** (v4 Broca mode), the ContentPlanNetwork SNN makes hard content decisions: what content type, what key points, what order.
+      - In **reward evaluation**, the TrainedPRM SNN evaluates output quality with STDP-based online learning.
 *   **Memory Layer (Storage: Facts + Embeddings + Graph)**:
     *   *Role:* Data storage of factual information, embeddings, procedural skills, and relational graphs.
 *   **Retrieval Layer (Ranking: Blending Signals)**:
@@ -60,6 +63,14 @@ graph TB
         C --> D["⚖️ Decision Node"]
     end
 
+    subgraph SNN["⚡ SNN Cognitive Stream"]
+        CS["👂 ComprehensionStream\n(5-channel LIF)"]
+        AL["🔗 AssociationLayer\n(4→8→2 SNN)"]
+        RN_SNN["🧩 ReasoningNetwork\n(4→6→2 SNN)"]
+        ES["🗣️ ExpressionStream\n(3-tier rendering)"]
+        TPRM["📊 TrainedPRM\n(6→8→4→2 SNN + STDP)"]
+    end
+
     subgraph META["🧬 Meta-Cognitive Layer (Self-Model)"]
         LEARN["🎓 Learner"]
         SPAWN["🧬 Spawner (Neurogenesis)"]
@@ -90,6 +101,8 @@ graph TB
     BUS <--> META
     BUS <--> MEMORY
     BUS ==> ACTIONS
+    CORE <==> SNN
+    SNN --> MEMORY
 
     SLEEP -->|"compact"| MEMORY
     SPAWN -->|"spawn LoRAs"| CORE
@@ -111,11 +124,23 @@ Input nodes that transform raw signals into structured messages:
 
 The reasoning pipeline that processes every query:
 
-1. **Router** — Classifies intent and selects the appropriate domain expert(s).
+1. **Router** — Classifies intent and selects the appropriate domain expert(s). Feeds query through ComprehensionStream for structured concept extraction.
 2. **Planner** — Generates a Graph-of-Thoughts (GoT) DAG for multi-step reasoning.
 3. **Workspace** — Blackboard consensus node where thoughts are refined.
 4. **Critic** — Self-evaluation using Process Reward Models (PRM).
-5. **Decision** — Final output synthesis with confidence scoring.
+5. **Decision** — Final output synthesis with confidence scoring. Delegates to ExpressionStream for SNN-gated, thought-by-thought text generation.
+
+#### SNN Cognitive Stream
+
+The SNN layer runs alongside the cognitive core:
+
+- **ComprehensionStream** — 5-channel LIF ensemble extracts concepts from input, triggers ONNX embeddings only on spikes (3× faster than per-token).
+- **AssociationLayer** — 4→8→2 SNN discovers concept relationships.
+- **ReasoningNetwork** — 4→6→2 SNN scores causal reasoning chains.
+- **ExpressionStream** — 3-tier rendering: Broca (v4, ~80 tokens) → Shallow (v3, ~300 tokens) → Deep (v1-v2, ~600 tokens).
+- **TrainedPRM** — 6→8→4→2 SNN evaluates response quality with STDP learning.
+- **ContentPlanner** — 8→12→6→3 SNN for content type selection (v4).
+- **BrocaEncoder** — Ultra-minimal prompt builder for pure text production (v4).
 
 ### Layer 3: Meta-Cognitive
 
@@ -211,6 +236,8 @@ sequenceDiagram
         W->>C: Evaluate intermediate steps (Process Reward Model)
         C-->>W: Step score: 0.92
         W->>D: Synthesize final response
+        D->>D: ExpressionStream (SNN-gated rendering)
+        Note over D: ContentPlanner → BrocaEncoder → LLM<br/>TrainedPRM evaluates output
         D-->>P: Deliver signed response package
     end
 ```

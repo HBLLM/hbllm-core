@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from hbllm.brain.action_planner import ActionPlanner
 from hbllm.brain.action_schema import ActionPlan, ActionType, RiskLevel
+from hbllm.brain.snn.expression.models import ExpressionResult
 from hbllm.brain.utility_calibrator import UtilityCalibrator
 from hbllm.brain.utility_engine import CognitiveUtilityEngine
 from hbllm.network.messages import Message, MessageType
@@ -53,6 +54,9 @@ class DecisionNode(Node):
         self.utility_engine = CognitiveUtilityEngine()
         self.calibrator = UtilityCalibrator(data_dir=data_dir)
         self.last_mode = "high"
+
+        # Expression-side Cognitive Stream (wired by factory if available)
+        self.expression_stream: Any | None = None
 
         # ── Multi-Rate Control State ─────────────────────────────────────
         # Smoothed band thresholds (updated every 7±1 decisions via γ-EMA)
@@ -699,9 +703,35 @@ class DecisionNode(Node):
     async def _exec_text_response(
         self, plan: ActionPlan, message: Message, original_query: dict[str, Any]
     ) -> None:
-        """Publish plain text to the user interface."""
+        """Publish plain text to the user interface.
+
+        If the ExpressionStream is wired and comprehension data exists in
+        the payload, runs structured thought-by-thought generation.
+        Falls back to direct output if expression is unavailable or fails.
+        """
         logger.info("[DecisionNode] Dispatching to User Interface.")
         thought_type = plan.metadata.get("thought_type", "intuition_general")
+
+        # ── Expression-side Cognitive Stream (Layer 5) ────────────────────
+        comprehension_data = original_query.get("comprehension")
+        if self.expression_stream is not None and comprehension_data is not None:
+            try:
+                expression_result = await self._run_expression_stream(
+                    content=plan.content,
+                    comprehension_data=comprehension_data,
+                    original_query=original_query,
+                )
+                if expression_result is not None and expression_result.text:
+                    plan.metadata["expression_reward"] = expression_result.mean_reward
+                    plan.metadata["expression_thoughts"] = expression_result.thought_count
+                    plan.metadata["expression_revisions"] = expression_result.revision_count
+                    await self._publish_output(message, expression_result.text, source=thought_type)
+                    return
+            except Exception as e:
+                logger.warning(
+                    "[DecisionNode] ExpressionStream failed, falling back to direct: %s", e
+                )
+
         await self._publish_output(message, plan.content, source=thought_type)
 
     async def _exec_audio_output(
@@ -1011,6 +1041,107 @@ class DecisionNode(Node):
             payload=payload,
             correlation_id=original.correlation_id,
         )
+
+    async def _run_expression_stream(
+        self,
+        content: str,
+        comprehension_data: dict[str, Any],
+        original_query: dict[str, Any],
+    ) -> ExpressionResult | None:
+        """Run the expression-side Cognitive Stream on a text response.
+
+        Reconstructs a lightweight UnderstandingState from the comprehension
+        payload (injected by RouterNode) and feeds it through the
+        ExpressionStream pipeline.
+
+        Args:
+            content: The raw text response from workspace consensus.
+            comprehension_data: The ``comprehension`` dict from the payload
+                (contains concepts, memories, salience_peak).
+            original_query: The original query payload.
+
+        Returns:
+            ExpressionResult if successful, None if skipped/failed.
+        """
+        from hbllm.brain.snn.comprehension.models import (
+            ActivatedMemory,
+            ComprehensionUnit,
+            UnderstandingState,
+        )
+
+        concepts_raw = comprehension_data.get("concepts", [])
+        if not concepts_raw:
+            return None
+
+        # Reconstruct UnderstandingState from the serialized payload
+        import numpy as np
+
+        concepts = []
+        for c in concepts_raw:
+            concepts.append(
+                ComprehensionUnit(
+                    text=c.get("text", ""),
+                    embedding=np.zeros(384),  # placeholder — not needed for planning
+                    salience=float(c.get("salience", 1.0)),
+                    domain_activation=c.get("domains", {}),
+                    channel_metadata=c.get("channels", {}),
+                    activated_memories=[],
+                )
+            )
+
+        memories_raw = comprehension_data.get("memories", [])
+        all_memories = [
+            ActivatedMemory(
+                id=m.get("id", ""),
+                content=m.get("content", ""),
+                score=0.5,
+            )
+            for m in memories_raw
+        ]
+
+        # Distribute memories to concepts that mention related content
+        for mem in all_memories:
+            if concepts:
+                # Assign to first concept as a simple heuristic
+                concepts[0].activated_memories.append(mem)
+
+        understanding = UnderstandingState(
+            concepts=concepts,
+            domain_activations={d: s for c in concepts for d, s in c.domain_activation.items()},
+            all_memories=all_memories,
+            salience_map=[c.salience for c in concepts],
+        )
+
+        query_text = original_query.get("text", "")
+
+        result = await self.expression_stream.express(
+            understanding=understanding,
+            base_thought=content,
+            original_query=query_text,
+        )
+
+        logger.info(
+            "[DecisionNode] ExpressionStream: %d thoughts, mean_reward=%.2f, revisions=%d",
+            result.thought_count,
+            result.mean_reward,
+            result.revision_count,
+        )
+
+        # Trigger batch SNN training if enough examples have accumulated
+        prm_trainer = getattr(self, "_prm_trainer", None)
+        if prm_trainer is not None:
+            try:
+                metrics = prm_trainer.maybe_train()
+                if metrics is not None:
+                    logger.info(
+                        "[DecisionNode] PRMTrainer batch: acc=%.1f%%, Δw=%.4f",
+                        metrics.accuracy * 100,
+                        metrics.mean_weight_delta,
+                    )
+            except Exception as e:
+                logger.debug("[DecisionNode] PRMTrainer batch failed (non-fatal): %s", e)
+
+        return result
 
     async def _publish_output(self, message: Message, text: str, source: str = "decision") -> None:
         """Publish a response to ``sensory.output``."""

@@ -34,3 +34,17 @@ User feedback explicitly overrides heuristic evaluation:
 ## 4. Distillation and Sleep
 
 High-scoring interactions (> 0.8) and corrected DPO pairs are held in the `distillation_bank`. During the sleep cycle, the `SleepNode` orchestrates continuous learning, flushing these banks to permanently update the model weights or RAG priority tables.
+
+## 5. SNN Reward Learning (TrainedPRM)
+
+In addition to LLM-level micro-learning, the SNN Cognitive Stream has its own reward evaluation loop:
+
+1. **TrainedPRM** (`snn/expression/trained_prm.py`): A 6→8→4→2 multi-layer SNN that scores expression output quality in real-time.
+2. **Online STDP**: During every interaction, the TrainedPRM network learns from accept/revise signals via Spike-Timing-Dependent Plasticity.
+3. **Batch Training**: When ≥20 new training examples accumulate, `PRMTrainer` runs batch STDP sweeps over the full training history, measuring pre/post accuracy and weight deltas.
+4. **Feedback Integration**: TrainedPRM scores are published as `expression_reward` metadata in the DecisionNode, feeding into the evaluation dimensions above.
+
+This creates a **dual-loop** learning system:
+- **Fast loop (SNN):** STDP adapts reward weights within seconds, no LLM calls required.
+- **Slow loop (LLM):** DPO/SFT updates during sleep cycles for permanent behavioral changes.
+

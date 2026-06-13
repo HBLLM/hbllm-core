@@ -8,7 +8,7 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-1800%2B%20passing-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-2300%2B%20passing-brightgreen.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
@@ -40,9 +40,11 @@ And it has the **safety instincts of a responsible person** — it knows when it
                     │       │           │           │          │
                     │  WorldState    Memory    Critic/Eval     │
                     │       │       (5 types)       │          │
-                    │  TaskGraph                 Identity      │
+                    │  Comprehension              Identity     │
+                    │  Stream (SNN)                  │          │
                     │       │                       │          │
-                    │  Human Guard ─► Verifier ─► OS Adapter  │
+                    │  Expression  ─► Policy ──► OS Adapter   │
+                    │  Stream (SNN)                            │
                     └────────────────────────────┬────────────┘
                                                  │
     Action / Output ◄────────────────────────────┘
@@ -65,6 +67,7 @@ And it has the **safety instincts of a responsible person** — it knows when it
 | **🌐 Distributed When You Want It** | Optionally spans your phone, laptop, and edge servers via `SynapseGateway` with Ed25519 cryptographic trust — zero cloud required | [Adaptive Network](docs/architecture/adaptive-network.md) |
 | **🛑 Human Control Layer** | Policy engine blocks harmful actions, every decision is audited, and the system slows itself down when overloaded | [Human Control](docs/architecture/human-control.md) |
 | **📦 Memory Compaction** | Causal graphs, attention-based memory folding, and decision deltas keep the brain efficient over long lifetimes | [Causality & Compaction](docs/architecture/causality-and-compaction.md) |
+| **🧬 SNN Cognitive Stream** | Spiking Neural Networks for concept extraction, content planning, and reward evaluation with STDP learning | [Pipeline](docs/architecture/pipeline.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding — extend any part of the cognitive loop | [Plugin Guide](docs/guides/plugins.md) |
 | **🔐 Enterprise Security** | Multi-tenant isolation, encrypted memory scopes, node revocation, and vector clock replay protection | [Security](SECURITY.md) |
 | **🧬 Neurogenesis** | SpawnerNode auto-creates new domain specialist LoRA adapters — the brain literally grows new regions | [Zoning](docs/zoning/how-it-works.md) |
