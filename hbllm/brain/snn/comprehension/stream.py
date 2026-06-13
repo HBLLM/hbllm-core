@@ -57,6 +57,7 @@ class ComprehensionStream:
         encoder: Callable[[str], Any],
         domain_centroids: dict[str, Any],
         memory_search_fn: MemorySearchFn | None = None,
+        association_layer: Any | None = None,
     ) -> None:
         """Initialize the comprehension stream.
 
@@ -69,12 +70,16 @@ class ComprehensionStream:
                               Shared reference from RouterNode.
             memory_search_fn: Async callable (text) -> list[ActivatedMemory].
                               If None, memory retrieval is skipped.
+            association_layer: Optional AssociationLayer for discovering
+                               concept relationships. If None, associations
+                               are not computed.
         """
         self.ensemble = ensemble
         self.lexical_buffer = lexical_buffer
         self.encoder = encoder
         self.domain_centroids = domain_centroids
         self.memory_search_fn = memory_search_fn
+        self.association_layer = association_layer
 
         # Per-query state
         self._word_buffer: list[str] = []
@@ -236,6 +241,18 @@ class ComprehensionStream:
                 if m.id not in seen:
                     seen.add(m.id)
                     state.all_memories.append(m)
+
+        # Discover concept associations via AssociationLayer
+        if self.association_layer is not None and len(self._concepts) >= 2:
+            try:
+                associations = self.association_layer.find_associations(
+                    self._concepts
+                )
+                state.associations = associations
+            except Exception:
+                logger.debug(
+                    "AssociationLayer failed (non-fatal), skipping associations"
+                )
 
         # Reset per-query state
         self._concepts = []

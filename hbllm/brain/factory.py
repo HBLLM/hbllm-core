@@ -499,12 +499,36 @@ def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
             domain="general", plastic_weights=plastic_weights
         )
 
+        # Try to create AssociationLayer for concept relationship detection
+        association_layer = None
+        try:
+            from hbllm.brain.snn.reasoning.association import AssociationLayer
+
+            assoc_stdp = None
+            try:
+                from hbllm.brain.snn.plasticity import STDPRule as _STDPRule
+
+                assoc_stdp = _STDPRule(
+                    learning_rate=0.01,
+                    time_constant=0.5,
+                    w_min=0.0,
+                    w_max=2.0,
+                )
+            except Exception:
+                pass
+
+            association_layer = AssociationLayer(stdp_rule=assoc_stdp)
+            logger.info("AssociationLayer wired to ComprehensionStream")
+        except Exception as e:
+            logger.debug("AssociationLayer not available (non-fatal): %s", e)
+
         stream = ComprehensionStream(
             ensemble=ensemble,
             lexical_buffer=lexical_buffer,
             encoder=router_node._encode_text,
             domain_centroids=router_node.domain_centroids,
             memory_search_fn=None,  # No memory coupling in v1; wired later if needed
+            association_layer=association_layer,
         )
         router_node.comprehension_stream = stream
         logger.info("ComprehensionStream wired to RouterNode")
