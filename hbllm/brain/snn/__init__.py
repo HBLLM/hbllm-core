@@ -9,4 +9,6 @@ __all__ = [
     "LIFNeuron",
     "SpikeEvent",
     "SpikingAccumulator",
+    # Comprehension subpackage
+    "comprehension",
 ]

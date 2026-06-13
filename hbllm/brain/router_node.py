@@ -114,6 +114,9 @@ class RouterNode(Node):
         self._bootstrapped = False
         self._bootstrapping = False
 
+        # Cognitive Stream: comprehension pipeline (wired by factory)
+        self.comprehension_stream: Any | None = None
+
     def _bootstrap_centroids(self) -> None:
         """Bootstrap domain embeddings from the DomainRegistry."""
         if not self.use_vectors or self._bootstrapped:
@@ -541,6 +544,55 @@ class RouterNode(Node):
             if self.unknown_counts["general_unknown"] > 0:
                 self.unknown_counts["general_unknown"] -= 1
 
+        # ── Cognitive Stream: Structured Comprehension ──────────────
+        # Enriches routing with multi-concept signals.  Augments but
+        # never replaces the existing single-pass classification.
+        comprehension_data: dict[str, Any] | None = None
+        word_count = len(text.split())
+        if self.comprehension_stream is not None and word_count >= 5:
+            try:
+                understanding = await self.comprehension_stream.comprehend(text)
+
+                # Refine domain using multi-concept signals
+                if understanding.domain_activations:
+                    strong_domains = {
+                        d: s
+                        for d, s in understanding.domain_activations.items()
+                        if s > 0.5
+                    }
+                    if len(strong_domains) > 1:
+                        # Multi-domain query detected — use weighted blend
+                        target_domain = strong_domains
+
+                # Build comprehension payload for workspace
+                comprehension_data = {
+                    "concepts": [
+                        {
+                            "text": c.text,
+                            "salience": c.salience,
+                            "domains": c.domain_activation,
+                            "channels": c.channel_metadata,
+                        }
+                        for c in understanding.concepts
+                    ],
+                    "memories": [
+                        {"id": m.id, "content": m.content[:200]}
+                        for m in understanding.all_memories
+                    ],
+                    "salience_peak": (
+                        max(understanding.salience_map)
+                        if understanding.salience_map
+                        else 0
+                    ),
+                }
+                logger.debug(
+                    "Comprehension produced %d concepts, %d memories",
+                    len(understanding.concepts),
+                    len(understanding.all_memories),
+                )
+            except Exception as e:
+                logger.warning("ComprehensionStream failed (non-fatal): %s", e)
+
         # 3. Publish to Global Workspace
         logger.info(
             "Routing to Workspace with dominant intent: %s (confidence: %.2f)", intent, confidence
@@ -550,7 +602,7 @@ class RouterNode(Node):
         # Simple queries with high confidence skip expensive GoT and get
         # a very short workspace deadline.
         _fast_path_intents = {"general_knowledge", "smalltalk"}
-        text_is_short = len(text.split()) < 30
+        text_is_short = word_count < 30
         is_fast_path = (
             isinstance(target_domain, str)
             and intent in _fast_path_intents
@@ -567,6 +619,10 @@ class RouterNode(Node):
         workspace_payload["confidence"] = confidence
         workspace_payload["is_fast_path"] = is_fast_path
         workspace_payload["preferred_tier"] = preferred_tier
+
+        # Inject comprehension data if available
+        if comprehension_data is not None:
+            workspace_payload["comprehension"] = comprehension_data
 
         if is_fast_path:
             logger.info(

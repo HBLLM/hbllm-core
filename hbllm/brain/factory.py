@@ -189,6 +189,9 @@ class BrainConfig:
     plugin_dirs: list[str] | None = None  # Extra plugin scan directories
     watch_plugins: bool = False  # Background watcher for new plugins
 
+    # Cognitive Stream: SNN-driven comprehension pipeline
+    inject_comprehension: bool = True
+
 
 class Brain:
     """
@@ -444,6 +447,46 @@ async def _register_node(registry: Any, node: Node) -> None:
     """Helper to register a node and mark it healthy upon startup."""
     await registry.register(node.get_info())
     await registry.update_health(NodeHealth(node_id=node.node_id, status=HealthStatus.HEALTHY))
+
+
+def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
+    """Wire the Cognitive Stream comprehension pipeline into a RouterNode.
+
+    Creates a ComprehensionStream with:
+      - LexicalBuffer for subword noise absorption
+      - ComprehensionEnsemble (5-channel SNN)
+      - Encoder bound to router_node._encode_text (reuses ONNX session)
+      - Domain centroids shared from router_node (same reference)
+
+    The comprehension stream is stored on router_node.comprehension_stream
+    and will be invoked during handle_message() for queries >= 5 words.
+    """
+    try:
+        from hbllm.brain.snn.comprehension import (
+            ComprehensionEnsemble,
+            ComprehensionStream,
+            LexicalBuffer,
+            populate_from_registry,
+        )
+
+        # Populate technical terms from domain registry centroid texts
+        if domain_registry is not None:
+            populate_from_registry(domain_registry)
+
+        lexical_buffer = LexicalBuffer()
+        ensemble = ComprehensionEnsemble(domain="general")
+
+        stream = ComprehensionStream(
+            ensemble=ensemble,
+            lexical_buffer=lexical_buffer,
+            encoder=router_node._encode_text,
+            domain_centroids=router_node.domain_centroids,
+            memory_search_fn=None,  # No memory coupling in v1; wired later if needed
+        )
+        router_node.comprehension_stream = stream
+        logger.info("ComprehensionStream wired to RouterNode")
+    except Exception as e:
+        logger.warning("Failed to wire ComprehensionStream (non-fatal): %s", e)
 
 
 class BrainFactory:
@@ -714,6 +757,10 @@ class BrainFactory:
 
         router_node = RouterNode(node_id="router", llm=llm, domain_registry=domain_registry)
         router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
+
+        # Wire Cognitive Stream comprehension pipeline
+        if cfg.inject_comprehension:
+            _wire_comprehension_stream(router_node, domain_registry)
 
         skill_registry = SkillRegistry(data_dir=cfg.data_dir)
 
@@ -1244,6 +1291,10 @@ class BrainFactory:
                 await _register_node(registry, composite)
                 await composite.start(message_bus)
                 nodes.append(composite)
+
+        # Wire Cognitive Stream comprehension into the ReasoningCore's inner RouterNode
+        if cfg.inject_comprehension and reasoning is not None and reasoning.router is not None:
+            _wire_comprehension_stream(reasoning.router, domain_registry)
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:
