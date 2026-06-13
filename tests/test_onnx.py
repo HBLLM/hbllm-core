@@ -1,5 +1,17 @@
 import numpy as np
-import onnxruntime as ort
+import pytest
+
+# Check for genuine installations of optional dependencies
+huggingface_hub = pytest.importorskip("huggingface_hub")
+tokenizers = pytest.importorskip("tokenizers")
+ort = pytest.importorskip("onnxruntime")
+
+# Skip if onnxruntime is mocked in conftest
+from unittest.mock import MagicMock
+
+if isinstance(ort, MagicMock):
+    pytest.skip("onnxruntime is mocked, skipping genuine ONNX tests", allow_module_level=True)
+
 from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 

@@ -202,7 +202,7 @@ def require_tenant(
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        if asyncio.iscoroutinefunction(fn):
+        if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -238,7 +238,7 @@ def require_identity(
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        if asyncio.iscoroutinefunction(fn):
+        if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:

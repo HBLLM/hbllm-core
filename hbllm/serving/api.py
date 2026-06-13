@@ -877,7 +877,8 @@ async def tenant_isolation_exception_handler(request: Request, exc: TenantIsolat
     return JSONResponse(
         status_code=403,
         content={
-            "error": {"code": "FORBIDDEN", "message": "Access denied: tenant isolation violation"}
+            "detail": f"Access denied: {str(exc)}",
+            "error": {"code": "FORBIDDEN", "message": f"Access denied: {str(exc)}"},
         },
     )
 
