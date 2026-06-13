@@ -8,7 +8,16 @@ correlated with response quality — NOT backpropagation through spikes.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from hbllm.brain.snn.comprehension.ensemble import DOMAIN_PARAMS
+
+if TYPE_CHECKING:
+    from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule
+
+logger = logging.getLogger(__name__)
 
 
 class SNNCalibrator:
@@ -23,12 +32,13 @@ class SNNCalibrator:
     NOT backpropagation through spikes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: str | Path | None = None) -> None:
         # Per-domain parameter history
         self._param_history: dict[str, list[dict]] = {}
         # EMA of success signal per domain
         self._domain_success: dict[str, float] = {}
         self._alpha = 0.1  # EMA update rate
+        self._data_dir = Path(data_dir) if data_dir else None
 
     def record_outcome(
         self,
@@ -99,3 +109,55 @@ class SNNCalibrator:
     def get_domain_success(self, domain: str) -> float:
         """Get the current EMA success signal for a domain."""
         return self._domain_success.get(domain, 0.5)
+
+    # ── Weight Persistence ──────────────────────────────────────────────
+
+    def _weights_path(self, domain: str) -> Path | None:
+        """Get the file path for persisted weights."""
+        if self._data_dir is None:
+            return None
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        return self._data_dir / f"snn_weights_{domain}.json"
+
+    def save_weights(
+        self, domain: str, weight_matrix: PlasticWeightMatrix
+    ) -> None:
+        """Persist learned weights for a domain.
+
+        Args:
+            domain: The domain key (e.g. ``"general"``, ``"code"``).
+            weight_matrix: The PlasticWeightMatrix to save.
+        """
+        path = self._weights_path(domain)
+        if path is None:
+            return
+        try:
+            weight_matrix.save(path)
+        except Exception as e:
+            logger.warning("Failed to save weights for domain '%s': %s", domain, e)
+
+    def load_weights(
+        self,
+        domain: str,
+        static_weights: dict[str, dict[str, float]],
+        stdp_rule: STDPRule | None = None,
+    ) -> PlasticWeightMatrix | None:
+        """Load persisted weights for a domain.
+
+        Returns None if no data_dir is configured or no file exists.
+
+        Args:
+            domain: The domain key.
+            static_weights: Current static weight defaults.
+            stdp_rule: STDP rule to use (or restore from persisted).
+
+        Returns:
+            Restored PlasticWeightMatrix, or None if unavailable.
+        """
+        path = self._weights_path(domain)
+        if path is None:
+            return None
+
+        from hbllm.brain.snn.plasticity import PlasticWeightMatrix as PWM
+
+        return PWM.load(path, static_weights, stdp_rule)

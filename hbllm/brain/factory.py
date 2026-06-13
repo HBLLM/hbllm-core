@@ -474,7 +474,30 @@ def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
             populate_from_registry(domain_registry)
 
         lexical_buffer = LexicalBuffer()
-        ensemble = ComprehensionEnsemble(domain="general")
+
+        # Try to create STDP plasticity for the ensemble
+        plastic_weights = None
+        try:
+            from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule
+
+            stdp_rule = STDPRule(
+                learning_rate=0.01,
+                time_constant=0.5,
+                w_min=0.0,
+                w_max=2.0,
+            )
+            # Create a temporary ensemble to get static weights
+            _tmp = ComprehensionEnsemble(domain="general")
+            plastic_weights = PlasticWeightMatrix(
+                _tmp._signal_weights, stdp_rule
+            )
+            logger.info("STDP plasticity enabled for ComprehensionEnsemble")
+        except Exception as e:
+            logger.debug("STDP plasticity not available (non-fatal): %s", e)
+
+        ensemble = ComprehensionEnsemble(
+            domain="general", plastic_weights=plastic_weights
+        )
 
         stream = ComprehensionStream(
             ensemble=ensemble,
@@ -487,6 +510,94 @@ def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
         logger.info("ComprehensionStream wired to RouterNode")
     except Exception as e:
         logger.warning("Failed to wire ComprehensionStream (non-fatal): %s", e)
+
+
+def _wire_expression_stream(
+    decision_node: Any,
+    router_node: Any | None = None,
+    llm: Any | None = None,
+) -> None:
+    """Wire the expression-side Cognitive Stream into a DecisionNode.
+
+    Creates an ExpressionStream with:
+      - ThoughtPlanner (symbolic outline from UnderstandingState)
+      - ThoughtController (SNN-gated thought sequencer)
+      - RewardEvaluator (per-fragment scoring)
+
+    The expression stream is stored on decision_node.expression_stream
+    and will be invoked during _exec_text_response() when comprehension
+    data is present in the payload.
+    """
+    try:
+        from hbllm.brain.snn.expression import (
+            ExpressionStream,
+            RewardEvaluator,
+            ThoughtController,
+            ThoughtPlanner,
+        )
+
+        planner = ThoughtPlanner(
+            base_token_budget=512,
+            constraint_expansion=True,
+            min_salience_for_goal=0.3,
+        )
+        controller = ThoughtController(
+            readiness_threshold=0.6,
+            coherence_threshold=0.5,
+            max_wait_steps=5,
+        )
+
+        # Try to create STDP plasticity for the controller
+        try:
+            from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule
+
+            stdp_rule = STDPRule(
+                learning_rate=0.01,
+                time_constant=0.5,
+                w_min=0.0,
+                w_max=2.0,
+            )
+            ctrl_plastic = PlasticWeightMatrix(
+                controller._static_weights, stdp_rule
+            )
+            controller.plastic_weights = ctrl_plastic
+            logger.info("STDP plasticity enabled for ThoughtController")
+        except Exception as e:
+            logger.debug("STDP plasticity for controller not available: %s", e)
+
+        # Try to bind the ONNX encoder for embedding-based scoring
+        encoder = None
+        if router_node is not None and hasattr(router_node, "_encode_text"):
+            encoder = router_node._encode_text
+
+        evaluator = RewardEvaluator(
+            encoder=encoder,
+            min_acceptable_reward=0.4,
+        )
+
+        # Bind LLM generate function if available
+        llm_generate = None
+        if llm is not None and hasattr(llm, "generate"):
+
+            async def _generate(prompt: str) -> str:
+                result = await llm.generate(prompt)
+                return str(result)
+
+            llm_generate = _generate
+
+        stream = ExpressionStream(
+            planner=planner,
+            controller=controller,
+            evaluator=evaluator,
+            llm_generate=llm_generate,
+            max_revisions=1,
+            enable_gating=True,
+        )
+
+        decision_node.expression_stream = stream
+        logger.info("ExpressionStream wired to DecisionNode")
+    except Exception as e:
+        logger.warning("Failed to wire ExpressionStream (non-fatal): %s", e)
 
 
 class BrainFactory:
@@ -763,6 +874,7 @@ class BrainFactory:
             _wire_comprehension_stream(router_node, domain_registry)
 
         skill_registry = SkillRegistry(data_dir=cfg.data_dir)
+        decision_node = DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine)
 
         nodes = [
             # Core cognitive pipeline
@@ -775,7 +887,7 @@ class BrainFactory:
                 llm=llm,
             ),
             CriticNode(node_id="critic", llm=llm),
-            DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine),
+            decision_node,
             WorkspaceNode(node_id="workspace"),
             # Memory (episodic + semantic + procedural + value + knowledge graph)
             MemoryNode(node_id="memory", db_path=Path(cfg.data_dir) / "working_memory.db"),
@@ -794,6 +906,10 @@ class BrainFactory:
             # Memory consolidation during idle
             SleepCycleNode(node_id="sleep", llm=llm),
         ]
+
+        # Wire expression-side Cognitive Stream (Layer 5)
+        if cfg.inject_comprehension:
+            _wire_expression_stream(decision_node, router_node, llm)
 
         # Browser Node (DuckDuckGo search + scraping)
         if cfg.inject_browser:
@@ -1295,6 +1411,9 @@ class BrainFactory:
         # Wire Cognitive Stream comprehension into the ReasoningCore's inner RouterNode
         if cfg.inject_comprehension and reasoning is not None and reasoning.router is not None:
             _wire_comprehension_stream(reasoning.router, domain_registry)
+            # Wire expression-side Cognitive Stream (Layer 5) into the DecisionNode
+            if reasoning.decision is not None:
+                _wire_expression_stream(reasoning.decision, reasoning.router, llm)
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:

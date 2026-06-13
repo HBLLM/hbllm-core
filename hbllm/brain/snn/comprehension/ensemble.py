@@ -18,8 +18,12 @@ Other channels provide metadata about what's inside each concept.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hbllm.brain.snn.lif import LIFConfig, LIFNeuron, SpikeEvent
+
+if TYPE_CHECKING:
+    from hbllm.brain.snn.plasticity import PlasticWeightMatrix
 
 
 @dataclass
@@ -71,8 +75,13 @@ class ComprehensionEnsemble:
     but maintain independent membrane potentials.
     """
 
-    def __init__(self, domain: str = "general") -> None:
+    def __init__(
+        self,
+        domain: str = "general",
+        plastic_weights: PlasticWeightMatrix | None = None,
+    ) -> None:
         self.domain = domain
+        self.plastic_weights = plastic_weights
         params = DOMAIN_PARAMS.get(domain, DOMAIN_PARAMS["general"])
 
         self.channels: dict[str, LIFNeuron] = {
@@ -166,13 +175,24 @@ class ComprehensionEnsemble:
     ) -> list[tuple[str, SpikeEvent]]:
         """Feed signals to all channels.
 
+        If a ``PlasticWeightMatrix`` is attached, uses learned weights
+        instead of static ones and records spike timing for STDP updates.
+
         Returns list of (channel_name, spike_event) for any that fired.
         """
+        # Record pre-synaptic activity for STDP
+        if self.plastic_weights is not None:
+            self.plastic_weights.record_signals(signals, timestamp)
+
         fired: list[tuple[str, SpikeEvent]] = []
 
         for channel_name, neuron in self.channels.items():
-            # Compute weighted current for this channel
-            weights = self._signal_weights[channel_name]
+            # Use learned weights if available, otherwise static
+            if self.plastic_weights is not None:
+                weights = self.plastic_weights.get_weights(channel_name)
+            else:
+                weights = self._signal_weights[channel_name]
+
             current = sum(
                 signals.get(sig, 0.0) * weight for sig, weight in weights.items()
             )
@@ -180,6 +200,11 @@ class ComprehensionEnsemble:
             spike = neuron.step(current, timestamp)
             if spike.fired:
                 fired.append((channel_name, spike))
+
+        # Record post-synaptic spikes for STDP
+        if self.plastic_weights is not None and fired:
+            fired_channels = [ch for ch, _ in fired]
+            self.plastic_weights.record_spikes(fired_channels, timestamp)
 
         return fired
 
