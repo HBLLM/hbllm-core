@@ -74,7 +74,7 @@ async def test_self_learning_vector_routing():
             type=MessageType.QUERY,
             source_node_id="user_api",
             topic="router.query",
-            payload={"text": "Hello, please calculate something random for me."},
+            payload={"text": "Hello, please calculate this math equation for me."},
             correlation_id="routing_test_1",
         )
         await bus.publish("router.query", query_msg)
@@ -109,7 +109,7 @@ async def test_self_learning_vector_routing():
                 "message_id": "routing_test_1",
                 "rating": -1,
                 "domain": "math",
-                "prompt": "Hello, please calculate something random for me.",
+                "prompt": "Hello, please calculate this math equation for me.",
             },
         )
         await bus.publish("system.feedback", feedback_msg)
@@ -119,7 +119,7 @@ async def test_self_learning_vector_routing():
             type=MessageType.QUERY,
             source_node_id="user_api",
             topic="router.query",
-            payload={"text": "Hello, please calculate something random for me."},
+            payload={"text": "Hello, please calculate this math equation for me."},
             correlation_id="routing_test_2",
         )
         await bus.publish("router.query", query_msg2)
