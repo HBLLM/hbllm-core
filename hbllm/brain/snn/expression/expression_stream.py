@@ -34,6 +34,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable, Coroutine
@@ -108,6 +109,7 @@ class ExpressionStream:
         base_thought: str,
         original_query: str,
         style_hints: Any | None = None,  # StyleHints
+        cancel_event: asyncio.Event | None = None,
     ) -> ExpressionResult:
         """Generate a structured response from comprehension output.
 
@@ -116,6 +118,8 @@ class ExpressionStream:
             base_thought: The raw thought content from workspace consensus.
             original_query: The user's original query text.
             style_hints: Optional StyleHints from StyleAdapter for emotion-aware rendering.
+            cancel_event: Optional asyncio.Event — when set, generation is
+                interrupted and partial results are returned.
 
         Returns:
             ExpressionResult with assembled text and per-fragment scores.
@@ -176,6 +180,14 @@ class ExpressionStream:
         self.controller.reset()
 
         for goal in goals:
+            # ── Check for interruption ────────────────────────────────────
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(
+                    "[ExpressionStream] Interrupted after %d/%d fragments",
+                    len(fragments),
+                    len(goals),
+                )
+                break
             # Step 2a: SNN gating
             if self.enable_gating:
                 gate = self.controller.gate(goal, prev_fragment_text)
@@ -306,6 +318,15 @@ class ExpressionStream:
                 except Exception:
                     logger.debug("on_fragment callback failed (non-fatal)")
 
+            # Check for interruption after emitting fragment
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(
+                    "[ExpressionStream] Interrupted after fragment %d/%d",
+                    len(fragments),
+                    len(goals),
+                )
+                break
+
         # Step 3: Assemble final response
         assembled_text = self._assemble(fragments, base_thought)
 
@@ -325,6 +346,10 @@ class ExpressionStream:
         result_metadata: dict[str, Any] = {}
         if style_hints is not None and hasattr(style_hints, "to_dict"):
             result_metadata["style_hints"] = style_hints.to_dict()
+        if cancel_event is not None and cancel_event.is_set():
+            result_metadata["interrupted"] = True
+            result_metadata["fragments_completed"] = len(fragments)
+            result_metadata["fragments_total"] = len(goals)
 
         return ExpressionResult(
             text=assembled_text,

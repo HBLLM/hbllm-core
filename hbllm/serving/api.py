@@ -1783,8 +1783,14 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
                 await token_queue.put(text)
             await token_queue.put(None)  # Signal completion
 
+    async def interrupt_handler(msg: Message) -> None:
+        """Handle barge-in interruption — terminate stream immediately."""
+        # Signal the SSE stream to end with an interruption marker
+        await token_queue.put("__INTERRUPTED__")
+
     await bus.subscribe("sensory.output.fragment", fragment_handler)
     await bus.subscribe("sensory.output", output_handler)
+    await bus.subscribe("sensory.output.interrupted", interrupt_handler)
 
     # Store user message in memory
     memory_msg = Message(
@@ -1838,6 +1844,9 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
 
                 if chunk is None:
                     yield f"data: {_json.dumps({'token': '', 'done': True, 'correlation_id': correlation_id})}\n\n"
+                    break
+                elif chunk == "__INTERRUPTED__":
+                    yield f"data: {_json.dumps({'token': '', 'done': True, 'interrupted': True, 'correlation_id': correlation_id})}\n\n"
                     break
                 else:
                     yield f"data: {_json.dumps({'token': chunk, 'done': False})}\n\n"
