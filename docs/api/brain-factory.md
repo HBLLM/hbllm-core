@@ -73,6 +73,18 @@ config = BrainConfig(
 )
 ```
 
+**SNN Cognitive Stream** is auto-wired when `BrainFactory.create()` is called. The factory automatically creates:
+- `ComprehensionStream` (5-channel LIF ensemble)
+- `ExpressionStream` (3-tier rendering)
+- `TrainedPRM` (6→8→4→2 SNN + STDP)
+- `ContentPlanner` (8→12→6→3 SNN)
+- `BrocaEncoder` (~80-token prompt builder)
+- `ShallowRenderer` (~300-token prompt builder)
+
+**Rendering mode defaults:**
+- `shallow_mode=False` — opt-in (full brain pipeline needs LLM reasoning)
+- `broca_mode=False` — opt-in (requires SNN to handle all content planning)
+
 ## `Brain.process()`
 
 ```python

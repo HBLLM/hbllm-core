@@ -13,7 +13,7 @@ description: "A continuously thinking, goal-driven cognitive brain that runs ent
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-1800%2B%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-2300%2B%20passing-brightgreen.svg)](#)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
@@ -65,6 +65,10 @@ And it has the **safety instincts of a responsible person** — it knows when it
 <h3>🛡️ Enterprise Governance & Trust</h3>
 <p>Ed25519 Distributed Trust, Vector Clock Replay Protection, Multi-tenant isolation, and Policy Engine for production-grade Sovereign networks.</p>
 </div>
+<div class="feature-card">
+<h3>⚡ SNN Cognitive Stream</h3>
+<p>Spiking Neural Networks for concept extraction (ComprehensionStream), content planning (ContentPlanner), and reward evaluation (TrainedPRM) with STDP learning. Three rendering tiers: Broca (v4) → Shallow (v3) → Deep (v1-v2).</p>
+</div>
 </div>
 
 ---
@@ -101,6 +105,13 @@ flowchart TB
         PLANNER -->|"GoT thoughts"| WORKSPACE
         WORKSPACE --> CRITIC
         CRITIC --> DECISION
+    end
+
+    subgraph SNN["⚡ SNN Cognitive Stream"]
+        direction TB
+        COMPREHENSION["👂 ComprehensionStream\n(5-channel LIF)"]
+        EXPRESSION["🗣️ ExpressionStream\n(3-tier rendering)"]
+        TRAINEDPRM["📊 TrainedPRM\n(STDP learning)"]
     end
 
     subgraph META["🧬 Meta-Cognitive Layer"]
@@ -180,6 +191,8 @@ flowchart TB
     SWARM <==>|"SynapseGateway (Firewall Audited)"| BUS
     ZONING -.-> BRAIN
     PROVIDERS -.-> BRAIN
+    BRAIN <==> SNN
+    SNN --> MEMORY
     CURIOSITY -->|"goals"| SLEEP
     SLEEP -->|"consolidation"| MEMORY
     EXPERIENCE -->|"salience"| METAREASON
@@ -292,6 +305,14 @@ asyncio.run(main())
 - **Dynamic MoE Blending** — Cross-domain queries synthesize custom blend-weights at runtime.
 - **Graph-of-Thoughts Planning** — Dynamic DAG reasoning for multi-step goals.
 - **Process Reward Models** — Neural scoring `[0-1]` of intermediate reasoning steps.
+
+### ⚡ SNN Cognitive Stream
+
+- **ComprehensionStream** — 5-channel LIF ensemble extracts concepts from input. Event-triggered embeddings (3× faster).
+- **ExpressionStream** — 3-tier rendering: Broca (~80 tokens) → Shallow (~300 tokens) → Deep (~600 tokens).
+- **ContentPlanner** — 8→12→6→3 SNN for content type selection. SNN decides what to say.
+- **TrainedPRM** — 6→8→4→2 SNN evaluates response quality with STDP online learning.
+- **STDP Plasticity** — All SNN networks learn via spike-timing-dependent plasticity.
 
 ### 💾 Multi-Tiered Memory
 
