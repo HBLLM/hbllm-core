@@ -17,10 +17,9 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
-from hbllm.brain.snn.expression.models import ExpressionResult
-
 from hbllm.brain.action_planner import ActionPlanner
 from hbllm.brain.action_schema import ActionPlan, ActionType, RiskLevel
+from hbllm.brain.snn.expression.models import ExpressionResult
 from hbllm.brain.utility_calibrator import UtilityCalibrator
 from hbllm.brain.utility_engine import CognitiveUtilityEngine
 from hbllm.network.messages import Message, MessageType
@@ -726,9 +725,7 @@ class DecisionNode(Node):
                     plan.metadata["expression_reward"] = expression_result.mean_reward
                     plan.metadata["expression_thoughts"] = expression_result.thought_count
                     plan.metadata["expression_revisions"] = expression_result.revision_count
-                    await self._publish_output(
-                        message, expression_result.text, source=thought_type
-                    )
+                    await self._publish_output(message, expression_result.text, source=thought_type)
                     return
             except Exception as e:
                 logger.warning(
@@ -1110,11 +1107,7 @@ class DecisionNode(Node):
 
         understanding = UnderstandingState(
             concepts=concepts,
-            domain_activations={
-                d: s
-                for c in concepts
-                for d, s in c.domain_activation.items()
-            },
+            domain_activations={d: s for c in concepts for d, s in c.domain_activation.items()},
             all_memories=all_memories,
             salience_map=[c.salience for c in concepts],
         )
@@ -1128,8 +1121,7 @@ class DecisionNode(Node):
         )
 
         logger.info(
-            "[DecisionNode] ExpressionStream: %d thoughts, "
-            "mean_reward=%.2f, revisions=%d",
+            "[DecisionNode] ExpressionStream: %d thoughts, mean_reward=%.2f, revisions=%d",
             result.thought_count,
             result.mean_reward,
             result.revision_count,

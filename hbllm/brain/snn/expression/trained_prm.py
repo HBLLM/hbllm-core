@@ -167,7 +167,8 @@ class RewardNetwork:
         ]
 
         self._network.connect(
-            "input", "hidden",
+            "input",
+            "hidden",
             initial_weights=input_to_hidden,
             stdp_rule=stdp_rule,
         )
@@ -187,7 +188,8 @@ class RewardNetwork:
         ]
 
         self._network.connect(
-            "hidden", "quality",
+            "hidden",
+            "quality",
             initial_weights=hidden_to_quality,
             stdp_rule=stdp_rule,
         )
@@ -203,7 +205,8 @@ class RewardNetwork:
         ]
 
         self._network.connect(
-            "quality", "output",
+            "quality",
+            "output",
             initial_weights=quality_to_output,
             stdp_rule=stdp_rule,
         )
@@ -341,7 +344,7 @@ class TrainingCollector:
 
         # Circular buffer: drop oldest when full
         if len(self._examples) > self._max_size:
-            self._examples = self._examples[-self._max_size:]
+            self._examples = self._examples[-self._max_size :]
 
     def get_recent(self, n: int = 50) -> list[TrainingExample]:
         """Get the N most recent examples."""
@@ -457,14 +460,10 @@ class TrainedPRM:
             ThoughtFragment with blended reward score.
         """
         # Step 1: Get heuristic scores
-        heuristic_fragment = self._heuristic.evaluate(
-            fragment_text, goal, prev_fragment_text
-        )
+        heuristic_fragment = self._heuristic.evaluate(fragment_text, goal, prev_fragment_text)
 
         # Step 2: Extract features for SNN
-        features = self._extract_features(
-            heuristic_fragment, goal, fragment_text
-        )
+        features = self._extract_features(heuristic_fragment, goal, fragment_text)
         self._last_features = features
 
         # Step 3: Get SNN score
@@ -511,9 +510,7 @@ class TrainedPRM:
             fragment: The evaluated fragment.
             accepted: True if the fragment was accepted, False if revised.
         """
-        features = self._last_features or self._extract_features_from_meta(
-            fragment
-        )
+        features = self._last_features or self._extract_features_from_meta(fragment)
 
         self._collector.record(
             features=features,
@@ -561,9 +558,7 @@ class TrainedPRM:
             "text_length_ratio": min(2.0, estimated_tokens / budget) / 2.0,
         }
 
-    def _extract_features_from_meta(
-        self, fragment: ThoughtFragment
-    ) -> dict[str, float]:
+    def _extract_features_from_meta(self, fragment: ThoughtFragment) -> dict[str, float]:
         """Fallback feature extraction from fragment metadata."""
         return {
             "heuristic_relevance": fragment.relevance_score,

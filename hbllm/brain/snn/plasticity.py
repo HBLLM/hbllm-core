@@ -294,17 +294,12 @@ class PlasticWeightMatrix:
             Dict mapping signal names to their current weights.
         """
         if channel in self._connections:
-            return {
-                signal: conn.weight
-                for signal, conn in self._connections[channel].items()
-            }
+            return {signal: conn.weight for signal, conn in self._connections[channel].items()}
 
         # Fallback to static weights
         return dict(self._static_weights.get(channel, {}))
 
-    def record_signals(
-        self, signals: dict[str, float], timestamp: float
-    ) -> None:
+    def record_signals(self, signals: dict[str, float], timestamp: float) -> None:
         """Record which signals were active (pre-synaptic activity).
 
         Call this *before* ``record_spikes()`` in each ensemble step.
@@ -422,9 +417,7 @@ class PlasticWeightMatrix:
     def get_total_updates(self) -> int:
         """Get total STDP update count across all connections."""
         return sum(
-            conn.update_count
-            for conns in self._connections.values()
-            for conn in conns.values()
+            conn.update_count for conns in self._connections.values() for conn in conns.values()
         )
 
     def reset_to_static(self) -> None:
@@ -443,9 +436,7 @@ class PlasticWeightMatrix:
         """
         connections: dict[str, dict[str, Any]] = {}
         for channel, conns in self._connections.items():
-            connections[channel] = {
-                signal: conn.to_dict() for signal, conn in conns.items()
-            }
+            connections[channel] = {signal: conn.to_dict() for signal, conn in conns.items()}
 
         return {
             "version": 1,
@@ -550,7 +541,5 @@ class PlasticWeightMatrix:
             )
             return matrix
         except Exception as e:
-            logger.warning(
-                "Failed to load weights from %s: %s. Starting fresh.", path, e
-            )
+            logger.warning("Failed to load weights from %s: %s. Starting fresh.", path, e)
             return cls(static_weights, stdp_rule or STDPRule())

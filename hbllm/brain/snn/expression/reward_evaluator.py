@@ -17,7 +17,8 @@ Each dimension is [0.0, 1.0]; the final reward is a weighted blend.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -133,9 +134,7 @@ class RewardEvaluator:
 
                 # Cosine similarity
                 dot = float(np.dot(text_emb, goal_emb))
-                norms = float(
-                    np.linalg.norm(text_emb) * np.linalg.norm(goal_emb) + 1e-9
-                )
+                norms = float(np.linalg.norm(text_emb) * np.linalg.norm(goal_emb) + 1e-9)
                 sim = dot / norms
 
                 # Map [-1, 1] → [0, 1]
@@ -149,9 +148,7 @@ class RewardEvaluator:
     def _lexical_relevance(self, text: str, goal: ThoughtGoal) -> float:
         """Compute relevance from word overlap (fallback)."""
         text_words = set(text.lower().split())
-        goal_words = set(
-            (goal.source_concept_text or goal.text).lower().split()
-        )
+        goal_words = set((goal.source_concept_text or goal.text).lower().split())
 
         if not goal_words:
             return 0.5
@@ -159,9 +156,7 @@ class RewardEvaluator:
         overlap = len(text_words & goal_words)
         return min(1.0, overlap / max(1, len(goal_words)))
 
-    def _score_coherence(
-        self, text: str, prev_text: str | None
-    ) -> float:
+    def _score_coherence(self, text: str, prev_text: str | None) -> float:
         """Score coherence with the previous fragment."""
         if prev_text is None:
             return 1.0  # First fragment is always coherent
@@ -175,10 +170,26 @@ class RewardEvaluator:
 
         # Check if fragment starts with a connector
         connectors = {
-            "additionally", "furthermore", "moreover", "also",
-            "however", "but", "yet", "therefore", "thus",
-            "consequently", "this", "that", "these", "here",
-            "in", "for", "the", "as", "with", "to",
+            "additionally",
+            "furthermore",
+            "moreover",
+            "also",
+            "however",
+            "but",
+            "yet",
+            "therefore",
+            "thus",
+            "consequently",
+            "this",
+            "that",
+            "these",
+            "here",
+            "in",
+            "for",
+            "the",
+            "as",
+            "with",
+            "to",
         }
         first_word = text.strip().split()[0].lower() if text.strip() else ""
         connector_bonus = 0.2 if first_word in connectors else 0.0
@@ -189,9 +200,28 @@ class RewardEvaluator:
         """Score how completely the fragment covers the goal's key terms."""
         # Extract key terms from goal (non-stopword words > 3 chars)
         stopwords = {
-            "the", "a", "an", "is", "are", "was", "were", "to", "in",
-            "of", "for", "on", "with", "it", "this", "that", "and",
-            "also", "address", "establish", "context", "briefly",
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "to",
+            "in",
+            "of",
+            "for",
+            "on",
+            "with",
+            "it",
+            "this",
+            "that",
+            "and",
+            "also",
+            "address",
+            "establish",
+            "context",
+            "briefly",
         }
         goal_text = goal.source_concept_text or goal.text
         key_terms = {

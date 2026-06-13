@@ -23,7 +23,6 @@ from hbllm.brain.snn.plasticity import (
     SynapticConnection,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # SynapticConnection Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -133,29 +132,21 @@ class TestSTDPRule:
         # Close pairing
         conn_close = SynapticConnection(weight=0.5, base_weight=0.5)
         rule.update(conn_close, pre_active=True, post_fired=False, timestamp=1.0)
-        delta_close = rule.update(
-            conn_close, pre_active=False, post_fired=True, timestamp=1.1
-        )
+        delta_close = rule.update(conn_close, pre_active=False, post_fired=True, timestamp=1.1)
 
         # Far pairing
         conn_far = SynapticConnection(weight=0.5, base_weight=0.5)
         rule.update(conn_far, pre_active=True, post_fired=False, timestamp=1.0)
-        delta_far = rule.update(
-            conn_far, pre_active=False, post_fired=True, timestamp=2.5
-        )
+        delta_far = rule.update(conn_far, pre_active=False, post_fired=True, timestamp=2.5)
 
-        assert abs(delta_close) > abs(delta_far), (
-            "Close timing should produce larger update"
-        )
+        assert abs(delta_close) > abs(delta_far), "Close timing should produce larger update"
 
     def test_no_update_without_events(self) -> None:
         """No pre or post activity → no update."""
         rule = STDPRule()
         conn = SynapticConnection(weight=0.5)
 
-        delta = rule.update(
-            conn, pre_active=False, post_fired=False, timestamp=1.0
-        )
+        delta = rule.update(conn, pre_active=False, post_fired=False, timestamp=1.0)
         assert delta == 0.0
         assert conn.weight == 0.5
 
@@ -178,9 +169,7 @@ class TestSTDPRule:
 
         # Pre and post at same time
         rule.update(conn, pre_active=True, post_fired=False, timestamp=1.0)
-        delta = rule.update(
-            conn, pre_active=True, post_fired=True, timestamp=1.0
-        )
+        delta = rule.update(conn, pre_active=True, post_fired=True, timestamp=1.0)
 
         # dt=0 → small potentiation (0.5 × η)
         assert delta > 0
@@ -188,9 +177,7 @@ class TestSTDPRule:
 
     def test_serialization(self) -> None:
         """Rule parameters serialize correctly."""
-        rule = STDPRule(
-            learning_rate=0.05, time_constant=0.3, w_min=0.1, w_max=1.5
-        )
+        rule = STDPRule(learning_rate=0.05, time_constant=0.3, w_min=0.1, w_max=1.5)
         d = rule.to_dict()
         assert d["learning_rate"] == 0.05
         assert d["w_max"] == 1.5
@@ -271,9 +258,7 @@ class TestPlasticWeightMatrix:
 
         # Force a weight change
         t = time.time()
-        matrix.record_signals(
-            {"semantic_weight": 1.0, "topic_shift": 0.0, "novelty": 0.0}, t
-        )
+        matrix.record_signals({"semantic_weight": 1.0, "topic_shift": 0.0, "novelty": 0.0}, t)
         matrix.record_spikes(["entity"], t + 0.05)
 
         drift = matrix.get_weight_drift()
@@ -374,9 +359,7 @@ class TestPlasticWeightMatrix:
     def test_decay_unused_nudges_toward_base(self) -> None:
         """Unused connections decay toward their base weight."""
         rule = STDPRule(learning_rate=0.5)
-        matrix = PlasticWeightMatrix(
-            STATIC_WEIGHTS, rule, decay_interval=5, decay_rate=0.1
-        )
+        matrix = PlasticWeightMatrix(STATIC_WEIGHTS, rule, decay_interval=5, decay_rate=0.1)
 
         # Force a weight change
         t = time.time()
@@ -434,16 +417,24 @@ class TestEnsemblePlasticity:
         rule = STDPRule(learning_rate=0.1)
         static_w = {
             "entity": {"semantic_weight": 0.5, "topic_shift": 0.3, "novelty": 0.2},
-            "clause": {"punctuation": 0.3, "buffer_pressure": 0.3, "topic_shift": 0.2, "semantic_weight": 0.2},
-            "discourse": {"topic_shift": 0.4, "inter_novelty": 0.3, "buffer_pressure": 0.2, "novelty": 0.1},
+            "clause": {
+                "punctuation": 0.3,
+                "buffer_pressure": 0.3,
+                "topic_shift": 0.2,
+                "semantic_weight": 0.2,
+            },
+            "discourse": {
+                "topic_shift": 0.4,
+                "inter_novelty": 0.3,
+                "buffer_pressure": 0.2,
+                "novelty": 0.1,
+            },
             "surprise": {"inter_novelty": 0.5, "constraint": 0.3, "novelty": 0.2},
             "constraint": {"constraint": 0.7, "semantic_weight": 0.2, "punctuation": 0.1},
         }
         matrix = PlasticWeightMatrix(static_w, rule)
 
-        ensemble = ComprehensionEnsemble(
-            domain="general", plastic_weights=matrix
-        )
+        ensemble = ComprehensionEnsemble(domain="general", plastic_weights=matrix)
 
         # Stimulate repeatedly
         t = time.time()
@@ -469,8 +460,18 @@ class TestEnsemblePlasticity:
         rule = STDPRule(learning_rate=0.05, time_constant=0.5)
         static_w = {
             "entity": {"semantic_weight": 0.5, "topic_shift": 0.3, "novelty": 0.2},
-            "clause": {"punctuation": 0.3, "buffer_pressure": 0.3, "topic_shift": 0.2, "semantic_weight": 0.2},
-            "discourse": {"topic_shift": 0.4, "inter_novelty": 0.3, "buffer_pressure": 0.2, "novelty": 0.1},
+            "clause": {
+                "punctuation": 0.3,
+                "buffer_pressure": 0.3,
+                "topic_shift": 0.2,
+                "semantic_weight": 0.2,
+            },
+            "discourse": {
+                "topic_shift": 0.4,
+                "inter_novelty": 0.3,
+                "buffer_pressure": 0.2,
+                "novelty": 0.1,
+            },
             "surprise": {"inter_novelty": 0.5, "constraint": 0.3, "novelty": 0.2},
             "constraint": {"constraint": 0.7, "semantic_weight": 0.2, "punctuation": 0.1},
         }
@@ -504,8 +505,8 @@ class TestControllerPlasticity:
 
     def test_controller_without_plasticity(self) -> None:
         """Controller without plasticity works identically to before."""
-        from hbllm.brain.snn.expression.thought_controller import ThoughtController
         from hbllm.brain.snn.expression.models import ThoughtGoal
+        from hbllm.brain.snn.expression.thought_controller import ThoughtController
 
         controller = ThoughtController()
         goal = ThoughtGoal(id="g1", text="test", salience=0.8)
@@ -515,8 +516,8 @@ class TestControllerPlasticity:
 
     def test_controller_with_plasticity(self) -> None:
         """Controller with plasticity records STDP and still gates."""
-        from hbllm.brain.snn.expression.thought_controller import ThoughtController
         from hbllm.brain.snn.expression.models import ThoughtGoal
+        from hbllm.brain.snn.expression.thought_controller import ThoughtController
 
         rule = STDPRule(learning_rate=0.05)
         static_w = {
@@ -541,9 +542,7 @@ class TestControllerPlasticity:
 
         # Subsequent goals use plasticity
         for _ in range(5):
-            signal = controller.gate(
-                goal, prev_fragment_text="previous text about neural networks"
-            )
+            signal = controller.gate(goal, prev_fragment_text="previous text about neural networks")
 
         # Matrix should have tracked steps
         assert matrix.global_step > 0

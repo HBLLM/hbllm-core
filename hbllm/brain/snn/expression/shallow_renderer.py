@@ -205,9 +205,7 @@ class RenderPromptBuilder:
                 source = chain.get("source_concept", "")
                 conclusion = chain.get("conclusion", "")
                 conf = chain.get("snn_confidence", 0.0)
-                parts.append(
-                    f"  - {source} → {conclusion} (confidence: {conf:.0%})"
-                )
+                parts.append(f"  - {source} → {conclusion} (confidence: {conf:.0%})")
 
         # Memory hints
         if context.memory_hints:
@@ -219,10 +217,7 @@ class RenderPromptBuilder:
         # Constraint guidance
         if context.constraints:
             parts.append("")
-            constraint_items = [
-                f"{k} (strength: {v:.1f})"
-                for k, v in context.constraints.items()
-            ]
+            constraint_items = [f"{k} (strength: {v:.1f})" for k, v in context.constraints.items()]
             parts.append(f"CONSTRAINTS to respect: {', '.join(constraint_items)}")
 
         # Style guidance based on domain
@@ -240,7 +235,7 @@ class RenderPromptBuilder:
         )
 
         prompt = "\n".join(parts)
-        return prompt[:self.max_conclusion_chars + 500]
+        return prompt[: self.max_conclusion_chars + 500]
 
     def build_per_goal_render(
         self,
@@ -275,8 +270,10 @@ class RenderPromptBuilder:
         # Relevant associations for this goal
         if self.include_associations and context.associations:
             relevant = [
-                a for a in context.associations
-                if goal.source_concept_text in (
+                a
+                for a in context.associations
+                if goal.source_concept_text
+                in (
                     a.get("source_text", ""),
                     a.get("target_text", ""),
                 )
@@ -286,8 +283,7 @@ class RenderPromptBuilder:
                 parts.append("Related findings:")
                 for a in relevant[:3]:
                     parts.append(
-                        f"  - [{a.get('association_type', 'related')}] "
-                        f"{a.get('target_text', '')}"
+                        f"  - [{a.get('association_type', 'related')}] {a.get('target_text', '')}"
                     )
 
         # Memory hints for this goal
@@ -408,14 +404,10 @@ class ShallowRenderer:
         # Extract memory hints
         memory_hints = []
         if hasattr(understanding, "all_memories"):
-            memory_hints = [
-                m.content[:200] for m in understanding.all_memories[:5]
-            ]
+            memory_hints = [m.content[:200] for m in understanding.all_memories[:5]]
 
         # Compute overall confidence from multiple signals
-        confidence = self._compute_confidence(
-            understanding, associations, causal_chains
-        )
+        confidence = self._compute_confidence(understanding, associations, causal_chains)
 
         # Extract constraints from goals
         constraints: dict[str, float] = {}
@@ -487,9 +479,7 @@ class ShallowRenderer:
         self._render_count += 1
 
         if goal is not None:
-            return self._builder.build_per_goal_render(
-                context, goal, prev_text
-            )
+            return self._builder.build_per_goal_render(context, goal, prev_text)
         return self._builder.build_full_render(context)
 
     def _compute_confidence(
@@ -519,25 +509,19 @@ class ShallowRenderer:
 
         # Association signal
         if associations:
-            avg_strength = sum(
-                a.get("strength", 0.5) for a in associations
-            ) / len(associations)
+            avg_strength = sum(a.get("strength", 0.5) for a in associations) / len(associations)
             score += avg_strength * 0.2
             weights_total += 0.2
 
         # Causal chain confidence
         if causal_chains:
-            avg_conf = sum(
-                c.get("snn_confidence", 0.5) for c in causal_chains
-            ) / len(causal_chains)
+            avg_conf = sum(c.get("snn_confidence", 0.5) for c in causal_chains) / len(causal_chains)
             score += avg_conf * 0.3
             weights_total += 0.3
 
         # Salience coverage
         if hasattr(understanding, "salience_map") and understanding.salience_map:
-            avg_salience = sum(understanding.salience_map) / len(
-                understanding.salience_map
-            )
+            avg_salience = sum(understanding.salience_map) / len(understanding.salience_map)
             score += min(1.0, avg_salience) * 0.2
             weights_total += 0.2
 

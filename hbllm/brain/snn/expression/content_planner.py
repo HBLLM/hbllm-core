@@ -39,11 +39,11 @@ logger = logging.getLogger(__name__)
 
 # Content type constants
 CONTENT_TYPES = [
-    "assertion",    # Direct statement of fact/answer
+    "assertion",  # Direct statement of fact/answer
     "explanation",  # Why/how something works
-    "example",      # Concrete illustration
-    "transition",   # Connecting between sections
-    "caveat",       # Qualification or limitation
+    "example",  # Concrete illustration
+    "transition",  # Connecting between sections
+    "caveat",  # Qualification or limitation
 ]
 
 
@@ -213,7 +213,8 @@ class ContentPlanNetwork:
         ]
 
         self._network.connect(
-            "input", "planning",
+            "input",
+            "planning",
             initial_weights=input_to_planning,
             stdp_rule=stdp_rule,
         )
@@ -241,7 +242,8 @@ class ContentPlanNetwork:
         ]
 
         self._network.connect(
-            "planning", "selection",
+            "planning",
+            "selection",
             initial_weights=planning_to_selection,
             stdp_rule=stdp_rule,
         )
@@ -260,7 +262,8 @@ class ContentPlanNetwork:
         ]
 
         self._network.connect(
-            "selection", "output",
+            "selection",
+            "output",
             initial_weights=selection_to_output,
             stdp_rule=stdp_rule,
         )
@@ -314,7 +317,9 @@ class ContentPlanNetwork:
             # Fallback: use membrane potentials if nothing fired
             if best_strength == 0.0:
                 potentials = self._network.get_layer("selection").get_potential_vector()
-                best_idx = max(range(len(potentials)), key=lambda i: potentials[i]) if potentials else 0
+                best_idx = (
+                    max(range(len(potentials)), key=lambda i: potentials[i]) if potentials else 0
+                )
 
             if best_idx < len(CONTENT_TYPES):
                 content_type = CONTENT_TYPES[best_idx]
@@ -423,9 +428,7 @@ class ContentPlanner:
                 continue
 
             # Build key points from concept + related data
-            key_points = self._build_key_points(
-                concept, associations, causal_chains, memory_hints
-            )
+            key_points = self._build_key_points(concept, associations, causal_chains, memory_hints)
 
             # Determine tone
             tone = "neutral"
@@ -518,7 +521,8 @@ class ContentPlanner:
         # association_count: normalized
         concept_lower = concept.lower()
         related = sum(
-            1 for a in associations
+            1
+            for a in associations
             if concept_lower in a.get("source_text", "").lower()
             or concept_lower in a.get("target_text", "").lower()
         )
@@ -533,9 +537,7 @@ class ContentPlanner:
                 causal_confidence = max(causal_confidence, conf)
 
         # memory_density: how many memory hints mention this concept
-        memory_matches = sum(
-            1 for h in memory_hints if concept_lower in h.lower()
-        )
+        memory_matches = sum(1 for h in memory_hints if concept_lower in h.lower())
         memory_density = min(1.0, memory_matches / 2.0)
 
         # constraint_strength: max constraint
@@ -595,9 +597,7 @@ class ContentPlanner:
 
         return points[:5]  # Cap at 5 key points
 
-    def _inject_transitions(
-        self, nodes: list[ContentNode]
-    ) -> list[ContentNode]:
+    def _inject_transitions(self, nodes: list[ContentNode]) -> list[ContentNode]:
         """Insert transition nodes between major content shifts."""
         result: list[ContentNode] = []
 
@@ -626,9 +626,7 @@ class ContentPlanner:
 
     @staticmethod
     def _make_id(text: str, position: int, suffix: str = "") -> str:
-        h = hashlib.md5(
-            f"{text}_{position}".encode(), usedforsecurity=False
-        ).hexdigest()[:8]
+        h = hashlib.md5(f"{text}_{position}".encode(), usedforsecurity=False).hexdigest()[:8]
         return f"cn_{h}_{suffix}" if suffix else f"cn_{h}"
 
     @property

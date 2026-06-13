@@ -24,7 +24,6 @@ from hbllm.brain.snn.expression.shallow_renderer import (
     ShallowRenderer,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # RenderingContext Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -95,17 +94,21 @@ class TestRenderPromptBuilder:
     def context(self):
         return RenderingContext(
             concepts=["SNN architecture", "LIF neurons", "STDP plasticity"],
-            associations=[{
-                "association_type": "similar",
-                "source_text": "SNN architecture",
-                "target_text": "LIF neurons",
-                "strength": 0.8,
-            }],
-            causal_chains=[{
-                "source_concept": "STDP plasticity",
-                "conclusion": "adaptive weights",
-                "snn_confidence": 0.75,
-            }],
+            associations=[
+                {
+                    "association_type": "similar",
+                    "source_text": "SNN architecture",
+                    "target_text": "LIF neurons",
+                    "strength": 0.8,
+                }
+            ],
+            causal_chains=[
+                {
+                    "source_concept": "STDP plasticity",
+                    "conclusion": "adaptive weights",
+                    "snn_confidence": 0.75,
+                }
+            ],
             memory_hints=["SNNs process temporal patterns"],
             domain_context={"coding": 0.7},
             original_query="How do SNNs work?",
@@ -198,9 +201,7 @@ class TestShallowRenderer:
 
     def test_build_context(self, renderer, understanding) -> None:
         goals = [ThoughtGoal(text="test", source_concept_text="SNN architecture")]
-        ctx = renderer.build_context(
-            understanding, goals, "How do SNNs work?", "Base thought"
-        )
+        ctx = renderer.build_context(understanding, goals, "How do SNNs work?", "Base thought")
         assert isinstance(ctx, RenderingContext)
         assert ctx.concept_count == 2
         assert "coding" in ctx.domain_context

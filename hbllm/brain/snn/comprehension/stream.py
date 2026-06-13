@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import numpy as np
 
@@ -136,9 +137,7 @@ class ComprehensionStream:
 
                 # Collect metadata from other channels that fired
                 metadata_channels = {
-                    ch: spike.strength
-                    for ch, spike in fired_channels
-                    if ch != "clause"
+                    ch: spike.strength for ch, spike in fired_channels if ch != "clause"
                 }
 
                 unit = await self._process_concept(
@@ -156,9 +155,7 @@ class ComprehensionStream:
         if self._word_buffer:
             concept_text = " ".join(self._word_buffer).strip()
             if concept_text:
-                unit = await self._process_concept(
-                    concept_text, {}, time.time()
-                )
+                unit = await self._process_concept(concept_text, {}, time.time())
                 self._concepts.append(unit)
 
         return self._build_understanding()
@@ -187,9 +184,7 @@ class ComprehensionStream:
                 emb_norm = float(np.linalg.norm(embedding))
                 cen_norm = float(np.linalg.norm(centroid))
                 if emb_norm > 0 and cen_norm > 0:
-                    sim = float(
-                        np.dot(embedding, centroid) / (emb_norm * cen_norm)
-                    )
+                    sim = float(np.dot(embedding, centroid) / (emb_norm * cen_norm))
                     if sim > 0.3:
                         domain_scores[domain] = sim
             except (ValueError, TypeError):
@@ -201,9 +196,7 @@ class ComprehensionStream:
             try:
                 memories = await self.memory_search_fn(text)
             except Exception:
-                logger.debug(
-                    "Memory search failed for concept: '%s...'", text[:30]
-                )
+                logger.debug("Memory search failed for concept: '%s...'", text[:30])
 
         # Compute salience from channel metadata
         # Constraint and surprise channels boost salience
@@ -250,14 +243,10 @@ class ComprehensionStream:
         # Discover concept associations via AssociationLayer
         if self.association_layer is not None and len(self._concepts) >= 2:
             try:
-                associations = self.association_layer.find_associations(
-                    self._concepts
-                )
+                associations = self.association_layer.find_associations(self._concepts)
                 state.associations = associations
             except Exception:
-                logger.debug(
-                    "AssociationLayer failed (non-fatal), skipping associations"
-                )
+                logger.debug("AssociationLayer failed (non-fatal), skipping associations")
 
         # Run causal reasoning over concept texts
         if self.causal_reasoner is not None and self._concepts:
@@ -266,9 +255,7 @@ class ComprehensionStream:
                 chains = self.causal_reasoner.reason(concept_ids)
                 state.causal_chains = chains
             except Exception:
-                logger.debug(
-                    "CausalReasoner failed (non-fatal), skipping causal chains"
-                )
+                logger.debug("CausalReasoner failed (non-fatal), skipping causal chains")
 
         # Reset per-query state
         self._concepts = []

@@ -34,8 +34,8 @@ from hbllm.brain.snn.expression.thought_controller import (
 )
 from hbllm.brain.snn.expression.thought_planner import ThoughtPlanner
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────
+
 
 def _make_understanding(
     n_concepts: int = 3,
@@ -156,9 +156,7 @@ class TestThoughtPlanner:
     def test_low_salience_merged(self) -> None:
         """Concepts below min_salience_for_goal get merged into one catch-all."""
         planner = ThoughtPlanner(min_salience_for_goal=0.3)
-        understanding = _make_understanding(
-            n_concepts=2, salience=0.8, low_salience_extra=True
-        )
+        understanding = _make_understanding(n_concepts=2, salience=0.8, low_salience_extra=True)
 
         goals = planner.plan(understanding)
 
@@ -171,9 +169,7 @@ class TestThoughtPlanner:
     def test_memory_hints_forwarded(self) -> None:
         """Memory hints from comprehension are included in goals."""
         planner = ThoughtPlanner()
-        understanding = _make_understanding(
-            n_concepts=2, with_memories=True
-        )
+        understanding = _make_understanding(n_concepts=2, with_memories=True)
 
         goals = planner.plan(understanding)
 
@@ -398,22 +394,19 @@ class TestRewardEvaluator:
         """Fragment below min_acceptable_reward should be revised."""
         evaluator = RewardEvaluator(min_acceptable_reward=0.5)
 
-        fragment = ThoughtFragment(
-            goal_id="g7", text="bad", reward_score=0.3
-        )
+        fragment = ThoughtFragment(goal_id="g7", text="bad", reward_score=0.3)
         assert evaluator.should_revise(fragment) is True
 
     def test_should_not_revise_above_threshold(self) -> None:
         """Fragment above threshold should not be revised."""
         evaluator = RewardEvaluator(min_acceptable_reward=0.4)
 
-        fragment = ThoughtFragment(
-            goal_id="g8", text="good", reward_score=0.6
-        )
+        fragment = ThoughtFragment(goal_id="g8", text="good", reward_score=0.6)
         assert evaluator.should_revise(fragment) is False
 
     def test_with_encoder(self) -> None:
         """Encoder-based relevance scoring works."""
+
         def mock_encoder(text: str) -> np.ndarray:
             # Simple hash-based embedding for determinism
             h = hash(text) % 1000
@@ -429,9 +422,7 @@ class TestRewardEvaluator:
             max_tokens=256,
         )
 
-        fragment = evaluator.evaluate(
-            fragment_text="test response", goal=goal
-        )
+        fragment = evaluator.evaluate(fragment_text="test response", goal=goal)
 
         # Should not crash and should produce a valid score
         assert 0.0 <= fragment.relevance_score <= 1.0
@@ -485,9 +476,7 @@ class TestExpressionStream:
     @pytest.fixture
     def stream_with_llm(self) -> ExpressionStream:
         """ExpressionStream with mock LLM."""
-        mock_llm = AsyncMock(
-            side_effect=lambda prompt: f"Generated response for: {prompt[:50]}"
-        )
+        mock_llm = AsyncMock(side_effect=lambda prompt: f"Generated response for: {prompt[:50]}")
         return ExpressionStream(
             planner=ThoughtPlanner(),
             controller=ThoughtController(),
@@ -498,9 +487,7 @@ class TestExpressionStream:
         )
 
     @pytest.mark.asyncio
-    async def test_empty_understanding_passthrough(
-        self, stream_no_llm: ExpressionStream
-    ) -> None:
+    async def test_empty_understanding_passthrough(self, stream_no_llm: ExpressionStream) -> None:
         """Empty understanding passes through base_thought."""
         understanding = UnderstandingState(
             concepts=[], domain_activations={}, all_memories=[], salience_map=[]
@@ -518,9 +505,7 @@ class TestExpressionStream:
         assert result.fragments == []
 
     @pytest.mark.asyncio
-    async def test_fallback_extraction(
-        self, stream_no_llm: ExpressionStream
-    ) -> None:
+    async def test_fallback_extraction(self, stream_no_llm: ExpressionStream) -> None:
         """Without LLM, extracts relevant portions from base_thought."""
         understanding = _make_understanding(n_concepts=2)
 
@@ -540,9 +525,7 @@ class TestExpressionStream:
         assert result.text  # Should have assembled text
 
     @pytest.mark.asyncio
-    async def test_with_llm_generation(
-        self, stream_with_llm: ExpressionStream
-    ) -> None:
+    async def test_with_llm_generation(self, stream_with_llm: ExpressionStream) -> None:
         """With LLM, generates per-goal text."""
         understanding = _make_understanding(n_concepts=2)
 
@@ -616,9 +599,7 @@ class TestExpressionStream:
         assert len(result.fragments) == 3
 
     @pytest.mark.asyncio
-    async def test_mean_reward_computed(
-        self, stream_no_llm: ExpressionStream
-    ) -> None:
+    async def test_mean_reward_computed(self, stream_no_llm: ExpressionStream) -> None:
         """Mean reward is computed correctly."""
         understanding = _make_understanding(n_concepts=2)
 
@@ -629,9 +610,7 @@ class TestExpressionStream:
         )
 
         if result.fragments:
-            expected_mean = sum(f.reward_score for f in result.fragments) / len(
-                result.fragments
-            )
+            expected_mean = sum(f.reward_score for f in result.fragments) / len(result.fragments)
             assert abs(result.mean_reward - expected_mean) < 0.01
 
     @pytest.mark.asyncio
@@ -646,9 +625,7 @@ class TestExpressionStream:
             max_revisions=0,
         )
 
-        understanding = _make_understanding(
-            n_concepts=1, with_constraints=True
-        )
+        understanding = _make_understanding(n_concepts=1, with_constraints=True)
 
         result = await stream.express(
             understanding=understanding,

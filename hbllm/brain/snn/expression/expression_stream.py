@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from hbllm.brain.snn.expression.models import (
     ExpressionResult,
@@ -195,9 +196,7 @@ class ExpressionStream:
                         )
                         use_shallow = True
                 except Exception:
-                    logger.debug(
-                        "ShallowRenderer failed (non-fatal), using deep path"
-                    )
+                    logger.debug("ShallowRenderer failed (non-fatal), using deep path")
 
             if not use_shallow:
                 fragment = await self._generate_for_goal(
@@ -285,16 +284,11 @@ class ExpressionStream:
         assembled_text = self._assemble(fragments, base_thought)
 
         # Compute mean reward
-        mean_reward = (
-            sum(f.reward_score for f in fragments) / len(fragments)
-            if fragments
-            else 0.0
-        )
+        mean_reward = sum(f.reward_score for f in fragments) / len(fragments) if fragments else 0.0
 
         latency_ms = (time.monotonic() - start_time) * 1000
         logger.info(
-            "ExpressionStream: %d goals → %d fragments, "
-            "mean_reward=%.2f, revisions=%d, %.1fms",
+            "ExpressionStream: %d goals → %d fragments, mean_reward=%.2f, revisions=%d, %.1fms",
             len(goals),
             len(fragments),
             mean_reward,
@@ -403,11 +397,7 @@ class ExpressionStream:
         if not assembled.strip():
             return None
 
-        mean_reward = (
-            sum(f.reward_score for f in fragments) / len(fragments)
-            if fragments
-            else 0.0
-        )
+        mean_reward = sum(f.reward_score for f in fragments) / len(fragments) if fragments else 0.0
 
         total_tokens = sum(f.metadata.get("tokens", 0) for f in fragments)
 
@@ -433,9 +423,7 @@ class ExpressionStream:
         base_thought using lexical matching.
         """
         if self.llm_generate is not None:
-            prompt = self._build_prompt(
-                goal, base_thought, original_query, prev_fragment_text
-            )
+            prompt = self._build_prompt(goal, base_thought, original_query, prev_fragment_text)
             try:
                 text = await self.llm_generate(prompt)
                 estimated_tokens = max(1, len(text) // 4)
@@ -445,9 +433,7 @@ class ExpressionStream:
                     metadata={"tokens": estimated_tokens, "source": "llm"},
                 )
             except Exception as e:
-                logger.warning(
-                    "LLM generation failed for goal %s: %s", goal.id, e
-                )
+                logger.warning("LLM generation failed for goal %s: %s", goal.id, e)
 
         # Fallback: extract from base_thought
         text = self._extract_from_base(goal, base_thought)
@@ -473,14 +459,10 @@ class ExpressionStream:
                 f"- Your response was not relevant enough to: '{goal.source_concept_text}'"
             )
         if original_fragment.coherence_score < 0.5:
-            feedback_parts.append(
-                "- Your response did not flow well from the previous section"
-            )
+            feedback_parts.append("- Your response did not flow well from the previous section")
         completeness = original_fragment.metadata.get("completeness", 1.0)
         if completeness < 0.5:
-            feedback_parts.append(
-                f"- You missed key terms from: '{goal.source_concept_text}'"
-            )
+            feedback_parts.append(f"- You missed key terms from: '{goal.source_concept_text}'")
 
         feedback = "\n".join(feedback_parts) if feedback_parts else "Improve overall quality."
 
@@ -517,15 +499,15 @@ class ExpressionStream:
     ) -> str:
         """Build a constrained LLM prompt for a thought goal."""
         parts = [
-            f"You are generating one section of a structured response.",
+            "You are generating one section of a structured response.",
             f"Original user query: {original_query}",
-            f"",
+            "",
             f"CURRENT GOAL: {goal.text}",
             f"Source concept: {goal.source_concept_text}",
         ]
 
         if goal.memory_hints:
-            parts.append(f"Relevant context from memory:")
+            parts.append("Relevant context from memory:")
             for hint in goal.memory_hints[:3]:
                 parts.append(f"  - {hint}")
 
@@ -534,14 +516,14 @@ class ExpressionStream:
 
         if prev_fragment_text:
             # Show last 200 chars of previous fragment for continuity
-            parts.append(f"")
-            parts.append(f"Previous section ended with:")
+            parts.append("")
+            parts.append("Previous section ended with:")
             parts.append(f"...{prev_fragment_text[-200:]}")
 
-        parts.append(f"")
-        parts.append(f"Reference material (full thought):")
+        parts.append("")
+        parts.append("Reference material (full thought):")
         parts.append(base_thought[:1000])
-        parts.append(f"")
+        parts.append("")
         parts.append(
             f"Generate ONLY the section addressing the current goal. "
             f"Keep it under {goal.max_tokens} tokens. "
@@ -570,9 +552,7 @@ class ExpressionStream:
             return base_thought
 
         # Score each sentence by word overlap with goal
-        goal_words = set(
-            (goal.source_concept_text or goal.text).lower().split()
-        )
+        goal_words = set((goal.source_concept_text or goal.text).lower().split())
 
         scored = []
         for s in sentences:

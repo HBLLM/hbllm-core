@@ -24,7 +24,6 @@ from hbllm.brain.snn.expression.trained_prm import (
 )
 from hbllm.brain.snn.network import SpikingNetwork
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # RewardNetwork Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -35,14 +34,16 @@ class TestRewardNetwork:
 
     def test_score_returns_valid_keys(self) -> None:
         net = RewardNetwork()
-        result = net.score({
-            "heuristic_relevance": 0.8,
-            "heuristic_coherence": 0.7,
-            "heuristic_completeness": 0.6,
-            "heuristic_conciseness": 0.5,
-            "goal_salience": 0.9,
-            "text_length_ratio": 0.5,
-        })
+        result = net.score(
+            {
+                "heuristic_relevance": 0.8,
+                "heuristic_coherence": 0.7,
+                "heuristic_completeness": 0.6,
+                "heuristic_conciseness": 0.5,
+                "goal_salience": 0.9,
+                "text_length_ratio": 0.5,
+            }
+        )
 
         assert "accept_score" in result
         assert "revise_score" in result
@@ -51,14 +52,16 @@ class TestRewardNetwork:
 
     def test_high_features_produce_reward(self) -> None:
         net = RewardNetwork()
-        result = net.score({
-            "heuristic_relevance": 1.0,
-            "heuristic_coherence": 1.0,
-            "heuristic_completeness": 1.0,
-            "heuristic_conciseness": 1.0,
-            "goal_salience": 1.0,
-            "text_length_ratio": 0.5,
-        })
+        result = net.score(
+            {
+                "heuristic_relevance": 1.0,
+                "heuristic_coherence": 1.0,
+                "heuristic_completeness": 1.0,
+                "heuristic_conciseness": 1.0,
+                "goal_salience": 1.0,
+                "text_length_ratio": 0.5,
+            }
+        )
         assert result["reward"] > 0.3
 
     def test_empty_features_valid(self) -> None:
@@ -196,15 +199,11 @@ class TestTrainedPRM:
         # blend weight should be 0 with no training
         assert fragment.metadata["prm_blend_weight"] == pytest.approx(0.0)
         # So the reward should equal the heuristic reward
-        assert fragment.reward_score == pytest.approx(
-            fragment.metadata["prm_heuristic_reward"]
-        )
+        assert fragment.reward_score == pytest.approx(fragment.metadata["prm_heuristic_reward"])
 
     def test_blend_ramps_with_training(self, prm) -> None:
         """Blend weight ramps up as training examples accumulate."""
-        goal = ThoughtGoal(
-            text="test", source_concept_text="test", max_tokens=200
-        )
+        goal = ThoughtGoal(text="test", source_concept_text="test", max_tokens=200)
 
         # Record some training data
         for _ in range(5):
@@ -216,9 +215,7 @@ class TestTrainedPRM:
         assert frag.metadata["prm_blend_weight"] == pytest.approx(0.3)
 
     def test_record_outcome_accepted(self, prm) -> None:
-        goal = ThoughtGoal(
-            text="test", source_concept_text="test", max_tokens=200
-        )
+        goal = ThoughtGoal(text="test", source_concept_text="test", max_tokens=200)
         fragment = prm.evaluate("good text", goal)
         prm.record_outcome(fragment, accepted=True)
 
@@ -226,9 +223,7 @@ class TestTrainedPRM:
         assert prm.collector.get_all()[0].accepted is True
 
     def test_record_outcome_revised(self, prm) -> None:
-        goal = ThoughtGoal(
-            text="test", source_concept_text="test", max_tokens=200
-        )
+        goal = ThoughtGoal(text="test", source_concept_text="test", max_tokens=200)
         fragment = prm.evaluate("bad text", goal)
         prm.record_outcome(fragment, accepted=False)
 
@@ -260,17 +255,18 @@ class TestExpressionStreamPRMIntegration:
 
     @pytest.mark.asyncio
     async def test_stream_with_trained_prm(self) -> None:
+        import numpy as np
+
+        from hbllm.brain.snn.comprehension.models import (
+            ComprehensionUnit,
+            UnderstandingState,
+        )
         from hbllm.brain.snn.expression import (
             ExpressionStream,
             RewardEvaluator,
             ThoughtController,
             ThoughtPlanner,
         )
-        from hbllm.brain.snn.comprehension.models import (
-            ComprehensionUnit,
-            UnderstandingState,
-        )
-        import numpy as np
 
         evaluator = RewardEvaluator(min_acceptable_reward=0.4)
         prm = TrainedPRM(reward_evaluator=evaluator)
@@ -304,17 +300,18 @@ class TestExpressionStreamPRMIntegration:
 
     @pytest.mark.asyncio
     async def test_stream_without_prm_still_works(self) -> None:
+        import numpy as np
+
+        from hbllm.brain.snn.comprehension.models import (
+            ComprehensionUnit,
+            UnderstandingState,
+        )
         from hbllm.brain.snn.expression import (
             ExpressionStream,
             RewardEvaluator,
             ThoughtController,
             ThoughtPlanner,
         )
-        from hbllm.brain.snn.comprehension.models import (
-            ComprehensionUnit,
-            UnderstandingState,
-        )
-        import numpy as np
 
         stream = ExpressionStream(
             planner=ThoughtPlanner(),

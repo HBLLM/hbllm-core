@@ -32,13 +32,25 @@ Public API
 
 from __future__ import annotations
 
+from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder, BrocaPrompt
+from hbllm.brain.snn.expression.content_planner import (
+    ContentNode,
+    ContentPlanner,
+    ContentPlanNetwork,
+)
 from hbllm.brain.snn.expression.expression_stream import ExpressionStream
 from hbllm.brain.snn.expression.models import (
     ExpressionResult,
     ThoughtFragment,
     ThoughtGoal,
 )
+from hbllm.brain.snn.expression.prm_trainer import PRMTrainer, TrainingMetrics
 from hbllm.brain.snn.expression.reward_evaluator import RewardEvaluator
+from hbllm.brain.snn.expression.shallow_renderer import (
+    RenderingContext,
+    RenderPromptBuilder,
+    ShallowRenderer,
+)
 from hbllm.brain.snn.expression.thought_controller import ThoughtController
 from hbllm.brain.snn.expression.thought_planner import ThoughtPlanner
 from hbllm.brain.snn.expression.trained_prm import (
@@ -46,18 +58,6 @@ from hbllm.brain.snn.expression.trained_prm import (
     TrainedPRM,
     TrainingCollector,
 )
-from hbllm.brain.snn.expression.shallow_renderer import (
-    RenderingContext,
-    RenderPromptBuilder,
-    ShallowRenderer,
-)
-from hbllm.brain.snn.expression.content_planner import (
-    ContentNode,
-    ContentPlanner,
-    ContentPlanNetwork,
-)
-from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder, BrocaPrompt
-from hbllm.brain.snn.expression.prm_trainer import PRMTrainer, TrainingMetrics
 
 __all__ = [
     "ThoughtPlanner",

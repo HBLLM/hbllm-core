@@ -28,7 +28,6 @@ from hbllm.brain.snn.reasoning.association import (
     ConceptAssociation,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # NeuronLayer Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -123,8 +122,10 @@ class TestLayerProjection:
 
     def test_projection_default_uniform_weights(self) -> None:
         proj = LayerProjection(
-            source_name="a", target_name="b",
-            source_size=4, target_size=3,
+            source_name="a",
+            target_name="b",
+            source_size=4,
+            target_size=3,
         )
 
         mat = proj.get_weight_matrix()
@@ -134,8 +135,10 @@ class TestLayerProjection:
         from hbllm.brain.snn.lif import SpikeEvent
 
         proj = LayerProjection(
-            source_name="a", target_name="b",
-            source_size=2, target_size=2,
+            source_name="a",
+            target_name="b",
+            source_size=2,
+            target_size=2,
             initial_weights=[[1.0, 0.0], [0.0, 1.0]],
         )
 
@@ -154,8 +157,10 @@ class TestLayerProjection:
 
         rule = STDPRule(learning_rate=0.1, time_constant=1.0)
         proj = LayerProjection(
-            source_name="a", target_name="b",
-            source_size=1, target_size=1,
+            source_name="a",
+            target_name="b",
+            source_size=1,
+            target_size=1,
             initial_weights=[[0.5]],
             stdp_rule=rule,
         )
@@ -170,8 +175,10 @@ class TestLayerProjection:
 
     def test_serialization_roundtrip(self) -> None:
         proj = LayerProjection(
-            source_name="a", target_name="b",
-            source_size=2, target_size=3,
+            source_name="a",
+            target_name="b",
+            source_size=2,
+            target_size=3,
             initial_weights=[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
         )
 
@@ -325,10 +332,15 @@ class TestAssociationLayer:
         # Same embedding = high similarity
         emb = np.random.randn(64)
         concepts = [
-            _MockConcept("neural networks", embedding=emb, timestamp=0.1,
-                         domain_activation={"ml": 0.8}),
-            _MockConcept("deep learning", embedding=emb * 0.95 + np.random.randn(64) * 0.05,
-                         timestamp=0.2, domain_activation={"ml": 0.7}),
+            _MockConcept(
+                "neural networks", embedding=emb, timestamp=0.1, domain_activation={"ml": 0.8}
+            ),
+            _MockConcept(
+                "deep learning",
+                embedding=emb * 0.95 + np.random.randn(64) * 0.05,
+                timestamp=0.2,
+                domain_activation={"ml": 0.7},
+            ),
         ]
 
         associations = layer.find_associations(concepts)
@@ -339,10 +351,12 @@ class TestAssociationLayer:
         layer = AssociationLayer()
 
         concepts = [
-            _MockConcept("the API works", timestamp=0.1,
-                         channel_metadata={"constraint": 0.0}),
-            _MockConcept("but only in production", timestamp=0.2,
-                         channel_metadata={"constraint": 0.9, "surprise": 0.7}),
+            _MockConcept("the API works", timestamp=0.1, channel_metadata={"constraint": 0.0}),
+            _MockConcept(
+                "but only in production",
+                timestamp=0.2,
+                channel_metadata={"constraint": 0.9, "surprise": 0.7},
+            ),
         ]
 
         associations = layer.find_associations(concepts)
@@ -353,12 +367,20 @@ class TestAssociationLayer:
         layer = AssociationLayer()
 
         emb = np.ones(64) / 8.0
-        a = _MockConcept("test", embedding=emb, timestamp=0.1,
-                         domain_activation={"code": 0.8},
-                         channel_metadata={"constraint": 0.0})
-        b = _MockConcept("test", embedding=emb, timestamp=0.2,
-                         domain_activation={"code": 0.9},
-                         channel_metadata={"constraint": 0.5})
+        a = _MockConcept(
+            "test",
+            embedding=emb,
+            timestamp=0.1,
+            domain_activation={"code": 0.8},
+            channel_metadata={"constraint": 0.0},
+        )
+        b = _MockConcept(
+            "test",
+            embedding=emb,
+            timestamp=0.2,
+            domain_activation={"code": 0.9},
+            channel_metadata={"constraint": 0.5},
+        )
 
         features = layer._encode_pair(a, b)
 
@@ -407,11 +429,13 @@ class TestAssociationLayer:
         valid_types = {"similar", "contrast", "causal", "temporal"}
 
         concepts = [
-            _MockConcept("concept A", timestamp=0.1,
-                         domain_activation={"code": 0.8}),
-            _MockConcept("concept B", timestamp=0.15,
-                         domain_activation={"code": 0.7},
-                         channel_metadata={"constraint": 0.6}),
+            _MockConcept("concept A", timestamp=0.1, domain_activation={"code": 0.8}),
+            _MockConcept(
+                "concept B",
+                timestamp=0.15,
+                domain_activation={"code": 0.7},
+                channel_metadata={"constraint": 0.6},
+            ),
         ]
 
         for assoc in layer.find_associations(concepts):
@@ -443,7 +467,8 @@ class TestStreamIntegration:
 
         ensemble = ComprehensionEnsemble(domain="general")
         lexical_buffer = LexicalBuffer()
-        encoder = lambda text: np.random.randn(384)
+        def encoder(text):
+            return np.random.randn(384)
         domain_centroids = {"general": np.random.randn(384)}
 
         assoc = AssociationLayer() if with_association else None
@@ -471,9 +496,7 @@ class TestStreamIntegration:
     async def test_stream_without_association(self) -> None:
         stream = self._make_stream(with_association=False)
 
-        state = await stream.comprehend(
-            "My API returns errors in production"
-        )
+        state = await stream.comprehend("My API returns errors in production")
 
         assert state.associations == []
 

@@ -193,9 +193,7 @@ class ComprehensionEnsemble:
             else:
                 weights = self._signal_weights[channel_name]
 
-            current = sum(
-                signals.get(sig, 0.0) * weight for sig, weight in weights.items()
-            )
+            current = sum(signals.get(sig, 0.0) * weight for sig, weight in weights.items())
 
             spike = neuron.step(current, timestamp)
             if spike.fired:
