@@ -53,6 +53,7 @@ async def test_self_learning_vector_routing():
 
     # Inject the mock encoder explicitly
     router._encode_text = mock_encode_text.__get__(router, RouterNode)
+    router.encoder = True  # Bypass actual model loading & huggingface_hub imports in _bootstrap_centroids
     router.use_vectors = True
     router._bootstrap_centroids()
 
