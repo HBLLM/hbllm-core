@@ -53,6 +53,9 @@ logger = logging.getLogger(__name__)
 # Type alias for async LLM generate function
 LLMGenerateFn = Callable[[str], Coroutine[Any, Any, str]]
 
+# Callback invoked each time a fragment is generated and evaluated
+FragmentCallback = Callable[[ThoughtFragment], Coroutine[Any, Any, None]]
+
 
 class ExpressionStream:
     """Full expression-side Cognitive Stream pipeline.
@@ -83,6 +86,7 @@ class ExpressionStream:
         content_planner: Any | None = None,
         broca_encoder: Any | None = None,
         broca_mode: bool = False,
+        on_fragment: FragmentCallback | None = None,
     ) -> None:
         self.planner = planner
         self.controller = controller
@@ -96,12 +100,14 @@ class ExpressionStream:
         self.content_planner = content_planner
         self.broca_encoder = broca_encoder
         self.broca_mode = broca_mode
+        self.on_fragment = on_fragment
 
     async def express(
         self,
         understanding: Any,  # UnderstandingState
         base_thought: str,
         original_query: str,
+        style_hints: Any | None = None,  # StyleHints
     ) -> ExpressionResult:
         """Generate a structured response from comprehension output.
 
@@ -109,11 +115,24 @@ class ExpressionStream:
             understanding: The UnderstandingState from ComprehensionStream.
             base_thought: The raw thought content from workspace consensus.
             original_query: The user's original query text.
+            style_hints: Optional StyleHints from StyleAdapter for emotion-aware rendering.
 
         Returns:
             ExpressionResult with assembled text and per-fragment scores.
         """
         start_time = time.monotonic()
+
+        # Apply style adaptation if provided
+        style_prefix = ""
+        if style_hints is not None and hasattr(style_hints, "prompt_prefix"):
+            style_prefix = style_hints.prompt_prefix or ""
+            if style_prefix:
+                original_query = style_prefix + original_query
+                logger.debug(
+                    "[ExpressionStream] Style adaptation active: tone=%s, verbosity=%s",
+                    getattr(style_hints, "tone", "?"),
+                    getattr(style_hints, "verbosity", "?"),
+                )
 
         # Step 1: Plan thought outline
         goals = self.planner.plan(understanding)
@@ -280,6 +299,13 @@ class ExpressionStream:
             total_tokens += evaluated.metadata.get("tokens", 0)
             fragments.append(evaluated)
 
+            # Emit fragment for streaming
+            if self.on_fragment is not None:
+                try:
+                    await self.on_fragment(evaluated)
+                except Exception:
+                    logger.debug("on_fragment callback failed (non-fatal)")
+
         # Step 3: Assemble final response
         assembled_text = self._assemble(fragments, base_thought)
 
@@ -296,6 +322,10 @@ class ExpressionStream:
             latency_ms,
         )
 
+        result_metadata: dict[str, Any] = {}
+        if style_hints is not None and hasattr(style_hints, "to_dict"):
+            result_metadata["style_hints"] = style_hints.to_dict()
+
         return ExpressionResult(
             text=assembled_text,
             fragments=fragments,
@@ -303,6 +333,7 @@ class ExpressionStream:
             total_tokens=total_tokens,
             thought_count=len(goals),
             revision_count=total_revisions,
+            metadata=result_metadata,
         )
 
     async def _express_broca(
@@ -390,6 +421,13 @@ class ExpressionStream:
 
             fragments.append(fragment)
             rendered_pairs.append((node, text.strip()))
+
+            # Emit fragment for streaming
+            if self.on_fragment is not None:
+                try:
+                    await self.on_fragment(fragment)
+                except Exception:
+                    logger.debug("on_fragment callback failed (non-fatal)")
 
         # Assemble final text
         assembled = self.broca_encoder.assemble(rendered_pairs)

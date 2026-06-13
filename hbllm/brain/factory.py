@@ -192,6 +192,11 @@ class BrainConfig:
     # Cognitive Stream: SNN-driven comprehension pipeline
     inject_comprehension: bool = True
 
+    # Autonomy watchers (environment awareness)
+    inject_autonomy_watchers: bool = True
+    autonomy_watch_dirs: list[str] | None = None  # Directories for filesystem watcher
+    autonomy_calendar_dir: str | None = None  # Directory for .ics calendar files
+
 
 class Brain:
     """
@@ -1201,6 +1206,44 @@ class BrainFactory:
             from hbllm.brain.autonomy.task_graph import TaskGraphRuntime
 
             brain.task_graph = TaskGraphRuntime(data_dir=data_dir)
+
+        # Autonomy Watchers
+        if cfg.inject_autonomy_watchers:
+            try:
+                from hbllm.brain.autonomy.watchers.filesystem_watcher import FilesystemWatcher
+                from hbllm.brain.autonomy.watchers.idle_detector import IdleDetector
+                from hbllm.brain.autonomy.watchers.system_health_watcher import (
+                    SystemHealthWatcher,
+                )
+
+                brain._autonomy_watchers = []
+
+                # Filesystem watcher
+                if cfg.autonomy_watch_dirs:
+                    fs_watcher = FilesystemWatcher(watch_dirs=cfg.autonomy_watch_dirs)
+                    brain._autonomy_watchers.append(("fs_watcher", fs_watcher))
+
+                # System health
+                health_watcher = SystemHealthWatcher()
+                brain._autonomy_watchers.append(("system_health", health_watcher))
+
+                # Idle detector
+                idle_detector = IdleDetector()
+                brain._autonomy_watchers.append(("idle_detector", idle_detector))
+
+                # Calendar watcher
+                if cfg.autonomy_calendar_dir:
+                    from hbllm.brain.autonomy.watchers.calendar_watcher import CalendarWatcher
+
+                    cal_watcher = CalendarWatcher(calendar_dir=cfg.autonomy_calendar_dir)
+                    brain._autonomy_watchers.append(("calendar", cal_watcher))
+
+                logger.info(
+                    "[Factory] Registered %d autonomy watchers",
+                    len(brain._autonomy_watchers),
+                )
+            except Exception as e:
+                logger.warning("[Factory] Failed to wire autonomy watchers: %s", e)
 
         if cfg.inject_causal_graph:
             from hbllm.brain.causality.causal_graph import CausalGraph

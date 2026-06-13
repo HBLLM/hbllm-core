@@ -720,6 +720,7 @@ class DecisionNode(Node):
                     content=plan.content,
                     comprehension_data=comprehension_data,
                     original_query=original_query,
+                    correlation_id=message.correlation_id,
                 )
                 if expression_result is not None and expression_result.text:
                     plan.metadata["expression_reward"] = expression_result.mean_reward
@@ -1047,6 +1048,7 @@ class DecisionNode(Node):
         content: str,
         comprehension_data: dict[str, Any],
         original_query: dict[str, Any],
+        correlation_id: str | None = None,
     ) -> ExpressionResult | None:
         """Run the expression-side Cognitive Stream on a text response.
 
@@ -1059,6 +1061,7 @@ class DecisionNode(Node):
             comprehension_data: The ``comprehension`` dict from the payload
                 (contains concepts, memories, salience_peak).
             original_query: The original query payload.
+            correlation_id: Optional correlation ID for fragment streaming.
 
         Returns:
             ExpressionResult if successful, None if skipped/failed.
@@ -1114,11 +1117,46 @@ class DecisionNode(Node):
 
         query_text = original_query.get("text", "")
 
-        result = await self.expression_stream.express(
-            understanding=understanding,
-            base_thought=content,
-            original_query=query_text,
-        )
+        # Wire fragment streaming callback if bus is available
+        saved_on_fragment = self.expression_stream.on_fragment
+        if self._bus is not None and correlation_id:
+            from hbllm.brain.snn.expression.models import ThoughtFragment
+            from hbllm.network.messages import Message as BusMessage
+            from hbllm.network.messages import MessageType as BusMT
+
+            async def _emit_fragment(fragment: ThoughtFragment) -> None:
+                """Publish each fragment to the bus for real-time SSE streaming."""
+                await self._bus.publish(
+                    "sensory.output.fragment",
+                    BusMessage(
+                        type=BusMT.EVENT,
+                        source_node_id=self.node_id,
+                        topic="sensory.output.fragment",
+                        payload={
+                            "text": fragment.text,
+                            "goal_id": fragment.goal_id,
+                            "reward_score": fragment.reward_score,
+                            "fragment_index": len(
+                                self.expression_stream.on_fragment.__dict__.get("_count", [])
+                            )
+                            if hasattr(self.expression_stream.on_fragment, "__dict__")
+                            else 0,
+                        },
+                        correlation_id=correlation_id,
+                    ),
+                )
+
+            self.expression_stream.on_fragment = _emit_fragment
+
+        try:
+            result = await self.expression_stream.express(
+                understanding=understanding,
+                base_thought=content,
+                original_query=query_text,
+            )
+        finally:
+            # Restore original callback
+            self.expression_stream.on_fragment = saved_on_fragment
 
         logger.info(
             "[DecisionNode] ExpressionStream: %d thoughts, mean_reward=%.2f, revisions=%d",

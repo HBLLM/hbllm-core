@@ -1750,8 +1750,9 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
     """
     Stream a response from the cognitive pipeline as Server-Sent Events (SSE).
 
+    Supports fragment-level streaming when ExpressionStream is active.
     Each SSE event has the format:
-        data: {"token": "...", "done": false}
+        data: {"token": "...", "done": false, "fragment_id": "..."}
         data: {"token": "", "done": true, "correlation_id": "..."}
     """
     request.tenant_id = getattr(api_req.state, "tenant_id", "default")
@@ -1766,12 +1767,23 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
 
     token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    async def output_handler(msg: Message) -> None:
+    async def fragment_handler(msg: Message) -> None:
+        """Handle real-time fragment events from ExpressionStream."""
         if msg.correlation_id == correlation_id:
             text = msg.payload.get("text", "")
-            await token_queue.put(text)
+            if text:
+                await token_queue.put(text)
+
+    async def output_handler(msg: Message) -> None:
+        """Handle final complete output — signals stream end."""
+        if msg.correlation_id == correlation_id:
+            text = msg.payload.get("text", "")
+            # If no fragments were streamed, emit the full text as fallback
+            if token_queue.empty() and text:
+                await token_queue.put(text)
             await token_queue.put(None)  # Signal completion
 
+    await bus.subscribe("sensory.output.fragment", fragment_handler)
     await bus.subscribe("sensory.output", output_handler)
 
     # Store user message in memory
