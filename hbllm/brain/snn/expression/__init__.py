@@ -21,6 +21,9 @@ Public API
     RewardEvaluator
     TrainedPRM
     ShallowRenderer
+    ContentPlanner
+    BrocaEncoder
+    PRMTrainer
     ExpressionStream
     ThoughtGoal
     ThoughtFragment
@@ -48,6 +51,13 @@ from hbllm.brain.snn.expression.shallow_renderer import (
     RenderPromptBuilder,
     ShallowRenderer,
 )
+from hbllm.brain.snn.expression.content_planner import (
+    ContentNode,
+    ContentPlanner,
+    ContentPlanNetwork,
+)
+from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder, BrocaPrompt
+from hbllm.brain.snn.expression.prm_trainer import PRMTrainer, TrainingMetrics
 
 __all__ = [
     "ThoughtPlanner",
@@ -59,9 +69,15 @@ __all__ = [
     "ShallowRenderer",
     "RenderingContext",
     "RenderPromptBuilder",
+    "ContentPlanner",
+    "ContentNode",
+    "ContentPlanNetwork",
+    "BrocaEncoder",
+    "BrocaPrompt",
+    "PRMTrainer",
+    "TrainingMetrics",
     "ExpressionStream",
     "ThoughtGoal",
     "ThoughtFragment",
     "ExpressionResult",
 ]
-

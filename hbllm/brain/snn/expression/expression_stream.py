@@ -79,6 +79,9 @@ class ExpressionStream:
         trained_prm: Any | None = None,
         shallow_renderer: Any | None = None,
         shallow_mode: bool = False,
+        content_planner: Any | None = None,
+        broca_encoder: Any | None = None,
+        broca_mode: bool = False,
     ) -> None:
         self.planner = planner
         self.controller = controller
@@ -89,6 +92,9 @@ class ExpressionStream:
         self.trained_prm = trained_prm
         self.shallow_renderer = shallow_renderer
         self.shallow_mode = shallow_mode
+        self.content_planner = content_planner
+        self.broca_encoder = broca_encoder
+        self.broca_mode = broca_mode
 
     async def express(
         self,
@@ -122,7 +128,26 @@ class ExpressionStream:
                 revision_count=0,
             )
 
-        # Step 2: Generate fragments per goal
+        # Step 2: Try Broca mode (v4) first
+        if (
+            self.broca_mode
+            and self.content_planner is not None
+            and self.broca_encoder is not None
+            and self.llm_generate is not None
+        ):
+            try:
+                broca_result = await self._express_broca(
+                    understanding, goals, base_thought, original_query
+                )
+                if broca_result is not None:
+                    elapsed = time.monotonic() - start_time
+                    broca_result.metadata["mode"] = "broca"
+                    broca_result.metadata["elapsed_ms"] = elapsed * 1000
+                    return broca_result
+            except Exception:
+                logger.debug("Broca mode failed (non-fatal), falling back")
+
+        # Step 3: Generate fragments per goal (shallow or deep)
         fragments: list[ThoughtFragment] = []
         prev_fragment_text: str | None = None
         total_tokens = 0
@@ -284,6 +309,115 @@ class ExpressionStream:
             total_tokens=total_tokens,
             thought_count=len(goals),
             revision_count=total_revisions,
+        )
+
+    async def _express_broca(
+        self,
+        understanding: Any,
+        goals: list[ThoughtGoal],
+        base_thought: str,
+        original_query: str,
+    ) -> ExpressionResult | None:
+        """v4 Broca's area pipeline.
+
+        ContentPlanner → BrocaEncoder → LLM (text only) → PRM.
+
+        Returns:
+            ExpressionResult if successful, None to fall back.
+        """
+        # Build rendering context for the content planner
+        render_ctx = None
+        if self.shallow_renderer is not None:
+            render_ctx = self.shallow_renderer.build_context(
+                understanding, goals, original_query, base_thought
+            )
+        else:
+            # Minimal context for ContentPlanner
+            from hbllm.brain.snn.expression.shallow_renderer import RenderingContext
+
+            concepts = []
+            if hasattr(understanding, "concepts"):
+                concepts = [c.text for c in understanding.concepts]
+            render_ctx = RenderingContext(
+                concepts=concepts,
+                goals=goals,
+                original_query=original_query,
+                base_thought=base_thought,
+                confidence=0.5,
+            )
+
+        # Plan content nodes
+        content_nodes = self.content_planner.plan(render_ctx)
+
+        if not content_nodes:
+            return None  # Fall back
+
+        # Render each node through BrocaEncoder → LLM
+        fragments: list[ThoughtFragment] = []
+        rendered_pairs: list[tuple[Any, str]] = []
+
+        for node in content_nodes:
+            broca_prompt = self.broca_encoder.encode(node)
+            if self.llm_generate is None:
+                return None  # Can't render without LLM
+            text = await self.llm_generate(broca_prompt.prompt_text)
+
+            fragment = ThoughtFragment(
+                goal_id=node.goal_id,
+                text=text.strip(),
+                metadata={
+                    "tokens": max(1, len(text) // 4),
+                    "source": "broca",
+                    "content_type": node.content_type,
+                    "tone": node.tone,
+                    "broca_prompt_tokens": broca_prompt.estimated_tokens,
+                    "node_confidence": node.confidence,
+                },
+            )
+
+            # Evaluate with PRM if available
+            if self.trained_prm is not None:
+                goal_match = None
+                for g in goals:
+                    if g.id == node.goal_id:
+                        goal_match = g
+                        break
+                if goal_match is None and goals:
+                    goal_match = goals[0]
+
+                if goal_match is not None:
+                    evaluated = self.trained_prm.evaluate(
+                        fragment_text=text.strip(),
+                        goal=goal_match,
+                    )
+                    fragment.reward_score = evaluated.reward_score
+                    fragment.metadata.update(evaluated.metadata)
+                    self.trained_prm.record_outcome(evaluated, accepted=True)
+
+            fragments.append(fragment)
+            rendered_pairs.append((node, text.strip()))
+
+        # Assemble final text
+        assembled = self.broca_encoder.assemble(rendered_pairs)
+
+        if not assembled.strip():
+            return None
+
+        mean_reward = (
+            sum(f.reward_score for f in fragments) / len(fragments)
+            if fragments
+            else 0.0
+        )
+
+        total_tokens = sum(f.metadata.get("tokens", 0) for f in fragments)
+
+        return ExpressionResult(
+            text=assembled,
+            fragments=fragments,
+            mean_reward=mean_reward,
+            total_tokens=total_tokens,
+            thought_count=len(content_nodes),
+            revision_count=0,
         )
 
     async def _generate_for_goal(

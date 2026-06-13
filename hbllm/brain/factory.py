@@ -660,6 +660,30 @@ def _wire_expression_stream(
         except Exception as e:
             logger.debug("ShallowRenderer not available (non-fatal): %s", e)
 
+        # Try to create v4 Broca components
+        content_planner = None
+        broca_encoder = None
+        try:
+            from hbllm.brain.snn.expression.content_planner import ContentPlanner
+            from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder
+
+            content_planner = ContentPlanner()
+            broca_encoder = BrocaEncoder()
+            logger.info("Broca's area components (v4) wired to ExpressionStream")
+
+            # Wire PRMTrainer for batch training
+            if trained_prm is not None:
+                try:
+                    from hbllm.brain.snn.expression.prm_trainer import PRMTrainer
+
+                    prm_trainer = PRMTrainer(trained_prm, epochs=3, batch_size=20)
+                    decision_node._prm_trainer = prm_trainer
+                    logger.info("PRMTrainer wired to DecisionNode")
+                except Exception as e2:
+                    logger.debug("PRMTrainer not available (non-fatal): %s", e2)
+        except Exception as e:
+            logger.debug("Broca components not available (non-fatal): %s", e)
+
         # Bind LLM generate function if available
         llm_generate = None
         if llm is not None and hasattr(llm, "generate"):
@@ -679,7 +703,10 @@ def _wire_expression_stream(
             enable_gating=True,
             trained_prm=trained_prm,
             shallow_renderer=shallow_renderer,
-            shallow_mode=shallow_renderer is not None,
+            shallow_mode=False,  # Opt-in: brain pipeline needs LLM reasoning
+            content_planner=content_planner,
+            broca_encoder=broca_encoder,
+            broca_mode=False,  # Opt-in: full brain pipeline needs LLM reasoning
         )
 
         decision_node.expression_stream = stream
