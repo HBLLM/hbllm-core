@@ -58,6 +58,7 @@ jobs:
   test:
     name: "🧪 Unit Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [lint]
     steps:
       - uses: actions/checkout@v4
@@ -74,14 +75,17 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run unit tests with coverage
+        env:
+          COVERAGE_PROCESS_START: ""
         run: |
-          pytest tests/ -v \
-            --timeout=120 -x \
+          python -m pytest tests/ \
+            --timeout=60 -x \
             --ignore=tests/test_change_detector.py \
             --ignore=tests/test_vision_node.py \
             --cov=hbllm \
             --cov-report=xml:coverage.xml \
             --cov-report=term-missing \
+            --no-cov-on-fail \
             -q
 
       - name: Upload coverage report
