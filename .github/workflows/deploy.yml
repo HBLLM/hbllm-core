@@ -1,0 +1,136 @@
+name: Deploy
+
+on:
+  # Auto-deploy to staging on main push
+  push:
+    branches: [main]
+
+  # Manual production deploy or rollback
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      action:
+        description: 'Deploy action'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - rollback
+      tag:
+        description: 'Image tag (for production deploys)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  HELM_RELEASE: hbllm
+  HELM_CHART: helm/hbllm
+
+jobs:
+  # ── Deploy to Staging ───────────────────────────────────────────────
+  staging:
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment: staging
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v4
+
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v4
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+
+    - name: Determine image tag
+      id: tag
+      run: |
+        if [ "${{ github.event.inputs.tag }}" != "" ]; then
+          echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Deploy to staging
+      if: github.event.inputs.action != 'rollback'
+      run: |
+        helm upgrade --install ${{ env.HELM_RELEASE }} ${{ env.HELM_CHART }} \
+          --namespace hbllm-staging \
+          --create-namespace \
+          --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+          --set image.tag=${{ steps.tag.outputs.tag }} \
+          --set env.HBLLM_SECRET_BACKEND=env \
+          --values helm/hbllm/values-staging.yaml \
+          --wait \
+          --timeout 5m
+
+    - name: Rollback staging
+      if: github.event.inputs.action == 'rollback'
+      run: |
+        helm rollback ${{ env.HELM_RELEASE }} --namespace hbllm-staging --wait
+
+    - name: Verify deployment
+      run: |
+        kubectl -n hbllm-staging rollout status deployment/${{ env.HELM_RELEASE }} --timeout=120s
+        kubectl -n hbllm-staging get pods -l app.kubernetes.io/name=hbllm
+
+  # ── Deploy to Production (manual gate) ──────────────────────────────
+  production:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.environment == 'production'
+    environment: production  # Requires manual approval in GitHub settings
+    needs: []
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v4
+
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v4
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
+
+    - name: Require image tag
+      if: github.event.inputs.tag == ''
+      run: |
+        echo "::error::Production deploys require an explicit image tag"
+        exit 1
+
+    - name: Deploy to production
+      if: github.event.inputs.action != 'rollback'
+      run: |
+        helm upgrade --install ${{ env.HELM_RELEASE }} ${{ env.HELM_CHART }} \
+          --namespace hbllm-production \
+          --create-namespace \
+          --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+          --set image.tag=${{ github.event.inputs.tag }} \
+          --values helm/hbllm/values-production.yaml \
+          --wait \
+          --timeout 10m
+
+    - name: Rollback production
+      if: github.event.inputs.action == 'rollback'
+      run: |
+        helm rollback ${{ env.HELM_RELEASE }} --namespace hbllm-production --wait
+
+    - name: Verify deployment
+      run: |
+        kubectl -n hbllm-production rollout status deployment/${{ env.HELM_RELEASE }} --timeout=180s
+        kubectl -n hbllm-production get pods -l app.kubernetes.io/name=hbllm
