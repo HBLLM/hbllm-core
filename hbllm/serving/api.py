@@ -905,6 +905,24 @@ app.add_middleware(RequestIDMiddleware)
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(JWTAuthMiddleware)
 
+# Per-tenant HTTP rate limiting (applied after auth resolves tenant_id)
+from hbllm.serving.middleware.rate_limit import HTTPRateLimitMiddleware
+
+_default_rpm = float(os.environ.get("HBLLM_RATE_LIMIT_RPM", "60"))
+app.add_middleware(HTTPRateLimitMiddleware, default_rpm=_default_rpm)
+
+# Prometheus metrics collection
+from hbllm.serving.middleware.prometheus import PrometheusMiddleware, prometheus_endpoint
+
+app.add_middleware(PrometheusMiddleware)
+
+
+@app.get("/metrics/prometheus", tags=["monitoring"])
+async def get_prometheus_metrics() -> Any:
+    """Export metrics in Prometheus text exposition format."""
+    brain = _state.get("brain")
+    return prometheus_endpoint(brain_getter=lambda: brain)
+
 
 # ─── Studio Router Registration ───────────────────────────────────────────────
 from hbllm.serving.studio import router as studio_router
