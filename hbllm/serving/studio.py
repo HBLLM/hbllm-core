@@ -1824,7 +1824,7 @@ async def studio_voice_test(request: Request) -> Any:
                 "audio_path": resp.payload.get("audio_path"),
                 "voice": resp.payload.get("voice"),
             }
-        return {"status": "error", "error": resp.payload.get("error", "Synthesis failed")}
+        return {"status": "error", "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
