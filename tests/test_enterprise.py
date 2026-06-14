@@ -282,3 +282,48 @@ class TestAuditMiddleware(unittest.TestCase):
 
         action = AuditMiddleware._classify_action("POST", "/v1/tools/search")
         assert action == AuditAction.TOOL_EXECUTED
+
+
+# ── Security Headers Middleware ──────────────────────────────────────
+
+
+class TestSecurityHeadersDefaults(unittest.TestCase):
+    """Test default security header values."""
+
+    def test_default_headers_include_hsts(self):
+        from hbllm.serving.middleware.security_headers import DEFAULT_SECURITY_HEADERS
+
+        assert "Strict-Transport-Security" in DEFAULT_SECURITY_HEADERS
+
+    def test_default_headers_include_csp(self):
+        from hbllm.serving.middleware.security_headers import DEFAULT_SECURITY_HEADERS
+
+        assert "Content-Security-Policy" in DEFAULT_SECURITY_HEADERS
+
+    def test_default_headers_include_x_frame(self):
+        from hbllm.serving.middleware.security_headers import DEFAULT_SECURITY_HEADERS
+
+        assert DEFAULT_SECURITY_HEADERS["X-Frame-Options"] == "DENY"
+
+    def test_default_headers_include_nosniff(self):
+        from hbllm.serving.middleware.security_headers import DEFAULT_SECURITY_HEADERS
+
+        assert DEFAULT_SECURITY_HEADERS["X-Content-Type-Options"] == "nosniff"
+
+    def test_hsts_can_be_disabled(self):
+        from unittest.mock import MagicMock
+
+        from hbllm.serving.middleware.security_headers import SecurityHeadersMiddleware
+
+        mw = SecurityHeadersMiddleware(MagicMock(), hsts=False)
+        assert "Strict-Transport-Security" not in mw._headers
+
+    def test_custom_headers_merged(self):
+        from unittest.mock import MagicMock
+
+        from hbllm.serving.middleware.security_headers import SecurityHeadersMiddleware
+
+        mw = SecurityHeadersMiddleware(MagicMock(), custom_headers={"X-Custom": "value"})
+        assert mw._headers["X-Custom"] == "value"
+        # Default headers still present
+        assert "X-Frame-Options" in mw._headers
