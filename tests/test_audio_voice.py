@@ -52,7 +52,9 @@ class TestVoiceConfig:
 
     def test_default_tenant_voices_empty(self):
         node = AudioOutputNode(node_id="test_audio_out")
-        assert len(node._tenant_voices) == 0
+        # VoiceRegistry returns default config for unknown tenants
+        voice = node._voice_registry.get("unknown_tenant")
+        assert voice.voice_id == "af_heart"  # default voice
 
     def test_capabilities_include_voice_customization(self):
         node = AudioOutputNode(node_id="test_audio_out")
