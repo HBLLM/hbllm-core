@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hbllm
+description: HBLLM Core — Human Brain-Like Language Model
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

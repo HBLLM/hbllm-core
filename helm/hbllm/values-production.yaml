@@ -1,0 +1,76 @@
+# HBLLM Core — Production Values Override
+# Applied via: helm upgrade --values helm/hbllm/values-production.yaml
+# Requires manual approval in GitHub Actions environment
+
+replicaCount: 3
+
+image:
+  pullPolicy: IfNotPresent
+  # tag is set via --set image.tag= in deploy.yml
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/rate-limit: "120"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: api.hbllm.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: hbllm-production-tls
+      hosts:
+        - api.hbllm.io
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  HBLLM_LOG_LEVEL: INFO
+  HBLLM_BUS_BACKEND: redis
+  HBLLM_SECRET_BACKEND: vault
+  HBLLM_RATE_LIMIT_RPM: "120"
+  HBLLM_SHUTDOWN_DRAIN_SECONDS: "30"
+
+secrets:
+  secretName: hbllm-production-secrets
+  keys:
+    - HBLLM_JWT_SECRET
+    - HBLLM_DATABASE_URL
+    - HBLLM_REDIS_URL
+    - HBLLM_EXTERNAL_PROVIDER_KEY
+    - VAULT_ADDR
+    - VAULT_TOKEN
+
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: gp3
+
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  runAsNonRoot: true
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]

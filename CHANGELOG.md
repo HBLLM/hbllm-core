@@ -1,74 +1,123 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to the HBLLM Core project are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [1.1.0] — 2026-06-13
-
-### Added — SNN Cognitive Stream (v1→v4 Complete)
-
-- **Synaptic Plasticity** (`snn/plasticity.py`): STDP learning rule for all multi-layer SNN projections. Supports online (per-interaction) and batch (periodic sweeps) training modes.
-- **Multi-Layer SNN** (`snn/network.py`): `SpikingNetwork` with `NeuronLayer`, `LayerProjection`, configurable LIF neurons, and STDP-enabled connections.
-- **ComprehensionStream** (`snn/comprehension/`): 5-channel LIF ensemble (entity, clause, discourse, surprise, constraint) with lexical signal input. Event-triggered embeddings (3× faster than per-token).
-- **AssociationLayer** (`snn/comprehension/association_layer.py`): 4→8→2 SNN discovers concept relationships and association types.
-- **CausalReasoner** (`snn/reasoning/`): Multi-hop causal graph with SNN-scored chain evaluation via 4→6→2 ReasoningNetwork.
-- **ExpressionStream** (`snn/expression/expression_stream.py`): Orchestrates thought→text pipeline with three rendering tiers (broca → shallow → deep).
-- **ThoughtPlanner + ThoughtController**: Symbolic goal decomposition with SNN-gated generation.
-- **TrainedPRM** (`snn/expression/trained_prm.py`): 6→8→4→2 SNN reward evaluator with `TrainingCollector` persistence and online STDP learning.
-- **ShallowRenderer** (v3, `snn/expression/shallow_renderer.py`): Reduces LLM prompts from ~600 to ~300 tokens. SNN handles reasoning, LLM handles rendering.
-- **ContentPlanner** (v4, `snn/expression/content_planner.py`): 8→12→6→3 SNN for content type selection (assertion/explanation/example/transition/caveat). SNN decides what to say.
-- **BrocaEncoder** (v4, `snn/expression/broca_encoder.py`): Ultra-minimal ~80-token prompts (TYPE/TONE/SAY/MAX format). 87% token reduction from v1.
-- **PRMTrainer** (v4, `snn/expression/prm_trainer.py`): Batch STDP training sweeps with pre/post accuracy measurement and weight delta tracking.
-- **SNN Debugger** (`snn/debugger.py`): Live introspection of neuron potentials, spike history, and weight matrices.
-
-### Changed
-- **BrainFactory**: Auto-wires all SNN components (ComprehensionStream, ExpressionStream, TrainedPRM, ContentPlanner, BrocaEncoder). Shallow/broca modes are opt-in (default: deep mode for full brain pipeline compatibility).
-- **DecisionNode**: Integrates ExpressionStream for structured thought-by-thought generation with SNN gating and PRM evaluation.
-
-### Architecture
-
-Three rendering tiers coexist with graceful fallback:
-
-| Tier | Prompt Tokens | LLM Role | SNN Role |
-|------|-------------|----------|----------|
-| Deep (v1-v2) | ~600 | Reasoning + generation | Gating only |
-| Shallow (v3) | ~300 | Rendering conclusions | Reasoning + associations |
-| Broca (v4) | ~80 | Grammar/fluency only | Full content planning |
-
-### Tests
-- 239 new SNN tests across 9 test files (comprehension, expression, plasticity, network, reasoning, trained PRM, shallow renderer, broca, router).
-- Full suite: 2311 passed, 8 skipped.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.0.0] — 2026-06-13
+## [Unreleased]
 
 ### Added
-- **Structured Error Handling**: New `hbllm.serving.errors` module with standardized error codes (`ErrorCode` enum), safe exception messages, and a global unhandled exception handler that prevents leaking internal details.
-- **Request Tracing**: `X-Request-ID` middleware injects a unique request ID into every request/response for end-to-end log correlation.
-- **Health Probes**: `/health/live` (liveness) and `/health/ready` (readiness with deep checks) endpoints for Kubernetes-compatible deployments.
-- **Production Secret Validation**: Server refuses to boot with `HBLLM_ENV=production` if secrets are missing or use insecure `.env.example` defaults.
-- **Dependency Splitting**: Heavy ML dependencies (torch, transformers, onnxruntime) moved to optional `[local]` extra. Base install is now lightweight (~50MB) for API-only / provider-mode users.
-  - `pip install hbllm` — lightweight, API-only
-  - `pip install hbllm[local]` — includes torch, transformers, reasoning engines
-  - `pip install hbllm[full]` — everything including GPU, embodiment, observability
-- **Project URLs**: PyPI package page now links to homepage, docs, repository, and changelog.
+
+#### Production Hardening (Audit Phase)
+
+- **DualLLMRouter + Circuit Breaker** — `hbllm/brain/dual_llm_router.py`
+  - Smart local/external LLM routing based on query complexity
+  - Circuit breaker with configurable failure threshold and recovery timeout
+  - Automatic fallback to local LLM when external provider fails
+  - Wired into ExpressionStream for transparent routing
+
+- **BrainConfig Pydantic Migration** — `hbllm/brain/config.py`
+  - Migrated from plain dict to Pydantic `BaseModel` with field validators
+  - Added `model_validator` for JWT secret enforcement in production
+  - Type-safe configuration with defaults and validation
+
+- **Graceful Shutdown** — `hbllm/serving/api.py`
+  - Drain period with configurable timeout (`HBLLM_SHUTDOWN_DRAIN_SEC`)
+  - Rejects new requests during shutdown with 503 status
+  - In-flight request tracking for clean termination
+
+- **HTTP Rate Limiting** — `hbllm/serving/middleware/rate_limit.py`
+  - Per-tenant token bucket rate limiting
+  - Configurable via `HBLLM_RATE_LIMIT_RPM` (default: 60 RPM)
+  - Returns 429 with `Retry-After` header
+
+- **Prometheus Metrics** — `hbllm/serving/middleware/prometheus.py`
+  - Request count, latency histogram, in-flight gauge, error counters
+  - `/metrics/prometheus` endpoint for scraping
+  - Per-endpoint and per-status-code breakdowns
+
+- **Per-Tenant DB Quotas** — `hbllm/memory/episodic.py`
+  - Configurable max turns per tenant (`HBLLM_DB_MAX_PER_TENANT`)
+  - Automatic eviction of oldest turns when quota exceeded
+  - Enforcement on every `store_turn()` call
+
+- **API Versioning Middleware** — `hbllm/serving/middleware/api_version.py`
+  - `X-API-Version` and `X-Supported-Versions` response headers
+  - `Accept-Version` request header validation
+  - Rejects unsupported versions with 400 + available versions list
+
+- **Kubernetes Manifests** — `deploy/k8s/`
+  - Deployment with health probes, resource limits, and rolling updates
+  - Service and ConfigMap for environment-based configuration
+  - Production-ready pod template with security context
+
+- **Integration Tests** — `tests/integration/test_production_readiness.py`
+  - 21 tests covering circuit breaker, rate limiting, DB quotas, metrics,
+    graceful shutdown, API versioning, body size limits, and CORS
+
+#### Benchmarks
+
+- **SNN Cognitive Benchmark** — `hbllm/benchmarks/bench_cognitive.py`
+  - ComprehensionEnsemble step() latency and per-token cost
+  - ComprehensionStream full comprehend() pipeline timing
+  - ThoughtPlanner symbolic outline generation overhead
+  - ExpressionStream rendering tier token budgets
+
+- **DualLLMRouter Benchmark** — `hbllm/benchmarks/bench_dual_router.py`
+  - Routing decision (classify) latency
+  - Circuit breaker state transition timing
+  - Fallback overhead measurement
+
+- **HTTP API Load Test** — `hbllm/benchmarks/bench_http.py`
+  - Health endpoint p50/p99 via ASGI transport
+  - Rate limiter validation under burst load
+  - Concurrent multi-tenant throughput
 
 ### Changed
-- **Version**: Bumped from `0.1.0` to `1.0.0`.
-- **CORS Hardening**: Restricted `allow_methods` and `allow_headers` from wildcard `*` to explicit lists.
-- **Error Responses**: Tenant isolation errors now return structured `{"error": {"code": "...", "message": "..."}}` format instead of raw `{"detail": "..."}`.
-- **Brain Degradation Tracking**: When full brain boot fails and falls back to provider mode, the state is tracked as `brain_degraded=True` and logged at ERROR level.
+
+- **api.py Split** — Extracted modular route packages:
+  - `hbllm/serving/routes/health.py` — health and monitoring endpoints
+  - `hbllm/serving/routes/memory.py` — memory, sync, feedback, knowledge endpoints
+  - `hbllm/serving/deps.py` — FastAPI `Depends()` injection layer
+  - api.py reduced from 2582 to 2177 lines (15% reduction)
+
+- **factory.py Split** — Extracted SNN wiring logic:
+  - `hbllm/brain/wiring/snn.py` — ComprehensionStream and ExpressionStream wiring
+  - factory.py reduced from 1972 to 1735 lines (12% reduction)
+
+- **orjson Graceful Fallback** — Silent fallback to stdlib json when orjson unavailable
 
 ### Fixed
-- **Silent Exception Swallowing**: 6 `except Exception: pass` patterns in `pipeline.py` now log at WARNING level with full traceback.
-- **Log Injection Prevention**: All f-string logger calls in `api.py` and `synapse_gateway.py` replaced with `%s` formatting.
-- **Python 3.16 Compatibility**: Replaced deprecated `asyncio.iscoroutinefunction()` with `inspect.iscoroutinefunction()` in `tenant_guard.py`.
-- **Synapse Gateway**: Invalid JSON now truncated to 200 chars in warning log to prevent log flooding.
 
-### Security
-- `BodySizeLimitMiddleware` now wired into the middleware stack (was defined but unused).
-- `RequestIDMiddleware` added for audit trail correlation.
-- WebRTC error responses no longer leak raw exception details (`str(e)` → generic message).
+- **torch NameError** in `adapter_registry.py` — `cast()` used `torch.Tensor` at runtime
+  but `torch` was only imported under `TYPE_CHECKING`. Fixed with string annotation.
+
+---
+
+## [0.2.0] — 2026-05-16
+
+### Added
+- ExpressionStream SNN pipeline (broca/shallow/deep rendering tiers)
+- ComprehensionStream 5-channel SNN ensemble
+- ThoughtPlanner symbolic outline generation
+- Process Reward Model (PRM) with STDP training
+- Speculative decoding integration
+- Studio compatibility API endpoints
+
+---
+
+## [0.1.0] — 2026-03-07
+
+### Added
+- Initial cognitive architecture with 25+ nodes
+- Multi-tiered memory system (episodic, semantic, procedural)
+- RouterNode with ONNX fast-path domain classification
+- LoRA-based domain specialization (zoning model)
+- InProcessBus and RedisBus message transport
+- Multi-tenant isolation with JWT authentication
+- Plugin system with hot-reload
+- Rust SIMD compute kernels (INT4/INT8)
+- MkDocs Material documentation site

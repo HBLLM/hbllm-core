@@ -34,6 +34,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable, Coroutine
@@ -52,6 +53,9 @@ logger = logging.getLogger(__name__)
 
 # Type alias for async LLM generate function
 LLMGenerateFn = Callable[[str], Coroutine[Any, Any, str]]
+
+# Callback invoked each time a fragment is generated and evaluated
+FragmentCallback = Callable[[ThoughtFragment], Coroutine[Any, Any, None]]
 
 
 class ExpressionStream:
@@ -83,6 +87,8 @@ class ExpressionStream:
         content_planner: Any | None = None,
         broca_encoder: Any | None = None,
         broca_mode: bool = False,
+        on_fragment: FragmentCallback | None = None,
+        dual_router: Any | None = None,
     ) -> None:
         self.planner = planner
         self.controller = controller
@@ -96,12 +102,16 @@ class ExpressionStream:
         self.content_planner = content_planner
         self.broca_encoder = broca_encoder
         self.broca_mode = broca_mode
+        self.on_fragment = on_fragment
+        self.dual_router = dual_router
 
     async def express(
         self,
         understanding: Any,  # UnderstandingState
         base_thought: str,
         original_query: str,
+        style_hints: Any | None = None,  # StyleHints
+        cancel_event: asyncio.Event | None = None,
     ) -> ExpressionResult:
         """Generate a structured response from comprehension output.
 
@@ -109,11 +119,26 @@ class ExpressionStream:
             understanding: The UnderstandingState from ComprehensionStream.
             base_thought: The raw thought content from workspace consensus.
             original_query: The user's original query text.
+            style_hints: Optional StyleHints from StyleAdapter for emotion-aware rendering.
+            cancel_event: Optional asyncio.Event — when set, generation is
+                interrupted and partial results are returned.
 
         Returns:
             ExpressionResult with assembled text and per-fragment scores.
         """
         start_time = time.monotonic()
+
+        # Apply style adaptation if provided
+        style_prefix = ""
+        if style_hints is not None and hasattr(style_hints, "prompt_prefix"):
+            style_prefix = style_hints.prompt_prefix or ""
+            if style_prefix:
+                original_query = style_prefix + original_query
+                logger.debug(
+                    "[ExpressionStream] Style adaptation active: tone=%s, verbosity=%s",
+                    getattr(style_hints, "tone", "?"),
+                    getattr(style_hints, "verbosity", "?"),
+                )
 
         # Step 1: Plan thought outline
         goals = self.planner.plan(understanding)
@@ -157,6 +182,14 @@ class ExpressionStream:
         self.controller.reset()
 
         for goal in goals:
+            # ── Check for interruption ────────────────────────────────────
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(
+                    "[ExpressionStream] Interrupted after %d/%d fragments",
+                    len(fragments),
+                    len(goals),
+                )
+                break
             # Step 2a: SNN gating
             if self.enable_gating:
                 gate = self.controller.gate(goal, prev_fragment_text)
@@ -280,6 +313,22 @@ class ExpressionStream:
             total_tokens += evaluated.metadata.get("tokens", 0)
             fragments.append(evaluated)
 
+            # Emit fragment for streaming
+            if self.on_fragment is not None:
+                try:
+                    await self.on_fragment(evaluated)
+                except Exception:
+                    logger.debug("on_fragment callback failed (non-fatal)")
+
+            # Check for interruption after emitting fragment
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(
+                    "[ExpressionStream] Interrupted after fragment %d/%d",
+                    len(fragments),
+                    len(goals),
+                )
+                break
+
         # Step 3: Assemble final response
         assembled_text = self._assemble(fragments, base_thought)
 
@@ -296,6 +345,14 @@ class ExpressionStream:
             latency_ms,
         )
 
+        result_metadata: dict[str, Any] = {}
+        if style_hints is not None and hasattr(style_hints, "to_dict"):
+            result_metadata["style_hints"] = style_hints.to_dict()
+        if cancel_event is not None and cancel_event.is_set():
+            result_metadata["interrupted"] = True
+            result_metadata["fragments_completed"] = len(fragments)
+            result_metadata["fragments_total"] = len(goals)
+
         return ExpressionResult(
             text=assembled_text,
             fragments=fragments,
@@ -303,6 +360,7 @@ class ExpressionStream:
             total_tokens=total_tokens,
             thought_count=len(goals),
             revision_count=total_revisions,
+            metadata=result_metadata,
         )
 
     async def _express_broca(
@@ -391,6 +449,13 @@ class ExpressionStream:
             fragments.append(fragment)
             rendered_pairs.append((node, text.strip()))
 
+            # Emit fragment for streaming
+            if self.on_fragment is not None:
+                try:
+                    await self.on_fragment(fragment)
+                except Exception:
+                    logger.debug("on_fragment callback failed (non-fatal)")
+
         # Assemble final text
         assembled = self.broca_encoder.assemble(rendered_pairs)
 
@@ -422,15 +487,30 @@ class ExpressionStream:
         If no LLM is available, extracts a relevant portion from the
         base_thought using lexical matching.
         """
-        if self.llm_generate is not None:
+        if self.llm_generate is not None or self.dual_router is not None:
             prompt = self._build_prompt(goal, base_thought, original_query, prev_fragment_text)
             try:
-                text = await self.llm_generate(prompt)
+                if self.dual_router is not None:
+                    # Use DualLLMRouter with tier-aware routing:
+                    # - Broca/Shallow modes use LOCAL tier (fast, on-device)
+                    # - Deep generation uses AUTO tier (complexity-based)
+                    from hbllm.brain.dual_llm_router import TaskTier
+
+                    if self.broca_mode or self.shallow_mode:
+                        tier = TaskTier.LOCAL
+                    else:
+                        tier = TaskTier.AUTO
+                    text = await self.dual_router.generate(prompt, tier=tier)
+                else:
+                    if self.llm_generate is None:
+                        raise RuntimeError("No LLM backend configured (llm_generate is None)")
+                    text = await self.llm_generate(prompt)
                 estimated_tokens = max(1, len(text) // 4)
+                source = "dual_router" if self.dual_router is not None else "llm"
                 return ThoughtFragment(
                     goal_id=goal.id,
                     text=text,
-                    metadata={"tokens": estimated_tokens, "source": "llm"},
+                    metadata={"tokens": estimated_tokens, "source": source},
                 )
             except Exception as e:
                 logger.warning("LLM generation failed for goal %s: %s", goal.id, e)

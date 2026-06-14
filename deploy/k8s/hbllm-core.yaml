@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hbllm-core
+  labels:
+    app: hbllm
+    component: core
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hbllm
+      component: core
+  template:
+    metadata:
+      labels:
+        app: hbllm
+        component: core
+    spec:
+      containers:
+        - name: hbllm-core
+          image: hbllm/core:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: hbllm-config
+            - secretRef:
+                name: hbllm-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "8Gi"
+              # nvidia.com/gpu: "1"  # Uncomment for GPU inference
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30  # Allow 150s for model loading
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hbllm-data
+      terminationGracePeriodSeconds: 60  # Match drain_timeout
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hbllm-core
+  labels:
+    app: hbllm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    app: hbllm
+    component: core
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hbllm-config
+data:
+  HBLLM_ENV: "production"
+  HBLLM_DATA_DIR: "/app/data"
+  HBLLM_RATE_LIMIT_RPM: "60"
+  HBLLM_DB_MAX_PER_TENANT: "5"
+  OTEL_ENABLED: "1"
+  OTEL_SERVICE_NAME: "hbllm"
+  # HBLLM_CORS_ORIGINS: "https://app.example.com"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hbllm-secrets
+type: Opaque
+stringData:
+  HBLLM_JWT_SECRET: "CHANGE-ME-generate-with-python-secrets-token_urlsafe-32"
+  HBLLM_DATABASE_URL: "postgresql://hbllm:password@postgres:5432/hbllm"
+  HBLLM_REDIS_URL: "redis://redis:6379"
+  # OPENAI_API_KEY: "sk-..."
+  # ANTHROPIC_API_KEY: "sk-ant-..."
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hbllm-core
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hbllm-core
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hbllm-core
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hbllm
+      component: core
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hbllm-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

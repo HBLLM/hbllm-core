@@ -4,10 +4,14 @@ Database Connection Pool Manager.
 Provides asyncpg connection pooling for PostgreSQL.
 Falls back to a warning/No-Op mode if `HBLLM_DATABASE_URL` is not set, allowing
 local SQLite components to continue functioning as default if preferred.
+
+Per-tenant connection quotas prevent noisy neighbor exhaustion of the shared pool.
 """
 
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -22,10 +26,12 @@ except ImportError:
 
 
 class DBPool:
-    """Singleton asyncpg connection pool manager."""
+    """Singleton asyncpg connection pool manager with per-tenant quotas."""
 
     _pool: Any | None = None
     _db_url: str | None = None
+    _tenant_semaphores: dict[str, asyncio.Semaphore] = {}
+    _max_per_tenant: int = 5  # Max concurrent connections per tenant
 
     @classmethod
     async def get_pool(cls) -> Any | None:
@@ -41,6 +47,8 @@ class DBPool:
         if not cls._db_url:
             # We don't error out, allowing SQLite fallbacks
             return None
+
+        cls._max_per_tenant = int(os.getenv("HBLLM_DB_MAX_PER_TENANT", "5"))
 
         try:
 
@@ -59,11 +67,57 @@ class DBPool:
                 init=init_connection,
                 timeout=10.0,
             )
-            logger.info("PostgreSQL connection pool initialized.")
+            logger.info(
+                "PostgreSQL connection pool initialized (max_per_tenant=%d).",
+                cls._max_per_tenant,
+            )
             return cls._pool
         except Exception as e:
             logger.error(f"Failed to initialize PostgreSQL pool: {e}")
             return None
+
+    @classmethod
+    def _get_semaphore(cls, tenant_id: str) -> asyncio.Semaphore:
+        """Get or create a semaphore for a tenant."""
+        if tenant_id not in cls._tenant_semaphores:
+            cls._tenant_semaphores[tenant_id] = asyncio.Semaphore(cls._max_per_tenant)
+        return cls._tenant_semaphores[tenant_id]
+
+    @classmethod
+    @asynccontextmanager
+    async def acquire(cls, tenant_id: str = "default"):
+        """Acquire a pooled connection with per-tenant quota enforcement.
+
+        Usage::
+
+            async with DBPool.acquire(tenant_id="t1") as conn:
+                rows = await conn.fetch("SELECT ...")
+
+        Raises:
+            asyncio.TimeoutError: If tenant quota is exhausted for 10s.
+        """
+        pool = await cls.get_pool()
+        if pool is None:
+            yield None
+            return
+
+        sem = cls._get_semaphore(tenant_id)
+        try:
+            # Wait up to 10s for a tenant slot
+            await asyncio.wait_for(sem.acquire(), timeout=10.0)
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "[DBPool] Tenant %s exceeded max %d concurrent connections",
+                tenant_id,
+                cls._max_per_tenant,
+            )
+            raise
+
+        try:
+            async with pool.acquire() as conn:
+                yield conn
+        finally:
+            sem.release()
 
     @classmethod
     async def close(cls) -> None:
@@ -71,4 +125,5 @@ class DBPool:
         if cls._pool:
             await cls._pool.close()
             cls._pool = None
+            cls._tenant_semaphores.clear()
             logger.info("PostgreSQL connection pool closed.")

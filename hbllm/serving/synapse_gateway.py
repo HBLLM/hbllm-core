@@ -9,7 +9,22 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-import orjson
+try:
+    import orjson
+
+    def _json_dumps(obj: Any) -> str:
+        return orjson.dumps(obj).decode("utf-8")
+
+    _json_loads = orjson.loads
+    _JSONDecodeError = orjson.JSONDecodeError
+except ImportError:
+    import json as _json_stdlib
+
+    def _json_dumps(obj: Any) -> str:  # type: ignore[misc]
+        return _json_stdlib.dumps(obj)
+
+    _json_loads = _json_stdlib.loads
+    _JSONDecodeError = _json_stdlib.JSONDecodeError  # type: ignore[assignment]
 from fastapi import WebSocket, WebSocketDisconnect
 
 from hbllm.network.bus import MessageBus, Subscription
@@ -129,7 +144,7 @@ class SynapseGateway:
             logger.info("Flushing %d pending messages to %s", len(pending_msgs), device_id)
             for msg in pending_msgs:
                 try:
-                    await websocket.send_text(orjson.dumps(msg).decode("utf-8"))
+                    await websocket.send_text(_json_dumps(msg))
                 except Exception as e:
                     logger.error("Failed to flush message to %s: %s", device_id, e)
                     self.disconnect(tenant_id, user_id, device_id)
@@ -174,7 +189,7 @@ class SynapseGateway:
 
     async def broadcast_to_tenant(self, tenant_id: str, message: dict[str, Any]) -> None:
         """Broadcast a message to all connected devices in a tenant."""
-        message_str = orjson.dumps(message).decode("utf-8")
+        message_str = _json_dumps(message)
         tasks = []
         for key, ws in self.active_connections.items():
             if key[0] == tenant_id:
@@ -213,7 +228,7 @@ class SynapseGateway:
                 return False
 
         try:
-            await ws.send_text(orjson.dumps(message).decode("utf-8"))
+            await ws.send_text(_json_dumps(message))
             return True
         except Exception as e:
             logger.error("Failed to send message to device %s: %s", device_id, e)
@@ -302,7 +317,7 @@ class SynapseGateway:
     ) -> None:
         """Process messages received from an edge device via WebSocket."""
         try:
-            data = orjson.loads(text_data)
+            data = _json_loads(text_data)
             msg_type = data.get("type")
 
             if msg_type == "register_capabilities":
@@ -385,7 +400,7 @@ class SynapseGateway:
             else:
                 logger.debug("Unknown message type from edge device %s: %s", device_id, msg_type)
 
-        except orjson.JSONDecodeError:
+        except _JSONDecodeError:
             logger.warning("Invalid JSON from device %s: %s", device_id, text_data[:200])
         except Exception as e:
             logger.error("Error handling edge message from %s: %s", device_id, e)

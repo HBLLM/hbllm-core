@@ -1,0 +1,58 @@
+# docker-compose.prod.yml — Production Overrides
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This overlay adds:
+#   - Multi-replica hbllm-core behind Nginx load balancer
+#   - Resource limits
+#   - Redis bus backend for horizontal scaling
+#   - Nginx reverse proxy with load balancing
+
+services:
+  hbllm-core:
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    environment:
+      - HBLLM_BUS_BACKEND=redis
+      - HBLLM_REDIS_URL=redis://redis:6379/0
+      - HBLLM_DATABASE_URL=postgresql://hbllm:hbllm_password@postgres:5432/hbllm_brain
+      - HBLLM_LOG_LEVEL=INFO
+      - HBLLM_SECRET_BACKEND=env
+    ports: []  # Override: don't expose directly, use nginx
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - hbllm-core
+    restart: unless-stopped
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M

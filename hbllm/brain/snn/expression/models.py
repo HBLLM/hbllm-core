@@ -86,3 +86,4 @@ class ExpressionResult:
     total_tokens: int = 0
     thought_count: int = 0
     revision_count: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
