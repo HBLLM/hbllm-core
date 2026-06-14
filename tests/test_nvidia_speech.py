@@ -77,7 +77,7 @@ async def test_audio_in_nvidia_rest_success(bus):
 
 @pytest.mark.asyncio
 async def test_audio_in_nvidia_rest_fallback(bus):
-    """Verify that AudioInputNode falls back to local Whisper on REST failure."""
+    """Verify that AudioInputNode falls back to local Moonshine on REST failure."""
     node = AudioInputNode(node_id="test_audio_in")
     await node.start(bus)
 
@@ -89,21 +89,20 @@ async def test_audio_in_nvidia_rest_fallback(bus):
             "NVIDIA_ASR_URL": "https://test.nvidia.com/v1/audio/transcriptions",
         },
     ):
-        # Mock httpx client post to raise an error
+        # Mock httpx client post to raise an error (NVIDIA fails)
         mock_post = AsyncMock(side_effect=Exception("Connection Refused"))
 
-        # Mock the local whisper transcription fallback method
-        mock_local_transcribe = MagicMock(return_value={"text": "local transcription fallback"})
-        node._load_model = MagicMock()
-        node.model = MagicMock()
-        node.model.transcribe = mock_local_transcribe
+        # Mock the Moonshine fallback transcription
+        async def mock_moonshine(file_path):
+            return "local transcription fallback"
+
+        node._transcribe_file_moonshine = mock_moonshine
 
         with patch("httpx.AsyncClient.post", mock_post), patch("builtins.open", MagicMock()):
             transcription = await node._transcribe_file("dummy.wav")
 
             assert transcription == "local transcription fallback"
             mock_post.assert_called_once()
-            mock_local_transcribe.assert_called_once_with("dummy.wav", fp16=False)
 
 
 @pytest.mark.asyncio
