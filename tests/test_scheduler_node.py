@@ -108,6 +108,7 @@ class TestSchedulerNode:
 
     async def test_retry_policy_on_publish_failure(self, scheduler):
         """Test scheduler retry logic when publishing fails."""
+
         # Mock _execute_task to simulate publish failure without breaking
         # the tick loop's exception handling
         async def _always_fail(task):
