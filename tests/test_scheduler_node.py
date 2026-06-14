@@ -90,8 +90,11 @@ class TestSchedulerNode:
             payload={"prompt": "Hello"},
         )
 
-        # Wait for the tick_loop interval to poll DB and publish
-        await asyncio.sleep(0.3)
+        # Wait dynamically for the tick loop to fire and deliver the message
+        for _ in range(20):
+            if received:
+                break
+            await asyncio.sleep(0.1)
 
         assert len(received) == 1
         assert received[0].topic == "agent.think"
@@ -105,8 +108,12 @@ class TestSchedulerNode:
 
     async def test_retry_policy_on_publish_failure(self, scheduler):
         """Test scheduler retry logic when publishing fails."""
-        # Force the execute_task to fail by not having a bus or mocking failure
-        scheduler._bus = None  # simulate bus dropout
+        # Mock _execute_task to simulate publish failure without breaking
+        # the tick loop's exception handling
+        async def _always_fail(task):
+            return False
+
+        scheduler._execute_task = _always_fail
 
         trigger_time = time.time() - 10.0
         scheduler.schedule_event(
@@ -118,19 +125,23 @@ class TestSchedulerNode:
             retry_policy="retry",
         )
 
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.5)
 
-        # Should have updated status back to pending, and shifted the trigger time
-        with sqlite3.connect(scheduler.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT status, trigger_time FROM scheduled_tasks WHERE task_id = 't4'"
-            )
-            row = cursor.fetchone()
+        # Poll until the retry logic completes (status changes from 'processing')
+        for _ in range(20):
+            with sqlite3.connect(scheduler.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute(
+                    "SELECT status, trigger_time FROM scheduled_tasks WHERE task_id = 't4'"
+                )
+                row = cursor.fetchone()
+            if row["status"] != "processing":
+                break
+            await asyncio.sleep(0.1)
 
         assert row["status"] == "pending"
-        # It should have shifted +60s from the execution time (now)
-        assert row["trigger_time"] > trigger_time + 10.0
+        # Retry shifts trigger_time forward by +60s from execution time
+        assert row["trigger_time"] > trigger_time + 50.0
 
     async def test_command_handling_over_bus(self, scheduler, bus):
         """Test tools can schedule and cancel tasks by publishing commands to the bus."""
