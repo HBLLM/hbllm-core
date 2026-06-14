@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: ["master", "main"]
 
+# Cancel redundant runs: when a PR is open, the push-triggered run
+# is cancelled in favour of the pull_request-triggered one.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.11"
   REGISTRY: ghcr.io
