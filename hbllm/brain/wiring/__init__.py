@@ -7,6 +7,6 @@ brain construction to wire up specific capabilities.
 
 Modules:
   - snn: SNN comprehension + expression stream wiring
-  - autonomy: Autonomy watchers, state machine, loop
-  - plugins: Plugin discovery, temporal reasoning, swarm
+  - nodes: Legacy cognitive node creation (27+ individual nodes)
+  - subsystems: Shared subsystem wiring (always-on, optional, late-phase)
 """

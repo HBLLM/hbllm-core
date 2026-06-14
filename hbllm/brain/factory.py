@@ -797,23 +797,7 @@ class BrainFactory:
             )
 
         # 3. Create cognitive nodes with LLM injected (legacy path)
-        from hbllm.brain.collective_node import CollectiveNode
-        from hbllm.brain.critic_node import CriticNode
-        from hbllm.brain.curiosity_node import CuriosityNode
-        from hbllm.brain.decision_node import DecisionNode
-        from hbllm.brain.experience_node import ExperienceNode
-        from hbllm.brain.identity_node import IdentityNode
-        from hbllm.brain.learner_node import LearnerNode
-        from hbllm.brain.meta_node import MetaReasoningNode
-        from hbllm.brain.planner_node import PlannerNode
-        from hbllm.brain.router_node import RouterNode
-        from hbllm.brain.rule_extractor import RuleExtractorNode
-        from hbllm.brain.sentinel_node import SentinelNode
-        from hbllm.brain.sleep_node import SleepCycleNode
-        from hbllm.brain.workspace_node import WorkspaceNode
-        from hbllm.brain.world_model_node import WorldModelNode
-        from hbllm.brain.world_state import WorldStateEngine
-        from hbllm.memory.memory_node import MemoryNode
+        from hbllm.brain.wiring.nodes import create_legacy_nodes
 
         # Create PolicyEngine for governance
         policy_engine = None
@@ -841,174 +825,24 @@ class BrainFactory:
                     )
                     logger.info("Auto-discovered sub-domain LoRA: %s", adapter_dir.name)
 
-        router_node = RouterNode(node_id="router", llm=llm, domain_registry=domain_registry)
-        router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
-
-        # Wire Cognitive Stream comprehension pipeline
-        if cfg.inject_comprehension:
-            _wire_comprehension_stream(router_node, domain_registry)
-
         skill_registry = SkillRegistry(data_dir=cfg.data_dir)
-        decision_node = DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine)
 
-        nodes = [
-            # Core cognitive pipeline
-            router_node,
-            PlannerNode(
-                node_id="planner",
-                branch_factor=cfg.planner_branch_factor,
-                max_depth=cfg.planner_max_depth,
-                policy_engine=policy_engine,
-                llm=llm,
-            ),
-            CriticNode(node_id="critic", llm=llm),
-            decision_node,
-            WorkspaceNode(node_id="workspace"),
-            # Memory (episodic + semantic + procedural + value + knowledge graph)
-            MemoryNode(node_id="memory", db_path=Path(cfg.data_dir) / "working_memory.db"),
-            # Experience & meta-cognitive layer
-            ExperienceNode(node_id="experience", llm=llm),
-            MetaReasoningNode(node_id="meta"),
-            RuleExtractorNode(node_id="rule_extractor"),
-            # Curiosity-driven goal generation
-            CuriosityNode(node_id="curiosity"),
-            # Collective intelligence (multi-instance knowledge sharing)
-            CollectiveNode(node_id="collective", skill_registry=skill_registry),
-            # Online learning from feedback (DPO)
-            LearnerNode(node_id="learner"),
-            # World model (code simulation & sandboxed execution)
-            WorldModelNode(node_id="world_model"),
-            # Memory consolidation during idle
-            SleepCycleNode(node_id="sleep", llm=llm),
-        ]
+        nodes = create_legacy_nodes(
+            llm=llm,
+            llm_provider=llm_provider,
+            cfg=cfg,
+            policy_engine=policy_engine,
+            domain_registry=domain_registry,
+            skill_registry=skill_registry,
+            dual_router=dual_router,
+        )
 
-        # Wire expression-side Cognitive Stream (Layer 5)
-        if cfg.inject_comprehension:
-            _wire_expression_stream(decision_node, router_node, llm, dual_router=dual_router)
-
-            # Wire memory search into ComprehensionStream for per-concept retrieval
-            comp_stream = getattr(router_node, "comprehension_stream", None)
-            if comp_stream is not None and comp_stream.memory_search_fn is None:
-                # Find the MemoryNode from the node list
-                memory_node = None
-                for n in nodes:
-                    if getattr(n, "node_id", None) == "memory":
-                        memory_node = n
-                        break
-                if memory_node is not None and hasattr(memory_node, "semantic_db"):
-
-                    async def _mem_search(
-                        text: str, top_k: int = 3, tenant_id: str = "default"
-                    ) -> list:
-                        import asyncio
-
-                        return await asyncio.to_thread(
-                            memory_node.semantic_db.search,
-                            text,
-                            top_k=top_k,
-                            tenant_id=tenant_id,
-                        )
-
-                    comp_stream.memory_search_fn = _mem_search
-                    logger.info("ComprehensionStream memory_search_fn wired to MemoryNode")
-
-        # Browser Node (DuckDuckGo search + scraping)
-        if cfg.inject_browser:
-            from hbllm.actions.browser_node import BrowserNode
-
-            nodes.append(BrowserNode(node_id="browser"))
-            logger.info("BrowserNode wired (web search & scrape)")
-
-        # Execution Node (sandboxed python execution)
-        if cfg.inject_execution:
-            from hbllm.actions.execution_node import ExecutionNode
-
-            nodes.append(ExecutionNode(node_id="execution"))
-            logger.info("ExecutionNode wired (sandboxed python execution)")
-
-        # Proactive governance sentinel
+        # Find sentinel node from created nodes (for subsystem wiring)
         sentinel_node = None
-        if cfg.inject_sentinel and policy_engine:
-            sentinel_node = SentinelNode(
-                node_id="sentinel",
-                policy_engine=policy_engine,
-            )
-            nodes.append(sentinel_node)
-
-        # Optional nodes based on config
-        if cfg.inject_identity:
-            nodes.append(IdentityNode(node_id="identity"))
-
-        # Host shell execution node
-        if cfg.inject_shell:
-            from hbllm.actions.shell_node import HostShellNode
-
-            shell_node = HostShellNode(
-                node_id="shell_executor",
-                workspace_dir=None,
-                require_manual_approval=cfg.require_shell_approval,
-                policy_engine=policy_engine,
-            )
-            nodes.append(shell_node)
-            logger.info("HostShellNode wired (manual approval=%s)", cfg.require_shell_approval)
-
-        # Perception nodes (optional — require ML models to be downloaded)
-        if cfg.inject_perception:
-            from hbllm.perception.audio_in_node import AudioInputNode
-            from hbllm.perception.audio_out_node import AudioOutputNode
-            from hbllm.perception.vision_node import VisionNode
-
-            nodes.extend(
-                [
-                    AudioInputNode(node_id="audio_in"),
-                    AudioOutputNode(node_id="audio_out"),
-                    VisionNode(node_id="vision"),
-                ]
-            )
-
-        # Reasoning nodes (optional — require extra dependencies)
-        if cfg.inject_fuzzy_logic:
-            from hbllm.actions.fuzzy_node import FuzzyNode
-
-            nodes.append(FuzzyNode(node_id="fuzzy", llm=llm))
-            logger.info("FuzzyNode wired (scikit-fuzzy reasoning)")
-
-        if cfg.inject_symbolic_logic:
-            from hbllm.actions.logic_node import LogicNode
-
-            nodes.append(LogicNode(node_id="logic", llm=llm))
-            logger.info("LogicNode wired (Z3 theorem prover)")
-
-        # Register and start default DomainModuleNode instances
-        if (
-            type(llm_provider).__name__ == "LocalProvider"
-            and getattr(llm_provider, "_model", None) is not None
-        ):
-            from hbllm.modules.base_module import DomainModuleNode
-
-            model = llm_provider._model
-            tokenizer = llm_provider._tokenizer
-            for domain in ["general", "coding", "math"]:
-                nodes.append(
-                    DomainModuleNode(
-                        node_id=f"domain_{domain}",
-                        domain_name=domain,
-                        model=model,
-                        tokenizer=tokenizer,
-                        lora_state_dict=None,
-                    )
-                )
-        else:
-            from hbllm.modules.base_module import DomainModuleNode
-
-            for domain in ["general", "coding", "math"]:
-                nodes.append(
-                    DomainModuleNode(
-                        node_id=f"domain_{domain}",
-                        domain_name=domain,
-                        llm=llm,
-                    )
-                )
+        for n in nodes:
+            if getattr(n, "node_id", None) == "sentinel":
+                sentinel_node = n
+                break
 
         # 4. Start all nodes on the bus
         for node in nodes:
@@ -1044,286 +878,26 @@ class BrainFactory:
             provider=llm_provider,
         )
 
-        # 6. Wire cognitive subsystems
-        data_dir = cfg.data_dir
-
-        # Always-on subsystems
-        brain.skill_registry = skill_registry
-        brain.tool_memory = ToolMemory(data_dir=data_dir)
-        brain.concept_extractor = ConceptExtractor()
-
-        from hbllm.perception.event_log import EventLog
-
-        brain.event_log = EventLog(data_dir=data_dir)
-        brain.world_state = WorldStateEngine(event_log=brain.event_log)
-
-        brain.cognition_router = CognitionRouter()
-        brain.reward_model = RewardModel(data_dir=data_dir)
-        brain.policy_optimizer = PolicyOptimizer()
-        brain.interaction_miner = AsyncInteractionMiner(data_dir=data_dir)
-
-        # Dual LLM Router
-        brain.dual_router = dual_router
-        if dual_router is not None:
-            # Wire state machine for cognitive-state-aware routing
-            autonomy = getattr(brain, "autonomy_core", None)
-            if autonomy is not None:
-                dual_router.state_machine = getattr(autonomy, "state_machine", None)
-            logger.info("[Factory] Dual LLM Router attached to brain")
-
-        # Advanced Subsystems (Phase 3-7)
-        if cfg.inject_task_graph:
-            from hbllm.brain.autonomy.task_graph import TaskGraphRuntime
-
-            brain.task_graph = TaskGraphRuntime(data_dir=data_dir)
-
-        # Autonomy Watchers
-        if cfg.inject_autonomy_watchers:
-            try:
-                from hbllm.brain.autonomy.watchers.filesystem_watcher import FilesystemWatcher
-                from hbllm.brain.autonomy.watchers.idle_detector import IdleDetector
-                from hbllm.brain.autonomy.watchers.system_health_watcher import (
-                    SystemHealthWatcher,
-                )
-
-                brain._autonomy_watchers = []
-
-                # Filesystem watcher
-                if cfg.autonomy_watch_dirs:
-                    fs_watcher = FilesystemWatcher(watch_dirs=cfg.autonomy_watch_dirs)
-                    brain._autonomy_watchers.append(("fs_watcher", fs_watcher))
-
-                # System health
-                health_watcher = SystemHealthWatcher()
-                brain._autonomy_watchers.append(("system_health", health_watcher))
-
-                # Idle detector
-                idle_detector = IdleDetector()
-                brain._autonomy_watchers.append(("idle_detector", idle_detector))
-
-                # Calendar watcher
-                if cfg.autonomy_calendar_dir:
-                    from hbllm.brain.autonomy.watchers.calendar_watcher import CalendarWatcher
-
-                    cal_watcher = CalendarWatcher(calendar_dir=cfg.autonomy_calendar_dir)
-                    brain._autonomy_watchers.append(("calendar", cal_watcher))
-
-                logger.info(
-                    "[Factory] Registered %d autonomy watchers",
-                    len(brain._autonomy_watchers),
-                )
-            except Exception as e:
-                logger.warning("[Factory] Failed to wire autonomy watchers: %s", e)
-
-        if cfg.inject_causal_graph:
-            from hbllm.brain.causality.causal_graph import CausalGraph
-
-            brain.causal_graph = CausalGraph(data_dir=data_dir)
-
-        if cfg.inject_compaction:
-            from hbllm.brain.compaction.engine import CognitiveCompactionEngine
-
-            brain.compaction_engine = CognitiveCompactionEngine()
-
-        if cfg.inject_embodiment:
-            from hbllm.brain.embodiment.os_adapter import OSAdapter
-            from hbllm.brain.embodiment.verifier import ExecutionVerifier
-
-            brain.os_adapter = OSAdapter()
-            brain.verifier = ExecutionVerifier(brain.os_adapter)
-
-        if cfg.inject_human_control:
-            from hbllm.brain.control.guard import SecurityGuard
-            from hbllm.brain.control.permissions import PermissionRegistry
-            from hbllm.brain.observability.tracer import DecisionTraceLedger
-
-            brain.permission_registry = PermissionRegistry()
-            brain.decision_tracer = DecisionTraceLedger(data_dir=data_dir)
-            brain.security_guard = SecurityGuard(brain.permission_registry, brain.decision_tracer)
-
-        if cfg.inject_mesh:
-            from hbllm.brain.mesh.registry import NodeRegistry, NodeType
-
-            brain.mesh_registry = NodeRegistry(local_node_id="local", local_node_type=NodeType.EDGE)
-
-        # Configurable subsystems
-        if cfg.inject_revision:
-            brain.confidence_estimator = ConfidenceEstimator()
-            brain.revision_node = RevisionNode()
-
-        if cfg.inject_goals:
-            brain.goal_manager = GoalManager(data_dir=data_dir)
-
-        if cfg.inject_self_model:
-            brain.self_model = SelfModel(data_dir=data_dir)
-
-        if cfg.inject_metrics:
-            brain.cognitive_metrics = CognitiveMetrics(data_dir=data_dir)
-
-        if cfg.inject_cost_optimizer:
-            brain.token_optimizer = TokenOptimizer()
-
-        if cfg.inject_policy_engine:
-            brain.policy_engine = policy_engine
-
-        if cfg.inject_owner_rules:
-            brain.owner_rules = OwnerRuleStore(db_path=str(Path(data_dir) / "owner_rules.db"))
-
-        if cfg.inject_sentinel and sentinel_node:
-            brain.sentinel = sentinel_node
-
-        # v2: Intelligence Feedback Loop — wire evaluation, reflection, skill compiler
-        if cfg.inject_evaluation:
-            eval_node = EvaluationNode(
-                node_id="evaluation",
-                cognitive_metrics=brain.cognitive_metrics,
-                goal_manager=brain.goal_manager,
-                self_model=brain.self_model,
-                skill_registry=brain.skill_registry,
-                db_path=Path(cfg.data_dir) / "evaluations.db",
-            )
-            await _register_node(registry, eval_node)
-            await eval_node.start(message_bus)
-            brain.evaluation_node = eval_node
-            nodes.append(eval_node)
-            logger.info("v2: EvaluationNode wired (intelligence feedback loop)")
-
-        if cfg.inject_reflection:
-            refl_node = ReflectionNode(
-                node_id="reflection",
-                cognitive_metrics=brain.cognitive_metrics,
-                goal_manager=brain.goal_manager,
-                self_model=brain.self_model,
-                skill_registry=brain.skill_registry,
-            )
-            await _register_node(registry, refl_node)
-            await refl_node.start(message_bus)
-            brain.reflection_node = refl_node
-            nodes.append(refl_node)
-            logger.info("v2: ReflectionNode wired (periodic batch reflection)")
-
-        if cfg.inject_skill_compiler:
-            compiler_node = SkillCompilerNode(
-                node_id="skill_compiler",
-                skill_registry=brain.skill_registry,
-                llm=llm,
-            )
-            await _register_node(registry, compiler_node)
-            await compiler_node.start(message_bus)
-            brain.skill_compiler_node = compiler_node
-            nodes.append(compiler_node)
-            logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
-
-        if cfg.inject_failure_analyzer:
-            from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
-
-            fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
-            await _register_node(registry, fail_node)
-            await fail_node.start(message_bus)
-            brain.failure_analyzer_node = fail_node
-            nodes.append(fail_node)
-            logger.info("FailureAnalyzerNode wired (automated skill repair)")
-
-        if cfg.inject_sil:
-            from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
-
-            sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
-            await _register_node(registry, sil_node)
-            await sil_node.start(message_bus)
-            brain.skill_intelligence_node = sil_node
-            nodes.append(sil_node)
-            logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")
-
-        # v2: Resource Intelligence — wire attention and load managers
-        if cfg.inject_attention:
-            attn_node = AttentionManager(node_id="attention")
-            await _register_node(registry, attn_node)
-            await attn_node.start(message_bus)
-            brain.attention_manager = attn_node
-            nodes.append(attn_node)
-            logger.info("v2: AttentionManager wired (memory budgets & focus)")
-
-        if cfg.inject_load_manager:
-            load_node = LoadManager(
-                node_id="load_manager",
-                monitor_interval=60.0,
-            )
-            await _register_node(registry, load_node)
-            await load_node.start(message_bus)
-            brain.load_manager = load_node
-            nodes.append(load_node)
-            logger.info("v2: LoadManager wired (resource monitoring & degradation)")
-
-        # v3: Proactive Execution — wire the scheduler node
-        if cfg.inject_scheduler:
-            from hbllm.brain.scheduler_node import SchedulerNode
-
-            sched_node = SchedulerNode(
-                node_id="scheduler",
-                data_dir=data_dir,
-            )
-            await _register_node(registry, sched_node)
-            await sched_node.start(message_bus)
-            brain.scheduler_node = sched_node
-            nodes.append(sched_node)
-            logger.info("v3: SchedulerNode wired (proactive autonomous task execution)")
-
-        logger.info(
-            "Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, "
-            "policy engine, owner rules, sentinel, evaluation, reflection, skill_compiler, "
-            "attention, load_manager"
+        # 6. Wire cognitive subsystems (extracted to wiring/subsystems.py)
+        from hbllm.brain.wiring.subsystems import (
+            wire_always_on_subsystems,
+            wire_late_subsystems,
+            wire_optional_subsystems,
         )
 
-        # ── Cognitive Awareness ───────────────────────────────────────
-        if cfg.inject_awareness:
-            from hbllm.brain.awareness import CognitiveAwareness
-
-            awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
-            await _register_node(registry, awareness_node)
-            await awareness_node.start(message_bus)
-            brain.awareness = awareness_node
-            nodes.append(awareness_node)
-            logger.info("CognitiveAwareness wired (brain self-monitoring active)")
-
-        # ── Knowledge Base ────────────────────────────────────────────
-        if cfg.inject_knowledge:
-            from hbllm.knowledge import KnowledgeBase
-
-            kb_dir = str(Path(data_dir) / "knowledge")
-            brain.knowledge_base = KnowledgeBase(data_dir=kb_dir)
-            logger.info("KnowledgeBase wired (data_dir=%s)", kb_dir)
-
-        # ── Persistence (BrainState) ─────────────────────────────────
-        if cfg.inject_persistence:
-            from hbllm.persistence import BrainState
-
-            state_path = str(Path(data_dir) / "brain_state.db")
-            brain.state = BrainState(path=state_path)
-            logger.info("BrainState wired (path=%s)", state_path)
-
-        # ── Plugin System ────────────────────────────────────────────
-        if cfg.inject_plugins:
-            from hbllm.plugin.manager import PluginManager
-
-            extra_dirs = [Path(d) for d in (cfg.plugin_dirs or [])]
-            brain.plugin_manager = PluginManager(
-                plugin_dirs=extra_dirs,
-                skill_registry=brain.skill_registry,
-                policy_engine=brain.policy_engine,
-                knowledge_base=brain.knowledge_base,
-            )
-            # Auto-discover plugins from all configured paths
-            discovered = await brain.plugin_manager.discover_plugins()
-            if discovered:
-                logger.info(
-                    "Plugin system: loaded %d bundles on startup",
-                    len(discovered),
-                )
-
-            # Optionally start background watcher for hot-loading
-            if cfg.watch_plugins:
-                await brain.plugin_manager.watch_directories()
-                logger.info("Plugin watcher started (runtime hot-loading enabled)")
+        brain.skill_registry = skill_registry
+        await wire_always_on_subsystems(brain, cfg, dual_router=dual_router)
+        await wire_optional_subsystems(
+            brain,
+            cfg,
+            nodes,
+            registry,
+            message_bus,
+            policy_engine=policy_engine,
+            sentinel_node=sentinel_node,
+            llm=llm,
+        )
+        await wire_late_subsystems(brain, cfg, nodes, registry, message_bus)
 
         return brain
 
