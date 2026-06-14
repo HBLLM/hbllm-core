@@ -2,12 +2,11 @@ name: CI Pipeline
 
 on:
   push:
-    branches: ["master", "main", "feature/*"]
+    branches: ["master", "main"]
   pull_request:
     branches: ["master", "main"]
 
-# Cancel redundant runs: when a PR is open, the push-triggered run
-# is cancelled in favour of the pull_request-triggered one.
+# Cancel stale runs when a new commit is pushed to the same PR or branch.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
