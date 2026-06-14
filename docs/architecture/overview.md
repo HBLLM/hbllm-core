@@ -142,6 +142,37 @@ The SNN layer runs alongside the cognitive core:
 - **ContentPlanner** — 8→12→6→3 SNN for content type selection (v4).
 - **BrocaEncoder** — Ultra-minimal prompt builder for pure text production (v4).
 
+#### DualLLMRouter & Circuit Breaker
+
+The `DualLLMRouter` adds intelligent routing between local and external LLM providers:
+
+```mermaid
+graph LR
+    Q["Query"] --> CL["classify()"]
+    CL -->|simple| LOCAL["Local SLM<br/>(fast, free)"]
+    CL -->|complex| CB{"Circuit<br/>Breaker"}
+    CB -->|closed| EXT["External LLM<br/>(GPT-4o, Claude)"]
+    CB -->|open| LOCAL
+    EXT -->|failure| CB
+    EXT -->|success| CB
+```
+
+- **Classify** — Fast heuristic (word count, question complexity) routes simple queries to local SLM
+- **Circuit Breaker** — Protects against external provider failures:
+    - **Closed** → Normal operation, requests go to external LLM
+    - **Open** → After N failures, all requests automatically fall back to local SLM
+    - **Half-Open** → After recovery timeout, allows one probe request to test recovery
+
+#### Production Resilience
+
+| Feature | Module | Behavior |
+|---------|--------|----------|
+| **Graceful Shutdown** | `api.py` | Drains in-flight requests before exit (configurable timeout) |
+| **Rate Limiting** | `middleware/rate_limit.py` | Per-tenant token bucket (429 when exceeded) |
+| **Prometheus Metrics** | `middleware/prometheus.py` | Request count, latency histogram, error counters |
+| **API Versioning** | `middleware/api_version.py` | `Accept-Version` validation, `X-API-Version` header |
+| **DB Quotas** | `episodic.py` | Per-tenant turn limits with automatic eviction |
+
 ### Layer 3: Meta-Cognitive
 
 Nodes that monitor, improve, and expand the brain itself:

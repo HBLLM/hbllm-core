@@ -98,32 +98,116 @@ HBLLM_BUS_TYPE=redis \
 HBLLM_REDIS_URL=redis://redis-host:6379 \
 HBLLM_REDIS_HMAC_KEY=your-secret-key \
 python -m hbllm.serving.api --worker-mode
+---
+
+## Kubernetes Deployment
+
+HBLLM ships production-ready K8s manifests in `deploy/k8s/`:
+
+```bash
+kubectl apply -f deploy/k8s/configmap.yaml
+kubectl apply -f deploy/k8s/deployment.yaml
+kubectl apply -f deploy/k8s/service.yaml
 ```
+
+The deployment includes:
+
+- **Liveness probe** → `GET /health/live` (checks process health)
+- **Readiness probe** → `GET /health/ready` (checks Brain + Bus initialization)
+- **Resource limits** — 2 CPU / 4Gi RAM (configurable via ConfigMap)
+- **Rolling updates** with `maxSurge: 1` / `maxUnavailable: 0`
+- **Security context** — non-root, read-only filesystem
+
+```yaml
+# deploy/k8s/configmap.yaml (key env vars)
+HBLLM_PROVIDER: "local"
+HBLLM_ENV: "production"
+HBLLM_JWT_SECRET: "<your-secret>"
+HBLLM_RATE_LIMIT_RPM: "60"
+HBLLM_DB_MAX_PER_TENANT: "50000"
+HBLLM_SHUTDOWN_DRAIN_SEC: "15"
+```
+
+---
 
 ## Monitoring
 
-HBLLM ships with OpenTelemetry instrumentation:
+### Prometheus Metrics
 
-- Request latency histograms
-- Node activation counts
-- Memory usage per tenant
-- Bus throughput metrics
+HBLLM exposes a `/metrics/prometheus` endpoint with:
 
-### Prometheus + Grafana
+| Metric | Type | Description |
+|--------|------|-------------|
+| `hbllm_http_requests_total` | Counter | Total requests by endpoint and status |
+| `hbllm_http_request_duration_seconds` | Histogram | Latency distribution (p50/p95/p99) |
+| `hbllm_http_requests_in_flight` | Gauge | Currently processing requests |
+| `hbllm_http_errors_total` | Counter | Server errors (5xx) by endpoint |
+
+**Scrape config** for `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'hbllm'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['hbllm-service:8000']
+    metrics_path: '/metrics/prometheus'
+```
+
+### OpenTelemetry
+
+HBLLM also ships with OpenTelemetry instrumentation for distributed tracing:
 
 ```bash
 HBLLM_OTEL_ENDPOINT=http://otel-collector:4317 \
 python -m hbllm.serving.api
 ```
 
-## Health Checks
+- Request latency histograms
+- Node activation spans
+- Memory usage per tenant
+- Bus throughput metrics
 
-The API exposes a health endpoint:
+---
+
+## API Versioning
+
+All API responses include version headers:
+
+```
+X-API-Version: v1
+X-Supported-Versions: v1
+```
+
+Clients can request a specific version via the `Accept-Version` header:
 
 ```bash
+curl -H "Accept-Version: v1" http://localhost:8000/v1/chat
+```
+
+Unsupported versions return `400 Bad Request` with the list of supported versions.
+
+---
+
+## Health Checks
+
+The API exposes three health endpoints:
+
+```bash
+# Quick liveness check (always fast, no dependency checks)
+curl http://localhost:8000/health/live
+# {"status": "alive"}
+
+# Readiness check (verifies Brain and Bus are initialized)
+curl http://localhost:8000/health/ready
+# {"status": "ready", "brain": true, "bus": true}
+
+# Full health check (includes node count and bus status)
 curl http://localhost:8000/health
 # {"status": "healthy", "nodes": 23, "bus": "running"}
 ```
+
+---
 
 ## Security Checklist
 
@@ -131,7 +215,8 @@ curl http://localhost:8000/health
 - [x] Set `HBLLM_TENANT_GUARD_MODE=STRICT` for production deployments
 - [x] Set `HBLLM_REDIS_HMAC_KEY` for distributed deployments
 - [x] Use `weights_only=True` (enforced automatically)
-- [x] Enable per-tenant rate limiting (`security.rate_limiting_enabled: true`)
+- [x] Enable per-tenant rate limiting (`HBLLM_RATE_LIMIT_RPM=60`)
+- [x] Enable per-tenant DB quotas (`HBLLM_DB_MAX_PER_TENANT=50000`)
 - [x] Enable audit logging (`security.audit_enabled: true`)
 - [x] Enable encryption at rest for sensitive fields (`security.encryption_enabled: true`)
 - [x] Pin adapter revisions to specific Git tags
@@ -139,3 +224,4 @@ curl http://localhost:8000/health
 - [x] Set `HBLLM_CORS_ORIGINS` to specific domains (wildcard blocked in production)
 
 > 📖 **[Full Security Architecture →](../security.md)**
+
