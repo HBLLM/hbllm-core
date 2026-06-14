@@ -42,18 +42,45 @@ class TestTraceSpan:
     @patch("hbllm.network.tracing._tracer", None)
     def test_tracer_init_called_when_enabled(self):
         """get_tracer should attempt initialization when OTEL_ENABLED=1."""
-        # This will try to import opentelemetry which may not be installed
-        # but should not crash — just returns None
+        import hbllm.network.tracing as tracing_mod
+
         tracer = get_tracer()
-        # Either returns a tracer (if OTel is installed) or None
         assert tracer is None or tracer is not None  # No crash = pass
+
+        # Tear down: reset global OTel state to prevent ConsoleSpanExporter
+        # from dumping spans for every subsequent test AND to stop the
+        # BatchSpanProcessor background thread (which causes the CI hang).
+        try:
+            from opentelemetry import trace
+
+            provider = trace.get_tracer_provider()
+            if hasattr(provider, "shutdown"):
+                provider.shutdown()
+            trace.set_tracer_provider(trace.NoOpTracerProvider())
+        except ImportError:
+            pass
+        tracing_mod._tracer = None
 
     @patch("hbllm.network.tracing._OTEL_ENABLED", True)
     @patch("hbllm.network.tracing._meter", None)
     def test_meter_init_called_when_enabled(self):
         """get_meter should attempt initialization when OTEL_ENABLED=1."""
+        import hbllm.network.tracing as tracing_mod
+
         meter = get_meter()
         assert meter is None or meter is not None  # No crash = pass
+
+        # Tear down: reset global meter provider
+        try:
+            from opentelemetry import metrics
+
+            provider = metrics.get_meter_provider()
+            if hasattr(provider, "shutdown"):
+                provider.shutdown()
+            metrics.set_meter_provider(metrics.NoOpMeterProvider())
+        except ImportError:
+            pass
+        tracing_mod._meter = None
 
 
 class TestBusMetrics:
