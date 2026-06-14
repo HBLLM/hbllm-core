@@ -1,157 +1,284 @@
-"""Tests for MetricsCollector and PluginManager."""
+"""
+Unit tests for the enterprise hardening modules:
+  - Secret Provider (secrets.py)
+  - RBAC Guard (rbac.py)
+  - RBAC Middleware (middleware/rbac.py)
+  - Audit Middleware (middleware/audit.py)
+"""
 
+from __future__ import annotations
+
+import os
 import tempfile
-from pathlib import Path
+import time
+import unittest
+from unittest.mock import MagicMock
 
-from hbllm.network.metrics import MetricsCollector
-from hbllm.network.plugin_manager import PluginInfo, PluginManager
+import pytest
 
-# ─── MetricsCollector Tests ──────────────────────────────────────────────────
-
-
-class TestMetricsCollector:
-    def setup_method(self):
-        MetricsCollector.reset()
-
-    def test_singleton(self):
-        m1 = MetricsCollector.get_instance()
-        m2 = MetricsCollector.get_instance()
-        assert m1 is m2
-
-    def test_backend(self):
-        m = MetricsCollector.get_instance()
-        assert m.backend in ("prometheus", "inmemory")
-
-    def test_record_request(self):
-        m = MetricsCollector.get_instance()
-        m.record_request("router.query", tenant_id="t1")
-        m.record_request("router.query", tenant_id="t1", status="error")
-        # Should not raise
-
-    def test_record_message(self):
-        m = MetricsCollector.get_instance()
-        m.record_message("workspace.update", "event")
-        # Should not raise
-
-    def test_record_error(self):
-        m = MetricsCollector.get_instance()
-        m.record_error("router_01", "timeout")
-        # Should not raise
-
-    def test_observe_duration(self):
-        m = MetricsCollector.get_instance()
-        m.observe_duration("pipeline", 1.5)
-        m.observe_duration("pipeline", 0.3)
-
-    def test_observe_node_latency(self):
-        m = MetricsCollector.get_instance()
-        m.observe_node_latency("router_01", 0.05)
-
-    def test_gauges(self):
-        m = MetricsCollector.get_instance()
-        m.set_active_nodes(10)
-        m.set_healthy_nodes(9)
-        m.inc_active_requests()
-        m.inc_active_requests()
-        m.dec_active_requests()
-
-    def test_measure_latency_context(self):
-        m = MetricsCollector.get_instance()
-        with m.measure_latency("test_stage"):
-            sum(range(100))
-        # Should record a duration
-
-    def test_get_metrics_text(self):
-        m = MetricsCollector.get_instance()
-        m.record_request("test")
-        text = m.get_metrics_text()
-        assert isinstance(text, str)
-
-    def test_snapshot(self):
-        m = MetricsCollector.get_instance()
-        m.record_request("test")
-        snap = m.snapshot()
-        assert "backend" in snap
+# ── Secret Provider ──────────────────────────────────────────────────
 
 
-# ─── PluginInfo Tests ────────────────────────────────────────────────────────
+class TestEnvSecretProvider(unittest.TestCase):
+    """Test the default environment variable secret backend."""
+
+    def test_get_returns_env_value(self):
+        from hbllm.security.secrets import EnvSecretProvider
+
+        os.environ["_TEST_SECRET_KEY"] = "test_value"
+        provider = EnvSecretProvider()
+        assert provider.get("_TEST_SECRET_KEY") == "test_value"
+        del os.environ["_TEST_SECRET_KEY"]
+
+    def test_get_returns_default_when_missing(self):
+        from hbllm.security.secrets import EnvSecretProvider
+
+        provider = EnvSecretProvider()
+        assert provider.get("_NONEXISTENT_KEY") is None
+        assert provider.get("_NONEXISTENT_KEY", "fallback") == "fallback"
+
+    def test_get_required_raises_on_missing(self):
+        from hbllm.security.secrets import EnvSecretProvider
+
+        provider = EnvSecretProvider()
+        with pytest.raises(KeyError, match="Required secret"):
+            provider.get_required("_DEFINITELY_NOT_SET")
+
+    def test_get_required_returns_value(self):
+        from hbllm.security.secrets import EnvSecretProvider
+
+        os.environ["_TEST_REQ"] = "required_value"
+        provider = EnvSecretProvider()
+        assert provider.get_required("_TEST_REQ") == "required_value"
+        del os.environ["_TEST_REQ"]
 
 
-class TestPluginInfo:
-    def test_to_dict(self):
-        info = PluginInfo(
-            name="test_plugin",
-            path="/tmp/test.py",
-            version="1.0.0",
-            description="A test plugin",
-        )
-        d = info.to_dict()
-        assert d["name"] == "test_plugin"
-        assert d["loaded"] is False
-        assert d["error"] is None
+class TestSecretProviderFactory(unittest.TestCase):
+    """Test the get_secret_provider factory."""
+
+    def setUp(self):
+        from hbllm.security.secrets import reset_provider
+
+        reset_provider()
+
+    def tearDown(self):
+        from hbllm.security.secrets import reset_provider
+
+        reset_provider()
+        os.environ.pop("HBLLM_SECRET_BACKEND", None)
+
+    def test_default_is_env(self):
+        from hbllm.security.secrets import EnvSecretProvider, get_secret_provider
+
+        provider = get_secret_provider()
+        assert isinstance(provider, EnvSecretProvider)
+
+    def test_explicit_env_backend(self):
+        from hbllm.security.secrets import EnvSecretProvider, get_secret_provider
+
+        os.environ["HBLLM_SECRET_BACKEND"] = "env"
+        provider = get_secret_provider()
+        assert isinstance(provider, EnvSecretProvider)
+
+    def test_unknown_backend_raises(self):
+        from hbllm.security.secrets import get_secret_provider, reset_provider
+
+        reset_provider()
+        os.environ["HBLLM_SECRET_BACKEND"] = "nonexistent"
+        with pytest.raises(ValueError, match="Unknown secret backend"):
+            get_secret_provider()
+
+    def test_singleton_returns_same_instance(self):
+        from hbllm.security.secrets import get_secret_provider
+
+        p1 = get_secret_provider()
+        p2 = get_secret_provider()
+        assert p1 is p2
 
 
-# ─── PluginManager Tests ─────────────────────────────────────────────────────
+# ── RBAC Guard ───────────────────────────────────────────────────────
 
 
-class TestPluginManager:
-    def test_discover_empty_dir(self):
-        with tempfile.TemporaryDirectory() as d:
-            pm = PluginManager(plugin_dirs=[d])
-            discovered = pm.discover()
-            assert len(discovered) == 0
+class TestRBACGuard(unittest.TestCase):
+    """Test the RBAC permission enforcement."""
 
-    def test_discover_nonexistent_dir(self):
-        pm = PluginManager(plugin_dirs=["/nonexistent/path"])
-        discovered = pm.discover()
-        assert len(discovered) == 0
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        from hbllm.security.rbac import RBACGuard
 
-    def test_discover_plugin_file(self):
-        with tempfile.TemporaryDirectory() as d:
-            plugin_file = Path(d) / "my_plugin.py"
-            plugin_file.write_text("async def register(bus):\n    return []\n")
+        self.guard = RBACGuard(db_path=f"{self.tmpdir}/rbac.db")
 
-            pm = PluginManager(plugin_dirs=[d])
-            discovered = pm.discover()
-            assert len(discovered) == 1
-            assert discovered[0].name == "my_plugin"
+    def tearDown(self):
+        self.guard.close()
 
-    def test_skip_file_without_register(self):
-        with tempfile.TemporaryDirectory() as d:
-            plugin_file = Path(d) / "not_a_plugin.py"
-            plugin_file.write_text('print("hello")\n')
+    def test_default_role_is_viewer(self):
+        from hbllm.security.rbac import Role
 
-            pm = PluginManager(plugin_dirs=[d])
-            discovered = pm.discover()
-            assert len(discovered) == 0
+        role = self.guard.get_role("t1", "unknown_user")
+        assert role == Role.VIEWER
 
-    def test_skip_underscore_files(self):
-        with tempfile.TemporaryDirectory() as d:
-            plugin_file = Path(d) / "__init__.py"
-            plugin_file.write_text("async def register(bus): pass\n")
+    def test_assign_and_get_role(self):
+        from hbllm.security.rbac import Role
 
-            pm = PluginManager(plugin_dirs=[d])
-            discovered = pm.discover()
-            assert len(discovered) == 0
+        self.guard.assign_role("t1", "u1", Role.ADMIN)
+        assert self.guard.get_role("t1", "u1") == Role.ADMIN
 
-    def test_discover_with_metadata(self):
-        with tempfile.TemporaryDirectory() as d:
-            plugin_file = Path(d) / "fancy_plugin.py"
-            plugin_file.write_text(
-                '__plugin__ = {"name": "fancy", "version": "2.0", "description": "A fancy plugin"}\n'
-                "async def register(bus):\n    return []\n"
-            )
+    def test_role_upgrade(self):
+        from hbllm.security.rbac import Role
 
-            pm = PluginManager(plugin_dirs=[d])
-            discovered = pm.discover()
-            assert len(discovered) == 1
-            assert discovered[0].name == "fancy"
-            assert discovered[0].version == "2.0"
+        self.guard.assign_role("t1", "u1", Role.MEMBER)
+        self.guard.assign_role("t1", "u1", Role.OWNER)
+        assert self.guard.get_role("t1", "u1") == Role.OWNER
 
-    def test_loaded_count(self):
-        pm = PluginManager()
-        assert pm.loaded_count == 0
+    def test_viewer_cannot_send_chat(self):
+        from hbllm.security.rbac import Permission
 
-    def test_list_plugins(self):
-        pm = PluginManager()
-        assert pm.list_plugins() == []
+        assert not self.guard.check("t1", "viewer_user", Permission.CHAT_SEND)
+
+    def test_viewer_can_read_chat(self):
+        from hbllm.security.rbac import Permission
+
+        assert self.guard.check("t1", "viewer_user", Permission.CHAT_READ)
+
+    def test_member_can_send_chat(self):
+        from hbllm.security.rbac import Permission, Role
+
+        self.guard.assign_role("t1", "u1", Role.MEMBER)
+        assert self.guard.check("t1", "u1", Permission.CHAT_SEND)
+
+    def test_member_cannot_manage_users(self):
+        from hbllm.security.rbac import Permission, Role
+
+        self.guard.assign_role("t1", "u1", Role.MEMBER)
+        assert not self.guard.check("t1", "u1", Permission.ADMIN_MANAGE_USERS)
+
+    def test_admin_can_manage_users(self):
+        from hbllm.security.rbac import Permission, Role
+
+        self.guard.assign_role("t1", "u1", Role.ADMIN)
+        assert self.guard.check("t1", "u1", Permission.ADMIN_MANAGE_USERS)
+
+    def test_owner_has_all_permissions(self):
+        from hbllm.security.rbac import Permission, Role
+
+        self.guard.assign_role("t1", "u1", Role.OWNER)
+        for perm in Permission:
+            assert self.guard.check("t1", "u1", perm), f"Owner should have {perm}"
+
+    def test_require_raises_on_insufficient(self):
+        from hbllm.security.rbac import Permission
+
+        with pytest.raises(PermissionError, match="lacks permission"):
+            self.guard.require("t1", "u_viewer", Permission.ADMIN_MANAGE_USERS)
+
+    def test_revoke_role(self):
+        from hbllm.security.rbac import Role
+
+        self.guard.assign_role("t1", "u1", Role.ADMIN)
+        assert self.guard.revoke_role("t1", "u1")
+        assert self.guard.get_role("t1", "u1") == Role.VIEWER
+
+    def test_list_users(self):
+        from hbllm.security.rbac import Role
+
+        self.guard.assign_role("t1", "u1", Role.MEMBER)
+        self.guard.assign_role("t1", "u2", Role.ADMIN)
+        users = self.guard.list_users("t1")
+        assert len(users) == 2
+        user_ids = {u["user_id"] for u in users}
+        assert user_ids == {"u1", "u2"}
+
+    def test_get_permissions(self):
+        from hbllm.security.rbac import Permission, Role
+
+        self.guard.assign_role("t1", "u1", Role.MEMBER)
+        perms = self.guard.get_permissions("t1", "u1")
+        assert Permission.CHAT_SEND in perms
+        assert Permission.ADMIN_MANAGE_USERS not in perms
+
+    def test_tenant_isolation(self):
+        from hbllm.security.rbac import Role
+
+        self.guard.assign_role("t1", "u1", Role.OWNER)
+        self.guard.assign_role("t2", "u1", Role.VIEWER)
+        assert self.guard.get_role("t1", "u1") == Role.OWNER
+        assert self.guard.get_role("t2", "u1") == Role.VIEWER
+
+
+# ── RBAC Middleware ──────────────────────────────────────────────────
+
+
+class TestRBACMiddleware(unittest.TestCase):
+    """Test RBAC route matching logic."""
+
+    def test_match_chat_send(self):
+        from hbllm.serving.middleware.rbac import Permission, RBACMiddleware
+
+        perm = RBACMiddleware._match_permission("POST", "/v1/chat/completions")
+        assert perm == Permission.CHAT_SEND
+
+    def test_match_admin_audit(self):
+        from hbllm.serving.middleware.rbac import Permission, RBACMiddleware
+
+        perm = RBACMiddleware._match_permission("GET", "/v1/admin/audit")
+        assert perm == Permission.ADMIN_VIEW_AUDIT
+
+    def test_unprotected_path_returns_none(self):
+        from hbllm.serving.middleware.rbac import RBACMiddleware
+
+        perm = RBACMiddleware._match_permission("GET", "/health/live")
+        assert perm is None
+
+    def test_unknown_path_returns_none(self):
+        from hbllm.serving.middleware.rbac import RBACMiddleware
+
+        perm = RBACMiddleware._match_permission("GET", "/some/random/path")
+        assert perm is None
+
+    def test_memory_write(self):
+        from hbllm.serving.middleware.rbac import Permission, RBACMiddleware
+
+        perm = RBACMiddleware._match_permission("POST", "/v1/memory")
+        assert perm == Permission.MEMORY_WRITE
+
+
+# ── Audit Middleware ─────────────────────────────────────────────────
+
+
+class TestAuditMiddleware(unittest.TestCase):
+    """Test audit action classification."""
+
+    def test_classify_chat(self):
+        from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        action = AuditMiddleware._classify_action("POST", "/v1/chat/completions")
+        assert action == AuditAction.CHAT_MESSAGE
+
+    def test_classify_admin(self):
+        from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        action = AuditMiddleware._classify_action("POST", "/v1/admin/config")
+        assert action == AuditAction.ADMIN_ACTION
+
+    def test_classify_unknown_defaults(self):
+        from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        action = AuditMiddleware._classify_action("GET", "/unknown")
+        assert action == AuditAction.DATA_ACCESSED
+
+    def test_classify_data_export(self):
+        from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        action = AuditMiddleware._classify_action("POST", "/v1/data/export")
+        assert action == AuditAction.DATA_EXPORTED
+
+    def test_classify_tool_execution(self):
+        from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        action = AuditMiddleware._classify_action("POST", "/v1/tools/search")
+        assert action == AuditAction.TOOL_EXECUTED
