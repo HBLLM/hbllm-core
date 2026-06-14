@@ -2,100 +2,98 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ "master", "main", "feature/*" ]
+    branches: ["master", "main", "feature/*"]
   pull_request:
-    branches: [ "master", "main" ]
+    branches: ["master", "main"]
 
 env:
   PYTHON_VERSION: "3.11"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# ─────────────────────────────────────────────────────────────────────
+# Job Dependency Graph:
+#
+#   lint ──→ test ──→ integration ──→ docker (main only)
+#             │
+#   security  │  rust
+#             │
+#           docs (main only, docs changed)
+# ─────────────────────────────────────────────────────────────────────
+
 jobs:
-  # ── Stage 1: Lint & Format ──────────────────────────────────────────
+  # ── Quality Gate: Lint, Format, Security ─────────────────────────────
   lint:
+    name: "🔍 Lint & Security"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install ruff mypy
+      - name: Install lint tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pip-audit bandit
 
-    - name: Lint with ruff
-      run: ruff check .
+      - name: Lint with ruff
+        run: ruff check .
 
-    - name: Format check with ruff
-      run: ruff format --check .
+      - name: Format check
+        run: ruff format --check .
 
-  # ── Stage 2: Security Scan ──────────────────────────────────────────
-  security:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
+      - name: Audit dependencies for CVEs
+        run: pip-audit --strict --desc 2>/dev/null || true
+        continue-on-error: true
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
+      - name: Static security analysis (bandit)
+        run: bandit -r hbllm/ -c pyproject.toml --severity-level medium -q || true
+        continue-on-error: true
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pip-audit bandit
-
-    - name: Audit dependencies for CVEs
-      run: pip-audit --strict --desc 2>/dev/null || true
-
-    - name: Static security analysis
-      run: bandit -r hbllm/ -c pyproject.toml --severity-level medium -q || true
-
-  # ── Stage 3: Unit Tests ─────────────────────────────────────────────
+  # ── Unit Tests with Coverage ─────────────────────────────────────────
   test:
+    name: "🧪 Unit Tests"
     runs-on: ubuntu-latest
     needs: [lint]
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
-    - name: Run unit tests with coverage
-      run: |
-        pytest tests/ -v \
-          --timeout=120 -x \
-          --ignore=tests/test_change_detector.py \
-          --ignore=tests/test_vision_node.py \
-          --cov=hbllm \
-          --cov-report=xml:coverage.xml \
-          --cov-report=term-missing \
-          -q
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/ -v \
+            --timeout=120 -x \
+            --ignore=tests/test_change_detector.py \
+            --ignore=tests/test_vision_node.py \
+            --cov=hbllm \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            -q
 
-    - name: Upload coverage report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-report
-        path: coverage.xml
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
-  # ── Stage 4: Integration Tests (with services) ─────────────────────
+  # ── Integration Tests (PostgreSQL + Redis) ───────────────────────────
   integration:
+    name: "🔗 Integration Tests"
     runs-on: ubuntu-latest
     needs: [test]
     services:
@@ -111,7 +109,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -120,57 +117,93 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
       HBLLM_DATABASE_URL: postgresql://hbllm:hbllm_test@localhost:5432/hbllm_test
       HBLLM_REDIS_URL: redis://localhost:6379/0
       HBLLM_BUS_BACKEND: redis
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
-    - name: Run integration tests
-      run: |
-        pytest tests/integration/ -v --timeout=120 -q
+      - name: Run integration tests
+        run: pytest tests/integration/ -v --timeout=120 -q
 
-  # ── Stage 5: Rust Kernel ────────────────────────────────────────────
+  # ── Rust Kernel ──────────────────────────────────────────────────────
   rust:
+    name: "🦀 Rust Kernel"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-    - name: Rust Cache
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: |
-          rust/compute_kernel -> target
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust/compute_kernel -> target
 
-    - name: Check Formatting
-      run: cargo fmt --manifest-path rust/compute_kernel/Cargo.toml -- --check
+      - name: Check formatting
+        run: cargo fmt --manifest-path rust/compute_kernel/Cargo.toml -- --check
 
-    - name: Check with Clippy
-      run: cargo clippy --manifest-path rust/compute_kernel/Cargo.toml --workspace -- -D warnings
+      - name: Clippy
+        run: cargo clippy --manifest-path rust/compute_kernel/Cargo.toml --workspace -- -D warnings
 
-    - name: Compile Compute Kernel
-      run: cargo check --manifest-path rust/compute_kernel/Cargo.toml
+      - name: Compile
+        run: cargo check --manifest-path rust/compute_kernel/Cargo.toml
 
-  # ── Stage 6: Docker Build ───────────────────────────────────────────
+  # ── Documentation ────────────────────────────────────────────────────
+  docs:
+    name: "📚 Documentation"
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: "pages"
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install MkDocs
+        run: pip install mkdocs-material mkdocs-minify-plugin "mkdocstrings[python]"
+
+      - name: Build documentation
+        run: mkdocs build --strict
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+
+  # ── Docker Build & Push ──────────────────────────────────────────────
   docker:
+    name: "🐳 Docker Build"
     runs-on: ubuntu-latest
     needs: [test, rust]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -178,34 +211,34 @@ jobs:
       contents: read
       packages: write
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Login to GHCR
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        tags: |
-          type=sha,prefix=
-          type=ref,event=branch
-          type=semver,pattern={{version}}
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
 
-    - name: Build and push
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
