@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: ["master", "main"]
 
-# Cancel stale runs when a new commit is pushed to the same PR or branch.
-concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 env:
   PYTHON_VERSION: "3.11"
   REGISTRY: ghcr.io
