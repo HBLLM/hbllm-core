@@ -77,6 +77,16 @@ gpu = [
 embodiment = [
     "aiortc>=1.8.0",
 ]
+voice = [
+    # Real-time voice pipeline
+    "kokoro>=0.9.0",            # Kokoro TTS engine (~300MB model)
+    "soundfile>=0.12.0",        # WAV I/O for audio processing
+    "silero-vad>=5.1.0",        # Voice activity detection (~2MB)
+]
+voice-premium = [
+    "hbllm[voice]",
+    "orpheus-speech>=0.1.0",    # Orpheus TTS (Llama-based, emotional)
+]
 observability = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
@@ -87,6 +97,7 @@ full = [
     "hbllm[gpu]",
     "hbllm[embodiment]",
     "hbllm[observability]",
+    "hbllm[voice]",
 ]
 dev = [
     "pytest>=8.0.0",

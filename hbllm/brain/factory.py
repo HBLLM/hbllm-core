@@ -1074,10 +1074,19 @@ class BrainFactory:
             from hbllm.perception.audio_in_node import AudioInputNode
             from hbllm.perception.audio_out_node import AudioOutputNode
             from hbllm.perception.vision_node import VisionNode
+            from hbllm.perception.voice_config import AudioPipelineConfig
 
+            audio_config = AudioPipelineConfig()
             for pnode in [
-                AudioInputNode(node_id="audio_in"),
-                AudioOutputNode(node_id="audio_out"),
+                AudioInputNode(
+                    node_id="audio_in",
+                    config=audio_config,
+                ),
+                AudioOutputNode(
+                    node_id="audio_out",
+                    config=audio_config,
+                    data_dir=cfg.data_dir,
+                ),
                 VisionNode(node_id="vision"),
             ]:
                 await _register_node(registry, pnode)

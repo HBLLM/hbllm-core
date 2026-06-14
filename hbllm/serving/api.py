@@ -1503,6 +1503,178 @@ async def audio_synthesize(api_req: Request, request: dict) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/v1/audio/voices")
+async def list_voices(backend: str = "kokoro") -> Any:
+    """List available TTS voices for a backend."""
+    from hbllm.perception.voice_config import TTSBackend, VoiceRegistry
+
+    try:
+        data_dir = _state.get("config")
+        db_path = "workspace/audio/voice_preferences.db"
+        if data_dir and hasattr(data_dir, "data_dir"):
+            db_path = f"{data_dir.data_dir}/voice_preferences.db"
+
+        registry = VoiceRegistry(db_path)
+        voices = registry.list_voices(TTSBackend(backend))
+        return {"voices": voices, "backend": backend}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.websocket("/v1/audio/ws")
+async def audio_websocket(ws: WebSocket) -> None:
+    """
+    Bidirectional WebSocket for real-time voice streaming.
+
+    **Inbound** (client → server): JSON messages with audio chunks
+        {"type": "audio", "chunk": "<hex-encoded-pcm>", "sample_rate": 16000}
+        {"type": "audio", "chunk": "...", "is_final": true}
+        {"type": "config", "voice_id": "af_heart", "speed": 1.0}
+
+    **Outbound** (server → client): JSON messages with transcription + audio
+        {"type": "transcription", "text": "Hello there"}
+        {"type": "audio_chunk", "audio": "<hex-pcm>", "sample_rate": 24000, "is_final": false}
+        {"type": "audio_chunk", "audio": "...", "is_final": true, "text": "..."}
+        {"type": "response_text", "text": "Full response text"}
+
+    Authentication: Pass JWT as query param: ws://host/v1/audio/ws?token=<jwt>
+    """
+    import os
+
+    import jwt as pyjwt
+
+    # ── Auth ──
+    token = ws.query_params.get("token", "")
+    tenant_id = "default"
+    user_id = "default"
+    session_id = str(uuid.uuid4())
+
+    if token:
+        secret_key = os.environ.get("HBLLM_JWT_SECRET", "")
+        if secret_key:
+            try:
+                payload = pyjwt.decode(token, secret_key, algorithms=["HS256"])
+                tenant_id = payload.get("tenant_id", "default")
+                user_id = payload.get("user_id", "default")
+            except pyjwt.InvalidTokenError:
+                await ws.close(code=1008, reason="Invalid token")
+                return
+
+    await ws.accept()
+    logger.info("Audio WebSocket connected: tenant=%s user=%s", tenant_id, user_id)
+
+    bus = _state.get("bus")
+    if not bus:
+        await ws.send_json({"type": "error", "message": "Bus not initialized"})
+        await ws.close(code=1011)
+        return
+
+    # ── Subscribe to audio response chunks ──
+    audio_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def _on_audio_chunk(msg: Message) -> None:
+        if msg.session_id == session_id:
+            await audio_queue.put({
+                "type": "audio_chunk",
+                "audio": msg.payload.get("audio", ""),
+                "sample_rate": msg.payload.get("sample_rate", 24000),
+                "is_final": msg.payload.get("is_final", False),
+                "text": msg.payload.get("text", ""),
+            })
+
+    async def _on_output(msg: Message) -> None:
+        if msg.session_id == session_id:
+            await audio_queue.put({
+                "type": "response_text",
+                "text": msg.payload.get("text", ""),
+            })
+
+    sub_chunk = await bus.subscribe("sensory.audio.chunk", _on_audio_chunk)
+    sub_output = await bus.subscribe("sensory.output", _on_output)
+
+    # ── Background task: forward audio responses to WebSocket ──
+    async def _send_loop() -> None:
+        try:
+            while True:
+                data = await audio_queue.get()
+                try:
+                    await ws.send_json(data)
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            pass
+
+    send_task = asyncio.create_task(_send_loop())
+
+    try:
+        while True:
+            data = await ws.receive_json()
+            msg_type = data.get("type", "audio")
+
+            if msg_type == "audio":
+                # Forward audio chunk to ASR
+                stream_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="sensory.audio.stream",
+                    payload={
+                        "chunk": data.get("chunk", ""),
+                        "sample_rate": data.get("sample_rate", 16000),
+                        "is_final": data.get("is_final", False),
+                    },
+                )
+                await bus.publish("sensory.audio.stream", stream_msg)
+
+            elif msg_type == "config":
+                # Update voice config
+                config_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="voice.config",
+                    payload={
+                        "tenant_id": tenant_id,
+                        "voice_id": data.get("voice_id", "af_heart"),
+                        "speed": data.get("speed", 1.0),
+                        "backend": data.get("backend", "kokoro"),
+                        "emotion": data.get("emotion"),
+                    },
+                )
+                await bus.publish("voice.config", config_msg)
+                await ws.send_json({"type": "config_ack", "status": "updated"})
+
+            elif msg_type == "synthesize":
+                # Direct TTS request
+                tts_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="sensory.audio.out",
+                    payload={
+                        "text": data.get("text", ""),
+                        "stream": True,
+                    },
+                )
+                await bus.publish("sensory.audio.out", tts_msg)
+
+    except WebSocketDisconnect:
+        logger.info("Audio WebSocket disconnected: tenant=%s", tenant_id)
+    except Exception as e:
+        logger.error("Audio WebSocket error: %s", e)
+    finally:
+        send_task.cancel()
+        try:
+            await send_task
+        except asyncio.CancelledError:
+            pass
+        await bus.unsubscribe(sub_chunk)
+        await bus.unsubscribe(sub_output)
+
+
 @app.post("/v1/benchmarks/run")
 async def run_benchmarks(api_req: Request, request: dict | None = None) -> Any:
     """Run specified benchmark suites (latency, memory, specialization, multi_tenant, all) and return reports."""
