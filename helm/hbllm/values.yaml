@@ -1,0 +1,94 @@
+# HBLLM Core — Helm Values
+# Override these in values-staging.yaml or values-production.yaml
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/hbllm/core
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: api.hbllm.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: hbllm-tls
+      hosts:
+        - api.hbllm.local
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Environment variables (non-secret)
+env:
+  HBLLM_LOG_LEVEL: INFO
+  HBLLM_BUS_BACKEND: redis
+  HBLLM_SECRET_BACKEND: env
+  HBLLM_RATE_LIMIT_RPM: "120"
+  HBLLM_SHUTDOWN_DRAIN_SECONDS: "30"
+
+# Secrets (reference Kubernetes secrets)
+secrets:
+  secretName: hbllm-secrets
+  keys:
+    - HBLLM_JWT_SECRET
+    - HBLLM_DATABASE_URL
+    - HBLLM_REDIS_URL
+    - HBLLM_EXTERNAL_PROVIDER_KEY
+
+probes:
+  liveness:
+    path: /health/live
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 5
+  readiness:
+    path: /health/ready
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  mountPath: /app/data
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  runAsNonRoot: true
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
