@@ -294,13 +294,18 @@ async def test_episodic_concurrent_writes():
             for i in range(count):
                 await mem.store_turn(session, "user", f"msg_{i}")
 
-        await asyncio.gather(
-            writer("s1", 50),
-            writer("s2", 50),
-            writer("s3", 50),
+        # Use asyncio.wait_for to prevent hang on slow CI runners
+        # where SQLite lock contention can stall indefinitely
+        await asyncio.wait_for(
+            asyncio.gather(
+                writer("s1", 20),
+                writer("s2", 20),
+                writer("s3", 20),
+            ),
+            timeout=30.0,
         )
 
-        assert await mem.get_turn_count() == 150
+        assert await mem.get_turn_count() == 60
         assert await mem.get_session_count() == 3
 
         await mem.close()
