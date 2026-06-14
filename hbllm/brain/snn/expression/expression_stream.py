@@ -502,6 +502,8 @@ class ExpressionStream:
                         tier = TaskTier.AUTO
                     text = await self.dual_router.generate(prompt, tier=tier)
                 else:
+                    if self.llm_generate is None:
+                        raise RuntimeError("No LLM backend configured (llm_generate is None)")
                     text = await self.llm_generate(prompt)
                 estimated_tokens = max(1, len(text) // 4)
                 source = "dual_router" if self.dual_router is not None else "llm"
