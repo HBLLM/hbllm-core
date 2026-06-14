@@ -12,7 +12,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock* ./
 COPY rust/ rust/
 
-RUN cargo build --release --manifest-path rust/compute_kernel/Cargo.toml 2>/dev/null || true
+RUN mkdir -p /build/output/lib && \
+    (cargo build --release --manifest-path rust/compute_kernel/Cargo.toml 2>/dev/null && \
+     cp rust/compute_kernel/target/release/*.so /build/output/lib/ 2>/dev/null || true)
 
 
 # ── Stage 2: Python Builder ───────────────────────────────────────────
@@ -58,8 +60,8 @@ WORKDIR /app
 # Copy installed Python packages from builder
 COPY --from=python-builder /install /usr/local
 
-# Copy Rust binaries if built
-COPY --from=rust-builder /build/rust/compute_kernel/target/release/*.so /app/lib/ 2>/dev/null || true
+# Copy Rust binaries if built (directory always exists, may be empty)
+COPY --from=rust-builder /build/output/lib/ /app/lib/
 
 # Copy source code (needed for package imports)
 COPY hbllm/ /app/hbllm/
