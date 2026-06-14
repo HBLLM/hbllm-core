@@ -88,6 +88,7 @@ class ExpressionStream:
         broca_encoder: Any | None = None,
         broca_mode: bool = False,
         on_fragment: FragmentCallback | None = None,
+        dual_router: Any | None = None,
     ) -> None:
         self.planner = planner
         self.controller = controller
@@ -102,6 +103,7 @@ class ExpressionStream:
         self.broca_encoder = broca_encoder
         self.broca_mode = broca_mode
         self.on_fragment = on_fragment
+        self.dual_router = dual_router
 
     async def express(
         self,
@@ -485,15 +487,28 @@ class ExpressionStream:
         If no LLM is available, extracts a relevant portion from the
         base_thought using lexical matching.
         """
-        if self.llm_generate is not None:
+        if self.llm_generate is not None or self.dual_router is not None:
             prompt = self._build_prompt(goal, base_thought, original_query, prev_fragment_text)
             try:
-                text = await self.llm_generate(prompt)
+                if self.dual_router is not None:
+                    # Use DualLLMRouter with tier-aware routing:
+                    # - Broca/Shallow modes use LOCAL tier (fast, on-device)
+                    # - Deep generation uses AUTO tier (complexity-based)
+                    from hbllm.brain.dual_llm_router import TaskTier
+
+                    if self.broca_mode or self.shallow_mode:
+                        tier = TaskTier.LOCAL
+                    else:
+                        tier = TaskTier.AUTO
+                    text = await self.dual_router.generate(prompt, tier=tier)
+                else:
+                    text = await self.llm_generate(prompt)
                 estimated_tokens = max(1, len(text) // 4)
+                source = "dual_router" if self.dual_router is not None else "llm"
                 return ThoughtFragment(
                     goal_id=goal.id,
                     text=text,
-                    metadata={"tokens": estimated_tokens, "source": "llm"},
+                    metadata={"tokens": estimated_tokens, "source": source},
                 )
             except Exception as e:
                 logger.warning("LLM generation failed for goal %s: %s", goal.id, e)

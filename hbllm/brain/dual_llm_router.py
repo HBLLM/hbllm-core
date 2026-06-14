@@ -250,6 +250,8 @@ class DualLLMRouter:
         external: ProviderLLM | None = None,
         state_machine: CognitiveStateMachine | None = None,
         complexity_threshold: float = DEFAULT_COMPLEXITY_THRESHOLD,
+        circuit_failure_threshold: int = 3,
+        circuit_recovery_timeout: float = 30.0,
     ) -> None:
         self.local = local
         self.external = external
@@ -257,15 +259,26 @@ class DualLLMRouter:
         self.complexity_threshold = complexity_threshold
         self.stats = DualLLMStats()
 
+        # Circuit breaker for external provider
+        from hbllm.network.circuit_breaker import CircuitBreaker
+
+        self._external_circuit = CircuitBreaker(
+            node_id="dual_router_external",
+            failure_threshold=circuit_failure_threshold,
+            recovery_timeout=circuit_recovery_timeout,
+        )
+
         # Provider names for logging
         self._local_name = getattr(local, "provider", None)
         self._external_name = getattr(external, "provider", None) if external else None
 
         logger.info(
-            "[DualLLMRouter] Initialized: local=%s, external=%s, threshold=%.2f",
+            "[DualLLMRouter] Initialized: local=%s, external=%s, threshold=%.2f, circuit=%d/%ds",
             getattr(self._local_name, "name", "local") if self._local_name else "local",
             getattr(self._external_name, "name", "none") if self._external_name else "none",
             complexity_threshold,
+            circuit_failure_threshold,
+            circuit_recovery_timeout,
         )
 
     # ── Routing Decision ──────────────────────────────────────────────
@@ -327,6 +340,16 @@ class DualLLMRouter:
                 state_allows_heavy=False,
             )
 
+        # If external circuit breaker is open, use local
+        if not self._external_circuit.can_execute():
+            return RoutingDecision(
+                tier=TaskTier.LOCAL,
+                reason="circuit_open",
+                prompt_length=prompt_length,
+                state_allows_heavy=state_allows_heavy,
+                fallback_used=True,
+            )
+
         # Estimate complexity
         complexity = estimate_complexity(prompt)
 
@@ -386,7 +409,13 @@ class DualLLMRouter:
                 temperature=temperature,
                 system_prompt=system_prompt,
             )
+            # Record success on external circuit
+            if decision.tier == TaskTier.EXTERNAL:
+                self._external_circuit.record_success()
         except Exception as e:
+            # Record failure on external circuit
+            if decision.tier == TaskTier.EXTERNAL:
+                self._external_circuit.record_failure()
             # Fallback: if external fails, try local
             if decision.tier == TaskTier.EXTERNAL and self.external is not None:
                 logger.warning("[DualLLMRouter] External failed (%s), falling back to local", e)
@@ -431,7 +460,11 @@ class DualLLMRouter:
         start = time.monotonic()
         try:
             result = await llm.generate_json(prompt, max_tokens=max_tokens)
+            if decision.tier == TaskTier.EXTERNAL:
+                self._external_circuit.record_success()
         except Exception as e:
+            if decision.tier == TaskTier.EXTERNAL:
+                self._external_circuit.record_failure()
             if decision.tier == TaskTier.EXTERNAL and self.external is not None:
                 logger.warning(
                     "[DualLLMRouter] External JSON failed (%s), falling back to local", e
@@ -537,4 +570,10 @@ class DualLLMRouter:
                 else "none"
             ),
             "has_state_machine": self.state_machine is not None,
+            "circuit_breaker": {
+                "state": self._external_circuit.state.value,
+                "failure_count": self._external_circuit._failure_count,
+                "total_failures": self._external_circuit.total_failures,
+                "time_until_retry": round(self._external_circuit.time_until_retry, 1),
+            },
         }
