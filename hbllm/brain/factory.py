@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 if TYPE_CHECKING:
     from hbllm.knowledge import KnowledgeBase
     from hbllm.plugin.manager import PluginManager
@@ -108,9 +110,16 @@ def _default_total_timeout() -> float:
     return float(os.getenv("HBLLM_TOTAL_TIMEOUT", str(default_val)))
 
 
-@dataclass
-class BrainConfig:
-    """Configuration for Brain creation."""
+class BrainConfig(BaseModel):
+    """Configuration for Brain creation.
+
+    Validates all fields and supports env var overrides via HBLLM_* prefix.
+    """
+
+    model_config = ConfigDict(
+        validate_default=True,
+        arbitrary_types_allowed=True,
+    )
 
     # ── Composite node flags (v4: consolidated architecture) ──────
     inject_reasoning: bool = True  # ReasoningCore (router+planner+critic+decision+revision+prm)
@@ -153,12 +162,15 @@ class BrainConfig:
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
     inject_browser: bool = True  # Browse web / search via DuckDuckGo
     inject_execution: bool = True  # Python sandboxed code execution
-    total_timeout: float = field(default_factory=_default_total_timeout)
-    api_timeout: float = field(default_factory=_default_api_timeout)
-    stream_timeout: float = field(default_factory=_default_stream_timeout)
-    planner_branch_factor: int = 3
-    planner_max_depth: int = 2
-    data_dir: str = field(default_factory=lambda: os.environ.get("HBLLM_DATA_DIR", "data"))
+    total_timeout: float = Field(default_factory=_default_total_timeout, gt=0)
+    api_timeout: float = Field(default_factory=_default_api_timeout, gt=0)
+    stream_timeout: float = Field(default_factory=_default_stream_timeout, gt=0)
+    planner_branch_factor: int = Field(default=3, ge=1, le=10)
+    planner_max_depth: int = Field(default=2, ge=1, le=5)
+    data_dir: str = Field(
+        default_factory=lambda: os.environ.get("HBLLM_DATA_DIR", "data"),
+        min_length=1,
+    )
     inject_sil: bool = True  # Skill Intelligence Layer
     inject_failure_analyzer: bool = True  # Automatic skill repair
     inject_shell: bool = True  # Host shell command executor node
@@ -201,8 +213,8 @@ class BrainConfig:
     external_provider: str | None = (
         None  # e.g. "openai/gpt-4o" or "anthropic/claude-sonnet-4-20250514"
     )
-    external_provider_kwargs: dict[str, Any] = field(default_factory=dict)
-    dual_llm_complexity_threshold: float = 0.4  # AUTO routing threshold
+    external_provider_kwargs: dict[str, Any] = Field(default_factory=dict)
+    dual_llm_complexity_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
 
 
 class Brain:
@@ -298,6 +310,29 @@ class Brain:
 
         self._hardware_loop_task: asyncio.Task[None] | None = None
 
+        # Graceful shutdown drain
+        self._draining = False
+        self._active_requests = 0
+        self._drain_event = asyncio.Event()
+
+    @property
+    def is_draining(self) -> bool:
+        """True if the brain is shutting down and rejecting new requests."""
+        return self._draining
+
+    def acquire_request(self) -> bool:
+        """Track an in-flight request. Returns False if draining."""
+        if self._draining:
+            return False
+        self._active_requests += 1
+        return True
+
+    def release_request(self) -> None:
+        """Release an in-flight request. Signals drain if count reaches 0."""
+        self._active_requests = max(0, self._active_requests - 1)
+        if self._draining and self._active_requests == 0:
+            self._drain_event.set()
+
     async def process(
         self,
         text: str,
@@ -305,6 +340,12 @@ class Brain:
         session_id: str = "default",
     ) -> PipelineResult:
         """Send a query through the full cognitive pipeline."""
+        if self._draining:
+            return PipelineResult(
+                text="Service is shutting down. Please retry shortly.",
+                correlation_id="drain",
+                error=True,
+            )
         import time as _time
 
         _start = _time.monotonic()
@@ -388,8 +429,31 @@ class Brain:
                     ),
                 )
 
-    async def shutdown(self) -> None:
-        """Stop all nodes, pipeline, and bus."""
+    async def shutdown(self, drain_timeout: float = 30.0) -> None:
+        """Stop all nodes, pipeline, and bus with graceful drain.
+
+        Args:
+            drain_timeout: Seconds to wait for in-flight requests to complete.
+        """
+        # Phase 1: Drain — stop accepting new requests, wait for in-flight
+        self._draining = True
+        if self._active_requests > 0:
+            logger.info(
+                "Draining %d in-flight requests (timeout=%.0fs)",
+                self._active_requests,
+                drain_timeout,
+            )
+            self._drain_event.clear()
+            try:
+                await asyncio.wait_for(self._drain_event.wait(), timeout=drain_timeout)
+                logger.info("All in-flight requests drained")
+            except (TimeoutError, asyncio.TimeoutError):
+                logger.warning(
+                    "Drain timeout reached with %d requests still active, forcing shutdown",
+                    self._active_requests,
+                )
+
+        # Phase 2: Shutdown
         if self._hardware_loop_task:
             self._hardware_loop_task.cancel()
             try:
@@ -571,6 +635,7 @@ def _wire_expression_stream(
     decision_node: Any,
     router_node: Any | None = None,
     llm: Any | None = None,
+    dual_router: Any | None = None,
 ) -> None:
     """Wire the expression-side Cognitive Stream into a DecisionNode.
 
@@ -713,6 +778,7 @@ def _wire_expression_stream(
             content_planner=content_planner,
             broca_encoder=broca_encoder,
             broca_mode=False,  # Opt-in: full brain pipeline needs LLM reasoning
+            dual_router=dual_router,
         )
 
         decision_node.expression_stream = stream
@@ -1055,7 +1121,7 @@ class BrainFactory:
 
         # Wire expression-side Cognitive Stream (Layer 5)
         if cfg.inject_comprehension:
-            _wire_expression_stream(decision_node, router_node, llm)
+            _wire_expression_stream(decision_node, router_node, llm, dual_router=dual_router)
 
             # Wire memory search into ComprehensionStream for per-concept retrieval
             comp_stream = getattr(router_node, "comprehension_stream", None)
@@ -1633,7 +1699,9 @@ class BrainFactory:
             _wire_comprehension_stream(reasoning.router, domain_registry)
             # Wire expression-side Cognitive Stream (Layer 5) into the DecisionNode
             if reasoning.decision is not None:
-                _wire_expression_stream(reasoning.decision, reasoning.router, llm)
+                _wire_expression_stream(
+                    reasoning.decision, reasoning.router, llm, dual_router=dual_router
+                )
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:
