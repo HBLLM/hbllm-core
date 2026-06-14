@@ -259,8 +259,8 @@ class AdapterRegistry:
         """Handles both raw state_dicts and our internal metadata-wrapped format."""
         if isinstance(payload, dict):
             if "state_dict" in payload:
-                return cast(dict[str, torch.Tensor], payload["state_dict"])
-            return cast(dict[str, torch.Tensor], payload)
+                return cast("dict[str, torch.Tensor]", payload["state_dict"])
+            return cast("dict[str, torch.Tensor]", payload)
         return {}
 
     async def _download_and_cache(self, source: AdapterSource) -> dict[str, torch.Tensor] | None:
