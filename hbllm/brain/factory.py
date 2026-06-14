@@ -216,6 +216,16 @@ class BrainConfig(BaseModel):
     external_provider_kwargs: dict[str, Any] = Field(default_factory=dict)
     dual_llm_complexity_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
 
+    # ── Horizontal Scaling ────────────────────────────────────────
+    bus_backend: str = Field(
+        default_factory=lambda: os.environ.get("HBLLM_BUS_BACKEND", "memory"),
+        description="Message bus backend: 'memory' (default), 'redis', or 'nats'",
+    )
+    redis_url: str = Field(
+        default_factory=lambda: os.environ.get("HBLLM_REDIS_URL", ""),
+        description="Redis URL for distributed bus/registry (required when bus_backend='redis')",
+    )
+
 
 class Brain:
     """
@@ -773,11 +783,30 @@ class BrainFactory:
             except Exception as e:
                 logger.warning("[Factory] Failed to create external provider: %s", e)
 
-        # 2. Create bus and registry
-        message_bus = bus or InProcessBus()
+        # 2. Create bus and registry (configurable backend)
+        if bus is not None:
+            message_bus = bus
+        elif cfg.bus_backend == "redis" and cfg.redis_url:
+            from hbllm.network.redis_bus import RedisBus
+
+            message_bus = RedisBus(redis_url=cfg.redis_url)
+            logger.info("[Factory] Using RedisBus for horizontal scaling")
+        elif cfg.bus_backend == "nats":
+            from hbllm.network.nats_bus import NatsBus
+
+            message_bus = NatsBus()
+            logger.info("[Factory] Using NatsBus for horizontal scaling")
+        else:
+            message_bus = InProcessBus()
         await message_bus.start()
 
-        registry = ServiceRegistry()
+        if cfg.bus_backend == "redis" and cfg.redis_url:
+            from hbllm.network.redis_registry import RedisRegistry
+
+            registry = RedisRegistry(redis_url=cfg.redis_url)
+            logger.info("[Factory] Using RedisRegistry for distributed service discovery")
+        else:
+            registry = ServiceRegistry()
         await registry.start(message_bus)
 
         # ── Tenant context propagation ───────────────────────────────
