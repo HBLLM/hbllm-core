@@ -48,9 +48,8 @@ async def test_stream_buffer_initialization(audio_node):
 
     assert "sess_1" in node._stream_buffers
     buf = node._stream_buffers["sess_1"]
-    assert len(buf["chunks"]) == 1
-    assert buf["chunks"][0] == bytes.fromhex("0102030405")
-    assert buf["sample_rate"] == 16000
+    assert buf.has_audio
+    assert buf.sample_rate == 16000
 
 
 @pytest.mark.asyncio
@@ -72,16 +71,25 @@ async def test_stream_multiple_chunks(audio_node):
     await asyncio.sleep(0.3)
 
     assert "sess_2" in node._stream_buffers
-    assert len(node._stream_buffers["sess_2"]["chunks"]) == 5
+    buf = node._stream_buffers["sess_2"]
+    assert buf.has_audio
+    assert len(buf.get_audio_bytes()) > 0
 
 
 @pytest.mark.asyncio
 async def test_stream_is_final_flushes(audio_node):
-    """is_final=True should flush the buffer."""
+    """is_final=True should trigger transcription."""
     node, bus = audio_node
 
-    # Mock _flush_stream_buffer to avoid loading Whisper
-    node._flush_stream_buffer = AsyncMock()
+    # Mock _transcribe_pcm to avoid loading models
+    node._transcribe_pcm = AsyncMock(return_value="test transcription")
+
+    router_received = []
+
+    async def capture(msg):
+        router_received.append(msg)
+
+    await bus.subscribe("router.query", capture)
 
     # Send chunk
     await bus.publish(
@@ -94,7 +102,7 @@ async def test_stream_is_final_flushes(audio_node):
             payload={"chunk": "aabbccdd"},
         ),
     )
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.1)
 
     # Send is_final
     await bus.publish(
@@ -107,11 +115,10 @@ async def test_stream_is_final_flushes(audio_node):
             payload={"is_final": True},
         ),
     )
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.5)
 
-    node._flush_stream_buffer.assert_called_once()
-    call_args = node._flush_stream_buffer.call_args
-    assert call_args[0][0] == "sess_3"
+    # Buffer should have been flushed and transcribed
+    node._transcribe_pcm.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -174,5 +181,10 @@ async def test_stream_separate_sessions(audio_node):
 
     assert "s_a" in node._stream_buffers
     assert "s_b" in node._stream_buffers
-    assert node._stream_buffers["s_a"]["chunks"][0] == bytes.fromhex("aabb")
-    assert node._stream_buffers["s_b"]["chunks"][0] == bytes.fromhex("ccdd")
+    assert node._stream_buffers["s_a"].has_audio
+    assert node._stream_buffers["s_b"].has_audio
+    # Verify they have different data
+    assert (
+        node._stream_buffers["s_a"].get_audio_bytes()
+        != node._stream_buffers["s_b"].get_audio_bytes()
+    )

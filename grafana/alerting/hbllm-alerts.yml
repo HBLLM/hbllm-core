@@ -1,0 +1,64 @@
+# HBLLM Core — Prometheus Alerting Rules
+# Import into Prometheus via: rule_files: ["alerting/hbllm-alerts.yml"]
+
+groups:
+  - name: hbllm.api
+    rules:
+      # ── Availability ─────────────────────────────────────────────
+      - alert: HBLLMHighErrorRate
+        expr: >
+          sum(rate(hbllm_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(hbllm_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HBLLM error rate above 5%"
+          description: >
+            Error rate is {{ $value | humanizePercentage }} over the last 5 minutes.
+
+      - alert: HBLLMHighLatency
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(hbllm_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HBLLM p95 latency above 5 seconds"
+          description: "p95 latency is {{ $value | humanizeDuration }}."
+
+      - alert: HBLLMHighInFlightRequests
+        expr: hbllm_http_requests_in_flight > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HBLLM has > 100 in-flight requests"
+          description: "Current in-flight: {{ $value }}. May indicate backpressure."
+
+      # ── LLM Router ──────────────────────────────────────────────
+      - alert: HBLLMExternalLLMDominant
+        expr: >
+          rate(hbllm_llm_calls_total{tier="external"}[30m])
+          / (rate(hbllm_llm_calls_total{tier="local"}[30m]) + rate(hbllm_llm_calls_total{tier="external"}[30m]))
+          > 0.7
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 70% of LLM calls routing to external provider"
+          description: >
+            External LLM usage is {{ $value | humanizePercentage }}.
+            Local model may be underperforming or circuit breaker is open.
+
+      # ── Infrastructure ──────────────────────────────────────────
+      - alert: HBLLMNoTraffic
+        expr: sum(rate(hbllm_http_requests_total[10m])) == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HBLLM receiving zero traffic for 10 minutes"
+          description: "No HTTP requests recorded. Service may be down or unreachable."

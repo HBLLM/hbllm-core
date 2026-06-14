@@ -11,6 +11,7 @@ safety checks, and dispatches the final command to the Agent Execution Layer
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -58,6 +59,10 @@ class DecisionNode(Node):
         # Expression-side Cognitive Stream (wired by factory if available)
         self.expression_stream: Any | None = None
 
+        # Barge-in: track active generation for mid-response interruption
+        self._active_generation_task: asyncio.Task[Any] | None = None
+        self._cancel_event: asyncio.Event = asyncio.Event()
+
         # ── Multi-Rate Control State ─────────────────────────────────────
         # Smoothed band thresholds (updated every 7±1 decisions via γ-EMA)
         self.smoothed_high: float = 0.7
@@ -103,6 +108,61 @@ class DecisionNode(Node):
     async def handle_message(self, message: Message) -> Message | None:
         return None
 
+    # ── Barge-in Support ──────────────────────────────────────────────────
+
+    async def cancel_active_generation(self, reason: str = "new_input") -> bool:
+        """Cancel any in-flight expression generation.
+
+        Sets the cancel event (checked by ExpressionStream between fragments)
+        and optionally cancels the asyncio task.
+
+        Returns:
+            True if a generation was actively cancelled, False if nothing was running.
+        """
+        if self._active_generation_task is None or self._active_generation_task.done():
+            return False
+
+        logger.info("[DecisionNode] Barge-in: cancelling active generation (reason=%s)", reason)
+
+        # Signal the ExpressionStream to stop between fragments
+        self._cancel_event.set()
+
+        # Give the task a short grace period to exit cleanly
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._active_generation_task),
+                timeout=1.0,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            # Force cancel if it didn't exit gracefully
+            self._active_generation_task.cancel()
+            try:
+                await self._active_generation_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        self._active_generation_task = None
+        self._cancel_event.clear()
+
+        # Publish interruption event on the bus
+        if self._bus is not None:
+            from hbllm.network.messages import Message as BusMessage
+            from hbllm.network.messages import MessageType as BusMT
+
+            await self._bus.publish(
+                "sensory.output.interrupted",
+                BusMessage(
+                    type=BusMT.EVENT,
+                    source_node_id=self.node_id,
+                    topic="sensory.output.interrupted",
+                    payload={"reason": reason},
+                ),
+            )
+
+        return True
+
     # ── Main Entry Point ──────────────────────────────────────────────────
 
     async def evaluate_workspace_decision(self, message: Message) -> Message | None:
@@ -110,6 +170,9 @@ class DecisionNode(Node):
         Triggered when the Workspace has reached a consensus.
         Flow: plan → safety gate (L1) → policy router (L2) → budget controller (L3) → execute.
         """
+        # Barge-in: cancel any in-flight generation before processing new input
+        await self.cancel_active_generation(reason="new_query")
+
         payload = message.payload
         original_query = payload.get("original_query", {})
         thought = payload.get("selected_thought", {})
@@ -571,7 +634,7 @@ class DecisionNode(Node):
                 )
                 return False
         except Exception:
-            pass
+            logger.debug("Memory limit check failed (psutil unavailable)", exc_info=True)
 
         return True
 
@@ -716,15 +779,28 @@ class DecisionNode(Node):
         comprehension_data = original_query.get("comprehension")
         if self.expression_stream is not None and comprehension_data is not None:
             try:
-                expression_result = await self._run_expression_stream(
+                # Reset cancel event for this generation
+                self._cancel_event.clear()
+
+                # Run as tracked task for barge-in support
+                coro = self._run_expression_stream(
                     content=plan.content,
                     comprehension_data=comprehension_data,
                     original_query=original_query,
+                    correlation_id=message.correlation_id,
+                    cancel_event=self._cancel_event,
                 )
+                self._active_generation_task = asyncio.create_task(coro)
+                expression_result = await self._active_generation_task
+                self._active_generation_task = None
+
                 if expression_result is not None and expression_result.text:
                     plan.metadata["expression_reward"] = expression_result.mean_reward
                     plan.metadata["expression_thoughts"] = expression_result.thought_count
                     plan.metadata["expression_revisions"] = expression_result.revision_count
+                    plan.metadata["interrupted"] = expression_result.metadata.get(
+                        "interrupted", False
+                    )
                     await self._publish_output(message, expression_result.text, source=thought_type)
                     return
             except Exception as e:
@@ -1047,6 +1123,8 @@ class DecisionNode(Node):
         content: str,
         comprehension_data: dict[str, Any],
         original_query: dict[str, Any],
+        correlation_id: str | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> ExpressionResult | None:
         """Run the expression-side Cognitive Stream on a text response.
 
@@ -1059,6 +1137,7 @@ class DecisionNode(Node):
             comprehension_data: The ``comprehension`` dict from the payload
                 (contains concepts, memories, salience_peak).
             original_query: The original query payload.
+            correlation_id: Optional correlation ID for fragment streaming.
 
         Returns:
             ExpressionResult if successful, None if skipped/failed.
@@ -1114,11 +1193,47 @@ class DecisionNode(Node):
 
         query_text = original_query.get("text", "")
 
-        result = await self.expression_stream.express(
-            understanding=understanding,
-            base_thought=content,
-            original_query=query_text,
-        )
+        # Wire fragment streaming callback if bus is available
+        saved_on_fragment = self.expression_stream.on_fragment
+        if self._bus is not None and correlation_id:
+            from hbllm.brain.snn.expression.models import ThoughtFragment
+            from hbllm.network.messages import Message as BusMessage
+            from hbllm.network.messages import MessageType as BusMT
+
+            async def _emit_fragment(fragment: ThoughtFragment) -> None:
+                """Publish each fragment to the bus for real-time SSE streaming."""
+                await self._bus.publish(
+                    "sensory.output.fragment",
+                    BusMessage(
+                        type=BusMT.EVENT,
+                        source_node_id=self.node_id,
+                        topic="sensory.output.fragment",
+                        payload={
+                            "text": fragment.text,
+                            "goal_id": fragment.goal_id,
+                            "reward_score": fragment.reward_score,
+                            "fragment_index": len(
+                                self.expression_stream.on_fragment.__dict__.get("_count", [])
+                            )
+                            if hasattr(self.expression_stream.on_fragment, "__dict__")
+                            else 0,
+                        },
+                        correlation_id=correlation_id,
+                    ),
+                )
+
+            self.expression_stream.on_fragment = _emit_fragment
+
+        try:
+            result = await self.expression_stream.express(
+                understanding=understanding,
+                base_thought=content,
+                original_query=query_text,
+                cancel_event=cancel_event,
+            )
+        finally:
+            # Restore original callback
+            self.expression_stream.on_fragment = saved_on_fragment
 
         logger.info(
             "[DecisionNode] ExpressionStream: %d thoughts, mean_reward=%.2f, revisions=%d",

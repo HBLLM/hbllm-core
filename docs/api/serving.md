@@ -83,8 +83,18 @@ The serving layer includes a comprehensive, layered security middleware stack.
 ### Middleware Order (outermost → innermost)
 
 ```
-Request → BodySizeLimitMiddleware → JWTAuthMiddleware → [Cloud: ApiSecurityMiddleware] → Route Handler
+Request → APIVersionMiddleware → PrometheusMiddleware → HTTPRateLimitMiddleware
+       → BodySizeLimitMiddleware → JWTAuthMiddleware → [Cloud: ApiSecurityMiddleware]
+       → Route Handler
 ```
+
+| Layer | Module | Purpose |
+|-------|--------|---------|
+| API Versioning | `middleware/api_version.py` | Validates `Accept-Version` header, injects `X-API-Version` |
+| Prometheus | `middleware/prometheus.py` | Request count, latency histogram, in-flight gauge |
+| Rate Limiting | `middleware/rate_limit.py` | Per-tenant token bucket (configurable RPM) |
+| Body Size | `serving/security.py` | Rejects oversized payloads (1–50 MB) |
+| JWT Auth | `serving/auth.py` | Token validation, identity injection |
 
 ### JWT Authentication (`serving/auth.py`)
 
@@ -131,12 +141,21 @@ validated = akm.validate("sk-prod-key")  # Returns ApiKey or None
 
 ### Rate Limiting
 
-Two rate limiters are available:
+Three rate limiters are available:
 
 | Module | Use Case |
 |--------|----------|
+| `middleware/rate_limit.py` → `HTTPRateLimitMiddleware` | **Primary** — Per-tenant HTTP rate limiting (token bucket, `HBLLM_RATE_LIMIT_RPM`) |
 | `serving/security.py` → `AuthRateLimiter` | Brute-force protection for auth endpoints (per-IP) |
-| `serving/rate_limiter.py` → `RateLimiter` | Per-tenant/user request throttling (token bucket) |
+| `serving/rate_limiter.py` → `RateLimiter` | Per-tenant/user request throttling (application-level) |
+
+When the rate limit is exceeded, the middleware returns:
+
+```json
+{"detail": "Rate limit exceeded. Try again in 42s"}
+```
+
+With `429 Too Many Requests` status and `Retry-After` header.
 
 ### CORS Hardening
 
@@ -168,16 +187,46 @@ The KV Cache can be serialized to disk to preserve active cognitive contexts bet
 
 ## Serving Architecture
 
+### Route Modules
+
+Endpoints are organized into modular routers:
+
+| Router | Module | Endpoints |
+|--------|--------|-----------|
+| `health_router` | `routes/health.py` | `/health`, `/health/live`, `/health/ready`, `/routing/stats` |
+| `memory_router` | `routes/memory.py` | `/v1/memory/*`, `/v1/sync/*`, `/v1/feedback/*`, `/v1/knowledge/*`, `/v1/rules` |
+| `studio_router` | `studio.py` | `/api/*`, `/studio/*` (Studio UI endpoints) |
+| Core (api.py) | `api.py` | `/v1/chat`, `/v1/audio/*`, `/v1/benchmarks/*`, `/v1/cognitive/*` |
+
+### Dependency Injection
+
+`serving/deps.py` provides `Depends()`-based state injection:
+
+```python
+from hbllm.serving.deps import get_brain, get_bus
+
+@router.get("/my-endpoint")
+async def my_endpoint(brain = Depends(get_brain)):
+    return brain.stats()
+```
+
+### Module Map
+
 | Module | File | Purpose |
 |---|---|---|
-| REST API | `serving/api.py` | FastAPI app with OpenAI-compatible endpoints |
+| REST API | `serving/api.py` | FastAPI app, core endpoints, middleware registration |
+| Route: Health | `serving/routes/health.py` | Health probes, routing stats |
+| Route: Memory | `serving/routes/memory.py` | Memory, sync, feedback, knowledge |
+| Dependencies | `serving/deps.py` | `Depends()` injection for routes |
 | Chat | `serving/chat.py` | Chat completion logic and streaming |
 | MCP Server | `serving/mcp_server.py` | MCP tool provider |
 | Pipeline | `serving/pipeline.py` | Cognitive pipeline orchestration |
 | Providers | `serving/provider.py` | LLM provider abstraction (OpenAI, Anthropic, Local, Ollama) |
 | Auth | `serving/auth.py` | JWT authentication middleware |
 | Security | `serving/security.py` | Input sanitization, body limits, CORS, API keys |
-| Rate Limiter | `serving/rate_limiter.py` | Per-tenant/user token bucket rate limiting |
+| Middleware: Rate Limit | `serving/middleware/rate_limit.py` | Per-tenant HTTP rate limiting |
+| Middleware: Prometheus | `serving/middleware/prometheus.py` | Prometheus metrics collection |
+| Middleware: Versioning | `serving/middleware/api_version.py` | API version headers |
 | KV Cache | `serving/kv_cache.py` | Efficient key-value cache for inference |
 | Token Optimizer | `serving/token_optimizer.py` | Token budget management |
 | Self-Improve | `serving/self_improve.py` | Background self-improvement loop |

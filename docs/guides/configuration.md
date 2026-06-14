@@ -9,11 +9,14 @@ HBLLM can be configured via environment variables, `.env` files, or programmatic
 
 ## Environment Variables
 
+### Core
+
 | Variable | Default | Description |
 |---|---|---|
 | `HBLLM_PROVIDER` | `local` | LLM backend: `local`, `openai`, `anthropic`, `ollama` |
 | `HBLLM_MODEL` | `hbllm/base-500m` | Model identifier |
 | `HBLLM_PORT` | `8000` | API server port |
+| `HBLLM_ENV` | `development` | Environment mode: `development` or `production` |
 | `HBLLM_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `HBLLM_MEMORY_DIR` | `~/.hbllm/memory` | Memory database location |
 | `HBLLM_ADAPTER_DIR` | `~/.hbllm/adapters` | LoRA adapter cache |
@@ -25,6 +28,29 @@ HBLLM can be configured via environment variables, `.env` files, or programmatic
 | `OPENAI_API_KEY` | — | OpenAI API key |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key |
 
+### Security & Production
+
+| Variable | Default | Description |
+|---|---|---|
+| `HBLLM_JWT_SECRET` | *(auto-gen in dev)* | JWT signing secret. **Required** in production mode |
+| `HBLLM_TENANT_GUARD_MODE` | `WARN` | Tenant isolation: `WARN` or `STRICT` (blocks cross-tenant) |
+| `HBLLM_CORS_ORIGINS` | `*` | Allowed CORS origins. Wildcard blocked in production |
+
+### Rate Limiting & Quotas
+
+| Variable | Default | Description |
+|---|---|---|
+| `HBLLM_RATE_LIMIT_RPM` | `60` | Max requests per minute per tenant |
+| `HBLLM_DB_MAX_PER_TENANT` | `50000` | Max episodic memory turns per tenant |
+
+### Infrastructure
+
+| Variable | Default | Description |
+|---|---|---|
+| `HBLLM_SHUTDOWN_DRAIN_SEC` | `15` | Seconds to drain in-flight requests on shutdown |
+| `HBLLM_OTEL_ENDPOINT` | — | OpenTelemetry collector endpoint for distributed tracing |
+| `HBLLM_CONFIG_PATH` | `hbllm.yaml` | Path to YAML configuration file |
+
 ## .env File
 
 Create a `.env` file in the project root:
@@ -35,7 +61,41 @@ OPENAI_API_KEY=sk-...
 HBLLM_LOG_LEVEL=DEBUG
 HBLLM_BUS_TYPE=redis
 HBLLM_REDIS_URL=redis://localhost:6379
+
+# Production settings
+HBLLM_ENV=production
+HBLLM_JWT_SECRET=your-secret-here
+HBLLM_RATE_LIMIT_RPM=120
+HBLLM_DB_MAX_PER_TENANT=100000
 ```
+
+## BrainConfig (Pydantic)
+
+The `BrainConfig` class uses Pydantic `BaseModel` with validators for type-safe configuration:
+
+```python
+from hbllm.brain.config import BrainConfig
+
+config = BrainConfig(
+    provider="openai",
+    model_name="gpt-4o",
+    env="production",
+    jwt_secret="my-production-secret",
+    rate_limit_rpm=120,
+    db_max_per_tenant=100_000,
+    shutdown_drain_sec=30,
+)
+```
+
+### Validators
+
+| Field | Validator | Behavior |
+|-------|-----------|----------|
+| `env` | — | `development` or `production` |
+| `jwt_secret` | `model_validator` | **Must be set** when `env=production` |
+| `rate_limit_rpm` | `field_validator` | Must be `> 0` |
+| `db_max_per_tenant` | `field_validator` | Must be `> 0` |
+| `shutdown_drain_sec` | `field_validator` | Must be `>= 0` |
 
 ## YAML Configuration
 
@@ -82,3 +142,4 @@ result = await brain.process(
     session_id="session-abc",
 )
 ```
+

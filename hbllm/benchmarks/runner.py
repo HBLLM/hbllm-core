@@ -556,12 +556,34 @@ SUITES: dict[str, Any] = {
     "multi_tenant": MultiTenantBenchmark,
 }
 
+# Lazy-import suites that have heavier dependencies
+_LAZY_SUITES: dict[str, str] = {
+    "cognitive": "hbllm.benchmarks.bench_cognitive.CognitiveBenchmark",
+    "dual_router": "hbllm.benchmarks.bench_dual_router.DualRouterBenchmark",
+    "http_api": "hbllm.benchmarks.bench_http.HTTPAPIBenchmark",
+}
+
+
+def _resolve_suite(name: str) -> Any:
+    """Resolve a suite class by name, including lazy-loaded suites."""
+    if name in SUITES:
+        return SUITES[name]
+    if name in _LAZY_SUITES:
+        module_path, cls_name = _LAZY_SUITES[name].rsplit(".", 1)
+        import importlib
+
+        mod = importlib.import_module(module_path)
+        return getattr(mod, cls_name)
+    raise ValueError(f"Unknown suite: {name}. Available: {list(ALL_SUITES)}")
+
+
+ALL_SUITES = list(SUITES.keys()) + list(_LAZY_SUITES.keys())
+
 
 async def run_suite(suite_name: str) -> BenchmarkReport:
     """Run a single benchmark suite."""
-    if suite_name not in SUITES:
-        raise ValueError(f"Unknown suite: {suite_name}. Available: {list(SUITES.keys())}")
-    bench: Any = SUITES[suite_name]()
+    cls = _resolve_suite(suite_name)
+    bench: Any = cls()
     from typing import cast
 
     return cast(BenchmarkReport, await bench.run())
@@ -570,8 +592,9 @@ async def run_suite(suite_name: str) -> BenchmarkReport:
 async def run_all() -> list[BenchmarkReport]:
     """Run all benchmark suites."""
     reports = []
-    for name, cls in SUITES.items():
+    for name in ALL_SUITES:
         logger.info("Running benchmark: %s", name)
+        cls = _resolve_suite(name)
         bench: Any = cls()
         report = await bench.run()
         report.print_report()
@@ -584,7 +607,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="HBLLM Benchmark Runner")
-    parser.add_argument("--suite", default="all", choices=list(SUITES.keys()) + ["all"])
+    parser.add_argument("--suite", default="all", choices=ALL_SUITES + ["all"])
     parser.add_argument("--output", type=str, help="Save results JSON to file")
     args = parser.parse_args()
 

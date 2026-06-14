@@ -4,7 +4,9 @@ PIP := $(VENV)/bin/pip
 PYTEST := $(PYTHON) -m pytest
 
 .PHONY: test test-v test-fast lint format typecheck install clean \
-       rust-test rust-clippy rust-build test-all
+       rust-test rust-clippy rust-build test-all \
+       db-migrate db-upgrade db-downgrade db-history \
+       docker-build docker-up docker-down
 
 ## ── Testing ──────────────────────────────────────────────────────────────
 
@@ -63,6 +65,34 @@ rust-build: ## Build all Rust crates as Python modules (requires maturin)
 	done
 
 test-all: rust-test test ## Run Rust tests then Python tests
+
+## ── Database Migrations ─────────────────────────────────────────────────
+
+db-migrate: ## Create a new migration (usage: make db-migrate msg="add users table")
+	$(PYTHON) -m alembic revision --autogenerate -m "$(msg)"
+
+db-upgrade: ## Apply all pending migrations
+	$(PYTHON) -m alembic upgrade head
+
+db-downgrade: ## Rollback the last migration
+	$(PYTHON) -m alembic downgrade -1
+
+db-history: ## Show migration history
+	$(PYTHON) -m alembic history --verbose
+
+## ── Docker ──────────────────────────────────────────────────────────────
+
+docker-build: ## Build production Docker image
+	docker build -t hbllm-core:latest .
+
+docker-up: ## Start all services (PostgreSQL + Redis + HBLLM)
+	docker compose up -d
+
+docker-down: ## Stop all services
+	docker compose down
+
+docker-prod: ## Start production stack (multi-replica)
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ## ── Help ─────────────────────────────────────────────────────────────────
 

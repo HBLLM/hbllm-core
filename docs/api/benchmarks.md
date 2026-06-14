@@ -130,3 +130,54 @@ report = await run_profile("throughput")
 | `eval_prm.py` | Evaluate Process Reward Model scoring accuracy |
 | `eval_speculative.py` | Benchmark speculative decoding speedup vs standard generation |
 | `eval_tot.py` | Evaluate Graph-of-Thoughts planning quality |
+| `bench_cognitive.py` | SNN Cognitive Stream benchmarks (comprehension, expression, planning) |
+| `bench_dual_router.py` | DualLLMRouter routing decisions and circuit breaker timing |
+| `bench_http.py` | HTTP API load testing (health latency, rate limiting, concurrent tenants) |
+
+---
+
+## New Benchmark Suites
+
+### `cognitive` — SNN Cognitive Stream
+
+Measures what makes HBLLM's SNN architecture unique:
+
+| Metric | What It Measures |
+|--------|-----------------|
+| ComprehensionEnsemble step() | 5-channel SNN ensemble per-token processing cost |
+| ComprehensionStream.comprehend() | Full comprehension pipeline latency (p50, p99) |
+| ThoughtPlanner.plan() | Symbolic outline generation overhead |
+| ExpressionStream rendering tiers | Token budgets: Broca (~80), Shallow (~300), Deep (~600) |
+
+```bash
+python -m hbllm.benchmarks.runner --suite cognitive
+```
+
+### `dual_router` — DualLLMRouter & Circuit Breaker
+
+Validates the local/external routing and resilience patterns:
+
+| Metric | What It Measures |
+|--------|-----------------|
+| classify() latency | Routing decision speed (< 0.1ms target) |
+| Circuit breaker transitions | closed → open → half-open → closed cycle timing |
+| Fallback overhead | Added latency when circuit opens and falls back to local |
+
+```bash
+python -m hbllm.benchmarks.runner --suite dual_router
+```
+
+### `http_api` — HTTP API Load Test
+
+End-to-end HTTP performance via ASGI transport (no network overhead):
+
+| Metric | What It Measures |
+|--------|-----------------|
+| Health endpoint p50/p99 | `/health`, `/health/live`, `/health/ready` response time |
+| Rate limit validation | Burst → 429 behavior at configured RPM |
+| Concurrent tenant throughput | 10 tenants × 20 requests, per-request latency |
+
+```bash
+python -m hbllm.benchmarks.runner --suite http_api
+```
+

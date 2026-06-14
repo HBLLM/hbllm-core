@@ -154,30 +154,38 @@ def pytest_collection_modifyitems(config, items):
 
     if torch_mocked:
         skip_marker = pytest.mark.skip(reason="PyTorch is not installed (running in mocked mode)")
-        ml_keywords = {
-            "lora",
-            "training",
-            "model",
-            "quant",
-            "speculative",
-            "transformer",
-            "sft",
-            "dpo",
-            "attention",
-            "feedforward",
-            "embeddings",
-            "learner",
-            "critic",
-            "policy",
-            "grammar",
-            "fused",
-            "projector",
-            "downloader",
-            "data",
-            "benchmark",
-            "onnx",
-            "adapter",
-            "cache",
+
+        # Specific test file prefixes that ACTUALLY require PyTorch or ONNX.
+        # Use exact file stems (without test_ prefix) to avoid false positives.
+        # e.g. "model" should match test_model.py but NOT test_self_model.py
+        ml_file_stems = {
+            # Model / ML core
+            "test_model",
+            "test_reward_model",
+            "test_lora",
+            "test_lora_concurrency",
+            "test_lora_hotswap",
+            "test_lora_loop",
+            "test_lora_moe_blending",
+            "test_hybrid_quant",
+            "test_speculative",
+            "test_incremental_grammar",
+            "test_fused_gemv",
+            "test_hf_adapter",
+            "test_onnx",
+            "test_projector",
+            # Training
+            "test_training",
+            "test_training_smoke",
+            "test_cognitive_training",
+            "test_sft_eval_embeddings",
+            "test_dpo",
+            "test_export_dpo",
+            "test_policy_optimizer",
+            # Data pipeline (needs torch datasets)
+            "test_data",
+            "test_downloader",
+            "test_benchmarks",
         }
 
         for item in items:
@@ -185,10 +193,15 @@ def pytest_collection_modifyitems(config, items):
             if mod is None:
                 continue
 
-            mod_name = mod.__name__
-            if any(kw in mod_name for kw in ml_keywords):
-                item.add_marker(skip_marker)
-                continue
+            # Get the test file stem: "tests/test_foo.py" -> "test_foo"
+            mod_file = getattr(mod, "__file__", "")
+            if mod_file:
+                import os
+
+                file_stem = os.path.splitext(os.path.basename(mod_file))[0]
+                if file_stem in ml_file_stems:
+                    item.add_marker(skip_marker)
+                    continue
 
             has_mocked = False
             for val in mod.__dict__.values():

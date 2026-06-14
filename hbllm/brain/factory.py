@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 if TYPE_CHECKING:
     from hbllm.knowledge import KnowledgeBase
     from hbllm.plugin.manager import PluginManager
@@ -108,9 +110,16 @@ def _default_total_timeout() -> float:
     return float(os.getenv("HBLLM_TOTAL_TIMEOUT", str(default_val)))
 
 
-@dataclass
-class BrainConfig:
-    """Configuration for Brain creation."""
+class BrainConfig(BaseModel):
+    """Configuration for Brain creation.
+
+    Validates all fields and supports env var overrides via HBLLM_* prefix.
+    """
+
+    model_config = ConfigDict(
+        validate_default=True,
+        arbitrary_types_allowed=True,
+    )
 
     # ── Composite node flags (v4: consolidated architecture) ──────
     inject_reasoning: bool = True  # ReasoningCore (router+planner+critic+decision+revision+prm)
@@ -153,12 +162,15 @@ class BrainConfig:
     inject_symbolic_logic: bool = False  # Z3 theorem prover (requires z3-solver)
     inject_browser: bool = True  # Browse web / search via DuckDuckGo
     inject_execution: bool = True  # Python sandboxed code execution
-    total_timeout: float = field(default_factory=_default_total_timeout)
-    api_timeout: float = field(default_factory=_default_api_timeout)
-    stream_timeout: float = field(default_factory=_default_stream_timeout)
-    planner_branch_factor: int = 3
-    planner_max_depth: int = 2
-    data_dir: str = field(default_factory=lambda: os.environ.get("HBLLM_DATA_DIR", "data"))
+    total_timeout: float = Field(default_factory=_default_total_timeout, gt=0)
+    api_timeout: float = Field(default_factory=_default_api_timeout, gt=0)
+    stream_timeout: float = Field(default_factory=_default_stream_timeout, gt=0)
+    planner_branch_factor: int = Field(default=3, ge=1, le=10)
+    planner_max_depth: int = Field(default=2, ge=1, le=5)
+    data_dir: str = Field(
+        default_factory=lambda: os.environ.get("HBLLM_DATA_DIR", "data"),
+        min_length=1,
+    )
     inject_sil: bool = True  # Skill Intelligence Layer
     inject_failure_analyzer: bool = True  # Automatic skill repair
     inject_shell: bool = True  # Host shell command executor node
@@ -191,6 +203,28 @@ class BrainConfig:
 
     # Cognitive Stream: SNN-driven comprehension pipeline
     inject_comprehension: bool = True
+
+    # Autonomy watchers (environment awareness)
+    inject_autonomy_watchers: bool = True
+    autonomy_watch_dirs: list[str] | None = None  # Directories for filesystem watcher
+    autonomy_calendar_dir: str | None = None  # Directory for .ics calendar files
+
+    # Dual LLM routing (local + external)
+    external_provider: str | None = (
+        None  # e.g. "openai/gpt-4o" or "anthropic/claude-sonnet-4-20250514"
+    )
+    external_provider_kwargs: dict[str, Any] = Field(default_factory=dict)
+    dual_llm_complexity_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+
+    # ── Horizontal Scaling ────────────────────────────────────────
+    bus_backend: str = Field(
+        default_factory=lambda: os.environ.get("HBLLM_BUS_BACKEND", "memory"),
+        description="Message bus backend: 'memory' (default), 'redis', or 'nats'",
+    )
+    redis_url: str = Field(
+        default_factory=lambda: os.environ.get("HBLLM_REDIS_URL", ""),
+        description="Redis URL for distributed bus/registry (required when bus_backend='redis')",
+    )
 
 
 class Brain:
@@ -286,6 +320,29 @@ class Brain:
 
         self._hardware_loop_task: asyncio.Task[None] | None = None
 
+        # Graceful shutdown drain
+        self._draining = False
+        self._active_requests = 0
+        self._drain_event = asyncio.Event()
+
+    @property
+    def is_draining(self) -> bool:
+        """True if the brain is shutting down and rejecting new requests."""
+        return self._draining
+
+    def acquire_request(self) -> bool:
+        """Track an in-flight request. Returns False if draining."""
+        if self._draining:
+            return False
+        self._active_requests += 1
+        return True
+
+    def release_request(self) -> None:
+        """Release an in-flight request. Signals drain if count reaches 0."""
+        self._active_requests = max(0, self._active_requests - 1)
+        if self._draining and self._active_requests == 0:
+            self._drain_event.set()
+
     async def process(
         self,
         text: str,
@@ -293,6 +350,12 @@ class Brain:
         session_id: str = "default",
     ) -> PipelineResult:
         """Send a query through the full cognitive pipeline."""
+        if self._draining:
+            return PipelineResult(
+                text="Service is shutting down. Please retry shortly.",
+                correlation_id="drain",
+                error=True,
+            )
         import time as _time
 
         _start = _time.monotonic()
@@ -376,8 +439,31 @@ class Brain:
                     ),
                 )
 
-    async def shutdown(self) -> None:
-        """Stop all nodes, pipeline, and bus."""
+    async def shutdown(self, drain_timeout: float = 30.0) -> None:
+        """Stop all nodes, pipeline, and bus with graceful drain.
+
+        Args:
+            drain_timeout: Seconds to wait for in-flight requests to complete.
+        """
+        # Phase 1: Drain — stop accepting new requests, wait for in-flight
+        self._draining = True
+        if self._active_requests > 0:
+            logger.info(
+                "Draining %d in-flight requests (timeout=%.0fs)",
+                self._active_requests,
+                drain_timeout,
+            )
+            self._drain_event.clear()
+            try:
+                await asyncio.wait_for(self._drain_event.wait(), timeout=drain_timeout)
+                logger.info("All in-flight requests drained")
+            except (TimeoutError, asyncio.TimeoutError):
+                logger.warning(
+                    "Drain timeout reached with %d requests still active, forcing shutdown",
+                    self._active_requests,
+                )
+
+        # Phase 2: Shutdown
         if self._hardware_loop_task:
             self._hardware_loop_task.cancel()
             try:
@@ -452,261 +538,26 @@ async def _register_node(registry: Any, node: Node) -> None:
 def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
     """Wire the Cognitive Stream comprehension pipeline into a RouterNode.
 
-    Creates a ComprehensionStream with:
-      - LexicalBuffer for subword noise absorption
-      - ComprehensionEnsemble (5-channel SNN)
-      - Encoder bound to router_node._encode_text (reuses ONNX session)
-      - Domain centroids shared from router_node (same reference)
-
-    The comprehension stream is stored on router_node.comprehension_stream
-    and will be invoked during handle_message() for queries >= 5 words.
+    Delegated to hbllm.brain.wiring.snn for maintainability.
     """
-    try:
-        from hbllm.brain.snn.comprehension import (
-            ComprehensionEnsemble,
-            ComprehensionStream,
-            LexicalBuffer,
-            populate_from_registry,
-        )
+    from hbllm.brain.wiring.snn import wire_comprehension_stream
 
-        # Populate technical terms from domain registry centroid texts
-        if domain_registry is not None:
-            populate_from_registry(domain_registry)
-
-        lexical_buffer = LexicalBuffer()
-
-        # Try to create STDP plasticity for the ensemble
-        plastic_weights = None
-        try:
-            from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule
-
-            stdp_rule = STDPRule(
-                learning_rate=0.01,
-                time_constant=0.5,
-                w_min=0.0,
-                w_max=2.0,
-            )
-            # Create a temporary ensemble to get static weights
-            _tmp = ComprehensionEnsemble(domain="general")
-            plastic_weights = PlasticWeightMatrix(_tmp._signal_weights, stdp_rule)
-            logger.info("STDP plasticity enabled for ComprehensionEnsemble")
-        except Exception as e:
-            logger.debug("STDP plasticity not available (non-fatal): %s", e)
-
-        ensemble = ComprehensionEnsemble(domain="general", plastic_weights=plastic_weights)
-
-        # Try to create AssociationLayer for concept relationship detection
-        association_layer = None
-        try:
-            from hbllm.brain.snn.reasoning.association import AssociationLayer
-
-            assoc_stdp = None
-            try:
-                from hbllm.brain.snn.plasticity import STDPRule as _STDPRule
-
-                assoc_stdp = _STDPRule(
-                    learning_rate=0.01,
-                    time_constant=0.5,
-                    w_min=0.0,
-                    w_max=2.0,
-                )
-            except Exception:
-                pass
-
-            association_layer = AssociationLayer(stdp_rule=assoc_stdp)
-            logger.info("AssociationLayer wired to ComprehensionStream")
-        except Exception as e:
-            logger.debug("AssociationLayer not available (non-fatal): %s", e)
-
-        # Try to create CausalReasoner for multi-hop causal reasoning
-        causal_reasoner = None
-        try:
-            from hbllm.brain.causality.causal_graph import CausalGraph
-            from hbllm.brain.snn.reasoning.reasoner import CausalReasoner
-            from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
-
-            # Use data_dir from router_node if available, else default
-            data_dir = getattr(router_node, "data_dir", "data")
-            causal_graph = CausalGraph(data_dir=data_dir)
-            reasoning_net = ReasoningNetwork(stdp_rule=assoc_stdp if assoc_stdp else None)
-            causal_reasoner = CausalReasoner(
-                causal_graph=causal_graph,
-                reasoning_network=reasoning_net,
-                max_depth=3,
-                min_probability=0.3,
-                top_k=5,
-            )
-            logger.info("CausalReasoner wired to ComprehensionStream")
-        except Exception as e:
-            logger.debug("CausalReasoner not available (non-fatal): %s", e)
-
-        stream = ComprehensionStream(
-            ensemble=ensemble,
-            lexical_buffer=lexical_buffer,
-            encoder=router_node._encode_text,
-            domain_centroids=router_node.domain_centroids,
-            memory_search_fn=None,  # No memory coupling in v1; wired later if needed
-            association_layer=association_layer,
-            causal_reasoner=causal_reasoner,
-        )
-        router_node.comprehension_stream = stream
-        logger.info("ComprehensionStream wired to RouterNode")
-    except Exception as e:
-        logger.warning("Failed to wire ComprehensionStream (non-fatal): %s", e)
+    wire_comprehension_stream(router_node, domain_registry)
 
 
 def _wire_expression_stream(
     decision_node: Any,
     router_node: Any | None = None,
     llm: Any | None = None,
+    dual_router: Any | None = None,
 ) -> None:
     """Wire the expression-side Cognitive Stream into a DecisionNode.
 
-    Creates an ExpressionStream with:
-      - ThoughtPlanner (symbolic outline from UnderstandingState)
-      - ThoughtController (SNN-gated thought sequencer)
-      - RewardEvaluator (per-fragment scoring)
-
-    The expression stream is stored on decision_node.expression_stream
-    and will be invoked during _exec_text_response() when comprehension
-    data is present in the payload.
+    Delegated to hbllm.brain.wiring.snn for maintainability.
     """
-    try:
-        from hbllm.brain.snn.expression import (
-            ExpressionStream,
-            RewardEvaluator,
-            ThoughtController,
-            ThoughtPlanner,
-        )
+    from hbllm.brain.wiring.snn import wire_expression_stream
 
-        planner = ThoughtPlanner(
-            base_token_budget=512,
-            constraint_expansion=True,
-            min_salience_for_goal=0.3,
-        )
-        controller = ThoughtController(
-            readiness_threshold=0.6,
-            coherence_threshold=0.5,
-            max_wait_steps=5,
-        )
-
-        # Try to create STDP plasticity for the controller
-        try:
-            from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule
-
-            stdp_rule = STDPRule(
-                learning_rate=0.01,
-                time_constant=0.5,
-                w_min=0.0,
-                w_max=2.0,
-            )
-            ctrl_plastic = PlasticWeightMatrix(controller._static_weights, stdp_rule)
-            controller.plastic_weights = ctrl_plastic
-            logger.info("STDP plasticity enabled for ThoughtController")
-        except Exception as e:
-            logger.debug("STDP plasticity for controller not available: %s", e)
-
-        # Try to bind the ONNX encoder for embedding-based scoring
-        encoder = None
-        if router_node is not None and hasattr(router_node, "_encode_text"):
-            encoder = router_node._encode_text
-
-        evaluator = RewardEvaluator(
-            encoder=encoder,
-            min_acceptable_reward=0.4,
-        )
-
-        # Try to create TrainedPRM for learnable reward scoring
-        trained_prm = None
-        try:
-            from hbllm.brain.snn.expression.trained_prm import TrainedPRM
-
-            prm_stdp = None
-            try:
-                from hbllm.brain.snn.plasticity import STDPRule as _PRMSTDPRule
-
-                prm_stdp = _PRMSTDPRule(
-                    learning_rate=0.01,
-                    time_constant=0.5,
-                    w_min=0.0,
-                    w_max=2.0,
-                )
-            except Exception:
-                pass
-
-            trained_prm = TrainedPRM(
-                reward_evaluator=evaluator,
-                stdp_rule=prm_stdp,
-                fallback_threshold=50,
-                snn_blend_weight=0.6,
-            )
-            logger.info("TrainedPRM wired to ExpressionStream")
-        except Exception as e:
-            logger.debug("TrainedPRM not available (non-fatal): %s", e)
-
-        # Try to create ShallowRenderer for v3 rendering mode
-        shallow_renderer = None
-        try:
-            from hbllm.brain.snn.expression.shallow_renderer import ShallowRenderer
-
-            shallow_renderer = ShallowRenderer(min_confidence=0.3)
-            logger.info("ShallowRenderer wired to ExpressionStream")
-        except Exception as e:
-            logger.debug("ShallowRenderer not available (non-fatal): %s", e)
-
-        # Try to create v4 Broca components
-        content_planner = None
-        broca_encoder = None
-        try:
-            from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder
-            from hbllm.brain.snn.expression.content_planner import ContentPlanner
-
-            content_planner = ContentPlanner()
-            broca_encoder = BrocaEncoder()
-            logger.info("Broca's area components (v4) wired to ExpressionStream")
-
-            # Wire PRMTrainer for batch training
-            if trained_prm is not None:
-                try:
-                    from hbllm.brain.snn.expression.prm_trainer import PRMTrainer
-
-                    prm_trainer = PRMTrainer(trained_prm, epochs=3, batch_size=20)
-                    decision_node._prm_trainer = prm_trainer
-                    logger.info("PRMTrainer wired to DecisionNode")
-                except Exception as e2:
-                    logger.debug("PRMTrainer not available (non-fatal): %s", e2)
-        except Exception as e:
-            logger.debug("Broca components not available (non-fatal): %s", e)
-
-        # Bind LLM generate function if available
-        llm_generate = None
-        if llm is not None and hasattr(llm, "generate"):
-
-            async def _generate(prompt: str) -> str:
-                result = await llm.generate(prompt)
-                return str(result)
-
-            llm_generate = _generate
-
-        stream = ExpressionStream(
-            planner=planner,
-            controller=controller,
-            evaluator=evaluator,
-            llm_generate=llm_generate,
-            max_revisions=1,
-            enable_gating=True,
-            trained_prm=trained_prm,
-            shallow_renderer=shallow_renderer,
-            shallow_mode=False,  # Opt-in: brain pipeline needs LLM reasoning
-            content_planner=content_planner,
-            broca_encoder=broca_encoder,
-            broca_mode=False,  # Opt-in: full brain pipeline needs LLM reasoning
-        )
-
-        decision_node.expression_stream = stream
-        logger.info("ExpressionStream wired to DecisionNode")
-    except Exception as e:
-        logger.warning("Failed to wire ExpressionStream (non-fatal): %s", e)
+    wire_expression_stream(decision_node, router_node, llm, dual_router)
 
 
 class BrainFactory:
@@ -908,11 +759,54 @@ class BrainFactory:
         # 1. Create adapter
         llm = ProviderLLM(llm_provider, system_prompt=cfg.system_prompt)
 
-        # 2. Create bus and registry
-        message_bus = bus or InProcessBus()
+        # 1b. Create dual LLM router if external provider is configured
+        dual_router = None
+        if cfg.external_provider:
+            try:
+                external_provider = get_provider(
+                    cfg.external_provider, **cfg.external_provider_kwargs
+                )
+                external_llm = ProviderLLM(external_provider, system_prompt=cfg.system_prompt)
+
+                from hbllm.brain.dual_llm_router import DualLLMRouter
+
+                dual_router = DualLLMRouter(
+                    local=llm,
+                    external=external_llm,
+                    complexity_threshold=cfg.dual_llm_complexity_threshold,
+                )
+                logger.info(
+                    "[Factory] Dual LLM Router: local=%s, external=%s",
+                    llm_provider.name,
+                    external_provider.name,
+                )
+            except Exception as e:
+                logger.warning("[Factory] Failed to create external provider: %s", e)
+
+        # 2. Create bus and registry (configurable backend)
+        if bus is not None:
+            message_bus = bus
+        elif cfg.bus_backend == "redis" and cfg.redis_url:
+            from hbllm.network.redis_bus import RedisBus
+
+            message_bus = RedisBus(redis_url=cfg.redis_url)
+            logger.info("[Factory] Using RedisBus for horizontal scaling")
+        elif cfg.bus_backend == "nats":
+            from hbllm.network.nats_bus import NatsBus
+
+            message_bus = NatsBus()
+            logger.info("[Factory] Using NatsBus for horizontal scaling")
+        else:
+            message_bus = InProcessBus()
         await message_bus.start()
 
-        registry = ServiceRegistry()
+        if cfg.bus_backend == "redis" and cfg.redis_url:
+            from hbllm.network.redis_registry import RedisRegistry
+
+            registry = RedisRegistry(redis_url=cfg.redis_url)
+            logger.info("[Factory] Using RedisRegistry for distributed service discovery")
+        else:
+            registry = ServiceRegistry()
         await registry.start(message_bus)
 
         # ── Tenant context propagation ───────────────────────────────
@@ -928,26 +822,11 @@ class BrainFactory:
                 cfg,
                 message_bus,
                 registry,
+                dual_router=dual_router,
             )
 
         # 3. Create cognitive nodes with LLM injected (legacy path)
-        from hbllm.brain.collective_node import CollectiveNode
-        from hbllm.brain.critic_node import CriticNode
-        from hbllm.brain.curiosity_node import CuriosityNode
-        from hbllm.brain.decision_node import DecisionNode
-        from hbllm.brain.experience_node import ExperienceNode
-        from hbllm.brain.identity_node import IdentityNode
-        from hbllm.brain.learner_node import LearnerNode
-        from hbllm.brain.meta_node import MetaReasoningNode
-        from hbllm.brain.planner_node import PlannerNode
-        from hbllm.brain.router_node import RouterNode
-        from hbllm.brain.rule_extractor import RuleExtractorNode
-        from hbllm.brain.sentinel_node import SentinelNode
-        from hbllm.brain.sleep_node import SleepCycleNode
-        from hbllm.brain.workspace_node import WorkspaceNode
-        from hbllm.brain.world_model_node import WorldModelNode
-        from hbllm.brain.world_state import WorldStateEngine
-        from hbllm.memory.memory_node import MemoryNode
+        from hbllm.brain.wiring.nodes import create_legacy_nodes
 
         # Create PolicyEngine for governance
         policy_engine = None
@@ -975,174 +854,24 @@ class BrainFactory:
                     )
                     logger.info("Auto-discovered sub-domain LoRA: %s", adapter_dir.name)
 
-        router_node = RouterNode(node_id="router", llm=llm, domain_registry=domain_registry)
-        router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
-
-        # Wire Cognitive Stream comprehension pipeline
-        if cfg.inject_comprehension:
-            _wire_comprehension_stream(router_node, domain_registry)
-
         skill_registry = SkillRegistry(data_dir=cfg.data_dir)
-        decision_node = DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine)
 
-        nodes = [
-            # Core cognitive pipeline
-            router_node,
-            PlannerNode(
-                node_id="planner",
-                branch_factor=cfg.planner_branch_factor,
-                max_depth=cfg.planner_max_depth,
-                policy_engine=policy_engine,
-                llm=llm,
-            ),
-            CriticNode(node_id="critic", llm=llm),
-            decision_node,
-            WorkspaceNode(node_id="workspace"),
-            # Memory (episodic + semantic + procedural + value + knowledge graph)
-            MemoryNode(node_id="memory", db_path=Path(cfg.data_dir) / "working_memory.db"),
-            # Experience & meta-cognitive layer
-            ExperienceNode(node_id="experience", llm=llm),
-            MetaReasoningNode(node_id="meta"),
-            RuleExtractorNode(node_id="rule_extractor"),
-            # Curiosity-driven goal generation
-            CuriosityNode(node_id="curiosity"),
-            # Collective intelligence (multi-instance knowledge sharing)
-            CollectiveNode(node_id="collective", skill_registry=skill_registry),
-            # Online learning from feedback (DPO)
-            LearnerNode(node_id="learner"),
-            # World model (code simulation & sandboxed execution)
-            WorldModelNode(node_id="world_model"),
-            # Memory consolidation during idle
-            SleepCycleNode(node_id="sleep", llm=llm),
-        ]
+        nodes = create_legacy_nodes(
+            llm=llm,
+            llm_provider=llm_provider,
+            cfg=cfg,
+            policy_engine=policy_engine,
+            domain_registry=domain_registry,
+            skill_registry=skill_registry,
+            dual_router=dual_router,
+        )
 
-        # Wire expression-side Cognitive Stream (Layer 5)
-        if cfg.inject_comprehension:
-            _wire_expression_stream(decision_node, router_node, llm)
-
-            # Wire memory search into ComprehensionStream for per-concept retrieval
-            comp_stream = getattr(router_node, "comprehension_stream", None)
-            if comp_stream is not None and comp_stream.memory_search_fn is None:
-                # Find the MemoryNode from the node list
-                memory_node = None
-                for n in nodes:
-                    if getattr(n, "node_id", None) == "memory":
-                        memory_node = n
-                        break
-                if memory_node is not None and hasattr(memory_node, "semantic_db"):
-
-                    async def _mem_search(
-                        text: str, top_k: int = 3, tenant_id: str = "default"
-                    ) -> list:
-                        import asyncio
-
-                        return await asyncio.to_thread(
-                            memory_node.semantic_db.search,
-                            text,
-                            top_k=top_k,
-                            tenant_id=tenant_id,
-                        )
-
-                    comp_stream.memory_search_fn = _mem_search
-                    logger.info("ComprehensionStream memory_search_fn wired to MemoryNode")
-
-        # Browser Node (DuckDuckGo search + scraping)
-        if cfg.inject_browser:
-            from hbllm.actions.browser_node import BrowserNode
-
-            nodes.append(BrowserNode(node_id="browser"))
-            logger.info("BrowserNode wired (web search & scrape)")
-
-        # Execution Node (sandboxed python execution)
-        if cfg.inject_execution:
-            from hbllm.actions.execution_node import ExecutionNode
-
-            nodes.append(ExecutionNode(node_id="execution"))
-            logger.info("ExecutionNode wired (sandboxed python execution)")
-
-        # Proactive governance sentinel
+        # Find sentinel node from created nodes (for subsystem wiring)
         sentinel_node = None
-        if cfg.inject_sentinel and policy_engine:
-            sentinel_node = SentinelNode(
-                node_id="sentinel",
-                policy_engine=policy_engine,
-            )
-            nodes.append(sentinel_node)
-
-        # Optional nodes based on config
-        if cfg.inject_identity:
-            nodes.append(IdentityNode(node_id="identity"))
-
-        # Host shell execution node
-        if cfg.inject_shell:
-            from hbllm.actions.shell_node import HostShellNode
-
-            shell_node = HostShellNode(
-                node_id="shell_executor",
-                workspace_dir=None,
-                require_manual_approval=cfg.require_shell_approval,
-                policy_engine=policy_engine,
-            )
-            nodes.append(shell_node)
-            logger.info("HostShellNode wired (manual approval=%s)", cfg.require_shell_approval)
-
-        # Perception nodes (optional — require ML models to be downloaded)
-        if cfg.inject_perception:
-            from hbllm.perception.audio_in_node import AudioInputNode
-            from hbllm.perception.audio_out_node import AudioOutputNode
-            from hbllm.perception.vision_node import VisionNode
-
-            nodes.extend(
-                [
-                    AudioInputNode(node_id="audio_in"),
-                    AudioOutputNode(node_id="audio_out"),
-                    VisionNode(node_id="vision"),
-                ]
-            )
-
-        # Reasoning nodes (optional — require extra dependencies)
-        if cfg.inject_fuzzy_logic:
-            from hbllm.actions.fuzzy_node import FuzzyNode
-
-            nodes.append(FuzzyNode(node_id="fuzzy", llm=llm))
-            logger.info("FuzzyNode wired (scikit-fuzzy reasoning)")
-
-        if cfg.inject_symbolic_logic:
-            from hbllm.actions.logic_node import LogicNode
-
-            nodes.append(LogicNode(node_id="logic", llm=llm))
-            logger.info("LogicNode wired (Z3 theorem prover)")
-
-        # Register and start default DomainModuleNode instances
-        if (
-            type(llm_provider).__name__ == "LocalProvider"
-            and getattr(llm_provider, "_model", None) is not None
-        ):
-            from hbllm.modules.base_module import DomainModuleNode
-
-            model = llm_provider._model
-            tokenizer = llm_provider._tokenizer
-            for domain in ["general", "coding", "math"]:
-                nodes.append(
-                    DomainModuleNode(
-                        node_id=f"domain_{domain}",
-                        domain_name=domain,
-                        model=model,
-                        tokenizer=tokenizer,
-                        lora_state_dict=None,
-                    )
-                )
-        else:
-            from hbllm.modules.base_module import DomainModuleNode
-
-            for domain in ["general", "coding", "math"]:
-                nodes.append(
-                    DomainModuleNode(
-                        node_id=f"domain_{domain}",
-                        domain_name=domain,
-                        llm=llm,
-                    )
-                )
+        for n in nodes:
+            if getattr(n, "node_id", None) == "sentinel":
+                sentinel_node = n
+                break
 
         # 4. Start all nodes on the bus
         for node in nodes:
@@ -1178,239 +907,26 @@ class BrainFactory:
             provider=llm_provider,
         )
 
-        # 6. Wire cognitive subsystems
-        data_dir = cfg.data_dir
-
-        # Always-on subsystems
-        brain.skill_registry = skill_registry
-        brain.tool_memory = ToolMemory(data_dir=data_dir)
-        brain.concept_extractor = ConceptExtractor()
-
-        from hbllm.perception.event_log import EventLog
-
-        brain.event_log = EventLog(data_dir=data_dir)
-        brain.world_state = WorldStateEngine(event_log=brain.event_log)
-
-        brain.cognition_router = CognitionRouter()
-        brain.reward_model = RewardModel(data_dir=data_dir)
-        brain.policy_optimizer = PolicyOptimizer()
-        brain.interaction_miner = AsyncInteractionMiner(data_dir=data_dir)
-
-        # Advanced Subsystems (Phase 3-7)
-        if cfg.inject_task_graph:
-            from hbllm.brain.autonomy.task_graph import TaskGraphRuntime
-
-            brain.task_graph = TaskGraphRuntime(data_dir=data_dir)
-
-        if cfg.inject_causal_graph:
-            from hbllm.brain.causality.causal_graph import CausalGraph
-
-            brain.causal_graph = CausalGraph(data_dir=data_dir)
-
-        if cfg.inject_compaction:
-            from hbllm.brain.compaction.engine import CognitiveCompactionEngine
-
-            brain.compaction_engine = CognitiveCompactionEngine()
-
-        if cfg.inject_embodiment:
-            from hbllm.brain.embodiment.os_adapter import OSAdapter
-            from hbllm.brain.embodiment.verifier import ExecutionVerifier
-
-            brain.os_adapter = OSAdapter()
-            brain.verifier = ExecutionVerifier(brain.os_adapter)
-
-        if cfg.inject_human_control:
-            from hbllm.brain.control.guard import SecurityGuard
-            from hbllm.brain.control.permissions import PermissionRegistry
-            from hbllm.brain.observability.tracer import DecisionTraceLedger
-
-            brain.permission_registry = PermissionRegistry()
-            brain.decision_tracer = DecisionTraceLedger(data_dir=data_dir)
-            brain.security_guard = SecurityGuard(brain.permission_registry, brain.decision_tracer)
-
-        if cfg.inject_mesh:
-            from hbllm.brain.mesh.registry import NodeRegistry, NodeType
-
-            brain.mesh_registry = NodeRegistry(local_node_id="local", local_node_type=NodeType.EDGE)
-
-        # Configurable subsystems
-        if cfg.inject_revision:
-            brain.confidence_estimator = ConfidenceEstimator()
-            brain.revision_node = RevisionNode()
-
-        if cfg.inject_goals:
-            brain.goal_manager = GoalManager(data_dir=data_dir)
-
-        if cfg.inject_self_model:
-            brain.self_model = SelfModel(data_dir=data_dir)
-
-        if cfg.inject_metrics:
-            brain.cognitive_metrics = CognitiveMetrics(data_dir=data_dir)
-
-        if cfg.inject_cost_optimizer:
-            brain.token_optimizer = TokenOptimizer()
-
-        if cfg.inject_policy_engine:
-            brain.policy_engine = policy_engine
-
-        if cfg.inject_owner_rules:
-            brain.owner_rules = OwnerRuleStore(db_path=str(Path(data_dir) / "owner_rules.db"))
-
-        if cfg.inject_sentinel and sentinel_node:
-            brain.sentinel = sentinel_node
-
-        # v2: Intelligence Feedback Loop — wire evaluation, reflection, skill compiler
-        if cfg.inject_evaluation:
-            eval_node = EvaluationNode(
-                node_id="evaluation",
-                cognitive_metrics=brain.cognitive_metrics,
-                goal_manager=brain.goal_manager,
-                self_model=brain.self_model,
-                skill_registry=brain.skill_registry,
-                db_path=Path(cfg.data_dir) / "evaluations.db",
-            )
-            await _register_node(registry, eval_node)
-            await eval_node.start(message_bus)
-            brain.evaluation_node = eval_node
-            nodes.append(eval_node)
-            logger.info("v2: EvaluationNode wired (intelligence feedback loop)")
-
-        if cfg.inject_reflection:
-            refl_node = ReflectionNode(
-                node_id="reflection",
-                cognitive_metrics=brain.cognitive_metrics,
-                goal_manager=brain.goal_manager,
-                self_model=brain.self_model,
-                skill_registry=brain.skill_registry,
-            )
-            await _register_node(registry, refl_node)
-            await refl_node.start(message_bus)
-            brain.reflection_node = refl_node
-            nodes.append(refl_node)
-            logger.info("v2: ReflectionNode wired (periodic batch reflection)")
-
-        if cfg.inject_skill_compiler:
-            compiler_node = SkillCompilerNode(
-                node_id="skill_compiler",
-                skill_registry=brain.skill_registry,
-                llm=llm,
-            )
-            await _register_node(registry, compiler_node)
-            await compiler_node.start(message_bus)
-            brain.skill_compiler_node = compiler_node
-            nodes.append(compiler_node)
-            logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
-
-        if cfg.inject_failure_analyzer:
-            from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
-
-            fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
-            await _register_node(registry, fail_node)
-            await fail_node.start(message_bus)
-            brain.failure_analyzer_node = fail_node
-            nodes.append(fail_node)
-            logger.info("FailureAnalyzerNode wired (automated skill repair)")
-
-        if cfg.inject_sil:
-            from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
-
-            sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
-            await _register_node(registry, sil_node)
-            await sil_node.start(message_bus)
-            brain.skill_intelligence_node = sil_node
-            nodes.append(sil_node)
-            logger.info("SkillIntelligenceNode wired (execution governor & lifecycle)")
-
-        # v2: Resource Intelligence — wire attention and load managers
-        if cfg.inject_attention:
-            attn_node = AttentionManager(node_id="attention")
-            await _register_node(registry, attn_node)
-            await attn_node.start(message_bus)
-            brain.attention_manager = attn_node
-            nodes.append(attn_node)
-            logger.info("v2: AttentionManager wired (memory budgets & focus)")
-
-        if cfg.inject_load_manager:
-            load_node = LoadManager(
-                node_id="load_manager",
-                monitor_interval=60.0,
-            )
-            await _register_node(registry, load_node)
-            await load_node.start(message_bus)
-            brain.load_manager = load_node
-            nodes.append(load_node)
-            logger.info("v2: LoadManager wired (resource monitoring & degradation)")
-
-        # v3: Proactive Execution — wire the scheduler node
-        if cfg.inject_scheduler:
-            from hbllm.brain.scheduler_node import SchedulerNode
-
-            sched_node = SchedulerNode(
-                node_id="scheduler",
-                data_dir=data_dir,
-            )
-            await _register_node(registry, sched_node)
-            await sched_node.start(message_bus)
-            brain.scheduler_node = sched_node
-            nodes.append(sched_node)
-            logger.info("v3: SchedulerNode wired (proactive autonomous task execution)")
-
-        logger.info(
-            "Cognitive subsystems wired: skills, goals, self-model, metrics, revision, tools, "
-            "policy engine, owner rules, sentinel, evaluation, reflection, skill_compiler, "
-            "attention, load_manager"
+        # 6. Wire cognitive subsystems (extracted to wiring/subsystems.py)
+        from hbllm.brain.wiring.subsystems import (
+            wire_always_on_subsystems,
+            wire_late_subsystems,
+            wire_optional_subsystems,
         )
 
-        # ── Cognitive Awareness ───────────────────────────────────────
-        if cfg.inject_awareness:
-            from hbllm.brain.awareness import CognitiveAwareness
-
-            awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
-            await _register_node(registry, awareness_node)
-            await awareness_node.start(message_bus)
-            brain.awareness = awareness_node
-            nodes.append(awareness_node)
-            logger.info("CognitiveAwareness wired (brain self-monitoring active)")
-
-        # ── Knowledge Base ────────────────────────────────────────────
-        if cfg.inject_knowledge:
-            from hbllm.knowledge import KnowledgeBase
-
-            kb_dir = str(Path(data_dir) / "knowledge")
-            brain.knowledge_base = KnowledgeBase(data_dir=kb_dir)
-            logger.info("KnowledgeBase wired (data_dir=%s)", kb_dir)
-
-        # ── Persistence (BrainState) ─────────────────────────────────
-        if cfg.inject_persistence:
-            from hbllm.persistence import BrainState
-
-            state_path = str(Path(data_dir) / "brain_state.db")
-            brain.state = BrainState(path=state_path)
-            logger.info("BrainState wired (path=%s)", state_path)
-
-        # ── Plugin System ────────────────────────────────────────────
-        if cfg.inject_plugins:
-            from hbllm.plugin.manager import PluginManager
-
-            extra_dirs = [Path(d) for d in (cfg.plugin_dirs or [])]
-            brain.plugin_manager = PluginManager(
-                plugin_dirs=extra_dirs,
-                skill_registry=brain.skill_registry,
-                policy_engine=brain.policy_engine,
-                knowledge_base=brain.knowledge_base,
-            )
-            # Auto-discover plugins from all configured paths
-            discovered = await brain.plugin_manager.discover_plugins()
-            if discovered:
-                logger.info(
-                    "Plugin system: loaded %d bundles on startup",
-                    len(discovered),
-                )
-
-            # Optionally start background watcher for hot-loading
-            if cfg.watch_plugins:
-                await brain.plugin_manager.watch_directories()
-                logger.info("Plugin watcher started (runtime hot-loading enabled)")
+        brain.skill_registry = skill_registry
+        await wire_always_on_subsystems(brain, cfg, dual_router=dual_router)
+        await wire_optional_subsystems(
+            brain,
+            cfg,
+            nodes,
+            registry,
+            message_bus,
+            policy_engine=policy_engine,
+            sentinel_node=sentinel_node,
+            llm=llm,
+        )
+        await wire_late_subsystems(brain, cfg, nodes, registry, message_bus)
 
         return brain
 
@@ -1421,6 +937,7 @@ class BrainFactory:
         cfg: BrainConfig,
         message_bus: MessageBus,
         registry: ServiceRegistry,
+        dual_router: Any = None,
     ) -> Brain:
         """
         v4: Build brain using 8 composite nodes instead of 27 individual ones.
@@ -1548,17 +1065,28 @@ class BrainFactory:
             _wire_comprehension_stream(reasoning.router, domain_registry)
             # Wire expression-side Cognitive Stream (Layer 5) into the DecisionNode
             if reasoning.decision is not None:
-                _wire_expression_stream(reasoning.decision, reasoning.router, llm)
+                _wire_expression_stream(
+                    reasoning.decision, reasoning.router, llm, dual_router=dual_router
+                )
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:
             from hbllm.perception.audio_in_node import AudioInputNode
             from hbllm.perception.audio_out_node import AudioOutputNode
             from hbllm.perception.vision_node import VisionNode
+            from hbllm.perception.voice_config import AudioPipelineConfig
 
+            audio_config = AudioPipelineConfig()
             for pnode in [
-                AudioInputNode(node_id="audio_in"),
-                AudioOutputNode(node_id="audio_out"),
+                AudioInputNode(
+                    node_id="audio_in",
+                    config=audio_config,
+                ),
+                AudioOutputNode(
+                    node_id="audio_out",
+                    config=audio_config,
+                    data_dir=cfg.data_dir,
+                ),
                 VisionNode(node_id="vision"),
             ]:
                 await _register_node(registry, pnode)
@@ -1701,6 +1229,14 @@ class BrainFactory:
         brain.reward_model = RewardModel(data_dir=cfg.data_dir)
         brain.policy_optimizer = PolicyOptimizer()
         brain.interaction_miner = AsyncInteractionMiner(data_dir=cfg.data_dir)
+
+        # Dual LLM Router
+        brain.dual_router = dual_router
+        if dual_router is not None:
+            autonomy = getattr(brain, "autonomy_core", None)
+            if autonomy is not None:
+                dual_router.state_machine = getattr(autonomy, "state_machine", None)
+            logger.info("[Factory] Dual LLM Router attached to brain (composite)")
 
         # Map composite sub-components to legacy Brain attributes
         if governance:

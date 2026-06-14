@@ -905,73 +905,40 @@ app.add_middleware(RequestIDMiddleware)
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(JWTAuthMiddleware)
 
+# Per-tenant HTTP rate limiting (applied after auth resolves tenant_id)
+from hbllm.serving.middleware.rate_limit import HTTPRateLimitMiddleware
 
-# ─── Studio Router Registration ───────────────────────────────────────────────
+_default_rpm = float(os.environ.get("HBLLM_RATE_LIMIT_RPM", "60"))
+app.add_middleware(HTTPRateLimitMiddleware, default_rpm=_default_rpm)
+
+# Prometheus metrics collection
+from hbllm.serving.middleware.prometheus import PrometheusMiddleware, prometheus_endpoint
+
+app.add_middleware(PrometheusMiddleware)
+
+# API versioning — validates Accept-Version, injects X-API-Version header
+from hbllm.serving.middleware.api_version import APIVersionMiddleware
+
+app.add_middleware(APIVersionMiddleware)
+
+
+@app.get("/metrics/prometheus", tags=["monitoring"])
+async def get_prometheus_metrics() -> Any:
+    """Export metrics in Prometheus text exposition format."""
+    brain = _state.get("brain")
+    return prometheus_endpoint(brain_getter=lambda: brain)
+
+
+# ─── Router Registration ──────────────────────────────────────────────────────
+from hbllm.serving.routes import health_router, memory_router
 from hbllm.serving.studio import router as studio_router
 
 app.include_router(studio_router)
+app.include_router(health_router)
+app.include_router(memory_router)
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check() -> HealthResponse:
-    """Check server health and node count."""
-    brain = _state.get("brain")
-    node_count = len(brain.nodes) if brain else 0
-    mode = _state.get("mode", "unknown")
-    return HealthResponse(
-        status="healthy",
-        nodes_registered=node_count,
-        bus_type=_state.get("bus_type", "unknown"),
-        provider_mode=mode,
-    )
-
-
-@app.get("/health/live")
-async def health_live() -> dict[str, str]:
-    """Kubernetes liveness probe — returns 200 if the process is running."""
-    return {"status": "alive"}
-
-
-@app.get("/health/ready")
-async def health_ready() -> dict[str, Any]:
-    """Kubernetes readiness probe — checks brain, bus, and provider availability."""
-    checks: dict[str, Any] = {}
-    overall_ready = True
-
-    # Brain check
-    brain = _state.get("brain")
-    if brain:
-        checks["brain"] = "ok"
-    elif _state.get("mode") == "provider":
-        checks["brain"] = "degraded (provider-only mode)"
-    else:
-        checks["brain"] = "not_initialized"
-        overall_ready = False
-
-    # Bus check
-    bus = _state.get("bus")
-    checks["bus"] = "ok" if bus else "not_initialized"
-
-    # Provider check
-    provider = _state.get("provider")
-    if not provider and brain:
-        provider = getattr(brain, "provider", None)
-    checks["provider"] = "ok" if provider else "not_configured"
-
-    status_code = 200 if overall_ready else 503
-    return JSONResponse(
-        status_code=status_code,
-        content={"status": "ready" if overall_ready else "not_ready", "checks": checks},
-    )
-
-
-@app.get("/metrics")
-async def metrics() -> Any:
-    """Return real-time MessageBus performance metrics."""
-    brain = _state.get("brain")
-    if not brain or not hasattr(brain.bus, "metrics"):
-        return {"error": "Bus not initialized or metrics unavailable"}
-    return brain.bus.metrics.snapshot()
+# Health, metrics, and routing stats are now in routes/health.py (health_router)
 
 
 # ─── Shared Memory Recall Layer ───────────────────────────────────────────────
@@ -1536,6 +1503,182 @@ async def audio_synthesize(api_req: Request, request: dict) -> Any:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/v1/audio/voices")
+async def list_voices(backend: str = "kokoro") -> Any:
+    """List available TTS voices for a backend."""
+    from hbllm.perception.voice_config import TTSBackend, VoiceRegistry
+
+    try:
+        data_dir = _state.get("config")
+        db_path = "workspace/audio/voice_preferences.db"
+        if data_dir and hasattr(data_dir, "data_dir"):
+            db_path = f"{data_dir.data_dir}/voice_preferences.db"
+
+        registry = VoiceRegistry(db_path)
+        voices = registry.list_voices(TTSBackend(backend))
+        return {"voices": voices, "backend": backend}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.websocket("/v1/audio/ws")
+async def audio_websocket(ws: WebSocket) -> None:
+    """
+    Bidirectional WebSocket for real-time voice streaming.
+
+    **Inbound** (client → server): JSON messages with audio chunks
+        {"type": "audio", "chunk": "<hex-encoded-pcm>", "sample_rate": 16000}
+        {"type": "audio", "chunk": "...", "is_final": true}
+        {"type": "config", "voice_id": "af_heart", "speed": 1.0}
+
+    **Outbound** (server → client): JSON messages with transcription + audio
+        {"type": "transcription", "text": "Hello there"}
+        {"type": "audio_chunk", "audio": "<hex-pcm>", "sample_rate": 24000, "is_final": false}
+        {"type": "audio_chunk", "audio": "...", "is_final": true, "text": "..."}
+        {"type": "response_text", "text": "Full response text"}
+
+    Authentication: Pass JWT as query param: ws://host/v1/audio/ws?token=<jwt>
+    """
+    import os
+
+    import jwt as pyjwt
+
+    # ── Auth ──
+    token = ws.query_params.get("token", "")
+    tenant_id = "default"
+    user_id = "default"
+    session_id = str(uuid.uuid4())
+
+    if token:
+        secret_key = os.environ.get("HBLLM_JWT_SECRET", "")
+        if secret_key:
+            try:
+                payload = pyjwt.decode(token, secret_key, algorithms=["HS256"])
+                tenant_id = payload.get("tenant_id", "default")
+                user_id = payload.get("user_id", "default")
+            except pyjwt.InvalidTokenError:
+                await ws.close(code=1008, reason="Invalid token")
+                return
+
+    await ws.accept()
+    logger.info("Audio WebSocket connected: tenant=%s user=%s", tenant_id, user_id)
+
+    bus = _state.get("bus")
+    if not bus:
+        await ws.send_json({"type": "error", "message": "Bus not initialized"})
+        await ws.close(code=1011)
+        return
+
+    # ── Subscribe to audio response chunks ──
+    audio_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def _on_audio_chunk(msg: Message) -> None:
+        if msg.session_id == session_id:
+            await audio_queue.put(
+                {
+                    "type": "audio_chunk",
+                    "audio": msg.payload.get("audio", ""),
+                    "sample_rate": msg.payload.get("sample_rate", 24000),
+                    "is_final": msg.payload.get("is_final", False),
+                    "text": msg.payload.get("text", ""),
+                }
+            )
+
+    async def _on_output(msg: Message) -> None:
+        if msg.session_id == session_id:
+            await audio_queue.put(
+                {
+                    "type": "response_text",
+                    "text": msg.payload.get("text", ""),
+                }
+            )
+
+    sub_chunk = await bus.subscribe("sensory.audio.chunk", _on_audio_chunk)
+    sub_output = await bus.subscribe("sensory.output", _on_output)
+
+    # ── Background task: forward audio responses to WebSocket ──
+    async def _send_loop() -> None:
+        try:
+            while True:
+                data = await audio_queue.get()
+                try:
+                    await ws.send_json(data)
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            pass
+
+    send_task = asyncio.create_task(_send_loop())
+
+    try:
+        while True:
+            data = await ws.receive_json()
+            msg_type = data.get("type", "audio")
+
+            if msg_type == "audio":
+                # Forward audio chunk to ASR
+                stream_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="sensory.audio.stream",
+                    payload={
+                        "chunk": data.get("chunk", ""),
+                        "sample_rate": data.get("sample_rate", 16000),
+                        "is_final": data.get("is_final", False),
+                    },
+                )
+                await bus.publish("sensory.audio.stream", stream_msg)
+
+            elif msg_type == "config":
+                # Update voice config
+                config_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="voice.config",
+                    payload={
+                        "tenant_id": tenant_id,
+                        "voice_id": data.get("voice_id", "af_heart"),
+                        "speed": data.get("speed", 1.0),
+                        "backend": data.get("backend", "kokoro"),
+                        "emotion": data.get("emotion"),
+                    },
+                )
+                await bus.publish("voice.config", config_msg)
+                await ws.send_json({"type": "config_ack", "status": "updated"})
+
+            elif msg_type == "synthesize":
+                # Direct TTS request
+                tts_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="sensory.audio.out",
+                    payload={
+                        "text": data.get("text", ""),
+                        "stream": True,
+                    },
+                )
+                await bus.publish("sensory.audio.out", tts_msg)
+
+    except WebSocketDisconnect:
+        logger.info("Audio WebSocket disconnected: tenant=%s", tenant_id)
+    except Exception as e:
+        logger.error("Audio WebSocket error: %s", e)
+    finally:
+        send_task.cancel()
+        try:
+            await send_task
+        except asyncio.CancelledError:
+            pass
+        await bus.unsubscribe(sub_chunk)
+        await bus.unsubscribe(sub_output)
+
+
 @app.post("/v1/benchmarks/run")
 async def run_benchmarks(api_req: Request, request: dict | None = None) -> Any:
     """Run specified benchmark suites (latency, memory, specialization, multi_tenant, all) and return reports."""
@@ -1750,8 +1893,9 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
     """
     Stream a response from the cognitive pipeline as Server-Sent Events (SSE).
 
+    Supports fragment-level streaming when ExpressionStream is active.
     Each SSE event has the format:
-        data: {"token": "...", "done": false}
+        data: {"token": "...", "done": false, "fragment_id": "..."}
         data: {"token": "", "done": true, "correlation_id": "..."}
     """
     request.tenant_id = getattr(api_req.state, "tenant_id", "default")
@@ -1766,13 +1910,30 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
 
     token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    async def output_handler(msg: Message) -> None:
+    async def fragment_handler(msg: Message) -> None:
+        """Handle real-time fragment events from ExpressionStream."""
         if msg.correlation_id == correlation_id:
             text = msg.payload.get("text", "")
-            await token_queue.put(text)
+            if text:
+                await token_queue.put(text)
+
+    async def output_handler(msg: Message) -> None:
+        """Handle final complete output — signals stream end."""
+        if msg.correlation_id == correlation_id:
+            text = msg.payload.get("text", "")
+            # If no fragments were streamed, emit the full text as fallback
+            if token_queue.empty() and text:
+                await token_queue.put(text)
             await token_queue.put(None)  # Signal completion
 
+    async def interrupt_handler(msg: Message) -> None:
+        """Handle barge-in interruption — terminate stream immediately."""
+        # Signal the SSE stream to end with an interruption marker
+        await token_queue.put("__INTERRUPTED__")
+
+    await bus.subscribe("sensory.output.fragment", fragment_handler)
     await bus.subscribe("sensory.output", output_handler)
+    await bus.subscribe("sensory.output.interrupted", interrupt_handler)
 
     # Store user message in memory
     memory_msg = Message(
@@ -1826,6 +1987,9 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
 
                 if chunk is None:
                     yield f"data: {_json.dumps({'token': '', 'done': True, 'correlation_id': correlation_id})}\n\n"
+                    break
+                elif chunk == "__INTERRUPTED__":
+                    yield f"data: {_json.dumps({'token': '', 'done': True, 'interrupted': True, 'correlation_id': correlation_id})}\n\n"
                     break
                 else:
                     yield f"data: {_json.dumps({'token': chunk, 'done': False})}\n\n"
@@ -1975,348 +2139,7 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
         )
 
 
-@app.get("/v1/memory/{session_id}")
-async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
-    """Retrieve recent conversation history for a tenant's session."""
-    tenant_id = getattr(request.state, "tenant_id", "default")
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
-
-    async def memory_handler(msg: Message) -> None:
-        if msg.correlation_id == correlation_id and not response_future.done():
-            response_future.set_result(msg)
-
-    await bus.subscribe("memory.retrieve_recent.response", memory_handler)
-
-    query = Message(
-        type=MessageType.QUERY,
-        source_node_id="api_server",
-        tenant_id=tenant_id,
-        session_id=session_id,
-        topic="memory.retrieve_recent",
-        payload={"session_id": session_id, "tenant_id": tenant_id, "limit": limit},
-        correlation_id=correlation_id,
-    )
-    await bus.publish("memory.retrieve_recent", query)
-
-    try:
-        result = await asyncio.wait_for(response_future, timeout=5.0)
-        return result.payload
-    except (TimeoutError, asyncio.TimeoutError):
-        return {"session_id": session_id, "turns": []}
-
-
-_sync_dedup_cache: set[str] = set()
-
-
-@app.post("/v1/sync/episodic")
-async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
-    """Sync a batch of episodic memories from an edge device (append strategy)."""
-    tenant_id = getattr(api_req.state, "tenant_id", "default")
-    user_id = getattr(api_req.state, "user_id", "default")
-    device_id = getattr(api_req.state, "device_id", "default")
-
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    import hashlib
-    import json
-
-    synced_count = 0
-    for mem in request.memories:
-        payload = dict(mem)
-
-        # Deduplication hash based on content
-        content_hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-        if content_hash in _sync_dedup_cache:
-            continue
-
-        # Add to cache and restrict size to prevent memory leaks
-        _sync_dedup_cache.add(content_hash)
-        if len(_sync_dedup_cache) > 10000:
-            # Pop an arbitrary item if cache gets too large
-            _sync_dedup_cache.pop()
-
-        payload["tenant_id"] = tenant_id
-        payload["user_id"] = user_id
-        payload["device_id"] = device_id
-
-        msg = Message(
-            type=MessageType.EVENT,
-            source_node_id=f"edge_sync_{device_id}",
-            tenant_id=tenant_id,
-            user_id=user_id,
-            device_id=device_id,
-            session_id=mem.get("session_id", "sync_session"),
-            topic="memory.store",
-            payload=payload,
-        )
-        await bus.publish("memory.store", msg)
-        synced_count += 1
-
-    return {
-        "status": "success",
-        "synced": synced_count,
-        "skipped": len(request.memories) - synced_count,
-    }
-
-
-@app.post("/v1/sync/semantic")
-async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
-    """Sync a batch of semantic knowledge items from an edge device (append strategy)."""
-    tenant_id = getattr(api_req.state, "tenant_id", "default")
-    user_id = getattr(api_req.state, "user_id", "default")
-    device_id = getattr(api_req.state, "device_id", "default")
-
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    import hashlib
-    import json
-
-    synced_count = 0
-    for item in request.knowledge_items:
-        payload = dict(item)
-
-        # Deduplication hash based on content
-        content_hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-        if content_hash in _sync_dedup_cache:
-            continue
-
-        _sync_dedup_cache.add(content_hash)
-        if len(_sync_dedup_cache) > 10000:
-            _sync_dedup_cache.pop()
-
-        payload["tenant_id"] = tenant_id
-        payload["user_id"] = user_id
-        payload["device_id"] = device_id
-
-        msg = Message(
-            type=MessageType.EVENT,
-            source_node_id=f"edge_sync_{device_id}",
-            tenant_id=tenant_id,
-            user_id=user_id,
-            device_id=device_id,
-            session_id="sync_session",
-            topic="knowledge.store",
-            payload=payload,
-        )
-        await bus.publish("knowledge.store", msg)
-        synced_count += 1
-
-    return {
-        "status": "success",
-        "synced": synced_count,
-        "skipped": len(request.knowledge_items) - synced_count,
-    }
-
-
-@app.post("/v1/feedback")
-async def submit_feedback(request: FeedbackRequest) -> Any:
-    """
-    Submit user feedback on a response for RLHF / DPO continuous learning.
-
-    Feedback is published to the LearnerNode which accumulates samples
-    and triggers DPO training once a batch threshold is reached.
-    """
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    feedback_msg = Message(
-        type=MessageType.FEEDBACK,
-        source_node_id="api_server",
-        tenant_id=request.tenant_id,
-        topic="system.feedback",
-        payload={
-            "message_id": request.message_id,
-            "rating": request.rating,
-            "prompt": request.prompt,
-            "response": request.response,
-            "comment": request.comment,
-        },
-    )
-    await bus.publish("system.feedback", feedback_msg)
-
-    return {
-        "status": "accepted",
-        "message_id": request.message_id,
-        "rating": request.rating,
-    }
-
-
-# ─── Knowledge Graph Endpoints ────────────────────────────────────────────────
-
-
-@app.get("/v1/knowledge/{entity}")
-async def knowledge_neighbors(
-    entity: str, direction: str = "both", relation_type: str | None = None
-) -> Any:
-    """Query KnowledgeGraph neighbors for an entity."""
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
-
-    async def handler(msg: Message) -> None:
-        if msg.correlation_id == correlation_id and not response_future.done():
-            response_future.set_result(msg)
-
-    await bus.subscribe("knowledge.response", handler)
-
-    query = Message(
-        type=MessageType.QUERY,
-        source_node_id="api_server",
-        topic="knowledge.query",
-        payload={
-            "action": "neighbors",
-            "entity": entity,
-            "direction": direction,
-            "relation_type": relation_type,
-        },
-        correlation_id=correlation_id,
-    )
-    await bus.publish("knowledge.query", query)
-
-    try:
-        result = await asyncio.wait_for(response_future, timeout=5.0)
-        return result.payload
-    except (TimeoutError, asyncio.TimeoutError):
-        return {"neighbors": [], "entity": entity}
-
-
-@app.get("/v1/knowledge/path")
-async def knowledge_path(from_entity: str, to_entity: str, max_depth: int = 5) -> Any:
-    """Find shortest path between two entities in the KnowledgeGraph."""
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
-
-    async def handler(msg: Message) -> None:
-        if msg.correlation_id == correlation_id and not response_future.done():
-            response_future.set_result(msg)
-
-    await bus.subscribe("knowledge.response", handler)
-
-    query = Message(
-        type=MessageType.QUERY,
-        source_node_id="api_server",
-        topic="knowledge.query",
-        payload={"action": "path", "from": from_entity, "to": to_entity, "max_depth": max_depth},
-        correlation_id=correlation_id,
-    )
-    await bus.publish("knowledge.query", query)
-
-    try:
-        result = await asyncio.wait_for(response_future, timeout=5.0)
-        return result.payload
-    except (TimeoutError, asyncio.TimeoutError):
-        return {"path": None, "from": from_entity, "to": to_entity}
-
-
-@app.get("/v1/knowledge/subgraph/{entity}")
-async def knowledge_subgraph(entity: str, depth: int = 2) -> Any:
-    """Extract a subgraph around an entity."""
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
-
-    async def handler(msg: Message) -> None:
-        if msg.correlation_id == correlation_id and not response_future.done():
-            response_future.set_result(msg)
-
-    await bus.subscribe("knowledge.response", handler)
-
-    query = Message(
-        type=MessageType.QUERY,
-        source_node_id="api_server",
-        topic="knowledge.query",
-        payload={"action": "subgraph", "entity": entity, "depth": depth},
-        correlation_id=correlation_id,
-    )
-    await bus.publish("knowledge.query", query)
-
-    try:
-        result = await asyncio.wait_for(response_future, timeout=5.0)
-        return result.payload
-    except (TimeoutError, asyncio.TimeoutError):
-        return {"subgraph": {"entities": [], "relations": []}, "entity": entity}
-
-
-@app.get("/v1/knowledge/stats")
-async def knowledge_stats() -> Any:
-    """Get KnowledgeGraph statistics."""
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    correlation_id = str(uuid.uuid4())
-    response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
-
-    async def handler(msg: Message) -> None:
-        if msg.correlation_id == correlation_id and not response_future.done():
-            response_future.set_result(msg)
-
-    await bus.subscribe("knowledge.response", handler)
-
-    query = Message(
-        type=MessageType.QUERY,
-        source_node_id="api_server",
-        topic="knowledge.query",
-        payload={"action": "stats"},
-        correlation_id=correlation_id,
-    )
-    await bus.publish("knowledge.query", query)
-
-    try:
-        result = await asyncio.wait_for(response_future, timeout=5.0)
-        return result.payload
-    except (TimeoutError, asyncio.TimeoutError):
-        return {"entity_count": 0, "relation_count": 0}
-
-
-# ─── Rules Endpoint ───────────────────────────────────────────────────────────
-
-
-@app.get("/v1/rules")
-async def list_rules() -> Any:
-    """List extracted if→then rules from the RuleExtractorNode."""
-    # Find the rule extractor node in the running nodes
-    brain = _state.get("brain")
-    node_map = _get_node_map(brain)
-    for node in node_map.values():
-        if hasattr(node, "rules"):
-            return {
-                "rules": [r.to_dict() for r in node.rules],
-                "total": len(node.rules),
-            }
-    return {"rules": [], "total": 0}
+# Memory, sync, feedback, knowledge, and rules endpoints are now in routes/memory.py (memory_router)
 
 
 # ─── WebSocket Streaming ─────────────────────────────────────────────────────

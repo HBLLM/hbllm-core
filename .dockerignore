@@ -1,49 +1,53 @@
-# ─── Build artifacts ──────────────────────────────────────────────────────────
+# Version control
+.git
+.gitignore
+
+# Python artifacts
 __pycache__
 *.pyc
 *.pyo
 *.egg-info
 dist/
 build/
-.eggs/
+*.egg
 
-# ─── Virtual environments ────────────────────────────────────────────────────
+# Virtual environments
 venv/
-.venv/
 llama_venv/
+.venv/
 
-# ─── Data & State (never ship in image) ──────────────────────────────────────
-data/
-*.db
-*.db-wal
-*.db-shm
-models/
-checkpoints/
-logs/
-
-# ─── Development & CI ────────────────────────────────────────────────────────
-.git/
-.github/
-.ruff_cache/
-.mypy_cache/
-.pytest_cache/
-tests/
-docs/
-examples/
-plugins/
-
-# ─── IDE & OS ────────────────────────────────────────────────────────────────
+# IDE
 .vscode/
 .idea/
-.DS_Store
 *.swp
 *.swo
 
-# ─── Rust build cache ────────────────────────────────────────────────────────
+# Tests & docs (not needed in production image)
+tests/
+docs/
+site/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gemini/
+
+# Development files
+Makefile
+docker-compose*.yml
+helm/
+migrations/
+
+# Data & models (mounted at runtime)
+data/
+models/
+*.db
+*.sqlite
+
+# Rust build artifacts (handled by multi-stage)
+target/
 rust/compute_kernel/target/
 
-# ─── Misc ────────────────────────────────────────────────────────────────────
-*.log
-.env
-.env.local
-pytest_run.log
+# Benchmarks
+hbllm/benchmarks/

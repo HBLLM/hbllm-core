@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -166,6 +167,91 @@ class TaskDecomposer:
         return subtasks
 
     @staticmethod
+    async def decompose_with_llm(
+        task: str,
+        llm_generate: Callable[[str], Coroutine[Any, Any, str]],
+        max_subtasks: int = 5,
+    ) -> list[SwarmTask]:
+        """
+        LLM-powered semantic task decomposition.
+
+        Uses structured JSON prompting to break complex tasks into
+        subtasks with proper dependency tracking.
+
+        Falls back to heuristic decomposition on failure.
+        """
+        import json
+
+        prompt = f"""Analyze this task and decompose it into subtasks for parallel execution.
+
+Task: {task[:1000]}
+
+Respond with ONLY a JSON array. Each element must have:
+- "id": unique subtask identifier (e.g. "sub_1")
+- "description": clear, actionable description
+- "dependencies": array of ids this depends on (empty if none)
+- "priority": float 0.0-1.0 (1.0 = highest)
+
+Rules:
+- Maximum {max_subtasks} subtasks
+- Independent tasks should have empty dependencies
+- Order by logical execution sequence
+- Each subtask should be self-contained and actionable
+
+JSON array:"""
+
+        try:
+            response = await llm_generate(prompt)
+
+            # Extract JSON from response
+            response = response.strip()
+            # Handle markdown code blocks
+            if "```" in response:
+                parts = response.split("```")
+                for part in parts:
+                    part = part.strip()
+                    if part.startswith("json"):
+                        part = part[4:].strip()
+                    if part.startswith("["):
+                        response = part
+                        break
+
+            if not response.startswith("["):
+                # Try to find array in response
+                start = response.find("[")
+                end = response.rfind("]") + 1
+                if start >= 0 and end > start:
+                    response = response[start:end]
+
+            items = json.loads(response)
+
+            if not isinstance(items, list) or not items:
+                raise ValueError("LLM returned empty or non-list response")
+
+            subtasks = []
+            for item in items[:max_subtasks]:
+                subtasks.append(
+                    SwarmTask(
+                        task_id=item.get("id", f"sub_{len(subtasks) + 1}"),
+                        description=item.get("description", ""),
+                        dependencies=item.get("dependencies", []),
+                        priority=float(item.get("priority", 0.5)),
+                    )
+                )
+
+            if subtasks:
+                logger.info("[TaskDecomposer] LLM decomposed into %d subtasks", len(subtasks))
+                return subtasks
+
+        except Exception as e:
+            logger.debug(
+                "[TaskDecomposer] LLM decomposition failed (falling back to heuristic): %s", e
+            )
+
+        # Fallback to heuristic
+        return TaskDecomposer.decompose(task, max_subtasks)
+
+    @staticmethod
     def identify_dependencies(tasks: list[SwarmTask]) -> list[SwarmTask]:
         """
         Identify dependencies between tasks based on references.
@@ -197,6 +283,7 @@ class SwarmEngine(HBLLMPlugin):
         node_id: str = "swarm_engine",
         max_workers: int = 4,
         task_timeout: float = 60.0,
+        llm_generate: Callable[[str], Coroutine[Any, Any, str]] | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -206,6 +293,7 @@ class SwarmEngine(HBLLMPlugin):
         self.task_timeout = task_timeout
         self._executions: dict[str, SwarmExecution] = {}
         self._worker_fn: Any = None  # Async callable for executing subtasks
+        self._llm_generate = llm_generate
         self.decomposer = TaskDecomposer()
 
     def set_worker(self, worker_fn: Any) -> None:
@@ -240,7 +328,12 @@ class SwarmEngine(HBLLMPlugin):
     async def execute(self, task: str) -> SwarmExecution:
         """Decompose and execute a complex task using the swarm."""
         execution_id = str(uuid.uuid4())[:8]
-        subtasks = self.decomposer.decompose(task)
+
+        # Use LLM decomposition when available, fall back to heuristic
+        if self._llm_generate is not None:
+            subtasks = await self.decomposer.decompose_with_llm(task, self._llm_generate)
+        else:
+            subtasks = self.decomposer.decompose(task)
         subtasks = self.decomposer.identify_dependencies(subtasks)
 
         execution = SwarmExecution(
