@@ -197,6 +197,13 @@ class BrainConfig:
     autonomy_watch_dirs: list[str] | None = None  # Directories for filesystem watcher
     autonomy_calendar_dir: str | None = None  # Directory for .ics calendar files
 
+    # Dual LLM routing (local + external)
+    external_provider: str | None = (
+        None  # e.g. "openai/gpt-4o" or "anthropic/claude-sonnet-4-20250514"
+    )
+    external_provider_kwargs: dict[str, Any] = field(default_factory=dict)
+    dual_llm_complexity_threshold: float = 0.4  # AUTO routing threshold
+
 
 class Brain:
     """
@@ -913,6 +920,30 @@ class BrainFactory:
         # 1. Create adapter
         llm = ProviderLLM(llm_provider, system_prompt=cfg.system_prompt)
 
+        # 1b. Create dual LLM router if external provider is configured
+        dual_router = None
+        if cfg.external_provider:
+            try:
+                external_provider = get_provider(
+                    cfg.external_provider, **cfg.external_provider_kwargs
+                )
+                external_llm = ProviderLLM(external_provider, system_prompt=cfg.system_prompt)
+
+                from hbllm.brain.dual_llm_router import DualLLMRouter
+
+                dual_router = DualLLMRouter(
+                    local=llm,
+                    external=external_llm,
+                    complexity_threshold=cfg.dual_llm_complexity_threshold,
+                )
+                logger.info(
+                    "[Factory] Dual LLM Router: local=%s, external=%s",
+                    llm_provider.name,
+                    external_provider.name,
+                )
+            except Exception as e:
+                logger.warning("[Factory] Failed to create external provider: %s", e)
+
         # 2. Create bus and registry
         message_bus = bus or InProcessBus()
         await message_bus.start()
@@ -933,6 +964,7 @@ class BrainFactory:
                 cfg,
                 message_bus,
                 registry,
+                dual_router=dual_router,
             )
 
         # 3. Create cognitive nodes with LLM injected (legacy path)
@@ -1201,6 +1233,15 @@ class BrainFactory:
         brain.policy_optimizer = PolicyOptimizer()
         brain.interaction_miner = AsyncInteractionMiner(data_dir=data_dir)
 
+        # Dual LLM Router
+        brain.dual_router = dual_router
+        if dual_router is not None:
+            # Wire state machine for cognitive-state-aware routing
+            autonomy = getattr(brain, "autonomy_core", None)
+            if autonomy is not None:
+                dual_router.state_machine = getattr(autonomy, "state_machine", None)
+            logger.info("[Factory] Dual LLM Router attached to brain")
+
         # Advanced Subsystems (Phase 3-7)
         if cfg.inject_task_graph:
             from hbllm.brain.autonomy.task_graph import TaskGraphRuntime
@@ -1464,6 +1505,7 @@ class BrainFactory:
         cfg: BrainConfig,
         message_bus: MessageBus,
         registry: ServiceRegistry,
+        dual_router: Any = None,
     ) -> Brain:
         """
         v4: Build brain using 8 composite nodes instead of 27 individual ones.
@@ -1744,6 +1786,14 @@ class BrainFactory:
         brain.reward_model = RewardModel(data_dir=cfg.data_dir)
         brain.policy_optimizer = PolicyOptimizer()
         brain.interaction_miner = AsyncInteractionMiner(data_dir=cfg.data_dir)
+
+        # Dual LLM Router
+        brain.dual_router = dual_router
+        if dual_router is not None:
+            autonomy = getattr(brain, "autonomy_core", None)
+            if autonomy is not None:
+                dual_router.state_machine = getattr(autonomy, "state_machine", None)
+            logger.info("[Factory] Dual LLM Router attached to brain (composite)")
 
         # Map composite sub-components to legacy Brain attributes
         if governance:

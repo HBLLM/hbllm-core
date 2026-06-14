@@ -974,6 +974,18 @@ async def metrics() -> Any:
     return brain.bus.metrics.snapshot()
 
 
+@app.get("/routing/stats")
+async def routing_stats() -> Any:
+    """Return Dual LLM Router statistics (local vs external usage)."""
+    brain = _state.get("brain")
+    if not brain:
+        return {"error": "Brain not initialized"}
+    dual_router = getattr(brain, "dual_router", None)
+    if dual_router is None:
+        return {"status": "single_model", "message": "No dual router configured"}
+    return dual_router.snapshot()
+
+
 # ─── Shared Memory Recall Layer ───────────────────────────────────────────────
 
 
