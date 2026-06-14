@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -142,14 +143,20 @@ async def test_system_health_watcher_normal():
 @pytest.mark.asyncio
 async def test_system_health_watcher_disk_alert():
     """Disk alert should trigger when threshold is impossibly high."""
+    # Use a path guaranteed to exist and be accessible in any environment
+    check_path = os.path.dirname(os.path.abspath(__file__))
     watcher = SystemHealthWatcher(
         thresholds=HealthThresholds(
             disk_free_min_gb=99999.0,  # Higher than any disk
             check_interval=0,
         ),
+        disk_paths=[check_path],
     )
     result = await watcher.check()
-    assert result is not None
+    assert result is not None, (
+        f"Expected disk alert but got None. "
+        f"disk_usage({check_path})={shutil.disk_usage(check_path)}"
+    )
     assert len(result) >= 1
     assert result[0].payload["type"] == "disk_low"
 
@@ -157,11 +164,13 @@ async def test_system_health_watcher_disk_alert():
 @pytest.mark.asyncio
 async def test_system_health_watcher_cooldown():
     """Same alert should not fire twice within cooldown period."""
+    check_path = os.path.dirname(os.path.abspath(__file__))
     watcher = SystemHealthWatcher(
         thresholds=HealthThresholds(
             disk_free_min_gb=99999.0,
             check_interval=0,
         ),
+        disk_paths=[check_path],
     )
     result1 = await watcher.check()
     assert result1 is not None
