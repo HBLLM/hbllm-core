@@ -103,8 +103,8 @@ class SystemHealthWatcher:
     def _is_on_cooldown(self, alert_key: str) -> bool:
         """Check if an alert type is on cooldown."""
         now = time.monotonic()
-        last = self._alert_cooldowns.get(alert_key, 0.0)
-        if now - last < self._alert_cooldown_s:
+        last = self._alert_cooldowns.get(alert_key)
+        if last is not None and (now - last) < self._alert_cooldown_s:
             return True
         self._alert_cooldowns[alert_key] = now
         return False
