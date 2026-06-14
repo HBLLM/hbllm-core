@@ -1,0 +1,47 @@
+# HBLLM Core — Staging Values Override
+# Applied via: helm upgrade --values helm/hbllm/values-staging.yaml
+
+replicaCount: 2
+
+image:
+  tag: "latest"  # CI auto-deploys SHA tag
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  hosts:
+    - host: api-staging.hbllm.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: hbllm-staging-tls
+      hosts:
+        - api-staging.hbllm.io
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 75
+
+env:
+  HBLLM_LOG_LEVEL: DEBUG
+  HBLLM_BUS_BACKEND: redis
+  HBLLM_SECRET_BACKEND: env
+  HBLLM_RATE_LIMIT_RPM: "300"
+  HBLLM_SHUTDOWN_DRAIN_SECONDS: "15"
+
+persistence:
+  enabled: true
+  size: 5Gi
