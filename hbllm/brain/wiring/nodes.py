@@ -15,7 +15,7 @@ from typing import Any
 from hbllm.brain.policy_engine import PolicyEngine
 from hbllm.brain.provider_adapter import ProviderLLM
 from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.wiring.snn import _wire_comprehension_stream, _wire_expression_stream
+from hbllm.brain.wiring.snn import wire_comprehension_stream, wire_expression_stream
 from hbllm.brain.wiring.subsystems import _register_node
 from hbllm.network.bus import MessageBus
 from hbllm.network.node import Node
@@ -61,7 +61,7 @@ def create_legacy_nodes(
     router_node._centroids_path = Path(cfg.data_dir) / "router_centroids.json"
 
     if cfg.inject_comprehension:
-        _wire_comprehension_stream(router_node, domain_registry)
+        wire_comprehension_stream(router_node, domain_registry)
 
     # Decision node
     decision_node = DecisionNode(node_id="decision", llm=llm, policy_engine=policy_engine)
@@ -92,7 +92,7 @@ def create_legacy_nodes(
 
     # Wire expression-side Cognitive Stream (Layer 5)
     if cfg.inject_comprehension:
-        _wire_expression_stream(decision_node, router_node, llm, dual_router=dual_router)
+        wire_expression_stream(decision_node, router_node, llm, dual_router=dual_router)
 
     # Wire memory search into ComprehensionStream for per-concept retrieval
     _wire_memory_search(router_node, nodes)
