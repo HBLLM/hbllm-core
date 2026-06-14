@@ -1574,20 +1574,24 @@ async def audio_websocket(ws: WebSocket) -> None:
 
     async def _on_audio_chunk(msg: Message) -> None:
         if msg.session_id == session_id:
-            await audio_queue.put({
-                "type": "audio_chunk",
-                "audio": msg.payload.get("audio", ""),
-                "sample_rate": msg.payload.get("sample_rate", 24000),
-                "is_final": msg.payload.get("is_final", False),
-                "text": msg.payload.get("text", ""),
-            })
+            await audio_queue.put(
+                {
+                    "type": "audio_chunk",
+                    "audio": msg.payload.get("audio", ""),
+                    "sample_rate": msg.payload.get("sample_rate", 24000),
+                    "is_final": msg.payload.get("is_final", False),
+                    "text": msg.payload.get("text", ""),
+                }
+            )
 
     async def _on_output(msg: Message) -> None:
         if msg.session_id == session_id:
-            await audio_queue.put({
-                "type": "response_text",
-                "text": msg.payload.get("text", ""),
-            })
+            await audio_queue.put(
+                {
+                    "type": "response_text",
+                    "text": msg.payload.get("text", ""),
+                }
+            )
 
     sub_chunk = await bus.subscribe("sensory.audio.chunk", _on_audio_chunk)
     sub_output = await bus.subscribe("sensory.output", _on_output)
