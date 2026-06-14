@@ -5,15 +5,16 @@ Revises: None
 Create Date: 2026-06-14
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -32,8 +33,7 @@ def upgrade() -> None:
         sa.Column("importance", sa.Float, server_default="0.5"),
         sa.Column("metadata", sa.JSON, server_default="{}"),
     )
-    op.create_index("idx_episodic_tenant_time", "episodic_memories",
-                     ["tenant_id", "timestamp"])
+    op.create_index("idx_episodic_tenant_time", "episodic_memories", ["tenant_id", "timestamp"])
 
     # ── Semantic Memory ─────────────────────────────────────────────
     op.create_table(
@@ -64,12 +64,9 @@ def upgrade() -> None:
         sa.Column("details", sa.JSON, server_default="{}"),
         sa.Column("success", sa.Boolean, server_default="true"),
     )
-    op.create_index("idx_audit_tenant", "audit_log",
-                     ["tenant_id", sa.text("timestamp DESC")])
-    op.create_index("idx_audit_action", "audit_log",
-                     ["action", sa.text("timestamp DESC")])
-    op.create_index("idx_audit_severity", "audit_log",
-                     ["severity", sa.text("timestamp DESC")])
+    op.create_index("idx_audit_tenant", "audit_log", ["tenant_id", sa.text("timestamp DESC")])
+    op.create_index("idx_audit_action", "audit_log", ["action", sa.text("timestamp DESC")])
+    op.create_index("idx_audit_severity", "audit_log", ["severity", sa.text("timestamp DESC")])
 
     # ── Tenant Registry ─────────────────────────────────────────────
     op.create_table(
@@ -99,8 +96,13 @@ def upgrade() -> None:
     op.create_table(
         "conversation_turns",
         sa.Column("id", sa.Text, primary_key=True),
-        sa.Column("conversation_id", sa.Text, sa.ForeignKey("conversations.id"),
-                   nullable=False, index=True),
+        sa.Column(
+            "conversation_id",
+            sa.Text,
+            sa.ForeignKey("conversations.id"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column("tenant_id", sa.Text, nullable=False, index=True),
         sa.Column("role", sa.Text, nullable=False),
         sa.Column("content", sa.Text, nullable=False),
