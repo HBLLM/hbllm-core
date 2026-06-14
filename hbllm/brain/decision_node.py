@@ -634,7 +634,7 @@ class DecisionNode(Node):
                 )
                 return False
         except Exception:
-            pass
+            logger.debug("Memory limit check failed (psutil unavailable)", exc_info=True)
 
         return True
 
