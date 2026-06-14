@@ -178,6 +178,9 @@ jobs:
     concurrency:
       group: "pages"
       cancel-in-progress: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -199,6 +202,7 @@ jobs:
           path: site/
 
       - name: Deploy to GitHub Pages
+        id: deploy
         uses: actions/deploy-pages@v4
 
   # ── Docker Build & Push ──────────────────────────────────────────────
