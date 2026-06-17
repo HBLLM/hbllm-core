@@ -82,7 +82,9 @@ class AudioInputNode(Node):
                 self._moonshine_model = MoonshineOnnxModel(model_name=self.model_size)
                 logger.info("Moonshine ASR loaded successfully")
             except ImportError:
-                logger.warning("moonshine-onnx not installed. Install with: pip install useful-moonshine-onnx")
+                logger.warning(
+                    "moonshine-onnx not installed. Install with: pip install useful-moonshine-onnx"
+                )
             except Exception as e:
                 logger.error("Failed to load Moonshine model: %s", e)
 
@@ -225,7 +227,9 @@ class AudioInputNode(Node):
 
         return None
 
-    async def _flush_stream(self, session_id: str, message: Message, *, is_final: bool = False) -> None:
+    async def _flush_stream(
+        self, session_id: str, message: Message, *, is_final: bool = False
+    ) -> None:
         """Transcribe buffered audio and forward to router."""
         buf = self._stream_buffers.pop(session_id, None)
         if not buf or not buf.has_audio:
@@ -239,7 +243,11 @@ class AudioInputNode(Node):
             duration_s = len(pcm_bytes) / (2 * sample_rate)
             logger.info(
                 "Flushing audio buffer (%s): %d bytes, %.2fs, %d chunks, sr=%d, speech=%s",
-                session_id[:8], len(pcm_bytes), duration_s, len(buf.chunks), sample_rate,
+                session_id[:8],
+                len(pcm_bytes),
+                duration_s,
+                len(buf.chunks),
+                sample_rate,
                 buf._speech_detected,
             )
 
@@ -255,12 +263,15 @@ class AudioInputNode(Node):
                 return
 
             import time as _time
+
             t0 = _time.monotonic()
             transcription = await self._transcribe_pcm(pcm_bytes, sample_rate)
             elapsed = _time.monotonic() - t0
             logger.info(
                 "Transcription result (%s): '%s' (took %.1fs)",
-                session_id[:8], transcription[:80] if transcription else "<empty>", elapsed,
+                session_id[:8],
+                transcription[:80] if transcription else "<empty>",
+                elapsed,
             )
 
             if transcription:
@@ -360,6 +371,7 @@ class AudioInputNode(Node):
 
         # Fall back to NVIDIA Cloud ASR if Moonshine returns empty
         import os
+
         nvidia_api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_NIM_API_KEY")
         if nvidia_api_key:
             try:
@@ -395,10 +407,15 @@ class AudioInputNode(Node):
                 return ""
 
             # Log audio stats for debugging
-            rms = float(np.sqrt(np.mean(samples ** 2)))
+            rms = float(np.sqrt(np.mean(samples**2)))
             peak = float(np.max(np.abs(samples)))
-            logger.info("Audio stats (raw): rms=%.4f, peak=%.4f, len=%d (%.2fs)",
-                        rms, peak, len(samples), len(samples)/16000)
+            logger.info(
+                "Audio stats (raw): rms=%.4f, peak=%.4f, len=%d (%.2fs)",
+                rms,
+                peak,
+                len(samples),
+                len(samples) / 16000,
+            )
 
             # Trim leading/trailing silence (below 2% amplitude)
             threshold = 0.02
@@ -409,8 +426,13 @@ class AudioInputNode(Node):
                 start = max(0, above[0] - pad)
                 end = min(len(samples), above[-1] + pad)
                 samples = samples[start:end]
-                logger.info("Trimmed silence: %d→%d samples (%.2fs→%.2fs)",
-                            len(above), len(samples), len(above)/16000, len(samples)/16000)
+                logger.info(
+                    "Trimmed silence: %d→%d samples (%.2fs→%.2fs)",
+                    len(above),
+                    len(samples),
+                    len(above) / 16000,
+                    len(samples) / 16000,
+                )
 
             # Skip if trimmed too short
             if len(samples) < 1600:
@@ -421,8 +443,11 @@ class AudioInputNode(Node):
             peak = float(np.max(np.abs(samples)))
             if peak > 0.001:
                 samples = samples * (0.95 / peak)
-                logger.info("Normalized: peak %.4f → 0.95, new rms=%.4f",
-                            peak, float(np.sqrt(np.mean(samples ** 2))))
+                logger.info(
+                    "Normalized: peak %.4f → 0.95, new rms=%.4f",
+                    peak,
+                    float(np.sqrt(np.mean(samples**2))),
+                )
 
             # Moonshine expects (1, samples) float32
             samples_2d = samples.reshape(1, -1)
@@ -430,9 +455,13 @@ class AudioInputNode(Node):
             # DEBUG: save the exact audio Moonshine receives to a WAV file
             try:
                 import soundfile as sf  # type: ignore[import-not-found]
+
                 sf.write("/tmp/moonshine_debug_last.wav", samples, 16000)
-                logger.info("DEBUG: Saved audio to /tmp/moonshine_debug_last.wav (%d samples, %.2fs)",
-                            len(samples), len(samples)/16000)
+                logger.info(
+                    "DEBUG: Saved audio to /tmp/moonshine_debug_last.wav (%d samples, %.2fs)",
+                    len(samples),
+                    len(samples) / 16000,
+                )
             except Exception:
                 pass
 
@@ -441,6 +470,7 @@ class AudioInputNode(Node):
             logger.info("Moonshine token_ids: %s", token_ids)
 
             from moonshine_onnx import load_tokenizer  # type: ignore[import-untyped]
+
             tokenizer = load_tokenizer()
             texts = tokenizer.decode_batch(token_ids)
             text = texts[0].strip() if texts else ""
@@ -584,7 +614,9 @@ class _StreamBuffer:
 
         # Absolute hard limit — never allow buffer to exceed 30s no matter what
         if self.elapsed >= 30.0:
-            logger.warning("Buffer exceeded absolute 30s limit (%.1fs). Force flushing.", self.elapsed)
+            logger.warning(
+                "Buffer exceeded absolute 30s limit (%.1fs). Force flushing.", self.elapsed
+            )
             return True
 
         # Normal max buffer duration
@@ -609,10 +641,11 @@ class _StreamBuffer:
         # Check if the latest chunk has enough energy to be speech
         if self.chunks:
             import numpy as np
+
             last_chunk = self.chunks[-1]
             if len(last_chunk) >= 2:
                 samples = np.frombuffer(last_chunk, dtype=np.int16).astype(np.float32) / 32768.0
-                rms = float(np.sqrt(np.mean(samples ** 2)))
+                rms = float(np.sqrt(np.mean(samples**2)))
                 if rms > 0.01:  # Above noise floor
                     if not self._speech_detected and len(self.chunks) > 2:
                         # Discard pre-speech silence (same as Silero VAD path)
@@ -642,8 +675,8 @@ class _StreamBuffer:
     def _check_vad(self, vad_model: Any) -> bool:
         """Use Silero VAD to detect speech boundaries."""
         try:
-            import torch
             import numpy as np
+            import torch
 
             # Get the last chunk for VAD analysis
             last_chunk = self.chunks[-1]
@@ -668,13 +701,21 @@ class _StreamBuffer:
 
             # Log every Nth check to avoid spam (log every 4th = ~1 per second)
             if len(self.chunks) % 4 == 0:
-                logger.info("VAD prob=%.3f, threshold=%.2f, speech_detected=%s, chunks=%d",
-                            speech_prob, self.vad_threshold, self._speech_detected, len(self.chunks))
+                logger.info(
+                    "VAD prob=%.3f, threshold=%.2f, speech_detected=%s, chunks=%d",
+                    speech_prob,
+                    self.vad_threshold,
+                    self._speech_detected,
+                    len(self.chunks),
+                )
 
             if speech_prob >= self.vad_threshold:
                 if not self._speech_detected:
-                    logger.info("VAD: Speech onset detected (prob=%.3f), discarding %d pre-speech chunks",
-                                speech_prob, max(0, len(self.chunks) - 2))
+                    logger.info(
+                        "VAD: Speech onset detected (prob=%.3f), discarding %d pre-speech chunks",
+                        speech_prob,
+                        max(0, len(self.chunks) - 2),
+                    )
                     # Discard all pre-speech silence chunks, keeping only
                     # the last 2 chunks as lead-in context (~0.5s).
                     # Without this, Moonshine receives 10+ seconds of noise

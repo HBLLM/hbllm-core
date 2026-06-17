@@ -142,12 +142,7 @@ class CognitivePipeline:
         while True:
             try:
                 await asyncio.sleep(30.0)
-                now = time.monotonic()
-                stale_ids = [
-                    cid
-                    for cid, fut in self._response_futures.items()
-                    if not fut.done()
-                ]
+                stale_ids = [cid for cid, fut in self._response_futures.items() if not fut.done()]
                 # We can't easily track creation time on futures, so we cancel
                 # any that are still pending after a full sweep interval.
                 # In practice, total_timeout handles the primary case; this
@@ -411,9 +406,25 @@ class CognitivePipeline:
 
     # Verbs that should never be routed to the fast path, even in short queries.
     _DANGEROUS_VERBS = {
-        "delete", "remove", "execute", "run", "kill", "drop", "destroy",
-        "erase", "wipe", "shutdown", "restart", "reset", "purge", "clear",
-        "install", "uninstall", "deploy", "terminate", "format",
+        "delete",
+        "remove",
+        "execute",
+        "run",
+        "kill",
+        "drop",
+        "destroy",
+        "erase",
+        "wipe",
+        "shutdown",
+        "restart",
+        "reset",
+        "purge",
+        "clear",
+        "install",
+        "uninstall",
+        "deploy",
+        "terminate",
+        "format",
     }
 
     def _classify_complexity(self, text: str) -> str:

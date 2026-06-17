@@ -46,8 +46,8 @@ class RateLimitInterceptor:
             return message
 
         # Exempt high-frequency streaming topics from rate limiting
-        topic = getattr(message, 'topic', '') or ''
-        if topic.startswith('sensory.audio') or topic.startswith('sensory.transcription'):
+        topic = getattr(message, "topic", "") or ""
+        if topic.startswith("sensory.audio") or topic.startswith("sensory.transcription"):
             return message
 
         now = time.monotonic()

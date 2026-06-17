@@ -371,9 +371,7 @@ class InProcessBus:
                             corr = m.correlation_id or m.id
                             pending_f = self._pending_requests.pop(corr, None)
                             if pending_f and not pending_f.done():
-                                error_resp = m.create_error(
-                                    f"Handler error: {type(exc).__name__}"
-                                )
+                                error_resp = m.create_error(f"Handler error: {type(exc).__name__}")
                                 pending_f.set_result(error_resp)
 
                 task = asyncio.create_task(_run_handler())
@@ -406,7 +404,4 @@ class InProcessBus:
 
     def _rebuild_wildcard_cache(self) -> None:
         """Rebuild the wildcard topic cache after subscription changes."""
-        self._wildcard_topics = [
-            t for t in self._subscriptions
-            if t == "*" or t.endswith(".*")
-        ]
+        self._wildcard_topics = [t for t in self._subscriptions if t == "*" or t.endswith(".*")]

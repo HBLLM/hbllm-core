@@ -59,6 +59,7 @@ class _BoundedSessionHistory:
         self._data[key] = d
         return d
 
+
 class RouterNode(Node):
     """
     Central router that uses LLM-based intent classification to direct

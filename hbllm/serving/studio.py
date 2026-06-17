@@ -1801,9 +1801,7 @@ async def studio_voice_test(request: Request) -> Any:
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
-
     import asyncio
-
 
     msg = Message(
         type=MessageType.QUERY,
@@ -1826,9 +1824,15 @@ async def studio_voice_test(request: Request) -> Any:
                 "audio_path": resp.payload.get("audio_path"),
                 "voice": resp.payload.get("voice"),
             }
-        return {"status": "error", "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded"}
+        return {
+            "status": "error",
+            "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded",
+        }
     except asyncio.TimeoutError:
-        return {"status": "error", "error": "Synthesis timed out — model may still be loading. Try again in a few seconds."}
+        return {
+            "status": "error",
+            "error": "Synthesis timed out — model may still be loading. Try again in a few seconds.",
+        }
     except Exception as e:
         return {"status": "error", "error": str(e) or f"Synthesis failed: {type(e).__name__}"}
 

@@ -56,7 +56,9 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     """Incoming chat message from a tenant."""
 
-    tenant_id: str = Field(default="default", description="Unique tenant identifier (overridden by JWT)")
+    tenant_id: str = Field(
+        default="default", description="Unique tenant identifier (overridden by JWT)"
+    )
     user_id: str = Field(default="", description="User identifier (overridden by JWT)")
     device_id: str = Field(default="", description="Device identifier (overridden by JWT)")
     session_id: str = Field(default="default_session", description="Session identifier")
@@ -130,7 +132,9 @@ class FeedbackRequest(BaseModel):
     tenant_id: str = Field(..., description="Tenant who sent the feedback")
     message_id: str = Field(..., description="Correlation ID of the response being rated")
     rating: int = Field(
-        ..., ge=-1, le=1,
+        ...,
+        ge=-1,
+        le=1,
         description="-1 (bad) or 1 (good). Neutral (0) feedback is accepted but excluded from RLHF training.",
     )
     prompt: str | None = Field(default=None, description="Original prompt text")
@@ -218,7 +222,16 @@ async def _boot_brain(
     provider_model = os.getenv("HBLLM_PROVIDER_MODEL")
 
     # Known external provider prefixes — anything else with "/" is a HuggingFace model ID
-    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local", "groq", "nvidia", "google", "deepseek"}
+    _KNOWN_PROVIDERS = {
+        "openai",
+        "anthropic",
+        "ollama",
+        "local",
+        "groq",
+        "nvidia",
+        "google",
+        "deepseek",
+    }
 
     is_provider = False
     if provider_name:
@@ -274,9 +287,8 @@ async def _boot_brain(
             "nvidia": "NVIDIA_API_KEY",
         }
         selected_env_key = provider_env_keys.get(provider_name.lower()) if provider_name else None
-        api_key = (
-            os.getenv("HBLLM_PROVIDER_API_KEY")
-            or (os.getenv(selected_env_key) if selected_env_key else None)
+        api_key = os.getenv("HBLLM_PROVIDER_API_KEY") or (
+            os.getenv(selected_env_key) if selected_env_key else None
         )
         if api_key:
             provider_kwargs["api_key"] = api_key
@@ -1648,7 +1660,9 @@ async def audio_websocket(ws: WebSocket) -> None:
                 chunk_data = data.get("chunk", "")
                 logger.debug(
                     "WS audio chunk received: %d hex chars, sr=%s, final=%s",
-                    len(chunk_data), data.get("sample_rate"), data.get("is_final"),
+                    len(chunk_data),
+                    data.get("sample_rate"),
+                    data.get("is_final"),
                 )
                 stream_msg = Message(
                     type=MessageType.EVENT,

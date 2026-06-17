@@ -371,9 +371,7 @@ class ServiceRegistry:
                                         "message": health.message,
                                     },
                                 )
-                                await self._bus.publish(
-                                    "system.node.unhealthy", alert_msg
-                                )
+                                await self._bus.publish("system.node.unhealthy", alert_msg)
 
             except asyncio.CancelledError:
                 break

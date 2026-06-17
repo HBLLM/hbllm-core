@@ -64,10 +64,10 @@ class MessageType(StrEnum):
 class Priority(int, Enum):
     """Message priority levels for queue ordering (lower value = higher priority)."""
 
-    LOW = 0        # Background tasks, analytics
-    NORMAL = 1     # Standard user messages
-    HIGH = 2       # System commands, health checks
-    CRITICAL = 3   # Safety-critical, emergency shutdown
+    LOW = 0  # Background tasks, analytics
+    NORMAL = 1  # Standard user messages
+    HIGH = 2  # System commands, health checks
+    CRITICAL = 3  # Safety-critical, emergency shutdown
 
 
 class Message(BaseModel):

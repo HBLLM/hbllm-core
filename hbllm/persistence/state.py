@@ -264,7 +264,9 @@ class BrainState:
                 device_id,
                 tool_name,
                 input_data,
-                output[:5000] if len(output) <= 5000 else output[:4950] + f"\n... [truncated from {len(output)} chars]",
+                output[:5000]
+                if len(output) <= 5000
+                else output[:4950] + f"\n... [truncated from {len(output)} chars]",
                 duration_ms,
                 time.time(),
             ),
