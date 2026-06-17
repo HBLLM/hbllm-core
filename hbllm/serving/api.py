@@ -1539,6 +1539,100 @@ async def list_voices(backend: str = "kokoro") -> Any:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ── Speaker Identification ────────────────────────────────────────────────
+
+
+@app.post("/studio/voice/speakers/enroll")
+async def enroll_speaker(request: Request) -> Any:
+    """
+    Enroll a speaker's voice for identification.
+
+    JSON body:
+        speaker_id: str — unique identifier
+        speaker_name: str — display name
+        audio_hex: str — hex-encoded 16-bit PCM audio (at least 3s)
+        sample_rate: int — sample rate (default 16000)
+    """
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Bus not initialized")
+
+    data = await request.json()
+    speaker_id = data.get("speaker_id", "").strip()
+    if not speaker_id:
+        raise HTTPException(status_code=400, detail="speaker_id is required")
+
+    tenant_id = data.get("tenant_id", "default")
+
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="api",
+        tenant_id=tenant_id,
+        topic="speaker.enroll",
+        payload={
+            "speaker_id": speaker_id,
+            "speaker_name": data.get("speaker_name", speaker_id),
+            "pcm_bytes": data.get("audio_hex", ""),
+            "sample_rate": data.get("sample_rate", 16000),
+        },
+    )
+    try:
+        resp = await asyncio.wait_for(
+            bus.request("speaker.enroll", msg, timeout=15.0), timeout=15.0
+        )
+        return resp.payload
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(status_code=504, detail="Speaker enrollment timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/studio/voice/speakers")
+async def list_speakers(tenant_id: str = "default") -> Any:
+    """List all enrolled speakers for a tenant."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Bus not initialized")
+
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="api",
+        tenant_id=tenant_id,
+        topic="speaker.list",
+        payload={},
+    )
+    try:
+        resp = await asyncio.wait_for(bus.request("speaker.list", msg, timeout=5.0), timeout=5.0)
+        return resp.payload
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(status_code=504, detail="Speaker list timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/studio/voice/speakers/{speaker_id}")
+async def delete_speaker(speaker_id: str, tenant_id: str = "default") -> Any:
+    """Delete an enrolled speaker profile."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Bus not initialized")
+
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="api",
+        tenant_id=tenant_id,
+        topic="speaker.delete",
+        payload={"speaker_id": speaker_id},
+    )
+    try:
+        resp = await asyncio.wait_for(bus.request("speaker.delete", msg, timeout=5.0), timeout=5.0)
+        return resp.payload
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(status_code=504, detail="Speaker delete timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/v1/audio/ws")
 async def audio_websocket(ws: WebSocket) -> None:
     """
@@ -1629,6 +1723,9 @@ async def audio_websocket(ws: WebSocket) -> None:
                 {
                     "type": "transcription",
                     "text": msg.payload.get("text", ""),
+                    "speaker_id": msg.payload.get("speaker_id", "unknown"),
+                    "speaker_name": msg.payload.get("speaker_name", ""),
+                    "speaker_confidence": msg.payload.get("speaker_confidence", 0.0),
                 }
             )
 

@@ -277,6 +277,41 @@ class AudioInputNode(Node):
             if transcription:
                 logger.info("Stream transcribed (%s): '%s'", session_id, transcription[:80])
 
+                # Identify the speaker from the same audio
+                speaker_id = "unknown"
+                speaker_name = ""
+                speaker_confidence = 0.0
+                try:
+                    speaker_msg = Message(
+                        type=MessageType.QUERY,
+                        source_node_id=self.node_id,
+                        tenant_id=message.tenant_id,
+                        session_id=session_id,
+                        topic="speaker.identify",
+                        payload={
+                            "pcm_bytes": pcm_bytes.hex(),
+                            "sample_rate": sample_rate,
+                        },
+                    )
+                    speaker_result = await asyncio.wait_for(
+                        self.bus.request("speaker.identify", speaker_msg, timeout=3.0),
+                        timeout=3.0,
+                    )
+                    speaker_id = speaker_result.payload.get("speaker_id", "unknown")
+                    speaker_name = speaker_result.payload.get("speaker_name", "")
+                    speaker_confidence = speaker_result.payload.get("confidence", 0.0)
+                    if speaker_id != "unknown":
+                        logger.info(
+                            "Speaker identified: %s (%s) confidence=%.2f",
+                            speaker_id,
+                            speaker_name,
+                            speaker_confidence,
+                        )
+                except (TimeoutError, asyncio.TimeoutError):
+                    logger.debug("Speaker identification timed out, continuing as unknown")
+                except Exception as e:
+                    logger.debug("Speaker identification unavailable: %s", e)
+
                 # Publish transcription event for the WebSocket to forward to browser
                 transcription_msg = Message(
                     type=MessageType.EVENT,
@@ -284,7 +319,12 @@ class AudioInputNode(Node):
                     tenant_id=message.tenant_id,
                     session_id=session_id,
                     topic="sensory.transcription",
-                    payload={"text": transcription},
+                    payload={
+                        "text": transcription,
+                        "speaker_id": speaker_id,
+                        "speaker_name": speaker_name,
+                        "speaker_confidence": speaker_confidence,
+                    },
                 )
                 await self.bus.publish("sensory.transcription", transcription_msg)
 
@@ -295,7 +335,13 @@ class AudioInputNode(Node):
                     tenant_id=message.tenant_id,
                     session_id=session_id,
                     topic="router.query",
-                    payload={"text": transcription, "source": "audio_stream"},
+                    payload={
+                        "text": transcription,
+                        "source": "audio_stream",
+                        "speaker_id": speaker_id,
+                        "speaker_name": speaker_name,
+                        "speaker_confidence": speaker_confidence,
+                    },
                 )
                 asyncio.create_task(self.bus.publish("router.query", query_msg))
 

@@ -141,6 +141,7 @@ def create_legacy_nodes(
     if cfg.inject_perception:
         from hbllm.perception.audio_in_node import AudioInputNode
         from hbllm.perception.audio_out_node import AudioOutputNode
+        from hbllm.perception.speaker_id_node import SpeakerIdNode
         from hbllm.perception.vision_node import VisionNode
 
         nodes.extend(
@@ -148,6 +149,7 @@ def create_legacy_nodes(
                 AudioInputNode(node_id="audio_in", model_size="tiny"),
                 AudioOutputNode(node_id="audio_out"),
                 VisionNode(node_id="vision"),
+                SpeakerIdNode(node_id="speaker_id"),
             ]
         )
 
