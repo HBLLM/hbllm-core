@@ -156,6 +156,7 @@ class AudioOutputNode(Node):
             voice_id: str → Optional voice override
             stream: bool → If True, emit sentence-level audio chunks
         """
+        logger.info("[AudioOut] handle_synthesize called with text=%s", message.payload.get("text", "")[:50])
         payload = message.payload
         text = payload.get("text")
         tenant_id = message.tenant_id or "default"

@@ -30,7 +30,7 @@ class DBPool:
 
     _pool: Any | None = None
     _db_url: str | None = None
-    _tenant_semaphores: dict[str, asyncio.Semaphore] = {}
+    _tenant_semaphores: dict[str, asyncio.Semaphore] | None = None
     _max_per_tenant: int = 5  # Max concurrent connections per tenant
 
     @classmethod
@@ -78,7 +78,13 @@ class DBPool:
 
     @classmethod
     def _get_semaphore(cls, tenant_id: str) -> asyncio.Semaphore:
-        """Get or create a semaphore for a tenant."""
+        """Get or create a semaphore for a tenant.
+
+        Lazily initialises the semaphore dict so that objects are always
+        created within the current event-loop context.
+        """
+        if cls._tenant_semaphores is None:
+            cls._tenant_semaphores = {}
         if tenant_id not in cls._tenant_semaphores:
             cls._tenant_semaphores[tenant_id] = asyncio.Semaphore(cls._max_per_tenant)
         return cls._tenant_semaphores[tenant_id]
@@ -121,9 +127,9 @@ class DBPool:
 
     @classmethod
     async def close(cls) -> None:
-        """Close the connection pool."""
+        """Close the connection pool and clear per-tenant semaphores."""
         if cls._pool:
             await cls._pool.close()
             cls._pool = None
-            cls._tenant_semaphores.clear()
-            logger.info("PostgreSQL connection pool closed.")
+        cls._tenant_semaphores = None
+        logger.info("PostgreSQL connection pool closed.")

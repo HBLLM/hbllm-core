@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from hbllm.persistence.db_pool import DBPool
+from hbllm.security.tenant_guard import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,6 @@ class BrainState:
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def save(
         self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
@@ -121,8 +120,6 @@ class BrainState:
             (tenant_id, user_id, device_id, key, json.dumps(value), time.time()),
         )
         self._conn.commit()
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def load(
@@ -142,8 +139,6 @@ class BrainState:
             return json.loads(row[0])
         return default
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Delete a key from the store."""
@@ -154,8 +149,6 @@ class BrainState:
         self._conn.commit()
 
     # ── Conversation History ──────────────────────────────────────────────
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def append_message(
@@ -174,8 +167,6 @@ class BrainState:
         )
         self._conn.commit()
         return cursor.lastrowid or 0
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def get_messages(
@@ -204,8 +195,6 @@ class BrainState:
             for row in reversed(rows)  # Return in chronological order
         ]
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
         """Clear all conversation history."""
@@ -216,8 +205,6 @@ class BrainState:
         self._conn.commit()
 
     # ── Checkpoints ───────────────────────────────────────────────────────
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def checkpoint(
@@ -230,8 +217,6 @@ class BrainState:
         )
         self._conn.commit()
         return cursor.lastrowid or 0
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def latest_checkpoint(
@@ -246,8 +231,6 @@ class BrainState:
             return {"data": json.loads(row[0]), "created_at": row[1]}
         return None
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def list_checkpoints(
         self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
@@ -260,8 +243,6 @@ class BrainState:
         return [{"id": row[0], "data": json.loads(row[1]), "created_at": row[2]} for row in rows]
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def log_tool_call(
@@ -283,14 +264,12 @@ class BrainState:
                 device_id,
                 tool_name,
                 input_data,
-                output[:5000],
+                output[:5000] if len(output) <= 5000 else output[:4950] + f"\n... [truncated from {len(output)} chars]",
                 duration_ms,
                 time.time(),
             ),
         )
         self._conn.commit()
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     def get_tool_logs(
@@ -416,8 +395,6 @@ class AsyncBrainState:
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def save(
         self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
@@ -436,8 +413,6 @@ class AsyncBrainState:
                 )
         else:
             await asyncio.to_thread(self._fallback.save, key, value, tenant_id, user_id, device_id)
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def load(
@@ -465,8 +440,6 @@ class AsyncBrainState:
             self._fallback.load, key, default, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def delete(
         self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = ""
@@ -485,8 +458,6 @@ class AsyncBrainState:
             await asyncio.to_thread(self._fallback.delete, key, tenant_id, user_id, device_id)
 
     # ── Conversation History ──────────────────────────────────────────────
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def append_message(
@@ -514,8 +485,6 @@ class AsyncBrainState:
         return await asyncio.to_thread(
             self._fallback.append_message, role, content, metadata, tenant_id, user_id, device_id
         )
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def get_messages(
@@ -553,8 +522,6 @@ class AsyncBrainState:
             self._fallback.get_messages, limit, offset, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def clear_messages(
         self, tenant_id: str = "", user_id: str = "", device_id: str = ""
@@ -572,8 +539,6 @@ class AsyncBrainState:
             await asyncio.to_thread(self._fallback.clear_messages, tenant_id, user_id, device_id)
 
     # ── Checkpoints ───────────────────────────────────────────────────────
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def checkpoint(
@@ -593,8 +558,6 @@ class AsyncBrainState:
         return await asyncio.to_thread(
             self._fallback.checkpoint, data, tenant_id, user_id, device_id
         )
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def latest_checkpoint(
@@ -616,8 +579,6 @@ class AsyncBrainState:
         return await asyncio.to_thread(
             self._fallback.latest_checkpoint, tenant_id, user_id, device_id
         )
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def list_checkpoints(
@@ -643,8 +604,6 @@ class AsyncBrainState:
         )
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def log_tool_call(
@@ -681,8 +640,6 @@ class AsyncBrainState:
                 user_id,
                 device_id,
             )
-
-    from hbllm.security.tenant_guard import require_tenant
 
     @require_tenant
     async def get_tool_logs(
@@ -733,8 +690,8 @@ class AsyncBrainState:
         # DBPool handles global connection closure, but we close the fallback
         await asyncio.to_thread(self._fallback.close)
 
-    @property
-    async def stats(self) -> dict:
+    async def get_stats(self) -> dict:
+        """Return storage statistics."""
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:

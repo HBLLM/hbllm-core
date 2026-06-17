@@ -34,7 +34,7 @@ import logging
 import os
 from collections.abc import Callable
 from enum import Enum
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +177,13 @@ def get_current_identity() -> tuple[str | None, str | None, str | None]:
 # ─── Decorators ─────────────────────────────────────────────────────────────
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
 def require_tenant(
-    func: Callable[..., Any] | None = None, *, param: str = "tenant_id"
-) -> Callable[..., Any] | Any:
+    func: Callable[_P, _R] | None = None, *, param: str = "tenant_id"
+) -> Callable[_P, _R] | Any:
     """
     Decorator that enforces tenant_id is present and valid.
 
@@ -201,15 +205,15 @@ def require_tenant(
         def find(self, tid: str, query: str): ...
     """
 
-    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 _validate_tenant(fn, args, kwargs, param)
-                return await fn(*args, **kwargs)
+                return await fn(*args, **kwargs)  # type: ignore[misc]
 
-            return async_wrapper
+            return async_wrapper  # type: ignore[return-value]
         else:
 
             @functools.wraps(fn)
@@ -217,7 +221,7 @@ def require_tenant(
                 _validate_tenant(fn, args, kwargs, param)
                 return fn(*args, **kwargs)
 
-            return sync_wrapper
+            return sync_wrapper  # type: ignore[return-value]
 
     if func is not None:
         return decorator(func)
