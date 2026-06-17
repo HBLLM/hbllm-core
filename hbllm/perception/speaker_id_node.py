@@ -5,11 +5,16 @@ Extracts 256-dim GE2E speaker embeddings from audio and identifies speakers
 against enrolled voice profiles. Supports enrollment, identification, and
 profile management.
 
+When an unknown speaker is detected, their embedding is cached. If that
+speaker is later enrolled, cached unknowns are retroactively matched and
+a `speaker.retroactive_update` event is published to re-tag old messages.
+
 Topics:
-    speaker.identify  — Identify who is speaking from PCM audio
-    speaker.enroll    — Enroll a new speaker from audio samples
-    speaker.list      — List enrolled speakers for a tenant
-    speaker.delete    — Delete a speaker profile
+    speaker.identify            — Identify who is speaking from PCM audio
+    speaker.enroll              — Enroll a new speaker from audio samples
+    speaker.list                — List enrolled speakers for a tenant
+    speaker.delete              — Delete a speaker profile
+    speaker.retroactive_update  — (published) when old unknowns match a new enrollment
 """
 
 from __future__ import annotations
@@ -17,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -26,6 +33,16 @@ from hbllm.network.node import Node
 from hbllm.perception.voice_profile_store import VoiceProfileStore
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class UnknownEmbedding:
+    """Cached embedding for an unidentified speaker, for retroactive matching."""
+
+    embedding: np.ndarray
+    session_id: str = ""
+    timestamp: float = 0.0
+    text: str = ""
 
 
 class SpeakerIdNode(Node):
@@ -41,6 +58,11 @@ class SpeakerIdNode(Node):
     node_id = "speaker_id"
     description = "Speaker identification and enrollment via voice embeddings"
 
+    # Max unknown embeddings to cache per tenant before evicting oldest
+    MAX_UNKNOWN_CACHE = 200
+    # How long to keep unknown embeddings (seconds) — 1 hour
+    UNKNOWN_TTL = 3600.0
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._encoder: Any | None = None
@@ -48,6 +70,9 @@ class SpeakerIdNode(Node):
         self._store: VoiceProfileStore | None = None
         # Cache: tenant_id → {speaker_id: embedding}
         self._embedding_cache: dict[str, dict[str, np.ndarray]] = {}
+        # Cache of unknown speaker embeddings for retroactive matching
+        # tenant_id → list of UnknownEmbedding
+        self._unknown_cache: dict[str, list[UnknownEmbedding]] = {}
 
     def _get_store(self) -> VoiceProfileStore:
         """Lazy-init the voice profile store."""
@@ -166,6 +191,16 @@ class SpeakerIdNode(Node):
                     store.update_embedding, tenant_id, speaker_id, embedding, weight=0.05
                 )
 
+            # Cache unknown embeddings for retroactive matching on future enrollment
+            if speaker_id == "unknown":
+                self._cache_unknown(
+                    tenant_id,
+                    embedding,
+                    session_id=message.session_id or "",
+                    timestamp=time.time(),
+                    text=payload.get("transcription_text", ""),
+                )
+
             logger.info(
                 "Speaker identified: %s (%s) confidence=%.3f tenant=%s",
                 speaker_id,
@@ -259,12 +294,18 @@ class SpeakerIdNode(Node):
                 tenant_id,
             )
 
+            # Retroactively match cached unknown embeddings
+            retro_matches = await self._retroactive_match(
+                tenant_id, speaker_id, speaker_name, avg_embedding
+            )
+
             return message.create_response(
                 {
                     "success": True,
                     "speaker_id": speaker_id,
                     "speaker_name": speaker_name,
                     "enrollment_samples": len(embeddings),
+                    "retroactive_matches": retro_matches,
                 }
             )
 
@@ -312,9 +353,113 @@ class SpeakerIdNode(Node):
 
         return None
 
+    def _cache_unknown(
+        self,
+        tenant_id: str,
+        embedding: np.ndarray,
+        session_id: str = "",
+        timestamp: float = 0.0,
+        text: str = "",
+    ) -> None:
+        """Cache an unknown speaker embedding for retroactive matching."""
+        if tenant_id not in self._unknown_cache:
+            self._unknown_cache[tenant_id] = []
+
+        cache = self._unknown_cache[tenant_id]
+
+        # Evict expired entries
+        now = time.time()
+        cache[:] = [e for e in cache if (now - e.timestamp) < self.UNKNOWN_TTL]
+
+        # Evict oldest if over limit
+        while len(cache) >= self.MAX_UNKNOWN_CACHE:
+            cache.pop(0)
+
+        cache.append(
+            UnknownEmbedding(
+                embedding=embedding,
+                session_id=session_id,
+                timestamp=timestamp or now,
+                text=text,
+            )
+        )
+        logger.debug(
+            "Cached unknown embedding: tenant=%s session=%s (cache size=%d)",
+            tenant_id,
+            session_id[:8],
+            len(cache),
+        )
+
+    async def _retroactive_match(
+        self,
+        tenant_id: str,
+        speaker_id: str,
+        speaker_name: str,
+        enrollment_embedding: np.ndarray,
+        threshold: float = 0.72,
+    ) -> int:
+        """
+        Compare a newly enrolled speaker against cached unknown embeddings.
+
+        For each match, publishes a `speaker.retroactive_update` event so
+        downstream consumers (WebSocket, memory) can re-tag old messages.
+
+        Returns the number of retroactive matches found.
+        """
+        cache = self._unknown_cache.get(tenant_id, [])
+        if not cache:
+            return 0
+
+        matches: list[UnknownEmbedding] = []
+        remaining: list[UnknownEmbedding] = []
+
+        enroll_norm = enrollment_embedding / (np.linalg.norm(enrollment_embedding) + 1e-8)
+
+        for entry in cache:
+            entry_norm = entry.embedding / (np.linalg.norm(entry.embedding) + 1e-8)
+            similarity = float(np.dot(enroll_norm, entry_norm))
+            if similarity >= threshold:
+                matches.append(entry)
+            else:
+                remaining.append(entry)
+
+        # Update the cache — remove matched entries
+        self._unknown_cache[tenant_id] = remaining
+
+        if matches:
+            logger.info(
+                "Retroactive speaker match: %d unknown utterances now attributed "
+                "to '%s' (%s), tenant=%s",
+                len(matches),
+                speaker_id,
+                speaker_name,
+                tenant_id,
+            )
+
+            # Publish retroactive update event
+            if self.bus:
+                update_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    tenant_id=tenant_id,
+                    topic="speaker.retroactive_update",
+                    payload={
+                        "speaker_id": speaker_id,
+                        "speaker_name": speaker_name,
+                        "matched_count": len(matches),
+                        "matched_timestamps": [m.timestamp for m in matches],
+                        "matched_sessions": list({m.session_id for m in matches if m.session_id}),
+                        "matched_texts": [m.text for m in matches if m.text],
+                    },
+                )
+                await self.bus.publish("speaker.retroactive_update", update_msg)
+
+        return len(matches)
+
     async def stop(self) -> None:
         """Cleanup resources."""
         if self._store:
             self._store.close()
         self._encoder = None
+        self._unknown_cache.clear()
         logger.info("SpeakerIdNode stopped")
