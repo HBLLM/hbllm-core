@@ -57,10 +57,12 @@ class TrustInterceptor:
             await self._send_to_dlq(message, "node_revoked")
             return None
 
-        # 3. Registered internal nodes are trusted (they are part of the brain)
-        #    This covers all composite sub-nodes (e.g. memory_system.sleep, audio_in, etc.)
+        # 3. Registered internal nodes are trusted when they send unsigned messages
+        #    (they are part of the brain). If a signature IS present, we still
+        #    verify it to catch forged payloads.
         base_node = source.split(".")[0]  # e.g. "memory_system.sleep" → "memory_system"
-        if source in self.registry._nodes or base_node in self.registry._nodes:
+        is_registered = source in self.registry._nodes or base_node in self.registry._nodes
+        if is_registered and not message.signature:
             return message
 
         # 4. Signature Verification (only for external/unknown nodes)
