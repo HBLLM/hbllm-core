@@ -89,7 +89,7 @@ class AudioPipelineConfig:
     # VAD settings
     vad_threshold: float = 0.5  # Silero VAD speech probability threshold
     vad_min_speech_ms: int = 250  # Minimum speech duration to trigger ASR
-    vad_max_silence_ms: int = 700  # Silence duration to end utterance
+    vad_max_silence_ms: int = 1500  # Silence duration to end utterance (1.5s for natural pauses)
     vad_padding_ms: int = 300  # Padding around speech segments
 
     # Streaming settings

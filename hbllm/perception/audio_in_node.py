@@ -18,6 +18,7 @@ import asyncio
 import logging
 import struct
 import tempfile
+import threading
 import time
 from collections import deque
 from typing import Any
@@ -43,7 +44,7 @@ class AudioInputNode(Node):
         self,
         node_id: str,
         config: AudioPipelineConfig | None = None,
-        model_size: str = "base",
+        model_size: str | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -56,6 +57,7 @@ class AudioInputNode(Node):
         # ASR model (lazy-loaded)
         self._moonshine_model: Any | None = None
         self._whisper_model: Any | None = None
+        self._model_lock = threading.Lock()  # Prevent concurrent model loads
 
         # VAD model (lazy-loaded)
         self._vad_model: Any | None = None
@@ -66,19 +68,23 @@ class AudioInputNode(Node):
     # ── Model loading ────────────────────────────────────────────────────
 
     def _load_moonshine(self) -> None:
-        """Load the Moonshine ONNX ASR model."""
+        """Load the Moonshine ONNX ASR model (thread-safe)."""
         if self._moonshine_model is not None:
             return
-        try:
-            from moonshine_onnx import MoonshineOnnxModel  # type: ignore[import-untyped]
+        with self._model_lock:
+            # Double-check after acquiring lock
+            if self._moonshine_model is not None:
+                return
+            try:
+                from moonshine_onnx import MoonshineOnnxModel  # type: ignore[import-untyped]
 
-            logger.info("Loading Moonshine %s ASR model...", self.model_size)
-            self._moonshine_model = MoonshineOnnxModel(model_name=self.model_size)
-            logger.info("Moonshine ASR loaded successfully")
-        except ImportError:
-            logger.warning("moonshine-onnx not installed. Install with: pip install moonshine-onnx")
-        except Exception as e:
-            logger.error("Failed to load Moonshine model: %s", e)
+                logger.info("Loading Moonshine %s ASR model...", self.model_size)
+                self._moonshine_model = MoonshineOnnxModel(model_name=self.model_size)
+                logger.info("Moonshine ASR loaded successfully")
+            except ImportError:
+                logger.warning("moonshine-onnx not installed. Install with: pip install useful-moonshine-onnx")
+            except Exception as e:
+                logger.error("Failed to load Moonshine model: %s", e)
 
     def _load_whisper(self) -> None:
         """Load the Whisper model (deprecated fallback)."""
@@ -97,20 +103,15 @@ class AudioInputNode(Node):
         if self._vad_model is not None:
             return
         try:
-            import torch
+            from silero_vad import load_silero_vad  # type: ignore[import-untyped]
 
-            model, utils = torch.hub.load(
-                repo_or_dir="snakers4/silero-vad",
-                model="silero_vad",
-                force_reload=False,
-                onnx=True,
-            )
+            model = load_silero_vad(onnx=True)
             self._vad_model = model
-            logger.info("Silero VAD loaded successfully")
+            logger.info("Silero VAD loaded successfully (via silero-vad package)")
         except ImportError:
-            logger.warning("Silero VAD requires torch. VAD will use fallback silence detection.")
+            logger.warning("silero-vad package not installed. VAD will use energy-based fallback.")
         except Exception as e:
-            logger.warning("Failed to load Silero VAD: %s. Using fallback.", e)
+            logger.warning("Failed to load Silero VAD: %s. Using energy-based fallback.", e)
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -120,6 +121,13 @@ class AudioInputNode(Node):
             "Starting AudioInputNode (backend=%s, streaming=enabled)",
             self.config.asr_backend.value,
         )
+        # Pre-load ASR model on startup so it's cached before first audio
+        if self.config.asr_backend == ASRBackend.MOONSHINE:
+            await asyncio.to_thread(self._load_moonshine)
+
+        # Pre-load VAD model
+        await asyncio.to_thread(self._load_vad)
+
         await self.bus.subscribe("sensory.audio.in", self.handle_transcribe)
         await self.bus.subscribe("sensory.audio.stream", self.handle_stream)
         await self.bus.subscribe("module.evaluate", self.handle_workspace_query)
@@ -209,11 +217,15 @@ class AudioInputNode(Node):
         should_flush = is_final or buf.should_flush(self._vad_model)
 
         if should_flush and buf.has_audio:
-            await self._flush_stream(session_id, message)
+            # If the caller explicitly marked is_final, treat as speech
+            # (the client confirmed end-of-utterance)
+            if is_final:
+                buf._speech_detected = True
+            await self._flush_stream(session_id, message, is_final=is_final)
 
         return None
 
-    async def _flush_stream(self, session_id: str, message: Message) -> None:
+    async def _flush_stream(self, session_id: str, message: Message, *, is_final: bool = False) -> None:
         """Transcribe buffered audio and forward to router."""
         buf = self._stream_buffers.pop(session_id, None)
         if not buf or not buf.has_audio:
@@ -223,11 +235,49 @@ class AudioInputNode(Node):
             pcm_bytes = buf.get_audio_bytes()
             sample_rate = buf.sample_rate
 
+            # Debug: log audio buffer stats
+            duration_s = len(pcm_bytes) / (2 * sample_rate)
+            logger.info(
+                "Flushing audio buffer (%s): %d bytes, %.2fs, %d chunks, sr=%d, speech=%s",
+                session_id[:8], len(pcm_bytes), duration_s, len(buf.chunks), sample_rate,
+                buf._speech_detected,
+            )
+
+            # Skip if no speech was detected (silence-only buffer from always-on mic)
+            if not buf._speech_detected:
+                logger.info("Skipping silence-only buffer (no speech detected)")
+                return
+
+            # Skip very short audio (< 0.5s) unless the client explicitly
+            # marked is_final (they confirmed the utterance is complete)
+            if duration_s < 0.5 and not is_final:
+                logger.info("Skipping too-short audio (%.2fs < 0.5s)", duration_s)
+                return
+
+            import time as _time
+            t0 = _time.monotonic()
             transcription = await self._transcribe_pcm(pcm_bytes, sample_rate)
+            elapsed = _time.monotonic() - t0
+            logger.info(
+                "Transcription result (%s): '%s' (took %.1fs)",
+                session_id[:8], transcription[:80] if transcription else "<empty>", elapsed,
+            )
 
             if transcription:
                 logger.info("Stream transcribed (%s): '%s'", session_id, transcription[:80])
 
+                # Publish transcription event for the WebSocket to forward to browser
+                transcription_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    tenant_id=message.tenant_id,
+                    session_id=session_id,
+                    topic="sensory.transcription",
+                    payload={"text": transcription},
+                )
+                await self.bus.publish("sensory.transcription", transcription_msg)
+
+                # Forward to the brain for response
                 query_msg = Message(
                     type=MessageType.QUERY,
                     source_node_id=self.node_id,
@@ -302,14 +352,25 @@ class AudioInputNode(Node):
                 return await self._transcribe_file_whisper(file_path)
 
     async def _transcribe_pcm(self, pcm_bytes: bytes, sample_rate: int = 16000) -> str:
-        """Transcribe raw PCM audio bytes (16-bit, mono)."""
-        backend = self.config.asr_backend
+        """Transcribe raw PCM audio bytes (16-bit, mono). Moonshine primary."""
+        # Try Moonshine first (local, fast)
+        result = await self._transcribe_pcm_moonshine(pcm_bytes, sample_rate)
+        if result:
+            return result
 
-        if backend == ASRBackend.MOONSHINE:
-            return await self._transcribe_pcm_moonshine(pcm_bytes, sample_rate)
+        # Fall back to NVIDIA Cloud ASR if Moonshine returns empty
+        import os
+        nvidia_api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_NIM_API_KEY")
+        if nvidia_api_key:
+            try:
+                logger.info("Moonshine returned empty, trying NVIDIA Cloud ASR...")
+                cloud_result = await self._transcribe_pcm_via_file(pcm_bytes, sample_rate)
+                if cloud_result:
+                    return cloud_result
+            except Exception as e:
+                logger.warning("NVIDIA Cloud ASR fallback failed: %s", e)
 
-        # Whisper requires a file — write to temp
-        return await self._transcribe_pcm_via_file(pcm_bytes, sample_rate)
+        return result  # Return empty string
 
     async def _transcribe_pcm_moonshine(self, pcm_bytes: bytes, sample_rate: int = 16000) -> str:
         """Transcribe raw PCM directly with Moonshine (no temp file)."""
@@ -323,15 +384,68 @@ class AudioInputNode(Node):
             # Convert 16-bit PCM to float32 numpy array
             samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
-            # Moonshine expects (samples,) at 16kHz
+            # Resample to 16kHz if needed
             if sample_rate != 16000:
-                # Simple resampling via linear interpolation
                 import scipy.signal  # type: ignore[import-untyped]
 
                 samples = scipy.signal.resample(samples, int(len(samples) * 16000 / sample_rate))
 
-            tokens = self._moonshine_model.generate(samples)
-            return str(tokens[0]).strip() if tokens else ""
+            # Skip very short audio (< 0.1s at 16kHz)
+            if len(samples) < 1600:
+                return ""
+
+            # Log audio stats for debugging
+            rms = float(np.sqrt(np.mean(samples ** 2)))
+            peak = float(np.max(np.abs(samples)))
+            logger.info("Audio stats (raw): rms=%.4f, peak=%.4f, len=%d (%.2fs)",
+                        rms, peak, len(samples), len(samples)/16000)
+
+            # Trim leading/trailing silence (below 2% amplitude)
+            threshold = 0.02
+            above = np.where(np.abs(samples) > threshold)[0]
+            if len(above) > 0:
+                # Keep 0.1s padding on each side
+                pad = int(0.1 * 16000)
+                start = max(0, above[0] - pad)
+                end = min(len(samples), above[-1] + pad)
+                samples = samples[start:end]
+                logger.info("Trimmed silence: %d→%d samples (%.2fs→%.2fs)",
+                            len(above), len(samples), len(above)/16000, len(samples)/16000)
+
+            # Skip if trimmed too short
+            if len(samples) < 1600:
+                logger.info("Skipping: too short after trim (%d samples)", len(samples))
+                return ""
+
+            # Normalize audio to peak=0.95 for consistent Moonshine input levels
+            peak = float(np.max(np.abs(samples)))
+            if peak > 0.001:
+                samples = samples * (0.95 / peak)
+                logger.info("Normalized: peak %.4f → 0.95, new rms=%.4f",
+                            peak, float(np.sqrt(np.mean(samples ** 2))))
+
+            # Moonshine expects (1, samples) float32
+            samples_2d = samples.reshape(1, -1)
+
+            # DEBUG: save the exact audio Moonshine receives to a WAV file
+            try:
+                import soundfile as sf  # type: ignore[import-not-found]
+                sf.write("/tmp/moonshine_debug_last.wav", samples, 16000)
+                logger.info("DEBUG: Saved audio to /tmp/moonshine_debug_last.wav (%d samples, %.2fs)",
+                            len(samples), len(samples)/16000)
+            except Exception:
+                pass
+
+            # generate() returns token IDs — decode with tokenizer
+            token_ids = self._moonshine_model.generate(samples_2d)
+            logger.info("Moonshine token_ids: %s", token_ids)
+
+            from moonshine_onnx import load_tokenizer  # type: ignore[import-untyped]
+            tokenizer = load_tokenizer()
+            texts = tokenizer.decode_batch(token_ids)
+            text = texts[0].strip() if texts else ""
+            logger.info("Moonshine transcribed: '%s'", text if text else "<empty>")
+            return text
 
         return await asyncio.to_thread(_transcribe)
 
@@ -358,7 +472,9 @@ class AudioInputNode(Node):
 
                 audio = scipy.signal.resample(audio, int(len(audio) * 16000 / sr))
 
-            tokens = self._moonshine_model.generate(audio)
+            # Moonshine ONNX expects (1, samples) — reshape from 1D
+            audio_2d = audio.reshape(1, -1)
+            tokens = self._moonshine_model.generate(audio_2d)
             return str(tokens[0]).strip() if tokens else ""
 
         return await asyncio.to_thread(_transcribe)
@@ -466,15 +582,60 @@ class _StreamBuffer:
         if not self.has_audio:
             return False
 
-        # Hard limit: max buffer duration
-        if self.elapsed >= self.max_buffer_seconds:
+        # Absolute hard limit — never allow buffer to exceed 30s no matter what
+        if self.elapsed >= 30.0:
+            logger.warning("Buffer exceeded absolute 30s limit (%.1fs). Force flushing.", self.elapsed)
             return True
+
+        # Normal max buffer duration
+        if self.elapsed >= self.max_buffer_seconds:
+            if self._speech_detected:
+                return True
+            # max_buffer_seconds == 0 means "always flush immediately"
+            if self.max_buffer_seconds == 0:
+                return True
+            # No speech in max window — silently discard
+            self.chunks.clear()
+            self.start_time = time.monotonic()
+            self._speech_detected = False
+            self._silence_start = None
+            return False
 
         # If we have VAD, use it
         if vad_model is not None and self.chunks:
             return self._check_vad(vad_model)
 
-        # Fallback: simple silence timeout
+        # Fallback: energy-based speech detection (no Silero VAD)
+        # Check if the latest chunk has enough energy to be speech
+        if self.chunks:
+            import numpy as np
+            last_chunk = self.chunks[-1]
+            if len(last_chunk) >= 2:
+                samples = np.frombuffer(last_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                rms = float(np.sqrt(np.mean(samples ** 2)))
+                if rms > 0.01:  # Above noise floor
+                    if not self._speech_detected and len(self.chunks) > 2:
+                        # Discard pre-speech silence (same as Silero VAD path)
+                        self.chunks = self.chunks[-2:]
+                        self.start_time = time.monotonic()
+                    self._speech_detected = True
+                    self._silence_start = None
+                elif self._speech_detected:
+                    # Speech was detected before, now silence
+                    if self._silence_start is None:
+                        self._silence_start = time.monotonic()
+                    silence_ms = (time.monotonic() - self._silence_start) * 1000
+                    if silence_ms >= self.max_silence_ms:
+                        return True  # End of utterance
+
+        # Max silence timeout (0 = flush immediately after any audio)
+        if self.max_silence_ms == 0 and self.has_audio:
+            return True
+
+        # Max buffer hit but no speech → don't flush
+        if not self._speech_detected:
+            return False
+
         silence = time.monotonic() - self.last_chunk_time
         return silence >= (self.max_silence_ms / 1000.0) and self.has_audio
 
@@ -482,16 +643,45 @@ class _StreamBuffer:
         """Use Silero VAD to detect speech boundaries."""
         try:
             import torch
+            import numpy as np
 
             # Get the last chunk for VAD analysis
             last_chunk = self.chunks[-1]
-            # Convert 16-bit PCM to float tensor
-            samples = torch.frombuffer(last_chunk, dtype=torch.int16).float() / 32768.0
+            if len(last_chunk) < 2:
+                return False
+
+            # Convert 16-bit PCM to float32 numpy first, then to torch tensor
+            np_samples = np.frombuffer(last_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+            samples = torch.from_numpy(np_samples)
+
+            # Silero VAD expects specific chunk sizes: 512 samples for 16kHz
+            # If our chunk is larger, take the last 512 samples
+            expected_size = 512
+            if len(samples) > expected_size:
+                samples = samples[-expected_size:]
+            elif len(samples) < expected_size:
+                # Pad with zeros if too short
+                samples = torch.nn.functional.pad(samples, (0, expected_size - len(samples)))
 
             # Silero VAD expects 16kHz mono
             speech_prob = vad_model(samples, self.sample_rate).item()
 
+            # Log every Nth check to avoid spam (log every 4th = ~1 per second)
+            if len(self.chunks) % 4 == 0:
+                logger.info("VAD prob=%.3f, threshold=%.2f, speech_detected=%s, chunks=%d",
+                            speech_prob, self.vad_threshold, self._speech_detected, len(self.chunks))
+
             if speech_prob >= self.vad_threshold:
+                if not self._speech_detected:
+                    logger.info("VAD: Speech onset detected (prob=%.3f), discarding %d pre-speech chunks",
+                                speech_prob, max(0, len(self.chunks) - 2))
+                    # Discard all pre-speech silence chunks, keeping only
+                    # the last 2 chunks as lead-in context (~0.5s).
+                    # Without this, Moonshine receives 10+ seconds of noise
+                    # before the actual speech, causing empty transcription.
+                    if len(self.chunks) > 2:
+                        self.chunks = self.chunks[-2:]
+                        self.start_time = time.monotonic()
                 self._speech_detected = True
                 self._silence_start = None
                 return False
@@ -500,8 +690,10 @@ class _StreamBuffer:
             if self._speech_detected:
                 if self._silence_start is None:
                     self._silence_start = time.monotonic()
+                    logger.debug("VAD: Silence started after speech (prob=%.3f)", speech_prob)
                 silence_ms = (time.monotonic() - self._silence_start) * 1000
                 if silence_ms >= self.max_silence_ms:
+                    logger.debug("VAD: End of utterance (%.0fms silence)", silence_ms)
                     return True  # End of utterance
 
         except Exception as e:
