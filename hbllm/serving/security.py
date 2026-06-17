@@ -12,13 +12,13 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import os
 import re
 import secrets
-import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -94,8 +94,8 @@ _csrf_secret = os.environ.get("HBLLM_CSRF_SECRET", secrets.token_hex(32))
 
 def generate_csrf_token(session_id: str) -> str:
     """Generate a CSRF token tied to a session."""
-    payload = f"{session_id}:{time.time():.0f}"
-    sig = hmac.new(_csrf_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    payload = f"{session_id}:{time.time():.3f}"
+    sig = hmac.new(_csrf_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
     return f"{payload}:{sig}"
 
 
@@ -114,7 +114,7 @@ def validate_csrf_token(token: str, session_id: str, max_age: int = 3600) -> boo
         expected_payload = f"{session_id}:{ts_str}"
         expected_sig = hmac.new(
             _csrf_secret.encode(), expected_payload.encode(), hashlib.sha256
-        ).hexdigest()[:16]
+        ).hexdigest()[:32]
         return hmac.compare_digest(sig, expected_sig)
     except (ValueError, AttributeError):
         return False
@@ -206,7 +206,7 @@ class AuthRateLimiter:
 # ─── CORS Validator ──────────────────────────────────────────────────────────
 
 
-def validate_cors_config(origins: list[str], env: str = "") -> list[str]:
+def validate_cors_config(origins: list[str]) -> list[str]:
     """Validate CORS origins. Wildcard * is forbidden."""
     if "*" in origins:
         logger.error(
@@ -278,7 +278,7 @@ class ApiKeyManager:
                 key_hash="bypass",
                 tenant_id="dev",
                 name="disabled_mode",
-                scopes=["chat", "memory", "health", "admin", "*"],
+                scopes=["chat", "memory", "health", "admin"],
             )
 
         key_hash = self.hash_key(raw_key)
@@ -322,10 +322,11 @@ class TokenBucket:
 
     @property
     def wait_time(self) -> float:
-        """Seconds until a token is available."""
+        """Seconds until the requested number of tokens becomes available."""
         if self.tokens >= 1:
             return 0.0
-        return (1 - self.tokens) / self.refill_rate
+        deficit = 1 - self.tokens
+        return deficit / self.refill_rate if self.refill_rate > 0 else float("inf")
 
 
 class RateLimiter:
@@ -341,7 +342,7 @@ class RateLimiter:
         self.requests_per_minute = requests_per_minute
         self.burst_size = burst_size
         self._buckets: dict[str, TokenBucket] = {}
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._enabled = True
 
     async def check(self, tenant_id: str) -> tuple[bool, float]:
@@ -352,7 +353,7 @@ class RateLimiter:
         if not self._enabled:
             return True, 0.0
 
-        with self._lock:
+        async with self._lock:
             if tenant_id not in self._buckets:
                 self._buckets[tenant_id] = TokenBucket(
                     capacity=self.burst_size,
@@ -366,7 +367,7 @@ class RateLimiter:
 
     async def reset(self, tenant_id: str) -> None:
         """Reset rate limit for a tenant."""
-        with self._lock:
+        async with self._lock:
             self._buckets.pop(tenant_id, None)
 
     @property
@@ -428,5 +429,15 @@ class InputSanitizer:
             if stripped != text:
                 warnings.append("html_stripped")
                 text = stripped
+
+        # Strip markdown injection patterns: ![](url), [text](javascript:...)
+        md_image = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
+        if md_image != text:
+            warnings.append("markdown_image_stripped")
+            text = md_image
+        md_link = re.sub(r"\[[^\]]*\]\(javascript:[^)]*\)", "", text, flags=re.IGNORECASE)
+        if md_link != text:
+            warnings.append("markdown_js_link_stripped")
+            text = md_link
 
         return text.strip(), warnings

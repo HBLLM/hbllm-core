@@ -1801,7 +1801,9 @@ async def studio_voice_test(request: Request) -> Any:
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
 
+
     import asyncio
+
 
     msg = Message(
         type=MessageType.QUERY,
@@ -1816,7 +1818,7 @@ async def studio_voice_test(request: Request) -> Any:
     )
     try:
         resp = await asyncio.wait_for(
-            bus.request("sensory.audio.out", msg, timeout=15.0), timeout=15.0
+            bus.request("sensory.audio.out", msg, timeout=180.0), timeout=180.0
         )
         if resp and resp.type != MessageType.ERROR:
             return {
@@ -1824,9 +1826,33 @@ async def studio_voice_test(request: Request) -> Any:
                 "audio_path": resp.payload.get("audio_path"),
                 "voice": resp.payload.get("voice"),
             }
-        return {"status": "error", "error": resp.payload.get("error", "Synthesis failed")}
+        return {"status": "error", "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded"}
+    except asyncio.TimeoutError:
+        return {"status": "error", "error": "Synthesis timed out — model may still be loading. Try again in a few seconds."}
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "error": str(e) or f"Synthesis failed: {type(e).__name__}"}
+
+
+@router.get("/voice/audio/{filename:path}")
+async def serve_audio(filename: str):
+    """Serve a synthesized audio file."""
+    import os
+    from pathlib import Path
+
+    from starlette.responses import FileResponse
+
+    # Sanitize filename to prevent directory traversal
+    safe_name = os.path.basename(filename)
+    audio_path = Path("workspace/audio") / safe_name
+
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(
+        str(audio_path),
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # ─── RBAC / Permissions Endpoints ─────────────────────────────────────────
@@ -2040,7 +2066,7 @@ async def studio_rbac_audit(request: Request, limit: int = 50) -> Any:
     try:
         from hbllm.security.audit_log import AuditLog
 
-        audit = AuditLog(data_dir=data_dir)
+        audit = AuditLog(db_path=os.path.join(data_dir, "audit.db"))
         entries = audit.query(tenant_id=tenant_id, limit=limit)
         return {
             "tenant_id": tenant_id,

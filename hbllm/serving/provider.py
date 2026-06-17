@@ -20,11 +20,9 @@ import os
 import random
 
 # Sanitize proxy environment variables to prevent httpx/urllib crashing on ::1 IPv6 address
-for _env_var in ("NO_PROXY", "no_proxy"):
-    _env_val = os.environ.get(_env_var, "")
-    if _env_val:
-        _cleaned = ",".join(_part for _part in _env_val.split(",") if "::1" not in _part)
-        os.environ[_env_var] = _cleaned
+from hbllm.utils.env_sanitize import sanitize_proxy_env
+
+sanitize_proxy_env()
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -56,8 +54,8 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 async def _retry_api_call(
     func: Callable[..., Any],
     *args: Any,
-    max_retries: int = 3,
-    initial_delay: float = 1.0,
+    max_retries: int | None = None,
+    initial_delay: float | None = None,
     max_delay: float = 30.0,
     **kwargs: Any,
 ) -> Any:
@@ -69,8 +67,16 @@ async def _retry_api_call(
       - httpx.TransportError (connection reset, DNS failure, timeout)
 
     Backoff formula: delay = initial_delay * 2^attempt + jitter
+
+    Retry count and initial delay are configurable via HBLLM_API_MAX_RETRIES
+    and HBLLM_API_RETRY_DELAY environment variables.
     """
     import httpx
+
+    if max_retries is None:
+        max_retries = int(os.getenv("HBLLM_API_MAX_RETRIES", "3"))
+    if initial_delay is None:
+        initial_delay = float(os.getenv("HBLLM_API_RETRY_DELAY", "1.0"))
 
     for attempt in range(max_retries + 1):
         try:
@@ -514,18 +520,37 @@ class LocalProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """Calls OpenAI-compatible APIs (OpenAI, Groq, Gemini, Cerebras, Together, OpenRouter, etc.)."""
 
+    # Map base_url fragments → human-readable provider names for error messages
+    _PROVIDER_HINTS: dict[str, str] = {
+        "api.groq.com": "Groq (GROQ_API_KEY)",
+        "api.openai.com": "OpenAI (OPENAI_API_KEY)",
+        "integrate.api.nvidia.com": "NVIDIA (NVIDIA_API_KEY)",
+        "generativelanguage.googleapis.com": "Google (GOOGLE_API_KEY)",
+        "api.deepseek.com": "DeepSeek (DEEPSEEK_API_KEY)",
+    }
+
     def __init__(
         self,
         api_key: str | None = None,
         model: str = "gpt-4o-mini",
         base_url: str | None = None,
     ):
+        import httpx
+
         self._api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self._model = model
         self._base_url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        self._client = httpx.AsyncClient(timeout=60)
+
+        # Determine provider name from base_url for clear error messages
+        self._provider_label = "OpenAI-compatible"
+        for fragment, label in self._PROVIDER_HINTS.items():
+            if fragment in self._base_url:
+                self._provider_label = label
+                break
 
         if not self._api_key:
-            logger.warning("OPENAI_API_KEY not set. OpenAI provider will fail.")
+            logger.warning("%s API key not set. Provider will fail.", self._provider_label)
 
         if self._base_url != "https://api.openai.com/v1":
             logger.info("Using custom OpenAI-compatible endpoint: %s", self._base_url)
@@ -538,21 +563,11 @@ class OpenAIProvider(LLMProvider):
         top_p: float = 0.9,
         **kwargs: Any,
     ) -> LLMResponse:
-        import httpx
-
         if not self._api_key:
-            if "api.groq.com" in self._base_url:
-                raise ValueError(
-                    "GROQ_API_KEY is not set. Please set the GROQ_API_KEY environment variable."
-                )
-            elif "api.openai.com" in self._base_url:
-                raise ValueError(
-                    "OPENAI_API_KEY is not set. Please set the OPENAI_API_KEY environment variable."
-                )
-            elif "integrate.api.nvidia.com" in self._base_url:
-                raise ValueError(
-                    "NVIDIA_API_KEY is not set. Please set the NVIDIA_API_KEY environment variable."
-                )
+            raise ValueError(
+                f"{self._provider_label} API key is not set. "
+                "Please set the appropriate environment variable."
+            )
 
         with trace_span(
             "llm.generate",
@@ -572,14 +587,13 @@ class OpenAIProvider(LLMProvider):
             }
 
             async def _do_request() -> Any:
-                async with httpx.AsyncClient(timeout=60) as client:
-                    resp = await client.post(
-                        f"{self._base_url}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
+                resp = await self._client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                return resp.json()
 
             data = await _retry_api_call(_do_request)
 
@@ -605,21 +619,11 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        import httpx
-
         if not self._api_key:
-            if "api.groq.com" in self._base_url:
-                raise ValueError(
-                    "GROQ_API_KEY is not set. Please set the GROQ_API_KEY environment variable."
-                )
-            elif "api.openai.com" in self._base_url:
-                raise ValueError(
-                    "OPENAI_API_KEY is not set. Please set the OPENAI_API_KEY environment variable."
-                )
-            elif "integrate.api.nvidia.com" in self._base_url:
-                raise ValueError(
-                    "NVIDIA_API_KEY is not set. Please set the NVIDIA_API_KEY environment variable."
-                )
+            raise ValueError(
+                f"{self._provider_label} API key is not set. "
+                "Please set the appropriate environment variable."
+            )
 
         headers: dict[str, str] = {
             "Content-Type": "application/json",
@@ -634,26 +638,30 @@ class OpenAIProvider(LLMProvider):
             "stream": True,
         }
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            async with client.stream(
-                "POST",
-                f"{self._base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    if line.startswith("data: "):
-                        chunk = line[6:]
-                        if chunk.strip() == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(chunk)
-                            delta = data["choices"][0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-                        except (json.JSONDecodeError, KeyError):
-                            continue
+        async with self._client.stream(
+            "POST",
+            f"{self._base_url}/chat/completions",
+            headers=headers,
+            json=payload,
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    chunk = line[6:]
+                    if chunk.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(chunk)
+                        delta = data["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+
+    async def close(self) -> None:
+        """Close the shared HTTP client."""
+        await self._client.aclose()
 
     @property
     def name(self) -> str:
@@ -791,6 +799,7 @@ class AnthropicProvider(LLMProvider):
                 headers=headers,
                 json=payload,
             ) as resp:
+                resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
