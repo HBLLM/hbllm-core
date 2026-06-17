@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import deque
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -40,7 +41,7 @@ class SafeStdoutWrapper:
             import sys
 
             if sys.stdout is not None:
-                sys.stdout.write(data)
+                return sys.stdout.write(data)
         except (ValueError, OSError, AttributeError):
             pass
         return len(data)
@@ -145,8 +146,12 @@ class BusMetrics:
         self.messages_dropped_ttl: int = 0
         self.messages_dropped_auth: int = 0
         self.reconnections: int = 0
-        self._latency_samples: list[float] = []
-        self._max_samples = 1000  # Rolling window
+        self._latency_samples: deque[float] = deque(maxlen=1000)
+
+    @property
+    def _max_samples(self) -> int:
+        """Maximum number of latency samples retained (deque capacity)."""
+        return self._latency_samples.maxlen or 1000
 
     def record_publish(self, topic: str) -> None:
         self.messages_published += 1
@@ -154,8 +159,6 @@ class BusMetrics:
     def record_delivery(self, topic: str, latency_ms: float) -> None:
         self.messages_delivered += 1
         self._latency_samples.append(latency_ms)
-        if len(self._latency_samples) > self._max_samples:
-            self._latency_samples = self._latency_samples[-self._max_samples :]
 
     def record_drop(self, topic: str) -> None:
         self.messages_dropped += 1

@@ -62,12 +62,12 @@ class MessageType(StrEnum):
 
 
 class Priority(int, Enum):
-    """Message priority levels."""
+    """Message priority levels for queue ordering (lower value = higher priority)."""
 
-    LOW = 0
-    NORMAL = 1
-    HIGH = 2
-    CRITICAL = 3
+    LOW = 0        # Background tasks, analytics
+    NORMAL = 1     # Standard user messages
+    HIGH = 2       # System commands, health checks
+    CRITICAL = 3   # Safety-critical, emergency shutdown
 
 
 class Message(BaseModel):
@@ -99,7 +99,7 @@ class Message(BaseModel):
         """Create a response message correlated to this message."""
         return Message(
             type=msg_type,
-            source_node_id=self.target_node_id or "system",
+            source_node_id=self.target_node_id or self.source_node_id,
             target_node_id=self.source_node_id,
             tenant_id=self.tenant_id,
             user_id=self.user_id,
@@ -145,9 +145,10 @@ class QueryPayload(BaseModel):
     """Payload for user queries routed to domain modules."""
 
     text: str
-    context: list[dict[str, Any]] | dict[str, Any] = Field(
-        default_factory=dict
-    )  # Conversation history or context dict
+    context: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Conversation history as a list of message dicts (role + content).",
+    )
     media: list[dict[str, Any]] = Field(default_factory=list)  # Multimodal items (images/audio)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

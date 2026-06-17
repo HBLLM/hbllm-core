@@ -241,12 +241,21 @@ class ServiceRegistry:
 
     async def has_permission(self, node_id: str, scope: str) -> bool:
         """Check if a node has permission to access a specific scope."""
-        parent_id = node_id.split(".")[0]
-        if parent_id in ("api_server", "system", "pipeline"):
-            return True
-        info = self._nodes.get(parent_id)
+        # Look up the node directly first
+        info = self._nodes.get(node_id)
         if not info:
-            return False
+            # Fall back to looking up by parent prefix for sub-nodes,
+            # but only if the parent is a registered node.
+            parent_id = node_id.split(".")[0]
+            info = self._nodes.get(parent_id)
+        if not info:
+            return scope == "public"
+
+        # System-level nodes get implicit admin access based on their
+        # registered node_type, not naming convention.
+        if info.node_type in (NodeType.CORE, NodeType.ROUTER):
+            return True
+
         # 'admin' scope grants all permissions
         return "admin" in info.scopes or scope in info.scopes or scope == "public"
 
@@ -348,6 +357,23 @@ class ServiceRegistry:
                             )
                             health.status = HealthStatus.UNHEALTHY
                             health.message = f"No heartbeat for {elapsed:.0f}s"
+
+                            # Notify the system so the router and workspace
+                            # can immediately stop routing to this node.
+                            if self._bus:
+                                alert_msg = Message(
+                                    type=MessageType.EVENT,
+                                    topic="system.node.unhealthy",
+                                    source_node_id="registry",
+                                    payload={
+                                        "node_id": node_id,
+                                        "elapsed_seconds": round(elapsed, 1),
+                                        "message": health.message,
+                                    },
+                                )
+                                await self._bus.publish(
+                                    "system.node.unhealthy", alert_msg
+                                )
 
             except asyncio.CancelledError:
                 break

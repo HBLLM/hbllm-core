@@ -45,6 +45,11 @@ class RateLimitInterceptor:
         if not tenant or tenant == "system":
             return message
 
+        # Exempt high-frequency streaming topics from rate limiting
+        topic = getattr(message, 'topic', '') or ''
+        if topic.startswith('sensory.audio') or topic.startswith('sensory.transcription'):
+            return message
+
         now = time.monotonic()
 
         async with self.lock:
