@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Test Moonshine ONNX directly with a generated speech-like signal and a real recording."""
-import numpy as np
+
 import sys
+
+import numpy as np
 
 print("=== Moonshine Live Debug ===")
 
@@ -33,40 +35,44 @@ print(f"  Decoded: '{texts[0] if texts else ''}'")
 print("\n--- Test 3: Record 3s from mic and transcribe ---")
 try:
     import sounddevice as sd
+
     print("  Recording 3 seconds... SPEAK NOW!")
-    audio = sd.rec(int(3 * sr), samplerate=sr, channels=1, dtype='float32')
+    audio = sd.rec(int(3 * sr), samplerate=sr, channels=1, dtype="float32")
     sd.wait()
     audio = audio.flatten()
-    
-    rms = float(np.sqrt(np.mean(audio ** 2)))
+
+    rms = float(np.sqrt(np.mean(audio**2)))
     peak = float(np.max(np.abs(audio)))
-    print(f"  Audio stats: rms={rms:.4f}, peak={peak:.4f}, len={len(audio)} ({len(audio)/sr:.2f}s)")
-    
+    print(
+        f"  Audio stats: rms={rms:.4f}, peak={peak:.4f}, len={len(audio)} ({len(audio) / sr:.2f}s)"
+    )
+
     # Normalize
     if peak > 0.001:
         audio_norm = audio * (0.95 / peak)
-        rms2 = float(np.sqrt(np.mean(audio_norm ** 2)))
+        rms2 = float(np.sqrt(np.mean(audio_norm**2)))
         print(f"  After norm: rms={rms2:.4f}, peak=0.95")
     else:
         audio_norm = audio
         print("  Audio too quiet to normalize!")
-    
+
     # Test raw
     print("\n  Raw audio:")
     tokens = model.generate(audio.reshape(1, -1))
     print(f"    Token IDs: {tokens}")
     texts = tokenizer.decode_batch(tokens)
     print(f"    Decoded: '{texts[0] if texts else ''}'")
-    
+
     # Test normalized
     print("\n  Normalized audio:")
     tokens = model.generate(audio_norm.reshape(1, -1))
     print(f"    Token IDs: {tokens}")
     texts = tokenizer.decode_batch(tokens)
     print(f"    Decoded: '{texts[0] if texts else ''}'")
-    
+
     # Save to file for inspection
     import soundfile as sf
+
     sf.write("/tmp/moonshine_test.wav", audio, sr)
     sf.write("/tmp/moonshine_test_norm.wav", audio_norm, sr)
     print("\n  Saved: /tmp/moonshine_test.wav and /tmp/moonshine_test_norm.wav")
@@ -79,6 +85,7 @@ except ImportError:
 print("\n--- Test 4: Using moonshine_onnx.transcribe() on WAV ---")
 try:
     from moonshine_onnx import transcribe
+
     result = transcribe("/tmp/moonshine_test.wav", model="moonshine/base")
     print(f"  transcribe() result: {result}")
 except Exception as e:
