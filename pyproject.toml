@@ -41,6 +41,7 @@ dependencies = [
     "fastapi>=0.110.0",
     "python-multipart>=0.0.9",
     "uvicorn>=0.27.0",
+    "websockets>=12.0",          # WebSocket support for uvicorn
     "httpx>=0.27.0",
     "PyJWT>=2.8.0",
     "cryptography>=42.0.0",
@@ -80,6 +81,8 @@ embodiment = [
 voice = [
     # Real-time voice pipeline
     "kokoro>=0.9.0",            # Kokoro TTS engine (~300MB model)
+    "misaki>=0.8.0",            # Phonemizer backend for Kokoro
+    "useful-moonshine-onnx>=0.2.0", # Moonshine ONNX ASR (~50MB, <100ms latency)
     "soundfile>=0.12.0",        # WAV I/O for audio processing
     "silero-vad>=5.1.0",        # Voice activity detection (~2MB)
 ]

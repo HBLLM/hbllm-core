@@ -19,6 +19,8 @@ from typing import Any
 
 from hbllm.serving.provider import LLMProvider, LLMResponse
 
+__all__ = ["MockProvider"]
+
 
 class MockProvider(LLMProvider):
     """
