@@ -133,17 +133,17 @@ async def test_provider_missing_api_key_validation():
     try:
         # 1. Groq Provider
         groq = GroqProvider(api_key="")
-        with pytest.raises(ValueError, match="GROQ_API_KEY is not set"):
+        with pytest.raises(ValueError, match="API key is not set"):
             await groq.generate([{"role": "user", "content": "hi"}])
-        with pytest.raises(ValueError, match="GROQ_API_KEY is not set"):
+        with pytest.raises(ValueError, match="API key is not set"):
             async for _ in groq.stream([{"role": "user", "content": "hi"}]):
                 pass
 
         # 2. OpenAI Provider with default URL
         openai = OpenAIProvider(api_key="")
-        with pytest.raises(ValueError, match="OPENAI_API_KEY is not set"):
+        with pytest.raises(ValueError, match="API key is not set"):
             await openai.generate([{"role": "user", "content": "hi"}])
-        with pytest.raises(ValueError, match="OPENAI_API_KEY is not set"):
+        with pytest.raises(ValueError, match="API key is not set"):
             async for _ in openai.stream([{"role": "user", "content": "hi"}]):
                 pass
 

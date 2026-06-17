@@ -33,7 +33,7 @@ async def test_health_response_provider_mode():
 @pytest.mark.asyncio
 async def test_knowledge_routes_registered():
     """Verify KnowledgeGraph endpoints are registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert "/v1/knowledge/{entity}" in routes
     assert "/v1/knowledge/path" in routes
     assert "/v1/knowledge/subgraph/{entity}" in routes
@@ -43,42 +43,42 @@ async def test_knowledge_routes_registered():
 @pytest.mark.asyncio
 async def test_rules_route_registered():
     """Verify rules endpoint is registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert "/v1/rules" in routes
 
 
 @pytest.mark.asyncio
 async def test_websocket_route_registered():
     """Verify WebSocket endpoint is registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert "/v1/chat/ws" in routes
 
 
 @pytest.mark.asyncio
 async def test_chat_stream_route_registered():
     """Verify SSE stream endpoint is registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert "/v1/chat/stream" in routes
 
 
 @pytest.mark.asyncio
 async def test_memory_route_registered():
     """Verify memory endpoint is registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert "/v1/memory/{session_id}" in routes
 
 
 @pytest.mark.asyncio
 async def test_feedback_route_registered():
     """Verify feedback endpoint is registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert "/v1/feedback" in routes
 
 
 @pytest.mark.asyncio
 async def test_all_core_routes_count():
     """Verify all expected core routes exist."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     expected = [
         "/health",
         "/metrics",
@@ -100,7 +100,7 @@ async def test_all_core_routes_count():
 @pytest.mark.asyncio
 async def test_studio_routes_registered():
     """Verify all Studio and dashboard compatibility routes are registered."""
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     expected_studio_routes = [
         "/api/emotion/state",
         "/api/swarm/status",
