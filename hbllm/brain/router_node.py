@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +28,36 @@ from hbllm.network.node import DeviceTier, Node, NodeType
 
 logger = logging.getLogger(__name__)
 
+
+class _BoundedSessionHistory:
+    """LRU-bounded session history to prevent unbounded memory growth.
+
+    Keeps at most ``max_sessions`` sessions.  When a new session is added
+    beyond the limit, the oldest (least-recently-used) session is evicted.
+    """
+
+    def __init__(self, max_sessions: int = 10_000) -> None:
+        self._data: OrderedDict[str, deque[str]] = OrderedDict()
+        self._max = max_sessions
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def __getitem__(self, key: str) -> deque[str]:
+        # Move to end on access (LRU)
+        self._data.move_to_end(key)
+        return self._data[key]
+
+    def get_or_create(self, key: str) -> deque[str]:
+        if key in self._data:
+            self._data.move_to_end(key)
+            return self._data[key]
+        # Evict oldest if at capacity
+        if len(self._data) >= self._max:
+            self._data.popitem(last=False)
+        d: deque[str] = deque(maxlen=10)
+        self._data[key] = d
+        return d
 
 class RouterNode(Node):
     """
@@ -101,7 +131,7 @@ class RouterNode(Node):
 
         # [Improvement 2] Contextual Routing — use conversation history
         self._context_window: int = 3  # Number of recent messages to include
-        self._session_history: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=10))
+        self._session_history: _BoundedSessionHistory = _BoundedSessionHistory(max_sessions=10000)
 
         # [Improvement 5] Confidence Calibration — Platt scaling params
         # sigmoid(a * score + b) — trained via feedback, defaults are identity-ish
@@ -250,7 +280,17 @@ class RouterNode(Node):
             import asyncio
 
             loop = asyncio.get_running_loop()
-            loop.run_in_executor(None, self._bootstrap_centroids)
+            fut = loop.run_in_executor(None, self._bootstrap_centroids)
+            # Surface bootstrap errors instead of silently swallowing them.
+            fut.add_done_callback(self._on_bootstrap_done)
+
+    @staticmethod
+    def _on_bootstrap_done(fut: Any) -> None:
+        """Callback to log bootstrap errors from the executor."""
+        try:
+            fut.result()
+        except Exception:
+            logger.exception("Centroid bootstrap failed in background executor")
 
     async def on_stop(self) -> None:
         """Save learned centroids on shutdown."""
@@ -378,7 +418,7 @@ class RouterNode(Node):
 
             # Store this query in session history for future context
             if session_id:
-                self._session_history[session_id].append(text[:200])
+                self._session_history.get_or_create(session_id).append(text[:200])
 
             scores = {}
             raw_scores_map: dict[str, float] = {}

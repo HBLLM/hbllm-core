@@ -145,7 +145,7 @@ def create_legacy_nodes(
 
         nodes.extend(
             [
-                AudioInputNode(node_id="audio_in"),
+                AudioInputNode(node_id="audio_in", model_size="tiny"),
                 AudioOutputNode(node_id="audio_out"),
                 VisionNode(node_id="vision"),
             ]
