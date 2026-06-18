@@ -549,9 +549,15 @@ class AudioInputNode(Node):
                 audio = scipy.signal.resample(audio, int(len(audio) * 16000 / sr))
 
             # Moonshine ONNX expects (1, samples) — reshape from 1D
-            audio_2d = audio.reshape(1, -1)
-            tokens = self._moonshine_model.generate(audio_2d)
-            return str(tokens[0]).strip() if tokens else ""
+            audio_2d = audio.reshape(1, -1).astype(np.float32)
+            token_ids = self._moonshine_model.generate(audio_2d)
+
+            # Decode with tokenizer (not str()!)
+            from moonshine_onnx import load_tokenizer  # type: ignore[import-untyped]
+
+            tokenizer = load_tokenizer()
+            texts = tokenizer.decode_batch(token_ids)
+            return texts[0].strip() if texts else ""
 
         return await asyncio.to_thread(_transcribe)
 
