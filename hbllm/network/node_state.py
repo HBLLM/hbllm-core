@@ -210,6 +210,9 @@ class NodeStateEngine:
                 "timestamp": time.monotonic(),
             }
         )
+        # Cap role history to prevent unbounded growth
+        if len(self._role_history) > 100:
+            self._role_history = self._role_history[-100:]
         self._last_updated = time.monotonic()
 
         logger.info(

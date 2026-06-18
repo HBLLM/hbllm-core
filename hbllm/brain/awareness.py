@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -303,7 +303,9 @@ class CognitiveAwareness(Node):
         self._total_memory_ops = 0
         self._total_skills = 0
         self._last_query_time: float = 0.0
-        self._active_sessions: set[str] = set()
+        # Active session tracking (LRU-bounded to prevent unbounded growth)
+        self._active_sessions: OrderedDict[str, float] = OrderedDict()
+        self._max_active_sessions: int = 10_000
 
         # Rolling confidence window
         self._confidence_scores: deque[float] = deque(maxlen=50)
@@ -368,10 +370,13 @@ class CognitiveAwareness(Node):
         self._last_query_time = time.time()
         self._activity.record("query")
 
-        # Track session
+        # Track session (LRU-bounded)
         sid = message.session_id or ""
         if sid:
-            self._active_sessions.add(sid)
+            self._active_sessions[sid] = time.time()
+            self._active_sessions.move_to_end(sid)
+            while len(self._active_sessions) > self._max_active_sessions:
+                self._active_sessions.popitem(last=False)
 
     async def _on_response(self, message: Message) -> None:
         self._total_responses += 1

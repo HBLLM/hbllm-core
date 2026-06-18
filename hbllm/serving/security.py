@@ -182,6 +182,12 @@ class AuthRateLimiter:
         cutoff = now - self.window
         self._attempts[identifier] = [t for t in self._attempts[identifier] if t > cutoff]
         attempts = self._attempts[identifier]
+
+        # Evict empty entries to prevent unbounded dict growth
+        if not attempts:
+            self._attempts.pop(identifier, None)
+            return True, self.max_attempts
+
         remaining = max(0, self.max_attempts - len(attempts))
 
         if len(attempts) >= self.max_attempts:

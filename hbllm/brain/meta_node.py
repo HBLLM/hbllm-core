@@ -45,6 +45,7 @@ class MetaReasoningNode(Node):
 
         # In-memory buffer (fast access) + persistence
         self.negative_feedback_buffer: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._max_buffer_per_domain: int = 100
         self._last_reflection_time: dict[str, float] = {}
 
         self.reflection_dir = "workspace/reflection"
@@ -179,6 +180,11 @@ class MetaReasoningNode(Node):
                     "domain": domain,
                 }
                 self.negative_feedback_buffer[domain].append(sample)
+                # Cap per-domain buffer to prevent unbounded growth during cooldown
+                if len(self.negative_feedback_buffer[domain]) > self._max_buffer_per_domain:
+                    self.negative_feedback_buffer[domain] = self.negative_feedback_buffer[domain][
+                        -self._max_buffer_per_domain :
+                    ]
 
                 try:
                     task = asyncio.create_task(

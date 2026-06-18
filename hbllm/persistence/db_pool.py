@@ -11,6 +11,7 @@ Per-tenant connection quotas prevent noisy neighbor exhaustion of the shared poo
 import asyncio
 import logging
 import os
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -30,8 +31,9 @@ class DBPool:
 
     _pool: Any | None = None
     _db_url: str | None = None
-    _tenant_semaphores: dict[str, asyncio.Semaphore] | None = None
+    _tenant_semaphores: OrderedDict[str, asyncio.Semaphore] | None = None
     _max_per_tenant: int = 5  # Max concurrent connections per tenant
+    _max_tenant_semaphores: int = 1000  # LRU cap on tracked tenants
 
     @classmethod
     async def get_pool(cls) -> Any | None:
@@ -81,13 +83,20 @@ class DBPool:
         """Get or create a semaphore for a tenant.
 
         Lazily initialises the semaphore dict so that objects are always
-        created within the current event-loop context.
+        created within the current event-loop context.  Uses LRU eviction
+        to prevent unbounded growth from tenant churn.
         """
         if cls._tenant_semaphores is None:
-            cls._tenant_semaphores = {}
-        if tenant_id not in cls._tenant_semaphores:
-            cls._tenant_semaphores[tenant_id] = asyncio.Semaphore(cls._max_per_tenant)
-        return cls._tenant_semaphores[tenant_id]
+            cls._tenant_semaphores = OrderedDict()
+        if tenant_id in cls._tenant_semaphores:
+            cls._tenant_semaphores.move_to_end(tenant_id)
+            return cls._tenant_semaphores[tenant_id]
+        # Evict least-recently-used tenant semaphore if at capacity
+        while len(cls._tenant_semaphores) >= cls._max_tenant_semaphores:
+            cls._tenant_semaphores.popitem(last=False)
+        sem = asyncio.Semaphore(cls._max_per_tenant)
+        cls._tenant_semaphores[tenant_id] = sem
+        return sem
 
     @classmethod
     @asynccontextmanager

@@ -82,7 +82,7 @@ async def _bus_request(
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
-    await bus.subscribe(response_topic, handler)
+    sub = await bus.subscribe(response_topic, handler)
 
     query = Message(
         type=MessageType.QUERY,
@@ -98,6 +98,8 @@ async def _bus_request(
         return result.payload
     except (TimeoutError, asyncio.TimeoutError):
         return {}
+    finally:
+        await bus.unsubscribe(sub)
 
 
 def _require_bus() -> Any:
@@ -125,7 +127,7 @@ async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
         if msg.correlation_id == correlation_id and not response_future.done():
             response_future.set_result(msg)
 
-    await bus.subscribe("memory.retrieve_recent.response", memory_handler)
+    sub = await bus.subscribe("memory.retrieve_recent.response", memory_handler)
 
     query = Message(
         type=MessageType.QUERY,
@@ -143,6 +145,8 @@ async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
         return result.payload
     except (TimeoutError, asyncio.TimeoutError):
         return {"session_id": session_id, "turns": []}
+    finally:
+        await bus.unsubscribe(sub)
 
 
 @router.post("/sync/episodic")

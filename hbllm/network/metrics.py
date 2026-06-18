@@ -51,7 +51,7 @@ class MetricsCollector:
         self._backend: str = "unknown"
         # In-memory storage
         self._mem_counters: dict[str, float] = defaultdict(float)
-        self._mem_histograms: dict[str, list[float]] = defaultdict(list)
+        self._mem_histograms: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=1000))
         self._mem_gauges: dict[str, float] = defaultdict(float)
         # SNN Telemetry history cache (rolling deque of max 100 entries per neuron)
         self._snn_history: dict[str, deque[tuple[float, float]]] = defaultdict(
