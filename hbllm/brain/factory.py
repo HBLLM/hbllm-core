@@ -1118,7 +1118,6 @@ class BrainFactory:
             voice_bridge = VoiceStreamBridge(node_id="voice_stream_bridge")
             await _register_node(registry, voice_bridge)
             await voice_bridge.start(message_bus)
-            brain.voice_bridge = voice_bridge
             nodes.append(voice_bridge)
 
             # Location awareness (geofencing)
@@ -1127,7 +1126,6 @@ class BrainFactory:
             location = LocationAdapter(node_id="location_adapter")
             await _register_node(registry, location)
             await location.start(message_bus)
-            brain.location_adapter = location
             nodes.append(location)
 
         # Reasoning nodes (optional — require extra dependencies)
