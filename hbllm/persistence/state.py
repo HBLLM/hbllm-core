@@ -56,6 +56,7 @@ class BrainState:
 
     def _init_tables(self) -> None:
         """Create tables if they don't exist."""
+        # Phase 1: Create tables (no-op if they already exist)
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS tenants (
                 id TEXT PRIMARY KEY,
@@ -105,8 +106,13 @@ class BrainState:
                 duration_ms REAL DEFAULT 0,
                 created_at REAL NOT NULL
             );
+        """)
 
-            -- Performance indexes for tenant-scoped queries
+        # Phase 2: Migrate legacy tables that predate multi-tenant columns
+        self._migrate_columns()
+
+        # Phase 3: Create indexes (safe now that columns exist)
+        self._conn.executescript("""
             CREATE INDEX IF NOT EXISTS idx_messages_tenant_time
                 ON messages(tenant_id, user_id, device_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_checkpoints_tenant
@@ -115,6 +121,24 @@ class BrainState:
                 ON tool_logs(tenant_id, user_id, device_id, tool_name);
         """)
         self._conn.commit()
+
+    def _migrate_columns(self) -> None:
+        """Add tenant_id/user_id/device_id columns to legacy tables missing them."""
+        migrations = {
+            "kv_store": ["tenant_id", "user_id", "device_id"],
+            "messages": ["tenant_id", "user_id", "device_id"],
+            "checkpoints": ["tenant_id", "user_id", "device_id"],
+            "tool_logs": ["tenant_id", "user_id", "device_id"],
+        }
+        for table, columns in migrations.items():
+            existing = {
+                row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for col in columns:
+                if col not in existing:
+                    self._conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''"  # noqa: S608
+                    )
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
