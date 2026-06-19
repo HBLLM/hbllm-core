@@ -75,8 +75,8 @@ class CognitiveStream:
             try:
                 if hasattr(self._bus, "unsubscribe"):
                     await self._bus.unsubscribe(topic, sub_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[Streaming] non-critical error: %s", e)
         self._subscriptions.clear()
 
     def __aiter__(self) -> AsyncIterator[dict[str, str]]:

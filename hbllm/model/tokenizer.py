@@ -100,6 +100,7 @@ class PurePythonBPE:
             if best_idx == -1:
                 break  # No more merge rules applicable
 
+            assert best_pair is not None  # guaranteed by best_idx != -1
             left, right = best_pair
             merged_id = self.merge_to_id[best_pair]
             tokens[best_idx] = merged_id
@@ -241,8 +242,10 @@ class HBLLMTokenizer:
         elif self._tiktoken is not None:
             return str(self._tiktoken.decode(filtered))
         else:
-            # Zero-dependency 256-byte fallback
-            return bytes(filtered).decode("utf-8", errors="replace")
+            # Zero-dependency 256-byte fallback — token IDs ≥256 (e.g.
+            # merged BPE tokens or special tokens) have no byte mapping here,
+            # so we filter them out to avoid ValueError.
+            return bytes(t for t in filtered if 0 <= t < 256).decode("utf-8", errors="replace")
 
     # ─── Special Token IDs ───────────────────────────────────────────
 

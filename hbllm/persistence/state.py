@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from hbllm.persistence.db_pool import DBPool
+from hbllm.security.tenant_guard import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -104,16 +105,27 @@ class BrainState:
                 duration_ms REAL DEFAULT 0,
                 created_at REAL NOT NULL
             );
+
+            -- Performance indexes for tenant-scoped queries
+            CREATE INDEX IF NOT EXISTS idx_messages_tenant_time
+                ON messages(tenant_id, user_id, device_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_checkpoints_tenant
+                ON checkpoints(tenant_id, user_id, device_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_tool_logs_tenant_name
+                ON tool_logs(tenant_id, user_id, device_id, tool_name);
         """)
         self._conn.commit()
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def save(
-        self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self,
+        key: str,
+        value: Any,
+        tenant_id: str = "default",
+        user_id: str = "",
+        device_id: str = "",
     ) -> None:
         """Save a value to the key-value store."""
         self._conn.execute(
@@ -122,14 +134,12 @@ class BrainState:
         )
         self._conn.commit()
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def load(
         self,
         key: str,
         default: Any = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> Any:
@@ -142,10 +152,10 @@ class BrainState:
             return json.loads(row[0])
         return default
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
-    def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    def delete(
+        self, key: str, tenant_id: str = "default", user_id: str = "", device_id: str = ""
+    ) -> None:
         """Delete a key from the store."""
         self._conn.execute(
             "DELETE FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?",
@@ -155,15 +165,13 @@ class BrainState:
 
     # ── Conversation History ──────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def append_message(
         self,
         role: str,
         content: str,
         metadata: dict | None = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> int:
@@ -175,14 +183,12 @@ class BrainState:
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def get_messages(
         self,
         limit: int = 50,
         offset: int = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -204,10 +210,10 @@ class BrainState:
             for row in reversed(rows)  # Return in chronological order
         ]
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
-    def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    def clear_messages(
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
+    ) -> None:
         """Clear all conversation history."""
         self._conn.execute(
             "DELETE FROM messages WHERE tenant_id = ? AND user_id = ? AND device_id = ?",
@@ -217,11 +223,9 @@ class BrainState:
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def checkpoint(
-        self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, data: dict, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> int:
         """Save a checkpoint."""
         cursor = self._conn.execute(
@@ -231,11 +235,9 @@ class BrainState:
         self._conn.commit()
         return cursor.lastrowid or 0
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def latest_checkpoint(
-        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> dict | None:
         """Get the most recent checkpoint."""
         row = self._conn.execute(
@@ -246,11 +248,9 @@ class BrainState:
             return {"data": json.loads(row[0]), "created_at": row[1]}
         return None
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def list_checkpoints(
-        self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, limit: int = 10, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> list[dict]:
         """List recent checkpoints."""
         rows = self._conn.execute(
@@ -261,8 +261,6 @@ class BrainState:
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def log_tool_call(
         self,
@@ -270,7 +268,7 @@ class BrainState:
         input_data: str,
         output: str,
         duration_ms: float = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> None:
@@ -283,21 +281,21 @@ class BrainState:
                 device_id,
                 tool_name,
                 input_data,
-                output[:5000],
+                output[:5000]
+                if len(output) <= 5000
+                else output[:4950] + f"\n... [truncated from {len(output)} chars]",
                 duration_ms,
                 time.time(),
             ),
         )
         self._conn.commit()
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     def get_tool_logs(
         self,
         tool_name: str | None = None,
         limit: int = 20,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -410,17 +408,28 @@ class AsyncBrainState:
                         duration_ms REAL DEFAULT 0,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     );
+
+                    -- Performance indexes for tenant-scoped queries
+                    CREATE INDEX IF NOT EXISTS idx_pg_messages_tenant_time
+                        ON messages(tenant_id, user_id, device_id, created_at);
+                    CREATE INDEX IF NOT EXISTS idx_pg_checkpoints_tenant
+                        ON checkpoints(tenant_id, user_id, device_id, id DESC);
+                    CREATE INDEX IF NOT EXISTS idx_pg_tool_logs_tenant_name
+                        ON tool_logs(tenant_id, user_id, device_id, tool_name);
                 """)
             self._pg_tables_created = True
         return pool
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def save(
-        self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self,
+        key: str,
+        value: Any,
+        tenant_id: str = "default",
+        user_id: str = "",
+        device_id: str = "",
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -437,14 +446,12 @@ class AsyncBrainState:
         else:
             await asyncio.to_thread(self._fallback.save, key, value, tenant_id, user_id, device_id)
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def load(
         self,
         key: str,
         default: Any = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> Any:
@@ -465,11 +472,9 @@ class AsyncBrainState:
             self._fallback.load, key, default, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def delete(
-        self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, key: str, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -486,15 +491,13 @@ class AsyncBrainState:
 
     # ── Conversation History ──────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def append_message(
         self,
         role: str,
         content: str,
         metadata: dict | None = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> int:
@@ -515,14 +518,12 @@ class AsyncBrainState:
             self._fallback.append_message, role, content, metadata, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def get_messages(
         self,
         limit: int = 50,
         offset: int = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -553,11 +554,9 @@ class AsyncBrainState:
             self._fallback.get_messages, limit, offset, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def clear_messages(
-        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -573,11 +572,9 @@ class AsyncBrainState:
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def checkpoint(
-        self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, data: dict, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> int:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -594,11 +591,9 @@ class AsyncBrainState:
             self._fallback.checkpoint, data, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def latest_checkpoint(
-        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> dict | None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -617,11 +612,9 @@ class AsyncBrainState:
             self._fallback.latest_checkpoint, tenant_id, user_id, device_id
         )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def list_checkpoints(
-        self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, limit: int = 10, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -644,8 +637,6 @@ class AsyncBrainState:
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def log_tool_call(
         self,
@@ -653,7 +644,7 @@ class AsyncBrainState:
         input_data: str,
         output: str,
         duration_ms: float = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> None:
@@ -682,14 +673,12 @@ class AsyncBrainState:
                 device_id,
             )
 
-    from hbllm.security.tenant_guard import require_tenant
-
     @require_tenant
     async def get_tool_logs(
         self,
         tool_name: str | None = None,
         limit: int = 20,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -733,8 +722,8 @@ class AsyncBrainState:
         # DBPool handles global connection closure, but we close the fallback
         await asyncio.to_thread(self._fallback.close)
 
-    @property
-    async def stats(self) -> dict:
+    async def get_stats(self) -> dict:
+        """Return storage statistics."""
         pool = await self._ensure_pg_tables()
         if pool:
             async with pool.acquire() as conn:

@@ -273,6 +273,6 @@ class ActionPlanner:
                     tool_name = data.get("tool_call") or data.get("tool")
                     args = data.get("arguments") or data.get("args") or {}
                     return str(tool_name), args
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[ActionPlanner] Fallback handler not available: %s", e)
         return None

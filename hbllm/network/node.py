@@ -43,6 +43,7 @@ class NodeType(StrEnum):
     ACTION = "action"
     SYSTEM = "system"
     GATEWAY = "gateway"
+    COMPOSITE = "composite"
 
 
 class DeviceTier(StrEnum):
@@ -181,40 +182,6 @@ class Node(ABC):
         _ACTIVE_NODES[self.node_id] = self
         self._start_time = time.monotonic()
         self._running = True
-
-        # Auto-signing monkeypatch on the bus instance if not already done
-        if not getattr(bus, "_auto_sign_wrapped", False):
-            original_publish = bus.publish
-            original_request = bus.request
-
-            async def wrapped_publish(topic: str, message: Message) -> None:
-                node = _ACTIVE_NODES.get(message.source_node_id)
-                if node:
-                    if not message.vector_clock:
-                        node.clock.increment()
-                        message.vector_clock = node.clock.to_dict()
-                    if not message.signature:
-                        message.signature = node.node_identity.sign(message.signable_data)
-                await original_publish(topic, message)
-
-            async def wrapped_request(
-                topic: str, message: Message, timeout: float = 90.0
-            ) -> Message:
-                node = _ACTIVE_NODES.get(message.source_node_id)
-                if node:
-                    if not message.vector_clock:
-                        node.clock.increment()
-                        message.vector_clock = node.clock.to_dict()
-                    if not message.signature:
-                        message.signature = node.node_identity.sign(message.signable_data)
-                return await original_request(topic, message, timeout=timeout)
-
-            try:
-                bus.publish = wrapped_publish  # type: ignore
-                bus.request = wrapped_request  # type: ignore
-                bus._auto_sign_wrapped = True  # type: ignore
-            except (AttributeError, TypeError):
-                pass
 
         await self.on_start()
 

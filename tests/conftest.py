@@ -57,7 +57,6 @@ except ImportError:
     sys.modules["onnxruntime"] = onnx_mock
 
 import asyncio
-import gc
 import logging
 import os
 

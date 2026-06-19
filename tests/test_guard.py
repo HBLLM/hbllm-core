@@ -1,9 +1,6 @@
 """Tests for Intent Integrity Engine and Explanation-First Guard."""
 
-import pytest
-
 from hbllm.brain.control.guard import IntentEnvelope, IntentIntegrityEngine
-from hbllm.brain.control.permissions import ActionClass
 
 
 def test_intent_integrity_hashing():

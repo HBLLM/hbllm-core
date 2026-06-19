@@ -5,7 +5,6 @@ Tests for Unified Knowledge Graph Extractor and Ingestion Pipeline.
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -17,10 +16,9 @@ from hbllm.knowledge.extractor import (
     KnowledgeGraphExtractor,
     MarkdownExtractor,
     PythonExtractor,
-    StructuralResult,
 )
 from hbllm.knowledge.knowledge_base import KnowledgeBase
-from hbllm.memory.knowledge_graph import Entity, KnowledgeGraph, Relation
+from hbllm.memory.knowledge_graph import KnowledgeGraph
 
 
 @pytest.fixture

@@ -1,4 +1,3 @@
-import asyncio
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,7 +25,6 @@ except ImportError:
 import pytest
 
 from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import Message
 from hbllm.perception.audio_in_node import AudioInputNode
 from hbllm.perception.audio_out_node import AudioOutputNode
 

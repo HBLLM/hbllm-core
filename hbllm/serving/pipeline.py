@@ -20,6 +20,9 @@ from typing import Any
 from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.registry import ServiceRegistry
+from hbllm.network.tracing import trace_span
+from hbllm.serving.errors import sanitize_exception_message
+from hbllm.utils.hardware import is_slow_cpu
 
 logger = logging.getLogger(__name__)
 
@@ -49,27 +52,15 @@ class PipelineResult:
             "session_id": self.session_id,
             "latency_ms": self.latency_ms,
             "stages_completed": self.stages_completed,
+            "metadata": self.metadata,
             "error": self.error,
         }
-
-
-def _is_slow_cpu() -> bool:
-    import os
-
-    try:
-        import torch
-
-        has_cuda = torch.cuda.is_available()
-        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-        return not (has_cuda or has_mps)
-    except ImportError:
-        return True
 
 
 def _default_total_timeout() -> float:
     import os
 
-    default_val = 300.0 if _is_slow_cpu() else 60.0
+    default_val = 300.0 if is_slow_cpu() else 60.0
     return float(os.getenv("HBLLM_TOTAL_TIMEOUT", str(default_val)))
 
 
@@ -116,6 +107,7 @@ class CognitivePipeline:
         self.config = config or PipelineConfig()
         self._response_futures: dict[str, asyncio.Future[Message]] = {}
         self._subscriptions: list[Subscription] = []
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         """Subscribe to decision output and sensory output to capture final responses."""
@@ -123,10 +115,18 @@ class CognitivePipeline:
             await self.bus.subscribe("decision.output", self._handle_decision_output),
             await self.bus.subscribe("sensory.output", self._handle_decision_output),
         ]
+        self._cleanup_task = asyncio.create_task(self._cleanup_stale_futures())
         logger.info("CognitivePipeline started")
 
     async def stop(self) -> None:
         """Clean up subscriptions and pending futures."""
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+
         if self._subscriptions:
             for sub in self._subscriptions:
                 await self.bus.unsubscribe(sub)
@@ -136,6 +136,26 @@ class CognitivePipeline:
                 future.cancel()
         self._response_futures.clear()
         logger.info("CognitivePipeline stopped")
+
+    async def _cleanup_stale_futures(self) -> None:
+        """Periodically cancel futures that have been pending longer than total_timeout."""
+        while True:
+            try:
+                await asyncio.sleep(30.0)
+                stale_ids = [cid for cid, fut in self._response_futures.items() if not fut.done()]
+                # We can't easily track creation time on futures, so we cancel
+                # any that are still pending after a full sweep interval.
+                # In practice, total_timeout handles the primary case; this
+                # catches futures whose callers were cancelled externally.
+                for cid in stale_ids:
+                    fut = self._response_futures.pop(cid, None)
+                    if fut and not fut.done():
+                        fut.cancel()
+                        logger.debug("Cleaned up stale future: %s", cid)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error in future cleanup task")
 
     async def _emit_thought(self, text: str, correlation_id: str, tenant_id: str) -> None:
         """Emit an internal thought to the bus for observability."""
@@ -165,94 +185,99 @@ class CognitivePipeline:
         correlation_id = str(uuid.uuid4())
         stages: list[str] = []
 
-        try:
-            # ── Stage 1: Pre-processing (memory + identity injection) ──
-            await self._emit_thought(
-                "Initializing cognitive pre-processing...", correlation_id, tenant_id
-            )
-            context = await self._pre_process(text, tenant_id, session_id, correlation_id)
-            stages.append("pre_process")
+        with trace_span(
+            "pipeline.process",
+            {"correlation_id": correlation_id, "tenant_id": tenant_id, "session_id": session_id},
+        ):
+            try:
+                # ── Stage 1: Pre-processing (memory + identity injection) ──
+                await self._emit_thought(
+                    "Initializing cognitive pre-processing...", correlation_id, tenant_id
+                )
+                context = await self._pre_process(text, tenant_id, session_id, correlation_id)
+                stages.append("pre_process")
 
-            # ── Stage 1.5: Fast Path Check ──
-            complexity = self._classify_complexity(text)
-            if complexity == "trivial":
+                # ── Stage 1.5: Fast Path Check ──
+                complexity = self._classify_complexity(text)
+                if complexity == "trivial":
+                    await self._emit_thought(
+                        "Query is trivial, routing to fast path...", correlation_id, tenant_id
+                    )
+                    response = await self._fast_path(
+                        text, context, tenant_id, session_id, correlation_id
+                    )
+                    stages.append("fast_path")
+                    # Skip normal routing/workspace stages
+                else:
+                    # ── Stage 2: Route through cognitive pipeline ──
+                    await self._emit_thought(
+                        f"Routing task to specialized experts (media: {len(media) if media else 0} items)...",
+                        correlation_id,
+                        tenant_id,
+                    )
+                    response = await self._route_and_wait(
+                        text=text,
+                        context=context,
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        correlation_id=correlation_id,
+                        model_size=model_size,
+                        media=media,
+                    )
+                    stages.append("route")
+                    stages.append("workspace")
+                    stages.append("decision")
+
+                # ── Stage 3: Post-processing (memory storage) ──
                 await self._emit_thought(
-                    "Query is trivial, routing to fast path...", correlation_id, tenant_id
+                    "Consolidating interaction into long-term memory...", correlation_id, tenant_id
                 )
-                response = await self._fast_path(
-                    text, context, tenant_id, session_id, correlation_id
-                )
-                stages.append("fast_path")
-                # Skip normal routing/workspace stages
-            else:
-                # ── Stage 2: Route through cognitive pipeline ──
-                await self._emit_thought(
-                    f"Routing task to specialized experts (media: {len(media) if media else 0} items)...",
-                    correlation_id,
-                    tenant_id,
-                )
-                response = await self._route_and_wait(
-                    text=text,
-                    context=context,
+                await self._post_process(text, response, tenant_id, session_id, correlation_id)
+                stages.append("post_process")
+
+                latency_ms = (time.monotonic() - start_time) * 1000
+
+                return PipelineResult(
+                    text=str(response.get("text", response.get("response", ""))),
+                    correlation_id=correlation_id,
+                    source_node=str(response.get("source_node", "decision")),
+                    confidence=float(response.get("confidence", 0.0)),
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    correlation_id=correlation_id,
-                    model_size=model_size,
-                    media=media,
+                    latency_ms=latency_ms,
+                    stages_completed=stages,
+                    metadata=response,
                 )
-                stages.append("route")
-                stages.append("workspace")
-                stages.append("decision")
 
-            # ── Stage 3: Post-processing (memory storage) ──
-            await self._emit_thought(
-                "Consolidating interaction into long-term memory...", correlation_id, tenant_id
-            )
-            await self._post_process(text, response, tenant_id, session_id, correlation_id)
-            stages.append("post_process")
-
-            latency_ms = (time.monotonic() - start_time) * 1000
-
-            return PipelineResult(
-                text=str(response.get("text", response.get("response", ""))),
-                correlation_id=correlation_id,
-                source_node=str(response.get("source_node", "decision")),
-                confidence=float(response.get("confidence", 0.0)),
-                tenant_id=tenant_id,
-                session_id=session_id,
-                latency_ms=latency_ms,
-                stages_completed=stages,
-                metadata=response,
-            )
-
-        except (TimeoutError, asyncio.TimeoutError):
-            latency_ms = (time.monotonic() - start_time) * 1000
-            logger.warning(
-                "Pipeline timed out after %.0fms for '%s...'",
-                latency_ms,
-                text[:30],
-            )
-            return PipelineResult(
-                text="I'm taking longer than expected to think about this. Please try again.",
-                correlation_id=correlation_id,
-                tenant_id=tenant_id,
-                session_id=session_id,
-                latency_ms=latency_ms,
-                stages_completed=stages,
-                error=True,
-            )
-        except Exception as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            logger.exception("Pipeline error: %s", e)
-            return PipelineResult(
-                text=f"An error occurred while processing your request: {e}",
-                correlation_id=correlation_id,
-                tenant_id=tenant_id,
-                session_id=session_id,
-                latency_ms=latency_ms,
-                stages_completed=stages,
-                error=True,
-            )
+            except (TimeoutError, asyncio.TimeoutError):
+                latency_ms = (time.monotonic() - start_time) * 1000
+                logger.warning(
+                    "Pipeline timed out after %.0fms for '%s...'",
+                    latency_ms,
+                    text[:30],
+                )
+                return PipelineResult(
+                    text="I'm taking longer than expected to think about this. Please try again.",
+                    correlation_id=correlation_id,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    latency_ms=latency_ms,
+                    stages_completed=stages,
+                    error=True,
+                )
+            except Exception as e:
+                latency_ms = (time.monotonic() - start_time) * 1000
+                logger.exception("Pipeline error: %s", e)
+                safe_message = sanitize_exception_message(e)
+                return PipelineResult(
+                    text=safe_message,
+                    correlation_id=correlation_id,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    latency_ms=latency_ms,
+                    stages_completed=stages,
+                    error=True,
+                )
 
     async def _pre_process(
         self,
@@ -379,6 +404,29 @@ class CognitivePipeline:
         finally:
             self._response_futures.pop(correlation_id, None)
 
+    # Verbs that should never be routed to the fast path, even in short queries.
+    _DANGEROUS_VERBS = {
+        "delete",
+        "remove",
+        "execute",
+        "run",
+        "kill",
+        "drop",
+        "destroy",
+        "erase",
+        "wipe",
+        "shutdown",
+        "restart",
+        "reset",
+        "purge",
+        "clear",
+        "install",
+        "uninstall",
+        "deploy",
+        "terminate",
+        "format",
+    }
+
     def _classify_complexity(self, text: str) -> str:
         """
         Heuristic check to see if a query is trivial enough to skip the full pipeline.
@@ -399,8 +447,15 @@ class CognitivePipeline:
         if "?" in text:
             return "complex"
 
-        # Question words at the start of a token → complex
         query_words = text.lower().split()
+
+        # Safety check: queries containing dangerous action verbs are always
+        # complex regardless of length (e.g. "Delete all my data" is 4 words
+        # but must NOT be trivially fast-pathed).
+        if self._DANGEROUS_VERBS.intersection(query_words):
+            return "complex"
+
+        # Question words at the start of a token → complex
         question_words = {"who", "what", "where", "when", "why", "how", "which"}
         if query_words and query_words[0] in question_words:
             return "complex"

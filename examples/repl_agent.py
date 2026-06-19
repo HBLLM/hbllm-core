@@ -16,7 +16,6 @@ Or equivalently::
 """
 
 import argparse
-import sys
 
 from hbllm.cli.agent import run_agent
 

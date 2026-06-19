@@ -312,13 +312,26 @@ class LoadManager(Node):
         task_id = message.payload.get("task_id", message.id)
         self._active_tasks.discard(task_id)
 
-        # Try to process queued tasks
+        # Try to process queued tasks — re-publish them so they actually execute
         next_task = self.dequeue_task()
         if next_task:
             logger.info(
-                "[LoadManager] Dequeuing task %s (queue=%d)",
+                "[LoadManager] Re-dispatching queued task %s (remaining queue=%d)",
                 next_task["task_id"],
                 len(self._task_queue),
+            )
+            await self.bus.publish(
+                "system.task.retry",
+                Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="system.task.retry",
+                    payload={
+                        "task_id": next_task["task_id"],
+                        "priority": next_task.get("priority", 0.5),
+                        "queued_at": next_task.get("queued_at", 0),
+                    },
+                ),
             )
 
     async def _handle_query(self, message: Message) -> Message | None:

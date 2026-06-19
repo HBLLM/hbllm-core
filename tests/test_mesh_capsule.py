@@ -2,9 +2,7 @@
 
 import time
 
-import pytest
-
-from hbllm.brain.mesh.capsule import CognitiveOwnership, TaskCapsule
+from hbllm.brain.mesh.capsule import TaskCapsule
 from hbllm.brain.mesh.locality import CognitiveLocalityEngine
 from hbllm.brain.mesh.registry import TaskPriorityClass
 

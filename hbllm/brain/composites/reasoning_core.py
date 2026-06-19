@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from hbllm.brain.policy_engine import PolicyEngine
     from hbllm.brain.provider_adapter import ProviderLLM
     from hbllm.modules.domain_registry import DomainRegistry
-    from hbllm.network.bus import MessageBus
     from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)

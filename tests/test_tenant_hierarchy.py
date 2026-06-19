@@ -4,7 +4,6 @@ Tests for the hierarchical tenant registry and tenant guard clearances.
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +14,6 @@ from hbllm.security.tenant_guard import (
     TenantContext,
     TenantGuardMode,
     TenantIsolationError,
-    _ctx_guard_mode,
     require_tenant,
 )
 from hbllm.security.tenant_registry import TenantRegistry

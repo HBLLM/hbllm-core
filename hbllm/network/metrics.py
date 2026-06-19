@@ -51,12 +51,16 @@ class MetricsCollector:
         self._backend: str = "unknown"
         # In-memory storage
         self._mem_counters: dict[str, float] = defaultdict(float)
-        self._mem_histograms: dict[str, list[float]] = defaultdict(list)
+        self._mem_histograms: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=1000))
         self._mem_gauges: dict[str, float] = defaultdict(float)
+        # Thread lock for in-memory mutations (Prometheus handles its own thread safety)
+        self._mem_lock = threading.Lock()
         # SNN Telemetry history cache (rolling deque of max 100 entries per neuron)
         self._snn_history: dict[str, deque[tuple[float, float]]] = defaultdict(
             lambda: deque(maxlen=100)
         )
+        self._snn_last_active: dict[str, float] = {}
+        self._max_snn_neurons: int = 5000  # LRU cap on tracked neurons
 
         # Prometheus metrics (initialized in _init_prometheus)
         self._requests_total: Any = None
@@ -176,74 +180,102 @@ class MetricsCollector:
         if HAS_PROMETHEUS and self._requests_total:
             self._requests_total.labels(topic=topic, tenant_id=tenant_id, status=status).inc()
         else:
-            self._mem_counters[f"requests:{topic}:{status}"] += 1
+            with self._mem_lock:
+                self._mem_counters[f"requests:{topic}:{status}"] += 1
 
     def record_message(self, topic: str, message_type: str = "event") -> None:
         """Record a bus message (counter increment)."""
         if HAS_PROMETHEUS and self._messages_total:
             self._messages_total.labels(topic=topic, message_type=message_type).inc()
         else:
-            self._mem_counters[f"messages:{topic}:{message_type}"] += 1
+            with self._mem_lock:
+                self._mem_counters[f"messages:{topic}:{message_type}"] += 1
 
     def record_error(self, node_id: str, error_type: str = "exception") -> None:
         """Record an error (counter increment)."""
         if HAS_PROMETHEUS and self._errors_total:
             self._errors_total.labels(node_id=node_id, error_type=error_type).inc()
         else:
-            self._mem_counters[f"errors:{node_id}:{error_type}"] += 1
+            with self._mem_lock:
+                self._mem_counters[f"errors:{node_id}:{error_type}"] += 1
 
     def observe_duration(self, stage: str, duration_seconds: float) -> None:
         """Record a request duration (histogram observation)."""
         if HAS_PROMETHEUS and self._request_duration:
             self._request_duration.labels(stage=stage).observe(duration_seconds)
         else:
-            self._mem_histograms[f"duration:{stage}"].append(duration_seconds)
+            with self._mem_lock:
+                self._mem_histograms[f"duration:{stage}"].append(duration_seconds)
 
     def observe_node_latency(self, node_id: str, latency_seconds: float) -> None:
         """Record per-node latency (histogram observation)."""
         if HAS_PROMETHEUS and self._node_latency:
             self._node_latency.labels(node_id=node_id).observe(latency_seconds)
         else:
-            self._mem_histograms[f"latency:{node_id}"].append(latency_seconds)
+            with self._mem_lock:
+                self._mem_histograms[f"latency:{node_id}"].append(latency_seconds)
 
     def set_active_nodes(self, count: int) -> None:
         """Set the active node count (gauge)."""
         if HAS_PROMETHEUS and self._active_nodes:
             self._active_nodes.set(count)
         else:
-            self._mem_gauges["active_nodes"] = float(count)
+            with self._mem_lock:
+                self._mem_gauges["active_nodes"] = float(count)
 
     def set_healthy_nodes(self, count: int) -> None:
         """Set the healthy node count (gauge)."""
         if HAS_PROMETHEUS and self._healthy_nodes:
             self._healthy_nodes.set(count)
         else:
-            self._mem_gauges["healthy_nodes"] = float(count)
+            with self._mem_lock:
+                self._mem_gauges["healthy_nodes"] = float(count)
 
     def inc_active_requests(self) -> None:
         """Increment active requests gauge."""
         if HAS_PROMETHEUS and self._active_requests:
             self._active_requests.inc()
         else:
-            self._mem_gauges["active_requests"] += 1
+            with self._mem_lock:
+                self._mem_gauges["active_requests"] += 1
 
     def dec_active_requests(self) -> None:
         """Decrement active requests gauge."""
         if HAS_PROMETHEUS and self._active_requests:
             self._active_requests.dec()
         else:
-            self._mem_gauges["active_requests"] = max(
-                0.0, self._mem_gauges["active_requests"] - 1.0
-            )
+            with self._mem_lock:
+                self._mem_gauges["active_requests"] = max(
+                    0.0, self._mem_gauges["active_requests"] - 1.0
+                )
 
     def record_snn_potential(self, neuron_id: str, potential: float) -> None:
         """Record SNN neuron membrane potential (gauge)."""
+        now = time.time()
         # Record history with a real timestamp
-        self._snn_history[neuron_id].append((time.time(), potential))
-        self._mem_gauges[f"snn_potential:{neuron_id}"] = potential
+        self._snn_history[neuron_id].append((now, potential))
+        self._snn_last_active[neuron_id] = now
+        with self._mem_lock:
+            self._mem_gauges[f"snn_potential:{neuron_id}"] = potential
 
         if HAS_PROMETHEUS and self._snn_potentials:
             self._snn_potentials.labels(neuron_id=neuron_id).set(potential)
+
+        # Evict neurons inactive for >60 minutes to prevent unbounded growth
+        if len(self._snn_history) > self._max_snn_neurons:
+            self._evict_inactive_neurons()
+
+    def _evict_inactive_neurons(self, max_age_seconds: float = 3600.0) -> None:
+        """Remove SNN history for neurons that haven't reported in >60 minutes."""
+        now = time.time()
+        to_evict = [
+            nid for nid, last in self._snn_last_active.items() if now - last > max_age_seconds
+        ]
+        for nid in to_evict:
+            self._snn_history.pop(nid, None)
+            self._snn_last_active.pop(nid, None)
+            with self._mem_lock:
+                self._mem_gauges.pop(f"snn_potential:{nid}", None)
 
     def get_snn_history(self, neuron_id: str) -> list[dict[str, float]]:
         """Retrieve the rolling potential history for a specific neuron."""
@@ -257,7 +289,8 @@ class MetricsCollector:
         if HAS_PROMETHEUS and self._snn_spikes_total:
             self._snn_spikes_total.labels(neuron_id=neuron_id).inc(strength)
         else:
-            self._mem_counters[f"snn_spikes:{neuron_id}"] += strength
+            with self._mem_lock:
+                self._mem_counters[f"snn_spikes:{neuron_id}"] += strength
 
     @contextlib.contextmanager
     def measure_latency(self, stage: str) -> Generator[None, None, None]:

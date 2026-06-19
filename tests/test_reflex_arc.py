@@ -6,13 +6,10 @@ Verifies pattern-matching rules, sub-millisecond bypass, and EventLog integratio
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from hbllm.perception.event_log import EventLog
 from hbllm.perception.reality_bus import (
-    EventOrigin,
     PerceptionEvent,
     PerceptionModality,
     RealityEventBus,

@@ -196,7 +196,7 @@ Endpoints are organized into modular routers:
 | `health_router` | `routes/health.py` | `/health`, `/health/live`, `/health/ready`, `/routing/stats` |
 | `memory_router` | `routes/memory.py` | `/v1/memory/*`, `/v1/sync/*`, `/v1/feedback/*`, `/v1/knowledge/*`, `/v1/rules` |
 | `studio_router` | `studio.py` | `/api/*`, `/studio/*` (Studio UI endpoints) |
-| Core (api.py) | `api.py` | `/v1/chat`, `/v1/audio/*`, `/v1/benchmarks/*`, `/v1/cognitive/*` |
+| Core (api.py) | `api.py` | `/v1/chat`, `/v1/audio/*`, `/v1/benchmarks/*`, `/v1/cognitive/*`, `/studio/voice/*` |
 
 ### Dependency Injection
 
@@ -234,6 +234,44 @@ async def my_endpoint(brain = Depends(get_brain)):
 
 ---
 
+## Speaker Identification API
+
+HBLLM supports per-tenant voice identification — enrolling speakers, identifying them in real-time, and retroactively matching unknowns.
+
+### `POST /studio/voice/speakers/enroll`
+
+Enroll a speaker's voice for identification:
+
+```bash
+curl -X POST http://localhost:8000/studio/voice/speakers/enroll \
+  -H "Content-Type: application/json" \
+  -d '{
+    "speaker_id": "dumith",
+    "speaker_name": "Dumith",
+    "audio_hex": "<hex-encoded 16-bit PCM, 3+ seconds>",
+    "sample_rate": 16000,
+    "tenant_id": "default"
+  }'
+```
+
+### `GET /studio/voice/speakers`
+
+List all enrolled speakers for a tenant:
+
+```bash
+curl http://localhost:8000/studio/voice/speakers?tenant_id=default
+```
+
+### `DELETE /studio/voice/speakers/{speaker_id}`
+
+Delete an enrolled speaker profile:
+
+```bash
+curl -X DELETE http://localhost:8000/studio/voice/speakers/dumith?tenant_id=default
+```
+
+---
+
 ## Security Package (`hbllm.security`)
 
 Core security modules that are platform-independent (no serving dependency):
@@ -241,5 +279,6 @@ Core security modules that are platform-independent (no serving dependency):
 | Module | File | Purpose |
 |---|---|---|
 | Tenant Guard | `security/tenant_guard.py` | `contextvars`-based identity propagation, `@require_tenant` decorator |
+| Trust Interceptor | `security/trust.py` | MessageBus interceptor for signature verification, replay protection, and internal node trust |
 | Audit Log | `security/audit_log.py` | Append-only SQLite audit trail with identity context |
 | Encryption | `security/encryption.py` | Field-level symmetric encryption (XOR keystream + HMAC-SHA256) |

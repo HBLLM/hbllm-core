@@ -7,19 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 import pytest
 
-from hbllm.brain.control.attention import HumanAttentionModel, HumanAttentionState
-from hbllm.brain.snn import LIFConfig, LIFNeuron, SpikeEvent, SpikingAccumulator
+from hbllm.brain.control.attention import HumanAttentionModel
+from hbllm.brain.snn import LIFConfig, LIFNeuron, SpikingAccumulator
 from hbllm.perception.reality_bus import (
-    EventOrigin,
     PerceptionEvent,
-    PerceptionModality,
     RealityEventBus,
 )
-from hbllm.perception.reflex_arc import ReflexArc, ReflexRule, SpikingReflexRule
+from hbllm.perception.reflex_arc import ReflexArc, SpikingReflexRule
 
 
 class TestLIFNeuron:

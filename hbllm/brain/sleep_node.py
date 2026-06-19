@@ -495,8 +495,8 @@ class SleepCycleNode(Node):
                 from hbllm.serving.state import _state
 
                 brain = _state.get("brain")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("[SleepNode] Non-critical error during consolidation phase: %s", e)
 
         if not brain:
             logger.debug("[SleepNode] No brain reference available for SNN consolidation.")
@@ -1087,8 +1087,8 @@ class SleepCycleNode(Node):
                     )
                     await self.bus.request("memory.retrieve_recent", warm_msg, timeout=2.0)
                     warmed += 1
-                except Exception:
-                    pass  # Non-critical — skip if individual topic warm fails
+                except Exception as e:
+                    logger.debug("[SleepNode] Non-critical: topic warm skipped: %s", e)
 
             logger.info(
                 "[SleepNode] Memory cache warmed with %d topics: %s",

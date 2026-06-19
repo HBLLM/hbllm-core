@@ -111,9 +111,8 @@ async def get_temporal_timeline():
                     p = json.loads(payload_str)
                     if isinstance(p, dict):
                         task_prompt = p.get("prompt") or p.get("text") or r["route_topic"]
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug("[Studio] non-critical error: %s", e)
                 rows.append(
                     {
                         "id": r["task_id"],
@@ -649,8 +648,8 @@ async def get_persona_profile(request: Request):
                         "topics_of_interest", ["AI", "cognitive architecture"]
                     ),
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[Studio] non-critical error: %s", e)
     return {
         "verbosity": "balanced",
         "tone": "neutral",
@@ -1058,8 +1057,8 @@ async def studio_stats() -> Any:
             if dpo_path.exists():
                 with dpo_path.open() as f:
                     dpo_queue_depth = len(json.load(f))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[Studio] non-critical error: %s", e)
         learning_stats["dpo_queue_depth"] = dpo_queue_depth
         result["learning"] = learning_stats
 
@@ -1277,8 +1276,8 @@ async def studio_learning() -> Any:
                     for entry in queue[:5]:
                         if isinstance(entry, (list, tuple)) and len(entry) > 0:
                             dpo_preview.append(str(entry[0])[:80])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[Studio] non-critical error: %s", e)
         result["learner"]["dpo_queue_depth"] = dpo_queue_depth
         result["learner"]["dpo_queue_preview"] = dpo_preview
         # Micro-learn queue preview
@@ -1816,7 +1815,7 @@ async def studio_voice_test(request: Request) -> Any:
     )
     try:
         resp = await asyncio.wait_for(
-            bus.request("sensory.audio.out", msg, timeout=15.0), timeout=15.0
+            bus.request("sensory.audio.out", msg, timeout=180.0), timeout=180.0
         )
         if resp and resp.type != MessageType.ERROR:
             return {
@@ -1824,9 +1823,39 @@ async def studio_voice_test(request: Request) -> Any:
                 "audio_path": resp.payload.get("audio_path"),
                 "voice": resp.payload.get("voice"),
             }
-        return {"status": "error", "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded"}
+        return {
+            "status": "error",
+            "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded",
+        }
+    except asyncio.TimeoutError:
+        return {
+            "status": "error",
+            "error": "Synthesis timed out — model may still be loading. Try again in a few seconds.",
+        }
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "error": str(e) or f"Synthesis failed: {type(e).__name__}"}
+
+
+@router.get("/voice/audio/{filename:path}")
+async def serve_audio(filename: str):
+    """Serve a synthesized audio file."""
+    import os
+    from pathlib import Path
+
+    from starlette.responses import FileResponse
+
+    # Sanitize filename to prevent directory traversal
+    safe_name = os.path.basename(filename)
+    audio_path = Path("workspace/audio") / safe_name
+
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(
+        str(audio_path),
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # ─── RBAC / Permissions Endpoints ─────────────────────────────────────────
@@ -2040,7 +2069,7 @@ async def studio_rbac_audit(request: Request, limit: int = 50) -> Any:
     try:
         from hbllm.security.audit_log import AuditLog
 
-        audit = AuditLog(data_dir=data_dir)
+        audit = AuditLog(db_path=os.path.join(data_dir, "audit.db"))
         entries = audit.query(tenant_id=tenant_id, limit=limit)
         return {
             "tenant_id": tenant_id,

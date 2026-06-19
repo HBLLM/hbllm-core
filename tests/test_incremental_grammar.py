@@ -2,7 +2,6 @@
 Test for Grammar-Constrained Sampler.
 """
 
-import pytest
 import torch
 
 from hbllm.model.grammar import GrammarState

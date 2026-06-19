@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from hbllm.plugin.manager import LoadedBundle, PluginManager, PromptStore
+from hbllm.plugin.manager import PluginManager
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

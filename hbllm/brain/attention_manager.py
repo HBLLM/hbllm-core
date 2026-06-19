@@ -122,6 +122,8 @@ class AttentionManager(Node):
         await self.bus.subscribe("attention.query", self._handle_query)
         await self.bus.subscribe("attention.score", self._handle_score_request)
         await self.bus.subscribe("workspace.thought", self._handle_thought_utility)
+        # Coordinate with LoadManager — adjust budget when load pressure changes
+        await self.bus.subscribe("system.load.policy_update", self._handle_load_policy)
         self._polling_task = asyncio.create_task(self._poll_memory_stats())
 
     async def on_stop(self) -> None:
@@ -132,6 +134,24 @@ class AttentionManager(Node):
         )
         if self._polling_task:
             self._polling_task.cancel()
+
+    async def _handle_load_policy(self, message: Message) -> None:
+        """Adjust context budget when LoadManager changes degradation policy."""
+        try:
+            new_max = message.payload.get("max_context_tokens")
+            if new_max is not None and isinstance(new_max, int):
+                old_budget = self.total_context_budget
+                self.total_context_budget = new_max
+                # Rebalance focus allocations to fit the new budget
+                self.rebalance_focus()
+                logger.info(
+                    "[AttentionManager] Context budget adjusted %d → %d (load policy: %s)",
+                    old_budget,
+                    new_max,
+                    message.payload.get("level", "unknown"),
+                )
+        except Exception as e:
+            logger.warning("[AttentionManager] Error handling load policy update: %s", e)
 
     async def _poll_memory_stats(self) -> None:
         """Periodically poll memory nodes for item counts to update budgets."""

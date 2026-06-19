@@ -10,9 +10,6 @@ Tests the complete flow using only HBLLM Core modules:
   6. Full journey combining all the above
 """
 
-import os
-import tempfile
-
 import pytest
 
 from hbllm.memory.episodic import EpisodicMemory

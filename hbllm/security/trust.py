@@ -31,8 +31,10 @@ class TrustInterceptor:
         Intercepts message and verifies trust.
         Returns message if valid, None if invalid/untrusted.
         """
-        # System, API server, and pipeline messages bypass trust checks (for now)
-        if message.source_node_id in ("system", "api_server", "pipeline"):
+        source = message.source_node_id
+
+        # Well-known system sources bypass all checks
+        if source in ("system", "api_server", "pipeline", "studio", "audio_ws", "registry"):
             return message
 
         # 1. Replay Protection
@@ -48,20 +50,28 @@ class TrustInterceptor:
             self._seen_messages.popitem(last=False)
 
         # 2. Revocation Check
-        if await self.registry.is_revoked(message.source_node_id):
+        if await self.registry.is_revoked(source):
             logger.warning(
                 "[TrustInterceptor] Message from revoked node! Dropping message %s", message.id
             )
             await self._send_to_dlq(message, "node_revoked")
             return None
 
-        # 3. Signature Verification
+        # 3. Registered internal nodes are trusted when they send unsigned messages
+        #    (they are part of the brain). If a signature IS present, we still
+        #    verify it to catch forged payloads.
+        base_node = source.split(".")[0]  # e.g. "memory_system.sleep" → "memory_system"
+        is_registered = source in self.registry._nodes or base_node in self.registry._nodes
+        if is_registered and not message.signature:
+            return message
+
+        # 4. Signature Verification (only for external/unknown nodes)
         is_valid = await self.registry.verify_message(message)
         if not is_valid:
             logger.warning(
                 "[TrustInterceptor] Untrusted message detected! Dropping message %s from node '%s'",
                 message.id,
-                message.source_node_id,
+                source,
             )
             await self._send_to_dlq(message, "invalid_signature")
             return None

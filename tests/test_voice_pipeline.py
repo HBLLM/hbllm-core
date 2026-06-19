@@ -10,13 +10,9 @@ All tests use mocks — no real ML models needed.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import struct
-import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-import pytest
 import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus

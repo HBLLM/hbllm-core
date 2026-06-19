@@ -10,7 +10,6 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock
 
 import numpy as np
@@ -29,7 +28,6 @@ from hbllm.brain.snn.expression.models import (
 )
 from hbllm.brain.snn.expression.reward_evaluator import RewardEvaluator
 from hbllm.brain.snn.expression.thought_controller import (
-    GateSignal,
     ThoughtController,
 )
 from hbllm.brain.snn.expression.thought_planner import ThoughtPlanner

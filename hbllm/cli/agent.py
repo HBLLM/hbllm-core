@@ -20,7 +20,7 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from argparse import ArgumentParser, Namespace
+    from argparse import Namespace
 
     from rich.console import Console
 

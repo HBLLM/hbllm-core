@@ -9,14 +9,12 @@ Verifies:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
 from hbllm.brain.control.intervention import InterventionAPI, ReversibilityPolicy
 from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import Message, MessageType
 
 
 @pytest.fixture

@@ -1,7 +1,5 @@
 """Tests for Idempotency Tracking Engine."""
 
-import pytest
-
 from hbllm.brain.embodiment.idempotency import IdempotencyEngine
 
 
