@@ -68,8 +68,10 @@ class TestGeoCoordinate:
 class TestGeofence:
     def test_contains_inside(self):
         fence = Geofence(
-            id="home", name="Home",
-            latitude=HOME_LAT, longitude=HOME_LON,
+            id="home",
+            name="Home",
+            latitude=HOME_LAT,
+            longitude=HOME_LON,
             radius_meters=100,
         )
         near = GeoCoordinate(latitude=NEAR_HOME_LAT, longitude=NEAR_HOME_LON)
@@ -77,8 +79,10 @@ class TestGeofence:
 
     def test_contains_outside(self):
         fence = Geofence(
-            id="home", name="Home",
-            latitude=HOME_LAT, longitude=HOME_LON,
+            id="home",
+            name="Home",
+            latitude=HOME_LAT,
+            longitude=HOME_LON,
             radius_meters=100,
         )
         far = GeoCoordinate(latitude=FAR_LAT, longitude=FAR_LON)
@@ -86,8 +90,10 @@ class TestGeofence:
 
     def test_to_dict(self):
         fence = Geofence(
-            id="office", name="Office",
-            latitude=37.0, longitude=-122.0,
+            id="office",
+            name="Office",
+            latitude=37.0,
+            longitude=-122.0,
             radius_meters=200,
         )
         d = fence.to_dict()
@@ -108,8 +114,10 @@ class TestGeofence:
 
     def test_roundtrip(self):
         fence = Geofence(
-            id="park", name="Park",
-            latitude=37.5, longitude=-122.1,
+            id="park",
+            name="Park",
+            latitude=37.5,
+            longitude=-122.1,
             radius_meters=300,
             trigger_on_exit=False,
         )
@@ -141,9 +149,12 @@ class TestLocationAdapter:
     def test_add_geofence(self):
         adapter = LocationAdapter()
         fence = Geofence(
-            id="home", name="Home",
-            latitude=HOME_LAT, longitude=HOME_LON,
-            radius_meters=100, tenant_id="t1",
+            id="home",
+            name="Home",
+            latitude=HOME_LAT,
+            longitude=HOME_LON,
+            radius_meters=100,
+            tenant_id="t1",
         )
         adapter.add_geofence(fence)
         fences = adapter.list_geofences("t1")
@@ -153,8 +164,10 @@ class TestLocationAdapter:
     def test_remove_geofence(self):
         adapter = LocationAdapter()
         fence = Geofence(
-            id="home", name="Home",
-            latitude=HOME_LAT, longitude=HOME_LON,
+            id="home",
+            name="Home",
+            latitude=HOME_LAT,
+            longitude=HOME_LON,
             tenant_id="t1",
         )
         adapter.add_geofence(fence)
@@ -186,18 +199,20 @@ class TestLocationAdapter:
 
     def test_get_nearest_geofence(self):
         adapter = LocationAdapter()
-        adapter._locations["t1"] = GeoCoordinate(
-            latitude=HOME_LAT, longitude=HOME_LON
-        )
+        adapter._locations["t1"] = GeoCoordinate(latitude=HOME_LAT, longitude=HOME_LON)
 
         fence1 = Geofence(
-            id="near", name="Near",
-            latitude=NEAR_HOME_LAT, longitude=NEAR_HOME_LON,
+            id="near",
+            name="Near",
+            latitude=NEAR_HOME_LAT,
+            longitude=NEAR_HOME_LON,
             tenant_id="t1",
         )
         fence2 = Geofence(
-            id="far", name="Far",
-            latitude=FAR_LAT, longitude=FAR_LON,
+            id="far",
+            name="Far",
+            latitude=FAR_LAT,
+            longitude=FAR_LON,
             tenant_id="t1",
         )
         adapter.add_geofence(fence1)

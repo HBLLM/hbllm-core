@@ -42,9 +42,7 @@ class TestSentenceBuffer:
         assert flushed == []
 
     def test_skip_code_blocks(self):
-        buf = self._make_buffer(
-            min_sentence_length=3, skip_code_blocks=True
-        )
+        buf = self._make_buffer(min_sentence_length=3, skip_code_blocks=True)
         text = "Here is code: ```python\nprint('hello')\n``` and more text. "
         sentences = buf.add(text)
         for s in sentences:
@@ -52,16 +50,12 @@ class TestSentenceBuffer:
 
     def test_skip_urls(self):
         buf = self._make_buffer(min_sentence_length=3, skip_urls=True)
-        sentences = buf.add(
-            "Visit https://example.com for details. "
-        )
+        sentences = buf.add("Visit https://example.com for details. ")
         for s in sentences:
             assert "https://" not in s
 
     def test_max_sentence_overflow(self):
-        buf = self._make_buffer(
-            min_sentence_length=3, max_sentence_length=20
-        )
+        buf = self._make_buffer(min_sentence_length=3, max_sentence_length=20)
         long_text = "a" * 30  # No sentence boundaries
         sentences = buf.add(long_text)
         assert len(sentences) >= 1

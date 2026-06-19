@@ -144,13 +144,9 @@ class OpenWakeWordEngine(WakeWordEngine):
                 inference_framework=self._config.oww_inference_framework,
             )
             self._loaded = True
-            logger.info(
-                "OpenWakeWord loaded (words=%s)", self._config.wake_words
-            )
+            logger.info("OpenWakeWord loaded (words=%s)", self._config.wake_words)
         except ImportError:
-            logger.warning(
-                "openwakeword not installed. Install with: pip install openwakeword"
-            )
+            logger.warning("openwakeword not installed. Install with: pip install openwakeword")
         except Exception as e:
             logger.error("Failed to load OpenWakeWord: %s", e)
 
@@ -243,9 +239,7 @@ class PorcupineEngine(WakeWordEngine):
             self._loaded = True
             logger.info("Porcupine loaded (words=%s)", self._config.wake_words)
         except ImportError:
-            logger.warning(
-                "pvporcupine not installed. Install with: pip install pvporcupine"
-            )
+            logger.warning("pvporcupine not installed. Install with: pip install pvporcupine")
         except Exception as e:
             logger.error("Failed to load Porcupine: %s", e)
 
@@ -392,9 +386,7 @@ class WakeWordDetector(Node):
     async def on_start(self) -> None:
         """Subscribe to audio stream for wake word detection."""
         self._engine = self._create_engine()
-        await self.bus.subscribe(
-            "sensory.audio.stream", self._on_audio_stream
-        )
+        await self.bus.subscribe("sensory.audio.stream", self._on_audio_stream)
         logger.info(
             "WakeWordDetector started (backend=%s, words=%s)",
             self.config.backend.value,

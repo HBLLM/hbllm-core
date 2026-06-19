@@ -1104,6 +1104,32 @@ class BrainFactory:
                 await message_bus.subscribe(fusion_topic, fuser.on_perception_event)
             logger.info("PerceptionFuser wired for cross-modal fusion")
 
+            # Wake word detection (hands-free activation)
+            from hbllm.perception.wake_word import WakeWordDetector
+
+            wake_word = WakeWordDetector(node_id="wake_word_detector")
+            await _register_node(registry, wake_word)
+            await wake_word.start(message_bus)
+            nodes.append(wake_word)
+
+            # Voice streaming bridge (ExpressionStream → AudioOutNode)
+            from hbllm.perception.voice_stream_bridge import VoiceStreamBridge
+
+            voice_bridge = VoiceStreamBridge(node_id="voice_stream_bridge")
+            await _register_node(registry, voice_bridge)
+            await voice_bridge.start(message_bus)
+            brain.voice_bridge = voice_bridge
+            nodes.append(voice_bridge)
+
+            # Location awareness (geofencing)
+            from hbllm.perception.location_adapter import LocationAdapter
+
+            location = LocationAdapter(node_id="location_adapter")
+            await _register_node(registry, location)
+            await location.start(message_bus)
+            brain.location_adapter = location
+            nodes.append(location)
+
         # Reasoning nodes (optional — require extra dependencies)
         if cfg.inject_fuzzy_logic:
             from hbllm.actions.fuzzy_node import FuzzyNode

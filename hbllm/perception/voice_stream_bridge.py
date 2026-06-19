@@ -72,9 +72,7 @@ class _SentenceBuffer:
     def __init__(self, config: VoiceStreamConfig) -> None:
         self._config = config
         self._buffer = ""
-        self._sentence_pattern = re.compile(
-            r"(?<=[.!?])\s+|(?<=[.!?])$"
-        )
+        self._sentence_pattern = re.compile(r"(?<=[.!?])\s+|(?<=[.!?])$")
 
     def add(self, text: str) -> list[str]:
         """Add text and return any complete sentences."""
@@ -166,9 +164,7 @@ class VoiceStreamBridge(Node):
         await self.bus.subscribe("sensory.stream.end", self._on_stream_end)
 
         if self.config.allow_barge_in:
-            await self.bus.subscribe(
-                self.config.barge_in_topic, self._on_barge_in
-            )
+            await self.bus.subscribe(self.config.barge_in_topic, self._on_barge_in)
 
         logger.info(
             "VoiceStreamBridge started (barge_in=%s)",
@@ -225,9 +221,7 @@ class VoiceStreamBridge(Node):
         if session_id in self._buffers:
             remaining = self._buffers[session_id].flush()
             for sentence in remaining:
-                await self._dispatch_sentence(
-                    session_id, sentence, is_final=True
-                )
+                await self._dispatch_sentence(session_id, sentence, is_final=True)
             del self._buffers[session_id]
 
         self._active_sessions.discard(session_id)
@@ -260,9 +254,7 @@ class VoiceStreamBridge(Node):
 
     # ── Sentence Dispatch ────────────────────────────────────────────────
 
-    async def _dispatch_sentence(
-        self, session_id: str, sentence: str, is_final: bool
-    ) -> None:
+    async def _dispatch_sentence(self, session_id: str, sentence: str, is_final: bool) -> None:
         """Send a sentence to AudioOutNode for TTS synthesis."""
         self._total_sentences += 1
 

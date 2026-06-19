@@ -82,8 +82,10 @@ class GeoCoordinate:
     def distance_to(self, other: GeoCoordinate) -> float:
         """Calculate distance to another coordinate in meters (Haversine)."""
         return haversine_distance(
-            self.latitude, self.longitude,
-            other.latitude, other.longitude,
+            self.latitude,
+            self.longitude,
+            other.latitude,
+            other.longitude,
         )
 
 
@@ -139,8 +141,10 @@ class Geofence:
     def contains(self, coord: GeoCoordinate) -> bool:
         """Check if a coordinate is inside this geofence."""
         distance = haversine_distance(
-            self.latitude, self.longitude,
-            coord.latitude, coord.longitude,
+            self.latitude,
+            self.longitude,
+            coord.latitude,
+            coord.longitude,
         )
         return distance <= self.radius_meters
 
@@ -172,9 +176,7 @@ class GeofenceEvent:
 # ── Haversine Distance ──────────────────────────────────────────────────────
 
 
-def haversine_distance(
-    lat1: float, lon1: float, lat2: float, lon2: float
-) -> float:
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the distance between two points on Earth in meters.
 
     Uses the Haversine formula for great-circle distance.
@@ -242,15 +244,9 @@ class LocationAdapter(Node):
 
     async def on_start(self) -> None:
         """Subscribe to location update topics."""
-        await self.bus.subscribe(
-            "perception.location.set", self._on_location_set
-        )
-        await self.bus.subscribe(
-            "perception.location.geofence.add", self._on_add_geofence
-        )
-        await self.bus.subscribe(
-            "perception.location.geofence.remove", self._on_remove_geofence
-        )
+        await self.bus.subscribe("perception.location.set", self._on_location_set)
+        await self.bus.subscribe("perception.location.geofence.add", self._on_add_geofence)
+        await self.bus.subscribe("perception.location.geofence.remove", self._on_remove_geofence)
         logger.info("LocationAdapter started")
 
     async def on_stop(self) -> None:
@@ -295,9 +291,7 @@ class LocationAdapter(Node):
             self._history[tenant_id] = []
         self._history[tenant_id].append(coord)
         if len(self._history[tenant_id]) > self._max_history:
-            self._history[tenant_id] = self._history[tenant_id][
-                -self._max_history :
-            ]
+            self._history[tenant_id] = self._history[tenant_id][-self._max_history :]
 
         logger.info(
             "📍 Location update [%s]: %.4f, %.4f (accuracy=%.0fm, source=%s)",
@@ -381,9 +375,7 @@ class LocationAdapter(Node):
 
     # ── Geofence Checking ────────────────────────────────────────────────
 
-    async def _check_geofences(
-        self, tenant_id: str, coord: GeoCoordinate
-    ) -> None:
+    async def _check_geofences(self, tenant_id: str, coord: GeoCoordinate) -> None:
         """Check all geofences for this tenant against the new location."""
         fences = self._geofences.get(tenant_id, {})
         now = time.time()
@@ -422,8 +414,10 @@ class LocationAdapter(Node):
             self._total_geofence_events += 1
 
             distance = haversine_distance(
-                fence.latitude, fence.longitude,
-                coord.latitude, coord.longitude,
+                fence.latitude,
+                fence.longitude,
+                coord.latitude,
+                coord.longitude,
             )
 
             event = GeofenceEvent(
@@ -460,20 +454,14 @@ class LocationAdapter(Node):
         """Get the current location for a tenant."""
         return self._locations.get(tenant_id)
 
-    def get_distance_to(
-        self, tenant_id: str, latitude: float, longitude: float
-    ) -> float | None:
+    def get_distance_to(self, tenant_id: str, latitude: float, longitude: float) -> float | None:
         """Get distance from tenant's current location to a point."""
         loc = self._locations.get(tenant_id)
         if loc is None:
             return None
-        return haversine_distance(
-            loc.latitude, loc.longitude, latitude, longitude
-        )
+        return haversine_distance(loc.latitude, loc.longitude, latitude, longitude)
 
-    def get_nearest_geofence(
-        self, tenant_id: str
-    ) -> tuple[Geofence, float] | None:
+    def get_nearest_geofence(self, tenant_id: str) -> tuple[Geofence, float] | None:
         """Get the nearest geofence and distance to it."""
         loc = self._locations.get(tenant_id)
         if loc is None:
@@ -488,8 +476,10 @@ class LocationAdapter(Node):
 
         for fence in fences.values():
             dist = haversine_distance(
-                loc.latitude, loc.longitude,
-                fence.latitude, fence.longitude,
+                loc.latitude,
+                loc.longitude,
+                fence.latitude,
+                fence.longitude,
             )
             if dist < nearest_dist:
                 nearest = fence
@@ -505,7 +495,5 @@ class LocationAdapter(Node):
             "tracked_tenants": len(self._locations),
             "total_updates": self._total_updates,
             "total_geofence_events": self._total_geofence_events,
-            "active_geofences": sum(
-                len(fences) for fences in self._geofences.values()
-            ),
+            "active_geofences": sum(len(fences) for fences in self._geofences.values()),
         }
