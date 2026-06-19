@@ -1071,6 +1071,7 @@ class BrainFactory:
         if cfg.inject_perception:
             from hbllm.perception.audio_in_node import AudioInputNode
             from hbllm.perception.audio_out_node import AudioOutputNode
+            from hbllm.perception.perception_fuser import PerceptionFuser
             from hbllm.perception.vision_node import VisionNode
             from hbllm.perception.voice_config import AudioPipelineConfig
 
@@ -1090,6 +1091,18 @@ class BrainFactory:
                 await _register_node(registry, pnode)
                 await pnode.start(message_bus)
                 nodes.append(pnode)
+
+            # Cross-modal perception fusion
+            fuser = PerceptionFuser(bus=message_bus)
+            for fusion_topic in [
+                "perception.audio",
+                "perception.vision",
+                "perception.screen",
+                "sensory.audio.in",
+                "sensory.vision.in",
+            ]:
+                await message_bus.subscribe(fusion_topic, fuser.on_perception_event)
+            logger.info("PerceptionFuser wired for cross-modal fusion")
 
         # Reasoning nodes (optional — require extra dependencies)
         if cfg.inject_fuzzy_logic:

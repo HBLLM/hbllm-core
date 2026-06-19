@@ -1,7 +1,7 @@
 site_name: HBLLM Core — Your Sovereign Personal AI
 site_description: >-
   A highly personalized, multi-tenant AI ecosystem that runs entirely on your own hardware.
-  25+ cognitive nodes, multi-tiered memory, Rust SIMD inference, and dynamic LoRA routing 
+  35+ cognitive nodes, multi-tiered memory, Rust SIMD inference, and dynamic LoRA routing 
   for absolute privacy and digital sovereignty.
 site_author: HBLLM Team
 site_url: https://hbllm.github.io/hbllm-core/
@@ -125,7 +125,9 @@ nav:
       - Overview: architecture/overview.md
       - Cognitive Nodes: architecture/cognitive-nodes.md
       - Decision & Control Plane: architecture/decision-gatekeeper.md
+      - Executive Brain: architecture/executive-brain-layer.md
       - Sleep Cycle: architecture/sleep-cycle.md
+      - Voice Pipeline: architecture/voice-pipeline.md
       - Web Research: architecture/web-research.md
       - Self-Model: architecture/self-model.md
       - Evaluation Loop: architecture/evaluation-loop.md
@@ -133,6 +135,9 @@ nav:
       - Memory Systems: architecture/memory-systems.md
       - Network Resilience: architecture/network-resilience.md
       - Distributed Trust: architecture/distributed-trust.md
+      - Embodiment: architecture/embodiment.md
+      - Human Control: architecture/human-control.md
+      - Causality & Compaction: architecture/causality-and-compaction.md
   - Zoning Model:
       - How It Works: zoning/how-it-works.md
       - LoRA Routing: zoning/lora-routing.md
@@ -146,6 +151,7 @@ nav:
       - Training Pipeline: guides/training.md
       - Robotics & IoT: guides/robotics-iot.md
       - Deployment: guides/deployment.md
+      - Migration v0.2: guides/migration_v0_2.md
       - Security Architecture: security.md
   - API Reference:
       - Brain Factory: api/brain-factory.md
@@ -153,11 +159,13 @@ nav:
       - Actions & Tools: api/actions.md
       - Governance & Policies: api/governance.md
       - Memory: api/memory.md
+      - Perception: api/perception.md
       - Plugin System: api/plugins.md
       - Model Internals: api/model.md
       - Serving & REST API: api/serving.md
       - Tokenizer: api/tokenizer.md
       - Network: api/network.md
+      - Security: api/security.md
       - Data Pipeline: api/data-pipeline.md
       - Benchmarks & Profiling: api/benchmarks.md
       - Rust Kernels: api/rust-kernels.md
