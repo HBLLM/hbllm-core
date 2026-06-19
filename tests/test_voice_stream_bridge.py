@@ -1,6 +1,5 @@
 """Tests for VoiceStreamBridge — ExpressionStream to AudioOutNode bridge."""
 
-
 from hbllm.perception.voice_stream_bridge import (
     VoiceStreamBridge,
     VoiceStreamConfig,

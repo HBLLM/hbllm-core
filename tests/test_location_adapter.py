@@ -1,7 +1,5 @@
 """Tests for LocationAdapter — spatial awareness and geofencing."""
 
-
-
 from hbllm.perception.location_adapter import (
     GeoCoordinate,
     Geofence,
