@@ -2,7 +2,6 @@
 
 import struct
 
-import pytest
 
 from hbllm.perception.wake_word import (
     EnergyWakeWordEngine,

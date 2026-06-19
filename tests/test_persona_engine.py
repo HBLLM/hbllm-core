@@ -1,10 +1,8 @@
 """Tests for PersonaEngine — persistent personality profiles."""
 
-import json
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from hbllm.brain.persona_engine import (
     EMOTION_MODULATIONS,

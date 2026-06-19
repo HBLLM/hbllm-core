@@ -11,7 +11,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
-from hbllm.serving.studio.helpers import get_brain, get_node, get_node_map, get_tenant_id
+from hbllm.serving.studio.helpers import get_brain, get_node, get_tenant_id
 
 logger = logging.getLogger(__name__)
 

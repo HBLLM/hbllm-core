@@ -1,6 +1,5 @@
 """Tests for EmotionEngine — emotional valence tracking and adaptation."""
 
-import pytest
 
 from hbllm.brain.emotion_engine import (
     _EMOTION_LEXICON,

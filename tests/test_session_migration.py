@@ -3,7 +3,6 @@
 import json
 import time
 
-import pytest
 
 from hbllm.network.session_migration import SessionMigrationManager, SessionSnapshot
 

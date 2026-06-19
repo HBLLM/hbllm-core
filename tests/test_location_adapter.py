@@ -1,8 +1,6 @@
 """Tests for LocationAdapter — spatial awareness and geofencing."""
 
-import time
 
-import pytest
 
 from hbllm.perception.location_adapter import (
     GeoCoordinate,

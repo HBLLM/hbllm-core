@@ -2,7 +2,6 @@
 
 import time
 
-import pytest
 
 from hbllm.brain.habit_tracker import HabitTracker, InteractionEvent
 

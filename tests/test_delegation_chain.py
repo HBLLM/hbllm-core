@@ -3,7 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from hbllm.brain.delegation_chain import (
     Delegation,

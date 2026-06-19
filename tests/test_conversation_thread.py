@@ -1,10 +1,8 @@
 """Tests for ConversationThread — named resumable threads."""
 
-import json
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from hbllm.memory.conversation_thread import ConversationThread, ThreadManager, ThreadTurn
 

@@ -11,7 +11,7 @@ import logging
 
 from fastapi import APIRouter
 
-from hbllm.serving.studio.helpers import get_node, get_node_map
+from hbllm.serving.studio.helpers import get_node_map
 
 logger = logging.getLogger(__name__)
 

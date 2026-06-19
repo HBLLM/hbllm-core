@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
 from hbllm.serving.studio.helpers import (
-    get_brain,
     get_node,
     get_tenant_id,
     require_bus,
