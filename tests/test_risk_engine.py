@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.autonomy.task_graph import Goal
 from hbllm.brain.simulation.models import CounterfactualScenario, FutureWorldState, PredictionOrigin
 from hbllm.brain.simulation.risk import RiskCategory, RiskEngine, RiskProfile
 

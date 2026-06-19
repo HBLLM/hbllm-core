@@ -9,7 +9,6 @@ import pytest
 from hbllm.perception.event_log import EventLog
 from hbllm.perception.normalizer import EventNormalizer
 from hbllm.perception.reality_bus import (
-    EventOrigin,
     PerceptionEvent,
     PerceptionModality,
     RealityEventBus,

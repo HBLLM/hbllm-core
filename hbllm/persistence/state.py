@@ -105,6 +105,14 @@ class BrainState:
                 duration_ms REAL DEFAULT 0,
                 created_at REAL NOT NULL
             );
+
+            -- Performance indexes for tenant-scoped queries
+            CREATE INDEX IF NOT EXISTS idx_messages_tenant_time
+                ON messages(tenant_id, user_id, device_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_checkpoints_tenant
+                ON checkpoints(tenant_id, user_id, device_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_tool_logs_tenant_name
+                ON tool_logs(tenant_id, user_id, device_id, tool_name);
         """)
         self._conn.commit()
 
@@ -112,7 +120,12 @@ class BrainState:
 
     @require_tenant
     def save(
-        self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self,
+        key: str,
+        value: Any,
+        tenant_id: str = "default",
+        user_id: str = "",
+        device_id: str = "",
     ) -> None:
         """Save a value to the key-value store."""
         self._conn.execute(
@@ -126,7 +139,7 @@ class BrainState:
         self,
         key: str,
         default: Any = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> Any:
@@ -140,7 +153,9 @@ class BrainState:
         return default
 
     @require_tenant
-    def delete(self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    def delete(
+        self, key: str, tenant_id: str = "default", user_id: str = "", device_id: str = ""
+    ) -> None:
         """Delete a key from the store."""
         self._conn.execute(
             "DELETE FROM kv_store WHERE tenant_id = ? AND user_id = ? AND device_id = ? AND key = ?",
@@ -156,7 +171,7 @@ class BrainState:
         role: str,
         content: str,
         metadata: dict | None = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> int:
@@ -173,7 +188,7 @@ class BrainState:
         self,
         limit: int = 50,
         offset: int = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -196,7 +211,9 @@ class BrainState:
         ]
 
     @require_tenant
-    def clear_messages(self, tenant_id: str = "", user_id: str = "", device_id: str = "") -> None:
+    def clear_messages(
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
+    ) -> None:
         """Clear all conversation history."""
         self._conn.execute(
             "DELETE FROM messages WHERE tenant_id = ? AND user_id = ? AND device_id = ?",
@@ -208,7 +225,7 @@ class BrainState:
 
     @require_tenant
     def checkpoint(
-        self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, data: dict, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> int:
         """Save a checkpoint."""
         cursor = self._conn.execute(
@@ -220,7 +237,7 @@ class BrainState:
 
     @require_tenant
     def latest_checkpoint(
-        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> dict | None:
         """Get the most recent checkpoint."""
         row = self._conn.execute(
@@ -233,7 +250,7 @@ class BrainState:
 
     @require_tenant
     def list_checkpoints(
-        self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, limit: int = 10, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> list[dict]:
         """List recent checkpoints."""
         rows = self._conn.execute(
@@ -251,7 +268,7 @@ class BrainState:
         input_data: str,
         output: str,
         duration_ms: float = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> None:
@@ -278,7 +295,7 @@ class BrainState:
         self,
         tool_name: str | None = None,
         limit: int = 20,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -391,6 +408,14 @@ class AsyncBrainState:
                         duration_ms REAL DEFAULT 0,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     );
+
+                    -- Performance indexes for tenant-scoped queries
+                    CREATE INDEX IF NOT EXISTS idx_pg_messages_tenant_time
+                        ON messages(tenant_id, user_id, device_id, created_at);
+                    CREATE INDEX IF NOT EXISTS idx_pg_checkpoints_tenant
+                        ON checkpoints(tenant_id, user_id, device_id, id DESC);
+                    CREATE INDEX IF NOT EXISTS idx_pg_tool_logs_tenant_name
+                        ON tool_logs(tenant_id, user_id, device_id, tool_name);
                 """)
             self._pg_tables_created = True
         return pool
@@ -399,7 +424,12 @@ class AsyncBrainState:
 
     @require_tenant
     async def save(
-        self, key: str, value: Any, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self,
+        key: str,
+        value: Any,
+        tenant_id: str = "default",
+        user_id: str = "",
+        device_id: str = "",
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -421,7 +451,7 @@ class AsyncBrainState:
         self,
         key: str,
         default: Any = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> Any:
@@ -444,7 +474,7 @@ class AsyncBrainState:
 
     @require_tenant
     async def delete(
-        self, key: str, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, key: str, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -467,7 +497,7 @@ class AsyncBrainState:
         role: str,
         content: str,
         metadata: dict | None = None,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> int:
@@ -493,7 +523,7 @@ class AsyncBrainState:
         self,
         limit: int = 50,
         offset: int = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:
@@ -526,7 +556,7 @@ class AsyncBrainState:
 
     @require_tenant
     async def clear_messages(
-        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -544,7 +574,7 @@ class AsyncBrainState:
 
     @require_tenant
     async def checkpoint(
-        self, data: dict, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, data: dict, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> int:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -563,7 +593,7 @@ class AsyncBrainState:
 
     @require_tenant
     async def latest_checkpoint(
-        self, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> dict | None:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -584,7 +614,7 @@ class AsyncBrainState:
 
     @require_tenant
     async def list_checkpoints(
-        self, limit: int = 10, tenant_id: str = "", user_id: str = "", device_id: str = ""
+        self, limit: int = 10, tenant_id: str = "default", user_id: str = "", device_id: str = ""
     ) -> list[dict]:
         pool = await self._ensure_pg_tables()
         if pool:
@@ -614,7 +644,7 @@ class AsyncBrainState:
         input_data: str,
         output: str,
         duration_ms: float = 0,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> None:
@@ -648,7 +678,7 @@ class AsyncBrainState:
         self,
         tool_name: str | None = None,
         limit: int = 20,
-        tenant_id: str = "",
+        tenant_id: str = "default",
         user_id: str = "",
         device_id: str = "",
     ) -> list[dict]:

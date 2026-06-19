@@ -25,7 +25,7 @@ except ImportError:
 
     _json_loads = _json_stdlib.loads
     _JSONDecodeError = _json_stdlib.JSONDecodeError  # type: ignore[assignment]
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
@@ -119,9 +119,8 @@ class SynapseGateway:
             old_ws = self.active_connections[key]
             try:
                 await old_ws.close(code=1008, reason="Concurrent login detected")
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug("[SynapseGateway] non-critical error: %s", e)
         self.active_connections[key] = websocket
         self.device_capabilities[key] = []
         self.known_devices.add(key)
@@ -160,9 +159,8 @@ class SynapseGateway:
                 import asyncio
 
                 asyncio.create_task(ws.close(code=1000, reason="Disconnected"))
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug("[SynapseGateway] non-critical error: %s", e)
         self.device_capabilities.pop(key, None)
 
         nodes = self.device_nodes.pop(key, [])
@@ -171,9 +169,8 @@ class SynapseGateway:
                 import asyncio
 
                 asyncio.create_task(node.stop())
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug("[SynapseGateway] non-critical error: %s", e)
         logger.info(
             "Edge device disconnected: tenant=%s user=%s device=%s", tenant_id, user_id, device_id
         )
@@ -254,8 +251,8 @@ class SynapseGateway:
             ws = self.active_connections[key]
             try:
                 await ws.close(code=1008, reason="Identity revoked")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[SynapseGateway] non-critical error: %s", e)
             self.disconnect(*key)
             logger.critical("SynapseGateway disconnected revoked node: %s", revoked_node_id)
 

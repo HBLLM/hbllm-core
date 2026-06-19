@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -60,11 +59,11 @@ from hbllm.brain.skill_compiler_node import SkillCompilerNode
 # New cognitive modules
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.world_state import WorldStateEngine
-from hbllm.data.interaction_miner import AsyncInteractionMiner, InteractionMiner
+from hbllm.data.interaction_miner import AsyncInteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
-from hbllm.network.node import HealthStatus, Node, NodeHealth, NodeInfo
+from hbllm.network.node import HealthStatus, Node, NodeHealth
 from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
 from hbllm.serving.provider import LLMProvider, get_provider
@@ -76,7 +75,6 @@ logger = logging.getLogger(__name__)
 
 
 def _is_slow_cpu() -> bool:
-    import os
 
     try:
         import torch

@@ -282,8 +282,8 @@ class SchedulerNode(Node):
                     "SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'pending'"
                 ).fetchone()
                 pending = row[0] if row else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[SchedulerNode] Non-critical query error: %s", e)
         return {
             "tasks_scheduled": self._tasks_scheduled,
             "tasks_completed": self._tasks_completed,

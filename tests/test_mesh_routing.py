@@ -1,7 +1,5 @@
 """Tests for Epistemic Routing and QoS Constraints."""
 
-import pytest
-
 from hbllm.brain.mesh.registry import (
     NodeCapabilities,
     NodeProfile,

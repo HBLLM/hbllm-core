@@ -1,7 +1,6 @@
 """Tests for SemanticMemory — vector search with TF-IDF fallback."""
 
 import pytest
-import pytest_asyncio
 
 from hbllm.memory.interface import MemoryType
 from hbllm.memory.memory_node import MemoryNode

@@ -1,7 +1,5 @@
 """Tests for Intervention and Reversibility Model."""
 
-import asyncio
-
 import pytest
 
 from hbllm.brain.control.intervention import InterventionAPI, ReversibilityPolicy

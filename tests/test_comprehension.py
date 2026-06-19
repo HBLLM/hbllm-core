@@ -12,7 +12,6 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import time
 
 import numpy as np
@@ -24,9 +23,6 @@ from hbllm.brain.snn.comprehension.ensemble import (
     ComprehensionEnsemble,
 )
 from hbllm.brain.snn.comprehension.lexical import (
-    _CONSTRAINT_WORDS,
-    _STOPWORDS,
-    _TECHNICAL_TERMS,
     LexicalBuffer,
     LexicalSignals,
 )

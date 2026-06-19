@@ -1,10 +1,9 @@
-import asyncio
 import time
 from typing import Any
 
 import pytest
 
-from hbllm.memory.cache import CacheEntry, ResponseCache
+from hbllm.memory.cache import ResponseCache
 
 
 @pytest.mark.asyncio

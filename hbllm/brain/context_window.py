@@ -52,8 +52,8 @@ def estimate_tokens(text: str, tokenizer_encode: Callable[[str], list[Any]] | No
     if tokenizer_encode is not None:
         try:
             return max(1, len(tokenizer_encode(text)))
-        except Exception:
-            pass  # Fall back to heuristic
+        except Exception as e:
+            logger.debug("[ContextWindow] Fall back to heuristic: %s", e)
     return max(1, len(text) // _CHARS_PER_TOKEN)
 
 

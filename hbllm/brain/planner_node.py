@@ -20,7 +20,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from hbllm.brain.utility_engine import CognitiveUtilityEngine, ThoughtBudget, UtilityBreakdown
+from hbllm.brain.utility_engine import CognitiveUtilityEngine, ThoughtBudget
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
@@ -291,8 +291,10 @@ class PlannerNode(Node):
                     return len(enc.ids)
                 elif isinstance(enc, list):
                     return len(enc)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "[PlannerNode] Token counting failed, falling back to heuristic: %s", e
+                )
         # Fallback to rough character-based token estimation (4 chars per token)
         return max(1, len(text) // 4)
 
@@ -635,7 +637,6 @@ class PlannerNode(Node):
         self, graph: ThoughtGraph, node: ThoughtNode, budget: ThoughtBudget | None = None
     ) -> None:
         """Score a thought node by querying the evaluation domain or ExecutionNode/ToolRouter."""
-        import time
 
         if node.metadata.get("is_observation"):
             node.score = 1.0  # Observations are always factual steps

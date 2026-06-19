@@ -1,6 +1,5 @@
 """Tests for BrainFactory — end-to-end brain creation and query processing."""
 
-import asyncio
 from typing import Any
 
 import pytest

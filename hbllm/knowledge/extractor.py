@@ -6,14 +6,11 @@ into stable hierarchical entities and relations.
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import logging
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Optional
 
 # Import the Entity and Relation dataclasses from the core knowledge graph module
 from hbllm.memory.knowledge_graph import Entity, Relation

@@ -141,6 +141,9 @@ class InProcessBus:
 
     async def stop(self) -> None:
         """Stop the bus and cancel pending requests."""
+        # Drain remaining messages before shutting down
+        await self.drain(timeout=5.0)
+
         self._running = False
 
         # Cancel all pending requests
@@ -181,6 +184,34 @@ class InProcessBus:
 
         self._subscriptions.clear()
         logger.info("InProcessBus stopped")
+
+    async def drain(self, timeout: float = 5.0) -> None:
+        """Wait for the message queue to empty, up to `timeout` seconds.
+
+        This allows in-flight messages to be processed before shutdown,
+        preventing silent message loss.
+        """
+        if not self._running or self._queue.empty():
+            return
+
+        logger.info(
+            "Draining bus queue (%d messages, timeout=%.1fs)",
+            self._queue.qsize(),
+            timeout,
+        )
+        try:
+            deadline = asyncio.get_event_loop().time() + timeout
+            while not self._queue.empty():
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    logger.warning(
+                        "Bus drain timed out with %d messages remaining",
+                        self._queue.qsize(),
+                    )
+                    break
+                await asyncio.sleep(0.05)  # Yield to let dispatch loop process
+        except Exception:
+            logger.warning("Error during bus drain")
 
     async def publish(self, topic: str, message: Message) -> None:
         """Publish a message to all subscribers of a topic, respecting priority."""

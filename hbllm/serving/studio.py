@@ -111,9 +111,8 @@ async def get_temporal_timeline():
                     p = json.loads(payload_str)
                     if isinstance(p, dict):
                         task_prompt = p.get("prompt") or p.get("text") or r["route_topic"]
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug("[Studio] non-critical error: %s", e)
                 rows.append(
                     {
                         "id": r["task_id"],
@@ -649,8 +648,8 @@ async def get_persona_profile(request: Request):
                         "topics_of_interest", ["AI", "cognitive architecture"]
                     ),
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[Studio] non-critical error: %s", e)
     return {
         "verbosity": "balanced",
         "tone": "neutral",
@@ -1058,8 +1057,8 @@ async def studio_stats() -> Any:
             if dpo_path.exists():
                 with dpo_path.open() as f:
                     dpo_queue_depth = len(json.load(f))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[Studio] non-critical error: %s", e)
         learning_stats["dpo_queue_depth"] = dpo_queue_depth
         result["learning"] = learning_stats
 
@@ -1277,8 +1276,8 @@ async def studio_learning() -> Any:
                     for entry in queue[:5]:
                         if isinstance(entry, (list, tuple)) and len(entry) > 0:
                             dpo_preview.append(str(entry[0])[:80])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[Studio] non-critical error: %s", e)
         result["learner"]["dpo_queue_depth"] = dpo_queue_depth
         result["learner"]["dpo_queue_preview"] = dpo_preview
         # Micro-learn queue preview

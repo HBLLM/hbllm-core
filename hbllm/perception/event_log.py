@@ -13,7 +13,6 @@ import logging
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 from hbllm.perception.reality_bus import PerceptionEvent
 

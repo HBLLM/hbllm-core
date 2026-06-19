@@ -4,13 +4,11 @@ Federation Gateway Test Suite — Validates cryptographic DID handshakes, AST co
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import pytest
 
 from hbllm.network.federation.cipher import EnvelopeCipher
-from hbllm.network.federation.firewall import FederatedFirewall, FederationSecurityError
 from hbllm.network.federation.mailbox import FederatedMailbox
 
 

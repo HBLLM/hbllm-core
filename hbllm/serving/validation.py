@@ -4,7 +4,7 @@ Input validation and sanitization middleware for HBLLM API.
 
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware

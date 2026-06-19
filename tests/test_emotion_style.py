@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from hbllm.brain.snn.expression.style_adapter import StyleAdapter, StyleHints
 
 # ── StyleHints ───────────────────────────────────────────────────────────

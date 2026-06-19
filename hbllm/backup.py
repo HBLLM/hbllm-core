@@ -479,8 +479,8 @@ class BackupManager:
                     conn = sqlite3.connect(str(path))
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     conn.close()
-                except Exception:
-                    pass  # Not all .db files may be SQLite
+                except Exception as e:
+                    logger.debug("[Backup] Not all .db files may be SQLite: %s", e)
 
     def _read_manifest(self, archive_path: Path) -> BackupManifest | None:
         """Read manifest from a backup archive."""

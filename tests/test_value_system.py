@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from hbllm.brain.value_system import (
     DynamicValueArbitrator,
     InterruptionPenaltyPolicy,

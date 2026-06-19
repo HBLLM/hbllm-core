@@ -1,9 +1,6 @@
 """Tests for core CognitiveAwareness engine."""
 
-import asyncio
 import time
-
-import pytest
 
 from hbllm.brain.awareness import (
     AwarenessSensor,

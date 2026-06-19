@@ -11,7 +11,7 @@ import logging
 from hbllm.brain.autonomy.task_graph import Goal, TaskGraphRuntime, TaskNode
 from hbllm.brain.autonomy.watchdog import CognitiveWatchdog
 from hbllm.brain.governance import CognitiveGovernanceEngine
-from hbllm.brain.observability.tracer import DecisionTrace, DecisionTraceLedger
+from hbllm.brain.observability.tracer import DecisionTraceLedger
 from hbllm.brain.simulation.engine import PredictiveSimulationEngine
 from hbllm.brain.simulation.models import CounterfactualScenario
 

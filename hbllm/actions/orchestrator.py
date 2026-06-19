@@ -7,7 +7,6 @@ should extend ``build_tool_args`` from ``hbllm.actions.agent_executor``.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time

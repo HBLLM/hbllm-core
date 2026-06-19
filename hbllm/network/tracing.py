@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import deque
+from collections import defaultdict, deque
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -147,6 +147,10 @@ class BusMetrics:
         self.messages_dropped_auth: int = 0
         self.reconnections: int = 0
         self._latency_samples: deque[float] = deque(maxlen=1000)
+        # Per-topic tracking for bottleneck identification
+        self._topic_publishes: dict[str, int] = defaultdict(int)
+        self._topic_deliveries: dict[str, int] = defaultdict(int)
+        self._topic_errors: dict[str, int] = defaultdict(int)
 
     @property
     def _max_samples(self) -> int:
@@ -155,16 +159,19 @@ class BusMetrics:
 
     def record_publish(self, topic: str) -> None:
         self.messages_published += 1
+        self._topic_publishes[topic] += 1
 
     def record_delivery(self, topic: str, latency_ms: float) -> None:
         self.messages_delivered += 1
         self._latency_samples.append(latency_ms)
+        self._topic_deliveries[topic] += 1
 
     def record_drop(self, topic: str) -> None:
         self.messages_dropped += 1
 
     def record_error(self, topic: str) -> None:
         self.handler_errors += 1
+        self._topic_errors[topic] += 1
 
     def record_subscribe(self) -> None:
         self.active_subscriptions += 1
@@ -200,7 +207,21 @@ class BusMetrics:
             "active_subscriptions": self.active_subscriptions,
             "avg_latency_ms": round(self.avg_latency_ms, 3),
             "p99_latency_ms": round(self.p99_latency_ms, 3),
+            "top_topics": self.top_topics(10),
         }
+
+    def top_topics(self, n: int = 10) -> list[dict[str, Any]]:
+        """Return top-N most active topics by publish count."""
+        sorted_topics = sorted(self._topic_publishes.items(), key=lambda x: x[1], reverse=True)[:n]
+        return [
+            {
+                "topic": topic,
+                "publishes": count,
+                "deliveries": self._topic_deliveries.get(topic, 0),
+                "errors": self._topic_errors.get(topic, 0),
+            }
+            for topic, count in sorted_topics
+        ]
 
 
 @contextmanager

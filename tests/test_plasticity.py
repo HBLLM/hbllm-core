@@ -14,9 +14,6 @@ from __future__ import annotations
 import json
 import time
 
-import numpy as np
-import pytest
-
 from hbllm.brain.snn.plasticity import (
     PlasticWeightMatrix,
     STDPRule,

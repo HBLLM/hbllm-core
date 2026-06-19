@@ -16,7 +16,6 @@ Fallback backends: SpeechT5 (deprecated), NVIDIA Riva
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import re
 from pathlib import Path
@@ -360,7 +359,6 @@ class AudioOutputNode(Node):
         self, text: str, voice: VoiceConfig, filename: str
     ) -> str | None:
         """Synthesize full text with Orpheus and save to file."""
-        import numpy as np
 
         def _synth() -> str | None:
             self._load_orpheus()

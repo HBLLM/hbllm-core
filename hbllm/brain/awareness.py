@@ -356,8 +356,8 @@ class CognitiveAwareness(Node):
                 await self._loop_task
             except asyncio.CancelledError:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[CognitiveAwareness] Non-critical shutdown error: %s", e)
         logger.info("CognitiveAwareness stopped")
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -499,8 +499,8 @@ class CognitiveAwareness(Node):
                                 payload=trigger.to_dict(),
                             ),
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("[CognitiveAwareness] Awareness check skipped: %s", e)
 
             except asyncio.CancelledError:
                 break

@@ -262,8 +262,8 @@ class WorldModelNode(Node):
                 elif isinstance(node, ast.ImportFrom):
                     if node.module:
                         imports.append(node.module)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[WorldModel] Import extraction failed for %s: %s", file_path, e)
         self._virtual_dependencies[file_path] = imports
         return imports
 

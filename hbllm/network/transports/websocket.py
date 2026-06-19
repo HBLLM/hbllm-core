@@ -159,9 +159,8 @@ class WebSocketTransport(Transport):
 
             if int(websockets.version.version.split(".")[0]) >= 14:
                 connect_kwargs = {"additional_headers": headers}
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug("[Websocket] non-critical error: %s", e)
         while True:
             try:
                 self._state = TransportState.CONNECTING

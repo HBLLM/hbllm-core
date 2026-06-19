@@ -6,8 +6,6 @@ Verifies projection fallback logic, zero-padding/truncation, and sensor sorting.
 
 from __future__ import annotations
 
-import pytest
-
 from hbllm.perception.vector_projector import MultimodalProjector
 
 
