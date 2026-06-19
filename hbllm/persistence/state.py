@@ -56,6 +56,7 @@ class BrainState:
 
     def _init_tables(self) -> None:
         """Create tables if they don't exist."""
+        # Phase 1: Create tables (no-op if they already exist)
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS tenants (
                 id TEXT PRIMARY KEY,
@@ -105,8 +106,13 @@ class BrainState:
                 duration_ms REAL DEFAULT 0,
                 created_at REAL NOT NULL
             );
+        """)
 
-            -- Performance indexes for tenant-scoped queries
+        # Phase 2: Migrate legacy tables that predate multi-tenant columns
+        self._migrate_columns()
+
+        # Phase 3: Create indexes (safe now that columns exist)
+        self._conn.executescript("""
             CREATE INDEX IF NOT EXISTS idx_messages_tenant_time
                 ON messages(tenant_id, user_id, device_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_checkpoints_tenant
@@ -115,6 +121,24 @@ class BrainState:
                 ON tool_logs(tenant_id, user_id, device_id, tool_name);
         """)
         self._conn.commit()
+
+    def _migrate_columns(self) -> None:
+        """Add tenant_id/user_id/device_id columns to legacy tables missing them."""
+        migrations = {
+            "kv_store": ["tenant_id", "user_id", "device_id"],
+            "messages": ["tenant_id", "user_id", "device_id"],
+            "checkpoints": ["tenant_id", "user_id", "device_id"],
+            "tool_logs": ["tenant_id", "user_id", "device_id"],
+        }
+        for table, columns in migrations.items():
+            existing = {
+                row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for col in columns:
+                if col not in existing:
+                    self._conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''"  # noqa: S608
+                    )
 
     # ── Key-Value Store ───────────────────────────────────────────────────
 
@@ -355,6 +379,11 @@ class AsyncBrainState:
         self._fallback = BrainState(path)
         self._pg_tables_created = False
 
+    @property
+    def _fb(self) -> Any:
+        """Untyped accessor — avoids Pyright false positives on @require_tenant methods."""
+        return self._fallback
+
     async def _ensure_pg_tables(self) -> Any | None:
         """Lazily create the PostgreSQL tables on first write."""
         pool = await DBPool.get_pool()
@@ -444,7 +473,11 @@ class AsyncBrainState:
                     value,
                 )
         else:
-            await asyncio.to_thread(self._fallback.save, key, value, tenant_id, user_id, device_id)
+            await asyncio.to_thread(
+                lambda: self._fb.save(
+                    key, value, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+                )
+            )
 
     @require_tenant
     async def load(
@@ -469,7 +502,9 @@ class AsyncBrainState:
                     return row["value"]
                 return default
         return await asyncio.to_thread(
-            self._fallback.load, key, default, tenant_id, user_id, device_id
+            lambda: self._fb.load(
+                key, default, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     @require_tenant
@@ -487,7 +522,11 @@ class AsyncBrainState:
                     key,
                 )
         else:
-            await asyncio.to_thread(self._fallback.delete, key, tenant_id, user_id, device_id)
+            await asyncio.to_thread(
+                lambda: self._fb.delete(
+                    key, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+                )
+            )
 
     # ── Conversation History ──────────────────────────────────────────────
 
@@ -515,7 +554,9 @@ class AsyncBrainState:
                 )
                 return int(row_id) if row_id else 0
         return await asyncio.to_thread(
-            self._fallback.append_message, role, content, metadata, tenant_id, user_id, device_id
+            lambda: self._fb.append_message(
+                role, content, metadata, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     @require_tenant
@@ -551,7 +592,9 @@ class AsyncBrainState:
                     for row in reversed(rows)
                 ]
         return await asyncio.to_thread(
-            self._fallback.get_messages, limit, offset, tenant_id, user_id, device_id
+            lambda: self._fb.get_messages(
+                limit, offset, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     @require_tenant
@@ -568,7 +611,11 @@ class AsyncBrainState:
                     device_id,
                 )
         else:
-            await asyncio.to_thread(self._fallback.clear_messages, tenant_id, user_id, device_id)
+            await asyncio.to_thread(
+                lambda: self._fb.clear_messages(
+                    tenant_id=tenant_id, user_id=user_id, device_id=device_id
+                )
+            )
 
     # ── Checkpoints ───────────────────────────────────────────────────────
 
@@ -588,7 +635,9 @@ class AsyncBrainState:
                 )
                 return int(row_id) if row_id else 0
         return await asyncio.to_thread(
-            self._fallback.checkpoint, data, tenant_id, user_id, device_id
+            lambda: self._fb.checkpoint(
+                data, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     @require_tenant
@@ -609,7 +658,9 @@ class AsyncBrainState:
                     return {"data": row["data"], "created_at": row["created_at"]}
                 return None
         return await asyncio.to_thread(
-            self._fallback.latest_checkpoint, tenant_id, user_id, device_id
+            lambda: self._fb.latest_checkpoint(
+                tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     @require_tenant
@@ -632,7 +683,9 @@ class AsyncBrainState:
                     for row in rows
                 ]
         return await asyncio.to_thread(
-            self._fallback.list_checkpoints, limit, tenant_id, user_id, device_id
+            lambda: self._fb.list_checkpoints(
+                limit, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     # ── Tool Logs ─────────────────────────────────────────────────────────
@@ -663,14 +716,15 @@ class AsyncBrainState:
                 )
         else:
             await asyncio.to_thread(
-                self._fallback.log_tool_call,
-                tool_name,
-                input_data,
-                output,
-                duration_ms,
-                tenant_id,
-                user_id,
-                device_id,
+                lambda: self._fb.log_tool_call(
+                    tool_name,
+                    input_data,
+                    output,
+                    duration_ms,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    device_id=device_id,
+                )
             )
 
     @require_tenant
@@ -715,7 +769,9 @@ class AsyncBrainState:
                     for row in rows
                 ]
         return await asyncio.to_thread(
-            self._fallback.get_tool_logs, tool_name, limit, tenant_id, user_id, device_id
+            lambda: self._fb.get_tool_logs(
+                tool_name, limit, tenant_id=tenant_id, user_id=user_id, device_id=device_id
+            )
         )
 
     async def close(self) -> None:
