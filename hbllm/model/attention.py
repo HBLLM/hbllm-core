@@ -24,6 +24,7 @@ from hbllm.model.embeddings import RotaryEmbedding, apply_rotary_pos_emb
 
 logger = logging.getLogger(__name__)
 
+
 class GroupedQueryAttention(nn.Module):
     """
     Grouped Query Attention (GQA).
