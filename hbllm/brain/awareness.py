@@ -62,6 +62,15 @@ class CognitiveSnapshot:
     memory_operations: int = 0  # store/retrieve ops in window
     skills_invoked: int = 0
 
+    # Emotional context (from EmotionEngine plugin)
+    current_emotion: str = "neutral"
+    emotion_valence: float = 0.0
+
+    # Ambient time context
+    hour_of_day: int = 0
+    day_of_week: int = 0  # 0=Monday
+    time_of_day: str = ""  # "morning", "afternoon", "evening", "night"
+
     # Platform sensor data (filled by registered sensors)
     sensor_data: dict[str, Any] = field(default_factory=dict)
 
@@ -313,6 +322,10 @@ class CognitiveAwareness(Node):
         # Cognitive load (from LoadManager)
         self._current_load: float = 0.0
 
+        # Emotion tracking (from EmotionEngine plugin)
+        self._current_emotion: str = "neutral"
+        self._emotion_valence: float = 0.0
+
         # Awareness loop
         self._loop_task: Any = None
         self._running = False
@@ -339,6 +352,7 @@ class CognitiveAwareness(Node):
         await self.bus.subscribe("system.error", self._on_error)
         await self.bus.subscribe("system.evaluation", self._on_evaluation)
         await self.bus.subscribe("system.load.report", self._on_load_report)
+        await self.bus.subscribe("emotion.state", self._on_emotion_state)
 
         # Start background awareness loop
         import asyncio
@@ -405,6 +419,12 @@ class CognitiveAwareness(Node):
     async def _on_load_report(self, message: Message) -> None:
         self._current_load = message.payload.get("load_percent", 0.0) / 100.0
 
+    async def _on_emotion_state(self, message: Message) -> None:
+        """Track emotional state from EmotionEngine plugin."""
+        self._current_emotion = message.payload.get("primary_emotion", "neutral")
+        self._emotion_valence = message.payload.get("valence", 0.0)
+        self._activity.record(f"emotion:{self._current_emotion}")
+
     # ── Snapshot ──────────────────────────────────────────────────────
 
     def snapshot(self) -> CognitiveSnapshot:
@@ -438,6 +458,18 @@ class CognitiveAwareness(Node):
         # Error rate
         error_rate = errors_lm / max(total_lm, 1)
 
+        # Ambient time context
+        local_time = time.localtime(now)
+        hour = local_time.tm_hour
+        if 5 <= hour < 12:
+            time_of_day = "morning"
+        elif 12 <= hour < 17:
+            time_of_day = "afternoon"
+        elif 17 <= hour < 21:
+            time_of_day = "evening"
+        else:
+            time_of_day = "night"
+
         snap = CognitiveSnapshot(
             timestamp=now,
             queries_last_minute=queries_lm,
@@ -452,6 +484,11 @@ class CognitiveAwareness(Node):
             idle_seconds=round(idle, 1),
             memory_operations=self._total_memory_ops,
             skills_invoked=self._total_skills,
+            current_emotion=self._current_emotion,
+            emotion_valence=round(self._emotion_valence, 3),
+            hour_of_day=hour,
+            day_of_week=local_time.tm_wday,
+            time_of_day=time_of_day,
         )
 
         return snap

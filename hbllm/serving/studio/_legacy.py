@@ -23,44 +23,7 @@ router = APIRouter()
 # ─── Studio Compatibility Endpoints ───────────────────────────────────────────
 
 
-@router.get("/api/emotion/state")
-async def get_emotion_state(agent_name: str = "assistant", tenant_id: str = "default"):
-    brain = _state.get("brain")
-    if not brain:
-        return {"valence": 0.0, "arousal": 0.0, "emotion_label": "neutral", "status": "not_loaded"}
-
-    # Try brain node map first
-    node_map = _get_node_map(brain)
-    emotion_node = node_map.get("EmotionNode")
-
-    # Fall back to plugin manager's loaded nodes
-    if not emotion_node:
-        pm = _state.get("plugin_manager")
-        if pm:
-            for node in getattr(pm, "_loaded_nodes", []):
-                if hasattr(node, "current_valence") and hasattr(node, "current_arousal"):
-                    emotion_node = node
-                    break
-
-    if emotion_node:
-        valence = getattr(emotion_node, "current_valence", 0.0)
-        arousal = getattr(emotion_node, "current_arousal", 0.0)
-        label = "neutral"
-        if valence > 0.3:
-            label = "happy"
-        elif valence > 0.0:
-            label = "content"
-        elif valence < -0.3:
-            label = "sad"
-        elif valence < 0.0:
-            label = "uneasy"
-        return {
-            "valence": valence,
-            "arousal": arousal,
-            "emotion_label": label,
-            "status": "active",
-        }
-    return {"valence": 0.0, "arousal": 0.0, "emotion_label": "neutral", "status": "not_loaded"}
+# NOTE: /api/emotion/state moved to studio/emotion.py
 
 
 @router.get("/api/swarm/status")
@@ -111,8 +74,9 @@ async def get_temporal_timeline():
                     p = json.loads(payload_str)
                     if isinstance(p, dict):
                         task_prompt = p.get("prompt") or p.get("text") or r["route_topic"]
-                except Exception as e:
-                    logger.debug("[Studio] non-critical error: %s", e)
+                except Exception:
+                    pass
+
                 rows.append(
                     {
                         "id": r["task_id"],
@@ -627,91 +591,7 @@ async def get_snn_plasticity_status():
     return result
 
 
-@router.get("/api/persona/profile")
-async def get_persona_profile(request: Request):
-    tenant_id = getattr(request.state, "tenant_id", "default")
-    db_path = os.path.join(os.environ.get("HBLLM_DATA_DIR", "data"), "identity.db")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT traits_json FROM identities WHERE tenant_id = ?", (tenant_id,)
-            ).fetchone()
-            if row:
-                traits = json.loads(row["traits_json"])
-                return {
-                    "verbosity": traits.get("verbosity", "balanced"),
-                    "tone": traits.get("tone", "neutral"),
-                    "emoji_preference": traits.get("emoji_preference", "minimal"),
-                    "interaction_count": traits.get("interaction_count", 5),
-                    "topics_of_interest": traits.get(
-                        "topics_of_interest", ["AI", "cognitive architecture"]
-                    ),
-                }
-    except Exception as e:
-        logger.debug("[Studio] non-critical error: %s", e)
-    return {
-        "verbosity": "balanced",
-        "tone": "neutral",
-        "emoji_preference": "minimal",
-        "interaction_count": 5,
-        "topics_of_interest": ["AI", "cognitive architecture"],
-    }
-
-
-@router.put("/api/persona/override")
-async def override_persona(request: Request):
-    body = await request.json()
-    tenant_id = getattr(request.state, "tenant_id", "default")
-    db_path = os.path.join(os.environ.get("HBLLM_DATA_DIR", "data"), "identity.db")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT traits_json FROM identities WHERE tenant_id = ?", (tenant_id,)
-            ).fetchone()
-            traits = {}
-            if row and row["traits_json"]:
-                traits = json.loads(row["traits_json"])
-            traits.update(body)
-            conn.execute(
-                "INSERT INTO identities (tenant_id, traits_json, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now')) ON CONFLICT(tenant_id) DO UPDATE SET traits_json = excluded.traits_json, updated_at = excluded.updated_at",
-                (tenant_id, json.dumps(traits)),
-            )
-            conn.commit()
-    except Exception as e:
-        logger.error("Failed to override persona: %s", e)
-    return {"status": "ok"}
-
-
-@router.post("/api/persona/reset")
-async def reset_persona(request: Request):
-    tenant_id = getattr(request.state, "tenant_id", "default")
-    db_path = os.path.join(os.environ.get("HBLLM_DATA_DIR", "data"), "identity.db")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                "UPDATE identities SET traits_json = '{}' WHERE tenant_id = ?", (tenant_id,)
-            )
-            conn.commit()
-    except Exception as e:
-        logger.error("Failed to reset persona: %s", e)
-    return {"status": "ok"}
-
-
-@router.delete("/api/persona/override")
-async def clear_persona_overrides(request: Request):
-    tenant_id = getattr(request.state, "tenant_id", "default")
-    db_path = os.path.join(os.environ.get("HBLLM_DATA_DIR", "data"), "identity.db")
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                "UPDATE identities SET traits_json = '{}' WHERE tenant_id = ?", (tenant_id,)
-            )
-            conn.commit()
-    except Exception as e:
-        logger.error("Failed to clear persona overrides: %s", e)
-    return {"status": "ok"}
+# NOTE: /api/persona/* moved to studio/persona.py
 
 
 @router.get("/api/memory/stats")
@@ -1057,8 +937,8 @@ async def studio_stats() -> Any:
             if dpo_path.exists():
                 with dpo_path.open() as f:
                     dpo_queue_depth = len(json.load(f))
-        except Exception as e:
-            logger.debug("[Studio] non-critical error: %s", e)
+        except Exception:
+            pass
         learning_stats["dpo_queue_depth"] = dpo_queue_depth
         result["learning"] = learning_stats
 
@@ -1276,8 +1156,8 @@ async def studio_learning() -> Any:
                     for entry in queue[:5]:
                         if isinstance(entry, (list, tuple)) and len(entry) > 0:
                             dpo_preview.append(str(entry[0])[:80])
-        except Exception as e:
-            logger.debug("[Studio] non-critical error: %s", e)
+        except Exception:
+            pass
         result["learner"]["dpo_queue_depth"] = dpo_queue_depth
         result["learner"]["dpo_queue_preview"] = dpo_preview
         # Micro-learn queue preview
@@ -1815,7 +1695,7 @@ async def studio_voice_test(request: Request) -> Any:
     )
     try:
         resp = await asyncio.wait_for(
-            bus.request("sensory.audio.out", msg, timeout=180.0), timeout=180.0
+            bus.request("sensory.audio.out", msg, timeout=15.0), timeout=15.0
         )
         if resp and resp.type != MessageType.ERROR:
             return {
@@ -1823,39 +1703,9 @@ async def studio_voice_test(request: Request) -> Any:
                 "audio_path": resp.payload.get("audio_path"),
                 "voice": resp.payload.get("voice"),
             }
-        return {
-            "status": "error",
-            "error": resp.payload.get("error") or "Synthesis failed — TTS model may not be loaded",
-        }
-    except asyncio.TimeoutError:
-        return {
-            "status": "error",
-            "error": "Synthesis timed out — model may still be loading. Try again in a few seconds.",
-        }
+        return {"status": "error", "error": resp.payload.get("error", "Synthesis failed")}
     except Exception as e:
-        return {"status": "error", "error": str(e) or f"Synthesis failed: {type(e).__name__}"}
-
-
-@router.get("/voice/audio/{filename:path}")
-async def serve_audio(filename: str):
-    """Serve a synthesized audio file."""
-    import os
-    from pathlib import Path
-
-    from starlette.responses import FileResponse
-
-    # Sanitize filename to prevent directory traversal
-    safe_name = os.path.basename(filename)
-    audio_path = Path("workspace/audio") / safe_name
-
-    if not audio_path.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found")
-
-    return FileResponse(
-        str(audio_path),
-        media_type="audio/wav",
-        headers={"Cache-Control": "no-cache"},
-    )
+        return {"status": "error", "error": str(e)}
 
 
 # ─── RBAC / Permissions Endpoints ─────────────────────────────────────────
@@ -2069,7 +1919,7 @@ async def studio_rbac_audit(request: Request, limit: int = 50) -> Any:
     try:
         from hbllm.security.audit_log import AuditLog
 
-        audit = AuditLog(db_path=os.path.join(data_dir, "audit.db"))
+        audit = AuditLog(data_dir=data_dir)
         entries = audit.query(tenant_id=tenant_id, limit=limit)
         return {
             "tenant_id": tenant_id,

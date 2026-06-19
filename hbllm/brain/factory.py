@@ -1071,6 +1071,7 @@ class BrainFactory:
         if cfg.inject_perception:
             from hbllm.perception.audio_in_node import AudioInputNode
             from hbllm.perception.audio_out_node import AudioOutputNode
+            from hbllm.perception.perception_fuser import PerceptionFuser
             from hbllm.perception.vision_node import VisionNode
             from hbllm.perception.voice_config import AudioPipelineConfig
 
@@ -1090,6 +1091,42 @@ class BrainFactory:
                 await _register_node(registry, pnode)
                 await pnode.start(message_bus)
                 nodes.append(pnode)
+
+            # Cross-modal perception fusion
+            fuser = PerceptionFuser(bus=message_bus)
+            for fusion_topic in [
+                "perception.audio",
+                "perception.vision",
+                "perception.screen",
+                "sensory.audio.in",
+                "sensory.vision.in",
+            ]:
+                await message_bus.subscribe(fusion_topic, fuser.on_perception_event)
+            logger.info("PerceptionFuser wired for cross-modal fusion")
+
+            # Wake word detection (hands-free activation)
+            from hbllm.perception.wake_word import WakeWordDetector
+
+            wake_word = WakeWordDetector(node_id="wake_word_detector")
+            await _register_node(registry, wake_word)
+            await wake_word.start(message_bus)
+            nodes.append(wake_word)
+
+            # Voice streaming bridge (ExpressionStream → AudioOutNode)
+            from hbllm.perception.voice_stream_bridge import VoiceStreamBridge
+
+            voice_bridge = VoiceStreamBridge(node_id="voice_stream_bridge")
+            await _register_node(registry, voice_bridge)
+            await voice_bridge.start(message_bus)
+            nodes.append(voice_bridge)
+
+            # Location awareness (geofencing)
+            from hbllm.perception.location_adapter import LocationAdapter
+
+            location = LocationAdapter(node_id="location_adapter")
+            await _register_node(registry, location)
+            await location.start(message_bus)
+            nodes.append(location)
 
         # Reasoning nodes (optional — require extra dependencies)
         if cfg.inject_fuzzy_logic:
@@ -1301,6 +1338,15 @@ class BrainFactory:
             await awareness_node.start(message_bus)
             brain.awareness = awareness_node
             nodes.append(awareness_node)
+
+            # EmotionEngine — publishes emotion.state consumed by Awareness & PersonaEngine
+            from hbllm.brain.emotion_engine import EmotionEngine
+
+            emotion_node = EmotionEngine(node_id="emotion_engine")
+            await _register_node(registry, emotion_node)
+            await emotion_node.start(message_bus)
+            brain.emotion_engine = emotion_node
+            nodes.append(emotion_node)
 
         # Knowledge Base
         if cfg.inject_knowledge:
