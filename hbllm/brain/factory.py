@@ -1315,6 +1315,15 @@ class BrainFactory:
             brain.awareness = awareness_node
             nodes.append(awareness_node)
 
+            # EmotionEngine — publishes emotion.state consumed by Awareness & PersonaEngine
+            from hbllm.brain.emotion_engine import EmotionEngine
+
+            emotion_node = EmotionEngine(node_id="emotion_engine")
+            await _register_node(registry, emotion_node)
+            await emotion_node.start(message_bus)
+            brain.emotion_engine = emotion_node
+            nodes.append(emotion_node)
+
         # Knowledge Base
         if cfg.inject_knowledge:
             from hbllm.knowledge import KnowledgeBase
