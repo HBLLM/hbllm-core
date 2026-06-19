@@ -11,6 +11,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Cognitive Features
+
+- **PersonaEngine** — `hbllm/brain/persona_engine.py`
+  - Persistent personality profiles (formality, humor, verbosity, emoji, empathy)
+  - Per-tenant persona storage with adaptive learning from feedback
+  - Emotion-aware style modulation (stressed → concise, curious → detailed)
+
+- **NotificationGateway** — `hbllm/serving/notifications.py`
+  - Proactive push channel for background insights and alerts
+  - Priority-based notification queue (critical, info, suggestion)
+  - WebSocket, webhook, and in-memory delivery backends
+
+- **HabitTracker** — `hbllm/brain/habit_tracker.py`
+  - Temporal pattern mining on episodic memory
+  - Routine detection (daily/weekly patterns) and need prediction
+  - Context-aware suggestions based on time-of-day and activity
+
+- **ActivityDigest** — `hbllm/brain/activity_digest.py`
+  - Summarizes missed activity during user absence
+  - Aggregates events, completed goals, and proactive findings
+  - Generates natural-language catch-up briefings
+
+- **ConversationThread** — `hbllm/memory/conversation_thread.py`
+  - Named, resumable conversation threads
+  - Independent context windows per thread
+  - Cross-session thread persistence
+
+- **DelegationChain** — `hbllm/brain/delegation_chain.py`
+  - Long-running autonomous task execution with progress tracking
+  - User approval gates for sensitive steps
+  - Persistent across restarts with state recovery
+
+- **SessionMigration** — `hbllm/network/session_migration.py`
+  - Cross-device context handoff ("continue on my phone")
+  - Exports active session state (history, context, goals)
+  - Cryptographic integrity verification on import
+
 #### Production Hardening (Audit Phase)
 
 - **DualLLMRouter + Circuit Breaker** — `hbllm/brain/dual_llm_router.py`
@@ -58,23 +95,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - 21 tests covering circuit breaker, rate limiting, DB quotas, metrics,
     graceful shutdown, API versioning, body size limits, and CORS
 
+#### Infrastructure Fixes (Core Audit)
+
+- **LoadManager ↔ AttentionManager** bidirectional integration
+- **AnthropicProvider** connection reuse with `httpx` client
+- **Per-topic BusMetrics** tracking (publish/delivery/error counters)
+- **Per-tenant RateLimitInterceptor** on message bus
+- **DB indexes** on `tenant_id` / `session_id` columns
+- **Bus drain** with timeout for graceful shutdown
+- **Provider lifecycle** with `close()` and async context manager
+- **LocalProvider** `_prepare_input()` factored out
+- **MemoryNode** `UnifiedMemoryInterface` compliance
+- **Ordered shutdown** sequence in lifespan
+- **Metrics thread safety** with `threading.Lock`
+- **SNN neuron eviction** on capacity overflow
+- **Task dispatch** error surfacing
+
 #### Benchmarks
 
 - **SNN Cognitive Benchmark** — `hbllm/benchmarks/bench_cognitive.py`
-  - ComprehensionEnsemble step() latency and per-token cost
-  - ComprehensionStream full comprehend() pipeline timing
-  - ThoughtPlanner symbolic outline generation overhead
-  - ExpressionStream rendering tier token budgets
-
 - **DualLLMRouter Benchmark** — `hbllm/benchmarks/bench_dual_router.py`
-  - Routing decision (classify) latency
-  - Circuit breaker state transition timing
-  - Fallback overhead measurement
-
 - **HTTP API Load Test** — `hbllm/benchmarks/bench_http.py`
-  - Health endpoint p50/p99 via ASGI transport
-  - Rate limiter validation under burst load
-  - Concurrent multi-tenant throughput
 
 ### Changed
 
@@ -92,10 +133,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Exception handling audit** — 460+ bare/pass-only catches across 68 files
+  converted to proper logging. Zero silent exception swallows remain.
+- **Memory leaks** — 8 leaks fixed across brain, network, serving, persistence
+- **FastAPI 0.137+ route detection** — `test_api_endpoints.py` updated for
+  `_IncludedRouter` (use OpenAPI + recursive traversal)
+- **Tokenizer decode crash** — `ValueError: bytes must be in range(0, 256)`
+  fixed in zero-dependency fallback when token IDs ≥ 256
 - **torch NameError** in `adapter_registry.py` — `cast()` used `torch.Tensor` at runtime
   but `torch` was only imported under `TYPE_CHECKING`. Fixed with string annotation.
+- **Ruff lint errors** — Missing logger imports, unused conditional imports, type narrowing
 
 ---
+
 
 ## [0.2.0] — 2026-05-16
 
