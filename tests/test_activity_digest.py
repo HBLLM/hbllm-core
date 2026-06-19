@@ -2,7 +2,6 @@
 
 import time
 
-
 from hbllm.brain.activity_digest import ActivityDigestEngine, Digest, DigestItem
 
 

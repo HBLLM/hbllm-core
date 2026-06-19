@@ -2,7 +2,6 @@
 
 import struct
 
-
 from hbllm.perception.wake_word import (
     EnergyWakeWordEngine,
     WakeWordConfig,
