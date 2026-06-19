@@ -132,12 +132,13 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP042", "UP017", "E741", "F401", "F811"]
+ignore = ["E501", "E402", "N802", "N803", "N806", "N812", "N814", "UP041", "UP042", "UP017", "E741", "F811"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["hbllm"]
 
 [tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
 "plugins/**/*.py" = ["N999"]
 
 [tool.pytest.ini_options]
@@ -155,7 +156,7 @@ python_version = "3.11"
 ignore_missing_imports = true
 exclude = ["plugins/"]
 disable_error_code = [
-    "assignment", "arg-type", "call-arg", "attr-defined", "import-untyped", 
+    "assignment", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 
-    "return-value", "operator", "valid-type", "union-attr"
+    "operator", "valid-type", "union-attr"
 ]

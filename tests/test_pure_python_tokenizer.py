@@ -4,7 +4,6 @@ and the new pure-Python BPE fallback tokenizer.
 """
 
 import json
-import os
 import tempfile
 from pathlib import Path
 

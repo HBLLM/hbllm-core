@@ -695,8 +695,8 @@ class RouterNode(Node):
                 correlation_id=message.correlation_id or message.id,
             )
             await self.bus.publish("system.router_decision", distill_msg)
-        except Exception:
-            pass  # Non-critical — don't fail routing over telemetry
+        except Exception as e:
+            logger.debug("[RouterNode] Non-critical telemetry error: %s", e)
 
         return None
 

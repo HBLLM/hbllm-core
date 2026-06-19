@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from hbllm.brain.self_state import EpistemicCalibrationTracker, ToolReliabilityTracker
 
 

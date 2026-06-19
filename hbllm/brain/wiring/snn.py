@@ -77,8 +77,8 @@ def wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
                     w_min=0.0,
                     w_max=2.0,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[SNN] Node processing skipped: %s", e)
 
             association_layer = AssociationLayer(stdp_rule=assoc_stdp)
             logger.info("AssociationLayer wired to ComprehensionStream")
@@ -199,8 +199,8 @@ def wire_expression_stream(
                     w_min=0.0,
                     w_max=2.0,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[SNN] Plasticity update skipped: %s", e)
 
             trained_prm = TrainedPRM(
                 reward_evaluator=evaluator,

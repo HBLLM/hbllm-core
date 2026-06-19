@@ -143,6 +143,16 @@ class LLMProvider(ABC):
         """Provider name."""
         ...
 
+    async def close(self) -> None:
+        """Close any resources held by the provider. Override in subclasses."""
+        pass
+
+    async def __aenter__(self) -> LLMProvider:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.close()
+
 
 # ─── Local Provider ──────────────────────────────────────────────────────────
 
@@ -155,6 +165,45 @@ class LocalProvider(LLMProvider):
         self._tokenizer = tokenizer
         self._device = device
         self._draft_model: Any = None
+
+    def _prepare_input(self, messages: list[dict[str, str]]) -> tuple[Any, Any]:
+        """Prepare tokenized input tensor and EOS ID from messages.
+
+        Returns (input_tensor, eos_token_id) ready for generation.
+        """
+        import inspect
+
+        import torch
+
+        apply_sig = inspect.signature(self._tokenizer.apply_chat_template)
+        has_tokenize = "tokenize" in apply_sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in apply_sig.parameters.values()
+        )
+        if has_tokenize:
+            prompt = self._tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        else:
+            prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+
+        if isinstance(prompt, list):
+            input_ids = prompt
+        else:
+            sig = inspect.signature(self._tokenizer.encode)
+            if "add_bos" in sig.parameters:
+                input_ids = self._tokenizer.encode(prompt, add_bos=True)
+            else:
+                input_ids = self._tokenizer.encode(prompt)
+        input_tensor = torch.tensor([input_ids], dtype=torch.long)
+
+        if hasattr(self._model, "device"):
+            input_tensor = input_tensor.to(self._model.device)
+
+        eos_token_id = getattr(
+            self._tokenizer, "eos_id", getattr(self._tokenizer, "eos_token_id", None)
+        )
+
+        return input_tensor, eos_token_id
 
     def _ensure_loaded(self) -> None:
         if self._model is None:
@@ -196,35 +245,8 @@ class LocalProvider(LLMProvider):
             "llm.generate",
             {"provider": "local", "model": "hbllm-local", "max_tokens": str(max_tokens)},
         ):
-            import inspect
-
-            apply_sig = inspect.signature(self._tokenizer.apply_chat_template)
-            has_tokenize = "tokenize" in apply_sig.parameters or any(
-                p.kind == inspect.Parameter.VAR_KEYWORD for p in apply_sig.parameters.values()
-            )
-            if has_tokenize:
-                prompt = self._tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-            else:
-                prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-
-            if isinstance(prompt, list):
-                input_ids = prompt
-            else:
-                sig = inspect.signature(self._tokenizer.encode)
-                if "add_bos" in sig.parameters:
-                    input_ids = self._tokenizer.encode(prompt, add_bos=True)
-                else:
-                    input_ids = self._tokenizer.encode(prompt)
-            input_tensor = torch.tensor([input_ids], dtype=torch.long)
-
-            if hasattr(self._model, "device"):
-                input_tensor = input_tensor.to(self._model.device)
-
-            eos_token_id = getattr(
-                self._tokenizer, "eos_id", getattr(self._tokenizer, "eos_token_id", None)
-            )
+            input_tensor, eos_token_id = self._prepare_input(messages)
+            input_ids = input_tensor[0].tolist()
 
             with torch.no_grad():
                 output = self._model.generate(
@@ -301,34 +323,9 @@ class LocalProvider(LLMProvider):
             except ValueError:
                 pass
 
-        import inspect
-
-        apply_sig = inspect.signature(self._tokenizer.apply_chat_template)
-        has_tokenize = "tokenize" in apply_sig.parameters or any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in apply_sig.parameters.values()
-        )
-        if has_tokenize:
-            prompt = self._tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-        else:
-            prompt = self._tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-
-        if isinstance(prompt, list):
-            input_ids = prompt
-        else:
-            sig = inspect.signature(self._tokenizer.encode)
-            if "add_bos" in sig.parameters:
-                input_ids = self._tokenizer.encode(prompt, add_bos=True)
-            else:
-                input_ids = self._tokenizer.encode(prompt)
-        input_tensor = torch.tensor([input_ids], dtype=torch.long)
-
-        if hasattr(self._model, "device"):
-            input_tensor = input_tensor.to(self._model.device)
+        input_tensor, eos_id = self._prepare_input(messages)
 
         top_p = kwargs.get("top_p", 0.9)
-        eos_id = getattr(self._tokenizer, "eos_id", getattr(self._tokenizer, "eos_token_id", None))
 
         # Phase 4: Speculative Decoding Integration
         has_draft_model = hasattr(self, "_draft_model") and self._draft_model is not None
@@ -679,8 +676,11 @@ class AnthropicProvider(LLMProvider):
         api_key: str | None = None,
         model: str = "claude-sonnet-4-20250514",
     ):
+        import httpx
+
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
         self._model = model
+        self._client = httpx.AsyncClient(timeout=60)
 
         if not self._api_key:
             logger.warning("ANTHROPIC_API_KEY not set. Anthropic provider will fail.")
@@ -693,7 +693,6 @@ class AnthropicProvider(LLMProvider):
         top_p: float = 0.9,
         **kwargs: Any,
     ) -> LLMResponse:
-        import httpx
 
         if not self._api_key:
             raise ValueError(
@@ -728,14 +727,13 @@ class AnthropicProvider(LLMProvider):
                 payload["system"] = system
 
             async def _do_request() -> Any:
-                async with httpx.AsyncClient(timeout=60) as client:
-                    resp = await client.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers=headers,
-                        json=payload,
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
+                resp = await self._client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                return resp.json()
 
             data = await _retry_api_call(_do_request)
 
@@ -762,7 +760,6 @@ class AnthropicProvider(LLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream tokens from Anthropic's SSE API."""
-        import httpx
 
         if not self._api_key:
             raise ValueError(
@@ -792,29 +789,32 @@ class AnthropicProvider(LLMProvider):
         if system:
             payload["system"] = system
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            async with client.stream(
-                "POST",
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    chunk = line[6:]
-                    try:
-                        data = json.loads(chunk)
-                        event_type = data.get("type", "")
-                        if event_type == "content_block_delta":
-                            text = data.get("delta", {}).get("text", "")
-                            if text:
-                                yield text
-                        elif event_type == "message_stop":
-                            break
-                    except (json.JSONDecodeError, KeyError):
-                        continue
+        async with self._client.stream(
+            "POST",
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=payload,
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                chunk = line[6:]
+                try:
+                    data = json.loads(chunk)
+                    event_type = data.get("type", "")
+                    if event_type == "content_block_delta":
+                        text = data.get("delta", {}).get("text", "")
+                        if text:
+                            yield text
+                    elif event_type == "message_stop":
+                        break
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+    async def close(self) -> None:
+        """Close the shared HTTP client."""
+        await self._client.aclose()
 
     @property
     def name(self) -> str:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from hbllm.brain.causality.causal_graph import CausalGraph

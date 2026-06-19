@@ -11,13 +11,11 @@ the helper gracefully falls back to a no-op context manager.
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-    from hbllm.network.messages import Message
 
 
 @contextmanager

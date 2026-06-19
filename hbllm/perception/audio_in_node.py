@@ -16,11 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import struct
 import tempfile
 import threading
 import time
-from collections import deque
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
@@ -508,10 +506,10 @@ class AudioInputNode(Node):
                     len(samples),
                     len(samples) / 16000,
                 )
-            except Exception:
-                pass
-
-            # generate() returns token IDs — decode with tokenizer
+            except Exception as e:
+                logger.debug(
+                    "[AudioInNode] generate() returns token IDs — decode with tokenizer: %s", e
+                )
             token_ids = self._moonshine_model.generate(samples_2d)
             logger.info("Moonshine token_ids: %s", token_ids)
 
@@ -595,8 +593,8 @@ class AudioInputNode(Node):
         finally:
             try:
                 os.unlink(tmp.name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[AudioInNode] non-critical error: %s", e)
 
     async def _transcribe_nvidia(self, file_path: str, api_key: str) -> str | None:
         """Transcribe via NVIDIA Cloud Whisper API."""

@@ -6,7 +6,6 @@ to be integrated with OpenTelemetry or custom dashboarding.
 """
 
 import logging
-import time
 
 logger = logging.getLogger(__name__)
 

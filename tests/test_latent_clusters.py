@@ -4,13 +4,10 @@ Unit and integration tests for Latent Memory Clusters and Self-Organizing Associ
 
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
-import time
 
 import numpy as np
-import pytest
 
 from hbllm.memory.latent_cluster import LatentClusterManager
 from hbllm.memory.priming import WorkingMemoryPrimer

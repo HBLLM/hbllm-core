@@ -13,7 +13,6 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from hbllm.actions.execution_node import validate_code
 from hbllm.actions.tool_registry import ToolResult

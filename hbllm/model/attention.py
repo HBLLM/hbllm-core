@@ -12,6 +12,7 @@ When 1 < num_kv_heads < num_attention_heads → Grouped Query Attention
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import torch
@@ -20,6 +21,8 @@ import torch.nn.functional as F
 
 from hbllm.model.config import ModelConfig
 from hbllm.model.embeddings import RotaryEmbedding, apply_rotary_pos_emb
+
+logger = logging.getLogger(__name__)
 
 
 class GroupedQueryAttention(nn.Module):
@@ -172,9 +175,8 @@ class GroupedQueryAttention(nn.Module):
                     ):
                         attn_mask = None
                         is_causal_mode = True
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    logger.debug("[Attention] non-critical error: %s", e)
             if attn_mask is not None:
                 # Convert additive float mask (0.0 for unmasked, negative for masked)
                 # to boolean mask where True means unmasked (keep) and False means masked.

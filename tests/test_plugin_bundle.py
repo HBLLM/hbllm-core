@@ -3,13 +3,11 @@ Tests for the Plugin Bundle System (hbllm.plugin.bundle).
 """
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 
 from hbllm.plugin.bundle import (
-    KNOWLEDGE_EXTENSIONS,
     PluginAssets,
     PluginBundle,
     PluginManifest,

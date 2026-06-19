@@ -25,7 +25,6 @@ from hbllm.brain.snn.network import (
 )
 from hbllm.brain.snn.reasoning.association import (
     AssociationLayer,
-    ConceptAssociation,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════

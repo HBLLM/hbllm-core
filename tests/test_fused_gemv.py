@@ -2,11 +2,9 @@
 Test for Rust Fused 4-bit GEMV Correctness vs PyTorch Linear.
 """
 
-import numpy as np
-import pytest
 import torch
 
-from hbllm.model.quantization import QuantizedLinear, rust_engine
+from hbllm.model.quantization import QuantizedLinear
 
 
 def test_fused_gemv_correctness():

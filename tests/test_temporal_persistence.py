@@ -8,8 +8,6 @@ import sys
 import tempfile
 import time
 
-import pytest
-
 
 # Import TemporalEngine from the plugin directory (dashes in path).
 def _import_temporal():

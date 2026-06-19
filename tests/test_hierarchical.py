@@ -3,8 +3,6 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-import websockets
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from hbllm.network.bus import InProcessBus

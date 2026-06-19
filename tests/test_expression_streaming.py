@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from hbllm.brain.snn.expression.expression_stream import ExpressionStream, FragmentCallback

@@ -2,8 +2,6 @@
 
 import time
 
-import pytest
-
 from hbllm.brain.autonomy.supervisor import ProcessSupervisor
 
 

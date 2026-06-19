@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from hbllm.plugin.bundle import PluginAssets, PluginBundle, PluginManifest
+from hbllm.plugin.bundle import PluginBundle
 
 logger = logging.getLogger(__name__)
 
@@ -227,10 +227,8 @@ class PluginManager:
                 pkg_plugins = Path(hbllm.__file__).parent.parent / "plugins"
                 if pkg_plugins.exists() and pkg_plugins not in self._plugin_dirs:
                     self._plugin_dirs.append(pkg_plugins)
-            except Exception:
-                pass
-
-        # Background watcher
+            except Exception as e:
+                logger.debug("[Manager] Background watcher: %s", e)
         self._watch_task: asyncio.Task[None] | None = None
 
     # ── Properties ───────────────────────────────────────────────────

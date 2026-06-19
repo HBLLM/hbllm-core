@@ -1,11 +1,9 @@
-import os
-
 import jwt
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from hbllm.security.tenant_guard import TenantContext, TenantIsolationError, require_tenant
+from hbllm.security.tenant_guard import TenantIsolationError, require_tenant
 from hbllm.serving.api import app
 
 

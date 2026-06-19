@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import logging
 import os
-import pathlib
 import uuid
 from contextlib import asynccontextmanager
 
@@ -167,7 +166,7 @@ class WebRTCOfferRequest(BaseModel):
 
 # ─── Global State ─────────────────────────────────────────────────────────────
 
-from hbllm.serving.state import _get_node_map, _state
+from hbllm.serving.state import _state
 
 
 async def _boot_brain(
@@ -1151,8 +1150,6 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
     filtered_history: list[dict[str, Any]] = []
     ctx = None
     if bus:
-        from hbllm.brain.prompt_helper import ChatContext
-
         filtered_history, ctx = await _prepare_chat_context(
             bus,
             request.tenant_id,
@@ -1460,15 +1457,14 @@ async def audio_transcribe(api_req: Request, file: UploadFile = File(...)) -> An
         try:
             if os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[Api] non-critical error: %s", e)
 
 
 @app.post("/v1/audio/synthesize")
 async def audio_synthesize(api_req: Request, request: dict) -> Any:
     """Synthesize text to audio using NVIDIA Riva / Local SpeechT5 fallback."""
     import os
-    import uuid
 
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
@@ -1686,6 +1682,13 @@ async def audio_websocket(ws: WebSocket) -> None:
 
     async def _on_audio_chunk(msg: Message) -> None:
         if msg.session_id == session_id:
+            logger.info(
+                "[AudioWS] Received audio chunk for session %s: %d hex chars, sr=%s, final=%s",
+                session_id[:8],
+                len(msg.payload.get("audio", "")),
+                msg.payload.get("sample_rate"),
+                msg.payload.get("is_final"),
+            )
             await audio_queue.put(
                 {
                     "type": "audio_chunk",
@@ -1697,6 +1700,12 @@ async def audio_websocket(ws: WebSocket) -> None:
             )
 
     async def _on_output(msg: Message) -> None:
+        logger.info(
+            "[AudioWS] sensory.output received: session=%s (ours=%s), text=%s",
+            (msg.session_id or "")[:8],
+            session_id[:8],
+            (msg.payload.get("text", ""))[:50],
+        )
         if msg.session_id == session_id:
             text = msg.payload.get("text", "")
             await audio_queue.put(
@@ -1707,6 +1716,9 @@ async def audio_websocket(ws: WebSocket) -> None:
             )
             # Auto-trigger TTS for voice chat responses
             if text.strip():
+                logger.info(
+                    "[AudioWS] Triggering TTS for session %s: '%s'", session_id[:8], text[:50]
+                )
                 tts_msg = Message(
                     type=MessageType.QUERY,
                     source_node_id="audio_ws",
@@ -2497,11 +2509,11 @@ async def chat_websocket(ws: WebSocket) -> None:
         logger.error("WebSocket error: %s", e)
         try:
             await ws.close(code=1011)
-        except Exception:
-            pass
-
-
-# ─── CLI Entry Point ──────────────────────────────────────────────────────────
+        except Exception as e:
+            logger.debug(
+                "[Api] ─── CLI Entry Point ──────────────────────────────────────────────────────────: %s",
+                e,
+            )
 
 
 def main() -> None:

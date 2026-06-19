@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from hbllm.brain.dual_llm_router import (
     DualLLMRouter,
     DualLLMStats,
-    RoutingDecision,
     TaskTier,
     estimate_complexity,
 )

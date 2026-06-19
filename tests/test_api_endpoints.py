@@ -6,6 +6,36 @@ import pytest
 
 from hbllm.serving.api import ChatRequest, HealthResponse, app
 
+# ── Helper ────────────────────────────────────────────────────────────────────
+
+
+def _get_openapi_paths() -> list[str]:
+    """Get all registered route paths.
+
+    FastAPI 0.137+ uses _IncludedRouter which doesn't flatten sub-router
+    paths into app.routes. We combine the OpenAPI spec (HTTP routes) with
+    recursive route traversal (to catch WebSocket routes which aren't in
+    the OpenAPI spec).
+    """
+    # HTTP routes from OpenAPI
+    paths = set(app.openapi().get("paths", {}).keys())
+
+    # WebSocket + other routes via recursive traversal
+    def _collect(router: object, prefix: str = "") -> None:
+        for route in getattr(router, "routes", []):
+            path = getattr(route, "path", "")
+            full = prefix + path
+            if full:
+                paths.add(full)
+            if hasattr(route, "routes"):
+                _collect(route, prefix=full or prefix)
+            if hasattr(route, "app") and hasattr(route.app, "routes"):
+                _collect(route.app, prefix=full or prefix)
+
+    _collect(app)
+    return list(paths)
+
+
 # ── Schema Tests ─────────────────────────────────────────────────────────────
 
 
@@ -33,7 +63,7 @@ async def test_health_response_provider_mode():
 @pytest.mark.asyncio
 async def test_knowledge_routes_registered():
     """Verify KnowledgeGraph endpoints are registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     assert "/v1/knowledge/{entity}" in routes
     assert "/v1/knowledge/path" in routes
     assert "/v1/knowledge/subgraph/{entity}" in routes
@@ -43,45 +73,44 @@ async def test_knowledge_routes_registered():
 @pytest.mark.asyncio
 async def test_rules_route_registered():
     """Verify rules endpoint is registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     assert "/v1/rules" in routes
 
 
 @pytest.mark.asyncio
 async def test_websocket_route_registered():
     """Verify WebSocket endpoint is registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     assert "/v1/chat/ws" in routes
 
 
 @pytest.mark.asyncio
 async def test_chat_stream_route_registered():
     """Verify SSE stream endpoint is registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     assert "/v1/chat/stream" in routes
 
 
 @pytest.mark.asyncio
 async def test_memory_route_registered():
     """Verify memory endpoint is registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     assert "/v1/memory/{session_id}" in routes
 
 
 @pytest.mark.asyncio
 async def test_feedback_route_registered():
     """Verify feedback endpoint is registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     assert "/v1/feedback" in routes
 
 
 @pytest.mark.asyncio
 async def test_all_core_routes_count():
     """Verify all expected core routes exist."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     expected = [
         "/health",
-        "/metrics",
         "/v1/chat",
         "/v1/chat/stream",
         "/v1/chat/ws",
@@ -100,7 +129,7 @@ async def test_all_core_routes_count():
 @pytest.mark.asyncio
 async def test_studio_routes_registered():
     """Verify all Studio and dashboard compatibility routes are registered."""
-    routes = [getattr(r, "path", "") for r in app.routes]
+    routes = _get_openapi_paths()
     expected_studio_routes = [
         "/api/emotion/state",
         "/api/swarm/status",

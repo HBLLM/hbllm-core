@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 

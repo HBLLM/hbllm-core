@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Test Moonshine ONNX directly with a generated speech-like signal and a real recording."""
 
-import sys
-
 import numpy as np
 
 print("=== Moonshine Live Debug ===")

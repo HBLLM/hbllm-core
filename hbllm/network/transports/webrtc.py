@@ -29,7 +29,7 @@ from collections import defaultdict
 from typing import Any
 
 from hbllm.network.bus import MessageHandler, Subscription
-from hbllm.network.messages import Message, MessageType
+from hbllm.network.messages import Message
 from hbllm.network.transports.base import Transport, TransportState
 
 logger = logging.getLogger(__name__)
@@ -114,8 +114,8 @@ class WebRTCTransport(Transport):
         for peer in list(self._peers.values()):
             try:
                 await peer.pc.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[Webrtc] non-critical error: %s", e)
         self._peers.clear()
         self._subscriptions.clear()
 
@@ -131,7 +131,7 @@ class WebRTCTransport(Transport):
             {"sdp": "...", "type": "offer"}
         """
         try:
-            from aiortc import RTCPeerConnection, RTCSessionDescription
+            from aiortc import RTCPeerConnection, RTCSessionDescription  # noqa: F401
         except ImportError:
             logger.error("aiortc not installed. WebRTC transport unavailable.")
             return {"sdp": "", "type": "error"}
@@ -382,8 +382,8 @@ class WebRTCTransport(Transport):
             self._peers.pop(peer.node_id, None)
             try:
                 await peer.pc.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[Webrtc] non-critical error: %s", e)
 
     def _get_matching_topics(self, topic: str) -> list[str]:
         """Match exact topics and wildcards."""

@@ -26,7 +26,6 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import contextvars
 import functools
 import inspect

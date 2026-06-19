@@ -8,7 +8,6 @@ import pytest
 
 from hbllm.brain.snn.expression.expression_stream import ExpressionStream
 from hbllm.brain.snn.expression.models import (
-    ExpressionResult,
     ThoughtFragment,
     ThoughtGoal,
 )

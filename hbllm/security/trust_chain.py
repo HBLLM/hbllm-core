@@ -8,7 +8,6 @@ ensuring that only authorized hardware can participate in the sovereign network.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from hbllm.security.identity import NodeIdentity
 
