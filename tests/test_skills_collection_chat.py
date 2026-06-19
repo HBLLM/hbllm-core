@@ -4,22 +4,15 @@ Integration test for skills collection and execution via the Chat API.
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
-from pathlib import Path
 from typing import Any
 
 import httpx
 import jwt
 import pytest
 
-from hbllm.brain.action_planner import ActionPlanner
-from hbllm.brain.action_schema import ActionPlan, ActionType
-from hbllm.brain.factory import Brain, BrainConfig, BrainFactory
-from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.factory import BrainConfig, BrainFactory
 from hbllm.network.bus import InProcessBus
-from hbllm.network.messages import Message, MessageType
+from hbllm.network.messages import Message
 from hbllm.serving.api import _state, app
 from hbllm.serving.provider import LLMProvider, LLMResponse
 

@@ -62,8 +62,8 @@ class DatabasePool:
             if conn is not None:
                 try:
                     await conn.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("[Pool] non-critical error: %s", e)
                 conn = None
             raise
         finally:

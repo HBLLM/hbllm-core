@@ -16,7 +16,6 @@ import asyncio
 import logging
 import statistics
 import time
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from hbllm.benchmarks.runner import BenchmarkReport, BenchmarkResult
@@ -225,17 +224,17 @@ class DualRouterBenchmark:
             for _ in range(2):
                 try:
                     await router.generate("complex query requiring external", tier="external")
-                except Exception:
-                    pass
-
-            # Measure fallback latency (circuit open → local)
+                except Exception as e:
+                    logger.debug(
+                        "[BenchDualRouter] Measure fallback latency (circuit open → local): %s", e
+                    )
             latencies = []
             for _ in range(100):
                 t0 = time.perf_counter()
                 try:
                     await router.generate("This should fall back to local", tier="external")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("[BenchDualRouter] non-critical error: %s", e)
                 latencies.append((time.perf_counter() - t0) * 1000)
 
             report.add(

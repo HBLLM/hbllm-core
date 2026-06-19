@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from hbllm.brain.causality.causal_graph import CausalGraph, CausalLink
-from hbllm.brain.snn.reasoning.reasoner import CausalChain, CausalReasoner
+from hbllm.brain.snn.reasoning.reasoner import CausalReasoner
 from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -11,16 +11,13 @@ import argparse
 import asyncio
 import logging
 import os
-import pathlib
 import uuid
 from contextlib import asynccontextmanager
 
 # Sanitize proxy environment variables to prevent httpx/urllib crashing on ::1 IPv6 address
-for _env_var in ("NO_PROXY", "no_proxy"):
-    _env_val = os.environ.get(_env_var, "")
-    if _env_val:
-        _cleaned = ",".join(_part for _part in _env_val.split(",") if "::1" not in _part)
-        os.environ[_env_var] = _cleaned
+from hbllm.utils.env_sanitize import sanitize_proxy_env
+
+sanitize_proxy_env()
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -58,7 +55,9 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     """Incoming chat message from a tenant."""
 
-    tenant_id: str = Field(default="", description="Unique tenant identifier (overridden by JWT)")
+    tenant_id: str = Field(
+        default="default", description="Unique tenant identifier (overridden by JWT)"
+    )
     user_id: str = Field(default="", description="User identifier (overridden by JWT)")
     device_id: str = Field(default="", description="Device identifier (overridden by JWT)")
     session_id: str = Field(default="default_session", description="Session identifier")
@@ -71,14 +70,20 @@ class ChatRequest(BaseModel):
 
 
 class FederatedEnvelopeRequest(BaseModel):
-    """Encapsulated cryptographic intent envelope for P2P Federation."""
+    """Encapsulated cryptographic intent envelope for P2P Federation.
+
+    The envelope dict is validated by EnvelopeCipher.verify_envelope() which
+    checks signature provenance and replay timestamps. We keep it as a dict
+    here because the federation layer owns the schema (topic, data, timestamp,
+    sender, recipient).
+    """
 
     envelope: dict[str, Any] = Field(
         ...,
         description="The signed envelope containing the sender ID, timestamp, and target intent payload.",
     )
     signature: str = Field(
-        ..., description="Hex-encoded Ed25519 signature of the serialized envelope."
+        ..., min_length=1, description="Hex-encoded Ed25519 signature of the serialized envelope."
     )
 
 
@@ -125,7 +130,12 @@ class FeedbackRequest(BaseModel):
 
     tenant_id: str = Field(..., description="Tenant who sent the feedback")
     message_id: str = Field(..., description="Correlation ID of the response being rated")
-    rating: int = Field(..., ge=-1, le=1, description="-1 (bad), 0 (neutral), 1 (good)")
+    rating: int = Field(
+        ...,
+        ge=-1,
+        le=1,
+        description="-1 (bad) or 1 (good). Neutral (0) feedback is accepted but excluded from RLHF training.",
+    )
     prompt: str | None = Field(default=None, description="Original prompt text")
     response: str | None = Field(default=None, description="Response text that was rated")
     comment: str | None = Field(default=None, description="Optional user comment")
@@ -156,7 +166,7 @@ class WebRTCOfferRequest(BaseModel):
 
 # ─── Global State ─────────────────────────────────────────────────────────────
 
-from hbllm.serving.state import _get_node_map, _state
+from hbllm.serving.state import _state
 
 
 async def _boot_brain(
@@ -202,7 +212,7 @@ async def _boot_brain(
         inject_memory=True,
         inject_identity=True,
         inject_curiosity=True,
-        inject_perception=not is_slow,
+        inject_perception=True,  # Always enable — Kokoro TTS works on CPU
         inject_fuzzy_logic=not is_slow,
         inject_symbolic_logic=not is_slow,
     )
@@ -211,7 +221,16 @@ async def _boot_brain(
     provider_model = os.getenv("HBLLM_PROVIDER_MODEL")
 
     # Known external provider prefixes — anything else with "/" is a HuggingFace model ID
-    _KNOWN_PROVIDERS = {"openai", "anthropic", "ollama", "local", "groq", "nvidia"}
+    _KNOWN_PROVIDERS = {
+        "openai",
+        "anthropic",
+        "ollama",
+        "local",
+        "groq",
+        "nvidia",
+        "google",
+        "deepseek",
+    }
 
     is_provider = False
     if provider_name:
@@ -267,13 +286,8 @@ async def _boot_brain(
             "nvidia": "NVIDIA_API_KEY",
         }
         selected_env_key = provider_env_keys.get(provider_name.lower()) if provider_name else None
-        api_key = (
-            os.getenv("HBLLM_PROVIDER_API_KEY")
-            or (os.getenv(selected_env_key) if selected_env_key else None)
-            or os.getenv("OPENAI_API_KEY")
-            or os.getenv("ANTHROPIC_API_KEY")
-            or os.getenv("GROQ_API_KEY")
-            or os.getenv("NVIDIA_API_KEY")
+        api_key = os.getenv("HBLLM_PROVIDER_API_KEY") or (
+            os.getenv(selected_env_key) if selected_env_key else None
         )
         if api_key:
             provider_kwargs["api_key"] = api_key
@@ -423,7 +437,7 @@ async def lifespan(app: FastAPI) -> Any:
     try:
         await _boot_brain(app=app, model_size=model_size)
         logger.info("Full brain pipeline active")
-    except Exception as e:
+    except (ImportError, RuntimeError, ConnectionError, OSError) as e:
         logger.error("Full brain boot failed: %s — falling back to provider-only mode.", e)
         _state["brain_degraded"] = True
         await _boot_provider_mode()
@@ -889,14 +903,17 @@ app.add_exception_handler(Exception, unhandled_exception_handler)  # type: ignor
 
 # ─── Middleware Stack (order matters: outermost first) ────────────────────────
 
-_cors_origins = os.environ.get(
+from hbllm.serving.security import validate_cors_config
+
+_cors_origins_raw = os.environ.get(
     "HBLLM_CORS_ORIGINS",
     "http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8080,http://127.0.0.1:3000",
 ).split(",")
+_cors_origins = validate_cors_config([o.strip() for o in _cors_origins_raw])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _cors_origins],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key"],
@@ -1133,8 +1150,6 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
     filtered_history: list[dict[str, Any]] = []
     ctx = None
     if bus:
-        from hbllm.brain.prompt_helper import ChatContext
-
         filtered_history, ctx = await _prepare_chat_context(
             bus,
             request.tenant_id,
@@ -1442,15 +1457,14 @@ async def audio_transcribe(api_req: Request, file: UploadFile = File(...)) -> An
         try:
             if os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[Api] non-critical error: %s", e)
 
 
 @app.post("/v1/audio/synthesize")
 async def audio_synthesize(api_req: Request, request: dict) -> Any:
     """Synthesize text to audio using NVIDIA Riva / Local SpeechT5 fallback."""
     import os
-    import uuid
 
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
@@ -1521,6 +1535,100 @@ async def list_voices(backend: str = "kokoro") -> Any:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ── Speaker Identification ────────────────────────────────────────────────
+
+
+@app.post("/studio/voice/speakers/enroll")
+async def enroll_speaker(request: Request) -> Any:
+    """
+    Enroll a speaker's voice for identification.
+
+    JSON body:
+        speaker_id: str — unique identifier
+        speaker_name: str — display name
+        audio_hex: str — hex-encoded 16-bit PCM audio (at least 3s)
+        sample_rate: int — sample rate (default 16000)
+    """
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Bus not initialized")
+
+    data = await request.json()
+    speaker_id = data.get("speaker_id", "").strip()
+    if not speaker_id:
+        raise HTTPException(status_code=400, detail="speaker_id is required")
+
+    tenant_id = data.get("tenant_id", "default")
+
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="api",
+        tenant_id=tenant_id,
+        topic="speaker.enroll",
+        payload={
+            "speaker_id": speaker_id,
+            "speaker_name": data.get("speaker_name", speaker_id),
+            "pcm_bytes": data.get("audio_hex", ""),
+            "sample_rate": data.get("sample_rate", 16000),
+        },
+    )
+    try:
+        resp = await asyncio.wait_for(
+            bus.request("speaker.enroll", msg, timeout=15.0), timeout=15.0
+        )
+        return resp.payload
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(status_code=504, detail="Speaker enrollment timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/studio/voice/speakers")
+async def list_speakers(tenant_id: str = "default") -> Any:
+    """List all enrolled speakers for a tenant."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Bus not initialized")
+
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="api",
+        tenant_id=tenant_id,
+        topic="speaker.list",
+        payload={},
+    )
+    try:
+        resp = await asyncio.wait_for(bus.request("speaker.list", msg, timeout=5.0), timeout=5.0)
+        return resp.payload
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(status_code=504, detail="Speaker list timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/studio/voice/speakers/{speaker_id}")
+async def delete_speaker(speaker_id: str, tenant_id: str = "default") -> Any:
+    """Delete an enrolled speaker profile."""
+    bus = _state.get("bus")
+    if not bus:
+        raise HTTPException(status_code=503, detail="Bus not initialized")
+
+    msg = Message(
+        type=MessageType.QUERY,
+        source_node_id="api",
+        tenant_id=tenant_id,
+        topic="speaker.delete",
+        payload={"speaker_id": speaker_id},
+    )
+    try:
+        resp = await asyncio.wait_for(bus.request("speaker.delete", msg, timeout=5.0), timeout=5.0)
+        return resp.payload
+    except (TimeoutError, asyncio.TimeoutError):
+        raise HTTPException(status_code=504, detail="Speaker delete timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/v1/audio/ws")
 async def audio_websocket(ws: WebSocket) -> None:
     """
@@ -1574,6 +1682,13 @@ async def audio_websocket(ws: WebSocket) -> None:
 
     async def _on_audio_chunk(msg: Message) -> None:
         if msg.session_id == session_id:
+            logger.info(
+                "[AudioWS] Received audio chunk for session %s: %d hex chars, sr=%s, final=%s",
+                session_id[:8],
+                len(msg.payload.get("audio", "")),
+                msg.payload.get("sample_rate"),
+                msg.payload.get("is_final"),
+            )
             await audio_queue.put(
                 {
                     "type": "audio_chunk",
@@ -1585,16 +1700,50 @@ async def audio_websocket(ws: WebSocket) -> None:
             )
 
     async def _on_output(msg: Message) -> None:
+        logger.info(
+            "[AudioWS] sensory.output received: session=%s (ours=%s), text=%s",
+            (msg.session_id or "")[:8],
+            session_id[:8],
+            (msg.payload.get("text", ""))[:50],
+        )
         if msg.session_id == session_id:
+            text = msg.payload.get("text", "")
             await audio_queue.put(
                 {
                     "type": "response_text",
+                    "text": text,
+                }
+            )
+            # Auto-trigger TTS for voice chat responses
+            if text.strip():
+                logger.info(
+                    "[AudioWS] Triggering TTS for session %s: '%s'", session_id[:8], text[:50]
+                )
+                tts_msg = Message(
+                    type=MessageType.QUERY,
+                    source_node_id="audio_ws",
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    topic="sensory.audio.out",
+                    payload={"text": text, "stream": True},
+                )
+                await bus.publish("sensory.audio.out", tts_msg)
+
+    async def _on_transcription(msg: Message) -> None:
+        if msg.session_id == session_id:
+            await audio_queue.put(
+                {
+                    "type": "transcription",
                     "text": msg.payload.get("text", ""),
+                    "speaker_id": msg.payload.get("speaker_id", "unknown"),
+                    "speaker_name": msg.payload.get("speaker_name", ""),
+                    "speaker_confidence": msg.payload.get("speaker_confidence", 0.0),
                 }
             )
 
     sub_chunk = await bus.subscribe("sensory.audio.chunk", _on_audio_chunk)
     sub_output = await bus.subscribe("sensory.output", _on_output)
+    sub_transcription = await bus.subscribe("sensory.transcription", _on_transcription)
 
     # ── Background task: forward audio responses to WebSocket ──
     async def _send_loop() -> None:
@@ -1617,6 +1766,13 @@ async def audio_websocket(ws: WebSocket) -> None:
 
             if msg_type == "audio":
                 # Forward audio chunk to ASR
+                chunk_data = data.get("chunk", "")
+                logger.debug(
+                    "WS audio chunk received: %d hex chars, sr=%s, final=%s",
+                    len(chunk_data),
+                    data.get("sample_rate"),
+                    data.get("is_final"),
+                )
                 stream_msg = Message(
                     type=MessageType.EVENT,
                     source_node_id="audio_ws",
@@ -1624,7 +1780,7 @@ async def audio_websocket(ws: WebSocket) -> None:
                     session_id=session_id,
                     topic="sensory.audio.stream",
                     payload={
-                        "chunk": data.get("chunk", ""),
+                        "chunk": chunk_data,
                         "sample_rate": data.get("sample_rate", 16000),
                         "is_final": data.get("is_final", False),
                     },
@@ -1665,6 +1821,34 @@ async def audio_websocket(ws: WebSocket) -> None:
                 )
                 await bus.publish("sensory.audio.out", tts_msg)
 
+            elif msg_type == "query":
+                # Client-side transcribed text → send to brain for response + TTS
+                text = data.get("text", "").strip()
+                if text:
+                    logger.info("Voice query from %s: '%s'", tenant_id, text[:80])
+
+                    # Send transcription event so frontend gets confirmation
+                    trans_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id="audio_ws",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        topic="sensory.transcription",
+                        payload={"text": text},
+                    )
+                    await bus.publish("sensory.transcription", trans_msg)
+
+                    # Forward to brain router for response
+                    query_msg = Message(
+                        type=MessageType.QUERY,
+                        source_node_id="audio_ws",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        topic="router.query",
+                        payload={"text": text, "source": "voice_chat"},
+                    )
+                    asyncio.create_task(bus.publish("router.query", query_msg))
+
     except WebSocketDisconnect:
         logger.info("Audio WebSocket disconnected: tenant=%s", tenant_id)
     except Exception as e:
@@ -1677,6 +1861,7 @@ async def audio_websocket(ws: WebSocket) -> None:
             pass
         await bus.unsubscribe(sub_chunk)
         await bus.unsubscribe(sub_output)
+        await bus.unsubscribe(sub_transcription)
 
 
 @app.post("/v1/benchmarks/run")
@@ -2324,11 +2509,11 @@ async def chat_websocket(ws: WebSocket) -> None:
         logger.error("WebSocket error: %s", e)
         try:
             await ws.close(code=1011)
-        except Exception:
-            pass
-
-
-# ─── CLI Entry Point ──────────────────────────────────────────────────────────
+        except Exception as e:
+            logger.debug(
+                "[Api] ─── CLI Entry Point ──────────────────────────────────────────────────────────: %s",
+                e,
+            )
 
 
 def main() -> None:

@@ -23,7 +23,6 @@ Service format:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import socket
 import time
@@ -32,8 +31,7 @@ from typing import TYPE_CHECKING, Any
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from hbllm.network.discovery.registry import CapabilityRegistry
-    from hbllm.network.node_state import NodeStateEngine
+    pass
 
 # mDNS service type for HBLLM instances
 HBLLM_SERVICE_TYPE = "_hbllm._tcp.local."
@@ -131,7 +129,7 @@ class MDNSDiscovery:
     async def start(self) -> None:
         """Start mDNS broadcasting and listening."""
         try:
-            from zeroconf import IPVersion, ServiceBrowser, ServiceInfo, Zeroconf
+            from zeroconf import IPVersion, ServiceBrowser, ServiceInfo, Zeroconf  # noqa: F401
             from zeroconf.asyncio import AsyncZeroconf
         except ImportError:
             logger.warning(
@@ -308,8 +306,8 @@ class MDNSDiscovery:
                     if self.on_peer_lost:
                         try:
                             await self.on_peer_lost(nid)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("[Mdns] non-critical error: %s", e)
             except asyncio.CancelledError:
                 break
             except Exception:

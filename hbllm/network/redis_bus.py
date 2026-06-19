@@ -280,7 +280,7 @@ class RedisBus(MessageBus):
                     backoff = min(backoff * 2, max_backoff)
                     try:
                         await self._reconnect()
-                    except Exception:
+                    except Exception as e:
                         logger.error("Reconnection failed. Will retry.")
                 else:
                     logger.error("Error in Redis dispatch loop: %s", e)

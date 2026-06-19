@@ -5,16 +5,14 @@ Integration and unit tests for safe shell execution in the HBLLM Chat API.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 import pytest
 
-from hbllm.actions.shell_node import HostShellNode
 from hbllm.brain.action_planner import ActionPlanner
-from hbllm.brain.action_schema import ActionPlan, ActionType, RiskLevel
+from hbllm.brain.action_schema import ActionType, RiskLevel
 from hbllm.brain.decision_node import DecisionNode
-from hbllm.brain.factory import Brain, BrainConfig, BrainFactory
+from hbllm.brain.factory import BrainConfig, BrainFactory
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 from hbllm.serving.provider import LLMProvider, LLMResponse

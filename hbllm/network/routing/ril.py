@@ -280,8 +280,8 @@ class RoutingIntelligenceLayer:
             if hasattr(transport, "unsubscribe"):
                 try:
                     await transport.unsubscribe(subscription)
-                except Exception:
-                    pass  # Subscription may not exist on this transport
+                except Exception as e:
+                    logger.debug("[Ril] Subscription may not exist on this transport: %s", e)
 
     def has_subscribers(self, topic: str) -> bool:
         """Check if any transport has subscribers for a topic."""

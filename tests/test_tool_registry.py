@@ -1,13 +1,10 @@
 """Tests for core ToolRegistry, @tool decorator, and ToolNode."""
 
-import asyncio
-
 import pytest
 
 from hbllm.actions.complexity import ComplexityDetector
 from hbllm.actions.tool_registry import (
     _TOOL_REGISTRY,
-    ToolNode,
     ToolRegistry,
     ToolResult,
     create_tool_from_code,

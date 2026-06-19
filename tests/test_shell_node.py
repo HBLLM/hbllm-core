@@ -4,8 +4,6 @@ Unit tests for HostShellNode.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from hbllm.actions.shell_node import HostShellNode

@@ -10,7 +10,6 @@ RedisTransport, WebRTCTransport.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -18,7 +17,7 @@ from collections.abc import Callable, Coroutine
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from hbllm.network.messages import Message
 

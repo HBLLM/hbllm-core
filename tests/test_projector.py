@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from hbllm.brain.simulation.models import PredictionOrigin
 from hbllm.brain.simulation.projector import ProjectedState
-from hbllm.brain.world_state import EntityState, WorldStateEngine
+from hbllm.brain.world_state import WorldStateEngine
 from hbllm.perception.reality_bus import PerceptionEvent
 
 

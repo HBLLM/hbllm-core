@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine
-from typing import Any
+from collections.abc import Callable
 
 from hbllm.brain.embodiment.os_adapter import OSAdapter
 

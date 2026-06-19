@@ -108,7 +108,23 @@ class HBLLMCoreConfig(BaseModel):
 
         config_path = Path(path)
         if not config_path.exists():
-            # Return defaults if no file found
+            env = os.environ.get("HBLLM_ENV", "development").lower()
+            if env == "production":
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "No config file found at '%s' in production mode. "
+                    "Using strict security defaults. Create a config file for customisation.",
+                    config_path,
+                )
+                return cls(
+                    env="production",
+                    security=SecurityConfig(
+                        tenant_guard_mode="strict",
+                        isolation_level="namespace",
+                    ),
+                )
+            # Return permissive defaults in development
             return cls()
 
         with open(config_path) as f:

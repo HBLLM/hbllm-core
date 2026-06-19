@@ -5,16 +5,14 @@ Integration and unit tests for global tool and plugin execution in the HBLLM Cha
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 from typing import Any
 
 import pytest
 
 from hbllm.brain.action_planner import ActionPlanner
-from hbllm.brain.action_schema import ActionPlan, ActionType, RiskLevel
+from hbllm.brain.action_schema import ActionType
 from hbllm.brain.decision_node import DecisionNode
-from hbllm.brain.factory import Brain, BrainConfig, BrainFactory
+from hbllm.brain.factory import BrainConfig, BrainFactory
 from hbllm.brain.prompt_helper import get_dynamic_system_prompt
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType

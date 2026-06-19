@@ -281,7 +281,6 @@ class MemoryBenchmark:
     """Measure memory efficiency of LoRA zoning vs full models."""
 
     async def run(self) -> BenchmarkReport:
-        import sys
         import tracemalloc
 
         from hbllm.brain.router_node import RouterNode

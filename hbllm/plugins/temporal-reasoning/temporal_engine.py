@@ -382,10 +382,8 @@ class TemporalEngine(HBLLMPlugin):
                         )
                         for r in rows
                     ]
-            except Exception:
-                pass
-
-        # Fallback to in-memory
+            except Exception as e:
+                logger.debug("[TemporalEngine] Fallback to in-memory: %s", e)
         return [e for e in self._events if start <= e.timestamp <= end][:max_results]
 
     def detect_patterns(self, window_days: int = 7) -> list[dict[str, Any]]:
@@ -411,9 +409,8 @@ class TemporalEngine(HBLLMPlugin):
                         (cutoff,),
                     ).fetchall()
                     domain_counts = {r[0]: r[1] for r in rows}
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug("[TemporalEngine] non-critical error: %s", e)
         if not domain_counts:
             for event in self._events:
                 if event.timestamp > cutoff:
@@ -488,9 +485,8 @@ class TemporalEngine(HBLLMPlugin):
                     total_persisted = conn.execute(
                         "SELECT COUNT(*) FROM temporal_events"
                     ).fetchone()[0]
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.debug("[TemporalEngine] non-critical error: %s", e)
         return {
             "total_events_cached": len(self._events),
             "total_events_persisted": total_persisted,

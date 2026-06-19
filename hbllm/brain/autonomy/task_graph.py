@@ -19,7 +19,6 @@ On boot, incomplete goals are automatically resumed.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sqlite3

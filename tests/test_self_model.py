@@ -1,6 +1,5 @@
 """Tests for SelfModel — internal capability tracking and trend analysis."""
 
-import os
 import tempfile
 
 import pytest

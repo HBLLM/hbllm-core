@@ -247,7 +247,7 @@ class RedisTransport(Transport):
                     backoff = min(backoff * 2, max_backoff)
                     try:
                         await self._reconnect()
-                    except Exception:
+                    except Exception as e:
                         logger.error("Redis reconnection failed.")
                 else:
                     logger.error("RedisTransport dispatch error: %s", e)
@@ -261,9 +261,8 @@ class RedisTransport(Transport):
                 await self.pubsub.close()
             if self.client:
                 await self.client.aclose()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug("[Redis] non-critical error: %s", e)
         self.client = aioredis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()
         await self.pubsub.psubscribe("*")

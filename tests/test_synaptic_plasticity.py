@@ -6,8 +6,6 @@ homeostatic decay, split persistence, and self-learning serving routes in HBLLM.
 from __future__ import annotations
 
 import json
-import os
-import pathlib
 
 import pytest
 from fastapi.testclient import TestClient

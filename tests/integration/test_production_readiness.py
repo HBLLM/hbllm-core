@@ -12,7 +12,7 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -197,7 +197,6 @@ class TestHTTPRateLimiting:
         assert bucket.try_consume() is False
 
     def test_bucket_refills_over_time(self):
-        import time
 
         from hbllm.serving.middleware.rate_limit import _TenantBucket
 

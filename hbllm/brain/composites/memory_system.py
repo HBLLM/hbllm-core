@@ -19,7 +19,6 @@ from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
     from hbllm.brain.provider_adapter import ProviderLLM
-    from hbllm.network.bus import MessageBus
     from hbllm.network.messages import Message
     from hbllm.network.registry import ServiceRegistry
 

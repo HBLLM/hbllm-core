@@ -1,7 +1,5 @@
 """Tests for Contract Delegation and Conflict Resolution."""
 
-import pytest
-
 from hbllm.brain.mesh.capsule import TaskCapsule
 from hbllm.brain.mesh.delegator import ContractDelegator, ContractOffer, DelegationResponse
 from hbllm.brain.mesh.registry import NodeType

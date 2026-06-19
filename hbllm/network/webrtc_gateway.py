@@ -7,7 +7,6 @@ for ultra-low latency streaming (e.g., live video frames for VisionNode).
 
 import asyncio
 import logging
-from typing import Any
 
 import orjson
 from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription

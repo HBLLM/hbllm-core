@@ -1,4 +1,7 @@
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Shared global state across API routers
 _state: dict[str, Any] = {}
@@ -92,10 +95,11 @@ def _get_node_map(brain) -> dict[str, Any]:
                 if val is not None:
                     sub_cls_name = type(val).__name__
                     node_map[sub_cls_name] = val
-            except Exception:
-                pass
-
-    # 3. Add direct brain attributes (in case some are not in brain.nodes)
+            except Exception as e:
+                logger.debug(
+                    "[State] 3. Add direct brain attributes (in case some are not in brain.nodes): %s",
+                    e,
+                )
     for attr_name in [
         "cognitive_metrics",
         "self_model",

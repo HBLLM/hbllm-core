@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from hbllm_knowledge_graph import (  # type: ignore[import-not-found]
-        disambiguate_entities as _rust_disambiguate,
+        disambiguate_entities as _rust_disambiguate,  # noqa: F401
     )
 
     _HAS_RUST_KG = True

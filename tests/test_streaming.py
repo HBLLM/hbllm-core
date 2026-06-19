@@ -1,7 +1,5 @@
 """Tests for core CognitiveStream."""
 
-import asyncio
-
 import pytest
 
 from hbllm.network.bus import InProcessBus

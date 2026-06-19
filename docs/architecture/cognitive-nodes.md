@@ -358,21 +358,41 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 
 - **Type:** `NodeType.PERCEPTION`
 - **File:** `hbllm/perception/audio_in_node.py`
-- **Purpose:** Speech-to-text streaming transcription.
-- **Upgrades:** Implements high-fidelity cloud routing with robust local fallbacks:
+- **Purpose:** Speech-to-text streaming transcription with speaker identification.
+- **ASR Engines:**
+    - **Moonshine ONNX** (default): Local inference via `useful-moonshine-onnx` (~50MB, <100ms latency). Runs on CPU with no cloud dependency.
     - **NVIDIA Cloud Whisper API**: When `NVIDIA_API_KEY` is active, routes requests to the NVIDIA Cloud Whisper API using the `openai/whisper-large-v3` model.
-    - **Local Fallback**: Automatically falls back to a thread-safe local Whisper model (`whisper.load_model(model_size)`) if cloud API calls fail or timeout.
-    - **Streaming Buffering**: Accumulates PCM chunks from `sensory.audio.stream` messages and flushes them when silence timeout is reached or final chunk is received.
+    - **Local Whisper Fallback**: Thread-safe local Whisper model (`whisper.load_model(model_size)`) if cloud API calls fail or timeout.
+- **Voice Activity Detection (VAD):** Silero VAD with configurable silence timeout (default 1500ms) for natural conversation pause handling.
+- **Audio Pipeline:** Normalization, silence trimming, linear interpolation downsampling from browser sample rates to 16kHz.
+- **Speaker Identification:** After transcription, sends the same PCM buffer to `SpeakerIdNode` for speaker identification. Attaches `speaker_id`, `speaker_name`, and `speaker_confidence` to both the `sensory.transcription` event and the `router.query` message.
+- **Topics:** `sensory.audio.stream`, `sensory.transcription`, `router.query`
 
 ### AudioOutputNode
 
 - **Type:** `NodeType.PERCEPTION`
 - **File:** `hbllm/perception/audio_out_node.py`
 - **Purpose:** Text-to-speech with per-tenant voice configurations.
-- **Upgrades:** Integrates dual-path cloud and local synthesis engines:
-    - **NVIDIA Riva TTS Client**: Interfaces with the `riva.client` gRPC library for cloud or local Riva/NIM text-to-speech synthesis (using `Magpie-Multilingual.EN-US.Aria` by default).
-    - **Local SpeechT5 Fallback**: If `riva.client` is missing or gRPC synthesis fails, falls back to local PyTorch `SpeechT5` (`microsoft/speecht5_tts` and HifiGan vocoder) with tenant-specific custom speaker xvectors.
-    - **Text Chunking**: Sentence-splits long text (>450 chars) to maintain synthesize voice consistency and quality.
+- **TTS Engines:**
+    - **Kokoro TTS** (default): Local neural TTS via `kokoro` + `misaki` phonemizer (~300MB model). High-quality voice synthesis with multiple voice options.
+    - **NVIDIA Riva TTS Client**: Interfaces with the `riva.client` gRPC library for cloud or local Riva/NIM text-to-speech synthesis.
+    - **Local SpeechT5 Fallback**: If other engines are unavailable, falls back to local PyTorch `SpeechT5` (`microsoft/speecht5_tts` and HifiGan vocoder) with tenant-specific custom speaker xvectors.
+- **Auto-TTS Trigger:** When the brain generates a response via `sensory.output`, it automatically publishes to `sensory.audio.out` for voice playback.
+- **Text Chunking**: Sentence-splits long text (>450 chars) to maintain voice consistency and quality.
+- **Topics:** `sensory.audio.out`, `sensory.audio.chunk`
+
+### SpeakerIdNode
+
+- **Type:** `NodeType.PERCEPTION`
+- **File:** `hbllm/perception/speaker_id_node.py`
+- **Purpose:** Real-time speaker identification using Resemblyzer GE2E voice embeddings.
+- **Model:** Resemblyzer VoiceEncoder (~50MB, CPU, ~20ms per identification). Extracts 256-dim GE2E speaker embeddings.
+- **Enrollment:** Speakers enroll by providing 3+ seconds of speech. Embeddings are averaged, normalized, and stored per-tenant in SQLite.
+- **Identification:** Cosine similarity against all enrolled profiles. Threshold: 0.75 (configurable per profile).
+- **Profile Adaptation:** High-confidence matches (>0.85) trigger incremental EMA updates to adapt profiles to voice changes over time.
+- **Retroactive Matching:** Unknown speaker embeddings are cached (up to 200 per tenant, 1-hour TTL). When a speaker is later enrolled, cached unknowns are retroactively matched and a `speaker.retroactive_update` event is published.
+- **Storage:** `hbllm/perception/voice_profile_store.py` — SQLite-backed with tenant isolation.
+- **Topics:** `speaker.identify`, `speaker.enroll`, `speaker.list`, `speaker.delete`, `speaker.retroactive_update`
 
 ### Perception Infrastructure
 

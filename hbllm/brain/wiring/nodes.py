@@ -8,7 +8,6 @@ used in the legacy (non-composite) brain path.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -16,10 +15,7 @@ from hbllm.brain.policy_engine import PolicyEngine
 from hbllm.brain.provider_adapter import ProviderLLM
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.brain.wiring.snn import wire_comprehension_stream, wire_expression_stream
-from hbllm.brain.wiring.subsystems import _register_node
-from hbllm.network.bus import MessageBus
 from hbllm.network.node import Node
-from hbllm.network.registry import ServiceRegistry
 from hbllm.serving.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -141,13 +137,15 @@ def create_legacy_nodes(
     if cfg.inject_perception:
         from hbllm.perception.audio_in_node import AudioInputNode
         from hbllm.perception.audio_out_node import AudioOutputNode
+        from hbllm.perception.speaker_id_node import SpeakerIdNode
         from hbllm.perception.vision_node import VisionNode
 
         nodes.extend(
             [
-                AudioInputNode(node_id="audio_in"),
+                AudioInputNode(node_id="audio_in", model_size="tiny"),
                 AudioOutputNode(node_id="audio_out"),
                 VisionNode(node_id="vision"),
+                SpeakerIdNode(node_id="speaker_id"),
             ]
         )
 

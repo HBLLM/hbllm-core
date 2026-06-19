@@ -6,23 +6,18 @@ and AutonomyCore integration.
 
 from __future__ import annotations
 
-import asyncio
-import time
-
 import pytest
 
 from hbllm.brain.autonomy.attention import (
     AttentionEvent,
     AttentionSystem,
     IncrementalContextWindow,
-    ScoredEvent,
 )
 from hbllm.brain.autonomy.loop import AutonomyCore, InternalThought
 from hbllm.brain.autonomy.state_machine import (
     CognitiveState,
     CognitiveStateCategory,
     CognitiveStateMachine,
-    TickProfile,
 )
 from hbllm.network.messages import Message, MessageType
 

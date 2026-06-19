@@ -8,7 +8,8 @@ Every node in the swarm is identified by its **Node ID** and its **Ed25519 Publi
 
 - **Registration**: On first boot, a node generates a persistent key pair. It registers its public key with the `ServiceRegistry`.
 - **Signing**: Every `Message` sent via the `MessageBus` must contain a `signature`. This signature is a hash of the message's ID, type, and payload, signed by the node's private key.
-- **Verification**: The `TrustInterceptor` on the bus verifies the signature of every incoming message against the registered public key. If a signature is missing or invalid, the message is dropped.
+- **Verification**: The `TrustInterceptor` on the bus verifies the signature of every incoming message against the registered public key. If a signature is present and invalid, the message is dropped — even from registered internal nodes.
+- **Internal Node Trust**: Registered internal nodes (brain components like router, memory, audio_in, etc.) that send **unsigned** messages are trusted implicitly — they are part of the local brain and don't need cryptographic signatures for internal bus traffic. However, if a registered node sends a message **with** a signature, the signature is always verified to catch forged payloads.
 - **Replay Protection (Vector Clocks)**: Valid signatures alone don't prevent replay attacks. Therefore, `ServiceRegistry` also verifies causal ordering via embedded `VectorClock` data. If a message attempts to replay an older clock or violates causality, it is flagged as a security violation and dropped.
 - **Registration Order**: Nodes **must** be registered in the `ServiceRegistry` *before* `node.start()` is called. This ensures that the node's initial heartbeat and startup messages are verifiable by the trust model.
 

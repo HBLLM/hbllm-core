@@ -277,6 +277,9 @@ class CuriosityNode(Node):
     async def _record_event(self, event: UncertaintyEvent) -> None:
         """Record an uncertainty event and check if a goal should be generated."""
         self.events.append(event)
+        # Cap events list to prevent unbounded growth
+        if len(self.events) > 500:
+            self.events = self.events[-500:]
         self.topic_counts[event.topic] += 1
 
         count = self.topic_counts[event.topic]

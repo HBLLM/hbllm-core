@@ -13,7 +13,7 @@ import time
 import pytest
 
 from hbllm.network.discovery.gossip import GossipEntry, GossipMessage, GossipSync
-from hbllm.network.discovery.registry import CapabilityEntry, CapabilityRegistry
+from hbllm.network.discovery.registry import CapabilityRegistry
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node_state import (
     NodeRole,
@@ -22,7 +22,7 @@ from hbllm.network.node_state import (
     PeerInfo,
     TransportInfo,
 )
-from hbllm.network.routing.context import ExecutionContext, RouteHop
+from hbllm.network.routing.context import ExecutionContext
 from hbllm.network.routing.ril import RoutingIntelligenceLayer
 from hbllm.network.transports.base import TransportMetrics, TransportState
 from hbllm.network.transports.inprocess import InProcessTransport

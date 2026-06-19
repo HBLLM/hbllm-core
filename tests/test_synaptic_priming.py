@@ -5,13 +5,10 @@ Unit and integration tests for SNN observability (Metrics + Telemetry) and the S
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Any
 
 import pytest
 
 from hbllm.brain.snn import LIFConfig
-from hbllm.memory.memory_node import MemoryNode
 from hbllm.memory.priming import WorkingMemoryPrimer
 from hbllm.memory.semantic import SemanticMemory
 from hbllm.network.metrics import MetricsCollector

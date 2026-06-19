@@ -137,9 +137,8 @@ class UplinkNode(Node):
 
             if int(websockets.version.version.split(".")[0]) >= 14:
                 connect_kwargs = {"additional_headers": headers}
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.debug("[UplinkNode] non-critical error: %s", e)
         while True:
             try:
                 async with websockets.connect(url, **connect_kwargs) as ws:

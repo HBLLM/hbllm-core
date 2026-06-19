@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Coroutine
 from datetime import timezone
 from typing import Any, Protocol, runtime_checkable
@@ -119,6 +119,11 @@ class InProcessBus:
         self._active_tasks: set[asyncio.Task[Any]] = set()
         # Message interceptors for proactive governance
         self._interceptors: list[Callable[[Message], Coroutine[Any, Any, Message | None]]] = []
+        # M11: Bounded set for message deduplication (prevents duplicate dispatch)
+        self._seen_message_ids: OrderedDict[str, None] = OrderedDict()
+        self._max_seen_ids: int = 10_000
+        # M7: Cache of wildcard-only topic patterns for faster matching
+        self._wildcard_topics: list[str] = []
 
     def add_interceptor(
         self, interceptor: Callable[[Message], Coroutine[Any, Any, Message | None]]
@@ -136,6 +141,9 @@ class InProcessBus:
 
     async def stop(self) -> None:
         """Stop the bus and cancel pending requests."""
+        # Drain remaining messages before shutting down
+        await self.drain(timeout=5.0)
+
         self._running = False
 
         # Cancel all pending requests
@@ -175,9 +183,35 @@ class InProcessBus:
                 pass
 
         self._subscriptions.clear()
-        logger.info("InProcessBus stopped and handlers cleared")
-
         logger.info("InProcessBus stopped")
+
+    async def drain(self, timeout: float = 5.0) -> None:
+        """Wait for the message queue to empty, up to `timeout` seconds.
+
+        This allows in-flight messages to be processed before shutdown,
+        preventing silent message loss.
+        """
+        if not self._running or self._queue.empty():
+            return
+
+        logger.info(
+            "Draining bus queue (%d messages, timeout=%.1fs)",
+            self._queue.qsize(),
+            timeout,
+        )
+        try:
+            deadline = asyncio.get_event_loop().time() + timeout
+            while not self._queue.empty():
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    logger.warning(
+                        "Bus drain timed out with %d messages remaining",
+                        self._queue.qsize(),
+                    )
+                    break
+                await asyncio.sleep(0.05)  # Yield to let dispatch loop process
+        except Exception:
+            logger.warning("Error during bus drain")
 
     async def publish(self, topic: str, message: Message) -> None:
         """Publish a message to all subscribers of a topic, respecting priority."""
@@ -215,6 +249,7 @@ class InProcessBus:
                 return
 
         self.metrics.record_publish(topic)
+
         # Priority queue: lower number = higher priority. Negate message priority value.
         # Use a monotonic counter as tiebreaker to preserve FIFO order within same priority.
         self._msg_counter += 1
@@ -266,6 +301,7 @@ class InProcessBus:
         )
         self._subscriptions[topic].append(sub)
         self.metrics.record_subscribe()
+        self._rebuild_wildcard_cache()
         logger.debug("Subscribed to '%s' (id=%s)", topic, sub.id)
         return sub
 
@@ -275,7 +311,11 @@ class InProcessBus:
         subs = self._subscriptions[subscription.topic]
         if subscription in subs:
             subs.remove(subscription)
+        # M19: Clean up empty topic entries to prevent stale accumulation
+        if not subs:
+            del self._subscriptions[subscription.topic]
         self.metrics.record_unsubscribe()
+        self._rebuild_wildcard_cache()
         logger.debug("Unsubscribed '%s' from '%s'", subscription.id, subscription.topic)
 
     def has_subscribers(self, topic: str) -> bool:
@@ -286,11 +326,9 @@ class InProcessBus:
         """Main loop: dequeue messages by priority and dispatch to subscribers."""
         while self._running:
             try:
-                priority_key, _counter, topic, message = await asyncio.wait_for(
-                    self._queue.get(), timeout=0.1
-                )
-            except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
-                continue
+                priority_key, _counter, topic, message = await self._queue.get()
+            except asyncio.CancelledError:
+                break
 
             # TTL enforcement: drop expired messages
             if message.ttl_seconds is not None:
@@ -350,28 +388,51 @@ class InProcessBus:
                                 if response.correlation_id is None:
                                     response.correlation_id = m.id
                                 await self.publish(response.topic, response)
-                        except Exception:
+                        except Exception as exc:
                             self.metrics.record_error(t)
                             logger.exception(
                                 "Error in handler for topic '%s', message %s",
                                 t,
                                 m.id,
                             )
+                            # Route failed messages to DLQ for observability
+                            await self._route_to_dlq(m, f"handler_error: {type(exc).__name__}")
+                            # If there's a pending request future, resolve it with an
+                            # error immediately instead of forcing the caller to timeout.
+                            corr = m.correlation_id or m.id
+                            pending_f = self._pending_requests.pop(corr, None)
+                            if pending_f and not pending_f.done():
+                                error_resp = m.create_error(f"Handler error: {type(exc).__name__}")
+                                pending_f.set_result(error_resp)
 
                 task = asyncio.create_task(_run_handler())
                 self._active_tasks.add(task)
                 task.add_done_callback(self._active_tasks.discard)
 
     def _get_matching_topics(self, topic: str) -> list[str]:
-        """Get all registered topics that match (exact + wildcard)."""
-        matches = []
-        for registered_topic in self._subscriptions:
-            if registered_topic == topic:
-                matches.append(registered_topic)
-            elif registered_topic.endswith(".*"):
-                prefix = registered_topic[:-2]
-                if topic.startswith(prefix):
-                    matches.append(registered_topic)
-            elif registered_topic == "*":
-                matches.append(registered_topic)
+        """Get all registered topics that match (exact + wildcard).
+
+        M7: Uses O(1) dict lookup for exact matches (common case)
+        and only iterates over cached wildcard patterns.
+        """
+        matches: list[str] = []
+
+        # O(1) exact match — the most common case
+        if topic in self._subscriptions:
+            matches.append(topic)
+
+        # Only iterate wildcard patterns, not all registered topics
+        for wc_topic in self._wildcard_topics:
+            if wc_topic == "*":
+                if topic not in matches:  # avoid double-add
+                    matches.append(wc_topic)
+            elif wc_topic.endswith(".*"):
+                prefix = wc_topic[:-2]
+                if topic.startswith(prefix) and wc_topic not in matches:
+                    matches.append(wc_topic)
+
         return matches
+
+    def _rebuild_wildcard_cache(self) -> None:
+        """Rebuild the wildcard topic cache after subscription changes."""
+        self._wildcard_topics = [t for t in self._subscriptions if t == "*" or t.endswith(".*")]

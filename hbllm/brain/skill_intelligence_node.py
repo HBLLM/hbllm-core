@@ -174,8 +174,8 @@ class SkillIntelligenceNode(Node):
                     if parsed.get("action") == "sil_execute":
                         is_sil = True
                         task_query = parsed.get("task", "")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("[SkillIntelligence] Skill metadata extraction skipped: %s", e)
 
             if is_sil:
                 req = Message(
