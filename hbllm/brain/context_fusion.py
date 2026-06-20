@@ -270,9 +270,7 @@ class ContextFusionEngine:
                         query=query, tenant_id=tenant_id, limit=5
                     )
                     if facts:
-                        formatted = "\n".join(
-                            f"- {f.get('content', '')[:200]}" for f in facts[:5]
-                        )
+                        formatted = "\n".join(f"- {f.get('content', '')[:200]}" for f in facts[:5])
                         parts.append(f"**Known facts:**\n{formatted}")
                 except Exception:
                     pass
@@ -299,12 +297,9 @@ class ContextFusionEngine:
 
             for entity in entities:
                 if entity.confidence > 0.3:
-                    props = ", ".join(
-                        f"{k}={v}" for k, v in list(entity.properties.items())[:5]
-                    )
+                    props = ", ".join(f"{k}={v}" for k, v in list(entity.properties.items())[:5])
                     parts.append(
-                        f"- {entity.entity_id}: {props} "
-                        f"(confidence={entity.confidence:.0%})"
+                        f"- {entity.entity_id}: {props} (confidence={entity.confidence:.0%})"
                     )
 
             return "\n".join(parts) if parts else ""
@@ -325,10 +320,7 @@ class ContextFusionEngine:
                     mood = state.get("dominant_emotion", "neutral")
                     valence = state.get("valence", 0.0)
                     arousal = state.get("arousal", 0.5)
-                    return (
-                        f"User mood: {mood} "
-                        f"(valence={valence:+.1f}, arousal={arousal:.1f})"
-                    )
+                    return f"User mood: {mood} (valence={valence:+.1f}, arousal={arousal:.1f})"
             except Exception:
                 pass
             return ""

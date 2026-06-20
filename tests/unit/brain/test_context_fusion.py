@@ -28,9 +28,7 @@ class TestContextSlice:
 
 class TestFusedContext:
     def test_empty(self):
-        ctx = FusedContext(
-            sections=[], total_tokens=0, budget_used_pct=0, assembly_time_ms=1.0
-        )
+        ctx = FusedContext(sections=[], total_tokens=0, budget_used_pct=0, assembly_time_ms=1.0)
         assert ctx.to_system_prompt() == ""
         d = ctx.to_dict()
         assert d["total_tokens"] == 0

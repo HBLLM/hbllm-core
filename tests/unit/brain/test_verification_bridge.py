@@ -7,23 +7,21 @@ from hbllm.brain.autonomy.verification_bridge import ActionVerificationBridge
 
 class TestActionVerificationBridge:
     def test_init(self):
-        bridge = ActionVerificationBridge(
-            task_graph=None, world_state=None, bus=None
-        )
+        bridge = ActionVerificationBridge(task_graph=None, world_state=None, bus=None)
         assert bridge.check_interval_s == 5.0
         assert bridge._running is False
 
     def test_init_custom_interval(self):
         bridge = ActionVerificationBridge(
-            task_graph=None, world_state=None, bus=None,
+            task_graph=None,
+            world_state=None,
+            bus=None,
             check_interval_s=10.0,
         )
         assert bridge.check_interval_s == 10.0
 
     def test_stats_initial(self):
-        bridge = ActionVerificationBridge(
-            task_graph=None, world_state=None, bus=None
-        )
+        bridge = ActionVerificationBridge(task_graph=None, world_state=None, bus=None)
         stats = bridge.stats()
         assert stats["verification_checks"] == 0
         assert stats["successes"] == 0
@@ -31,9 +29,7 @@ class TestActionVerificationBridge:
 
     @pytest.mark.asyncio
     async def test_stop_without_start(self):
-        bridge = ActionVerificationBridge(
-            task_graph=None, world_state=None, bus=None
-        )
+        bridge = ActionVerificationBridge(task_graph=None, world_state=None, bus=None)
         # Should not raise
         await bridge.stop()
 

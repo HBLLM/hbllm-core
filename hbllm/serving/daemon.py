@@ -156,9 +156,7 @@ class CognitiveDaemon:
 
         # ── 4. Optionally start HTTP server ──────────────────────
         if self.serve_http:
-            self._server_task = asyncio.create_task(
-                self._start_http_server()
-            )
+            self._server_task = asyncio.create_task(self._start_http_server())
 
         elapsed = time.monotonic() - self._boot_time
         logger.info("═" * 60)
@@ -328,9 +326,7 @@ class CognitiveDaemon:
             if hasattr(awareness, "get_recent_patterns"):
                 patterns = awareness.get_recent_patterns()
                 if patterns:
-                    summary = "; ".join(
-                        p.get("description", str(p)) for p in patterns[:3]
-                    )
+                    summary = "; ".join(p.get("description", str(p)) for p in patterns[:3])
                     return [
                         Message(
                             type=MessageType.EVENT,

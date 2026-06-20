@@ -117,7 +117,10 @@ class ConversationTurnManager(Node):
 
         logger.info(
             "Turn state: %s → %s (reason=%s, session=%s)",
-            old.value, new_state.value, reason, self._current_session,
+            old.value,
+            new_state.value,
+            reason,
+            self._current_session,
         )
 
         # Cancel any pending timeout
@@ -144,13 +147,9 @@ class ConversationTurnManager(Node):
 
         # Start appropriate timeout
         if new_state == TurnState.LISTENING:
-            self._timeout_task = asyncio.create_task(
-                self._idle_timeout()
-            )
+            self._timeout_task = asyncio.create_task(self._idle_timeout())
         elif new_state == TurnState.PROCESSING:
-            self._timeout_task = asyncio.create_task(
-                self._processing_timeout()
-            )
+            self._timeout_task = asyncio.create_task(self._processing_timeout())
 
     # ── Event Handlers ───────────────────────────────────────────────────
 
@@ -286,7 +285,9 @@ class ConversationTurnManager(Node):
         try:
             await asyncio.sleep(self.PROCESSING_TIMEOUT_S)
             if self._state == TurnState.PROCESSING:
-                logger.warning("Processing timeout — brain didn't respond in %.0fs", self.PROCESSING_TIMEOUT_S)
+                logger.warning(
+                    "Processing timeout — brain didn't respond in %.0fs", self.PROCESSING_TIMEOUT_S
+                )
                 if self.CONTINUOUS_LISTEN:
                     await self._transition(TurnState.LISTENING, "processing_timeout")
                 else:

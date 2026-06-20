@@ -132,13 +132,17 @@ class ActionVerificationBridge:
                     import json
 
                     try:
-                        action_payload = json.loads(action_payload_str) if action_payload_str else {}
+                        action_payload = (
+                            json.loads(action_payload_str) if action_payload_str else {}
+                        )
                     except (json.JSONDecodeError, TypeError):
                         action_payload = {}
 
                     logger.info(
                         "Re-executing task %s (attempt %d): %s",
-                        task_id, correction_attempts, action_type,
+                        task_id,
+                        correction_attempts,
+                        action_type,
                     )
 
                     # Re-publish the action command
@@ -183,7 +187,10 @@ class ActionVerificationBridge:
                     self.task_graph.set_verification_rule(task_id, rule)
                     logger.info(
                         "Auto-generated verification rule for task %s: %s.%s == %s",
-                        task_id, rule.entity_id, rule.property_name, rule.expected_value,
+                        task_id,
+                        rule.entity_id,
+                        rule.property_name,
+                        rule.expected_value,
                     )
         except Exception as e:
             logger.debug("Auto-rule generation failed: %s", e)
@@ -197,7 +204,9 @@ class ActionVerificationBridge:
         if device_id and expected_state:
             logger.debug(
                 "IoT verification will check %s for state=%s after command=%s",
-                device_id, expected_state, command,
+                device_id,
+                expected_state,
+                command,
             )
 
     @staticmethod

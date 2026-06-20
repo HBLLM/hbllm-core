@@ -38,18 +38,14 @@ class TestAsyncModelManager:
     async def test_load_and_list(self):
         manager = AsyncModelManager()
         # Manually inject a model to test list functionality
-        manager._models["test"] = ModelInfo(
-            model_id="test", model=object(), tokenizer=object()
-        )
+        manager._models["test"] = ModelInfo(model_id="test", model=object(), tokenizer=object())
         loaded = await manager.list_loaded()
         assert "test" in loaded
 
     @pytest.mark.asyncio
     async def test_unload_loaded(self):
         manager = AsyncModelManager()
-        manager._models["test"] = ModelInfo(
-            model_id="test", model=object(), tokenizer=object()
-        )
+        manager._models["test"] = ModelInfo(model_id="test", model=object(), tokenizer=object())
         await manager.unload_model("test")
         loaded = await manager.list_loaded()
         assert "test" not in loaded

@@ -1,6 +1,5 @@
 """Unit tests for ReAct-style tool reasoning loop."""
 
-
 import pytest
 
 from hbllm.actions.tool_chain import (
@@ -107,11 +106,7 @@ class TestReActParsing:
         assert actions[0]["input"] == "python asyncio tutorial"
 
     def test_parse_finish(self):
-        text = (
-            "Thought: I have the answer.\n"
-            "Action: FINISH\n"
-            "Action Input: The answer is 42."
-        )
+        text = "Thought: I have the answer.\nAction: FINISH\nAction Input: The answer is 42."
         thought, actions = ReActLoop._parse_react_output(text)
         assert len(actions) == 1
         assert actions[0]["tool"] == "FINISH"
@@ -172,11 +167,13 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_direct_answer(self):
         """LLM answers immediately without tools."""
-        llm = MockLLM([
-            "Thought: This is a simple question.\n"
-            "Action: FINISH\n"
-            "Action Input: The capital of France is Paris."
-        ])
+        llm = MockLLM(
+            [
+                "Thought: This is a simple question.\n"
+                "Action: FINISH\n"
+                "Action Input: The capital of France is Paris."
+            ]
+        )
         tools = ToolRegistry()
         loop = ReActLoop(llm=llm, tools=tools)
         result = await loop.run("What is the capital of France?")
@@ -188,14 +185,12 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_single_tool_call(self):
         """LLM uses one tool then answers."""
-        llm = MockLLM([
-            "Thought: I need to calculate this.\n"
-            "Action: calculator\n"
-            "Action Input: 2 + 2",
-            "Thought: I got the result.\n"
-            "Action: FINISH\n"
-            "Action Input: 2 + 2 = 4",
-        ])
+        llm = MockLLM(
+            [
+                "Thought: I need to calculate this.\nAction: calculator\nAction Input: 2 + 2",
+                "Thought: I got the result.\nAction: FINISH\nAction Input: 2 + 2 = 4",
+            ]
+        )
         tools = ToolRegistry()
 
         async def calc(expression: str) -> ToolResult:
@@ -214,11 +209,7 @@ class TestReActLoop:
     async def test_max_iterations_limit(self):
         """Loop stops after max iterations."""
         # LLM never says FINISH
-        llm = MockLLM([
-            "Thought: Let me think more.\n"
-            "Action: calculator\n"
-            "Action Input: 1 + 1"
-        ] * 5)
+        llm = MockLLM(["Thought: Let me think more.\nAction: calculator\nAction Input: 1 + 1"] * 5)
 
         tools = ToolRegistry()
 
@@ -237,18 +228,20 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_tool_failure_handling(self):
         """Loop handles tool failures gracefully."""
-        llm = MockLLM([
-            "Thought: Let me try.\n"
-            "Action: broken_tool\n"
-            "Action Input: test",
-            "Thought: The tool failed, let me answer directly.\n"
-            "Action: FINISH\n"
-            "Action Input: Could not retrieve the information.",
-        ])
+        llm = MockLLM(
+            [
+                "Thought: Let me try.\nAction: broken_tool\nAction Input: test",
+                "Thought: The tool failed, let me answer directly.\n"
+                "Action: FINISH\n"
+                "Action Input: Could not retrieve the information.",
+            ]
+        )
         tools = ToolRegistry()
 
         async def broken(x: str) -> ToolResult:
-            return ToolResult(tool="broken_tool", success=False, output="", error="Connection refused")
+            return ToolResult(
+                tool="broken_tool", success=False, output="", error="Connection refused"
+            )
 
         tools.register("broken_tool", "A broken tool", broken, {"x": "input"})
 
@@ -263,11 +256,7 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_scratchpad(self):
         """Scratchpad captures reasoning chain."""
-        llm = MockLLM([
-            "Thought: Simple answer.\n"
-            "Action: FINISH\n"
-            "Action Input: Done."
-        ])
+        llm = MockLLM(["Thought: Simple answer.\nAction: FINISH\nAction Input: Done."])
         tools = ToolRegistry()
         config = ReActConfig(include_scratchpad=True)
         loop = ReActLoop(llm=llm, tools=tools, config=config)

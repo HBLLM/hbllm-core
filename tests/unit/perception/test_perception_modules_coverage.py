@@ -10,9 +10,7 @@ from hbllm.perception.speaker_id_node import SpeakerIdNode, UnknownEmbedding
 
 class TestUnknownEmbedding:
     def test_creation(self):
-        emb = UnknownEmbedding(
-            embedding=np.zeros(256), session_id="sess-1", timestamp=time.time()
-        )
+        emb = UnknownEmbedding(embedding=np.zeros(256), session_id="sess-1", timestamp=time.time())
         assert emb.session_id == "sess-1"
         assert emb.embedding.shape == (256,)
 

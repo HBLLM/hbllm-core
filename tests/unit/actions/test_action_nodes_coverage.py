@@ -42,7 +42,6 @@ class TestLogicNode:
         node = LogicNode(node_id="logic-test")
         assert node.node_id == "logic-test"
 
-
     @pytest.mark.asyncio
     async def test_on_stop(self):
         node = LogicNode(node_id="logic-test")
@@ -53,7 +52,6 @@ class TestFuzzyNode:
     def test_init(self):
         node = FuzzyNode(node_id="fuzzy-test")
         assert node.node_id == "fuzzy-test"
-
 
     @pytest.mark.asyncio
     async def test_on_stop(self):

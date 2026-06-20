@@ -118,8 +118,10 @@ class DeviceBridge:
 
         logger.info(
             "Device registered: %s (type=%s, tenant=%s, caps=%s)",
-            device.device_id, device.device_type,
-            device.tenant_id, device.capabilities,
+            device.device_id,
+            device.device_type,
+            device.tenant_id,
+            device.capabilities,
         )
 
     def unregister_device(self, device_id: str) -> None:
@@ -188,8 +190,11 @@ class DeviceBridge:
 
         logger.info(
             "Session %s handed off: %s (%s) → %s (%s)",
-            session_id, from_device, from_dev.device_type,
-            to_device, to_dev.device_type,
+            session_id,
+            from_device,
+            from_dev.device_type,
+            to_device,
+            to_dev.device_type,
         )
         return True
 
@@ -223,8 +228,7 @@ class DeviceBridge:
         # Filter by capabilities
         if required_capabilities:
             filtered = [
-                d for d in active
-                if all(cap in d.capabilities for cap in required_capabilities)
+                d for d in active if all(cap in d.capabilities for cap in required_capabilities)
             ]
             if filtered:
                 active = filtered

@@ -294,8 +294,10 @@ class TestNotificationGatewayIntegration:
     def test_remove_callback(self):
         gw = NotificationGateway()
         received = []
+
         def cb(n):
             received.append(n)
+
         gw.on_notification("t1", cb)
         gw.remove_callback("t1", cb)
 

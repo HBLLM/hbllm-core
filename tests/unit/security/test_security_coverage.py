@@ -234,7 +234,7 @@ class TestVaultSecretProvider:
             import hbllm.security.secrets
 
             reload(hbllm.security.secrets)
-            provider = hbllm.security.secrets.VaultSecretProvider()
+            _provider = hbllm.security.secrets.VaultSecretProvider()
             mock_client.auth.approle.login.assert_called_once()
 
     def test_init_auth_failure(self, monkeypatch):
@@ -563,14 +563,14 @@ class TestNodeIdentity:
         from hbllm.security.identity import NodeIdentity
 
         key_path = tmp_path / "node.key"
-        identity = NodeIdentity.load_or_create(key_path)
+        _identity = NodeIdentity.load_or_create(key_path)
         assert key_path.exists()
 
     def test_load_or_create_existing(self, tmp_path):
         from hbllm.security.identity import NodeIdentity
 
         key_path = tmp_path / "node.key"
-        id1 = NodeIdentity.load_or_create(key_path)
+        _id1 = NodeIdentity.load_or_create(key_path)
         assert key_path.exists()
         # Subsequent call produces valid identity (key saved in OpenSSH format,
         # which load_pem_private_key may not reload — falls back to new key)

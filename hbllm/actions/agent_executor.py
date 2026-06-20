@@ -299,7 +299,10 @@ class AgentExecutor:
         ]
         if kb_context:
             messages.append(
-                {"role": "system", "content": f"Relevant context from knowledge base:\n{kb_context}"}
+                {
+                    "role": "system",
+                    "content": f"Relevant context from knowledge base:\n{kb_context}",
+                }
             )
         if history:
             messages.extend(history[-10:])

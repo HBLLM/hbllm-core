@@ -1241,7 +1241,8 @@ class BrainFactory:
                 nodes.append(iot_node)
                 logger.info(
                     "MqttIoTNode wired (broker=%s:%d)",
-                    cfg.iot_mqtt_broker, cfg.iot_mqtt_port,
+                    cfg.iot_mqtt_broker,
+                    cfg.iot_mqtt_port,
                 )
             except ImportError:
                 logger.info("IoT node not available (paho-mqtt not installed)")
@@ -1523,9 +1524,7 @@ class BrainFactory:
         await proactive.start(message_bus)
 
         # Route autonomy actions through the bus for proactive processing
-        autonomy.set_action_handler(
-            lambda msg: message_bus.publish(msg.topic, msg)
-        )
+        autonomy.set_action_handler(lambda msg: message_bus.publish(msg.topic, msg))
 
         brain.notification_gateway = gateway
         brain.proactive_processor = proactive

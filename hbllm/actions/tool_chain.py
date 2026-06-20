@@ -172,9 +172,7 @@ class ReActLoop:
 
         # Build tool descriptions
         tool_list = self.tools.list_tools(available_only=True)
-        tool_desc = "\n".join(
-            f"  - {t['name']}: {t['description']}" for t in tool_list
-        )
+        tool_desc = "\n".join(f"  - {t['name']}: {t['description']}" for t in tool_list)
 
         system_prompt = REACT_SYSTEM_PROMPT.format(tool_descriptions=tool_desc)
 
@@ -184,9 +182,7 @@ class ReActLoop:
         ]
 
         if context:
-            messages.append(
-                {"role": "system", "content": f"Context:\n{context}"}
-            )
+            messages.append({"role": "system", "content": f"Context:\n{context}"})
 
         if history:
             messages.extend(history[-6:])
@@ -220,13 +216,13 @@ class ReActLoop:
             if self.config.verbose_logging:
                 logger.info(
                     "ReAct step %d: thought=%s, actions=%s",
-                    iteration, thought[:80], actions,
+                    iteration,
+                    thought[:80],
+                    actions,
                 )
 
             # Check for FINISH
-            finish_action = next(
-                (a for a in actions if a["tool"].upper() == "FINISH"), None
-            )
+            finish_action = next((a for a in actions if a["tool"].upper() == "FINISH"), None)
             if finish_action:
                 answer = finish_action["input"]
                 step.action = "FINISH"
@@ -265,10 +261,7 @@ class ReActLoop:
                 continue
 
             # Parallel execution if multiple tools and allowed
-            if (
-                len(tool_actions) > 1
-                and self.config.allow_parallel
-            ):
+            if len(tool_actions) > 1 and self.config.allow_parallel:
                 observations = await self._execute_parallel(
                     tool_actions[: self.config.max_parallel_tools]
                 )
@@ -287,15 +280,17 @@ class ReActLoop:
             obs_text_parts = []
             for obs in observations:
                 status = "✓" if obs.success else "✗"
-                obs_text_parts.append(
-                    f"[{status} {obs.source}]: {obs.content}"
-                )
+                obs_text_parts.append(f"[{status} {obs.source}]: {obs.content}")
 
             obs_text = "\n".join(obs_text_parts)
-            step.observation = observations[0] if len(observations) == 1 else Observation(
-                source="parallel",
-                content=obs_text,
-                success=all(o.success for o in observations),
+            step.observation = (
+                observations[0]
+                if len(observations) == 1
+                else Observation(
+                    source="parallel",
+                    content=obs_text,
+                    success=all(o.success for o in observations),
+                )
             )
 
             step.duration_ms = (time.monotonic() - step_start) * 1000
@@ -312,9 +307,7 @@ class ReActLoop:
 
             # Feed observation back to LLM
             messages.append({"role": "assistant", "content": llm_output})
-            messages.append(
-                {"role": "user", "content": f"Observation: {obs_text}"}
-            )
+            messages.append({"role": "user", "content": f"Observation: {obs_text}"})
 
         # If we exhausted iterations without FINISH, extract best answer
         if not answer:
@@ -356,14 +349,9 @@ class ReActLoop:
                 success=False,
             )
 
-    async def _execute_parallel(
-        self, actions: list[dict[str, str]]
-    ) -> list[Observation]:
+    async def _execute_parallel(self, actions: list[dict[str, str]]) -> list[Observation]:
         """Execute multiple tools concurrently."""
-        tasks = [
-            self._execute_tool(a["tool"], a["input"])
-            for a in actions
-        ]
+        tasks = [self._execute_tool(a["tool"], a["input"]) for a in actions]
         return list(await asyncio.gather(*tasks, return_exceptions=False))
 
     # ── LLM Interface ────────────────────────────────────────────────────
@@ -400,9 +388,7 @@ class ReActLoop:
         actions: list[dict[str, str]] = []
 
         # Extract thought
-        thought_match = re.search(
-            r"Thought:\s*(.+?)(?=\nAction:|\Z)", text, re.DOTALL
-        )
+        thought_match = re.search(r"Thought:\s*(.+?)(?=\nAction:|\Z)", text, re.DOTALL)
         if thought_match:
             thought = thought_match.group(1).strip()
 
@@ -422,8 +408,7 @@ class ReActLoop:
             thought = text.strip()
             # Check if the entire response looks like a final answer
             if not any(
-                kw in text.lower()
-                for kw in ["tool_call", "action:", "let me", "i need to"]
+                kw in text.lower() for kw in ["tool_call", "action:", "let me", "i need to"]
             ):
                 actions.append({"tool": "FINISH", "input": text.strip()})
 
@@ -434,16 +419,11 @@ class ReActLoop:
         """Extract the best partial answer from completed steps."""
         # Use the last observation as context
         observations = [
-            s.observation.content
-            for s in steps
-            if s.observation and s.observation.success
+            s.observation.content for s in steps if s.observation and s.observation.success
         ]
 
         if observations:
-            return (
-                "Based on the information gathered:\n"
-                + "\n".join(observations[-3:])
-            )
+            return "Based on the information gathered:\n" + "\n".join(observations[-3:])
 
         # Fall back to last thought
         if steps:

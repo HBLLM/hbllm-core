@@ -1,6 +1,5 @@
 """Unit tests for ConversationTurnManager — voice conversation state machine."""
 
-
 import pytest
 
 from hbllm.perception.conversation_turn import ConversationTurnManager, TurnState

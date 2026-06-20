@@ -219,8 +219,9 @@ class ProactiveProcessor:
         original_payload = payload.get("original_payload", {})
 
         # Determine if this needs LLM enrichment
-        needs_enrichment = (
-            self._enrich_via_llm and tier in ("tier2_fast_router", "tier3_heavy_reasoning")
+        needs_enrichment = self._enrich_via_llm and tier in (
+            "tier2_fast_router",
+            "tier3_heavy_reasoning",
         )
 
         # Build the proactive event
@@ -320,9 +321,7 @@ class ProactiveProcessor:
             )
             await self._bus.publish("proactive.output", broadcast)
 
-    def _generate_title(
-        self, source: str, category: str, payload: dict[str, Any]
-    ) -> str:
+    def _generate_title(self, source: str, category: str, payload: dict[str, Any]) -> str:
         """Generate a human-readable title from event metadata."""
         # Use explicit title if provided
         if "title" in payload:

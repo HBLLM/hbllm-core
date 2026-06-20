@@ -151,9 +151,7 @@ class TestActivityDigest:
 
     def test_digest_duration_hours(self):
         now = time.time()
-        digest = Digest(
-            tenant_id="t1", items=[], period_start=now - 7200, period_end=now
-        )
+        digest = Digest(tenant_id="t1", items=[], period_start=now - 7200, period_end=now)
         assert abs(digest.duration_hours - 2.0) < 0.1
 
     def test_digest_to_natural_language(self):
@@ -247,15 +245,11 @@ class TestHabitTracker:
         assert event.action_type == "query"
 
     def test_event_hour(self):
-        event = InteractionEvent(
-            tenant_id="t1", timestamp=time.time(), action_type="query"
-        )
+        event = InteractionEvent(tenant_id="t1", timestamp=time.time(), action_type="query")
         assert 0 <= event.hour <= 23
 
     def test_event_weekday(self):
-        event = InteractionEvent(
-            tenant_id="t1", timestamp=time.time(), action_type="query"
-        )
+        event = InteractionEvent(tenant_id="t1", timestamp=time.time(), action_type="query")
         assert 0 <= event.weekday <= 6
 
     def test_habit_pattern(self):
@@ -283,9 +277,7 @@ class TestHabitTracker:
         assert isinstance(freq, float)
 
     def test_habit_pattern_to_dict(self):
-        pattern = HabitPattern(
-            id="p1", tenant_id="t1", description="test", occurrence_count=5
-        )
+        pattern = HabitPattern(id="p1", tenant_id="t1", description="test", occurrence_count=5)
         d = pattern.to_dict()
         assert "tenant_id" in d
 

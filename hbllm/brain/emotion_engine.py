@@ -384,13 +384,9 @@ class EmotionEngine(Node):
 
             # Non-blocking with timeout so we don't slow down the pipeline
             if hasattr(self._llm, "generate"):
-                result = await asyncio.wait_for(
-                    self._llm.generate(prompt), timeout=3.0
-                )
+                result = await asyncio.wait_for(self._llm.generate(prompt), timeout=3.0)
             elif hasattr(self._llm, "chat"):
-                result = await asyncio.wait_for(
-                    self._llm.chat(prompt), timeout=3.0
-                )
+                result = await asyncio.wait_for(self._llm.chat(prompt), timeout=3.0)
             else:
                 return
 
@@ -430,7 +426,10 @@ class EmotionEngine(Node):
 
                 logger.debug(
                     "LLM emotion inference: %s (v=%.2f, a=%.2f, conf=%.2f)",
-                    emotion, llm_valence, llm_arousal, llm_confidence,
+                    emotion,
+                    llm_valence,
+                    llm_arousal,
+                    llm_confidence,
                 )
         except (TimeoutError, asyncio.TimeoutError):
             logger.debug("LLM emotion inference timed out")
