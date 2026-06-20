@@ -1,3 +1,5 @@
+import time
+
 import jwt
 import pytest
 from fastapi import Request
@@ -51,7 +53,9 @@ def test_unauthenticated_request_rejected(client):
 def test_authenticated_request_success(client, jwt_secret):
     """Verify authenticated requests pass identity and run in TenantContext."""
     token = jwt.encode(
-        {"tenant_id": "tenant_A", "user_id": "user_1"}, jwt_secret, algorithm="HS256"
+        {"tenant_id": "tenant_A", "user_id": "user_1", "exp": int(time.time()) + 3600},
+        jwt_secret,
+        algorithm="HS256",
     )
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -64,7 +68,9 @@ def test_cross_tenant_access_blocked_by_guard(client, jwt_secret):
     """Verify that cross-tenant mismatch triggers TenantIsolationError -> 403."""
     # Token is for tenant_A, but we request tenant_B (triggers require_tenant check)
     token = jwt.encode(
-        {"tenant_id": "tenant_A", "user_id": "user_1"}, jwt_secret, algorithm="HS256"
+        {"tenant_id": "tenant_A", "user_id": "user_1", "exp": int(time.time()) + 3600},
+        jwt_secret,
+        algorithm="HS256",
     )
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -75,7 +81,11 @@ def test_cross_tenant_access_blocked_by_guard(client, jwt_secret):
 
 def test_global_exception_handler_maps_403(client, jwt_secret):
     """Verify that TenantIsolationError is mapped to a clean 403 by the exception handler."""
-    token = jwt.encode({"tenant_id": "tenant_A"}, jwt_secret, algorithm="HS256")
+    token = jwt.encode(
+        {"tenant_id": "tenant_A", "exp": int(time.time()) + 3600},
+        jwt_secret,
+        algorithm="HS256",
+    )
     headers = {"Authorization": f"Bearer {token}"}
 
     response = client.get("/v1/mock-isolation-error", headers=headers)

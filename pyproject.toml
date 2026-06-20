@@ -147,6 +147,12 @@ asyncio_mode = "auto"
 timeout = 60
 timeout_method = "thread"
 addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal"
+markers = [
+    "unit: Unit tests (single component, fast)",
+    "integration: Integration tests (multi-component)",
+    "e2e: End-to-end tests (full pipeline)",
+    "ml: ML-dependent tests requiring PyTorch",
+]
 filterwarnings = [
     "ignore:The PyTorch API of nested tensors is in prototype stage:UserWarning",
 ]

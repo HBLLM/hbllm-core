@@ -3,7 +3,7 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 PYTEST := $(PYTHON) -m pytest
 
-.PHONY: test test-v test-fast lint format typecheck install clean \
+.PHONY: test test-v test-fast test-unit test-integration lint format typecheck install clean \
        rust-test rust-clippy rust-build test-all \
        db-migrate db-upgrade db-downgrade db-history \
        docker-build docker-up docker-down
@@ -16,13 +16,19 @@ test: ## Run full test suite
 test-v: ## Run tests with verbose output
 	$(PYTEST) -v --tb=short
 
-test-fast: ## Run tests excluding slow/heavy tests
-	$(PYTEST) -q --tb=short --timeout=60 \
-		--ignore=tests/test_cognitive_training.py \
-		--ignore=tests/test_lora_loop.py
+test-fast: ## Run unit tests excluding slow/heavy tests
+	$(PYTEST) tests/unit/ -q --tb=short --timeout=60 \
+		--ignore=tests/unit/brain/test_cognitive_training.py \
+		--ignore=tests/unit/ml/test_lora_loop.py
+
+test-unit: ## Run unit tests only
+	$(PYTEST) tests/unit/ tests/modules/ -q --tb=short
+
+test-integration: ## Run integration tests only
+	$(PYTEST) tests/integration/ -v --tb=short --timeout=120
 
 test-%: ## Run a specific test file (e.g., make test-brain_factory)
-	$(PYTEST) tests/test_$*.py -v --tb=short
+	$(PYTEST) -k "test_$*" -v --tb=short
 
 ## ── Code Quality ─────────────────────────────────────────────────────────
 

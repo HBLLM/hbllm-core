@@ -253,8 +253,11 @@ async def test_skills_collection_via_chat_api(tmp_path, monkeypatch):
             await bus.subscribe("workspace.simulate", mock_simulate)
 
             # Generate Bearer token for authentication
+            import time
             token = jwt.encode(
-                {"tenant_id": "tenant_test", "user_id": "user_1"}, jwt_secret, algorithm="HS256"
+                {"tenant_id": "tenant_test", "user_id": "user_1", "exp": int(time.time()) + 3600},
+                jwt_secret,
+                algorithm="HS256",
             )
             headers = {"Authorization": f"Bearer {token}"}
 
