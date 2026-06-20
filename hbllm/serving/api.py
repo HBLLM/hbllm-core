@@ -408,26 +408,32 @@ async def lifespan(app: FastAPI) -> Any:
 
     # ── Production secret validation ──────────────────────────────────────────
     hbllm_env = os.getenv("HBLLM_ENV", "development").lower()
+    _INSECURE_DEFAULTS = {
+        "super-secret-key-change-me",
+        "super-secret-jwt-change-me",
+        "super-secret-csrf-change-me",
+        "admin_password_change_me",
+    }
+    _SECRET_VARS = {
+        "HBLLM_SECRET_KEY": os.getenv("HBLLM_SECRET_KEY", ""),
+        "HBLLM_JWT_SECRET": os.getenv("HBLLM_JWT_SECRET", ""),
+        "HBLLM_CSRF_SECRET": os.getenv("HBLLM_CSRF_SECRET", ""),
+        "HBLLM_ADMIN_PASS": os.getenv("HBLLM_ADMIN_PASS", ""),
+    }
+    insecure_found = [k for k, v in _SECRET_VARS.items() if v in _INSECURE_DEFAULTS or not v]
     if hbllm_env == "production":
-        _INSECURE_DEFAULTS = {
-            "super-secret-key-change-me",
-            "super-secret-jwt-change-me",
-            "super-secret-csrf-change-me",
-            "admin_password_change_me",
-        }
-        _SECRET_VARS = {
-            "HBLLM_SECRET_KEY": os.getenv("HBLLM_SECRET_KEY", ""),
-            "HBLLM_JWT_SECRET": os.getenv("HBLLM_JWT_SECRET", ""),
-            "HBLLM_CSRF_SECRET": os.getenv("HBLLM_CSRF_SECRET", ""),
-            "HBLLM_ADMIN_PASS": os.getenv("HBLLM_ADMIN_PASS", ""),
-        }
-        insecure_found = [k for k, v in _SECRET_VARS.items() if v in _INSECURE_DEFAULTS or not v]
         if insecure_found:
             raise RuntimeError(
                 f"HBLLM_ENV=production but the following secrets are missing or use insecure "
                 f"defaults: {', '.join(insecure_found)}. Set them to secure values before deploying."
             )
         logger.info("Production security validation passed")
+    elif insecure_found:
+        logger.warning(
+            "⚠️  SECURITY WARNING: The following secrets are missing or use insecure defaults: %s. "
+            "These MUST be changed before deploying to production.",
+            ", ".join(insecure_found),
+        )
 
     # Initialize Core Config & Security components
     config = HBLLMCoreConfig.load()
