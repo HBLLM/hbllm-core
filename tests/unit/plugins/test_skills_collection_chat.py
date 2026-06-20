@@ -187,10 +187,20 @@ async def test_skills_collection_via_chat_api(tmp_path, monkeypatch):
     monkeypatch.setenv("HBLLM_ENV", "production")
     monkeypatch.setenv("HBLLM_TENANT_GUARD_MODE", "strict")
 
-    # Override JWT secret in API middleware
+    # Override JWT secret in the *live* middleware instance.
+    # The app.user_middleware list only controls future app rebuilds;
+    # we need to patch the already-instantiated middleware's secret_key.
     for middleware in app.user_middleware:
         if middleware.cls.__name__ == "JWTAuthMiddleware":
             middleware.kwargs["secret_key"] = jwt_secret
+
+    # Also patch the live middleware stack (already instantiated).
+    _mw = app.middleware_stack
+    while _mw is not None:
+        if hasattr(_mw, "secret_key"):
+            _mw.secret_key = jwt_secret
+            break
+        _mw = getattr(_mw, "app", None)
 
     # Setup the mock provider
     mock_provider = SkillCallMockProvider()
