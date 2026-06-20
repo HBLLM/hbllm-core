@@ -1162,6 +1162,15 @@ class BrainFactory:
             await location.start(message_bus)
             nodes.append(location)
 
+            # Conversation turn manager (voice state machine)
+            from hbllm.perception.conversation_turn import ConversationTurnManager
+
+            turn_mgr = ConversationTurnManager(node_id="conversation_turn")
+            await _register_node(registry, turn_mgr)
+            await turn_mgr.start(message_bus)
+            nodes.append(turn_mgr)
+            logger.info("ConversationTurnManager wired (voice state machine)")
+
         # Reasoning nodes (optional — require extra dependencies)
         if cfg.inject_fuzzy_logic:
             from hbllm.actions.fuzzy_node import FuzzyNode

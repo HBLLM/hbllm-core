@@ -136,22 +136,35 @@ class EmotionEngine(Node):
         node_id: str = "emotion_engine",
         decay_rate: float = 0.1,
         history_size: int = 100,
+        llm: Any | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.META,
-            capabilities=["emotion_tracking", "tone_adaptation"],
+            capabilities=["emotion_tracking", "tone_adaptation", "contextual_inference"],
         )
         self.decay_rate = decay_rate
         self.state = EmotionState()
         self._history: deque[EmotionState] = deque(maxlen=history_size)
         self._word_count = 0
+        self._llm = llm  # For contextual emotion inference
+
+        # Behavioral pattern tracking
+        self._response_times: deque[float] = deque(maxlen=20)
+        self._error_count = 0
+        self._message_lengths: deque[int] = deque(maxlen=20)
+        self._last_interaction: float = 0.0
+
+        # Per-tenant state cache
+        self._tenant_states: dict[str, EmotionState] = {}
 
     async def on_start(self) -> None:
-        """Subscribe to experience and evaluation topics."""
+        """Subscribe to experience, evaluation, and behavioral topics."""
         await self.bus.subscribe("system.experience", self._on_experience)
         await self.bus.subscribe("system.evaluation", self._on_evaluation)
-        logger.info("EmotionEngine started")
+        await self.bus.subscribe("router.query", self._on_user_message)
+        await self.bus.subscribe("pipeline.error", self._on_pipeline_error)
+        logger.info("EmotionEngine started (llm_inference=%s)", self._llm is not None)
 
     async def on_stop(self) -> None:
         """Cleanup on shutdown."""
@@ -277,7 +290,152 @@ class EmotionEngine(Node):
             hints["tone"] = "clarifying"
             hints["formality"] = "simple"
 
+        # Behavioral signals
+        if self._error_count > 3:
+            hints["encouragement"] = True
+            hints["empathy_level"] = "high"
+
+        if self._response_times and len(self._response_times) >= 3:
+            avg_gap = sum(self._response_times) / len(self._response_times)
+            if avg_gap < 2.0:  # Rapid-fire messages → user is impatient
+                hints["formality"] = "concise"
+
         return hints
+
+    def get_state(self, tenant_id: str = "default") -> dict[str, Any]:
+        """Get emotional state for a specific tenant."""
+        state = self._tenant_states.get(tenant_id, self.state)
+        return {
+            "dominant_emotion": state.primary_emotion,
+            "valence": state.valence,
+            "arousal": state.arousal,
+            "dominance": state.dominance,
+            "confidence": state.confidence,
+        }
+
+    # ── Behavioral Pattern Tracking ──────────────────────────────────────
+
+    async def _on_user_message(self, message: Message) -> None:
+        """Track behavioral signals from user messages."""
+        now = time.time()
+        text = message.payload.get("text", "")
+
+        # Response time pattern
+        if self._last_interaction > 0:
+            gap = now - self._last_interaction
+            self._response_times.append(gap)
+        self._last_interaction = now
+
+        # Message length pattern
+        self._message_lengths.append(len(text))
+
+        # Behavioral emotional signals
+        self._apply_behavioral_signals()
+
+        # LLM-based contextual inference (if available and text is substantial)
+        if self._llm and len(text) > 20:
+            await self._infer_emotion_from_context(text, message.tenant_id)
+
+    async def _on_pipeline_error(self, message: Message) -> None:
+        """Track errors that may frustrate the user."""
+        self._error_count += 1
+        # Multiple errors in succession strongly indicate frustration
+        if self._error_count >= 2:
+            self.state.valence = max(-1.0, self.state.valence - 0.1)
+            self.state.arousal = min(1.0, self.state.arousal + 0.1)
+            self._classify_emotion()
+            await self._publish_state()
+
+    def _apply_behavioral_signals(self) -> None:
+        """Adjust emotional state based on behavioral patterns."""
+        # Short rapid messages → possible impatience/frustration
+        if len(self._message_lengths) >= 3:
+            recent = list(self._message_lengths)[-3:]
+            avg_len = sum(recent) / len(recent)
+            if avg_len < 15 and len(self._response_times) >= 3:
+                recent_gaps = list(self._response_times)[-3:]
+                avg_gap = sum(recent_gaps) / len(recent_gaps)
+                if avg_gap < 3.0:  # Very rapid short messages
+                    self.state.arousal = min(1.0, self.state.arousal + 0.05)
+
+        # Long detailed messages → user is engaged
+        if self._message_lengths and list(self._message_lengths)[-1] > 200:
+            self.state.valence = min(1.0, self.state.valence + 0.02)
+
+    # ── LLM-Based Contextual Inference ───────────────────────────────────
+
+    async def _infer_emotion_from_context(self, text: str, tenant_id: str | None = None) -> None:
+        """Use LLM to infer emotional state from full message context."""
+        try:
+            import asyncio
+
+            prompt = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Analyze the emotional state of the user from their message. "
+                        "Respond with ONLY a JSON object: "
+                        '{"valence": float(-1 to 1), "arousal": float(0 to 1), '
+                        '"emotion": "word", "confidence": float(0 to 1)}'
+                    ),
+                },
+                {"role": "user", "content": text[:500]},
+            ]
+
+            # Non-blocking with timeout so we don't slow down the pipeline
+            if hasattr(self._llm, "generate"):
+                result = await asyncio.wait_for(
+                    self._llm.generate(prompt), timeout=3.0
+                )
+            elif hasattr(self._llm, "chat"):
+                result = await asyncio.wait_for(
+                    self._llm.chat(prompt), timeout=3.0
+                )
+            else:
+                return
+
+            # Parse the JSON response
+            import json
+
+            result_str = str(result)
+            # Extract JSON from response
+            start = result_str.find("{")
+            end = result_str.rfind("}") + 1
+            if start >= 0 and end > start:
+                data = json.loads(result_str[start:end])
+                llm_valence = float(data.get("valence", 0))
+                llm_arousal = float(data.get("arousal", 0.5))
+                llm_confidence = float(data.get("confidence", 0.5))
+
+                # Blend LLM inference with lexicon-based state
+                # LLM gets higher weight because it understands context
+                alpha = 0.6 * llm_confidence
+                self.state.valence = (1 - alpha) * self.state.valence + alpha * llm_valence
+                self.state.arousal = (1 - alpha) * self.state.arousal + alpha * llm_arousal
+                self.state.confidence = max(self.state.confidence, llm_confidence)
+
+                emotion = data.get("emotion", "")
+                if emotion and llm_confidence > 0.6:
+                    self.state.primary_emotion = emotion
+
+                # Cache per-tenant
+                if tenant_id:
+                    self._tenant_states[tenant_id] = EmotionState(
+                        valence=self.state.valence,
+                        arousal=self.state.arousal,
+                        dominance=self.state.dominance,
+                        confidence=self.state.confidence,
+                        primary_emotion=self.state.primary_emotion,
+                    )
+
+                logger.debug(
+                    "LLM emotion inference: %s (v=%.2f, a=%.2f, conf=%.2f)",
+                    emotion, llm_valence, llm_arousal, llm_confidence,
+                )
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.debug("LLM emotion inference timed out")
+        except Exception as e:
+            logger.debug("LLM emotion inference failed: %s", e)
 
     def stats(self) -> dict[str, Any]:
         """Return emotional statistics."""
@@ -286,6 +444,20 @@ class EmotionEngine(Node):
             "adaptation_hints": self.get_adaptation_hints(),
             "history_size": len(self._history),
             "trend": self._compute_trend(),
+            "behavioral": {
+                "error_count": self._error_count,
+                "avg_response_time": (
+                    round(sum(self._response_times) / len(self._response_times), 1)
+                    if self._response_times
+                    else None
+                ),
+                "avg_message_length": (
+                    round(sum(self._message_lengths) / len(self._message_lengths))
+                    if self._message_lengths
+                    else None
+                ),
+            },
+            "llm_inference": self._llm is not None,
         }
 
     def _compute_trend(self) -> str:
