@@ -1,16 +1,13 @@
 """Integration tests for Memory subsystem — ConversationThread, Cache, ConflictResolver."""
 
 import asyncio
-import json
 import time
-from typing import Any
 
 import pytest
 
 from hbllm.memory.cache import CacheEntry, ResponseCache
 from hbllm.memory.conflict_resolver import MemoryConflictResolver
 from hbllm.memory.conversation_thread import ConversationThread, ThreadManager, ThreadTurn
-
 
 # ── ConversationThread Tests ─────────────────────────────────────────────────
 
@@ -28,8 +25,8 @@ class TestConversationThread:
 
     def test_add_turns(self):
         thread = ConversationThread(tenant_id="t1", name="Chat")
-        t1 = thread.add_turn("user", "Hello")
-        t2 = thread.add_turn("assistant", "Hi there!")
+        thread.add_turn("user", "Hello")
+        thread.add_turn("assistant", "Hi there!")
 
         assert thread.total_turns == 2
         assert len(thread.turns) == 2
@@ -184,7 +181,7 @@ class TestThreadManagerIntegration:
     def test_search_threads(self, tmp_path):
         manager = ThreadManager(storage_dir=tmp_path / "threads")
         t1 = manager.create("t1", name="Python Development", topic="python")
-        t2 = manager.create("t1", name="Server Setup", topic="devops")
+        t2 = manager.create("t1", name="Server Setup", topic="devops")  # noqa: F841
         t1.add_turn("user", "How do I use decorators?")
         manager.save(t1)
 

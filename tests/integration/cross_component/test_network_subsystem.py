@@ -1,13 +1,11 @@
 """Integration tests for Network subsystem — InProcessTransport, VectorClock."""
 
 import asyncio
-from typing import Any
 
 import pytest
 
-from hbllm.network.messages import Message, Priority, MessageType
+from hbllm.network.messages import Message, MessageType, Priority
 from hbllm.network.transports.inprocess import InProcessTransport
-
 
 # ── InProcessTransport Integration ───────────────────────────────────────────
 

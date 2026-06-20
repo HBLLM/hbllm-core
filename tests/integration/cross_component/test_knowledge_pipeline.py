@@ -1,10 +1,7 @@
 """Integration tests for Knowledge Pipeline — Extractor → KnowledgeBase → KnowledgeGraph."""
 
 import json
-import os
 import textwrap
-
-import pytest
 
 from hbllm.knowledge.extractor import (
     FolderExtractor,
@@ -17,7 +14,6 @@ from hbllm.knowledge.extractor import (
 from hbllm.knowledge.knowledge_base import KnowledgeBase, Source
 from hbllm.memory.knowledge_graph import KnowledgeGraph
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -26,7 +22,8 @@ def _create_sample_project(tmp_path):
     tmp_path.mkdir(parents=True, exist_ok=True)
     # Python file
     py_file = tmp_path / "example.py"
-    py_file.write_text(textwrap.dedent("""\
+    py_file.write_text(
+        textwrap.dedent("""\
         import os
         from pathlib import Path
 
@@ -44,11 +41,13 @@ def _create_sample_project(tmp_path):
         def main():
             processor = DataProcessor("data.csv")
             processor.process()
-    """))
+    """)
+    )
 
     # Markdown file
     md_file = tmp_path / "README.md"
-    md_file.write_text(textwrap.dedent("""\
+    md_file.write_text(
+        textwrap.dedent("""\
         # Project Title
 
         ## Overview
@@ -62,18 +61,20 @@ def _create_sample_project(tmp_path):
 
         ## Setup
         Install dependencies.
-    """))
+    """)
+    )
 
     # JSON config
     json_file = tmp_path / "config.json"
-    json_file.write_text(json.dumps({
-        "database": {
-            "host": "${DB_HOST}",
-            "port": 5432,
-            "name": "hbllm"
-        },
-        "features": ["auth", "cache"],
-    }, indent=2))
+    json_file.write_text(
+        json.dumps(
+            {
+                "database": {"host": "${DB_HOST}", "port": 5432, "name": "hbllm"},
+                "features": ["auth", "cache"],
+            },
+            indent=2,
+        )
+    )
 
     # Subdirectory
     sub = tmp_path / "utils"
@@ -233,9 +234,13 @@ class TestKnowledgeGraphExtractor:
 
     def test_merge_results(self):
         a = StructuralResult()
-        a.entities.append(type("E", (), {"id": "a", "label": "A", "entity_type": "test", "attributes": {}})())
+        a.entities.append(
+            type("E", (), {"id": "a", "label": "A", "entity_type": "test", "attributes": {}})()
+        )
         b = StructuralResult()
-        b.entities.append(type("E", (), {"id": "b", "label": "B", "entity_type": "test", "attributes": {}})())
+        b.entities.append(
+            type("E", (), {"id": "b", "label": "B", "entity_type": "test", "attributes": {}})()
+        )
         a.merge(b)
         assert len(a.entities) == 2
 

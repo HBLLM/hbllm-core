@@ -1,10 +1,7 @@
 """Integration tests for Security subsystem — Encryption, TenantGuard, CSRF."""
 
 import base64
-import os
 import secrets
-import time
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,12 +10,11 @@ from hbllm.security.tenant_guard import (
     TenantContext,
     TenantGuardMode,
     TenantIsolationError,
-    require_tenant,
-    require_identity,
-    get_current_tenant,
     get_current_identity,
+    get_current_tenant,
+    require_identity,
+    require_tenant,
 )
-
 
 # ── Encryption Vault Integration ─────────────────────────────────────────────
 

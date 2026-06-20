@@ -2,12 +2,10 @@
 
 import asyncio
 import time
-from typing import Any
 
 import pytest
 
 from hbllm.brain.awareness import (
-    AwarenessSensor,
     CognitiveAwareness,
     CognitiveSnapshot,
     CognitiveTrigger,
@@ -16,7 +14,6 @@ from hbllm.brain.awareness import (
 )
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
-
 
 # ── ActivityWindow Tests ─────────────────────────────────────────────────────
 
@@ -39,6 +36,7 @@ class TestActivityWindow:
         window.record("query")
 
         import time as t
+
         t.sleep(0.2)
 
         assert window.count("query") == 0

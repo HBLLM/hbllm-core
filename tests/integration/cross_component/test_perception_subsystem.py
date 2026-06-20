@@ -1,8 +1,6 @@
 """Integration tests for Perception subsystem — RealityEventBus, EventNormalizer, EventLog."""
 
 import asyncio
-import time
-from typing import Any
 
 import pytest
 
@@ -14,7 +12,6 @@ from hbllm.perception.reality_bus import (
     PerceptionModality,
     RealityEventBus,
 )
-
 
 # ── PerceptionEvent Tests ────────────────────────────────────────────────────
 
@@ -206,11 +203,13 @@ class TestEventLogIntegration:
         log = EventLog(data_dir=tmp_path / "events")
 
         for i in range(10):
-            log.append(PerceptionEvent(
-                entity_id=f"e_{i}",
-                event_type="test",
-                logical_clock=i + 1,
-            ))
+            log.append(
+                PerceptionEvent(
+                    entity_id=f"e_{i}",
+                    event_type="test",
+                    logical_clock=i + 1,
+                )
+            )
 
         events = list(log.replay(start_clock=6))
         assert len(events) == 5
@@ -413,13 +412,15 @@ class TestPerceptionPipelineIntegration:
         bus.subscribe(normalizer.handle_raw_event)
 
         # Ingest events through the bus
-        await bus.ingest(PerceptionEvent(
-            entity_id="user_1",
-            event_type="activity",
-            sub_type="keystroke",
-            modality=PerceptionModality.APP,
-            payload={"key": "enter"},
-        ))
+        await bus.ingest(
+            PerceptionEvent(
+                entity_id="user_1",
+                event_type="activity",
+                sub_type="keystroke",
+                modality=PerceptionModality.APP,
+                payload={"key": "enter"},
+            )
+        )
 
         await asyncio.sleep(0.2)
 

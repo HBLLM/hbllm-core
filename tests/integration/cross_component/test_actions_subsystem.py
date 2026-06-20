@@ -1,15 +1,10 @@
 """Integration tests for Actions subsystem — MultiAgentOrchestrator, ToolRegistry."""
 
-import asyncio
-from typing import Any
-from unittest.mock import AsyncMock
-
 import pytest
 
-from hbllm.actions.agent_executor import AgentResponse, AgentStep, ConfidenceScorer
+from hbllm.actions.agent_executor import AgentResponse, ConfidenceScorer
 from hbllm.actions.orchestrator import MultiAgentOrchestrator
 from hbllm.actions.tool_registry import ToolRegistry, ToolResult
-
 
 # ── Mock LLM ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +20,7 @@ class MockLLM:
         self.call_count += 1
         self.messages_received.append(messages)
 
-        user_msg = messages[-1]["content"].lower() if messages else ""
+        user_msg = messages[-1]["content"].lower() if messages else ""  # noqa: F841
 
         # Planning phase — return a structured plan
         if "task planner" in messages[0].get("content", "").lower():
@@ -154,7 +149,6 @@ class TestMultiAgentOrchestratorIntegration:
             return ToolResult(tool="search", success=True, output=f"Search results for: {query}")
 
         registry.register("search", "Search", search)
-
 
         orchestrator = MultiAgentOrchestrator(llm=llm, tool_registry=registry)
         response = await orchestrator.execute("Find information about Python data structures")

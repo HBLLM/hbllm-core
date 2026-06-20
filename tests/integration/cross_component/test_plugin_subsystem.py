@@ -1,16 +1,11 @@
 """Integration tests for Plugin subsystem — PluginManager, PromptStore, Bundle lifecycle."""
 
-import asyncio
 import json
-import os
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from hbllm.plugin.manager import LoadedBundle, PluginManager, PromptStore
-
 
 # ── PromptStore Tests ────────────────────────────────────────────────────────
 
@@ -118,6 +113,7 @@ def _create_v2_plugin(plugin_dir: Path, name: str = "test-plugin") -> Path:
 
     try:
         import yaml
+
         prompts_data = {
             "prompts": {
                 "greeting": f"Hello from {name} plugin!",
@@ -178,7 +174,8 @@ class TestPluginManagerIntegration:
 
         # Only check prompts if yaml is available (prompts are in YAML)
         try:
-            import yaml
+            import yaml  # noqa: F401
+
             assert manager.prompt_store.count >= 2
             assert manager.prompt_store.get("prompt-test:greeting") is not None
         except ImportError:
@@ -219,7 +216,7 @@ class TestPluginManagerIntegration:
         manager = PluginManager(plugin_dirs=[str(plugins_dir)])
 
         # Load first time
-        loaded1 = await manager.load_bundle(plugins_dir / "reload-test")
+        loaded1 = await manager.load_bundle(plugins_dir / "reload-test")  # noqa: F841
         # Load again — should unload first, then reload
         loaded2 = await manager.load_bundle(plugins_dir / "reload-test")
 
@@ -264,11 +261,15 @@ class TestPluginManagerIntegration:
         # Create a v1 plugin (manifest_version=1)
         v1_dir = plugins_dir / "v1-plugin"
         v1_dir.mkdir()
-        (v1_dir / "plugin.json").write_text(json.dumps({
-            "name": "v1-plugin",
-            "version": "1.0.0",
-            "manifest_version": 1,
-        }))
+        (v1_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "v1-plugin",
+                    "version": "1.0.0",
+                    "manifest_version": 1,
+                }
+            )
+        )
 
         manager = PluginManager(plugin_dirs=[str(plugins_dir)])
         loaded = await manager.discover_plugins()
