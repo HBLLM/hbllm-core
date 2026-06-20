@@ -231,7 +231,8 @@ class AgentExecutor:
         Execute a user message.
 
         If agent_mode is True and the task is complex, delegates to the
-        multi-agent orchestrator. Otherwise, uses single-agent with tool support.
+        multi-agent orchestrator. For moderately complex tasks with tools,
+        uses the ReAct iterative reasoning loop. Otherwise, single-pass.
         """
         start = time.monotonic()
 
@@ -241,90 +242,76 @@ class AgentExecutor:
             orchestrator = MultiAgentOrchestrator(self.llm, self.tools)
             return await orchestrator.execute(message, history, kb_context)
 
-        # Single agent with tool parsing
-        steps: list[AgentStep] = []
-        step_num = 0
+        # ── ReAct loop for tool-augmented reasoning ──
+        if agent_mode:
+            from hbllm.actions.tool_chain import ReActConfig, ReActLoop
 
-        # Build messages for LLM — only present available tools so the
-        # model never plans steps using offline/removed tools.
-        tool_list = self.tools.list_tools(available_only=True)
-        tool_desc = "\n".join(f"- {t['name']}: {t['description']}" for t in tool_list)
-
-        system_prompt = (
-            (
-                "You are a helpful AI assistant with access to tools.\n\n"
-                f"Available tools:\n{tool_desc}\n\n"
-                "To use a tool, output EXACTLY:\n"
-                "TOOL_CALL: tool_name\n"
-                "TOOL_INPUT: input_value\n\n"
-                "After receiving tool results, provide your final answer.\n"
-                "Only use tools when needed — for simple questions, just answer directly."
+            react = ReActLoop(
+                llm=self.llm,
+                tools=self.tools,
+                config=ReActConfig(max_iterations=8, max_wall_time_seconds=60.0),
             )
-            if agent_mode
-            else "You are a helpful AI assistant."
-        )
+            result = await react.run(
+                task=message,
+                context=kb_context,
+                history=history,
+            )
 
-        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+            # Convert ReAct steps to AgentSteps for API compatibility
+            steps = []
+            for rs in result.steps:
+                tool_result = None
+                if rs.observation and rs.action and rs.action != "FINISH":
+                    tool_result = ToolResult(
+                        tool=rs.action,
+                        success=rs.observation.success,
+                        output=rs.observation.content if rs.observation.success else "",
+                        error=rs.observation.content if not rs.observation.success else None,
+                        duration_ms=rs.duration_ms,
+                    )
+                steps.append(
+                    AgentStep(
+                        step_num=rs.step_num,
+                        role="executor",
+                        action="tool_call" if rs.action != "FINISH" else "respond",
+                        content=rs.thought,
+                        tool_result=tool_result,
+                    )
+                )
 
+            total_ms = (time.monotonic() - start) * 1000
+            confidence = ConfidenceScorer.score(
+                message, result.answer, had_context=bool(kb_context)
+            )
+
+            return AgentResponse(
+                content=result.answer,
+                steps=steps,
+                confidence=confidence["overall"],
+                confidence_flags=confidence["flags"],
+                multi_agent=False,
+                total_duration_ms=total_ms,
+            )
+
+        # ── Simple single-pass (non-agent mode) ──
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": "You are a helpful AI assistant."}
+        ]
         if kb_context:
             messages.append(
-                {
-                    "role": "system",
-                    "content": f"Relevant context from knowledge base:\n{kb_context}",
-                }
+                {"role": "system", "content": f"Relevant context from knowledge base:\n{kb_context}"}
             )
-
         if history:
             messages.extend(history[-10:])
-
         messages.append({"role": "user", "content": message})
 
-        # Get LLM response
         response_text = await self._call_llm(messages)
-        step_num += 1
-
-        # Check for tool calls
-        if agent_mode:
-            tool_calls = self._extract_tool_calls(response_text)
-            if tool_calls:
-                for tc in tool_calls:
-                    step_num += 1
-                    result = await self.tools.invoke(
-                        tc["tool"], **build_tool_args(tc["tool"], tc["input"])
-                    )
-                    steps.append(
-                        AgentStep(
-                            step_num=step_num,
-                            role="executor",
-                            action="tool_call",
-                            content=f"Using {tc['tool']}",
-                            tool_result=result,
-                        )
-                    )
-
-                # Feed results back to LLM for final response
-                tool_results_text = "\n".join(
-                    f"Tool: {s.tool_result.tool}\n"
-                    f"{'Output' if s.tool_result.success else 'Error'}: "
-                    f"{s.tool_result.output if s.tool_result.success else s.tool_result.error}"
-                    for s in steps
-                    if s.tool_result
-                )
-                messages.append({"role": "assistant", "content": response_text})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"Tool results:\n{tool_results_text}\n\nProvide your final answer based on these results.",
-                    }
-                )
-                response_text = await self._call_llm(messages)
-
         total_ms = (time.monotonic() - start) * 1000
         confidence = ConfidenceScorer.score(message, response_text, had_context=bool(kb_context))
 
         return AgentResponse(
             content=response_text,
-            steps=steps,
+            steps=[],
             confidence=confidence["overall"],
             confidence_flags=confidence["flags"],
             multi_agent=False,

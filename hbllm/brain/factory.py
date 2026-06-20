@@ -207,6 +207,14 @@ class BrainConfig(BaseModel):
     autonomy_watch_dirs: list[str] | None = None  # Directories for filesystem watcher
     autonomy_calendar_dir: str | None = None  # Directory for .ics calendar files
 
+    # IoT / Home Automation (MQTT bridge)
+    inject_iot: bool = False  # MqttIoTNode (requires paho-mqtt and MQTT broker)
+    iot_mqtt_broker: str = "localhost"
+    iot_mqtt_port: int = 1883
+
+    # Live World State (environment graph fed by perception + IoT)
+    inject_world_state: bool = True
+
     # Dual LLM routing (local + external)
     external_provider: str | None = (
         None  # e.g. "openai/gpt-4o" or "anthropic/claude-sonnet-4-20250514"
@@ -265,6 +273,7 @@ class Brain:
         self.proactive_processor: Any = None  # ProactiveProcessor
         self.sse_channel: Any = None  # SSEChannel
         self.emotion_engine: Any = None  # EmotionEngine
+        self.world_state: Any = None  # WorldStateEngine
 
         # Cognitive subsystems (initialized by factory)
         self.skill_registry: SkillRegistry | None = None
@@ -487,6 +496,12 @@ class Brain:
                 await self.autonomy_core.stop()
             except Exception:
                 logger.debug("Error stopping autonomy core during shutdown", exc_info=True)
+        # Stop world state engine
+        if self.world_state:
+            try:
+                await self.world_state.stop()
+            except Exception:
+                logger.debug("Error stopping world state during shutdown", exc_info=True)
         # Stop plugin watcher
         if self.plugin_manager:
             await self.plugin_manager.stop_watching()
@@ -1202,6 +1217,67 @@ class BrainFactory:
                 "HostShellNode wired (manual approval=%s)", shell_node.require_manual_approval
             )
 
+        # IoT / Home Automation (MQTT bridge — optional)
+        if cfg.inject_iot:
+            try:
+                from hbllm.actions.iot_mqtt_node import MqttIoTNode
+
+                iot_node = MqttIoTNode(
+                    node_id="iot_mqtt",
+                    broker_host=cfg.iot_mqtt_broker,
+                    broker_port=cfg.iot_mqtt_port,
+                )
+                await _register_node(registry, iot_node)
+                await iot_node.start(message_bus)
+                nodes.append(iot_node)
+                logger.info(
+                    "MqttIoTNode wired (broker=%s:%d)",
+                    cfg.iot_mqtt_broker, cfg.iot_mqtt_port,
+                )
+            except ImportError:
+                logger.info("IoT node not available (paho-mqtt not installed)")
+            except Exception as e:
+                logger.warning("Failed to start IoT node: %s", e)
+
+        # Live World State Engine (environment graph)
+        if cfg.inject_world_state:
+            from hbllm.brain.world_state import WorldStateEngine
+            from hbllm.perception.event_log import EventLog
+
+            event_log = EventLog(db_path=os.path.join(cfg.data_dir, "event_log.db"))
+            world_state = WorldStateEngine(event_log=event_log)
+            world_state.start()
+
+            # Wire perception events → WorldStateEngine
+            async def _on_perception_for_world(msg: Any) -> None:
+                """Route normalized perception events to world state graph."""
+                try:
+                    from hbllm.perception.reality_bus import PerceptionEvent
+
+                    payload = msg.payload
+                    event = PerceptionEvent(
+                        entity_id=payload.get("entity_id", msg.source_node_id),
+                        event_type=payload.get("event_type", "update"),
+                        payload=payload,
+                        confidence=float(payload.get("confidence", 0.7)),
+                    )
+                    await world_state.handle_normalized_event(event)
+                except Exception as e:
+                    logger.debug("WorldState event ingestion failed: %s", e)
+
+            for ws_topic in [
+                "perception.normalized",
+                "iot.event",
+                "iot.discovery",
+                "sensor.reading",
+                "device.change",
+            ]:
+                await message_bus.subscribe(ws_topic, _on_perception_for_world)
+
+            logger.info("WorldStateEngine wired — live environment graph active")
+        else:
+            world_state = None
+
         # Register and start default DomainModuleNode instances
         if (
             type(llm_provider).__name__ == "LocalProvider"
@@ -1263,6 +1339,10 @@ class BrainFactory:
             nodes=nodes,
             provider=llm_provider,
         )
+
+        # Attach world state if wired
+        if world_state is not None:
+            brain.world_state = world_state
 
         # Wire composite references
         brain.reasoning_core = reasoning
