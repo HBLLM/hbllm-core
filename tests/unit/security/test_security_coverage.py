@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════
 # encryption.py
 # ═══════════════════════════════════════════════════════════════════════
@@ -213,7 +212,9 @@ class TestVaultSecretProvider:
         mock_hvac.Client.return_value = mock_client
         with patch.dict("sys.modules", {"hvac": mock_hvac}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.VaultSecretProvider()
             assert provider._mount == "secret"
@@ -229,7 +230,9 @@ class TestVaultSecretProvider:
         mock_hvac.Client.return_value = mock_client
         with patch.dict("sys.modules", {"hvac": mock_hvac}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.VaultSecretProvider()
             mock_client.auth.approle.login.assert_called_once()
@@ -242,7 +245,9 @@ class TestVaultSecretProvider:
         mock_hvac.Client.return_value = mock_client
         with patch.dict("sys.modules", {"hvac": mock_hvac}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             with pytest.raises(RuntimeError, match="authentication failed"):
                 hbllm.security.secrets.VaultSecretProvider()
@@ -258,7 +263,9 @@ class TestVaultSecretProvider:
         mock_hvac.Client.return_value = mock_client
         with patch.dict("sys.modules", {"hvac": mock_hvac}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.VaultSecretProvider()
             assert provider.get("JWT_SECRET") == "vault-jwt-value"
@@ -274,7 +281,9 @@ class TestVaultSecretProvider:
         mock_hvac.Client.return_value = mock_client
         with patch.dict("sys.modules", {"hvac": mock_hvac}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.VaultSecretProvider()
             with pytest.raises(KeyError, match="not found"):
@@ -289,7 +298,9 @@ class TestVaultSecretProvider:
         mock_hvac.Client.return_value = mock_client
         with patch.dict("sys.modules", {"hvac": mock_hvac}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.VaultSecretProvider()
             with pytest.raises(Exception, match="Connection refused"):
@@ -304,7 +315,9 @@ class TestAWSSecretsProvider:
         mock_boto3.client.return_value = MagicMock()
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.AWSSecretsProvider()
             assert provider._secret_name == "test/secrets"
@@ -318,7 +331,9 @@ class TestAWSSecretsProvider:
         mock_boto3.client.return_value = mock_client
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.AWSSecretsProvider()
             assert provider.get("DB_PASSWORD") == "aws-secret-value"
@@ -332,7 +347,9 @@ class TestAWSSecretsProvider:
         mock_boto3.client.return_value = mock_client
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.AWSSecretsProvider()
             with pytest.raises(KeyError, match="not found"):
@@ -345,7 +362,9 @@ class TestAWSSecretsProvider:
         mock_boto3.client.return_value = mock_client
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
             from importlib import reload
+
             import hbllm.security.secrets
+
             reload(hbllm.security.secrets)
             provider = hbllm.security.secrets.AWSSecretsProvider()
             with pytest.raises(Exception, match="AccessDenied"):
@@ -355,6 +374,7 @@ class TestAWSSecretsProvider:
 class TestSecretProviderFactory:
     def test_default_env_backend(self, monkeypatch):
         from hbllm.security.secrets import EnvSecretProvider, get_secret_provider, reset_provider
+
         reset_provider()
         monkeypatch.setenv("HBLLM_SECRET_BACKEND", "env")
         assert isinstance(get_secret_provider(), EnvSecretProvider)
@@ -362,6 +382,7 @@ class TestSecretProviderFactory:
 
     def test_unknown_backend_raises(self, monkeypatch):
         from hbllm.security.secrets import get_secret_provider, reset_provider
+
         reset_provider()
         monkeypatch.setenv("HBLLM_SECRET_BACKEND", "unknown")
         with pytest.raises(ValueError, match="Unknown secret backend"):
@@ -370,6 +391,7 @@ class TestSecretProviderFactory:
 
     def test_singleton_pattern(self, monkeypatch):
         from hbllm.security.secrets import get_secret_provider, reset_provider
+
         reset_provider()
         monkeypatch.setenv("HBLLM_SECRET_BACKEND", "env")
         p1 = get_secret_provider()
@@ -387,21 +409,34 @@ class TestAuditLog:
     @pytest.fixture
     def audit(self, tmp_path):
         from hbllm.security.audit_log import AuditLog
+
         log = AuditLog(db_path=str(tmp_path / "audit.db"))
         yield log
         log.close()
 
     def test_log_basic(self, audit):
         from hbllm.security.audit_log import AuditAction
-        entry = audit.log(action=AuditAction.AUTH_LOGIN, tenant_id="t1", user_id="u1",
-                          actor="u1", resource="session:abc", ip_address="1.2.3.4",
-                          user_agent="Mozilla/5.0")
+
+        entry = audit.log(
+            action=AuditAction.AUTH_LOGIN,
+            tenant_id="t1",
+            user_id="u1",
+            actor="u1",
+            resource="session:abc",
+            ip_address="1.2.3.4",
+            user_agent="Mozilla/5.0",
+        )
         assert entry.action == "auth.login"
 
     def test_log_critical_severity(self, audit):
         from hbllm.security.audit_log import AuditAction, AuditSeverity
-        entry = audit.log(action=AuditAction.ADMIN_ACTION, tenant_id="admin",
-                          severity=AuditSeverity.CRITICAL, details={"op": "delete"})
+
+        entry = audit.log(
+            action=AuditAction.ADMIN_ACTION,
+            tenant_id="admin",
+            severity=AuditSeverity.CRITICAL,
+            details={"op": "delete"},
+        )
         assert entry.severity == "critical"
 
     def test_log_to_dict(self, audit):
@@ -520,17 +555,20 @@ class TestAuditLog:
 class TestNodeIdentity:
     def test_generate(self):
         from hbllm.security.identity import NodeIdentity
+
         identity = NodeIdentity.generate()
         assert identity.public_key_bytes is not None
 
     def test_load_or_create_new(self, tmp_path):
         from hbllm.security.identity import NodeIdentity
+
         key_path = tmp_path / "node.key"
         identity = NodeIdentity.load_or_create(key_path)
         assert key_path.exists()
 
     def test_load_or_create_existing(self, tmp_path):
         from hbllm.security.identity import NodeIdentity
+
         key_path = tmp_path / "node.key"
         id1 = NodeIdentity.load_or_create(key_path)
         assert key_path.exists()
@@ -541,6 +579,7 @@ class TestNodeIdentity:
 
     def test_load_or_create_corrupted_fallback(self, tmp_path):
         from hbllm.security.identity import NodeIdentity
+
         key_path = tmp_path / "node.key"
         key_path.write_bytes(b"corrupted-key-data-not-valid-pem")
         identity = NodeIdentity.load_or_create(key_path)
@@ -548,6 +587,7 @@ class TestNodeIdentity:
 
     def test_sign_and_verify(self):
         from hbllm.security.identity import NodeIdentity
+
         identity = NodeIdentity.generate()
         data = b"important message"
         sig = identity.sign(data)
@@ -555,11 +595,13 @@ class TestNodeIdentity:
 
     def test_verify_bad_signature_returns_false(self):
         from hbllm.security.identity import NodeIdentity
+
         identity = NodeIdentity.generate()
         assert NodeIdentity.verify(identity.public_key_b64, b"data", "badsig==") is False
 
     def test_public_key_b64(self):
         from hbllm.security.identity import NodeIdentity
+
         b64_key = NodeIdentity.generate().public_key_b64
         assert isinstance(b64_key, str) and len(b64_key) > 0
 
@@ -574,6 +616,7 @@ class TestTenantGuardCoverage:
         monkeypatch.setenv("HBLLM_ENV", "production")
         monkeypatch.setenv("HBLLM_TENANT_GUARD_MODE", "strict")
         from hbllm.security.tenant_guard import TenantContext
+
         with TenantContext(tenant_id="tenant_A", user_id="user1") as ctx:
             assert ctx.tenant_id == "tenant_A"
 
@@ -648,50 +691,60 @@ class TestTenantGuardCoverage:
 class TestServingSecurityCoverage:
     def test_csrf_token_generation(self):
         from hbllm.serving.security import generate_csrf_token
+
         token = generate_csrf_token("session-123")
         assert isinstance(token, str) and token.count(":") >= 2
 
     def test_csrf_token_validation(self):
         from hbllm.serving.security import generate_csrf_token, validate_csrf_token
+
         token = generate_csrf_token("session-123")
         assert validate_csrf_token(token, "session-123")
 
     def test_csrf_invalid_token(self):
         from hbllm.serving.security import validate_csrf_token
+
         assert not validate_csrf_token("invalid-token", "session-123")
 
     def test_csrf_wrong_session(self):
         from hbllm.serving.security import generate_csrf_token, validate_csrf_token
+
         token = generate_csrf_token("session-123")
         assert not validate_csrf_token(token, "session-456")
 
     def test_cors_validate_config(self):
         from hbllm.serving.security import validate_cors_config
+
         result = validate_cors_config(["https://example.com", "https://app.test.com"])
         assert result == ["https://example.com", "https://app.test.com"]
 
     def test_cors_wildcard_rejected(self):
         from hbllm.serving.security import validate_cors_config
+
         result = validate_cors_config(["*", "https://example.com"])
         assert "*" not in result and "https://example.com" in result
 
     def test_cors_wildcard_only_falls_back(self):
         from hbllm.serving.security import validate_cors_config
+
         result = validate_cors_config(["*"])
         assert "http://localhost" in result or "https://localhost" in result
 
     def test_password_hash_and_verify(self):
         from hbllm.serving.security import hash_password, verify_password
+
         hashed = hash_password("my-password")
         assert verify_password("my-password", hashed)
         assert not verify_password("wrong-password", hashed)
 
     def test_password_verify_invalid_format(self):
         from hbllm.serving.security import verify_password
+
         assert not verify_password("any", "not-a-valid-hash")
 
     def test_auth_rate_limiter_reset(self):
         from hbllm.serving.security import AuthRateLimiter
+
         limiter = AuthRateLimiter(max_attempts=3, window_seconds=300)
         limiter.record_attempt("ip1")
         limiter.reset("ip1")
@@ -700,6 +753,7 @@ class TestServingSecurityCoverage:
 
     def test_api_key_manager_add_and_validate(self):
         from hbllm.serving.security import ApiKeyManager
+
         mgr = ApiKeyManager()
         mgr.enabled = True
         mgr.add_key(raw_key="sk-test-key-123", tenant_id="t1", scopes=["chat", "memory"])
@@ -708,12 +762,14 @@ class TestServingSecurityCoverage:
 
     def test_api_key_manager_validate_invalid(self):
         from hbllm.serving.security import ApiKeyManager
+
         mgr = ApiKeyManager()
         mgr.enabled = True
         assert mgr.validate("nonexistent-key") is None
 
     def test_api_key_manager_disabled_bypass(self):
         from hbllm.serving.security import ApiKeyManager
+
         mgr = ApiKeyManager()
         mgr.enabled = False
         result = mgr.validate("any-key")
@@ -721,16 +777,19 @@ class TestServingSecurityCoverage:
 
     def test_api_key_manager_has_scope(self):
         from hbllm.serving.security import ApiKeyManager
+
         mgr = ApiKeyManager()
         key = mgr.add_key(raw_key="sk-scoped", tenant_id="t1", scopes=["chat"])
         assert mgr.has_scope(key, "chat") and not mgr.has_scope(key, "admin")
 
     def test_detect_injection(self):
         from hbllm.serving.security import detect_injection
+
         assert detect_injection("normal text")["detected"] is False
 
     def test_sanitize_input_truncates(self):
         from hbllm.serving.security import sanitize_input
+
         assert len(sanitize_input("a" * 100, max_length=10)) == 10
 
 
@@ -743,14 +802,18 @@ class TestAuthMiddlewareCoverage:
     def test_health_bypasses_auth(self, monkeypatch):
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi.testclient import TestClient
+
         from hbllm.serving.api import app
+
         client = TestClient(app, raise_server_exceptions=False)
         assert client.get("/health").status_code == 200
 
     def test_static_assets_bypass_auth(self, monkeypatch):
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi.testclient import TestClient
+
         from hbllm.serving.api import app
+
         client = TestClient(app, raise_server_exceptions=False)
         assert client.get("/admin/static/app.js").status_code != 401
 
@@ -758,7 +821,9 @@ class TestAuthMiddlewareCoverage:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         monkeypatch.setenv("HBLLM_ENV", "production")
         from fastapi.testclient import TestClient
+
         from hbllm.serving.api import app
+
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/v1/chat", headers={"Authorization": "Bearer not.a.valid.jwt.token"})
         assert resp.status_code == 401
@@ -767,7 +832,9 @@ class TestAuthMiddlewareCoverage:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         monkeypatch.setenv("HBLLM_ENV", "production")
         from fastapi.testclient import TestClient
+
         from hbllm.serving.api import app
+
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/v1/chat", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         assert resp.status_code == 401

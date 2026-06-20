@@ -254,6 +254,7 @@ async def test_skills_collection_via_chat_api(tmp_path, monkeypatch):
 
             # Generate Bearer token for authentication
             import time
+
             token = jwt.encode(
                 {"tenant_id": "tenant_test", "user_id": "user_1", "exp": int(time.time()) + 3600},
                 jwt_secret,

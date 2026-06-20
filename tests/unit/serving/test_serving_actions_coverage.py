@@ -18,12 +18,10 @@ Covers uncovered lines in:
 
 from __future__ import annotations
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # serving/mcp_server.py
@@ -34,11 +32,14 @@ class TestMcpServer:
     @pytest.fixture
     def server(self):
         from hbllm.serving.mcp_server import HBLLMMcpServer
+
         return HBLLMMcpServer()
 
     @pytest.mark.asyncio
     async def test_handle_initialize(self, server):
-        resp = await server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        resp = await server.handle_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        )
         assert resp["result"]["protocolVersion"] == "2024-11-05"
         assert "tools" in resp["result"]["capabilities"]
 
@@ -50,7 +51,9 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_handle_tools_list(self, server):
-        resp = await server.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+        resp = await server.handle_request(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        )
         tools = resp["result"]["tools"]
         assert len(tools) > 0
         names = [t["name"] for t in tools]
@@ -59,12 +62,16 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_handle_resources_list(self, server):
-        resp = await server.handle_request({"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}})
+        resp = await server.handle_request(
+            {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}}
+        )
         assert resp["result"]["resources"] == []
 
     @pytest.mark.asyncio
     async def test_handle_prompts_list(self, server):
-        resp = await server.handle_request({"jsonrpc": "2.0", "id": 4, "method": "prompts/list", "params": {}})
+        resp = await server.handle_request(
+            {"jsonrpc": "2.0", "id": 4, "method": "prompts/list", "params": {}}
+        )
         assert resp["result"]["prompts"] == []
 
     @pytest.mark.asyncio
@@ -85,11 +92,14 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_tools_call_health(self, server):
-        resp = await server.handle_request({
-            "jsonrpc": "2.0", "id": 7,
-            "method": "tools/call",
-            "params": {"name": "hbllm_health", "arguments": {}}
-        })
+        resp = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": "hbllm_health", "arguments": {}},
+            }
+        )
         content = resp["result"]["content"]
         assert content[0]["type"] == "text"
         result = json.loads(content[0]["text"])
@@ -97,24 +107,31 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_tools_call_unknown_tool(self, server):
-        resp = await server.handle_request({
-            "jsonrpc": "2.0", "id": 8,
-            "method": "tools/call",
-            "params": {"name": "nonexistent_tool", "arguments": {}}
-        })
+        resp = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {"name": "nonexistent_tool", "arguments": {}},
+            }
+        )
         assert resp["result"]["isError"] is True
 
     @pytest.mark.asyncio
     async def test_tools_call_memory_store(self, server):
         mock_bus = AsyncMock()
         server.bus = mock_bus
-        resp = await server.handle_request({
-            "jsonrpc": "2.0", "id": 9,
-            "method": "tools/call",
-            "params": {"name": "hbllm_memory_store", "arguments": {
-                "content": "Test fact", "memory_type": "semantic"
-            }}
-        })
+        resp = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "hbllm_memory_store",
+                    "arguments": {"content": "Test fact", "memory_type": "semantic"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["stored"] is True
 
@@ -122,13 +139,17 @@ class TestMcpServer:
     async def test_tools_call_identity_set(self, server):
         mock_bus = AsyncMock()
         server.bus = mock_bus
-        resp = await server.handle_request({
-            "jsonrpc": "2.0", "id": 10,
-            "method": "tools/call",
-            "params": {"name": "hbllm_identity_set", "arguments": {
-                "tenant_id": "t1", "persona_name": "TestBot"
-            }}
-        })
+        resp = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "hbllm_identity_set",
+                    "arguments": {"tenant_id": "t1", "persona_name": "TestBot"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["updated"] is True
 
@@ -136,13 +157,17 @@ class TestMcpServer:
     async def test_tools_call_feedback(self, server):
         mock_bus = AsyncMock()
         server.bus = mock_bus
-        resp = await server.handle_request({
-            "jsonrpc": "2.0", "id": 11,
-            "method": "tools/call",
-            "params": {"name": "hbllm_feedback", "arguments": {
-                "message_id": "msg-123", "rating": 1, "comment": "Great!"
-            }}
-        })
+        resp = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "hbllm_feedback",
+                    "arguments": {"message_id": "msg-123", "rating": 1, "comment": "Great!"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["recorded"] is True
 
@@ -154,7 +179,12 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_jsonrpc_helpers(self):
-        from hbllm.serving.mcp_server import _jsonrpc_response, _jsonrpc_error, _jsonrpc_notification
+        from hbllm.serving.mcp_server import (
+            _jsonrpc_error,
+            _jsonrpc_notification,
+            _jsonrpc_response,
+        )
+
         resp = _jsonrpc_response(1, {"ok": True})
         assert resp["id"] == 1 and resp["result"]["ok"] is True
 
@@ -178,12 +208,14 @@ class TestStudioHelpers:
     def test_get_brain_none(self):
         from hbllm.serving.state import _state
         from hbllm.serving.studio.helpers import get_brain
+
         _state.pop("brain", None)
         assert get_brain() is None
 
     def test_get_brain_present(self):
         from hbllm.serving.state import _state
         from hbllm.serving.studio.helpers import get_brain
+
         mock_brain = MagicMock()
         _state["brain"] = mock_brain
         try:
@@ -194,6 +226,7 @@ class TestStudioHelpers:
     def test_get_bus_from_brain(self):
         from hbllm.serving.state import _state
         from hbllm.serving.studio.helpers import get_bus
+
         mock_brain = MagicMock()
         mock_brain.bus = MagicMock()
         _state["brain"] = mock_brain
@@ -205,12 +238,14 @@ class TestStudioHelpers:
     def test_get_bus_no_brain(self):
         from hbllm.serving.state import _state
         from hbllm.serving.studio.helpers import get_bus
+
         _state.pop("brain", None)
         assert get_bus() is None
 
     def test_require_bus_raises_503(self):
         from hbllm.serving.state import _state
         from hbllm.serving.studio.helpers import require_bus
+
         _state.pop("brain", None)
         with pytest.raises(Exception) as exc_info:
             require_bus()
@@ -251,6 +286,7 @@ class TestStudioHelpers:
     def test_require_node_raises_503(self):
         from hbllm.serving.state import _state
         from hbllm.serving.studio.helpers import require_node
+
         _state.pop("brain", None)
         with pytest.raises(Exception) as exc_info:
             require_node("SomeNode")
@@ -258,22 +294,26 @@ class TestStudioHelpers:
 
     def test_get_data_dir(self, monkeypatch):
         from hbllm.serving.studio.helpers import get_data_dir
+
         monkeypatch.setenv("HBLLM_DATA_DIR", "/custom/data")
         assert get_data_dir() == "/custom/data"
 
     def test_get_data_dir_default(self, monkeypatch):
         from hbllm.serving.studio.helpers import get_data_dir
+
         monkeypatch.delenv("HBLLM_DATA_DIR", raising=False)
         assert get_data_dir() == "data"
 
     def test_get_tenant_id(self):
         from hbllm.serving.studio.helpers import get_tenant_id
+
         request = MagicMock()
         request.state.tenant_id = "my-tenant"
         assert get_tenant_id(request) == "my-tenant"
 
     def test_get_user_id(self):
         from hbllm.serving.studio.helpers import get_user_id
+
         request = MagicMock()
         request.state.user_id = "user-42"
         assert get_user_id(request) == "user-42"
@@ -287,11 +327,13 @@ class TestStudioHelpers:
 class TestSynapseGateway:
     def test_init(self):
         from hbllm.serving.synapse_gateway import SynapseGateway
+
         gw = SynapseGateway(bus=MagicMock(), audit_log=MagicMock())
         assert gw.active_connections == {}
 
     def test_disconnect_nonexistent(self):
         from hbllm.serving.synapse_gateway import SynapseGateway
+
         gw = SynapseGateway()
         gw.disconnect("t1", "u1", "d1")  # should not raise
 
@@ -304,6 +346,7 @@ class TestSynapseGateway:
 class TestToolRegistry:
     def test_register_and_list(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def my_tool() -> ToolResult:
@@ -317,6 +360,7 @@ class TestToolRegistry:
 
     def test_unregister(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def my_tool() -> ToolResult:
@@ -329,6 +373,7 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_invoke_success(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def echo(text: str) -> ToolResult:
@@ -342,6 +387,7 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_invoke_unknown_tool(self):
         from hbllm.actions.tool_registry import ToolRegistry
+
         reg = ToolRegistry()
         result = await reg.invoke("nonexistent")
         assert not result.success
@@ -350,6 +396,7 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_invoke_unavailable_tool(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def my_tool() -> ToolResult:
@@ -364,6 +411,7 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_invoke_handler_exception(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def failing_tool() -> ToolResult:
@@ -376,6 +424,7 @@ class TestToolRegistry:
 
     def test_set_availability(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def my_tool() -> ToolResult:
@@ -391,17 +440,20 @@ class TestToolRegistry:
 
     def test_get_availability_unknown(self):
         from hbllm.actions.tool_registry import ToolRegistry
+
         reg = ToolRegistry()
         status = reg.get_availability("nonexistent")
         assert not status["registered"]
 
     def test_set_availability_unknown_tool(self):
         from hbllm.actions.tool_registry import ToolRegistry
+
         reg = ToolRegistry()
         reg.set_availability("nonexistent", False)  # Should not raise
 
     def test_available_tools(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def tool_a() -> ToolResult:
@@ -417,6 +469,7 @@ class TestToolRegistry:
 
     def test_list_tools_available_only(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def tool_a() -> ToolResult:
@@ -433,6 +486,7 @@ class TestToolRegistry:
 
     def test_list_tools_all(self):
         from hbllm.actions.tool_registry import ToolRegistry, ToolResult
+
         reg = ToolRegistry()
 
         async def tool_a() -> ToolResult:
@@ -471,6 +525,7 @@ class TestToolDecorator:
 
     def test_get_tool_registry(self):
         from hbllm.actions.tool_registry import get_tool_registry
+
         registry = get_tool_registry()
         assert isinstance(registry, dict)
 
@@ -478,12 +533,14 @@ class TestToolDecorator:
 class TestCreateToolFromCode:
     def test_create_valid_function(self):
         from hbllm.actions.tool_registry import create_tool_from_code
+
         code = "def add(a, b): return a + b"
         func = create_tool_from_code(code, "add")
         assert func(2, 3) == 5
 
     def test_create_missing_function_raises(self):
         from hbllm.actions.tool_registry import create_tool_from_code
+
         with pytest.raises(ValueError, match="not found"):
             create_tool_from_code("x = 42", "nonexistent")
 
@@ -497,34 +554,33 @@ class TestSchedulerTools:
     @pytest.mark.asyncio
     async def test_schedule_event_tool(self):
         from hbllm.actions.scheduler_tools import ScheduleEventTool
+
         tool = ScheduleEventTool()
         env = MagicMock()
         scheduler = MagicMock()
         scheduler.schedule = AsyncMock(return_value="task-123")
         env.scheduler = scheduler
 
-        result = await tool.execute(
-            env, action="Send daily report", time="2026-06-20T09:00:00"
-        )
+        result = await tool.execute(env, action="Send daily report", time="2026-06-20T09:00:00")
         assert "task-123" in str(result) or result is not None
 
     @pytest.mark.asyncio
     async def test_schedule_recurring_tool(self):
         from hbllm.actions.scheduler_tools import ScheduleRecurringTool
+
         tool = ScheduleRecurringTool()
         env = MagicMock()
         scheduler = MagicMock()
         scheduler.schedule_recurring = AsyncMock(return_value="recurring-456")
         env.scheduler = scheduler
 
-        result = await tool.execute(
-            env, action="Check emails", interval="every 30 minutes"
-        )
+        result = await tool.execute(env, action="Check emails", interval="every 30 minutes")
         assert result is not None
 
     @pytest.mark.asyncio
     async def test_cancel_task_tool(self):
         from hbllm.actions.scheduler_tools import CancelTaskTool
+
         tool = CancelTaskTool()
         env = MagicMock()
         scheduler = MagicMock()
@@ -543,6 +599,7 @@ class TestSchedulerTools:
 class TestOrchestrator:
     def test_parse_plan(self):
         from hbllm.actions.orchestrator import MultiAgentOrchestrator
+
         plan_text = """Step 1: Search for information
 Tool: web_search
 Input: latest news
@@ -562,12 +619,19 @@ Input: the search results"""
 class TestPipelineClassifyComplexity:
     def test_simple_query(self):
         from hbllm.serving.pipeline import CognitivePipeline
+
         pipeline = CognitivePipeline.__new__(CognitivePipeline)
         # Short simple text
-        assert pipeline._classify_complexity("Hello") in ("trivial", "simple", "moderate", "complex")
+        assert pipeline._classify_complexity("Hello") in (
+            "trivial",
+            "simple",
+            "moderate",
+            "complex",
+        )
 
     def test_complex_query(self):
         from hbllm.serving.pipeline import CognitivePipeline
+
         pipeline = CognitivePipeline.__new__(CognitivePipeline)
         complex_text = (
             "Analyze the trade-offs between microservices and monolithic architectures "
@@ -582,6 +646,7 @@ class TestPipelineClassifyComplexity:
 class TestPipelineResult:
     def test_to_dict(self):
         from hbllm.serving.pipeline import PipelineResult
+
         result = PipelineResult(
             text="Hello!",
             correlation_id="corr-123",
@@ -595,6 +660,7 @@ class TestPipelineResult:
 
     def test_pipeline_config_defaults(self):
         from hbllm.serving.pipeline import PipelineConfig
+
         config = PipelineConfig()
         assert config.inject_memory is True
         assert config.router_timeout == 15.0

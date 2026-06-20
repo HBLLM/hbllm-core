@@ -14,12 +14,10 @@ Covers uncovered lines in:
 
 from __future__ import annotations
 
-import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # network/serialization.py
@@ -29,6 +27,7 @@ import pytest
 class TestSerialization:
     def _make_message(self):
         from hbllm.network.messages import Message, MessageType
+
         return Message(
             type=MessageType.QUERY,
             source_node_id="test_node",
@@ -38,6 +37,7 @@ class TestSerialization:
 
     def test_json_roundtrip(self):
         from hbllm.network.serialization import JsonSerializer
+
         s = JsonSerializer()
         msg = self._make_message()
         data = s.serialize(msg)
@@ -48,6 +48,7 @@ class TestSerialization:
 
     def test_msgpack_roundtrip(self):
         from hbllm.network.serialization import MsgpackSerializer
+
         s = MsgpackSerializer()
         msg = self._make_message()
         data = s.serialize(msg)
@@ -57,21 +58,25 @@ class TestSerialization:
 
     def test_get_serializer_json(self):
         from hbllm.network.serialization import JsonSerializer, get_serializer
+
         s = get_serializer("json")
         assert isinstance(s, JsonSerializer)
 
     def test_get_serializer_msgpack(self):
         from hbllm.network.serialization import MsgpackSerializer, get_serializer
+
         s = get_serializer("msgpack")
         assert isinstance(s, MsgpackSerializer)
 
     def test_get_serializer_protobuf(self):
         from hbllm.network.serialization import ProtobufSerializer, get_serializer
+
         s = get_serializer("protobuf")
         assert isinstance(s, ProtobufSerializer)
 
     def test_get_serializer_default(self):
         from hbllm.network.serialization import JsonSerializer, get_serializer
+
         s = get_serializer("unknown_format")
         assert isinstance(s, JsonSerializer)
 
@@ -84,12 +89,14 @@ class TestSerialization:
 class TestEnvelopeCipher:
     def test_generate_keypair(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         cipher = EnvelopeCipher()
         assert cipher.public_key_hex is not None
         assert len(cipher.public_key_hex) > 0
 
     def test_sign_payload(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         cipher = EnvelopeCipher()
         payload = {"action": "test", "timestamp": time.time()}
         sig = cipher.sign_payload(payload)
@@ -97,6 +104,7 @@ class TestEnvelopeCipher:
 
     def test_verify_envelope_valid(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         cipher = EnvelopeCipher()
         payload = {"action": "test", "timestamp": time.time()}
         sig = cipher.sign_payload(payload)
@@ -104,6 +112,7 @@ class TestEnvelopeCipher:
 
     def test_verify_envelope_expired(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         cipher = EnvelopeCipher()
         payload = {"action": "test", "timestamp": time.time() - 600}
         sig = cipher.sign_payload(payload)
@@ -111,12 +120,14 @@ class TestEnvelopeCipher:
 
     def test_verify_envelope_bad_signature(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         cipher = EnvelopeCipher()
         payload = {"action": "test", "timestamp": time.time()}
         assert not cipher.verify_envelope(cipher.public_key_hex, payload, "badsig==")
 
     def test_pack_envelope(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         cipher = EnvelopeCipher()
         other = EnvelopeCipher()
         envelope = cipher.pack_envelope(other.public_key_hex, "test.topic", {"data": "hello"})
@@ -126,9 +137,11 @@ class TestEnvelopeCipher:
 
     def test_from_private_key_bytes(self):
         from hbllm.network.federation.cipher import EnvelopeCipher
+
         # Generate then recreate from same key bytes
         try:
             from cryptography.hazmat.primitives.asymmetric import ed25519
+
             key = ed25519.Ed25519PrivateKey.generate()
             raw = key.private_bytes_raw()
             cipher = EnvelopeCipher(private_key_bytes=raw)
@@ -147,6 +160,7 @@ class TestRateLimitInterceptor:
     async def test_system_tenant_bypasses(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=1)
         msg = Message(type=MessageType.EVENT, source_node_id="sys", tenant_id="system", topic="t")
         result = await interceptor.intercept(msg)
@@ -156,6 +170,7 @@ class TestRateLimitInterceptor:
     async def test_empty_tenant_bypasses(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=1)
         msg = Message(type=MessageType.EVENT, source_node_id="sys", tenant_id="", topic="t")
         result = await interceptor.intercept(msg)
@@ -165,10 +180,13 @@ class TestRateLimitInterceptor:
     async def test_audio_topic_bypasses(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=1)
         msg = Message(
-            type=MessageType.EVENT, source_node_id="audio",
-            tenant_id="t1", topic="sensory.audio.chunk"
+            type=MessageType.EVENT,
+            source_node_id="audio",
+            tenant_id="t1",
+            topic="sensory.audio.chunk",
         )
         result = await interceptor.intercept(msg)
         assert result is msg
@@ -177,6 +195,7 @@ class TestRateLimitInterceptor:
     async def test_allows_within_limit(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=60, burst_multiplier=2.0)
         msg = Message(type=MessageType.QUERY, source_node_id="n", tenant_id="t1", topic="q")
         result = await interceptor.intercept(msg)
@@ -186,6 +205,7 @@ class TestRateLimitInterceptor:
     async def test_drops_when_exhausted(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=1, burst_multiplier=1.0)
         msg = Message(type=MessageType.QUERY, source_node_id="n", tenant_id="t1", topic="q")
         # First should pass (burst = 1)
@@ -199,6 +219,7 @@ class TestRateLimitInterceptor:
     async def test_per_tenant_isolation(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=1, burst_multiplier=1.0)
         msg_a = Message(type=MessageType.QUERY, source_node_id="n", tenant_id="t1", topic="q")
         msg_b = Message(type=MessageType.QUERY, source_node_id="n", tenant_id="t2", topic="q")
@@ -210,11 +231,11 @@ class TestRateLimitInterceptor:
     async def test_lru_eviction(self):
         from hbllm.network.messages import Message, MessageType
         from hbllm.network.rate_limiter import RateLimitInterceptor
+
         interceptor = RateLimitInterceptor(target_rpm=60, max_tracked_tenants=2)
         for i in range(5):
             msg = Message(
-                type=MessageType.QUERY, source_node_id="n",
-                tenant_id=f"tenant_{i}", topic="q"
+                type=MessageType.QUERY, source_node_id="n", tenant_id=f"tenant_{i}", topic="q"
             )
             await interceptor.intercept(msg)
         # Only 2 tenants should remain tracked
@@ -229,6 +250,7 @@ class TestRateLimitInterceptor:
 class TestMetricsCollector:
     def test_singleton(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m1 = MetricsCollector.get_instance()
         m2 = MetricsCollector.get_instance()
@@ -237,6 +259,7 @@ class TestMetricsCollector:
 
     def test_record_request(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.record_request("test.topic", tenant_id="t1", status="ok")
@@ -244,6 +267,7 @@ class TestMetricsCollector:
 
     def test_record_message(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.record_message("test.topic", "event")
@@ -251,6 +275,7 @@ class TestMetricsCollector:
 
     def test_record_error(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.record_error("n1", "timeout")
@@ -258,6 +283,7 @@ class TestMetricsCollector:
 
     def test_observe_duration(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.observe_duration("workspace", 0.5)
@@ -265,6 +291,7 @@ class TestMetricsCollector:
 
     def test_observe_node_latency(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.observe_node_latency("n1", 0.1)
@@ -272,6 +299,7 @@ class TestMetricsCollector:
 
     def test_set_active_nodes(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.set_active_nodes(10)
@@ -279,6 +307,7 @@ class TestMetricsCollector:
 
     def test_set_healthy_nodes(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.set_healthy_nodes(8)
@@ -286,6 +315,7 @@ class TestMetricsCollector:
 
     def test_inc_dec_active_requests(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         m.inc_active_requests()
@@ -294,6 +324,7 @@ class TestMetricsCollector:
 
     def test_backend_type(self):
         from hbllm.network.metrics import MetricsCollector
+
         MetricsCollector.reset()
         m = MetricsCollector.get_instance()
         assert m.backend in ("prometheus", "inmemory")
@@ -308,9 +339,9 @@ class TestMetricsCollector:
 class TestSystemCapabilities:
     def test_fully_operational(self):
         from hbllm.network.degraded import SystemCapabilities
+
         caps = SystemCapabilities(
-            available={"memory", "chat"}, degraded={}, offline={},
-            total_nodes=10, healthy_nodes=10
+            available={"memory", "chat"}, degraded={}, offline={}, total_nodes=10, healthy_nodes=10
         )
         assert caps.is_fully_operational
         assert caps.operational_percentage == 100.0
@@ -318,11 +349,13 @@ class TestSystemCapabilities:
 
     def test_degraded_state(self):
         from hbllm.network.degraded import SystemCapabilities
+
         caps = SystemCapabilities(
             available={"chat"},
             degraded={"memory": "⚠️ Running on fallback store"},
             offline={},
-            total_nodes=10, healthy_nodes=8
+            total_nodes=10,
+            healthy_nodes=8,
         )
         assert not caps.is_fully_operational
         assert caps.operational_percentage == 100.0  # available+degraded = 2/2
@@ -331,11 +364,13 @@ class TestSystemCapabilities:
 
     def test_offline_state(self):
         from hbllm.network.degraded import SystemCapabilities
+
         caps = SystemCapabilities(
             available={"chat"},
             degraded={},
             offline={"memory": "❌ Memory node crashed"},
-            total_nodes=10, healthy_nodes=5
+            total_nodes=10,
+            healthy_nodes=5,
         )
         assert not caps.is_fully_operational
         assert caps.operational_percentage == 50.0  # 1 available / 2 total
@@ -344,9 +379,9 @@ class TestSystemCapabilities:
 
     def test_empty_capabilities(self):
         from hbllm.network.degraded import SystemCapabilities
+
         caps = SystemCapabilities(
-            available=set(), degraded={}, offline={},
-            total_nodes=0, healthy_nodes=0
+            available=set(), degraded={}, offline={}, total_nodes=0, healthy_nodes=0
         )
         assert caps.is_fully_operational
         assert caps.operational_percentage == 100.0

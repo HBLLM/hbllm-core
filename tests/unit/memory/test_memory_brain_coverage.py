@@ -15,11 +15,9 @@ Covers uncovered lines in:
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock
 
 import pytest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # persistence/state.py — BrainState (synchronous SQLite backend)
@@ -30,6 +28,7 @@ class TestBrainState:
     @pytest.fixture
     def state(self, tmp_path):
         from hbllm.persistence.state import BrainState
+
         return BrainState(path=str(tmp_path / "test_brain.db"))
 
     def test_save_and_load(self, state):
@@ -84,9 +83,13 @@ class TestBrainState:
 
     def test_tool_logging(self, state):
         state.log_tool_call(
-            tool_name="python_exec", input_data="print(1)",
-            output="1", duration_ms=42.0, tenant_id="t1",
-            user_id="", device_id=""
+            tool_name="python_exec",
+            input_data="print(1)",
+            output="1",
+            duration_ms=42.0,
+            tenant_id="t1",
+            user_id="",
+            device_id="",
         )
         logs = state.get_tool_logs(tenant_id="t1")
         assert len(logs) >= 1
@@ -117,6 +120,7 @@ class TestBrainState:
 class TestMemoryScope:
     def test_scope_values(self):
         from hbllm.memory.scope import MemoryScope
+
         assert MemoryScope.WORKING is not None
         assert MemoryScope.EPISODIC is not None
         assert MemoryScope.SEMANTIC is not None
@@ -131,12 +135,14 @@ class TestMemoryScope:
 class TestToolReliabilityTracker:
     def test_default_reliability(self):
         from hbllm.brain.self_state import ToolReliabilityTracker
+
         tracker = ToolReliabilityTracker()
         r = tracker.get_reliability("unknown_tool")
         assert isinstance(r, float) and r >= 0
 
     def test_record_success(self):
         from hbllm.brain.self_state import ToolReliabilityTracker
+
         tracker = ToolReliabilityTracker()
         tracker.record_execution("tool1", True)
         r = tracker.get_reliability("tool1")
@@ -144,6 +150,7 @@ class TestToolReliabilityTracker:
 
     def test_record_failure_degrades(self):
         from hbllm.brain.self_state import ToolReliabilityTracker
+
         tracker = ToolReliabilityTracker()
         initial = tracker.get_reliability("tool1")
         tracker.record_execution("tool1", False)
@@ -154,12 +161,14 @@ class TestToolReliabilityTracker:
 class TestEpistemicCalibrationTracker:
     def test_default_calibration(self):
         from hbllm.brain.self_state import EpistemicCalibrationTracker
+
         tracker = EpistemicCalibrationTracker()
         cal = tracker.get_calibration("unknown")
         assert isinstance(cal, float)
 
     def test_record_verification_match(self):
         from hbllm.brain.self_state import EpistemicCalibrationTracker
+
         tracker = EpistemicCalibrationTracker()
         tracker.record_verification("math", predicted_outcome="A", verified_outcome="A", match=True)
         cal = tracker.get_calibration("math")
@@ -167,8 +176,11 @@ class TestEpistemicCalibrationTracker:
 
     def test_record_verification_mismatch(self):
         from hbllm.brain.self_state import EpistemicCalibrationTracker
+
         tracker = EpistemicCalibrationTracker()
-        tracker.record_verification("math", predicted_outcome="A", verified_outcome="B", match=False)
+        tracker.record_verification(
+            "math", predicted_outcome="A", verified_outcome="B", match=False
+        )
         cal = tracker.get_calibration("math")
         assert isinstance(cal, float)
 
@@ -176,6 +188,7 @@ class TestEpistemicCalibrationTracker:
 class TestSelfStateEngine:
     def test_cognitive_pressure_no_governance(self):
         from hbllm.brain.self_state import SelfStateEngine
+
         engine = SelfStateEngine(governance=None)
         pressure = engine.get_cognitive_pressure()
         assert isinstance(pressure, float)
@@ -190,6 +203,7 @@ class TestIntentEnvelope:
     def test_create_and_hash(self):
         from hbllm.brain.control.guard import IntentEnvelope
         from hbllm.brain.control.permissions import ActionClass
+
         env = IntentEnvelope(
             envelope_id="e1",
             goal_description="Run a test",
@@ -205,11 +219,14 @@ class TestIntentEnvelope:
     def test_hash_deterministic(self):
         from hbllm.brain.control.guard import IntentEnvelope
         from hbllm.brain.control.permissions import ActionClass
+
         kwargs = dict(
-            envelope_id="e1", goal_description="Test",
+            envelope_id="e1",
+            goal_description="Test",
             planned_actions=[{"tool_name": "act", "args": {}}],
             risk_level=ActionClass.SAFE,
-            execution_window_s=30.0, allowed_scopes=["local"],
+            execution_window_s=30.0,
+            allowed_scopes=["local"],
             explanation="Test",
         )
         env1 = IntentEnvelope(**kwargs)
@@ -221,13 +238,17 @@ class TestIntentIntegrityEngine:
     def test_record_and_verify(self):
         from hbllm.brain.control.guard import IntentEnvelope, IntentIntegrityEngine
         from hbllm.brain.control.permissions import ActionClass
+
         engine = IntentIntegrityEngine()
         actions = [{"tool_name": "act", "args": {}}]
         scopes = ["local"]
         env = IntentEnvelope(
-            envelope_id="e1", goal_description="Test",
-            planned_actions=actions, risk_level=ActionClass.SAFE,
-            execution_window_s=30.0, allowed_scopes=scopes,
+            envelope_id="e1",
+            goal_description="Test",
+            planned_actions=actions,
+            risk_level=ActionClass.SAFE,
+            execution_window_s=30.0,
+            allowed_scopes=scopes,
             explanation="Test",
         )
         engine.record_approval(env)
@@ -236,6 +257,7 @@ class TestIntentIntegrityEngine:
 
     def test_verify_unapproved(self):
         from hbllm.brain.control.guard import IntentIntegrityEngine
+
         engine = IntentIntegrityEngine()
         # Envelope "e99" was never approved
         assert not engine.verify_integrity(
@@ -245,12 +267,15 @@ class TestIntentIntegrityEngine:
     def test_verify_tampered(self):
         from hbllm.brain.control.guard import IntentEnvelope, IntentIntegrityEngine
         from hbllm.brain.control.permissions import ActionClass
+
         engine = IntentIntegrityEngine()
         env = IntentEnvelope(
-            envelope_id="e3", goal_description="Original",
+            envelope_id="e3",
+            goal_description="Original",
             planned_actions=[{"tool_name": "act", "args": {}}],
             risk_level=ActionClass.SAFE,
-            execution_window_s=30.0, allowed_scopes=["local"],
+            execution_window_s=30.0,
+            allowed_scopes=["local"],
             explanation="Test",
         )
         engine.record_approval(env)
@@ -267,6 +292,7 @@ class TestIntentIntegrityEngine:
 class TestDecisionTrace:
     def test_explain_decision(self):
         from hbllm.brain.observability.tracer import DecisionTrace
+
         trace = DecisionTrace(
             trace_id="t1",
             goal_id="g1",
@@ -279,9 +305,12 @@ class TestDecisionTrace:
 class TestDecisionTraceLedger:
     def test_record_and_retrieve(self, tmp_path):
         from hbllm.brain.observability.tracer import DecisionTrace, DecisionTraceLedger
+
         ledger = DecisionTraceLedger(data_dir=str(tmp_path), ring_size=10)
         trace = DecisionTrace(
-            trace_id="t1", goal_id="g1", selected_scenario_id="s1",
+            trace_id="t1",
+            goal_id="g1",
+            selected_scenario_id="s1",
         )
         ledger.record_decision(trace)
         recent = ledger.get_recent_traces()
@@ -289,10 +318,13 @@ class TestDecisionTraceLedger:
 
     def test_ring_buffer_eviction(self, tmp_path):
         from hbllm.brain.observability.tracer import DecisionTrace, DecisionTraceLedger
+
         ledger = DecisionTraceLedger(data_dir=str(tmp_path), ring_size=3)
         for i in range(5):
             trace = DecisionTrace(
-                trace_id=f"t{i}", goal_id=f"g{i}", selected_scenario_id="s",
+                trace_id=f"t{i}",
+                goal_id=f"g{i}",
+                selected_scenario_id="s",
             )
             ledger.record_decision(trace)
         recent = ledger.get_recent_traces()
@@ -300,9 +332,12 @@ class TestDecisionTraceLedger:
 
     def test_explain_decision_by_id(self, tmp_path):
         from hbllm.brain.observability.tracer import DecisionTrace, DecisionTraceLedger
+
         ledger = DecisionTraceLedger(data_dir=str(tmp_path), ring_size=10)
         trace = DecisionTrace(
-            trace_id="t1", goal_id="g1", selected_scenario_id="s1",
+            trace_id="t1",
+            goal_id="g1",
+            selected_scenario_id="s1",
         )
         ledger.record_decision(trace)
         explanation = ledger.explain_decision("t1")
@@ -317,20 +352,27 @@ class TestDecisionTraceLedger:
 class TestSNNCalibrator:
     def test_record_outcome(self, tmp_path):
         from hbllm.brain.snn.comprehension.calibrator import SNNCalibrator
+
         cal = SNNCalibrator(data_dir=str(tmp_path))
         cal.record_outcome(
-            domain="math", params_used={"threshold": 0.5},
-            num_concepts=5, response_quality=0.8, memory_relevance=0.7
+            domain="math",
+            params_used={"threshold": 0.5},
+            num_concepts=5,
+            response_quality=0.8,
+            memory_relevance=0.7,
         )
 
     def test_record_multiple_outcomes(self, tmp_path):
         from hbllm.brain.snn.comprehension.calibrator import SNNCalibrator
+
         cal = SNNCalibrator(data_dir=str(tmp_path))
         for i in range(10):
             cal.record_outcome(
-                domain="science", params_used={"threshold": 0.3 + i * 0.05},
-                num_concepts=i + 1, response_quality=0.5 + i * 0.05,
-                memory_relevance=0.6
+                domain="science",
+                params_used={"threshold": 0.3 + i * 0.05},
+                num_concepts=i + 1,
+                response_quality=0.5 + i * 0.05,
+                memory_relevance=0.6,
             )
 
 
@@ -342,6 +384,7 @@ class TestSNNCalibrator:
 class TestContractDelegator:
     def test_propose_contract(self):
         from hbllm.brain.mesh.delegator import ContractDelegator
+
         delegator = ContractDelegator(local_node_id="node_1")
         capsule = MagicMock()
         capsule.priority = 5
@@ -351,6 +394,7 @@ class TestContractDelegator:
 
     def test_evaluate_contract(self):
         from hbllm.brain.mesh.delegator import ContractDelegator, ContractOffer
+
         delegator = ContractDelegator(local_node_id="node_1")
         capsule = MagicMock()
         capsule.is_valid = True
@@ -370,14 +414,17 @@ class TestContractDelegator:
 class TestRiskSimulation:
     def test_risk_engine_import(self):
         from hbllm.brain.simulation.risk import RiskEngine
+
         assert RiskEngine is not None
 
     def test_risk_category_enum(self):
         from hbllm.brain.simulation.risk import RiskCategory
+
         assert RiskCategory is not None
 
     def test_risk_profile(self):
         from hbllm.brain.simulation.risk import RiskProfile
+
         assert RiskProfile is not None
 
 
@@ -389,4 +436,5 @@ class TestRiskSimulation:
 class TestCausalMemory:
     def test_import(self):
         from hbllm.brain.causality import causal_memory
+
         assert causal_memory is not None

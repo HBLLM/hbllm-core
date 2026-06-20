@@ -20,7 +20,7 @@ import os
 import re
 import secrets
 import time
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -171,7 +171,9 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
             # No Content-Length header — read actual body to enforce limits
             body = await request.body()
             if len(body) > limit:
-                logger.warning("Body size %d exceeds limit %d for %s (no CL header)", len(body), limit, path)
+                logger.warning(
+                    "Body size %d exceeds limit %d for %s (no CL header)", len(body), limit, path
+                )
                 return JSONResponse(
                     status_code=413,
                     content={

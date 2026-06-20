@@ -17,15 +17,11 @@ Covers all fixes from the 2026-06-19 security audit:
 
 from __future__ import annotations
 
-import asyncio
-import logging
 import os
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
-
 
 # ─── CRIT-4: builtin_tools shell injection ───────────────────────────────────
 
@@ -225,9 +221,7 @@ class TestDevCredentialWarnings:
             "HBLLM_ADMIN_PASS": "admin_password_change_me",
         }
 
-        insecure_found = [
-            k for k, v in test_vars.items() if v in _INSECURE_DEFAULTS or not v
-        ]
+        insecure_found = [k for k, v in test_vars.items() if v in _INSECURE_DEFAULTS or not v]
         assert len(insecure_found) == 4
 
     def test_secure_values_pass(self):
@@ -245,9 +239,7 @@ class TestDevCredentialWarnings:
             "HBLLM_ADMIN_PASS": "StrongP@ssw0rd!2026",
         }
 
-        insecure_found = [
-            k for k, v in secure_vars.items() if v in _INSECURE_DEFAULTS or not v
-        ]
+        insecure_found = [k for k, v in secure_vars.items() if v in _INSECURE_DEFAULTS or not v]
         assert len(insecure_found) == 0
 
 

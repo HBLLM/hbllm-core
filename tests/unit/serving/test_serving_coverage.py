@@ -17,11 +17,9 @@ Covers uncovered lines in:
 
 from __future__ import annotations
 
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # rate_limiter.py
@@ -31,12 +29,14 @@ import pytest
 class TestRateLimiter:
     def test_check_allowed(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=60, enabled=True)
         allowed, retry = limiter.check("t1")
         assert allowed and retry == 0.0
 
     def test_check_disabled_always_allows(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=1, enabled=False)
         for _ in range(100):
             allowed, _ = limiter.check("t1")
@@ -44,6 +44,7 @@ class TestRateLimiter:
 
     def test_check_exhausted_returns_retry(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=1, burst=1, enabled=True)
         limiter.check("t1", cost=1)  # consume the only token
         allowed, retry = limiter.check("t1", cost=1)
@@ -51,6 +52,7 @@ class TestRateLimiter:
 
     def test_per_user_isolation(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=1, burst=1, enabled=True)
         limiter.check("t1", user_id="u1", cost=1)
         # Different user should still have tokens
@@ -59,6 +61,7 @@ class TestRateLimiter:
 
     def test_plan_based_limits(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(enabled=True)
         # Enterprise plan should have higher burst
         usage = limiter.get_usage("t1", plan="enterprise")
@@ -68,6 +71,7 @@ class TestRateLimiter:
 
     def test_get_headers(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=60, enabled=True)
         limiter.check("t1")
         headers = limiter.get_headers("t1")
@@ -77,6 +81,7 @@ class TestRateLimiter:
 
     def test_reset_bucket(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=1, burst=1, enabled=True)
         limiter.check("t1", cost=1)
         limiter.reset("t1")
@@ -85,6 +90,7 @@ class TestRateLimiter:
 
     def test_stats(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=60, enabled=True)
         limiter.check("t1")
         limiter.check("t2")
@@ -95,6 +101,7 @@ class TestRateLimiter:
 
     def test_bucket_key_with_user(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=60)
         key = limiter._bucket_key("t1", "u1")
         assert key == "t1:u1"
@@ -103,6 +110,7 @@ class TestRateLimiter:
 
     def test_get_usage(self):
         from hbllm.serving.rate_limiter import RateLimiter
+
         limiter = RateLimiter(rpm=60)
         usage = limiter.get_usage("t1", user_id="u1")
         assert usage["tenant_id"] == "t1"
@@ -119,6 +127,7 @@ class TestRateLimiter:
 class TestErrors:
     def test_hbllm_error(self):
         from hbllm.serving.errors import ErrorCode, HBLLMError
+
         err = HBLLMError(ErrorCode.INVALID_REQUEST, "bad input", 400, internal_detail="details")
         assert err.code == ErrorCode.INVALID_REQUEST
         assert err.message == "bad input"
@@ -127,48 +136,57 @@ class TestErrors:
 
     def test_error_response(self):
         from hbllm.serving.errors import ErrorCode, error_response
+
         resp = error_response(ErrorCode.NOT_FOUND, "Not found", 404, request_id="req-123")
         assert resp.status_code == 404
 
     def test_error_response_with_extra(self):
         from hbllm.serving.errors import ErrorCode, error_response
+
         resp = error_response(ErrorCode.RATE_LIMITED, "Too many", 429, extra={"retry_after": 60})
         assert resp.status_code == 429
 
     def test_sanitize_exception_message_safe(self):
         from hbllm.serving.errors import sanitize_exception_message
+
         msg = sanitize_exception_message(ValueError("Connection timeout"))
         assert msg == "Connection timeout"
 
     def test_sanitize_exception_strips_paths(self):
         from hbllm.serving.errors import sanitize_exception_message
+
         msg = sanitize_exception_message(Exception('File "/Users/admin/app.py", line 42'))
         assert "/Users/" not in msg
         assert "internal error" in msg.lower()
 
     def test_sanitize_exception_strips_api_keys(self):
         from hbllm.serving.errors import sanitize_exception_message
+
         msg = sanitize_exception_message(Exception("Invalid API key: sk-abc123"))
         assert "sk-" not in msg
 
     def test_sanitize_exception_strips_traceback(self):
         from hbllm.serving.errors import sanitize_exception_message
+
         msg = sanitize_exception_message(Exception("Traceback (most recent call last)"))
         assert "Traceback" not in msg
 
     def test_sanitize_exception_truncates_long(self):
         from hbllm.serving.errors import sanitize_exception_message
+
         msg = sanitize_exception_message(Exception("x" * 300))
         assert len(msg) <= 204  # 200 + "..."
 
     def test_error_code_enum(self):
         from hbllm.serving.errors import ErrorCode
+
         assert ErrorCode.INTERNAL_ERROR.value == "INTERNAL_ERROR"
         assert ErrorCode.RATE_LIMITED.value == "RATE_LIMITED"
 
     @pytest.mark.asyncio
     async def test_hbllm_error_handler(self):
         from hbllm.serving.errors import ErrorCode, HBLLMError, hbllm_error_handler
+
         request = MagicMock()
         request.state = MagicMock()
         request.state.request_id = "req-abc"
@@ -179,6 +197,7 @@ class TestErrors:
     @pytest.mark.asyncio
     async def test_hbllm_error_handler_no_internal_detail(self):
         from hbllm.serving.errors import ErrorCode, HBLLMError, hbllm_error_handler
+
         request = MagicMock()
         request.state = MagicMock(spec=[])
         exc = HBLLMError(ErrorCode.NOT_FOUND, "Not found", 404)
@@ -188,6 +207,7 @@ class TestErrors:
     @pytest.mark.asyncio
     async def test_unhandled_exception_handler(self):
         from hbllm.serving.errors import unhandled_exception_handler
+
         request = MagicMock()
         request.state = MagicMock(spec=[])
         request.url = MagicMock()
@@ -205,6 +225,7 @@ class TestDeps:
     def test_get_brain_raises_when_missing(self):
         from hbllm.serving.deps import get_brain
         from hbllm.serving.state import _state
+
         _state.pop("brain", None)
         with pytest.raises(Exception) as exc_info:
             get_brain()
@@ -213,6 +234,7 @@ class TestDeps:
     def test_get_brain_returns_brain(self):
         from hbllm.serving.deps import get_brain
         from hbllm.serving.state import _state
+
         mock_brain = MagicMock()
         _state["brain"] = mock_brain
         try:
@@ -223,12 +245,14 @@ class TestDeps:
     def test_get_brain_optional_returns_none(self):
         from hbllm.serving.deps import get_brain_optional
         from hbllm.serving.state import _state
+
         _state.pop("brain", None)
         assert get_brain_optional() is None
 
     def test_get_bus_raises_when_missing(self):
         from hbllm.serving.deps import get_bus
         from hbllm.serving.state import _state
+
         _state.pop("bus", None)
         with pytest.raises(Exception) as exc_info:
             get_bus()
@@ -237,6 +261,7 @@ class TestDeps:
     def test_get_bus_returns_bus(self):
         from hbllm.serving.deps import get_bus
         from hbllm.serving.state import _state
+
         mock_bus = MagicMock()
         _state["bus"] = mock_bus
         try:
@@ -247,12 +272,14 @@ class TestDeps:
     def test_get_bus_optional_returns_none(self):
         from hbllm.serving.deps import get_bus_optional
         from hbllm.serving.state import _state
+
         _state.pop("bus", None)
         assert get_bus_optional() is None
 
     def test_get_provider_from_state(self):
         from hbllm.serving.deps import get_provider
         from hbllm.serving.state import _state
+
         mock_provider = MagicMock()
         _state["provider"] = mock_provider
         try:
@@ -263,6 +290,7 @@ class TestDeps:
     def test_get_provider_from_brain(self):
         from hbllm.serving.deps import get_provider
         from hbllm.serving.state import _state
+
         mock_brain = MagicMock()
         mock_brain.provider = MagicMock()
         _state.pop("provider", None)
@@ -275,6 +303,7 @@ class TestDeps:
     def test_get_provider_returns_none(self):
         from hbllm.serving.deps import get_provider
         from hbllm.serving.state import _state
+
         _state.pop("provider", None)
         _state.pop("brain", None)
         assert get_provider() is None
@@ -282,6 +311,7 @@ class TestDeps:
     def test_get_mode(self):
         from hbllm.serving.deps import get_mode
         from hbllm.serving.state import _state
+
         _state["mode"] = "full"
         try:
             assert get_mode() == "full"
@@ -290,12 +320,14 @@ class TestDeps:
 
     def test_get_tenant_id(self):
         from hbllm.serving.deps import get_tenant_id
+
         request = MagicMock()
         request.state.tenant_id = "my-tenant"
         assert get_tenant_id(request) == "my-tenant"
 
     def test_get_tenant_id_default(self):
         from hbllm.serving.deps import get_tenant_id
+
         request = MagicMock(spec=[])
         request.state = MagicMock(spec=[])
         assert get_tenant_id(request) == "default"
@@ -309,6 +341,7 @@ class TestDeps:
 class TestState:
     def test_get_node_map_empty_brain(self):
         from hbllm.serving.state import _get_node_map
+
         assert _get_node_map(None) == {}
 
     def test_get_node_map_with_nodes(self):
@@ -378,38 +411,51 @@ class TestState:
 
 class TestAuditMiddleware:
     def test_classify_action_chat(self):
-        from hbllm.serving.middleware.audit import AuditMiddleware
         from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
         assert AuditMiddleware._classify_action("POST", "/v1/chat") == AuditAction.CHAT_MESSAGE
 
     def test_classify_action_memory_delete(self):
-        from hbllm.serving.middleware.audit import AuditMiddleware
         from hbllm.security.audit_log import AuditAction
-        assert AuditMiddleware._classify_action("DELETE", "/v1/memory/123") == AuditAction.DATA_DELETED
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        assert (
+            AuditMiddleware._classify_action("DELETE", "/v1/memory/123") == AuditAction.DATA_DELETED
+        )
 
     def test_classify_action_unknown(self):
-        from hbllm.serving.middleware.audit import AuditMiddleware
         from hbllm.security.audit_log import AuditAction
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
         assert AuditMiddleware._classify_action("OPTIONS", "/unknown") == AuditAction.DATA_ACCESSED
 
     def test_classify_action_admin(self):
-        from hbllm.serving.middleware.audit import AuditMiddleware
         from hbllm.security.audit_log import AuditAction
-        assert AuditMiddleware._classify_action("POST", "/v1/admin/config") == AuditAction.ADMIN_ACTION
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        assert (
+            AuditMiddleware._classify_action("POST", "/v1/admin/config") == AuditAction.ADMIN_ACTION
+        )
 
     def test_classify_action_tools(self):
-        from hbllm.serving.middleware.audit import AuditMiddleware
         from hbllm.security.audit_log import AuditAction
-        assert AuditMiddleware._classify_action("POST", "/v1/tools/run") == AuditAction.TOOL_EXECUTED
+        from hbllm.serving.middleware.audit import AuditMiddleware
+
+        assert (
+            AuditMiddleware._classify_action("POST", "/v1/tools/run") == AuditAction.TOOL_EXECUTED
+        )
 
     def test_get_client_ip_forwarded(self):
         from hbllm.serving.middleware.audit import AuditMiddleware
+
         request = MagicMock()
         request.headers = {"x-forwarded-for": "1.2.3.4, 5.6.7.8"}
         assert AuditMiddleware._get_client_ip(request) == "1.2.3.4"
 
     def test_get_client_ip_direct(self):
         from hbllm.serving.middleware.audit import AuditMiddleware
+
         request = MagicMock()
         request.headers = {}
         request.client = MagicMock()
@@ -418,6 +464,7 @@ class TestAuditMiddleware:
 
     def test_get_client_ip_no_client(self):
         from hbllm.serving.middleware.audit import AuditMiddleware
+
         request = MagicMock()
         request.headers = {}
         request.client = None
@@ -463,30 +510,39 @@ class TestRBACMiddleware:
     def test_match_permission_chat(self):
         from hbllm.security.rbac import Permission
         from hbllm.serving.middleware.rbac import RBACMiddleware
+
         assert RBACMiddleware._match_permission("POST", "/v1/chat") == Permission.CHAT_SEND
 
     def test_match_permission_admin(self):
         from hbllm.security.rbac import Permission
         from hbllm.serving.middleware.rbac import RBACMiddleware
-        assert RBACMiddleware._match_permission("GET", "/v1/admin/audit") == Permission.ADMIN_VIEW_AUDIT
+
+        assert (
+            RBACMiddleware._match_permission("GET", "/v1/admin/audit")
+            == Permission.ADMIN_VIEW_AUDIT
+        )
 
     def test_match_permission_memory_write(self):
         from hbllm.security.rbac import Permission
         from hbllm.serving.middleware.rbac import RBACMiddleware
+
         assert RBACMiddleware._match_permission("POST", "/v1/memory") == Permission.MEMORY_WRITE
 
     def test_match_permission_unknown(self):
         from hbllm.serving.middleware.rbac import RBACMiddleware
+
         assert RBACMiddleware._match_permission("OPTIONS", "/unknown") is None
 
     def test_match_permission_tools_shell(self):
         from hbllm.security.rbac import Permission
         from hbllm.serving.middleware.rbac import RBACMiddleware
+
         assert RBACMiddleware._match_permission("POST", "/v1/tools/shell") == Permission.TOOL_SHELL
 
     def test_match_permission_data_export(self):
         from hbllm.security.rbac import Permission
         from hbllm.serving.middleware.rbac import RBACMiddleware
+
         assert RBACMiddleware._match_permission("POST", "/v1/data/export") == Permission.DATA_EXPORT
 
 
@@ -498,6 +554,7 @@ class TestRBACMiddleware:
 class TestPrometheusMetrics:
     def test_record_and_render(self):
         from hbllm.serving.middleware.prometheus import PrometheusMetrics
+
         metrics = PrometheusMetrics()
         metrics.record_request("GET", "/health", 200, 0.005)
         metrics.record_request("POST", "/v1/chat", 200, 0.15)
@@ -510,27 +567,34 @@ class TestPrometheusMetrics:
 
     def test_normalize_path_uuid(self):
         from hbllm.serving.middleware.prometheus import PrometheusMetrics
-        result = PrometheusMetrics._normalize_path("/v1/memory/550e8400-e29b-41d4-a716-446655440000")
+
+        result = PrometheusMetrics._normalize_path(
+            "/v1/memory/550e8400-e29b-41d4-a716-446655440000"
+        )
         assert ":id" in result
 
     def test_normalize_path_numeric(self):
         from hbllm.serving.middleware.prometheus import PrometheusMetrics
+
         result = PrometheusMetrics._normalize_path("/v1/users/12345")
         assert ":id" in result
 
     def test_normalize_path_normal(self):
         from hbllm.serving.middleware.prometheus import PrometheusMetrics
+
         result = PrometheusMetrics._normalize_path("/v1/chat")
         assert result == "/v1/chat"
 
     def test_render_with_extra_lines(self):
         from hbllm.serving.middleware.prometheus import PrometheusMetrics
+
         metrics = PrometheusMetrics()
         output = metrics.render(extra_lines=["custom_metric 42"])
         assert "custom_metric 42" in output
 
     def test_in_flight_tracking(self):
         from hbllm.serving.middleware.prometheus import PrometheusMetrics
+
         metrics = PrometheusMetrics()
         assert metrics.in_flight == 0
         metrics.in_flight += 1
@@ -540,11 +604,13 @@ class TestPrometheusMetrics:
 
     def test_prometheus_endpoint_no_brain(self):
         from hbllm.serving.middleware.prometheus import prometheus_endpoint
+
         resp = prometheus_endpoint(brain_getter=None)
         assert resp.status_code == 200
 
     def test_prometheus_endpoint_with_brain(self):
         from hbllm.serving.middleware.prometheus import prometheus_endpoint
+
         brain = MagicMock()
         brain.dual_router = MagicMock()
         brain.dual_router.snapshot.return_value = {
@@ -566,6 +632,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import RequestSizeLimiter
 
         app = FastAPI()
@@ -582,6 +649,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import RequestSizeLimiter
 
         app = FastAPI()
@@ -599,6 +667,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import ContentTypeValidator
 
         app = FastAPI()
@@ -616,6 +685,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import ContentTypeValidator
 
         app = FastAPI()
@@ -633,6 +703,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import InputSanitizer
 
         app = FastAPI()
@@ -653,6 +724,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import InputSanitizer
 
         app = FastAPI()
@@ -670,6 +742,7 @@ class TestValidationMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.validation import InputSanitizer
 
         app = FastAPI()
@@ -694,6 +767,7 @@ class TestSecurityHeadersMiddleware:
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+
         from hbllm.serving.middleware.security_headers import SecurityHeadersMiddleware
 
         app = FastAPI()

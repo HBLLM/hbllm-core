@@ -124,7 +124,9 @@ async def tool_shell_exec(command: str) -> ToolResult:
     try:
         parts = shlex.split(command)
     except ValueError as e:
-        return ToolResult(tool="shell_exec", success=False, output="", error=f"Invalid command syntax: {e}")
+        return ToolResult(
+            tool="shell_exec", success=False, output="", error=f"Invalid command syntax: {e}"
+        )
 
     if not parts:
         return ToolResult(tool="shell_exec", success=False, output="", error="Empty command")
@@ -195,7 +197,9 @@ async def tool_file_write(path: str, content: str) -> ToolResult:
             p_resolved = p.resolve(strict=False)
         except (OSError, ValueError):
             return ToolResult(
-                tool="file_write", success=False, output="",
+                tool="file_write",
+                success=False,
+                output="",
                 error="Cannot resolve path",
             )
 
