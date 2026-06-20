@@ -953,12 +953,13 @@ async def get_prometheus_metrics() -> Any:
 
 
 # ─── Router Registration ──────────────────────────────────────────────────────
-from hbllm.serving.routes import health_router, memory_router
+from hbllm.serving.routes import health_router, memory_router, notification_router
 from hbllm.serving.studio import router as studio_router
 
 app.include_router(studio_router)
 app.include_router(health_router)
 app.include_router(memory_router)
+app.include_router(notification_router)
 
 
 # Health, metrics, and routing stats are now in routes/health.py (health_router)

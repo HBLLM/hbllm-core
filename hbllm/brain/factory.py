@@ -259,6 +259,13 @@ class Brain:
         self.social_layer: Any = None  # SocialLayer
         self.learning_loop: Any = None  # LearningLoop
 
+        # ── Autonomy subsystem (cognitive heartbeat) ──────────────
+        self.autonomy_core: Any = None  # AutonomyCore
+        self.notification_gateway: Any = None  # NotificationGateway
+        self.proactive_processor: Any = None  # ProactiveProcessor
+        self.sse_channel: Any = None  # SSEChannel
+        self.emotion_engine: Any = None  # EmotionEngine
+
         # Cognitive subsystems (initialized by factory)
         self.skill_registry: SkillRegistry | None = None
         self.goal_manager: GoalManager | None = None
@@ -468,6 +475,18 @@ class Brain:
                 await self._hardware_loop_task
             except asyncio.CancelledError:
                 pass
+        # Stop proactive processor
+        if self.proactive_processor:
+            try:
+                await self.proactive_processor.stop()
+            except Exception:
+                logger.debug("Error stopping proactive processor during shutdown", exc_info=True)
+        # Stop autonomy core (cognitive heartbeat)
+        if self.autonomy_core:
+            try:
+                await self.autonomy_core.stop()
+            except Exception:
+                logger.debug("Error stopping autonomy core during shutdown", exc_info=True)
         # Stop plugin watcher
         if self.plugin_manager:
             await self.plugin_manager.stop_watching()
@@ -1382,8 +1401,50 @@ class BrainFactory:
             if cfg.watch_plugins:
                 await brain.plugin_manager.watch_directories()
 
+        # ── Autonomy Core (cognitive heartbeat) ────────────────────
+        from hbllm.brain.autonomy.loop import AutonomyCore
+
+        autonomy = AutonomyCore(
+            fast_path_topics=[
+                "user.input",
+                "user.action",
+                "sensor.anomaly",
+                "device.change",
+                "system.critical",
+                "perception.*",
+                "iot.event",
+                "iot.discovery",
+            ],
+        )
+        await autonomy.start(message_bus)
+        brain.autonomy_core = autonomy
+        logger.info("AutonomyCore started — cognitive heartbeat active")
+
+        # ── Proactive Output (autonomy → notifications) ──────────
+        from hbllm.serving.notifications import NotificationGateway
+        from hbllm.serving.proactive import ProactiveProcessor, SSEChannel
+
+        gateway = NotificationGateway()
+        sse = SSEChannel()
+        proactive = ProactiveProcessor(
+            gateway=gateway,
+            pipeline=pipeline,
+            sse_channel=sse,
+        )
+        await proactive.start(message_bus)
+
+        # Route autonomy actions through the bus for proactive processing
+        autonomy.set_action_handler(
+            lambda msg: message_bus.publish(msg.topic, msg)
+        )
+
+        brain.notification_gateway = gateway
+        brain.proactive_processor = proactive
+        brain.sse_channel = sse
+        logger.info("ProactiveProcessor wired — notifications active")
+
         logger.info(
-            "v4 composite brain ready: %d top-level nodes (was 27+ in legacy mode)",
+            "v4 composite brain ready: %d top-level nodes, autonomy=ACTIVE",
             len(nodes),
         )
 
