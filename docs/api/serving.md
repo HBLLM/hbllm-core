@@ -231,8 +231,147 @@ async def my_endpoint(brain = Depends(get_brain)):
 | Token Optimizer | `serving/token_optimizer.py` | Token budget management |
 | Self-Improve | `serving/self_improve.py` | Background self-improvement loop |
 | Launcher | `serving/launcher.py` | Server startup and configuration |
+| **Cognitive Daemon** | `serving/daemon.py` | Always-on cognitive process with autonomy heartbeat |
+| **Proactive Processor** | `serving/proactive.py` | Routes autonomy actions to user-facing output via SSE |
+| **Device Bridge** | `serving/device_bridge.py` | Cross-device session continuity and presence tracking |
+| **Notification Routes** | `serving/routes/notifications.py` | REST + SSE notification API |
 
 ---
+
+## Cognitive Daemon
+
+**Module:** `hbllm.serving.daemon.CognitiveDaemon`
+
+Long-running daemon process that boots the full Brain with AutonomyCore running
+and keeps it alive as a background service. Manages the complete lifecycle:
+
+1. Boot Brain via BrainFactory
+2. Start AutonomyCore (cognitive heartbeat)
+3. Start ProactiveProcessor (output bridge)
+4. Optionally start HTTP server (FastAPI)
+5. Run until shutdown signal (SIGTERM/SIGINT)
+6. Graceful drain and persist state
+
+### CLI Usage
+
+```bash
+# Foreground (development)
+python -m hbllm.serving.daemon
+
+# With specific provider
+python -m hbllm.serving.daemon --provider openai/gpt-4o-mini
+
+# Local model
+python -m hbllm.serving.daemon --local --model-size 1.5b
+
+# As a systemd service (journal-compatible logging)
+python -m hbllm.serving.daemon --mode systemd
+```
+
+### Programmatic Usage
+
+```python
+from hbllm.serving.daemon import CognitiveDaemon
+
+daemon = CognitiveDaemon(
+    provider="openai/gpt-4o-mini",
+    host="0.0.0.0",
+    port=8000,
+    data_dir="data",
+)
+await daemon.start()
+
+# Get telemetry
+snap = daemon.snapshot()
+# {"uptime_s": 3600, "brain_nodes": 28, "autonomy": {...}, "proactive": {...}}
+
+await daemon.stop()
+```
+
+---
+
+## Proactive Processor & SSE Channel
+
+**Module:** `hbllm.serving.proactive.ProactiveProcessor`
+
+Routes AutonomyCore cognitive actions to user-facing output. When the AutonomyCore
+generates a cognitive action (proactive reminder, anomaly detection, background
+insight), this processor enriches it via the CognitivePipeline and delivers the
+result through multiple channels.
+
+### Delivery Channels
+
+| Channel | Class | Description |
+|---------|-------|-------------|
+| NotificationGateway | Persistent | Pollable notification store |
+| SSE Channel | Real-time | Per-tenant Server-Sent Events |
+| Bus broadcast | Internal | `proactive.output` topic |
+
+### SSEChannel
+
+```python
+from hbllm.serving.proactive import SSEChannel, ProactiveEvent
+
+channel = SSEChannel(max_queue_size=100)
+
+# Push an event
+await channel.push(ProactiveEvent(
+    tenant_id="user1",
+    title="Goal Complete",
+    body="Your research task finished",
+))
+
+# Stream events (used by API endpoint)
+async for event in channel.stream("user1"):
+    yield f"data: {event.to_dict()}\n\n"
+```
+
+---
+
+## Device Bridge
+
+**Module:** `hbllm.serving.device_bridge.DeviceBridge`
+
+Enables seamless conversation handoff between devices — start a conversation on
+your phone, continue on your laptop. Tracks device presence via heartbeat and
+routes notifications to the best available device.
+
+### Usage
+
+```python
+from hbllm.serving.device_bridge import DeviceBridge, DeviceInfo
+
+bridge = DeviceBridge(bus=message_bus)
+await bridge.start()
+
+# Register a device
+bridge.register_device(DeviceInfo(
+    device_id="iphone-1",
+    tenant_id="user1",
+    device_type="mobile",
+    capabilities=["audio", "display"],
+    push_token="fcm:abc123",
+))
+
+# Find best device for notification
+best = bridge.get_best_device("user1", required_capabilities=["display"])
+
+# Handoff session between devices
+await bridge.handoff_session("session-1", from_device="iphone-1", to_device="macbook-1")
+
+# Stats
+bridge.stats()
+# {"total_devices": 3, "active_devices": 2, "tenants": 1, "handoffs": 1}
+```
+
+### Bus Events
+
+| Topic | When |
+|-------|------|
+| `device.register` | New device connects |
+| `device.heartbeat` | Device sends presence ping |
+| `device.handoff` | Session transfer requested |
+| `device.inactive` | Device went stale (5-minute timeout) |
 
 ## Speaker Identification API
 

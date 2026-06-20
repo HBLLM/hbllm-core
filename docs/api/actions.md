@@ -244,6 +244,60 @@ the executor automatically delegates to `MultiAgentOrchestrator`.
 
 ---
 
+## ReActLoop (Iterative Reasoning)
+
+::: hbllm.actions.tool_chain.ReActLoop
+
+When `agent_mode=True`, the AgentExecutor uses the `ReActLoop` for multi-step
+tool reasoning instead of single-pass extraction. The loop follows the
+**Observe → Think → Act → Observe** pattern:
+
+```python
+from hbllm.actions.tool_chain import ReActLoop, ReActConfig
+
+config = ReActConfig(
+    max_iterations=8,       # Max reasoning steps
+    max_wall_time_seconds=60.0,
+    max_parallel_tools=3,   # Concurrent tool calls
+    allow_parallel=True,
+    include_scratchpad=True, # Keep chain-of-thought trace
+)
+
+loop = ReActLoop(llm=my_llm, tools=tool_registry, config=config)
+result = await loop.run("Research quantum computing and summarize key concepts")
+
+print(result.answer)           # Final answer
+print(result.total_tool_calls) # Number of tools invoked
+print(result.steps)            # Full reasoning trace
+print(result.scratchpad)       # Raw chain-of-thought
+```
+
+### Budget Controls
+
+The loop respects three budget limits to prevent runaway execution:
+
+| Budget | Config Field | Default |
+|--------|-------------|---------|
+| Step limit | `max_iterations` | 8 |
+| Time limit | `max_wall_time_seconds` | 60s |
+| Parallel tools | `max_parallel_tools` | 3 |
+
+### ReActResult
+
+```python
+@dataclass
+class ReActResult:
+    answer: str              # Final synthesized answer
+    steps: list[ThoughtStep] # Full reasoning trace
+    total_iterations: int
+    total_tool_calls: int
+    total_duration_ms: float
+    finished_reason: str     # "answer" | "max_iterations" | "timeout" | "error"
+    scratchpad: str          # Raw chain-of-thought text
+```
+
+---
+
 ## MultiAgentOrchestrator
 
 ::: hbllm.actions.orchestrator.MultiAgentOrchestrator

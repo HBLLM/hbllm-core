@@ -95,6 +95,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - 21 tests covering circuit breaker, rate limiting, DB quotas, metrics,
     graceful shutdown, API versioning, body size limits, and CORS
 
+#### Autonomy & Agency (Core Audit — Cognitive Gaps)
+
+- **CognitiveDaemon** — `hbllm/serving/daemon.py`
+  - Long-running daemon process with Brain + AutonomyCore lifecycle
+  - Boots Brain via BrainFactory, starts cognitive heartbeat
+  - Graceful shutdown with state persistence
+  - CLI entry point (`python -m hbllm.serving.daemon`)
+
+- **ProactiveProcessor + SSEChannel** — `hbllm/serving/proactive.py`
+  - Routes AutonomyCore cognitive actions to user-facing output
+  - LLM enrichment of background insights before delivery
+  - Real-time Server-Sent Events per-tenant push channel
+  - Notification delivery via NotificationGateway + SSE + bus broadcast
+
+- **Notification API** — `hbllm/serving/routes/notifications.py`
+  - REST endpoints for listing and dismissing notifications
+  - SSE streaming endpoint for real-time push delivery
+
+- **ReActLoop** — `hbllm/actions/tool_chain.py`
+  - Iterative Observe → Think → Act reasoning loop (replaces single-pass)
+  - Parallel tool execution with configurable concurrency
+  - Scratchpad chain-of-thought reasoning trace
+  - Budget limits: max iterations, max tokens, max wall-time
+
+- **ConversationTurnManager** — `hbllm/perception/conversation_turn.py`
+  - Full-duplex voice state machine (IDLE → LISTENING → PROCESSING → SPEAKING)
+  - Barge-in detection and interrupt handling
+  - Silence timeout and continuous listening mode
+
+- **ContextFusionEngine** — `hbllm/brain/context_fusion.py`
+  - Token-budgeted context assembly from multiple sources
+  - Priority-weighted greedy allocation strategy
+  - Pre-built providers for memory, world state, emotion, goals
+
+- **EmotionEngine Upgrade** — `hbllm/brain/emotion_engine.py`
+  - LLM-based contextual inference (sarcasm, nuance detection)
+  - Behavioral pattern tracking (response latency, message frequency)
+  - Per-tenant emotional state cache for context fusion
+
+- **ActionVerificationBridge** — `hbllm/brain/autonomy/verification_bridge.py`
+  - Closes the execute → verify → correct feedback loop
+  - Periodic verification of VERIFYING tasks against WorldStateEngine
+  - Auto-generates verification rules for IoT commands
+  - Re-executes tasks that fail verification (with correction limit)
+
+- **DeviceBridge** — `hbllm/serving/device_bridge.py`
+  - Cross-device session continuity and presence tracking
+  - Device registration with capabilities and push tokens
+  - Heartbeat-based presence (5-minute timeout)
+  - Session handoff between devices with tenant isolation
+
 #### Infrastructure Fixes (Core Audit)
 
 - **LoadManager ↔ AttentionManager** bidirectional integration
