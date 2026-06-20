@@ -1254,7 +1254,7 @@ class BrainFactory:
             from hbllm.brain.world_state import WorldStateEngine
             from hbllm.perception.event_log import EventLog
 
-            event_log = EventLog(db_path=os.path.join(cfg.data_dir, "event_log.db"))
+            event_log = EventLog(data_dir=cfg.data_dir)
             world_state = WorldStateEngine(event_log=event_log)
             world_state.start()
 
