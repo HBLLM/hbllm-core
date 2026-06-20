@@ -207,6 +207,14 @@ class BrainConfig(BaseModel):
     autonomy_watch_dirs: list[str] | None = None  # Directories for filesystem watcher
     autonomy_calendar_dir: str | None = None  # Directory for .ics calendar files
 
+    # IoT / Home Automation (MQTT bridge)
+    inject_iot: bool = False  # MqttIoTNode (requires paho-mqtt and MQTT broker)
+    iot_mqtt_broker: str = "localhost"
+    iot_mqtt_port: int = 1883
+
+    # Live World State (environment graph fed by perception + IoT)
+    inject_world_state: bool = True
+
     # Dual LLM routing (local + external)
     external_provider: str | None = (
         None  # e.g. "openai/gpt-4o" or "anthropic/claude-sonnet-4-20250514"
@@ -258,6 +266,14 @@ class Brain:
         self.resource_manager: Any = None  # ResourceManager
         self.social_layer: Any = None  # SocialLayer
         self.learning_loop: Any = None  # LearningLoop
+
+        # ── Autonomy subsystem (cognitive heartbeat) ──────────────
+        self.autonomy_core: Any = None  # AutonomyCore
+        self.notification_gateway: Any = None  # NotificationGateway
+        self.proactive_processor: Any = None  # ProactiveProcessor
+        self.sse_channel: Any = None  # SSEChannel
+        self.emotion_engine: Any = None  # EmotionEngine
+        self.world_state: Any = None  # WorldStateEngine
 
         # Cognitive subsystems (initialized by factory)
         self.skill_registry: SkillRegistry | None = None
@@ -468,6 +484,24 @@ class Brain:
                 await self._hardware_loop_task
             except asyncio.CancelledError:
                 pass
+        # Stop proactive processor
+        if self.proactive_processor:
+            try:
+                await self.proactive_processor.stop()
+            except Exception:
+                logger.debug("Error stopping proactive processor during shutdown", exc_info=True)
+        # Stop autonomy core (cognitive heartbeat)
+        if self.autonomy_core:
+            try:
+                await self.autonomy_core.stop()
+            except Exception:
+                logger.debug("Error stopping autonomy core during shutdown", exc_info=True)
+        # Stop world state engine
+        if self.world_state:
+            try:
+                await self.world_state.stop()
+            except Exception:
+                logger.debug("Error stopping world state during shutdown", exc_info=True)
         # Stop plugin watcher
         if self.plugin_manager:
             await self.plugin_manager.stop_watching()
@@ -1128,6 +1162,15 @@ class BrainFactory:
             await location.start(message_bus)
             nodes.append(location)
 
+            # Conversation turn manager (voice state machine)
+            from hbllm.perception.conversation_turn import ConversationTurnManager
+
+            turn_mgr = ConversationTurnManager(node_id="conversation_turn")
+            await _register_node(registry, turn_mgr)
+            await turn_mgr.start(message_bus)
+            nodes.append(turn_mgr)
+            logger.info("ConversationTurnManager wired (voice state machine)")
+
         # Reasoning nodes (optional — require extra dependencies)
         if cfg.inject_fuzzy_logic:
             from hbllm.actions.fuzzy_node import FuzzyNode
@@ -1182,6 +1225,68 @@ class BrainFactory:
             logger.info(
                 "HostShellNode wired (manual approval=%s)", shell_node.require_manual_approval
             )
+
+        # IoT / Home Automation (MQTT bridge — optional)
+        if cfg.inject_iot:
+            try:
+                from hbllm.actions.iot_mqtt_node import MqttIoTNode
+
+                iot_node = MqttIoTNode(
+                    node_id="iot_mqtt",
+                    broker_host=cfg.iot_mqtt_broker,
+                    broker_port=cfg.iot_mqtt_port,
+                )
+                await _register_node(registry, iot_node)
+                await iot_node.start(message_bus)
+                nodes.append(iot_node)
+                logger.info(
+                    "MqttIoTNode wired (broker=%s:%d)",
+                    cfg.iot_mqtt_broker,
+                    cfg.iot_mqtt_port,
+                )
+            except ImportError:
+                logger.info("IoT node not available (paho-mqtt not installed)")
+            except Exception as e:
+                logger.warning("Failed to start IoT node: %s", e)
+
+        # Live World State Engine (environment graph)
+        if cfg.inject_world_state:
+            from hbllm.brain.world_state import WorldStateEngine
+            from hbllm.perception.event_log import EventLog
+
+            event_log = EventLog(data_dir=cfg.data_dir)
+            world_state = WorldStateEngine(event_log=event_log)
+            world_state.start()
+
+            # Wire perception events → WorldStateEngine
+            async def _on_perception_for_world(msg: Any) -> None:
+                """Route normalized perception events to world state graph."""
+                try:
+                    from hbllm.perception.reality_bus import PerceptionEvent
+
+                    payload = msg.payload
+                    event = PerceptionEvent(
+                        entity_id=payload.get("entity_id", msg.source_node_id),
+                        event_type=payload.get("event_type", "update"),
+                        payload=payload,
+                        confidence=float(payload.get("confidence", 0.7)),
+                    )
+                    await world_state.handle_normalized_event(event)
+                except Exception as e:
+                    logger.debug("WorldState event ingestion failed: %s", e)
+
+            for ws_topic in [
+                "perception.normalized",
+                "iot.event",
+                "iot.discovery",
+                "sensor.reading",
+                "device.change",
+            ]:
+                await message_bus.subscribe(ws_topic, _on_perception_for_world)
+
+            logger.info("WorldStateEngine wired — live environment graph active")
+        else:
+            world_state = None
 
         # Register and start default DomainModuleNode instances
         if (
@@ -1244,6 +1349,10 @@ class BrainFactory:
             nodes=nodes,
             provider=llm_provider,
         )
+
+        # Attach world state if wired
+        if world_state is not None:
+            brain.world_state = world_state
 
         # Wire composite references
         brain.reasoning_core = reasoning
@@ -1382,8 +1491,48 @@ class BrainFactory:
             if cfg.watch_plugins:
                 await brain.plugin_manager.watch_directories()
 
+        # ── Autonomy Core (cognitive heartbeat) ────────────────────
+        from hbllm.brain.autonomy.loop import AutonomyCore
+
+        autonomy = AutonomyCore(
+            fast_path_topics=[
+                "user.input",
+                "user.action",
+                "sensor.anomaly",
+                "device.change",
+                "system.critical",
+                "perception.*",
+                "iot.event",
+                "iot.discovery",
+            ],
+        )
+        await autonomy.start(message_bus)
+        brain.autonomy_core = autonomy
+        logger.info("AutonomyCore started — cognitive heartbeat active")
+
+        # ── Proactive Output (autonomy → notifications) ──────────
+        from hbllm.serving.notifications import NotificationGateway
+        from hbllm.serving.proactive import ProactiveProcessor, SSEChannel
+
+        gateway = NotificationGateway()
+        sse = SSEChannel()
+        proactive = ProactiveProcessor(
+            gateway=gateway,
+            pipeline=pipeline,
+            sse_channel=sse,
+        )
+        await proactive.start(message_bus)
+
+        # Route autonomy actions through the bus for proactive processing
+        autonomy.set_action_handler(lambda msg: message_bus.publish(msg.topic, msg))
+
+        brain.notification_gateway = gateway
+        brain.proactive_processor = proactive
+        brain.sse_channel = sse
+        logger.info("ProactiveProcessor wired — notifications active")
+
         logger.info(
-            "v4 composite brain ready: %d top-level nodes (was 27+ in legacy mode)",
+            "v4 composite brain ready: %d top-level nodes, autonomy=ACTIVE",
             len(nodes),
         )
 

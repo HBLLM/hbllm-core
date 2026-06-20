@@ -124,17 +124,21 @@ class BrainState:
 
     def _migrate_columns(self) -> None:
         """Add tenant_id/user_id/device_id columns to legacy tables missing them."""
+        _ALLOWED_TABLES = frozenset({"kv_store", "messages", "checkpoints", "tool_logs"})
         migrations = {
             "kv_store": ["tenant_id", "user_id", "device_id"],
             "messages": ["tenant_id", "user_id", "device_id"],
             "checkpoints": ["tenant_id", "user_id", "device_id"],
             "tool_logs": ["tenant_id", "user_id", "device_id"],
         }
+        _ALLOWED_COLS = frozenset({"tenant_id", "user_id", "device_id"})
         for table, columns in migrations.items():
+            assert table in _ALLOWED_TABLES, f"Unsafe table name in migration: {table}"
             existing = {
                 row[1] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
             }
             for col in columns:
+                assert col in _ALLOWED_COLS, f"Unsafe column name in migration: {col}"
                 if col not in existing:
                     self._conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''"  # noqa: S608

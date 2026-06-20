@@ -11,8 +11,11 @@ import pytest
 
 # Import from plugin directory with dashes
 def _import_swarm():
+    # Navigate from tests/integration/cross_component/ → tests/ → core/ (project root)
+    _tests_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _project_root = os.path.dirname(_tests_root)
     engine_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        _project_root,
         "hbllm",
         "plugins",
         "swarm-orchestrator",

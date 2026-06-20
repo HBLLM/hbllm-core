@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import re
+import shlex
 import sys
 from typing import Any
 
@@ -33,6 +34,10 @@ COMMAND_BLOCKLIST: list[str] = [
     r"\breboot\b",  # OS control
     r"\bshutdown\b",  # OS control
 ]
+
+# Shell metacharacters that enable command chaining/injection.
+# These are blocked regardless of the command itself.
+_SHELL_METACHAR_RE = re.compile(r"[;|&`$]|\$\(")
 
 
 class HostShellNode(Node):
@@ -72,6 +77,13 @@ class HostShellNode(Node):
         command = message.payload.get("command", "").strip()
         if not command:
             return message.create_error("No 'command' provided for execution.")
+
+        # ── 0. Security Check: Shell Metacharacters ──
+        if _SHELL_METACHAR_RE.search(command):
+            logger.warning("HostShellNode blocked command with shell metacharacters: %s", command)
+            return message.create_error(
+                "Command rejected: shell metacharacters (;|&`$) are not allowed."
+            )
 
         # ── 1. Security Check: Blocklist Regexes ──
         for pattern in COMMAND_BLOCKLIST:
@@ -123,11 +135,16 @@ class HostShellNode(Node):
             return False
 
     async def _run_command(self, command: str) -> dict[str, Any]:
-        """Run the command in a subprocess with timeout limits."""
+        """Run the command in a subprocess with timeout limits.
+
+        Uses ``create_subprocess_exec`` to avoid shell interpretation of
+        metacharacters for defense in depth.
+        """
         logger.info("Executing shell command: %s", command)
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
+            parts = shlex.split(command)
+            proc = await asyncio.create_subprocess_exec(
+                *parts,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.workspace_dir,

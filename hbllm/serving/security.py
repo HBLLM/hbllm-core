@@ -20,7 +20,7 @@ import os
 import re
 import secrets
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -140,17 +140,23 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         content_length = request.headers.get("content-length")
+        path = request.url.path
+
+        if "/upload" in path or "/knowledge" in path:
+            limit = self.upload_limit
+        elif "/chat" in path:
+            limit = self.chat_limit
+        else:
+            limit = self.default_limit
+
         if content_length:
-            size = int(content_length)
-            path = request.url.path
-
-            if "/upload" in path or "/knowledge" in path:
-                limit = self.upload_limit
-            elif "/chat" in path:
-                limit = self.chat_limit
-            else:
-                limit = self.default_limit
-
+            try:
+                size = int(content_length)
+            except (ValueError, TypeError):
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Invalid Content-Length header"},
+                )
             if size > limit:
                 logger.warning("Body size %d exceeds limit %d for %s", size, limit, path)
                 return JSONResponse(
@@ -161,6 +167,21 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                         "received_bytes": size,
                     },
                 )
+        elif request.method in ("POST", "PUT", "PATCH"):
+            # No Content-Length header — read actual body to enforce limits
+            body = await request.body()
+            if len(body) > limit:
+                logger.warning(
+                    "Body size %d exceeds limit %d for %s (no CL header)", len(body), limit, path
+                )
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Request body too large",
+                        "max_bytes": limit,
+                        "received_bytes": len(body),
+                    },
+                )
 
         return await call_next(request)
 
@@ -169,19 +190,36 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
 
 class AuthRateLimiter:
-    """Rate limiter for auth endpoints. Prevents brute-force attacks."""
+    """Rate limiter for auth endpoints. Prevents brute-force attacks.
+
+    Uses an OrderedDict with bounded size to prevent memory exhaustion
+    from attackers sending requests with millions of unique identifiers.
+    """
+
+    _MAX_TRACKED_IDENTIFIERS = 50_000
 
     def __init__(self, max_attempts: int = 5, window_seconds: int = 300):
         self.max_attempts = max_attempts
         self.window = window_seconds
-        self._attempts: dict[str, list[float]] = defaultdict(list)
+        self._attempts: OrderedDict[str, list[float]] = OrderedDict()
 
     def check(self, identifier: str) -> tuple[bool, int]:
         """Check if an auth attempt is allowed. Returns (allowed, remaining)."""
         now = time.time()
         cutoff = now - self.window
+
+        if identifier not in self._attempts:
+            self._attempts[identifier] = []
+
         self._attempts[identifier] = [t for t in self._attempts[identifier] if t > cutoff]
         attempts = self._attempts[identifier]
+
+        # Move to end (most recently accessed) for LRU ordering
+        self._attempts.move_to_end(identifier)
+
+        # Evict oldest entries if we exceed the max tracked identifiers
+        while len(self._attempts) > self._MAX_TRACKED_IDENTIFIERS:
+            self._attempts.popitem(last=False)
 
         # Evict empty entries to prevent unbounded dict growth
         if not attempts:
@@ -202,6 +240,8 @@ class AuthRateLimiter:
 
     def record_attempt(self, identifier: str) -> None:
         """Record an auth attempt."""
+        if identifier not in self._attempts:
+            self._attempts[identifier] = []
         self._attempts[identifier].append(time.time())
 
     def reset(self, identifier: str) -> None:
@@ -280,11 +320,12 @@ class ApiKeyManager:
 
     def validate(self, raw_key: str) -> ApiKey | None:
         if not self._enabled:
+            # Bypass mode: grant basic access only — never admin
             return ApiKey(
                 key_hash="bypass",
                 tenant_id="dev",
                 name="disabled_mode",
-                scopes=["chat", "memory", "health", "admin"],
+                scopes=["chat", "memory", "health"],
             )
 
         key_hash = self.hash_key(raw_key)

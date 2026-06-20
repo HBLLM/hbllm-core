@@ -629,7 +629,8 @@ class TestBenchmarkTaskDatasets:
     def tasks_dir(self):
         from pathlib import Path
 
-        return Path(__file__).parent.parent / "hbllm" / "benchmarks" / "tasks"
+        # Go up from tests/unit/brain/ to project root, then into hbllm/benchmarks/tasks
+        return Path(__file__).parent.parent.parent.parent / "hbllm" / "benchmarks" / "tasks"
 
     def test_reasoning_tasks_loadable(self, tasks_dir):
         import json

@@ -11,8 +11,11 @@ import time
 
 # Import TemporalEngine from the plugin directory (dashes in path).
 def _import_temporal():
+    # Navigate from tests/unit/memory/ → tests/ → core/ (project root)
+    _tests_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _project_root = os.path.dirname(_tests_root)
     engine_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        _project_root,
         "hbllm",
         "plugins",
         "temporal-reasoning",

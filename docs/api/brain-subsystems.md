@@ -32,6 +32,9 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | `LoadManager` | `load_manager.py` | `inject_load_manager` | Cognitive load monitoring & degradation (v2) |
 | `CollectiveNode` | `collective_node.py` | Always on | Multi-agent voting, delegation & knowledge sharing (v2) |
 | `SchedulerNode` | `scheduler_node.py` | `inject_scheduler` | Proactive scheduling and background execution via SQLite (v2) |
+| `ContextFusionEngine` | `context_fusion.py` | Always on | Token-budgeted multi-source context assembly |
+| `ActionVerificationBridge` | `autonomy/verification_bridge.py` | Always on | Execute → verify → correct feedback loop |
+| `EmotionEngine` | `emotion_engine.py` | `inject_emotion` | Multi-signal emotion detection with LLM inference |
 
 ---
 
@@ -445,4 +448,114 @@ stats = brain.cognitive_stats()
 #   "load_manager": {...},    # v2
 # }
 ```
+
+---
+
+## Context Fusion Engine
+
+**Module:** `hbllm.brain.context_fusion.ContextFusionEngine`
+
+Assembles context from multiple sources (memory, world state, emotions, goals)
+into a token-budgeted prompt for the LLM. Uses priority-weighted greedy allocation
+to fit the most relevant context within the model's token limit.
+
+### Usage
+
+```python
+from hbllm.brain.context_fusion import ContextFusionEngine
+
+engine = ContextFusionEngine(token_budget=4096)
+
+# Register context providers
+engine.register_source("episodic_memory", memory_provider, priority=0.9)
+engine.register_source("world_state", world_state_provider, priority=0.7)
+engine.register_source("emotion", emotion_provider, priority=0.5)
+
+# Fuse context for a query
+result = await engine.fuse(query="What's the temperature?", tenant_id="user1")
+system_prompt = result.to_system_prompt()
+
+print(result.total_tokens)     # 2847
+print(result.budget_used_pct)  # 69.5%
+print(len(result.sections))    # 3
+```
+
+### Pre-built Providers
+
+| Factory Method | Source |
+|---------------|--------|
+| `world_state_provider(ws)` | WorldStateEngine entity graph |
+| `emotion_provider(engine)` | EmotionEngine per-tenant state |
+
+### FusedContext Output
+
+```python
+@dataclass
+class FusedContext:
+    sections: list[ContextSlice]  # Ordered by priority
+    total_tokens: int
+    budget_used_pct: float
+    assembly_time_ms: float
+```
+
+---
+
+## Emotion Engine (Enhanced)
+
+**Module:** `hbllm.brain.emotion_engine.EmotionEngine`
+
+Enhanced with multi-signal emotion detection beyond keyword matching:
+
+- **LLM contextual inference** — Understands sarcasm, nuance, full-sentence emotion
+- **Behavioral pattern tracking** — Response times, message lengths, rapid-fire detection
+- **Error correlation** — Pipeline errors → frustration detection
+- **Per-tenant state cache** — `get_state(tenant_id)` for context fusion integration
+
+```python
+# Get tenant-scoped emotional state (for context fusion)
+state = engine.get_state("tenant_123")
+# {"dominant_emotion": "joy", "valence": 0.6, "arousal": 0.4}
+
+# Get behavioral adaptation hints
+hints = engine.get_adaptation_hints()
+# {"tone": "enthusiastic", "empathy_level": "moderate", ...}
+```
+
+---
+
+## Action Verification Bridge
+
+**Module:** `hbllm.brain.autonomy.verification_bridge.ActionVerificationBridge`
+
+Closes the **execute → verify → correct** feedback loop between `TaskGraphRuntime`
+and `WorldStateEngine`. After a task is executed, this bridge periodically checks
+whether the real-world state confirms the action succeeded.
+
+### Verification Flow
+
+```
+Task Executed → VERIFYING → [WorldState check] → COMPLETED
+                    ↓ (timeout)
+               CORRECTING → [Re-execute] → VERIFYING
+                    ↓ (max attempts)
+               UNCERTAIN → [Escalate to user]
+```
+
+### Usage
+
+```python
+from hbllm.brain.autonomy.verification_bridge import ActionVerificationBridge
+
+bridge = ActionVerificationBridge(
+    task_graph=brain.task_graph,
+    world_state=brain.world_state,
+    bus=brain.bus,
+    check_interval_s=5.0,
+)
+await bridge.start()
+
+# Auto-generates verification rules for IoT commands:
+# "turn on kitchen light" → VerificationRule(entity="kitchen_light", property="state", expected="on")
+```
+
 

@@ -137,9 +137,22 @@ async def bus():
 
 
 def pytest_collection_modifyitems(config, items):
-    """Dynamically skip PyTorch-dependent tests on environments without real PyTorch."""
+    """Auto-apply markers and dynamically skip PyTorch-dependent tests."""
     import sys
     from unittest.mock import MagicMock
+
+    # ── Auto-apply markers based on test directory ───────────────────────
+    for item in items:
+        path_str = str(item.fspath)
+        if "/integration/e2e/" in path_str:
+            item.add_marker(pytest.mark.e2e)
+            item.add_marker(pytest.mark.integration)
+        elif "/integration/" in path_str:
+            item.add_marker(pytest.mark.integration)
+        elif "/unit/" in path_str:
+            item.add_marker(pytest.mark.unit)
+
+    # ── Skip PyTorch-dependent tests when torch is mocked ────────────────
 
     # Check if torch is mocked
     torch_mocked = False

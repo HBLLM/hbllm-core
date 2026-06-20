@@ -46,17 +46,19 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Pass-through for health checks, studio dashboard, static files, and CORS preflight
+        # Pass-through for health checks, static files, and CORS preflight
+        _bypass_paths = [
+            "/health",
+            "/metrics",
+        ]
+        # Only expose /docs and /openapi.json in non-production environments
+        if os.environ.get("HBLLM_ENV", "").lower() != "production":
+            _bypass_paths.extend(["/docs", "/openapi.json"])
+
         if (
             request.method == "OPTIONS"
-            or request.url.path
-            in [
-                "/health",
-                "/metrics",
-                "/docs",
-                "/openapi.json",
-            ]
-            or request.url.path.startswith(("/admin/static", "/studio/"))
+            or request.url.path in _bypass_paths
+            or request.url.path.startswith(("/admin/static", "/studio/static", "/portal/static"))
         ):
             return await call_next(request)
 
@@ -93,12 +95,24 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 
         token = auth_header.split(" ")[1]
         try:
-            payload = jwt.decode(token, self.secret_key, algorithms=self.algorithms)
-            tenant_id = payload.get("tenant_id")
-            if not tenant_id:
+            payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=self.algorithms,
+                options={"require": ["tenant_id"]},
+            )
+
+            # Enforce expiration: reject tokens that lack an 'exp' claim in production
+            if os.environ.get("HBLLM_ENV", "").lower() == "production" and "exp" not in payload:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Token missing required 'exp' claim for production"},
+                )
+            if not payload.get("tenant_id"):
                 return JSONResponse(
                     status_code=401, content={"detail": "Token payload missing 'tenant_id'"}
                 )
+            tenant_id = payload["tenant_id"]
 
             # Securely inject the verified identity triplet into the request state
             request.state.tenant_id = tenant_id

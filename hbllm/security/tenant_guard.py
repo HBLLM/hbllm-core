@@ -97,7 +97,10 @@ def _get_guard_mode() -> TenantGuardMode:
     except LookupError:
         pass
 
-    env_mode = os.environ.get("HBLLM_TENANT_GUARD_MODE", "warn").lower()
+    # Default to 'strict' in production, 'warn' in development
+    hbllm_env = os.environ.get("HBLLM_ENV", "development").lower()
+    default_mode = "strict" if hbllm_env == "production" else "warn"
+    env_mode = os.environ.get("HBLLM_TENANT_GUARD_MODE", default_mode).lower()
     try:
         return TenantGuardMode(env_mode)
     except ValueError:

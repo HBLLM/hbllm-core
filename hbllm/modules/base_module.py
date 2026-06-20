@@ -51,7 +51,7 @@ class DomainModuleNode(Node):
         self.llm = llm
 
         self.has_lora = lora_state_dict is not None and self.model is not None
-        if self.has_lora:
+        if self.has_lora and self.model is not None:
             logger.info("DomainModuleNode '%s' registering LoRA adapter...", self.domain_name)
             LoRAManager.add_adapter(self.model, self.domain_name, lora_state_dict)
 

@@ -25,6 +25,7 @@ the MessageBus and operate asynchronously.
 | `vector_projector.py` | `VectorProjector` | Embedding projection |
 | `voice_config.py` | `VoiceConfig` | Audio pipeline configuration |
 | `voice_profile_store.py` | `VoiceProfileStore` | Speaker profile persistence |
+| `conversation_turn.py` | `ConversationTurnManager` | Full-duplex voice turn management |
 
 ## AudioInputNode
 
@@ -131,3 +132,61 @@ response = arc.check(input_text)
 | `perception.fused` | PerceptionFuser | Multi-modal fused event |
 | `perception.reflex` | ReflexArc | Triggered reflex action |
 | `perception.event` | PerceptionEventLog | All perception events |
+| `sensory.audio.start` | ConversationTurnManager | User started speaking |
+| `sensory.audio.stop` | ConversationTurnManager | User stopped speaking |
+| `sensory.audio.interrupt` | ConversationTurnManager | Barge-in detected |
+
+---
+
+## ConversationTurnManager
+
+**Module:** `hbllm.perception.conversation_turn.ConversationTurnManager`
+
+Full-duplex voice conversation state machine that manages turn-taking between
+the user and the system. Handles barge-in interrupts, silence timeouts, and
+continuous listening mode.
+
+### State Machine
+
+```
+IDLE → (wake word) → LISTENING → (transcription) → PROCESSING → (response) → SPEAKING
+                                                                     ↑ (barge-in) ↓
+                                                                     ← INTERRUPTED ←
+```
+
+### Usage
+
+```python
+from hbllm.perception.conversation_turn import ConversationTurnManager, TurnState
+
+mgr = ConversationTurnManager(
+    silence_timeout_s=3.0,      # Max silence before end-of-turn
+    processing_timeout_s=30.0,  # Max time waiting for LLM response
+    continuous_listen=True,     # Auto-resume listening after speaking
+)
+
+# Query current state
+snap = mgr.snapshot()
+# {"state": "idle", "turn_count": 0, "continuous_listen": true}
+```
+
+### TurnState Enum
+
+| State | Description |
+|-------|-------------|
+| `IDLE` | Waiting for wake word or input |
+| `LISTENING` | Actively capturing user speech |
+| `PROCESSING` | Transcription received, waiting for LLM |
+| `SPEAKING` | Playing TTS response |
+| `INTERRUPTED` | User barged in during playback |
+
+### Bus Topics
+
+| Topic | Direction | Payload |
+|-------|-----------|---------|
+| `sensory.audio.start` | Subscribe | User started speaking |
+| `sensory.audio.stop` | Subscribe | End of speech detected |
+| `sensory.audio.interrupt` | Subscribe | Barge-in during TTS |
+| `cognitive.response.ready` | Subscribe | LLM response available |
+| `tts.playback.done` | Subscribe | TTS finished playing |
+

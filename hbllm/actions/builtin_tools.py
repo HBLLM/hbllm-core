@@ -114,8 +114,20 @@ async def tool_python_exec(code: str) -> ToolResult:
 
 
 async def tool_shell_exec(command: str) -> ToolResult:
-    """Execute a safe shell command."""
-    parts = command.strip().split()
+    """Execute a safe shell command.
+
+    Uses ``create_subprocess_exec`` (not ``_shell``) to prevent shell
+    metacharacter injection (e.g. ``ls; rm -rf /``).
+    """
+    import shlex
+
+    try:
+        parts = shlex.split(command)
+    except ValueError as e:
+        return ToolResult(
+            tool="shell_exec", success=False, output="", error=f"Invalid command syntax: {e}"
+        )
+
     if not parts:
         return ToolResult(tool="shell_exec", success=False, output="", error="Empty command")
 
@@ -129,8 +141,8 @@ async def tool_shell_exec(command: str) -> ToolResult:
         )
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
+        proc = await asyncio.create_subprocess_exec(
+            *parts,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(Path.home()),
@@ -176,20 +188,42 @@ async def tool_file_read(path: str) -> ToolResult:
 async def tool_file_write(path: str, content: str) -> ToolResult:
     """Write content to a file."""
     try:
-        p = Path(path).expanduser().resolve()
-        # Safety: only allow writes within home directory
+        p = Path(path).expanduser()
         home = Path.home()
-        if not str(p).startswith(str(home)):
+
+        # Safety: reject paths outside home BEFORE resolving symlinks
+        # to prevent symlink-based traversal (e.g. ~/link -> /etc/)
+        try:
+            p_resolved = p.resolve(strict=False)
+        except (OSError, ValueError):
+            return ToolResult(
+                tool="file_write",
+                success=False,
+                output="",
+                error="Cannot resolve path",
+            )
+
+        if not p_resolved.is_relative_to(home):
             return ToolResult(
                 tool="file_write",
                 success=False,
                 output="",
                 error="Writes only allowed within home directory",
             )
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+
+        # Also check the un-resolved path to block symlinks escaping home
+        if p.is_symlink() and not p.resolve().is_relative_to(home):
+            return ToolResult(
+                tool="file_write",
+                success=False,
+                output="",
+                error="Symlink target is outside home directory",
+            )
+
+        p_resolved.parent.mkdir(parents=True, exist_ok=True)
+        p_resolved.write_text(content)
         return ToolResult(
-            tool="file_write", success=True, output=f"Written {len(content)} bytes to {p}"
+            tool="file_write", success=True, output=f"Written {len(content)} bytes to {p_resolved}"
         )
     except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
         return ToolResult(tool="file_write", success=False, output="", error=str(e))

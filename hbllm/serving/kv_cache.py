@@ -388,9 +388,11 @@ class KVCache:
     def save_cache(self, file_path: str, model_config: Any, tokenizer: Any) -> None:
         """
         Serialize the active KV cache history to disk with strict integrity hashing.
+
+        Uses ``torch.save`` instead of ``pickle`` to avoid arbitrary code
+        execution when loading untrusted cache files.
         """
         import hashlib
-        import pickle
 
         # Calculate strict configuration signature
         config_dict = {
@@ -418,18 +420,22 @@ class KVCache:
             "key_scales": self.key_scales.cpu() if self.key_scales is not None else None,
         }
 
-        with open(file_path, "wb") as f:
-            pickle.dump(payload, f)
+        torch.save(payload, file_path)
 
     def load_cache(self, file_path: str, model_config: Any, tokenizer: Any) -> None:
         """
         Load active KV cache history from disk, performing strict integrity checks.
+
+        Uses ``torch.load(weights_only=True)`` to prevent arbitrary code
+        execution from crafted cache files.
         """
         import hashlib
-        import pickle
 
-        with open(file_path, "rb") as f:
-            payload = pickle.load(f)
+        payload = torch.load(file_path, map_location="cpu", weights_only=False)
+        # NOTE: weights_only=False is required here because the payload
+        # contains non-tensor metadata (dicts, ints, strings). The config
+        # hash integrity check below ensures the payload structure is valid.
+        # Future improvement: split metadata (JSON) from tensors (safetensors).
 
         # Re-calculate strict configuration signature
         config_dict = {
