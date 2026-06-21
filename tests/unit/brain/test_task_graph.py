@@ -25,13 +25,13 @@ def runtime(tmp_path):
 def _make_goal(**kwargs) -> Goal:
     defaults: dict[str, Any] = {"name": "Test Goal", "status": GoalStatus.ACTIVE}
     defaults.update(kwargs)
-    return Goal(**defaults)
+    return Goal(**defaults)  # type: ignore[arg-type]
 
 
 def _make_task(**kwargs) -> TaskNode:
     defaults: dict[str, Any] = {"name": "Test Task", "action_topic": "test.action"}
     defaults.update(kwargs)
-    return TaskNode(**defaults)
+    return TaskNode(**defaults)  # type: ignore[arg-type]
 
 
 class TestGoalLifecycle:

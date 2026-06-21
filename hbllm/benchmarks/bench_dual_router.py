@@ -61,7 +61,7 @@ class DualRouterBenchmark:
             external_llm = MagicMock()
             external_llm.generate = AsyncMock(return_value=MagicMock(content="external response"))
 
-            router = DualLLMRouter(local_llm=local_llm, external_llm=external_llm)
+            router = DualLLMRouter(local=local_llm, external=external_llm)
 
             # Test classify() latency
             queries = [
@@ -215,10 +215,10 @@ class DualRouterBenchmark:
             external_llm.generate = AsyncMock(side_effect=ConnectionError("External LLM down"))
 
             router = DualLLMRouter(
-                local_llm=local_llm,
-                external_llm=external_llm,
-                failure_threshold=2,
-                recovery_timeout=60.0,  # Long timeout so circuit stays open
+                local=local_llm,
+                external=external_llm,
+                circuit_failure_threshold=2,
+                circuit_recovery_timeout=60.0,  # Long timeout so circuit stays open
             )
 
             # Force circuit open

@@ -85,7 +85,7 @@ def _test_config(tmp_path, **overrides) -> BrainConfig:
         inject_mesh=False,
     )
     defaults.update(overrides)
-    return BrainConfig(**defaults)
+    return BrainConfig(**defaults)  # type: ignore[arg-type]
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────

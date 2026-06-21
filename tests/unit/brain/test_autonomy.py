@@ -311,7 +311,7 @@ class TestAttentionSystem:
             "urgency": 0.5,
         }
         defaults.update(kwargs)
-        return AttentionEvent(**defaults)
+        return AttentionEvent(**defaults)  # type: ignore[arg-type]
 
     def test_basic_scoring(self):
         attn = AttentionSystem()
