@@ -19,6 +19,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 from hbllm.benchmarks.runner import BenchmarkReport, BenchmarkResult
+from hbllm.brain.dual_llm_router import TaskTier
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +224,9 @@ class DualRouterBenchmark:
             # Force circuit open
             for _ in range(2):
                 try:
-                    await router.generate("complex query requiring external", tier="external")
+                    await router.generate(
+                        "complex query requiring external", tier=TaskTier.EXTERNAL
+                    )
                 except Exception as e:
                     logger.debug(
                         "[BenchDualRouter] Measure fallback latency (circuit open → local): %s", e
@@ -232,7 +235,7 @@ class DualRouterBenchmark:
             for _ in range(100):
                 t0 = time.perf_counter()
                 try:
-                    await router.generate("This should fall back to local", tier="external")
+                    await router.generate("This should fall back to local", tier=TaskTier.EXTERNAL)
                 except Exception as e:
                     logger.debug("[BenchDualRouter] non-critical error: %s", e)
                 latencies.append((time.perf_counter() - t0) * 1000)
