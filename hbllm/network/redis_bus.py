@@ -46,7 +46,7 @@ class RedisBus(MessageBus):
         """
         import os
 
-        self.redis_url = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
+        self.redis_url: str = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
         self.auth_secret = auth_secret
         self.client: Any | None = None
         self.pubsub: Any | None = None

@@ -63,7 +63,7 @@ class RedisRegistry(ServiceRegistry):
             health_check_interval=health_check_interval,
             node_timeout=node_timeout,
         )
-        self.redis_url = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
+        self.redis_url: str = redis_url or os.getenv("HBLLM_REDIS_URL", "redis://localhost:6379")
         self.ttl = ttl
         self._redis: Any | None = None
         self._listener_task: asyncio.Task[Any] | None = None
