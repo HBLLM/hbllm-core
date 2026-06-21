@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,7 +79,7 @@ class DeviceBridge:
         self.bus = bus
         self._devices: dict[str, DeviceInfo] = {}  # device_id → DeviceInfo
         self._tenant_devices: dict[str, set[str]] = {}  # tenant_id → {device_ids}
-        self._handoff_log: list[SessionHandoff] = []
+        self._handoff_log: deque[SessionHandoff] = deque(maxlen=1000)
         self._running = False
         self._presence_task: asyncio.Task[Any] | None = None
 

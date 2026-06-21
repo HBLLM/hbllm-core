@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -94,6 +94,7 @@ class OfflineManager:
         failure_threshold: int = 3,
         bus: Any | None = None,
         cache_size: int = 100,
+        max_queue: int = 500,
     ) -> None:
         self.health_endpoints = health_endpoints or {}
         self.check_interval_s = check_interval_s
@@ -112,8 +113,8 @@ class OfflineManager:
         self._running = False
 
         # Request queue (for replay on reconnect)
-        self._queue: list[QueuedRequest] = []
-        self._max_queue = 500
+        self._queue: deque[QueuedRequest] = deque(maxlen=max_queue)
+        self._max_queue = max_queue
 
         # Response cache (LRU)
         self._cache: OrderedDict[str, Any] = OrderedDict()
@@ -285,10 +286,6 @@ class OfflineManager:
         payload: dict[str, Any],
     ) -> None:
         """Queue a request for replay when connectivity returns."""
-        if len(self._queue) >= self._max_queue:
-            # Drop oldest
-            self._queue.pop(0)
-
         self._queue.append(
             QueuedRequest(
                 request_id=request_id,
