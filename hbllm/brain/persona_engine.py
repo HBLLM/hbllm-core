@@ -1,5 +1,5 @@
 """
-PersonaEngine — Persistent personality profiles for Jarvis-like interactions.
+PersonaEngine — Persistent personality profiles for intelligent assistant interactions.
 
 Unlike IdentityNode (which handles ethics/constraints), PersonaEngine manages
 the *style* of interaction: formality level, humor, verbosity, emoji usage,
