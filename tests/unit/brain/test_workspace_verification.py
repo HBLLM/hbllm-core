@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.execution_node import ExecutionNode
 from hbllm.brain.workspace_node import WorkspaceNode
@@ -8,7 +9,7 @@ from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     b = InProcessBus()
     await b.start()

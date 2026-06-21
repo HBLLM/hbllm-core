@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.critic_node import CriticNode
 from hbllm.brain.workspace_node import WorkspaceNode
@@ -40,7 +41,7 @@ class MockIntuitionNode:
         await self.bus.publish("workspace.thought", thought)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def critic_env():
     bus = InProcessBus()
     await bus.start()

@@ -11,6 +11,7 @@ Tests the complete flow using only HBLLM Core modules:
 """
 
 import pytest
+import pytest_asyncio
 
 from hbllm.memory.episodic import EpisodicMemory
 from hbllm.memory.semantic import SemanticMemory
@@ -192,7 +193,7 @@ class TestKnowledgeBase:
 class TestEpisodicTenantIsolation:
     """Test that episodic memory properly isolates tenants."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_episodic(self, tmp_path):
         self.db_path = str(tmp_path / "tenant_iso.db")
         self.db = EpisodicMemory(self.db_path)
@@ -237,7 +238,7 @@ class TestFullTenantJourney:
     API Key → Auth → Store Memory → Search → Verify Isolation
     """
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_journey(self, tmp_path):
         self.akm = ApiKeyManager()
         self.rl = RateLimiter(requests_per_minute=60, burst_size=10)

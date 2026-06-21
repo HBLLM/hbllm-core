@@ -13,13 +13,14 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def memory_bus_system(monkeypatch):
     """Boot a mock InProcessBus and MemoryNode with an in-memory database."""
     bus = InProcessBus()

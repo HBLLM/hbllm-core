@@ -9,6 +9,7 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
@@ -17,7 +18,7 @@ from hbllm.perception.audio_in_node import (
 )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def audio_node():
     """Set up AudioInputNode with bus (no model loaded)."""
     bus = InProcessBus()

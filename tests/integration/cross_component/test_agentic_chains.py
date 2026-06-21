@@ -12,6 +12,7 @@ Validates that:
 import json
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.tool_router import ToolRouterNode
 from hbllm.brain.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
@@ -73,7 +74,7 @@ def test_observation_node_does_not_propagate_flag():
 # ─── Unit Tests: ToolRouterNode ──────────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     b = InProcessBus()
     await b.start()

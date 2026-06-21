@@ -1,6 +1,7 @@
 """Tests for Load Balancer — round-robin, least-loaded, capability-match strategies."""
 
 import pytest
+import pytest_asyncio
 
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry
 from hbllm.network.load_balancer import LoadBalancer
@@ -8,7 +9,7 @@ from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
 from hbllm.network.registry import ServiceRegistry
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def lb_setup():
     """Create registry with 3 domain nodes and a load balancer."""
     registry = ServiceRegistry()

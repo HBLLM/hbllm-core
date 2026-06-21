@@ -3,6 +3,7 @@
 import json
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.mcp_client_node import McpClientNode, McpTool
 from hbllm.network.bus import InProcessBus
@@ -14,7 +15,7 @@ from hbllm.serving.mcp_server import HBLLM_TOOLS, HBLLMMcpServer
 class TestMcpServer:
     """Tests for the HBLLM MCP Server."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def server(self):
         bus = InProcessBus()
         await bus.start()

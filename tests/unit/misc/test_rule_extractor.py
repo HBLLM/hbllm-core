@@ -5,6 +5,7 @@ Tests for RuleExtractorNode — pattern mining from high-salience events.
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.rule_extractor import (
     ExtractedRule,
@@ -67,7 +68,7 @@ class TestExtractRulesFromText:
 
 
 class TestRuleExtractorNode:
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def extractor_system(self):
         bus = InProcessBus()
         await bus.start()

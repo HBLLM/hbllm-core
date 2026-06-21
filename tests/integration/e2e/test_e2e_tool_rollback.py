@@ -12,12 +12,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.control.intervention import InterventionAPI, ReversibilityPolicy
 from hbllm.network.bus import InProcessBus
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def intervention_bus_system():
     """Boot InProcessBus and setup mock autonomy core and InterventionAPI."""
     bus = InProcessBus()

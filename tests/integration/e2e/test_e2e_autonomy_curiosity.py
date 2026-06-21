@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.autonomy.loop import AutonomyCore
 from hbllm.brain.autonomy.state_machine import CognitiveState
@@ -22,7 +23,7 @@ from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def autonomy_curiosity_system():
     """Boot InProcessBus, CuriosityNode, SpawnerNode, and AutonomyCore together."""
     bus = InProcessBus()

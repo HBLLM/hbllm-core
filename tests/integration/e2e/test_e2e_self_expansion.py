@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.spawner_node import SpawnerNode, _classify_domain_rank
 from hbllm.network.bus import InProcessBus
@@ -28,7 +29,7 @@ def test_lora_rank_classification() -> None:
     assert _classify_domain_rank("unknown_simple_domain") == 8
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def spawner_system():
     """Boot InProcessBus and SpawnerNode with mock model/tokenizer."""
     bus = InProcessBus()

@@ -1,6 +1,7 @@
 """Tests for CognitivePipeline and ContextWindowManager."""
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.context_window import (
     ContextBlock,
@@ -136,7 +137,7 @@ class TestPipelineResult:
 
 
 class TestCognitivePipeline:
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def pipeline(self):
         bus = InProcessBus()
         await bus.start()

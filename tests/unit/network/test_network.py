@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.circuit_breaker import (
@@ -186,7 +187,7 @@ class TestNode:
 # ──────────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     b = InProcessBus()
     await b.start()

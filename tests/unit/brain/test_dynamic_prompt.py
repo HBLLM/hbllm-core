@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.browser_node import BrowserNode
 from hbllm.actions.execution_node import ExecutionNode
@@ -277,7 +278,7 @@ class TestGlobalBudget:
 # ── Integration tests for get_chat_memories ────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def memory_bus(tmp_path):
     """Set up a bus with a live MemoryNode for integration tests."""
     bus = InProcessBus()

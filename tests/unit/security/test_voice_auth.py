@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 import pytest
+import pytest_asyncio
 
 from hbllm.security.voice_auth import (
     VerificationResult,
@@ -14,7 +15,7 @@ from hbllm.security.voice_auth import (
 class TestVoiceEnrollment:
     """Tests for voice profile enrollment."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def auth(self, tmp_path):
         a = VoiceAuthenticator(
             db_path=tmp_path / "voice_profiles.db",
@@ -69,7 +70,7 @@ class TestVoiceEnrollment:
 class TestVoiceVerification:
     """Tests for speaker verification."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def auth(self, tmp_path):
         a = VoiceAuthenticator(
             db_path=tmp_path / "voice_profiles.db",
@@ -119,7 +120,7 @@ class TestVoiceVerification:
 class TestPINFallback:
     """Tests for PIN-based fallback auth."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def auth(self, tmp_path):
         a = VoiceAuthenticator(
             db_path=tmp_path / "voice_profiles.db",
@@ -152,7 +153,7 @@ class TestPINFallback:
 class TestReVerification:
     """Tests for session re-verification."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def auth(self, tmp_path):
         a = VoiceAuthenticator(
             db_path=tmp_path / "voice_profiles.db",

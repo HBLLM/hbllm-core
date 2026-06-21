@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.evaluation_node import EvaluationNode, EvaluationReport
 from hbllm.network.bus import InProcessBus
@@ -140,7 +141,7 @@ class TestEvaluationReport:
 # ── Integration Tests: Bus Interaction ────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def eval_env():
     bus = InProcessBus()
     await bus.start()
@@ -160,7 +161,11 @@ async def test_experience_triggers_evaluation(eval_env):
     bus, node = eval_env
 
     evaluations = []
-    await bus.subscribe("system.evaluation", lambda msg: evaluations.append(msg))
+
+    async def _on_evaluations_163(msg):
+        evaluations.append(msg)
+
+    await bus.subscribe("system.evaluation", _on_evaluations_163)
 
     # Simulate DecisionNode output
     experience_msg = Message(
@@ -189,7 +194,11 @@ async def test_negative_feedback_triggers_micro_learn(eval_env):
     bus, node = eval_env
 
     micro_learn_events = []
-    await bus.subscribe("system.micro_learn", lambda msg: micro_learn_events.append(msg))
+
+    async def _on_micro_learn_events_192(msg):
+        micro_learn_events.append(msg)
+
+    await bus.subscribe("system.micro_learn", _on_micro_learn_events_192)
 
     # First seed a pending context
     corr_id = "test-feedback-123"

@@ -1,13 +1,14 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.world_model_node import WorldModelNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def simulated_bus():
     bus = InProcessBus()
     await bus.start()

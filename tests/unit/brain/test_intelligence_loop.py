@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.evaluation_node import EvaluationNode
@@ -103,14 +104,14 @@ def _make_reflection_msg(rules: list[dict] | None = None) -> Message:
 class TestEvaluationNode:
     """Test EvaluationNode scoring and feedback loop."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def eval_node(self, bus, tmp_path):
         metrics = CognitiveMetrics(data_dir=str(tmp_path))
         goal_mgr = GoalManager(data_dir=str(tmp_path))
@@ -224,14 +225,14 @@ class TestEvaluationNode:
 class TestSkillCompilerNode:
     """Test SkillCompilerNode pattern detection and compilation."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def compiler(self, bus, tmp_path):
         registry = SkillRegistry(data_dir=str(tmp_path))
         node = SkillCompilerNode(
@@ -315,14 +316,14 @@ class TestSkillCompilerNode:
 class TestReflectionNode:
     """Test ReflectionNode periodic analysis and insight generation."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def reflection(self, bus, tmp_path):
         metrics = CognitiveMetrics(data_dir=str(tmp_path))
         goal_mgr = GoalManager(data_dir=str(tmp_path))
@@ -464,7 +465,7 @@ class TestReflectionNode:
 class TestV2FactoryIntegration:
     """Verify v2 nodes are wired into Brain via factory."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def brain(self, tmp_path):
         from hbllm.brain.factory import BrainConfig, BrainFactory
         from hbllm.serving.provider import LLMProvider, LLMResponse

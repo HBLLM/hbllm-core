@@ -81,7 +81,11 @@ async def test_execute_move_command():
     await bus.start()
 
     events = []
-    await bus.subscribe("ros2.event", lambda msg: events.append(msg))
+
+    async def _on_events_83(msg):
+        events.append(msg)
+
+    await bus.subscribe("ros2.event", _on_events_83)
 
     node = Ros2Node(node_id="ros2_move", ros2_enabled=False)
     await node.start(bus)
@@ -110,7 +114,11 @@ async def test_execute_stop_command():
     await bus.start()
 
     events = []
-    await bus.subscribe("ros2.event", lambda msg: events.append(msg))
+
+    async def _on_events_112(msg):
+        events.append(msg)
+
+    await bus.subscribe("ros2.event", _on_events_112)
 
     node = Ros2Node(node_id="ros2_stop", ros2_enabled=False)
     await node.start(bus)
@@ -186,7 +194,11 @@ async def test_navigate_command():
     await bus.start()
 
     events = []
-    await bus.subscribe("ros2.event", lambda msg: events.append(msg))
+
+    async def _on_events_188(msg):
+        events.append(msg)
+
+    await bus.subscribe("ros2.event", _on_events_188)
 
     node = Ros2Node(node_id="ros2_nav", ros2_enabled=False)
     await node.start(bus)
@@ -218,7 +230,11 @@ async def test_query_all_robots():
     await bus.start()
 
     responses = []
-    await bus.subscribe("ros2.query.response", lambda msg: responses.append(msg))
+
+    async def _on_responses_220(msg):
+        responses.append(msg)
+
+    await bus.subscribe("ros2.query.response", _on_responses_220)
 
     node = Ros2Node(node_id="ros2_query", ros2_enabled=False)
     await node.start(bus)
@@ -248,7 +264,11 @@ async def test_query_available_commands():
     await bus.start()
 
     responses = []
-    await bus.subscribe("ros2.query.response", lambda msg: responses.append(msg))
+
+    async def _on_responses_250(msg):
+        responses.append(msg)
+
+    await bus.subscribe("ros2.query.response", _on_responses_250)
 
     node = Ros2Node(node_id="ros2_cmds", ros2_enabled=False)
     await node.start(bus)
@@ -279,7 +299,11 @@ async def test_register_and_execute_behavior():
     await bus.start()
 
     events = []
-    await bus.subscribe("ros2.event", lambda msg: events.append(msg))
+
+    async def _on_events_281(msg):
+        events.append(msg)
+
+    await bus.subscribe("ros2.event", _on_events_281)
 
     node = Ros2Node(node_id="ros2_behavior", ros2_enabled=False)
     await node.start(bus)

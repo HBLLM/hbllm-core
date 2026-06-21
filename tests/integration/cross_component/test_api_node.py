@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.api_node import ApiNode
 from hbllm.network.bus import InProcessBus
@@ -8,7 +9,7 @@ from hbllm.network.messages import Message, MessageType
 from tests.mock_llm import MockLLM
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def api_env():
     bus = InProcessBus()
     await bus.start()
