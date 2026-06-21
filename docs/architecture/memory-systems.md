@@ -1,11 +1,11 @@
 ---
 title: "Memory Systems — Multi-Tier Cognitive Memory"
-description: "Deep-dive into HBLLM's memory systems: Working, Episodic, Semantic, Procedural, Value, and Knowledge Graph memory."
+description: "Deep-dive into HBLLM's 9 memory subsystems: Working, Episodic, Semantic, Procedural, Value, Knowledge Graph, Spatial, Temporal Patterns, and Importance Scoring."
 ---
 
 # Memory Systems
 
-HBLLM implements **multiple distinct memory types** mirroring human cognitive psychology. Each memory system operates independently with its own storage backend and query interface.
+HBLLM implements **9 distinct memory subsystems** mirroring human cognitive psychology. Each memory system operates independently with its own storage backend and query interface.
 
 ## Overview
 
@@ -17,12 +17,19 @@ graph LR
     VM["❤️ Value Memory<br/>(preferences)"]
     KG["🔗 Knowledge Graph<br/>(entity relations)"]
     WM["📋 Working Memory<br/>(context window)"]
+    SPM["📍 Spatial Memory<br/>(locations & maps)"]
+    TPM["⏰ Temporal Patterns<br/>(recurring patterns)"]
+    IS["⭐ Importance Scorer<br/>(salience ranking)"]
     
     EM --> SM
     SM --> KG
     PM --> SM
     VM --> SM
     WM --> SM
+    SPM --> SM
+    TPM --> SM
+    IS --> EM
+    IS --> SM
 ```
 
 ## Memory Module Structure
@@ -36,6 +43,9 @@ All memory classes live in `hbllm/memory/`:
 | `procedural.py` | `ProceduralMemory` | Learned tool patterns and skills |
 | `value_memory.py` | `ValueMemory` | Per-tenant preference/reward signals |
 | `knowledge_graph.py` | `KnowledgeGraph` | LRU-bounded entity-relation graphs |
+| `spatial_memory.py` | `SpatialMemory` | Location-aware memory with proximity search |
+| `temporal_patterns.py` | `TemporalPatternTracker` | Recurring pattern detection across time |
+| `importance_scorer.py` | `ImportanceScorer` | Multi-factor salience scoring for prioritization |
 | `memory_node.py` | `MemoryNode` | Bus-connected node wrapping all systems |
 | `concept_extractor.py` | — | Concept extraction utilities |
 
@@ -153,6 +163,79 @@ kg.add_entity("pytorch", label="PyTorch", entity_type="framework")
 kg.add_relation("pytorch", "python", "built_with")
 
 neighbors = kg.get_neighbors("python")
+```
+
+---
+
+## 6. Spatial Memory
+
+**Class:** `hbllm.memory.spatial_memory.SpatialMemory`  
+**Storage:** In-memory spatial index with optional SQLite persistence.
+
+Maintains a mental map of locations, rooms, devices, and spatial relationships. Supports proximity-based queries and spatial reasoning.
+
+```python
+from hbllm.memory.spatial_memory import SpatialMemory
+
+sm = SpatialMemory()
+sm.register_location("living_room", x=0.0, y=0.0, floor=1)
+sm.register_location("kitchen", x=5.0, y=0.0, floor=1)
+sm.register_device("speaker_01", location="living_room")
+
+nearby = sm.find_nearby("living_room", radius=10.0)
+```
+
+---
+
+## 7. Temporal Patterns
+
+**Class:** `hbllm.memory.temporal_patterns.TemporalPatternTracker`  
+**Storage:** SQLite-backed pattern database.
+
+Detects recurring patterns across time windows (hourly, daily, weekly, seasonal). Used by the autonomy system for proactive scheduling and anticipatory actions.
+
+```python
+from hbllm.memory.temporal_patterns import TemporalPatternTracker
+
+tp = TemporalPatternTracker(db_path="patterns.db")
+tp.record_event("user_wakes", hour=7, day_of_week=1)
+tp.record_event("user_wakes", hour=7, day_of_week=2)
+
+patterns = tp.detect_patterns("user_wakes", min_occurrences=5)
+# [{"pattern": "daily", "time": "07:00", "confidence": 0.85}]
+```
+
+---
+
+## 8. Importance Scorer
+
+**Class:** `hbllm.memory.importance_scorer.ImportanceScorer`  
+**Role:** Multi-factor salience scoring for memory prioritization.
+
+Scores memories across multiple dimensions to determine which should be retained, consolidated, or pruned during sleep cycles.
+
+**Scoring factors:**
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Recency | 0.25 | How recently the memory was accessed |
+| Frequency | 0.20 | How often the memory has been retrieved |
+| Emotional valence | 0.15 | Strength of associated reward/penalty signals |
+| Goal relevance | 0.20 | Alignment with active goals and tasks |
+| Uniqueness | 0.10 | Information entropy relative to existing knowledge |
+| User reference | 0.10 | Whether the user explicitly referenced this information |
+
+```python
+from hbllm.memory.importance_scorer import ImportanceScorer
+
+scorer = ImportanceScorer()
+score = scorer.score(
+    recency_hours=2.0,
+    access_count=5,
+    emotional_valence=0.8,
+    goal_alignment=0.6,
+)
+# score: 0.72 (retain during consolidation)
 ```
 
 ---
