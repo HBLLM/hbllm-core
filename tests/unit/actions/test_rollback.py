@@ -1,156 +1,225 @@
-"""Tests for ActionTransaction and RollbackRegistry."""
+"""Tests for RollbackRegistry and ActionTransaction."""
 
 import pytest
 
 from hbllm.actions.rollback import (
     ActionTransaction,
     RollbackRegistry,
-    StateSnapshot,
-    TransactionStatus,
 )
 
 
-class TestRollbackRegistry:
-    """Tests for action → undo mapping."""
+@pytest.fixture
+def registry():
+    return RollbackRegistry()
 
-    @pytest.fixture
-    def registry(self):
-        return RollbackRegistry()
 
-    def test_reversible_actions_count(self, registry):
-        reversible = registry.list_reversible()
-        assert len(reversible) >= 10
+# ── Registry Tests ───────────────────────────────────────────────────────────
 
-    def test_file_create_undo(self, registry):
-        undo = registry.get_undo("file.create")
-        assert undo is not None
-        assert undo["action"] == "file.delete"
 
-    def test_light_on_off(self, registry):
-        assert registry.is_reversible("iot.light.on")
-        undo = registry.get_undo("iot.light.on")
-        assert undo["action"] == "iot.light.off"
-
-    def test_lock_undo(self, registry):
-        undo = registry.get_undo("iot.lock.unlock")
-        assert undo["action"] == "iot.lock.lock"
-
-    def test_notification_irreversible(self, registry):
-        assert not registry.is_reversible("system.notification.send")
-
-    def test_unknown_action_none(self, registry):
-        assert registry.get_undo("totally.unknown") is None
-        assert not registry.is_reversible("totally.unknown")
-
-    def test_custom_registration(self, registry):
-        registry.register("custom.deploy", "custom.rollback")
-        assert registry.is_reversible("custom.deploy")
-        undo = registry.get_undo("custom.deploy")
-        assert undo["action"] == "custom.rollback"
-
-    def test_build_undo_params(self, registry):
-        params = registry.build_undo_params(
-            "iot.light.on",
-            {"device_id": "living_room"},
-        )
-        assert params == {"device_id": "living_room"}
-
-    def test_build_undo_params_with_state(self, registry):
-        snap = StateSnapshot(key="temp", value=21)
-        params = registry.build_undo_params(
-            "iot.thermostat.set",
-            {"device_id": "hvac"},
-            pre_state=snap,
-        )
-        assert params is not None
-        assert params.get("value") == 21
+class TestRegistration:
+    def test_register_handler(self, registry):
+        registry.register("file.create", description="Create a file")
+        assert registry.has_handler("file.create")
+        assert not registry.has_handler("file.delete")
 
     def test_stats(self, registry):
-        s = registry.stats()
-        assert s["total_registered"] >= 12
-        assert s["reversible"] >= 10
+        registry.register("a")
+        registry.register("b")
+        stats = registry.stats()
+        assert "a" in stats["registered_handlers"]
+        assert "b" in stats["registered_handlers"]
+
+
+# ── Execute with Rollback Tests ──────────────────────────────────────────────
+
+
+class TestExecuteWithRollback:
+    @pytest.mark.asyncio
+    async def test_successful_execution(self, registry):
+        executed = []
+
+        async def do_action(**kwargs):
+            executed.append(kwargs)
+
+        result = await registry.execute_with_rollback(
+            "test.action",
+            do_action,
+            {"key": "value"},
+        )
+        assert result.success is True
+        assert result.rolled_back is False
+        assert len(executed) == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_execution_triggers_rollback(self, registry):
+        undo_called = []
+
+        async def failing_action(**kwargs):
+            raise RuntimeError("boom")
+
+        async def undo_fn(pre_state):
+            undo_called.append(pre_state)
+            return True
+
+        registry.register(
+            "risky.action",
+            snapshot_fn=lambda params: {"backup": True},
+            undo_fn=undo_fn,
+        )
+
+        result = await registry.execute_with_rollback(
+            "risky.action",
+            failing_action,
+            {"x": 1},
+        )
+        assert result.success is False
+        assert result.rolled_back is True
+        assert result.error == "boom"
+        assert len(undo_called) == 1
+        assert undo_called[0] == {"backup": True}
+
+    @pytest.mark.asyncio
+    async def test_failed_execution_no_handler(self, registry):
+        """Failure without a registered undo handler."""
+
+        async def failing_action(**kwargs):
+            raise RuntimeError("fail")
+
+        result = await registry.execute_with_rollback(
+            "unknown.action",
+            failing_action,
+        )
+        assert result.success is False
+        assert result.rolled_back is False
+
+    @pytest.mark.asyncio
+    async def test_snapshot_captured(self, registry):
+        state = {"counter": 5}
+
+        registry.register(
+            "increment",
+            snapshot_fn=lambda params: {"old_value": state["counter"]},
+        )
+
+        async def increment(**kwargs):
+            state["counter"] += 1
+
+        result = await registry.execute_with_rollback("increment", increment)
+        assert result.snapshot is not None
+        assert result.snapshot.pre_state == {"old_value": 5}
+
+
+# ── Undo Last Tests ──────────────────────────────────────────────────────────
+
+
+class TestUndoLast:
+    @pytest.mark.asyncio
+    async def test_undo_last_action(self, registry):
+        undo_calls = []
+
+        async def undo(pre_state):
+            undo_calls.append(pre_state)
+            return True
+
+        registry.register("do.thing", undo_fn=undo)
+
+        async def do_thing(**kwargs):
+            pass
+
+        await registry.execute_with_rollback("do.thing", do_thing, tenant_id="t1")
+        success = await registry.undo_last(tenant_id="t1")
+        assert success is True
+        assert len(undo_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_undo_empty_history(self, registry):
+        success = await registry.undo_last(tenant_id="empty")
+        assert success is False
+
+    @pytest.mark.asyncio
+    async def test_no_double_undo(self, registry):
+        undo_calls = []
+
+        async def undo(pre_state):
+            undo_calls.append(1)
+            return True
+
+        registry.register("act", undo_fn=undo)
+
+        async def act(**kwargs):
+            pass
+
+        await registry.execute_with_rollback("act", act, tenant_id="t1")
+        await registry.undo_last(tenant_id="t1")
+        # Second undo should find nothing undoable
+        success = await registry.undo_last(tenant_id="t1")
+        assert success is False
+        assert len(undo_calls) == 1
+
+
+# ── History Tests ────────────────────────────────────────────────────────────
+
+
+class TestHistory:
+    @pytest.mark.asyncio
+    async def test_history_tracked_per_tenant(self, registry):
+        async def noop(**kwargs):
+            pass
+
+        await registry.execute_with_rollback("a", noop, tenant_id="t1")
+        await registry.execute_with_rollback("b", noop, tenant_id="t2")
+
+        h1 = registry.get_history("t1")
+        h2 = registry.get_history("t2")
+        assert len(h1) == 1
+        assert len(h2) == 1
+        assert h1[0].action_name == "a"
+        assert h2[0].action_name == "b"
+
+
+# ── Transaction Context Manager Tests ────────────────────────────────────────
 
 
 class TestActionTransaction:
-    """Tests for multi-step transaction execution."""
+    @pytest.mark.asyncio
+    async def test_committed_transaction(self, registry):
+        registry.register("create", snapshot_fn=lambda p: {"snap": True})
 
-    @pytest.fixture
-    def registry(self):
-        return RollbackRegistry()
+        async with ActionTransaction(registry, "create", {"path": "/tmp"}) as txn:
+            # Simulate work
+            txn.commit()
+
+        history = registry.get_history()
+        assert len(history) == 1
+        assert history[0].committed is True
 
     @pytest.mark.asyncio
-    async def test_successful_transaction(self, registry):
-        """All steps complete → COMPLETED status."""
-        executed = []
+    async def test_auto_rollback_on_exception(self, registry):
+        undo_calls = []
 
-        async def executor(action, params):
-            executed.append(action)
-            return {"ok": True}
+        async def undo(pre_state):
+            undo_calls.append(pre_state)
+            return True
 
-        tx = ActionTransaction("tx-1", registry, executor=executor)
-        tx.add_step("iot.light.on", {"device_id": "living_room"})
-        tx.add_step("iot.light.on", {"device_id": "kitchen"})
+        registry.register("risky", snapshot_fn=lambda p: {"x": 1}, undo_fn=undo)
 
-        result = await tx.execute()
-        assert result.status == TransactionStatus.COMPLETED
-        assert len(executed) == 2
+        async with ActionTransaction(registry, "risky") as _txn:
+            raise ValueError("something went wrong")
 
-    @pytest.mark.asyncio
-    async def test_failure_triggers_rollback(self, registry):
-        """Step failure → previous steps are rolled back."""
-        call_log = []
-
-        async def executor(action, params):
-            call_log.append(action)
-            if action == "iot.thermostat.set":
-                raise RuntimeError("Thermostat offline")
-            return {"ok": True}
-
-        tx = ActionTransaction("tx-2", registry, executor=executor)
-        tx.add_step("iot.light.on", {"device_id": "lr"})
-        tx.add_step("iot.thermostat.set", {"device_id": "hvac", "temp": 22})
-
-        result = await tx.execute()
-        assert result.status == TransactionStatus.ROLLED_BACK
-        # Light should have been rolled back (light.off)
-        assert "iot.light.off" in call_log
+        # Exception should be suppressed and undo called
+        assert len(undo_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_dry_run_without_executor(self, registry):
-        """No executor → dry run mode."""
-        tx = ActionTransaction("tx-3", registry)
-        tx.add_step("test.action", {"param": "value"})
-        result = await tx.execute()
-        assert result.status == TransactionStatus.COMPLETED
-        assert result.steps[0].result == {"dry_run": True, "action": "test.action"}
+    async def test_no_rollback_after_commit(self, registry):
+        undo_calls = []
 
-    @pytest.mark.asyncio
-    async def test_manual_rollback(self, registry):
-        """Manual rollback of completed steps."""
-        call_log = []
+        async def undo(pre_state):
+            undo_calls.append(1)
+            return True
 
-        async def executor(action, params):
-            call_log.append(action)
+        registry.register("safe", undo_fn=undo)
 
-        tx = ActionTransaction("tx-4", registry, executor=executor)
-        tx.add_step("iot.light.on", {"device_id": "lr"})
-        await tx.execute()
+        async with ActionTransaction(registry, "safe") as txn:
+            txn.commit()
 
-        assert tx.status == TransactionStatus.COMPLETED
-        await tx.rollback_all()
-        assert "iot.light.off" in call_log
-
-    def test_to_dict(self, registry):
-        tx = ActionTransaction("tx-5", registry)
-        tx.add_step("test", {"a": 1})
-        d = tx.to_dict()
-        assert d["transaction_id"] == "tx-5"
-        assert len(d["steps"]) == 1
-
-    def test_stats(self, registry):
-        tx = ActionTransaction("tx-6", registry)
-        tx.add_step("test1")
-        tx.add_step("test2")
-        s = tx.stats()
-        assert s["total_steps"] == 2
-        assert s["status"] == "pending"
+        assert len(undo_calls) == 0

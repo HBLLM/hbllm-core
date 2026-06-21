@@ -1,22 +1,40 @@
-"""Restraint Engine — knowing when NOT to act.
+"""Restraint Engine — cognitive safety gate for autonomous actions.
 
-Evaluates every proposed autonomous action through multiple lenses:
-    1. Social appropriateness — don't interrupt dinner, don't message at 3am
-    2. Confidence threshold — don't act if confidence < 0.7
-    3. Reversibility check — prefer reversible actions over irreversible
-    4. User preference history — if user previously rejected, don't repeat
-    5. Cool-down enforcement — exponential backoff on repeated suggestions
+Evaluates whether the system *should* act, even when it *can*.
+Multi-factor assessment prevents over-aggressive autonomy:
 
-Outputs: APPROVE, DEFER, or SUPPRESS with reasoning.
-All decisions are logged for training data.
+    1. Confidence threshold — suppress if brain confidence is too low
+    2. Reversibility — defer irreversible actions with medium confidence
+    3. Social timing — suppress during user sleep/focus hours
+    4. Rejection history — back off if user rejected similar actions recently
+    5. Cooldown enforcement — don't repeat same action type too quickly
+    6. Rate limiting — cap autonomous actions per hour
 
-"The best assistant knows when to shut up."
+Decisions:
+    APPROVE  — proceed with the action
+    DEFER    — delay and re-evaluate later (not rejected, just not now)
+    SUPPRESS — do not perform this action
+
+Bus Topics:
+    autonomy.restraint.evaluated  — Published on every evaluation
+
+Usage::
+
+    engine = RestraintEngine()
+    decision = engine.evaluate(
+        action="proactive.reminder",
+        context={"confidence": 0.8, "reversible": True},
+    )
+    if decision.decision == RestraintDecision.APPROVE:
+        # Proceed
+        ...
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -24,318 +42,278 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-class RestraintDecision(str, Enum):
-    """Possible restraint outcomes."""
+# ── Decision Types ───────────────────────────────────────────────────────────
 
-    APPROVE = "approve"  # Safe to proceed
-    DEFER = "defer"  # Hold for a better moment
-    SUPPRESS = "suppress"  # Do not execute at all
+
+class RestraintDecision(str, Enum):
+    """Outcome of a restraint evaluation."""
+
+    APPROVE = "approve"
+    DEFER = "defer"
+    SUPPRESS = "suppress"
 
 
 @dataclass
-class RestraintResult:
-    """Result of a restraint evaluation."""
+class RestraintReason:
+    """Full result of a restraint evaluation."""
 
     decision: RestraintDecision
+    confidence: float
     reasons: list[str] = field(default_factory=list)
-    confidence: float = 1.0
-    defer_until: float | None = None  # Timestamp to retry (for DEFER)
-    alternative_action: str | None = None  # Suggested softer alternative
+    cooldown_s: float = 0.0
+    action: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision": self.decision.value,
-            "reasons": self.reasons,
             "confidence": self.confidence,
-            "defer_until": self.defer_until,
-            "alternative_action": self.alternative_action,
+            "reasons": self.reasons,
+            "cooldown_s": self.cooldown_s,
+            "action": self.action,
         }
 
 
 @dataclass
-class ActionProposal:
-    """A proposed autonomous action to evaluate."""
+class RestraintConfig:
+    """Tunable parameters for the restraint engine."""
 
-    action_type: str  # e.g., "notification.send", "iot.light.off"
-    category: str  # e.g., "suggestion", "reflex", "proactive"
-    confidence: float = 1.0  # How confident the system is
-    priority: str = "normal"  # "critical", "high", "normal", "suggestion"
-    is_reversible: bool = True
-    target: str = ""  # What will be acted upon
-    tenant_id: str = "default"
-    context: dict[str, Any] = field(default_factory=dict)
+    # Confidence thresholds
+    min_confidence_approve: float = 0.4
+    min_confidence_irreversible: float = 0.7
+
+    # Social timing (24h format)
+    quiet_hours_start: int = 22  # 10 PM
+    quiet_hours_end: int = 7  # 7 AM
+
+    # Rate limiting
+    max_actions_per_hour: int = 20
+    cooldown_per_action_type_s: float = 60.0
+
+    # Rejection backoff
+    rejection_window_s: float = 3600.0  # 1 hour
+    max_rejections_before_suppress: int = 3
+    backoff_multiplier: float = 2.0
 
 
-# ── Rejection History ────────────────────────────────────────────────────
-
-
-@dataclass
-class _RejectionRecord:
-    """Tracks a user rejection of an action type."""
-
-    count: int = 0
-    last_rejected: float = 0.0
-    backoff_until: float = 0.0
+# ── Engine ───────────────────────────────────────────────────────────────────
 
 
 class RestraintEngine:
-    """Evaluates whether an autonomous action should proceed.
+    """Multi-factor safety gate for autonomous actions.
 
-    Usage::
-
-        restraint = RestraintEngine()
-
-        proposal = ActionProposal(
-            action_type="notification.send",
-            category="suggestion",
-            confidence=0.65,
-        )
-        result = restraint.evaluate(proposal)
-
-        if result.decision == RestraintDecision.APPROVE:
-            execute(proposal)
-        elif result.decision == RestraintDecision.DEFER:
-            schedule_retry(proposal, result.defer_until)
-        else:
-            log_suppressed(proposal)
+    Args:
+        config: Tunable restraint parameters.
+        bus: Optional MessageBus for event publishing.
     """
 
     def __init__(
         self,
-        confidence_threshold: float = 0.7,
-        max_suggestions_per_hour: int = 3,
-        quiet_hours: tuple[int, int] = (23, 7),  # 11pm - 7am
-        backoff_base_s: float = 300.0,  # 5 minutes
-        backoff_max_s: float = 21600.0,  # 6 hours
+        config: RestraintConfig | None = None,
+        bus: Any | None = None,
     ) -> None:
-        self.confidence_threshold = confidence_threshold
-        self.max_suggestions_per_hour = max_suggestions_per_hour
-        self.quiet_hours = quiet_hours
-        self._backoff_base_s = backoff_base_s
-        self._backoff_max_s = backoff_max_s
+        self.config = config or RestraintConfig()
+        self.bus = bus
 
-        # Per-tenant rejection history: tenant → action_type → record
-        self._rejections: dict[str, dict[str, _RejectionRecord]] = {}
-
-        # Suggestion timestamps: tenant → [timestamps]
-        self._suggestion_times: dict[str, list[float]] = {}
-
-        # Context signals
-        self._user_in_meeting: dict[str, bool] = {}
-        self._user_is_sleeping: dict[str, bool] = {}
+        # Tracking state
+        self._action_timestamps: deque[float] = deque(maxlen=1000)
+        self._last_action_by_type: dict[str, float] = {}
+        self._rejection_history: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=50))
+        self._approval_history: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=50))
 
         # Telemetry
-        self._total_evaluated = 0
-        self._decisions: dict[str, int] = {"approve": 0, "defer": 0, "suppress": 0}
+        self._total_evaluations = 0
+        self._decisions: dict[str, int] = {d.value: 0 for d in RestraintDecision}
 
-    def evaluate(self, proposal: ActionProposal) -> RestraintResult:
-        """Evaluate whether a proposed action should proceed.
+    def evaluate(
+        self,
+        action: str,
+        context: dict[str, Any] | None = None,
+    ) -> RestraintReason:
+        """Evaluate whether an autonomous action should proceed.
 
-        Checks are applied in priority order — first failing check wins.
+        Args:
+            action: Action identifier (e.g. "proactive.reminder", "iot.command").
+            context: Evaluation context. Recognised keys:
+                - confidence (float): Brain's confidence in this action (0-1)
+                - reversible (bool): Whether the action can be undone
+                - priority (str): "low", "normal", "high", "critical"
+                - hour (int): Override current hour for testing
+
+        Returns:
+            RestraintReason with decision, confidence, and explanation.
         """
-        self._total_evaluated += 1
+        self._total_evaluations += 1
+        ctx = context or {}
+        confidence = float(ctx.get("confidence", 0.5))
+        reversible = bool(ctx.get("reversible", True))
+        priority = str(ctx.get("priority", "normal"))
+        hour = int(ctx.get("hour", _current_hour()))
+
         reasons: list[str] = []
-        now = time.time()
 
-        # 1. Critical actions always pass
-        if proposal.priority == "critical":
-            return self._approve("Critical priority bypasses restraint")
-
-        # 2. Confidence threshold
-        if proposal.confidence < self.confidence_threshold:
-            reasons.append(
-                f"Confidence {proposal.confidence:.2f} below threshold "
-                f"{self.confidence_threshold:.2f}"
-            )
-            return self._suppress(reasons)
-
-        # 3. Quiet hours check
-        if self._is_quiet_hours():
-            if proposal.priority not in ("critical", "high"):
-                reasons.append(f"Quiet hours ({self.quiet_hours[0]}:00-{self.quiet_hours[1]}:00)")
-                # Defer until quiet hours end
-                defer_ts = self._next_quiet_hours_end()
-                return self._defer(reasons, defer_until=defer_ts)
-
-        # 4. Meeting check
-        if self._user_in_meeting.get(proposal.tenant_id, False):
-            if proposal.priority not in ("critical",):
-                reasons.append("User is in a meeting")
-                return self._defer(reasons, defer_until=now + 1800)
-
-        # 5. Sleep check
-        if self._user_is_sleeping.get(proposal.tenant_id, False):
-            if proposal.priority not in ("critical",):
-                reasons.append("User appears to be sleeping")
-                return self._suppress(reasons)
-
-        # 6. Rejection backoff
-        record = self._get_rejection_record(proposal.tenant_id, proposal.action_type)
-        if record and record.backoff_until > now:
-            remaining = record.backoff_until - now
-            reasons.append(
-                f"Backoff active: {record.count} prior rejections, {remaining:.0f}s remaining"
-            )
-            return self._suppress(reasons)
-
-        # 7. Suggestion rate limit
-        if proposal.category == "suggestion":
-            if not self._check_suggestion_rate(proposal.tenant_id, now):
-                reasons.append(f"Suggestion rate limit: max {self.max_suggestions_per_hour}/hour")
-                return self._defer(reasons, defer_until=now + 900)
-
-        # 8. Reversibility check for irreversible high-risk actions
-        if not proposal.is_reversible and proposal.priority not in ("critical", "high"):
-            reasons.append(
-                "Irreversible action without high priority — consider a reversible alternative"
-            )
-            return self._defer(
-                reasons,
-                alternative_action=f"reversible_{proposal.action_type}",
+        # Critical priority bypasses all checks
+        if priority == "critical":
+            return self._result(
+                RestraintDecision.APPROVE,
+                confidence,
+                ["Critical priority — bypassing restraint checks"],
+                action=action,
             )
 
-        # All checks passed
-        if proposal.category == "suggestion":
-            self._record_suggestion(proposal.tenant_id, now)
+        # ── Factor 1: Confidence threshold ───────────────────────────
+        if confidence < self.config.min_confidence_approve:
+            return self._result(
+                RestraintDecision.SUPPRESS,
+                confidence,
+                [
+                    f"Confidence {confidence:.2f} below threshold "
+                    f"{self.config.min_confidence_approve}"
+                ],
+                action=action,
+            )
 
-        return self._approve("All restraint checks passed")
+        # ── Factor 2: Reversibility ──────────────────────────────────
+        if not reversible and confidence < self.config.min_confidence_irreversible:
+            return self._result(
+                RestraintDecision.DEFER,
+                confidence,
+                [
+                    f"Irreversible action with confidence {confidence:.2f} below "
+                    f"{self.config.min_confidence_irreversible} — deferring"
+                ],
+                cooldown_s=30.0,
+                action=action,
+            )
 
-    def record_rejection(self, tenant_id: str, action_type: str) -> None:
-        """Record that the user rejected an autonomous action.
+        # ── Factor 3: Social timing ──────────────────────────────────
+        if self._is_quiet_hours(hour) and priority != "high":
+            return self._result(
+                RestraintDecision.SUPPRESS,
+                confidence,
+                [
+                    f"Quiet hours ({self.config.quiet_hours_start}:00–"
+                    f"{self.config.quiet_hours_end}:00)"
+                ],
+                action=action,
+            )
 
-        This applies exponential backoff to future proposals of the same type.
-        """
-        if tenant_id not in self._rejections:
-            self._rejections[tenant_id] = {}
-        if action_type not in self._rejections[tenant_id]:
-            self._rejections[tenant_id][action_type] = _RejectionRecord()
-
-        record = self._rejections[tenant_id][action_type]
-        record.count += 1
-        record.last_rejected = time.time()
-
-        # Exponential backoff: 5min, 15min, 45min, 2.25h, 6h (capped)
-        backoff_s = min(
-            self._backoff_max_s,
-            self._backoff_base_s * (3 ** (record.count - 1)),
+        # ── Factor 4: Rejection history ──────────────────────────────
+        recent_rejections = self._count_recent(
+            self._rejection_history.get(action, deque()),
+            self.config.rejection_window_s,
         )
-        record.backoff_until = time.time() + backoff_s
+        if recent_rejections >= self.config.max_rejections_before_suppress:
+            cooldown = self.config.cooldown_per_action_type_s * (
+                self.config.backoff_multiplier**recent_rejections
+            )
+            return self._result(
+                RestraintDecision.SUPPRESS,
+                confidence,
+                [
+                    f"User rejected '{action}' {recent_rejections} times recently "
+                    f"— backing off {cooldown:.0f}s"
+                ],
+                cooldown_s=cooldown,
+                action=action,
+            )
 
-        logger.info(
-            "Restraint: rejection recorded for tenant=%s action=%s (count=%d, backoff=%ds)",
-            tenant_id,
-            action_type,
-            record.count,
-            backoff_s,
+        # ── Factor 5: Cooldown ───────────────────────────────────────
+        last_time = self._last_action_by_type.get(action, 0.0)
+        elapsed = time.monotonic() - last_time
+        if elapsed < self.config.cooldown_per_action_type_s:
+            remaining = self.config.cooldown_per_action_type_s - elapsed
+            return self._result(
+                RestraintDecision.DEFER,
+                confidence,
+                [f"Cooldown: {remaining:.0f}s remaining for '{action}'"],
+                cooldown_s=remaining,
+                action=action,
+            )
+
+        # ── Factor 6: Rate limiting ──────────────────────────────────
+        now = time.monotonic()
+        recent_actions = sum(1 for t in self._action_timestamps if now - t < 3600)
+        if recent_actions >= self.config.max_actions_per_hour:
+            return self._result(
+                RestraintDecision.DEFER,
+                confidence,
+                [
+                    f"Rate limit: {recent_actions}/{self.config.max_actions_per_hour} "
+                    f"actions per hour"
+                ],
+                cooldown_s=60.0,
+                action=action,
+            )
+
+        # ── All checks passed ────────────────────────────────────────
+        reasons.append("All restraint checks passed")
+        return self._result(
+            RestraintDecision.APPROVE,
+            confidence,
+            reasons,
+            action=action,
         )
 
-    def record_acceptance(self, tenant_id: str, action_type: str) -> None:
-        """Record that the user accepted an action. Reduces backoff."""
-        record = self._get_rejection_record(tenant_id, action_type)
-        if record and record.count > 0:
-            record.count = max(0, record.count - 1)
-            record.backoff_until = 0.0
+    # ── Feedback API ─────────────────────────────────────────────────
 
-    def update_context(
-        self,
-        tenant_id: str,
-        in_meeting: bool | None = None,
-        is_sleeping: bool | None = None,
-    ) -> None:
-        """Update social context for a tenant."""
-        if in_meeting is not None:
-            self._user_in_meeting[tenant_id] = in_meeting
-        if is_sleeping is not None:
-            self._user_is_sleeping[tenant_id] = is_sleeping
+    def record_rejection(self, action: str) -> None:
+        """Record that a user rejected this action type."""
+        self._rejection_history[action].append(time.monotonic())
+        logger.info("Restraint: user rejected '%s'", action)
 
-    # ── Internal Helpers ─────────────────────────────────────────────────
+    def record_approval(self, action: str) -> None:
+        """Record that an action was approved/executed."""
+        self._approval_history[action].append(time.monotonic())
+        self._action_timestamps.append(time.monotonic())
+        self._last_action_by_type[action] = time.monotonic()
 
-    def _approve(self, reason: str) -> RestraintResult:
-        self._decisions["approve"] += 1
-        return RestraintResult(
-            decision=RestraintDecision.APPROVE,
-            reasons=[reason],
-        )
+    # ── Internal ─────────────────────────────────────────────────────
 
-    def _defer(
-        self,
-        reasons: list[str],
-        defer_until: float | None = None,
-        alternative_action: str | None = None,
-    ) -> RestraintResult:
-        self._decisions["defer"] += 1
-        return RestraintResult(
-            decision=RestraintDecision.DEFER,
-            reasons=reasons,
-            defer_until=defer_until,
-            alternative_action=alternative_action,
-        )
-
-    def _suppress(self, reasons: list[str]) -> RestraintResult:
-        self._decisions["suppress"] += 1
-        return RestraintResult(
-            decision=RestraintDecision.SUPPRESS,
-            reasons=reasons,
-        )
-
-    def _is_quiet_hours(self) -> bool:
-        """Check if the current time is within quiet hours."""
-        from datetime import datetime
-
-        hour = datetime.now().hour
-        start, end = self.quiet_hours
-        if start <= end:
-            return start <= hour < end
-        else:
-            # Overnight range (e.g., 23-7)
+    def _is_quiet_hours(self, hour: int) -> bool:
+        """Check if current hour falls in quiet hours."""
+        start = self.config.quiet_hours_start
+        end = self.config.quiet_hours_end
+        if start > end:
+            # Wraps midnight: e.g. 22-7
             return hour >= start or hour < end
+        return start <= hour < end
 
-    def _next_quiet_hours_end(self) -> float:
-        """Calculate the timestamp when quiet hours next end."""
-        from datetime import datetime, timedelta
+    @staticmethod
+    def _count_recent(timestamps: deque[float], window_s: float) -> int:
+        """Count events within the recent time window."""
+        now = time.monotonic()
+        return sum(1 for t in timestamps if now - t < window_s)
 
-        now = datetime.now()
-        end_hour = self.quiet_hours[1]
-
-        # If we're past the end hour today, it's tomorrow's end
-        target = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
-
-        return target.timestamp()
-
-    def _get_rejection_record(self, tenant_id: str, action_type: str) -> _RejectionRecord | None:
-        return self._rejections.get(tenant_id, {}).get(action_type)
-
-    def _check_suggestion_rate(self, tenant_id: str, now: float) -> bool:
-        """Check if another suggestion is allowed within rate limits."""
-        timestamps = self._suggestion_times.get(tenant_id, [])
-        one_hour_ago = now - 3600
-        recent = [t for t in timestamps if t > one_hour_ago]
-        return len(recent) < self.max_suggestions_per_hour
-
-    def _record_suggestion(self, tenant_id: str, now: float) -> None:
-        """Record a suggestion timestamp."""
-        if tenant_id not in self._suggestion_times:
-            self._suggestion_times[tenant_id] = []
-        self._suggestion_times[tenant_id].append(now)
-        # Prune old timestamps
-        one_hour_ago = now - 3600
-        self._suggestion_times[tenant_id] = [
-            t for t in self._suggestion_times[tenant_id] if t > one_hour_ago
-        ]
+    def _result(
+        self,
+        decision: RestraintDecision,
+        confidence: float,
+        reasons: list[str],
+        cooldown_s: float = 0.0,
+        action: str = "",
+    ) -> RestraintReason:
+        """Build result and update telemetry."""
+        self._decisions[decision.value] += 1
+        result = RestraintReason(
+            decision=decision,
+            confidence=confidence,
+            reasons=reasons,
+            cooldown_s=cooldown_s,
+            action=action,
+        )
+        logger.debug("Restraint [%s] %s: %s", action, decision.value, "; ".join(reasons))
+        return result
 
     def stats(self) -> dict[str, Any]:
-        """Restraint engine statistics."""
+        """Engine statistics."""
         return {
-            "total_evaluated": self._total_evaluated,
+            "total_evaluations": self._total_evaluations,
             "decisions": dict(self._decisions),
-            "active_backoffs": sum(
-                1
-                for tenant in self._rejections.values()
-                for record in tenant.values()
-                if record.backoff_until > time.time()
-            ),
-            "confidence_threshold": self.confidence_threshold,
-            "quiet_hours": f"{self.quiet_hours[0]}:00-{self.quiet_hours[1]}:00",
         }
+
+
+def _current_hour() -> int:
+    """Get the current hour (0-23). Extracted for testability."""
+    import datetime
+
+    return datetime.datetime.now().hour

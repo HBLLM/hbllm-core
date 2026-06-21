@@ -1,122 +1,156 @@
-"""Tests for OfflineManager — graceful network degradation."""
-
-import time
+"""Tests for OfflineManager — connectivity detection and graceful degradation."""
 
 import pytest
 
 from hbllm.serving.offline_mode import (
     ConnectivityState,
     OfflineManager,
-    QueuedRequest,
 )
 
 
-class TestConnectivityState:
-    """Tests for state management."""
+@pytest.fixture
+def manager():
+    return OfflineManager()
 
-    def test_initial_state_online(self):
-        om = OfflineManager()
-        assert om.state == ConnectivityState.ONLINE
-        assert om.is_online
-        assert not om.is_offline
 
-    def test_state_properties(self):
-        om = OfflineManager()
-        om._state = ConnectivityState.OFFLINE
-        assert om.is_offline
-        assert not om.is_online
+@pytest.fixture
+def manager_with_providers():
+    return OfflineManager(
+        health_endpoints={
+            "openai": "https://api.openai.com/v1/models",
+            "anthropic": "https://api.anthropic.com/v1/messages",
+        },
+        failure_threshold=2,
+    )
+
+
+# ── State Tests ──────────────────────────────────────────────────────────────
+
+
+class TestState:
+    def test_initial_state_online(self, manager):
+        assert manager.state == ConnectivityState.ONLINE
+        assert manager.is_online
+        assert not manager.is_offline
+
+    def test_no_providers_stays_online(self, manager):
+        """Without configured providers, state is always ONLINE."""
+        assert manager.is_online
+
+
+# ── Provider Failure Reporting ───────────────────────────────────────────────
+
+
+class TestFailureReporting:
+    def test_report_failure_below_threshold(self, manager_with_providers):
+        manager_with_providers.report_failure("openai", "timeout")
+        # 1 failure < threshold of 2
+        assert "openai" in manager_with_providers.get_healthy_providers()
+
+    def test_report_failure_exceeds_threshold(self, manager_with_providers):
+        manager_with_providers.report_failure("openai", "timeout")
+        manager_with_providers.report_failure("openai", "timeout again")
+        assert "openai" in manager_with_providers.get_unhealthy_providers()
+
+    def test_report_success_resets(self, manager_with_providers):
+        manager_with_providers.report_failure("openai", "err")
+        manager_with_providers.report_failure("openai", "err")
+        assert "openai" in manager_with_providers.get_unhealthy_providers()
+
+        manager_with_providers.report_success("openai")
+        assert "openai" in manager_with_providers.get_healthy_providers()
+
+    def test_report_unknown_provider(self, manager_with_providers):
+        # Should not raise
+        manager_with_providers.report_failure("unknown_provider")
+        manager_with_providers.report_success("unknown_provider")
+
+
+# ── Request Queue Tests ──────────────────────────────────────────────────────
 
 
 class TestRequestQueue:
-    """Tests for outbound request queuing."""
+    def test_queue_request(self, manager):
+        manager.queue_request("r1", "openai", {"prompt": "hello"})
+        assert manager.pending_count() == 1
 
-    @pytest.fixture
-    def manager(self):
-        return OfflineManager(queue_max_size=10)
-
-    def test_enqueue_returns_id(self, manager):
-        rid = manager.enqueue("push", {"msg": "hello"})
-        assert rid.startswith("req_")
-        assert manager.queue_size == 1
-
-    def test_multiple_enqueue(self, manager):
+    def test_queue_overflow(self):
+        manager = OfflineManager()
+        manager._max_queue = 3
         for i in range(5):
-            manager.enqueue("push", {"msg": f"msg_{i}"})
-        assert manager.queue_size == 5
+            manager.queue_request(f"r{i}", "openai", {"n": i})
+        assert manager.pending_count() == 3
 
-    def test_queue_overflow_drops_oldest(self, manager):
-        for i in range(12):
-            manager.enqueue("push", {"msg": f"msg_{i}"})
-        assert manager.queue_size <= 10
+    @pytest.mark.asyncio
+    async def test_flush_queue(self, manager):
+        manager.queue_request("r1", "openai", {})
+        manager.queue_request("r2", "openai", {})
+        await manager._flush_queue()
+        assert manager.pending_count() == 0
 
-    def test_queue_summary_by_type(self, manager):
-        manager.enqueue("push", {"a": 1})
-        manager.enqueue("push", {"a": 2})
-        manager.enqueue("webhook", {"b": 1})
-        summary = manager.get_queue_summary()
-        assert summary["push"] == 2
-        assert summary["webhook"] == 1
 
-    def test_expired_request(self):
-        req = QueuedRequest(
-            request_id="test",
-            request_type="push",
-            max_age_s=0.001,  # Expire immediately
-        )
-        time.sleep(0.01)
-        assert req.is_expired
+# ── Response Cache Tests ─────────────────────────────────────────────────────
 
 
 class TestResponseCache:
-    """Tests for cloud response caching."""
-
-    @pytest.fixture
-    def manager(self):
-        return OfflineManager(cache_max_size=5)
-
-    def test_cache_store_and_retrieve(self, manager):
-        manager.cache_response("query1", {"answer": "42"})
-        cached = manager.get_cached("query1")
-        assert cached == {"answer": "42"}
+    def test_cache_hit(self, manager):
+        manager.cache_response("query:hello", {"answer": "world"})
+        assert manager.get_cached("query:hello") == {"answer": "world"}
 
     def test_cache_miss(self, manager):
-        cached = manager.get_cached("nonexistent")
-        assert cached is None
+        assert manager.get_cached("nonexistent") is None
 
-    def test_cache_eviction(self, manager):
-        for i in range(7):
-            manager.cache_response(f"key_{i}", f"val_{i}")
-        # Cache max is 5, oldest should be evicted
-        assert manager.get_cached("key_0") is None
-        assert manager.get_cached("key_6") == "val_6"
+    def test_cache_lru_eviction(self):
+        manager = OfflineManager(cache_size=2)
+        manager.cache_response("a", 1)
+        manager.cache_response("b", 2)
+        manager.cache_response("c", 3)  # Should evict "a"
+        assert manager.get_cached("a") is None
+        assert manager.get_cached("b") == 2
+        assert manager.get_cached("c") == 3
 
-    def test_stale_cache_returns_none(self, manager):
-        manager.cache_response("stale", "data", ttl_s=0.001)
-        time.sleep(0.01)
-        assert manager.get_cached("stale") is None
+    def test_cache_access_refreshes_lru(self):
+        manager = OfflineManager(cache_size=2)
+        manager.cache_response("a", 1)
+        manager.cache_response("b", 2)
+        manager.get_cached("a")  # Refresh "a"
+        manager.cache_response("c", 3)  # Should evict "b" (not "a")
+        assert manager.get_cached("a") == 1
+        assert manager.get_cached("b") is None
 
-    def test_clear_cache(self, manager):
+
+# ── Stats Tests ──────────────────────────────────────────────────────────────
+
+
+class TestStats:
+    def test_stats_structure(self, manager_with_providers):
+        stats = manager_with_providers.stats()
+        assert stats["state"] == "online"
+        assert "providers" in stats
+        assert "openai" in stats["providers"]
+
+    def test_stats_after_operations(self, manager):
+        manager.queue_request("r1", "openai", {})
         manager.cache_response("k1", "v1")
-        manager.clear_cache()
-        assert manager.get_cached("k1") is None
-
-    def test_cache_stats(self, manager):
-        manager.cache_response("k1", "v1")
-        manager.get_cached("k1")  # hit
-        manager.get_cached("k2")  # miss
-        s = manager.stats()
-        assert s["cache_hits"] == 1
-        assert s["cache_misses"] == 1
+        stats = manager.stats()
+        assert stats["pending_queue"] == 1
+        assert stats["cache_entries"] == 1
 
 
-class TestOfflineManagerStats:
-    """Tests for telemetry."""
+# ── Lifecycle Tests ──────────────────────────────────────────────────────────
 
-    def test_stats_structure(self):
-        om = OfflineManager()
-        s = om.stats()
-        assert "state" in s
-        assert "queue_size" in s
-        assert "cache_size" in s
-        assert "total_checks" in s
-        assert s["state"] == "online"
+
+class TestLifecycle:
+    @pytest.mark.asyncio
+    async def test_start_stop(self, manager):
+        await manager.start()
+        assert manager._running
+        await manager.stop()
+        assert not manager._running
+
+    @pytest.mark.asyncio
+    async def test_start_stop_with_providers(self, manager_with_providers):
+        await manager_with_providers.start()
+        assert manager_with_providers._running
+        await manager_with_providers.stop()
+        assert not manager_with_providers._running

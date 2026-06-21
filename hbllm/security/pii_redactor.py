@@ -1,20 +1,23 @@
-"""PII Redactor — automatic personally identifiable information protection.
+"""PII Redactor — Scrub personally identifiable information before memory storage.
 
-Scans text before memory storage to detect and redact sensitive information:
-    - Email addresses
-    - Phone numbers (international formats)
-    - Social Security Numbers (US format)
-    - Credit card numbers (Luhn-validated)
-    - IP addresses (v4 and v6)
-    - Named entities via regex heuristics (names following salutation patterns)
+Scans text for PII patterns (email, phone, SSN, credit card, IP address,
+API keys, JWT tokens) and applies configurable per-tenant redaction policies.
 
-Configurable per-tenant redaction policies:
-    - REDACT:  replace with [REDACTED_TYPE]
-    - HASH:    replace with deterministic hash (allows dedup)
-    - ENCRYPT: replace with reversible Fernet token (owner can decrypt)
-    - PASS:    no redaction (trusted internal data)
+Policies:
+    REDACT   — Replace with ``[REDACTED:<type>]`` placeholder
+    HASH     — Replace with truncated SHA-256 (first 8 chars)
+    ENCRYPT  — Encrypt via EncryptionVault (reversible for authorised users)
+    PASS     — Allow through unchanged (audit-logged)
 
-All redaction events are logged for auditability.
+Bus Topics:
+    security.pii.redacted  — Published when PII is found and redacted
+
+Usage::
+
+    redactor = PIIRedactor()
+    result = redactor.redact("Call me at 555-123-4567", tenant_id="t1")
+    # result.text == "Call me at [REDACTED:PHONE]"
+    # result.findings == [PIIMatch(type=PIIType.PHONE, ...)]
 """
 
 from __future__ import annotations
@@ -22,61 +25,43 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-# ── PII Types ────────────────────────────────────────────────────────────
+# ── PII Types ────────────────────────────────────────────────────────────────
 
 
 class PIIType(str, Enum):
-    """Supported PII categories."""
+    """Categories of personally identifiable information."""
 
-    EMAIL = "email"
-    PHONE = "phone"
-    SSN = "ssn"
-    CREDIT_CARD = "credit_card"
-    IP_ADDRESS = "ip_address"
-    PERSON_NAME = "person_name"
-
-
-# ── Redaction Policies ───────────────────────────────────────────────────
+    EMAIL = "EMAIL"
+    PHONE = "PHONE"
+    SSN = "SSN"
+    CREDIT_CARD = "CREDIT_CARD"
+    IP_ADDRESS = "IP_ADDRESS"
+    API_KEY = "API_KEY"
+    JWT_TOKEN = "JWT_TOKEN"
 
 
-class RedactionAction(str, Enum):
-    """What to do when PII is detected."""
+class RedactionPolicy(str, Enum):
+    """How to handle detected PII."""
 
-    REDACT = "redact"  # Replace with [REDACTED_TYPE]
-    HASH = "hash"  # Replace with deterministic hash
-    ENCRYPT = "encrypt"  # Replace with Fernet-encrypted token
-    PASS = "pass"  # No redaction
+    REDACT = "redact"
+    HASH = "hash"
+    ENCRYPT = "encrypt"
+    PASS = "pass"
 
 
-@dataclass
-class RedactionPolicy:
-    """Per-tenant redaction configuration.
-
-    Default: REDACT everything except PASS for person_name (too many false positives).
-    """
-
-    email: RedactionAction = RedactionAction.REDACT
-    phone: RedactionAction = RedactionAction.REDACT
-    ssn: RedactionAction = RedactionAction.REDACT
-    credit_card: RedactionAction = RedactionAction.REDACT
-    ip_address: RedactionAction = RedactionAction.HASH
-    person_name: RedactionAction = RedactionAction.PASS
-
-    def get_action(self, pii_type: PIIType) -> RedactionAction:
-        """Get the redaction action for a PII type."""
-        return getattr(self, pii_type.value, RedactionAction.REDACT)
+# ── Data Structures ──────────────────────────────────────────────────────────
 
 
 @dataclass
 class PIIMatch:
-    """A detected PII occurrence in text."""
+    """A single PII detection result."""
 
     pii_type: PIIType
     original: str
@@ -84,280 +69,184 @@ class PIIMatch:
     end: int
     replacement: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "type": self.pii_type.value,
-            "start": self.start,
-            "end": self.end,
-            "replacement": self.replacement,
-            # Never log the original PII value
-        }
+
+@dataclass
+class RedactedText:
+    """Result of a redaction pass."""
+
+    text: str
+    findings: list[PIIMatch] = field(default_factory=list)
+    tenant_id: str = "default"
+
+    @property
+    def had_pii(self) -> bool:
+        return len(self.findings) > 0
 
 
-# ── Regex Patterns ───────────────────────────────────────────────────────
+@dataclass
+class TenantPIIPolicy:
+    """Per-tenant PII handling policy."""
 
-# Email: standard RFC-like pattern
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
+    default_policy: RedactionPolicy = RedactionPolicy.REDACT
+    overrides: dict[PIIType, RedactionPolicy] = field(default_factory=dict)
 
-# Phone: international formats with optional country code
-_PHONE_RE = re.compile(
-    r"(?<!\d)"  # not preceded by digit
-    r"(?:\+?\d{1,3}[-.\s]?)?"  # optional country code
-    r"(?:\(?\d{2,4}\)?[-.\s]?)"  # area code
-    r"(?:\d{3,4}[-.\s]?)"  # first group
-    r"\d{3,4}"  # last group
-    r"(?!\d)"  # not followed by digit
-)
-
-# SSN: XXX-XX-XXXX format
-_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-
-# Credit card: 13-19 digits, optionally space/dash separated
-_CC_RE = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
-
-# IPv4
-_IPV4_RE = re.compile(
-    r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
-    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
-)
-
-# IPv6 (simplified — common formats)
-_IPV6_RE = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b")
-
-# Person name heuristic: salutation + capitalized words
-_NAME_RE = re.compile(
-    r"\b(?:Mr|Mrs|Ms|Dr|Prof)\.?\s+"
-    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b"
-)
+    def policy_for(self, pii_type: PIIType) -> RedactionPolicy:
+        return self.overrides.get(pii_type, self.default_policy)
 
 
-# ── Luhn Validation ──────────────────────────────────────────────────────
+# ── Regex Patterns ───────────────────────────────────────────────────────────
+
+_PII_PATTERNS: dict[PIIType, re.Pattern[str]] = {
+    # RFC 5322 simplified — matches most real-world emails
+    PIIType.EMAIL: re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"),
+    # US/international phone numbers: +1-555-123-4567, (555) 123-4567, 555.123.4567
+    PIIType.PHONE: re.compile(
+        r"(?<!\d)(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)"
+    ),
+    # US Social Security: 123-45-6789
+    PIIType.SSN: re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    # Credit card: 4 groups of 4 digits (Visa, MC, Amex patterns)
+    PIIType.CREDIT_CARD: re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
+    # IPv4 and IPv6
+    PIIType.IP_ADDRESS: re.compile(
+        r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+        r"|"
+        r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b"
+    ),
+    # API keys: long hex/base64 strings (32+ chars) prefixed by common key indicators
+    PIIType.API_KEY: re.compile(
+        r"(?:api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{32,})['\"]?",
+        re.IGNORECASE,
+    ),
+    # JWT tokens: three base64url segments separated by dots
+    PIIType.JWT_TOKEN: re.compile(
+        r"\beyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b"
+    ),
+}
 
 
-def _luhn_check(number: str) -> bool:
-    """Validate a number string using the Luhn algorithm."""
-    digits = [int(d) for d in number if d.isdigit()]
-    if len(digits) < 13:
-        return False
-
-    total = 0
-    for i, d in enumerate(reversed(digits)):
-        if i % 2 == 1:
-            d *= 2
-            if d > 9:
-                d -= 9
-        total += d
-    return total % 10 == 0
-
-
-# ── PIIRedactor ──────────────────────────────────────────────────────────
+# ── Redactor ─────────────────────────────────────────────────────────────────
 
 
 class PIIRedactor:
-    """Scans and redacts PII from text before memory storage.
+    """Scans and redacts PII from text with per-tenant policies.
 
-    Usage::
-
-        redactor = PIIRedactor()
-
-        # Redact with default policy
-        clean_text, matches = redactor.redact(
-            "Call me at john@example.com or 555-123-4567"
-        )
-        # clean_text = "Call me at [REDACTED_EMAIL] or [REDACTED_PHONE]"
-
-        # Custom per-tenant policy
-        policy = RedactionPolicy(email=RedactionAction.HASH)
-        clean_text, matches = redactor.redact(text, policy=policy)
+    Args:
+        default_policy: Fallback policy when no tenant-specific override exists.
+        bus: Optional MessageBus for audit event publishing.
     """
 
     def __init__(
         self,
-        default_policy: RedactionPolicy | None = None,
-        hash_salt: str = "hbllm_pii_salt",
-        encryption_key: bytes | None = None,
+        default_policy: RedactionPolicy = RedactionPolicy.REDACT,
+        bus: Any | None = None,
     ) -> None:
-        self.default_policy = default_policy or RedactionPolicy()
-        self._hash_salt = hash_salt
-        self._encryption_key = encryption_key
-        self._fernet = None
-
-        # Initialize Fernet if encryption key is provided
-        if encryption_key:
-            try:
-                from cryptography.fernet import Fernet  # type: ignore[import-not-found]
-
-                self._fernet = Fernet(encryption_key)
-            except ImportError:
-                logger.warning(
-                    "cryptography package not installed — ENCRYPT policy "
-                    "will fall back to HASH. Install: pip install cryptography"
-                )
+        self.default_policy = default_policy
+        self.bus = bus
+        self._tenant_policies: dict[str, TenantPIIPolicy] = {}
+        self._encryption_vault: Any | None = None
 
         # Telemetry
-        self._total_scanned = 0
-        self._total_redacted = 0
-        self._by_type: dict[str, int] = {}
+        self._total_scans = 0
+        self._total_findings = 0
+        self._findings_by_type: dict[PIIType, int] = {t: 0 for t in PIIType}
 
-    def redact(
+    def configure_tenant(
         self,
-        text: str,
-        policy: RedactionPolicy | None = None,
-        tenant_id: str = "default",
-    ) -> tuple[str, list[PIIMatch]]:
-        """Scan text for PII and apply redaction policy.
-
-        Args:
-            text: The input text to scan.
-            policy: Redaction policy (uses default if None).
-            tenant_id: For audit logging.
-
-        Returns:
-            Tuple of (redacted_text, list of PIIMatch detections).
-        """
-        if not text or not text.strip():
-            return text, []
-
-        self._total_scanned += 1
-        pol = policy or self.default_policy
-
-        # Detect all PII
-        matches = self._detect_all(text)
-
-        if not matches:
-            return text, []
-
-        # Apply redaction (process from end to preserve indices)
-        matches.sort(key=lambda m: m.start, reverse=True)
-        redacted = text
-
-        for match in matches:
-            action = pol.get_action(match.pii_type)
-            if action == RedactionAction.PASS:
-                continue
-
-            replacement = self._apply_action(match.original, match.pii_type, action)
-            match.replacement = replacement
-            redacted = redacted[: match.start] + replacement + redacted[match.end :]
-
-            self._total_redacted += 1
-            self._by_type[match.pii_type.value] = self._by_type.get(match.pii_type.value, 0) + 1
-
-        logger.debug(
-            "PII scan: tenant=%s, found=%d, redacted=%d",
-            tenant_id,
-            len(matches),
-            sum(1 for m in matches if m.replacement),
+        tenant_id: str,
+        default_policy: RedactionPolicy | None = None,
+        overrides: dict[PIIType, RedactionPolicy] | None = None,
+    ) -> None:
+        """Set per-tenant PII handling policy."""
+        self._tenant_policies[tenant_id] = TenantPIIPolicy(
+            default_policy=default_policy or self.default_policy,
+            overrides=overrides or {},
         )
 
-        return redacted, matches
+    def set_encryption_vault(self, vault: Any) -> None:
+        """Attach an EncryptionVault for ENCRYPT policy."""
+        self._encryption_vault = vault
 
-    def _detect_all(self, text: str) -> list[PIIMatch]:
-        """Detect all PII occurrences in text."""
-        matches: list[PIIMatch] = []
-        seen_ranges: set[tuple[int, int]] = set()
+    # ── Core API ─────────────────────────────────────────────────────
 
-        def _add_matches(regex: re.Pattern[str], pii_type: PIIType) -> None:
-            for m in regex.finditer(text):
-                span = (m.start(), m.end())
-                # Skip overlapping matches
-                if any(s <= span[0] < e or s < span[1] <= e for s, e in seen_ranges):
-                    continue
-                matches.append(
-                    PIIMatch(
-                        pii_type=pii_type,
-                        original=m.group(),
-                        start=m.start(),
-                        end=m.end(),
-                    )
-                )
-                seen_ranges.add(span)
+    def scan(self, text: str) -> list[PIIMatch]:
+        """Detect PII in text without modifying it."""
+        findings: list[PIIMatch] = []
+        for pii_type, pattern in _PII_PATTERNS.items():
+            for match in pattern.finditer(text):
+                # For API_KEY pattern, use the captured group if available
+                if pii_type == PIIType.API_KEY and match.lastindex:
+                    value = match.group(1)
+                    start = match.start(1)
+                    end = match.end(1)
+                else:
+                    value = match.group(0)
+                    start = match.start()
+                    end = match.end()
+                findings.append(PIIMatch(pii_type=pii_type, original=value, start=start, end=end))
+        # Sort by position (descending) for safe replacement
+        findings.sort(key=lambda m: m.start, reverse=True)
+        return findings
 
-        # Order matters — more specific patterns first
-        _add_matches(_SSN_RE, PIIType.SSN)
-        _add_matches(_EMAIL_RE, PIIType.EMAIL)
+    def redact(self, text: str, tenant_id: str = "default") -> RedactedText:
+        """Scan and redact PII according to tenant policy.
 
-        # Credit cards: validate with Luhn to reduce false positives
-        for m in _CC_RE.finditer(text):
-            digits_only = re.sub(r"\D", "", m.group())
-            if _luhn_check(digits_only) and len(digits_only) >= 13:
-                span = (m.start(), m.end())
-                if not any(s <= span[0] < e or s < span[1] <= e for s, e in seen_ranges):
-                    matches.append(
-                        PIIMatch(
-                            pii_type=PIIType.CREDIT_CARD,
-                            original=m.group(),
-                            start=m.start(),
-                            end=m.end(),
-                        )
-                    )
-                    seen_ranges.add(span)
-
-        _add_matches(_PHONE_RE, PIIType.PHONE)
-        _add_matches(_IPV4_RE, PIIType.IP_ADDRESS)
-        _add_matches(_IPV6_RE, PIIType.IP_ADDRESS)
-        _add_matches(_NAME_RE, PIIType.PERSON_NAME)
-
-        return matches
-
-    def _apply_action(
-        self,
-        original: str,
-        pii_type: PIIType,
-        action: RedactionAction,
-    ) -> str:
-        """Apply a redaction action to a PII value."""
-        if action == RedactionAction.REDACT:
-            return f"[REDACTED_{pii_type.value.upper()}]"
-
-        elif action == RedactionAction.HASH:
-            salted = f"{self._hash_salt}:{original}"
-            h = hashlib.sha256(salted.encode()).hexdigest()[:16]
-            return f"[HASH_{pii_type.value.upper()}:{h}]"
-
-        elif action == RedactionAction.ENCRYPT:
-            if self._fernet:
-                encrypted = self._fernet.encrypt(original.encode()).decode()
-                return f"[ENC_{pii_type.value.upper()}:{encrypted}]"
-            else:
-                # Fall back to hash if Fernet not available
-                return self._apply_action(original, pii_type, RedactionAction.HASH)
-
-        return original  # PASS
-
-    def decrypt(self, token: str) -> str | None:
-        """Decrypt an encrypted PII value (owner use only).
-
-        Args:
-            token: The [ENC_TYPE:...] token to decrypt.
-
-        Returns:
-            The original PII value, or None if decryption fails.
+        Returns a RedactedText with the cleaned string and list of findings.
         """
-        if not self._fernet:
-            return None
+        self._total_scans += 1
 
-        # Extract the encrypted payload
-        match = re.match(r"\[ENC_[A-Z_]+:(.+)\]", token)
-        if not match:
-            return None
+        findings = self.scan(text)
+        if not findings:
+            return RedactedText(text=text, tenant_id=tenant_id)
 
-        try:
-            return self._fernet.decrypt(match.group(1).encode()).decode()
-        except Exception:
-            return None
+        policy = self._tenant_policies.get(
+            tenant_id, TenantPIIPolicy(default_policy=self.default_policy)
+        )
 
-    def scan_only(self, text: str) -> list[PIIMatch]:
-        """Detect PII without redacting (for reporting/preview)."""
-        return self._detect_all(text)
+        result = text
+        for finding in findings:
+            action = policy.policy_for(finding.pii_type)
+            replacement = self._apply_policy(action, finding)
+            finding.replacement = replacement
+            result = result[: finding.start] + replacement + result[finding.end :]
+
+            self._total_findings += 1
+            self._findings_by_type[finding.pii_type] += 1
+
+        logger.info(
+            "PII redaction: %d findings in %d chars (tenant=%s)",
+            len(findings),
+            len(text),
+            tenant_id,
+        )
+
+        return RedactedText(text=result, findings=findings, tenant_id=tenant_id)
+
+    def _apply_policy(self, policy: RedactionPolicy, match: PIIMatch) -> str:
+        """Apply a redaction policy to a single PII match."""
+        if policy == RedactionPolicy.PASS:
+            return match.original
+        elif policy == RedactionPolicy.HASH:
+            digest = hashlib.sha256(match.original.encode()).hexdigest()[:8]
+            return f"[HASHED:{match.pii_type.value}:{digest}]"
+        elif policy == RedactionPolicy.ENCRYPT:
+            if self._encryption_vault and hasattr(self._encryption_vault, "encrypt"):
+                encrypted = self._encryption_vault.encrypt(match.original)
+                return f"[ENCRYPTED:{match.pii_type.value}:{encrypted[:16]}...]"
+            # Fallback to REDACT if no vault configured
+            logger.warning(
+                "ENCRYPT policy requested but no vault configured, falling back to REDACT"
+            )
+            return f"[REDACTED:{match.pii_type.value}]"
+        else:  # REDACT
+            return f"[REDACTED:{match.pii_type.value}]"
+
+    # ── Telemetry ────────────────────────────────────────────────────
 
     def stats(self) -> dict[str, Any]:
         """Redactor statistics."""
         return {
-            "total_scanned": self._total_scanned,
-            "total_redacted": self._total_redacted,
-            "by_type": dict(self._by_type),
-            "default_policy": {
-                pii.value: self.default_policy.get_action(pii).value for pii in PIIType
-            },
+            "total_scans": self._total_scans,
+            "total_findings": self._total_findings,
+            "findings_by_type": {k.value: v for k, v in self._findings_by_type.items()},
         }
