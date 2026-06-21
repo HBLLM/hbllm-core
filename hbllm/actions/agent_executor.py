@@ -266,7 +266,7 @@ class AgentExecutor:
                         tool=rs.action,
                         success=rs.observation.success,
                         output=rs.observation.content if rs.observation.success else "",
-                        error=rs.observation.content if not rs.observation.success else None,
+                        error=rs.observation.content if not rs.observation.success else "",
                         duration_ms=rs.duration_ms,
                     )
                 steps.append(

@@ -493,4 +493,4 @@ class AsyncInteractionMiner:
                     "regeneration_rate": round(regen / max(total, 1), 3),
                     "mined_samples": mined,
                 }
-        return self._fallback.stats
+        return self._fallback.stats()

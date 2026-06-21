@@ -153,10 +153,12 @@ class ReActLoop:
         llm: Any,
         tools: ToolRegistry,
         config: ReActConfig | None = None,
+        rollback_registry: Any | None = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
         self.config = config or ReActConfig()
+        self.rollback_registry = rollback_registry  # RollbackRegistry for undo
 
     async def run(
         self,

@@ -323,6 +323,39 @@ class MqttIoTNode(Node):
                 message, f"Invalid action '{action}' for {device.type}. Valid: {valid_actions}"
             )
 
+        # ── Confirmation Gate ──────────────────────────────────────
+        # Check if this action requires user confirmation
+        try:
+            from hbllm.actions.confirmation import ActionRiskClassifier
+
+            classifier = ActionRiskClassifier()
+            risk_action = f"{device.type}.{action}"
+            assessment = classifier.classify(risk_action, {"device_id": device_id})
+
+            if assessment.requires_confirmation:
+                # Check if we have a confirmation gate on the bus
+                if self.bus:
+                    from hbllm.actions.confirmation import ConfirmationGate
+
+                    gate = ConfirmationGate(bus=self.bus, classifier=classifier)
+                    approved = await gate.request_confirmation(
+                        action=risk_action,
+                        tenant_id=message.tenant_id or "default",
+                        context={"device_id": device_id, "action": action, "params": params},
+                    )
+                    if not approved:
+                        logger.warning(
+                            "IoT command DENIED by confirmation gate: %s → %s",
+                            device_id,
+                            action,
+                        )
+                        return self._error_response(
+                            message,
+                            f"Action '{action}' on {device_id} was denied or timed out.",
+                        )
+        except ImportError:
+            pass  # Confirmation module not available — proceed without gate
+
         # Send MQTT command
         mqtt_payload = {"action": action, **params}
 

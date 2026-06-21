@@ -92,6 +92,8 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         self._knowledge_graphs: dict[str, KnowledgeGraph] = {"default": self.knowledge_graph}
         # Synaptic Priming Layer
         self.primer = WorkingMemoryPrimer()
+        # PII Redactor (injected by brain factory)
+        self._pii_redactor: Any | None = None
         # Track background tasks for graceful shutdown
         self._pending_tasks: set[asyncio.Task[Any]] = set()
 
@@ -101,26 +103,26 @@ class MemoryNode(Node, UnifiedMemoryInterface):
         await self.db.init_db()
         await self.procedural_db.init_db()
         await self.value_db.init_db()
-        await self.bus.subscribe("memory.store", self.handle_store)
-        await self.bus.subscribe("memory.retrieve_recent", self.handle_retrieve)
-        await self.bus.subscribe("memory.search", self.handle_search)
-        await self.bus.subscribe("memory.skill.store", self.handle_skill_store)
-        await self.bus.subscribe("memory.skill.find", self.handle_skill_find)
-        await self.bus.subscribe("memory.reward.record", self.handle_reward_record)
-        await self.bus.subscribe("memory.reward.query", self.handle_reward_query)
-        await self.bus.subscribe("system.salience", self.handle_salience)
-        await self.bus.subscribe("system.improve", self.handle_improvement)
-        await self.bus.subscribe("system.reflection", self.handle_reflection)
-        await self.bus.subscribe("knowledge.query", self.handle_knowledge_query)
-        await self.bus.subscribe("memory.browse", self.handle_browse)
-        await self.bus.subscribe("memory.forget", self.handle_forget)
-        await self.bus.subscribe("memory.stats", self.handle_stats)
-        await self.bus.subscribe("memory.feedback", self.handle_feedback)
-        await self.bus.subscribe("memory.consolidate", self.handle_consolidate)
+        await self.bus.subscribe("memory.store", self.handle_store)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.retrieve_recent", self.handle_retrieve)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.search", self.handle_search)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.skill.store", self.handle_skill_store)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.skill.find", self.handle_skill_find)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.reward.record", self.handle_reward_record)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.reward.query", self.handle_reward_query)  # type: ignore[arg-type]
+        await self.bus.subscribe("system.salience", self.handle_salience)  # type: ignore[arg-type]
+        await self.bus.subscribe("system.improve", self.handle_improvement)  # type: ignore[arg-type]
+        await self.bus.subscribe("system.reflection", self.handle_reflection)  # type: ignore[arg-type]
+        await self.bus.subscribe("knowledge.query", self.handle_knowledge_query)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.browse", self.handle_browse)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.forget", self.handle_forget)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.stats", self.handle_stats)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.feedback", self.handle_feedback)  # type: ignore[arg-type]
+        await self.bus.subscribe("memory.consolidate", self.handle_consolidate)  # type: ignore[arg-type]
 
         # Synaptic priming subscriptions
-        await self.bus.subscribe("router.query", self._on_router_query)
-        await self.bus.subscribe("workspace.thought", self._on_workspace_thought)
+        await self.bus.subscribe("router.query", self._on_router_query)  # type: ignore[arg-type]
+        await self.bus.subscribe("workspace.thought", self._on_workspace_thought)  # type: ignore[arg-type]
 
         # Tracking for handle_improvement which was previously untracked
         self._improvement_tasks: set[asyncio.Task[Any]] = set()
@@ -203,11 +205,16 @@ class MemoryNode(Node, UnifiedMemoryInterface):
 
         task = asyncio.create_task(
             asyncio.to_thread(
-                self.semantic_db.store,
-                pattern_content,
-                {"source": "reflection_engine", "domain": domain, "tenant_id": message.tenant_id},
-                is_priority=False,  # Patterns grow general semantic memory
-                tenant_id=message.tenant_id,
+                lambda: self.semantic_db.store(
+                    pattern_content,
+                    metadata={
+                        "source": "reflection_engine",
+                        "domain": domain,
+                        "tenant_id": message.tenant_id,
+                    },
+                    is_priority=False,  # Patterns grow general semantic memory
+                    tenant_id=message.tenant_id,
+                )
             )
         )
         self._improvement_tasks.add(task)
@@ -246,6 +253,15 @@ class MemoryNode(Node, UnifiedMemoryInterface):
     # ── UnifiedMemoryInterface Implementation ──
 
     async def store(self, memory_type: MemoryType, data: Any, **kwargs: Any) -> str:
+        # PII Protection: redact sensitive data before persistence
+        if isinstance(data, str) and self._pii_redactor:
+            try:
+                data, _pii_matches = self._pii_redactor.redact(
+                    data, tenant_id=kwargs.get("tenant_id", "default")
+                )
+            except Exception as e:
+                logger.debug("PII redaction error (proceeding): %s", e)
+
         if memory_type == MemoryType.EPISODIC:
             return str(
                 await self.db.store_turn(
@@ -269,7 +285,7 @@ class MemoryNode(Node, UnifiedMemoryInterface):
                 tenant_id=kwargs.get("tenant_id", "default"),
                 skill_name=kwargs.get("name", ""),
                 trigger_pattern=data,
-                steps=kwargs.get("steps", kwargs.get("code", [])),
+                steps=kwargs.get("steps") or kwargs.get("code") or [],
             )
             return "stored"
         elif memory_type == MemoryType.VALUE:
@@ -308,6 +324,8 @@ class MemoryNode(Node, UnifiedMemoryInterface):
                 self.semantic_db.search, query, top_k=limit, tenant_id=tenant_id, primer=self.primer
             )
             for r in sem_res:
+                if not isinstance(r, dict):
+                    continue
                 results.append(
                     SearchResult(
                         memory_type=MemoryType.SEMANTIC,
