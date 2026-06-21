@@ -1,6 +1,5 @@
 """Tests for FallbackManager — graceful degradation and chain resolution."""
 
-import pytest
 import pytest_asyncio
 
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry

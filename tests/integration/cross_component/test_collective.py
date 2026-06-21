@@ -2,7 +2,6 @@
 
 import asyncio
 
-import pytest
 import pytest_asyncio
 
 from hbllm.brain.collective_node import CollectiveNode, KnowledgeDigest

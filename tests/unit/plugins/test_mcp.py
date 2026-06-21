@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 import pytest_asyncio
 
 from hbllm.actions.mcp_client_node import McpClientNode, McpTool

@@ -1,6 +1,5 @@
 """Tests for Load Balancer — round-robin, least-loaded, capability-match strategies."""
 
-import pytest
 import pytest_asyncio
 
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry

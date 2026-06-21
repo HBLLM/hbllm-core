@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-import pytest
 import pytest_asyncio
 
 from hbllm.brain.collective_node import (

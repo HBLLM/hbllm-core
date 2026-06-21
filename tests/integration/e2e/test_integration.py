@@ -7,7 +7,6 @@ with mock LLM to verify the cognitive pipeline works end-to-end.
 
 import asyncio
 
-import pytest
 import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus
