@@ -21,13 +21,13 @@ def test_projector_fallback_padding() -> None:
     assert padded[3:] == [0.0] * 7
 
     # 2. Truncation: input longer than target
-    input_long = list(range(15))
+    input_long = [float(x) for x in range(15)]
     truncated = projector.project_vision(input_long)
     assert len(truncated) == 10
-    assert truncated == list(range(10))
+    assert truncated == [float(x) for x in range(10)]
 
     # 3. Exact: input matches target
-    input_exact = list(range(10))
+    input_exact = [float(x) for x in range(10)]
     exact = projector.project_vision(input_exact)
     assert exact == input_exact
 

@@ -3,8 +3,8 @@
 from hbllm.brain.embodiment.idempotency import IdempotencyEngine
 
 
-def test_idempotency_locking():
-    engine = IdempotencyEngine()
+def test_idempotency_locking(tmp_path):
+    engine = IdempotencyEngine(db_path=tmp_path / "idempotency.db")
 
     key1 = engine.generate_key("goal_1", "email.send", {"to": "alice"})
 
