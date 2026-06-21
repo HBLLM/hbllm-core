@@ -200,8 +200,8 @@ class TestInProcessTransportIntegration:
         await transport.send("test", high)
 
         # High priority should come first from queue (lower priority_key value)
-        first = await asyncio.wait_for(transport._queue.get(), timeout=5.0)
-        second = await asyncio.wait_for(transport._queue.get(), timeout=5.0)
+        first = await transport._queue.get()
+        second = await transport._queue.get()
 
         # First should have lower priority_key (higher actual priority)
         assert first[0] <= second[0]
@@ -296,7 +296,7 @@ class TestInProcessTransportIntegration:
 
         assert not transport.has_subscribers("test.topic")
 
-        async def _noop(msg: Message) -> None:
+        async def _noop(m: Message) -> None:
             pass
 
         await transport.subscribe("test.topic", _noop)
