@@ -130,12 +130,12 @@ class SpeakerIdNode(Node):
         embedding = self._encoder.embed_utterance(processed)
         return embedding.astype(np.float32)
 
-    async def start(self) -> None:
+    async def on_start(self) -> None:
         """Subscribe to speaker identification topics."""
-        await self.bus.subscribe("speaker.identify", self.handle_identify)
-        await self.bus.subscribe("speaker.enroll", self.handle_enroll)
-        await self.bus.subscribe("speaker.list", self.handle_list)
-        await self.bus.subscribe("speaker.delete", self.handle_delete)
+        await self.bus.subscribe("speaker.identify", self.handle_identify)  # type: ignore[arg-type]
+        await self.bus.subscribe("speaker.enroll", self.handle_enroll)  # type: ignore[arg-type]
+        await self.bus.subscribe("speaker.list", self.handle_list)  # type: ignore[arg-type]
+        await self.bus.subscribe("speaker.delete", self.handle_delete)  # type: ignore[arg-type]
         logger.info("SpeakerIdNode started")
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -456,7 +456,7 @@ class SpeakerIdNode(Node):
 
         return len(matches)
 
-    async def stop(self) -> None:
+    async def on_stop(self) -> None:
         """Cleanup resources."""
         if self._store:
             self._store.close()

@@ -134,7 +134,7 @@ class ConversationTurnManager(Node):
             Message(
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
-                session_id=self._current_session,
+                session_id=self._current_session or "",
                 topic="conversation.state_change",
                 payload={
                     "old_state": old.value,
@@ -181,7 +181,7 @@ class ConversationTurnManager(Node):
             Message(
                 type=MessageType.QUERY,
                 source_node_id=self.node_id,
-                session_id=self._current_session,
+                session_id=self._current_session or "",
                 topic="router.query",
                 payload={
                     "text": text,
@@ -216,7 +216,7 @@ class ConversationTurnManager(Node):
             Message(
                 type=MessageType.QUERY,
                 source_node_id=self.node_id,
-                session_id=self._current_session,
+                session_id=self._current_session or "",
                 topic="sensory.audio.out",
                 payload={
                     "text": response_text,
@@ -261,7 +261,7 @@ class ConversationTurnManager(Node):
             Message(
                 type=MessageType.EVENT,
                 source_node_id=self.node_id,
-                session_id=self._current_session,
+                session_id=self._current_session or "",
                 topic="sensory.audio.interrupt",
                 payload={"reason": reason},
             ),

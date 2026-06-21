@@ -496,20 +496,6 @@ class AudioInputNode(Node):
             # Moonshine expects (1, samples) float32
             samples_2d = samples.reshape(1, -1)
 
-            # DEBUG: save the exact audio Moonshine receives to a WAV file
-            try:
-                import soundfile as sf  # type: ignore[import-not-found]
-
-                sf.write("/tmp/moonshine_debug_last.wav", samples, 16000)
-                logger.info(
-                    "DEBUG: Saved audio to /tmp/moonshine_debug_last.wav (%d samples, %.2fs)",
-                    len(samples),
-                    len(samples) / 16000,
-                )
-            except Exception as e:
-                logger.debug(
-                    "[AudioInNode] generate() returns token IDs — decode with tokenizer: %s", e
-                )
             token_ids = self._moonshine_model.generate(samples_2d)
             logger.info("Moonshine token_ids: %s", token_ids)
 
