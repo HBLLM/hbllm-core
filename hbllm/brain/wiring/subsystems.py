@@ -74,29 +74,6 @@ async def wire_always_on_subsystems(
             dual_router.state_machine = getattr(autonomy, "state_machine", None)
         logger.info("[Factory] Dual LLM Router attached to brain")
 
-    # ── Core: always-on safety subsystems ─────────────────────────────
-    # PII Redactor (protects memory from storing personal data)
-    from hbllm.security.pii_redactor import PIIRedactor
-
-    brain.pii_redactor = PIIRedactor()
-    logger.info("PIIRedactor wired (memory write filter active)")
-
-    # Rollback Registry (undo mappings for transactional actions)
-    from hbllm.actions.rollback import RollbackRegistry
-
-    brain.rollback_registry = RollbackRegistry()
-    logger.info(
-        "RollbackRegistry wired (%d reversible actions)",
-        len(brain.rollback_registry.list_reversible()),
-    )
-
-    # Audit Trail (immutable action logging)
-    from hbllm.security.audit_trail import AuditTrail
-
-    brain.audit_trail = AuditTrail(db_path=str(Path(cfg.data_dir) / "audit_trail.db"))
-    await brain.audit_trail.init_db()
-    logger.info("AuditTrail wired (immutable action logging active)")
-
 
 async def wire_optional_subsystems(
     brain: Brain,
@@ -243,10 +220,10 @@ async def wire_optional_subsystems(
         nodes.append(fail_node)
         logger.info("FailureAnalyzerNode wired (automated skill repair)")
 
-    if cfg.inject_sil and brain.skill_registry is not None:
+    if cfg.inject_sil:
         from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
 
-        sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)
+        sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)  # type: ignore[arg-type]
         await _register_node(registry, sil_node)
         await sil_node.start(message_bus)
         brain.skill_intelligence_node = sil_node
@@ -330,30 +307,6 @@ async def wire_late_subsystems(
         brain.state = BrainState(path=state_path)
         logger.info("BrainState wired (path=%s)", state_path)
 
-    # ── Core: late-wired subsystems ──────────────────────────────────
-    # Restraint Engine (action gating — "when NOT to act")
-    from hbllm.brain.autonomy.restraint import RestraintEngine
-
-    brain.restraint_engine = RestraintEngine()
-    logger.info("RestraintEngine wired (action gating active)")
-
-    # Voice Authenticator (speaker embedding auth)
-    try:
-        from hbllm.security.voice_auth import VoiceAuthenticator
-
-        brain.voice_auth = VoiceAuthenticator(db_path=str(Path(cfg.data_dir) / "voice_profiles.db"))
-        await brain.voice_auth.init_db()
-        logger.info("VoiceAuthenticator wired (%d profiles)", len(brain.voice_auth.list_profiles()))
-    except ImportError:
-        logger.debug("VoiceAuthenticator skipped (numpy not available)")
-
-    # Offline Manager (graceful network degradation)
-    from hbllm.serving.offline_mode import OfflineManager
-
-    brain.offline_manager = OfflineManager(bus=message_bus)
-    await brain.offline_manager.start()
-    logger.info("OfflineManager wired (connectivity monitoring active)")
-
     # Plugin System (must come last — depends on skill_registry, policy_engine, knowledge_base)
     if cfg.inject_plugins:
         from hbllm.plugin.manager import PluginManager
@@ -384,8 +337,7 @@ async def _wire_autonomy_watchers(brain: Brain, cfg: BrainConfig) -> None:
         brain._autonomy_watchers = []
 
         if cfg.autonomy_watch_dirs:
-            watch_dirs: list[Path | str] = list(cfg.autonomy_watch_dirs)
-            fs_watcher = FilesystemWatcher(watch_dirs=watch_dirs)
+            fs_watcher = FilesystemWatcher(watch_dirs=list(cfg.autonomy_watch_dirs))
             brain._autonomy_watchers.append(("fs_watcher", fs_watcher))
 
         health_watcher = SystemHealthWatcher()

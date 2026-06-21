@@ -74,6 +74,7 @@ class RedisTransport(Transport):
             return
 
         self._state = TransportState.CONNECTING
+        assert self.redis_url is not None, "redis_url required"
         self.client = aioredis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()
         await self.pubsub.psubscribe("*")
@@ -263,6 +264,7 @@ class RedisTransport(Transport):
                 await self.client.aclose()
         except Exception as e:
             logger.debug("[Redis] non-critical error: %s", e)
+        assert self.redis_url is not None
         self.client = aioredis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()
         await self.pubsub.psubscribe("*")

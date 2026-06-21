@@ -82,6 +82,7 @@ class RedisBus(MessageBus):
 
     async def start(self) -> None:
         """Connect to Redis and start the dispatch loop."""
+        assert self.redis_url is not None, "redis_url must be set before start()"
         self.client = redis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()
         # Subscribe to all topics to catch responses and broadcast identically to InProcessBus
@@ -295,6 +296,7 @@ class RedisBus(MessageBus):
         except Exception:
             logger.debug("Error closing connection during reconnect", exc_info=True)
 
+        assert self.redis_url is not None
         self.client = redis.from_url(self.redis_url, decode_responses=True)
         self.pubsub = self.client.pubsub()
         await self.pubsub.psubscribe("*")

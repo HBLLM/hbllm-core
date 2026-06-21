@@ -107,7 +107,7 @@ class UtilityCalibrator:
         import json
 
         query = "SELECT trace_id, decision_point, predicted_utility, actual_outcome, prediction_error, timestamp, metadata_json FROM calibration_traces"
-        args: list[Any] = []
+        args: list[str | int] = []
         if decision_point:
             query += " WHERE decision_point = ?"
             args.append(decision_point)

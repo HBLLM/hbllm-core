@@ -174,9 +174,7 @@ class McpClientNode(Node):
 
             env = {**os.environ, **self.server_env}
 
-        if not self.server_command:
-            raise ValueError("server_command is required for stdio transport")
-
+        assert self.server_command is not None, "server_command required"
         self._process = await asyncio.create_subprocess_exec(
             self.server_command,
             *self.server_args,

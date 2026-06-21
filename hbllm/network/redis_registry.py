@@ -73,6 +73,7 @@ class RedisRegistry(ServiceRegistry):
         try:
             import redis.asyncio as aioredis  # type: ignore
 
+            assert self.redis_url is not None, "redis_url required"
             self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
             if self._redis:
                 await self._redis.ping()
