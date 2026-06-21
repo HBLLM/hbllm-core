@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from hbllm.brain.autonomy.task_graph import (
@@ -21,13 +23,13 @@ def runtime(tmp_path):
 
 
 def _make_goal(**kwargs) -> Goal:
-    defaults = {"name": "Test Goal", "status": GoalStatus.ACTIVE}
+    defaults: dict[str, Any] = {"name": "Test Goal", "status": GoalStatus.ACTIVE}
     defaults.update(kwargs)
     return Goal(**defaults)
 
 
 def _make_task(**kwargs) -> TaskNode:
-    defaults = {"name": "Test Task", "action_topic": "test.action"}
+    defaults: dict[str, Any] = {"name": "Test Task", "action_topic": "test.action"}
     defaults.update(kwargs)
     return TaskNode(**defaults)
 

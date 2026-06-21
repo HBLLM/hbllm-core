@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-import pytest
+import pytest_asyncio
 
 from hbllm.brain.collective_node import (
     AgentProfile,
@@ -132,7 +132,7 @@ class TestDataModels:
 class TestAgentSpecialization:
     """Test peer profile exchange and specialization registry."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
@@ -233,7 +233,7 @@ class TestAgentSpecialization:
 class TestConsensusVoting:
     """Test multi-agent consensus voting protocol."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
@@ -387,7 +387,7 @@ class TestConsensusVoting:
 class TestTaskDelegation:
     """Test intelligent task delegation to specialized peers."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
@@ -545,7 +545,7 @@ class TestTaskDelegation:
 class TestKnowledgeSharingRegression:
     """Ensure existing knowledge sharing still works with v2 enhancements."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()

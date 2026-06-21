@@ -13,6 +13,7 @@ Tests:
 import json
 
 import pytest
+import pytest_asyncio
 
 # ─── SemanticMemory Isolation ────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ class TestSemanticMemoryIsolation:
 class TestValueMemoryIsolation:
     """Verify that ValueMemory rewards are scoped by identity triplet."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def value_db(self, tmp_path):
         from hbllm.memory.value_memory import ValueMemory
 

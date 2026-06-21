@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.experience_node import ExperienceNode
 from hbllm.memory.memory_node import MemoryNode
@@ -25,7 +26,7 @@ def tmp_reflection_dir():
     shutil.rmtree(d, ignore_errors=True)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def reflection_system(tmp_reflection_dir):
     """Boot ExperienceNode + MemoryNode connected via bus."""
     bus = InProcessBus()

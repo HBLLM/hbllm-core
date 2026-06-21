@@ -273,7 +273,6 @@ class Brain:
         self.proactive_processor: Any = None  # ProactiveProcessor
         self.sse_channel: Any = None  # SSEChannel
         self.emotion_engine: Any = None  # EmotionEngine
-        self.world_state: Any = None  # WorldStateEngine
 
         # Cognitive subsystems (initialized by factory)
         self.skill_registry: SkillRegistry | None = None
@@ -328,6 +327,14 @@ class Brain:
         self.decision_tracer: Any | None = None
         self.security_guard: Any | None = None
         self.mesh_registry: Any | None = None
+
+        # Core safety subsystems (Phase 4-5 wiring)
+        self.audit_trail: Any | None = None  # AuditTrail (immutable action log)
+        self.pii_redactor: Any | None = None  # PIIRedactor (memory write filter)
+        self.restraint_engine: Any | None = None  # RestraintEngine (action gating)
+        self.offline_manager: Any | None = None  # OfflineManager (network degradation)
+        self.voice_auth: Any | None = None  # VoiceAuthenticator (speaker ID)
+        self.rollback_registry: Any | None = None  # RollbackRegistry (undo mappings)
 
         # Plugin system
         self.plugin_manager: PluginManager | None = None
@@ -1475,7 +1482,7 @@ class BrainFactory:
         if cfg.inject_plugins:
             from hbllm.plugin.manager import PluginManager
 
-            extra_dirs = [Path(d) for d in (cfg.plugin_dirs or [])]
+            extra_dirs: list[Path | str] = [Path(d) for d in (cfg.plugin_dirs or [])]
             brain.plugin_manager = PluginManager(
                 plugin_dirs=extra_dirs,
                 skill_registry=brain.skill_registry,

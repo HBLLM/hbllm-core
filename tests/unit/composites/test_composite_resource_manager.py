@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.composites.resource_manager import ResourceManager
 from hbllm.network.bus import InProcessBus
@@ -14,7 +15,7 @@ from hbllm.network.node import HealthStatus
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     bus = InProcessBus()
     await bus.start()
@@ -22,7 +23,7 @@ async def bus():
     await bus.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def resource_mgr(bus, tmp_path):
     node = ResourceManager(node_id="test_resource", data_dir=str(tmp_path))
     await node.start(bus)

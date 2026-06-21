@@ -1,6 +1,6 @@
 ---
 title: "HBLLM Core — An AI That Thinks Like a Person"
-description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 28+ cognitive nodes, 6 memory systems, and cryptographic trust for absolute privacy."
+description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 45+ cognitive nodes, 9 memory subsystems, and cryptographic trust for absolute privacy."
 ---
 
 <!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, Privacy-First AI, On-Premise AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Multi-Tenant AI -->
@@ -34,16 +34,16 @@ And it has the **safety instincts of a responsible person** — it knows when it
 
 <div class="feature-grid">
 <div class="feature-card">
-<h3>🧠 28+ Cognitive Nodes</h3>
-<p>Router, Planner, Critic, Decision, Learner, Curiosity, Identity, World Model, Sleep Cycle, and more — each running as an isolated, asynchronous service.</p>
+<h3>🧠 45+ Cognitive Nodes</h3>
+<p>Router, Planner, Critic, Decision, Learner, Curiosity, Identity, World Model, Sleep Cycle, Autonomy Core, Restraint Engine, Reflex Library, and more — each running as an isolated, asynchronous service.</p>
 </div>
 <div class="feature-card">
 <h3>💤 Sleep Cycle Consolidation</h3>
 <p>3-phase memory consolidation (Replay → Prune → Strengthen) inspired by biological sleep. Refines model weights and compresses knowledge while idle. [Architecture &rarr;](architecture/sleep-cycle.md)</p>
 </div>
 <div class="feature-card">
-<h3>💾 6 Memory Systems</h3>
-<p>Working, Episodic, Semantic, Procedural, Value, and Knowledge Graph — mirroring human cognitive psychology for lifelong learning.</p>
+<h3>💾 9 Memory Subsystems</h3>
+<p>Working, Episodic, Semantic, Procedural, Value, Knowledge Graph, Spatial Memory, Temporal Patterns, and Importance Scoring — mirroring human cognitive psychology for lifelong learning.</p>
 </div>
 <div class="feature-card">
 <h3>🧬 Self-Expanding Zones</h3>
@@ -69,6 +69,18 @@ And it has the **safety instincts of a responsible person** — it knows when it
 <h3>⚡ SNN Cognitive Stream</h3>
 <p>Spiking Neural Networks for concept extraction (ComprehensionStream), content planning (ContentPlanner), and reward evaluation (TrainedPRM) with STDP learning. Three rendering tiers: Broca (v4) → Shallow (v3) → Deep (v1-v2).</p>
 </div>
+<div class="feature-card">
+<h3>🎯 Autonomous Goal Pursuit</h3>
+<p>Goal decomposition, proactive insight generation, reflex learning, and persistent DAG-based task execution with boot recovery. The system sets and pursues multi-step goals in the background.</p>
+</div>
+<div class="feature-card">
+<h3>🎥 Multimodal Perception</h3>
+<p>Video stream analysis, gesture recognition, ambient audio classification, speaker identification, conversation turn management, temporal fusion, and world state tracking.</p>
+</div>
+<div class="feature-card">
+<h3>🛡️ Restraint & Safety</h3>
+<p>Cognitive restraint engine, PII redaction, voice authentication, action confirmation gates, and rollback support. The system knows when to stop and ask for permission.</p>
+</div>
 </div>
 
 ---
@@ -82,6 +94,12 @@ flowchart TB
         VIS["📸 Vision\n(Caption + OCR)"]
         AIN["🎤 Audio In\n(STT + Streaming)"]
         AOUT["🔊 Audio Out\n(TTS + Per-Tenant Voice)"]
+        VID["🎥 Video Stream"]
+        GES["🤚 Gesture"]
+        AMB["🔊 Ambient\nAudio"]
+        SID["🗣️ Speaker ID"]
+        CTURN["💬 Turn\nManager"]
+        WSTATE["🌍 World\nState"]
     end
 
     subgraph BUS["⚡ Message Bus (Async Pub/Sub)"]
@@ -114,6 +132,18 @@ flowchart TB
         TRAINEDPRM["📊 TrainedPRM\n(STDP learning)"]
     end
 
+    subgraph AUTONOMY["🎯 Autonomy & Executive Control"]
+        direction LR
+        ACORE["🫀 Autonomy\nCore"]
+        CSM["🧠 State\nMachine"]
+        TGR["📋 TaskGraph"]
+        GDECOMP["🎯 Goal\nDecomposition"]
+        REFLEX["⚡ Reflex\nLibrary"]
+        RESTRAINT["🛑 Restraint"]
+        PROACT["💡 Proactive\nInsight"]
+        CLOAD["📊 Cognitive\nLoad"]
+    end
+
     subgraph META["🧬 Meta-Cognitive Layer"]
         direction LR
         LEARN["🎓 Learner"]
@@ -128,9 +158,10 @@ flowchart TB
         click CLICK "architecture/sleep-cycle.md" "Learn how HBLLM sleeps"
         COLLECTIVE["📊 Collective"]
         WORLD["🌍 World Model"]
+        SOCIAL["🗓️ Social\nTiming"]
     end
 
-    subgraph MEMORY["💾 Memory Systems (6 types)"]
+    subgraph MEMORY["💾 Memory Systems (9 types)"]
         direction LR
         EPISODIC["📖 Episodic\n(events)"]
         SEMANTIC["📚 Semantic\n(hybrid search)"]
@@ -138,6 +169,9 @@ flowchart TB
         VALUE["❤️ Value\n(preferences)"]
         WORKING["📋 Working\n(context)"]
         KG["🔗 Graph\n(concepts)"]
+        SPATIAL["📍 Spatial\n(locations)"]
+        TEMPORAL_M["⏰ Temporal\n(patterns)"]
+        IMPORTANCE["⭐ Importance\n(scoring)"]
     end
 
     subgraph ACTIONS["⚡ Action Layer"]
@@ -150,6 +184,17 @@ flowchart TB
         MCP["🔌 MCP"]
         IOT["📡 IoT/MQTT"]
         ROS["🤖 ROS2"]
+        CONFIRM["✅ Confirm"]
+        ROLLBACK["↩️ Rollback"]
+        AGENT["🤖 Agent\nExecutor"]
+    end
+
+    subgraph SECURITY["🔒 Security & Governance"]
+        direction LR
+        PII["🔏 PII\nRedactor"]
+        VAUTH["🎤 Voice\nAuth"]
+        AUDIT["📜 Audit\nTrail"]
+        POLICY["📋 Policy\nEngine"]
     end
 
     subgraph ZONING["🧪 Zoning Model (Self-Expanding)"]
@@ -173,13 +218,15 @@ flowchart TB
         OLLAMA["Ollama"]
     end
 
-    subgraph SWARM["🌐 Hierarchical Swarm"]
+    subgraph SWARM["🌐 Hierarchical Swarm & Multi-Agent"]
         direction LR
         UPLINK["📡 UplinkNode"]
         MOBILE["📱 Mobile Apps"]
         DESKTOP["💻 Desktop Brains"]
+        COORD["🤝 Coordinator"]
         UPLINK --- MOBILE
         UPLINK --- DESKTOP
+        UPLINK --- COORD
     end
 
     PERCEPTION ==> BUS
@@ -188,11 +235,15 @@ flowchart TB
     BUS ==> ACTIONS
     BUS <--> MEMORY
     BUS <--> META
+    BUS <--> AUTONOMY
+    BUS <--> SECURITY
     SWARM <==>|"SynapseGateway (Firewall Audited)"| BUS
     ZONING -.-> BRAIN
     PROVIDERS -.-> BRAIN
     BRAIN <==> SNN
     SNN --> MEMORY
+    AUTONOMY --> BRAIN
+    AUTONOMY --> ACTIONS
     CURIOSITY -->|"goals"| SLEEP
     SLEEP -->|"consolidation"| MEMORY
     EXPERIENCE -->|"salience"| METAREASON
@@ -323,12 +374,34 @@ asyncio.run(main())
 | **Semantic** | Hybrid dense/sparse vector search with UUID stability |
 | **Procedural** | Learned tool patterns and skill registries |
 | **Knowledge Graph** | LRU-bounded entity-relation concept graphs |
+| **Spatial** | Location-aware memory with proximity search and mental maps |
+| **Temporal Patterns** | Recurring pattern detection across time (daily, weekly, seasonal) |
+| **Importance Scorer** | Multi-factor salience scoring for memory prioritization and consolidation |
+
+### 🎯 Autonomous Executive Control
+
+- **Goal Decomposition** — Breaks high-level objectives into executable sub-task DAGs.
+- **Reflex Library** — Zero-cost deterministic reflexes for system, security, environment, and routine events.
+- **Reflex Learner** — Promotes frequently-triggered LLM patterns into compiled reflexes.
+- **Restraint Engine** — Prevents excessive actions, API calls, and resource consumption.
+- **Proactive Insight** — Background insight generation from idle-time analysis.
+- **Cognitive Load Estimator** — Tracks working memory load to prevent cognitive overload.
+
+### 🎥 Multimodal Perception
+
+- **Video Stream** — Camera/RTSP feed processing with frame events and motion detection.
+- **Gesture Recognition** — Body/hand landmark classification for gesture-based commands.
+- **Ambient Audio** — Scene classification (speech, music, silence, noise) for context awareness.
+- **Speaker ID** — Speaker identification and diarization for multi-person conversations.
+- **World State Tracker** — Unified model of entities, locations, and activities from all sensors.
 
 ### 🛡️ Enterprise Governance
 
 - **Tenant Isolation** — API keys, per-tenant rate limiters, isolated memory domains.
 - **Policy Engine & Sentinel** — YAML governance with proactive bus traffic scanning.
 - **Owner Rules** — Auto-extracted behavioral guardrails from high-salience interactions.
+- **PII Redactor** — Automatic detection and redaction of personally identifiable information.
+- **Voice Authentication** — Speaker verification for voice-activated commands.
 
 ### ⚙️ Infrastructure — Built for Minimal Hardware
 

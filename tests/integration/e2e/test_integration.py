@@ -7,7 +7,7 @@ with mock LLM to verify the cognitive pipeline works end-to-end.
 
 import asyncio
 
-import pytest
+import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
@@ -18,7 +18,7 @@ from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
 class TestEndToEndPipeline:
     """Tests full pipeline flow with simulated node handlers."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def full_pipeline(self):
         """Set up bus, pipeline, and simulated nodes."""
         bus = InProcessBus()
@@ -149,7 +149,7 @@ class TestEndToEndPipeline:
 class TestPipelineWithContextInjection:
     """Test pre-processing context injection."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def pipeline_with_context(self):
         """Pipeline with context injection enabled and mock handlers."""
         bus = InProcessBus()

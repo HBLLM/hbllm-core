@@ -1,6 +1,7 @@
 """Tests for SkillInductionNode — autonomous tool generation with AST security scanning."""
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.skill_induction_node import SecurityInterceptor, SkillInductionNode
 from hbllm.network.bus import InProcessBus
@@ -107,7 +108,7 @@ class MockLLM:
         return self._response
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def induction_env():
     bus = InProcessBus()
     await bus.start()
@@ -131,7 +132,11 @@ async def test_induction_safe_tool(induction_env):
     await node.start(bus)
 
     induced_events = []
-    await bus.subscribe("system.skill.induced", lambda msg: induced_events.append(msg))
+
+    async def _collect(msg: Message) -> None:
+        induced_events.append(msg)
+
+    await bus.subscribe("system.skill.induced", _collect)
 
     request = Message(
         type=MessageType.QUERY,

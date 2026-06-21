@@ -8,6 +8,7 @@ Tests for Enterprise Infrastructure Hardening:
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
@@ -17,7 +18,7 @@ from hbllm.security.identity import NodeIdentity
 from hbllm.security.trust import TrustInterceptor
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def secure_bus():
     registry = ServiceRegistry()
     await registry.start()

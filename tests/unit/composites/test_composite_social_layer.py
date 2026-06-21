@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.composites.social_layer import SocialLayer
 from hbllm.network.bus import InProcessBus
@@ -14,7 +15,7 @@ from hbllm.network.node import HealthStatus
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     bus = InProcessBus()
     await bus.start()
@@ -22,7 +23,7 @@ async def bus():
     await bus.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def social(bus):
     node = SocialLayer(node_id="test_social")
     await node.start(bus)

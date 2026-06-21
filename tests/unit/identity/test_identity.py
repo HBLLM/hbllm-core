@@ -1,6 +1,7 @@
 """Tests for the Identity Core — per-tenant persona management."""
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.identity_node import IdentityNode, IdentityProfile, IdentityStore
 from hbllm.network.bus import InProcessBus
@@ -98,7 +99,7 @@ def test_store_delete(identity_store):
 # ─── IdentityNode Integration Tests ──────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def identity_node(tmp_path):
     bus = InProcessBus()
     await bus.start()

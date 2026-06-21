@@ -2,7 +2,7 @@
 
 import asyncio
 
-import pytest
+import pytest_asyncio
 
 from hbllm.brain.collective_node import CollectiveNode, KnowledgeDigest
 from hbllm.network.bus import InProcessBus
@@ -47,7 +47,7 @@ def test_digest_to_dict():
 # ─── CollectiveNode Integration Tests ─────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def collective_setup():
     """Set up two collective nodes on the same bus (simulating peer instances)."""
     bus = InProcessBus()
@@ -60,7 +60,11 @@ async def collective_setup():
     await node_b.start(bus)
 
     # Wire broadcast → sync so nodes can communicate
-    await bus.subscribe("collective.broadcast", lambda msg: bus.publish("collective.sync", msg))
+
+    async def _on_fwd_63(msg):
+        await bus.publish("collective.sync", msg)
+
+    await bus.subscribe("collective.broadcast", _on_fwd_63)
 
     yield node_a, node_b, bus
 

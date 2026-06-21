@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.sleep_node import SleepCycleNode
 from hbllm.memory.memory_node import MemoryNode
@@ -31,7 +32,7 @@ def db_dir():
     shutil.rmtree(d, ignore_errors=True)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def e2e_sleep_env(db_dir):
     bus = InProcessBus()
     await bus.start()

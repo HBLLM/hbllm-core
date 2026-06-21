@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from hbllm.network.bus import InProcessBus
@@ -11,7 +12,7 @@ from hbllm.network.uplink_node import UplinkNode
 from hbllm.serving.api import app as core_app
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     b = InProcessBus()
     await b.start()

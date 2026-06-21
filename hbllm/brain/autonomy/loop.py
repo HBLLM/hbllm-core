@@ -184,12 +184,19 @@ class AutonomyCore:
         # Outbound message callback
         self._on_action: Callable[[Message], Coroutine[Any, Any, None]] | None = None
 
+        # Core safety subsystems (injected by daemon after construction)
+        self._restraint_engine: Any | None = None  # RestraintEngine
+        self._notification_suppressor: Any | None = None  # NotificationSuppressor
+        self._audit_trail: Any | None = None  # AuditTrail
+
         # Telemetry
         self._ticks_completed = 0
         self._fast_path_wakes = 0
         self._reflexes_fired = 0
         self._thoughts_generated = 0
         self._actions_emitted = 0
+        self._actions_suppressed = 0
+        self._actions_deferred = 0
         self._recursion_blocks = 0
         self._boot_time = time.monotonic()
 
@@ -288,6 +295,21 @@ class AutonomyCore:
         (e.g., a proactive reminder, anomaly alert, or background result).
         """
         self._on_action = handler
+
+    def set_restraint_engine(self, engine: Any) -> None:
+        """Inject the RestraintEngine for action gating."""
+        self._restraint_engine = engine
+        logger.debug("Restraint engine injected into AutonomyCore")
+
+    def set_notification_suppressor(self, suppressor: Any) -> None:
+        """Inject the NotificationSuppressor for anti-annoyance."""
+        self._notification_suppressor = suppressor
+        logger.debug("Notification suppressor injected into AutonomyCore")
+
+    def set_audit_trail(self, audit: Any) -> None:
+        """Inject the AuditTrail for action logging."""
+        self._audit_trail = audit
+        logger.debug("Audit trail injected into AutonomyCore")
 
     # ── Registration ──────────────────────────────────────────────────
 
@@ -628,7 +650,65 @@ class AutonomyCore:
     # ── Output ────────────────────────────────────────────────────────
 
     async def _emit_action(self, msg: Message) -> None:
-        """Emit a proactive action message."""
+        """Emit a proactive action message, gated by restraint + suppression.
+
+        Pipeline: Restraint → Notification Suppression → Audit → Emit
+        """
+        # 1. Restraint check (should we act at all?)
+        if self._restraint_engine:
+            try:
+                from hbllm.brain.autonomy.restraint import (
+                    ActionProposal,
+                    RestraintDecision,
+                )
+
+                proposal = ActionProposal(
+                    action_type=msg.topic,
+                    category=msg.payload.get("category", "proactive"),
+                    confidence=msg.payload.get("confidence", 0.8),
+                    priority=msg.payload.get("priority", "normal"),
+                    tenant_id=getattr(msg, "tenant_id", "default"),
+                )
+                result = self._restraint_engine.evaluate(proposal)
+
+                if result.decision == RestraintDecision.SUPPRESS:
+                    self._actions_suppressed += 1
+                    logger.debug("Restraint SUPPRESSED: %s — %s", msg.topic, result.reasons)
+                    return
+                if result.decision == RestraintDecision.DEFER:
+                    self._actions_deferred += 1
+                    logger.debug("Restraint DEFERRED: %s — %s", msg.topic, result.reasons)
+                    return
+            except Exception as e:
+                logger.debug("Restraint check error (proceeding): %s", e)
+
+        # 2. Notification suppression (anti-annoyance)
+        if self._notification_suppressor and "notification" in msg.topic:
+            try:
+                category = msg.payload.get("category", "general")
+                priority = msg.payload.get("priority", "normal")
+                tenant_id = getattr(msg, "tenant_id", "default")
+                if not self._notification_suppressor.should_send(category, priority, tenant_id):
+                    self._actions_suppressed += 1
+                    logger.debug("Notification suppressed: %s", msg.topic)
+                    return
+            except Exception as e:
+                logger.debug("Suppressor check error (proceeding): %s", e)
+
+        # 3. Audit trail logging
+        if self._audit_trail:
+            try:
+                self._audit_trail.log(
+                    tenant_id=getattr(msg, "tenant_id", "default"),
+                    action=msg.topic,
+                    category=msg.payload.get("category", "autonomy"),
+                    source="autonomy",
+                    target=msg.payload.get("target", ""),
+                )
+            except Exception as e:
+                logger.debug("Audit trail error (proceeding): %s", e)
+
+        # 4. Emit
         self._actions_emitted += 1
 
         if self._on_action:
@@ -658,6 +738,8 @@ class AutonomyCore:
             "reflexes_fired": self._reflexes_fired,
             "thoughts_generated": self._thoughts_generated,
             "actions_emitted": self._actions_emitted,
+            "actions_suppressed": self._actions_suppressed,
+            "actions_deferred": self._actions_deferred,
             "recursion_blocks": self._recursion_blocks,
             "pending_events": len(self._pending_events),
             "pending_thoughts": len(self._thought_queue),

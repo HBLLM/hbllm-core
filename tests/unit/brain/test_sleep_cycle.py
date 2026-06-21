@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.sleep_node import SleepCycleNode
 from hbllm.network.bus import InProcessBus
@@ -39,7 +40,7 @@ class MockMemoryNode:
         return None
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def simulated_sleep_env():
     bus = InProcessBus()
     await bus.start()
@@ -231,7 +232,7 @@ class MockKnowledgeNode:
         return msg.create_response({})
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def temporal_sleep_env():
     bus = InProcessBus()
     await bus.start()
@@ -248,7 +249,7 @@ async def temporal_sleep_env():
     await bus.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def contradiction_sleep_env():
     bus = InProcessBus()
     await bus.start()

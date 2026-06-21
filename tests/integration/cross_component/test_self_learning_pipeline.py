@@ -189,7 +189,11 @@ class TestExplicitFeedbackToMicroLearn:
         bus, learner, eval_node = await _setup_pipeline(mock_model=True)
 
         micro_events: list[Message] = []
-        await bus.subscribe("system.micro_learn", lambda msg: micro_events.append(msg))
+
+        async def _on_micro_events_191(msg):
+            micro_events.append(msg)
+
+        await bus.subscribe("system.micro_learn", _on_micro_events_191)
 
         # Seed a pending context so EvaluationNode has something to work with
         corr_id = "feedback_test_001"
@@ -290,7 +294,11 @@ class TestSleepTriggeredDPO:
         bus, learner, eval_node = await _setup_pipeline()
 
         updates: list[Message] = []
-        await bus.subscribe("system.learning_update", lambda msg: updates.append(msg))
+
+        async def _on_updates_292(msg):
+            updates.append(msg)
+
+        await bus.subscribe("system.learning_update", _on_updates_292)
 
         # Manually populate the DPO queue on disk
         os.makedirs(os.path.dirname(learner.queue_path), exist_ok=True)
@@ -324,7 +332,11 @@ class TestSleepTriggeredDPO:
         bus, learner, eval_node = await _setup_pipeline()
 
         updates: list[Message] = []
-        await bus.subscribe("system.learning_update", lambda msg: updates.append(msg))
+
+        async def _on_updates_326(msg):
+            updates.append(msg)
+
+        await bus.subscribe("system.learning_update", _on_updates_326)
 
         sleep_msg = Message(
             type=MessageType.EVENT,

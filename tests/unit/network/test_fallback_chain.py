@@ -1,6 +1,6 @@
 """Tests for FallbackManager — graceful degradation and chain resolution."""
 
-import pytest
+import pytest_asyncio
 
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry
 from hbllm.network.fallback import FallbackManager
@@ -8,7 +8,7 @@ from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
 from hbllm.network.registry import ServiceRegistry
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def setup():
     """Registry with coding (primary) and general (fallback) nodes."""
     registry = ServiceRegistry()

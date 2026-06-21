@@ -55,11 +55,16 @@ class UplinkNode(Node):
         device_tier: DeviceTier | str | None = None,
     ) -> None:
 
+        _tier = (
+            DeviceTier(device_tier)
+            if isinstance(device_tier, str)
+            else (device_tier or DeviceTier.SERVER)
+        )
         super().__init__(
             node_id=node_id,
             node_type=NodeType.META,
             capabilities=["uplink_bridge"],
-            device_tier=device_tier or DeviceTier.SERVER,
+            device_tier=_tier,
         )
         self.upstream_url = upstream_url
         self.tenant_id = tenant_id
@@ -141,7 +146,7 @@ class UplinkNode(Node):
             logger.debug("[UplinkNode] non-critical error: %s", e)
         while True:
             try:
-                async with websockets.connect(url, **connect_kwargs) as ws:
+                async with websockets.connect(url, **connect_kwargs) as ws:  # type: ignore[arg-type]
                     self._ws = ws
                     logger.info("UplinkNode '%s' connected to %s", self.node_id, self.upstream_url)
 

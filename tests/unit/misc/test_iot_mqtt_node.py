@@ -76,7 +76,11 @@ async def test_execute_command():
     await bus.start()
 
     events = []
-    await bus.subscribe("iot.event", lambda msg: events.append(msg))
+
+    async def _on_events_78(msg):
+        events.append(msg)
+
+    await bus.subscribe("iot.event", _on_events_78)
 
     node = MqttIoTNode(node_id="iot_cmd")
     await node.start(bus)
@@ -154,7 +158,11 @@ async def test_query_all_devices():
     await bus.start()
 
     responses = []
-    await bus.subscribe("iot.query.response", lambda msg: responses.append(msg))
+
+    async def _on_responses_156(msg):
+        responses.append(msg)
+
+    await bus.subscribe("iot.query.response", _on_responses_156)
 
     node = MqttIoTNode(node_id="iot_query")
     await node.start(bus)
@@ -183,7 +191,11 @@ async def test_query_by_room():
     await bus.start()
 
     responses = []
-    await bus.subscribe("iot.query.response", lambda msg: responses.append(msg))
+
+    async def _on_responses_185(msg):
+        responses.append(msg)
+
+    await bus.subscribe("iot.query.response", _on_responses_185)
 
     node = MqttIoTNode(node_id="iot_room_q")
     await node.start(bus)
@@ -206,16 +218,32 @@ async def test_query_by_room():
     await bus.stop()
 
 
-# ── Scene Management ─────────────────────────────────────────────────────────
+# ── Scene Management ─────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_register_and_activate_scene():
+async def test_register_and_activate_scene(monkeypatch):
+    """Scene activation should execute all commands — confirmation auto-approved."""
+    # Patch the risk classifier so all actions are auto-approved (Tier 0)
+    from hbllm.actions import confirmation
+
+    monkeypatch.setattr(
+        confirmation.ActionRiskClassifier,
+        "classify",
+        lambda self, action, context=None: confirmation.RiskAssessment(
+            action=action, tier=0, reason="test", requires_confirmation=False, auto_approve=True
+        ),
+    )
+
     bus = InProcessBus()
     await bus.start()
 
     events = []
-    await bus.subscribe("iot.event", lambda msg: events.append(msg))
+
+    async def _on_events_217(msg):
+        events.append(msg)
+
+    await bus.subscribe("iot.event", _on_events_217)
 
     node = MqttIoTNode(node_id="iot_scene")
     await node.start(bus)

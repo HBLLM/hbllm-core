@@ -23,13 +23,14 @@ except ImportError:
     sys.modules["riva.client"] = riva_client_mock
 
 import pytest
+import pytest_asyncio
 
 from hbllm.network.bus import InProcessBus
 from hbllm.perception.audio_in_node import AudioInputNode
 from hbllm.perception.audio_out_node import AudioOutputNode
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     b = InProcessBus()
     await b.start()

@@ -59,7 +59,7 @@ class CognitiveBenchmark:
 
             # Warm up
             for _ in range(10):
-                ensemble.step("test token", position=0, total_tokens=5)
+                ensemble.step({"semantic_weight": 0.5, "topic_shift": 0.1}, timestamp=0.0)
             ensemble.reset()
 
             # Benchmark 1000 token steps
@@ -73,7 +73,14 @@ class CognitiveBenchmark:
                 ensemble.reset()
                 t0 = time.perf_counter()
                 for i, token in enumerate(tokens):
-                    ensemble.step(token, position=i, total_tokens=total)
+                    signals = {
+                        "semantic_weight": 0.5 + (i * 0.02),
+                        "topic_shift": 0.1 if i % 3 == 0 else 0.0,
+                        "punctuation": 0.8 if token in {".", ","} else 0.0,
+                        "buffer_pressure": min(1.0, i / total),
+                        "novelty": 0.3,
+                    }
+                    ensemble.step(signals, timestamp=float(i))
                 elapsed = time.perf_counter() - t0
                 latencies.append(elapsed * 1000)  # ms
 
@@ -188,7 +195,7 @@ class CognitiveBenchmark:
             state = UnderstandingState(
                 concepts=[],
                 domain_activations={"coding": 0.8, "general": 0.2},
-                salience_map={"function": 0.9, "fibonacci": 0.85, "python": 0.7},
+                salience_map=[0.9, 0.85, 0.7],
                 constraint_tags=["must_return_list", "optimize"],
             )
 

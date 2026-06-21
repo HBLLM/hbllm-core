@@ -6,6 +6,8 @@ and AutonomyCore integration.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from hbllm.brain.autonomy.attention import (
@@ -301,8 +303,8 @@ class TestIncrementalContextWindow:
 
 
 class TestAttentionSystem:
-    def _make_event(self, **kwargs) -> AttentionEvent:
-        defaults = {
+    def _make_event(self, **kwargs: Any) -> AttentionEvent:
+        defaults: dict[str, Any] = {
             "event_id": "test_event",
             "source": "test.source",
             "category": "background",

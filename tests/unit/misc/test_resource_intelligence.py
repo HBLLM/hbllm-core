@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.attention_manager import AttentionManager, FocusAllocation, MemoryBudget
 from hbllm.brain.confidence_estimator import ConfidenceEstimator
@@ -34,14 +35,14 @@ from hbllm.network.messages import Message, MessageType
 class TestAttentionManager:
     """Test memory budgets, importance scoring, and focus allocation."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def attn(self, bus):
         node = AttentionManager(node_id="test_attn", total_context_budget=4096)
         await node.start(bus)
@@ -119,14 +120,14 @@ class TestAttentionManager:
 class TestLoadManager:
     """Test pressure levels, degradation, and task management."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def load(self, bus):
         node = LoadManager(
             node_id="test_load",
@@ -312,14 +313,14 @@ class TestConfidenceEstimatorV2:
 class TestLearnerNodeMicroLearning:
     """Test v2 micro-learning enhancements to LearnerNode."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def learner(self, bus, tmp_path):
         from hbllm.brain.learner_node import LearnerNode
 
@@ -483,7 +484,7 @@ class TestLearnerNodeMicroLearning:
 class TestPhase2FactoryIntegration:
     """Verify Phase 2 nodes are wired into Brain via factory."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def brain(self, tmp_path):
         from hbllm.brain.factory import BrainConfig, BrainFactory
         from hbllm.serving.provider import LLMProvider, LLMResponse

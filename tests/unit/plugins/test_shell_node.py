@@ -5,6 +5,7 @@ Unit tests for HostShellNode.
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.shell_node import HostShellNode
 from hbllm.brain.policy_engine import Policy, PolicyAction, PolicyEngine, PolicyType
@@ -12,7 +13,7 @@ from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     bus = InProcessBus()
     await bus.start()

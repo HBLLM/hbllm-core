@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
+import pytest_asyncio
 
 from hbllm.actions.tool_memory import ToolMemory
 from hbllm.brain.cognitive_metrics import CognitiveMetrics
@@ -49,7 +50,7 @@ class _MockProvider(LLMProvider):
 class TestBrainCognitiveSubsystems:
     """Verify BrainFactory wires all cognitive subsystems into Brain."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def brain(self, tmp_path):
         config = BrainConfig(
             inject_perception=False,

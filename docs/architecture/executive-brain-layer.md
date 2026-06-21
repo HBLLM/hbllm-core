@@ -50,17 +50,38 @@ into a **continuously operating cognitive organism**. It provides:
     │ • Decay       │  │ • Tick profiles  │
     │ • Budgets     │  │ • Guards/hooks   │
     │ • Context     │  │ • Interruption   │
-    └───────────────┘  └─────────────────┘
-                 │
-    ┌────────────▼──────────────┐
-    │   TaskGraphRuntime        │
-    │   (Persistent Goals)      │
-    │                           │
-    │ • DAG execution           │
-    │ • SQLite persistence      │
-    │ • Retry / failure cascade │
-    │ • Boot recovery           │
-    └───────────────────────────┘
+    └───────┬───────┘  └────────┬────────┘
+            │                   │
+    ┌───────▼───────────────────▼──────┐
+    │   TaskGraphRuntime               │
+    │   (Persistent Goals)             │
+    │                                  │
+    │ • DAG execution                  │
+    │ • SQLite persistence             │
+    │ • Retry / failure cascade        │
+    │ • Boot recovery                  │
+    └───────┬──────────────────────────┘
+            │
+    ┌───────▼──────────────────────────┐
+    │   Autonomy Subsystems            │
+    │                                  │
+    │ ┌──────────────┐ ┌────────────┐  │
+    │ │ Goal         │ │ Reflex     │  │
+    │ │ Decomposition│ │ Library    │  │
+    │ └──────────────┘ └────────────┘  │
+    │ ┌──────────────┐ ┌────────────┐  │
+    │ │ Restraint    │ │ Interrupt  │  │
+    │ │ Engine       │ │ Detector   │  │
+    │ └──────────────┘ └────────────┘  │
+    │ ┌──────────────┐ ┌────────────┐  │
+    │ │ Notification │ │ Proactive  │  │
+    │ │ Suppressor   │ │ Insight    │  │
+    │ └──────────────┘ └────────────┘  │
+    │ ┌──────────────┐ ┌────────────┐  │
+    │ │ Reflex       │ │ Cognitive  │  │
+    │ │ Learner      │ │ Load Est.  │  │
+    │ └──────────────┘ └────────────┘  │
+    └──────────────────────────────────┘
 ```
 
 ## Component Reference
@@ -177,6 +198,91 @@ PENDING → ACTIVE → COMPLETED
 Tasks left in `RUNNING` state (from a crash/reboot) are automatically
 reset to `READY` on startup via `recover_on_boot()`.
 
+### 5. GoalDecompositionEngine (`goal_decomposition.py`)
+
+Breaks high-level user goals into executable sub-task DAGs. Uses LLM reasoning to identify dependencies and optimal execution order.
+
+- **Recursive decomposition** — Complex goals are decomposed into progressively smaller tasks.
+- **Dependency inference** — Automatically identifies prerequisites between sub-tasks.
+- **Feasibility check** — Validates each sub-task against available tools and capabilities.
+
+---
+
+### 6. ReflexLibrary (`reflexes/`)
+
+Zero-cost deterministic reflexes organized into 4 domains:
+
+| Domain | Module | Examples |
+|--------|--------|----------|
+| **System** | `reflexes/system.py` | High CPU alert, disk space warning, memory pressure |
+| **Security** | `reflexes/security.py` | Failed auth attempt, suspicious IP, policy violation |
+| **Environment** | `reflexes/environment.py` | Temperature anomaly, device offline, sensor drift |
+| **Routine** | `reflexes/routine.py` | Morning briefing, schedule reminder, daily summary |
+
+---
+
+### 7. ReflexLearner (`reflex_learner.py`)
+
+Promotes frequently-triggered LLM reasoning patterns into compiled reflexes:
+
+1. **Pattern detection** — Monitors LLM invocations for repeated triggers.
+2. **Confidence threshold** — Only promotes patterns with >95% consistency.
+3. **Compilation** — Converts natural language rules into deterministic Python functions.
+4. **Validation** — Tests compiled reflexes against historical events before activation.
+
+---
+
+### 8. RestraintEngine (`restraint.py`)
+
+Prevents excessive resource consumption and action loops:
+
+| Budget | Default | Behavior when exceeded |
+|--------|---------|----------------------|
+| **Actions per minute** | 30 | Queue and defer |
+| **API calls per hour** | 100 | Fall back to local processing |
+| **Notifications per hour** | 10 | Batch and summarize |
+| **Concurrent tool executions** | 5 | Queue with priority |
+
+---
+
+### 9. InterruptDetector (`interrupt_detector.py`)
+
+Classifies incoming events against the current cognitive state to determine if an interruption is warranted.
+
+- **Context preservation** — Saves current execution state before interrupting.
+- **Priority override** — Safety-critical events always interrupt regardless of state.
+- **Deferral queue** — Low-priority events are queued for the next idle window.
+
+---
+
+### 10. NotificationSuppressor (`notification_suppressor.py`)
+
+Batches and deduplicates notifications during focus states to prevent information overload:
+
+- **Focus mode** — Suppresses all non-critical notifications during FOCUSED/EXECUTING states.
+- **Deduplication** — Merges repeated notifications into a single summary.
+- **Digest delivery** — Delivers batched notifications when transitioning to IDLE.
+
+---
+
+### 11. ProactiveInsightEngine (`proactive_insight.py`)
+
+Generates background insights during idle time by analyzing patterns in memory, events, and goals:
+
+- **Anomaly detection** — Identifies unusual patterns in system metrics and user behavior.
+- **Goal suggestions** — Proposes new goals based on incomplete tasks and observed opportunities.
+- **Knowledge gaps** — Identifies areas where the system lacks knowledge and suggests learning targets.
+
+---
+
+### 12. CognitiveLoadEstimator (`cognitive_load_estimator.py`)
+
+Tracks working memory utilization to prevent cognitive overload:
+
+- **Multi-factor load** — Weighs active tasks, pending events, context window usage, and concurrent tools.
+- **Overload protection** — Automatically transitions to REFLECTING state when load exceeds threshold.
+- **Load shedding** — Deprioritizes non-essential processing during high-load periods.
+
 ## Test Coverage
 
 | Module                     | Tests | Status |
@@ -186,10 +292,14 @@ reset to `READY` on startup via `recover_on_boot()`.
 | AttentionSystem            | 8     | ✅     |
 | AutonomyCore               | 11    | ✅     |
 | TaskGraphRuntime           | 25    | ✅     |
-| **Total**                  | **72**| ✅     |
+| GoalDecomposition          | 6     | ✅     |
+| ReflexLibrary              | 12    | ✅     |
+| RestraintEngine            | 8     | ✅     |
+| AutonomyComponents         | 10    | ✅     |
+| **Total**                  | **108**| ✅    |
 
 ## Cross-References
 
 - [Adaptive Network Architecture](./adaptive-network.md) — the transport layer below this
-- `hbllm/brain/scheduler_node.py` — the legacy scheduler to be migrated
+- [Memory Systems](./memory-systems.md) — importance scoring integrates with autonomy
 - `hbllm/brain/attention_manager.py` — memory-focused attention (complementary)

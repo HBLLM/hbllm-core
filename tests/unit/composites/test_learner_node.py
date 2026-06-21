@@ -115,7 +115,11 @@ async def test_training_completes_and_broadcasts(clean_queue):
     await node.start(bus)
 
     updates = []
-    await bus.subscribe("system.learning_update", lambda msg: updates.append(msg))
+
+    async def _on_updates_117(msg):
+        updates.append(msg)
+
+    await bus.subscribe("system.learning_update", _on_updates_117)
 
     # Add 1 pair
     pos = _make_feedback(rating=1, prompt="P", response="Good")

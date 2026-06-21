@@ -4,6 +4,7 @@ import sqlite3
 import time
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.scheduler_node import SchedulerNode
 from hbllm.network.bus import InProcessBus
@@ -13,14 +14,14 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestSchedulerNode:
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bus(self):
         bus = InProcessBus()
         await bus.start()
         yield bus
         await bus.stop()
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def scheduler(self, bus, tmp_path):
         node = SchedulerNode(
             node_id="test_scheduler",

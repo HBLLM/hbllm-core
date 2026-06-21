@@ -139,10 +139,11 @@ class SkillIntelligenceNode(Node):
                 rt_payload = repair_resp.payload
                 failure_type = rt_payload.get("failure_type", "Unknown")
                 if rt_payload.get("repaired") and rt_payload.get("new_steps"):
+                    new_steps: list[str] = rt_payload["new_steps"]
                     # Create a new version of the skill
                     new_skill = self.skill_registry.version_skill(
                         skill_id=best_skill.skill_id,
-                        new_steps=rt_payload.get("new_steps"),
+                        new_steps=new_steps,
                         test_latency_ms=latency_ms,
                     )
                     if new_skill:

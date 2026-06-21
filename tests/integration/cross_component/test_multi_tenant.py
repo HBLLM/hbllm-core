@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.router_node import RouterNode
 from hbllm.brain.workspace_node import WorkspaceNode
@@ -37,7 +38,7 @@ class MockDomainNode:
         await self.bus.publish("workspace.thought", thought)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mt_env():
     bus = InProcessBus()
     await bus.start()

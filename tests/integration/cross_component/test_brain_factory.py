@@ -67,7 +67,7 @@ class MockBrainProvider(LLMProvider):
 
 def _test_config(tmp_path, **overrides) -> BrainConfig:
     """Create a test-safe BrainConfig that disables background tasks."""
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         data_dir=str(tmp_path),
         watch_plugins=False,
         inject_plugins=False,

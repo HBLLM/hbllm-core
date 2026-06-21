@@ -4,6 +4,7 @@ import asyncio
 import time
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.source_verifier import SourceCredibility, SourceVerifier
 from hbllm.brain.web_research_node import (
@@ -152,7 +153,7 @@ class TestTierClassification:
 # ── WebResearchNode Integration Tests ────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def research_env():
     """Set up a bus with WebResearchNode and mock BrowserNode."""
     bus = InProcessBus()
@@ -221,8 +222,16 @@ async def test_t1_not_stored_in_memory(research_env):
 
     memory_events = []
     workspace_events = []
-    await bus.subscribe("memory.store", lambda msg: memory_events.append(msg))
-    await bus.subscribe("workspace.thought", lambda msg: workspace_events.append(msg))
+
+    async def _on_memory_events_224(msg):
+        memory_events.append(msg)
+
+    await bus.subscribe("memory.store", _on_memory_events_224)
+
+    async def _on_workspace_events_225(msg):
+        workspace_events.append(msg)
+
+    await bus.subscribe("workspace.thought", _on_workspace_events_225)
 
     request = Message(
         type=MessageType.QUERY,
@@ -248,7 +257,11 @@ async def test_t2_stored_in_episodic(research_env):
     bus, node = research_env
 
     memory_events = []
-    await bus.subscribe("memory.store", lambda msg: memory_events.append(msg))
+
+    async def _on_memory_events_251(msg):
+        memory_events.append(msg)
+
+    await bus.subscribe("memory.store", _on_memory_events_251)
 
     request = Message(
         type=MessageType.QUERY,
@@ -273,7 +286,11 @@ async def test_t3_stored_in_knowledge_base(research_env):
     bus, node = research_env
 
     kb_events = []
-    await bus.subscribe("knowledge.ingest", lambda msg: kb_events.append(msg))
+
+    async def _on_kb_events_276(msg):
+        kb_events.append(msg)
+
+    await bus.subscribe("knowledge.ingest", _on_kb_events_276)
 
     request = Message(
         type=MessageType.QUERY,
@@ -330,7 +347,11 @@ async def test_gap_detection_low_confidence(research_env):
     bus, node = research_env
 
     reports = []
-    await bus.subscribe("system.research.report", lambda msg: reports.append(msg))
+
+    async def _on_reports_333(msg):
+        reports.append(msg)
+
+    await bus.subscribe("system.research.report", _on_reports_333)
 
     thought = Message(
         type=MessageType.EVENT,

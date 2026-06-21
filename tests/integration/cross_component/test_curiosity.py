@@ -2,7 +2,7 @@
 
 import asyncio
 
-import pytest
+import pytest_asyncio
 
 from hbllm.brain.curiosity_node import (
     CuriosityNode,
@@ -81,7 +81,7 @@ def test_goal_queue_summary():
 # ─── CuriosityNode Integration Tests ─────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def curiosity_node():
     bus = InProcessBus()
     await bus.start()

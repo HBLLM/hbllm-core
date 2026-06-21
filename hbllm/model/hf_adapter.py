@@ -198,7 +198,7 @@ class HuggingFaceModelAdapter(nn.Module):
 
         # Move to device if not using device_map
         if device != "auto" and not load_in_4bit and not load_in_8bit:
-            model = model.to(device)
+            model = model.to(device)  # type: ignore[arg-type]
 
         # ── CPU Inference Optimizations ───────────────────────────────────
         actual_device = next(model.parameters()).device

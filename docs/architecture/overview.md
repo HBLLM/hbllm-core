@@ -1,6 +1,6 @@
 ---
 title: "Architecture Overview — HBLLM Cognitive Architecture"
-description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 28+ cognitive nodes, async message bus, 6 memory systems, and the edge-optimized zoning model."
+description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 45+ cognitive nodes, async message bus, 9 memory subsystems, autonomous goal pursuit, and the edge-optimized zoning model."
 ---
 
 # Architecture Overview
@@ -48,6 +48,13 @@ graph TB
         VIS["📸 Vision (OCR)"]
         AIN["🎤 Audio In (STT)"]
         IOT["📡 IoT/MQTT"]
+        VID["🎥 Video Stream"]
+        GES["🤚 Gesture"]
+        AMB["🔊 Ambient Audio\nClassifier"]
+        SID["🗣️ Speaker ID"]
+        CTURN["💬 Conversation\nTurn Manager"]
+        TFUSE["⏱️ Temporal Fuser"]
+        WSTATE["🌍 World State\nTracker"]
     end
 
     subgraph BUS["⚡ Message Bus (Communication)"]
@@ -71,27 +78,62 @@ graph TB
         TPRM["📊 TrainedPRM\n(6→8→4→2 SNN + STDP)"]
     end
 
+    subgraph AUTONOMY["🎯 Autonomy & Executive Control"]
+        ACORE["🫀 AutonomyCore\n(Cognitive Heartbeat)"]
+        CSM["🧠 Cognitive\nState Machine"]
+        ATTN["👁️ Attention\nSystem"]
+        TGR["📋 TaskGraph\nRuntime"]
+        GDECOMP["🎯 Goal\nDecomposition"]
+        REFLEX["⚡ Reflex\nLibrary"]
+        RESTRAINT["🛑 Restraint\nEngine"]
+        IDETECT["🚨 Interrupt\nDetector"]
+        NSUP["🔕 Notification\nSuppressor"]
+        PROACT["💡 Proactive\nInsight"]
+        CLOAD["📊 Cognitive Load\nEstimator"]
+    end
+
     subgraph META["🧬 Meta-Cognitive Layer (Self-Model)"]
         LEARN["🎓 Learner"]
         SPAWN["🧬 Spawner (Neurogenesis)"]
         SLEEP["💤 Sleep Cycle (Compaction)"]
         CURIO["🔭 Curiosity Node"]
         ID["🛡️ Identity & Ethics"]
+        SOCIAL["🗓️ Social Timing"]
     end
 
-    subgraph MEMORY["💾 Memory Systems (6 Tiers)"]
+    subgraph MEMORY["💾 Memory Systems (9 Subsystems)"]
         EPISODIC["📖 Episodic"]
         SEMANTIC["📚 Semantic (RAG)"]
         PROCEDURAL["🔧 Procedural (Skills)"]
         KG["🔗 Knowledge Graph"]
         VALUE["❤️ Value / Prefs"]
         WORKING["📋 Working Context"]
+        SPATIAL["📍 Spatial Memory"]
+        TEMPORAL["⏰ Temporal Patterns"]
+        IMPORTANCE["⭐ Importance Scorer"]
     end
 
     subgraph ACTIONS["⚡ Action & Embodiment Layer"]
         EXEC["🖥️ Sandboxed Exec"]
         BROWSER["🌍 Browser Node"]
         MCP["🔌 MCP Client"]
+        CONFIRM["✅ Confirmation\nGate"]
+        ROLLBACK["↩️ Rollback\nEngine"]
+        AGENT["🤖 Agent\nExecutor"]
+        TCHAIN["🔗 Tool Chain"]
+    end
+
+    subgraph SECURITY["🔒 Security & Governance"]
+        PII["🔏 PII Redactor"]
+        VAUTH["🎤 Voice Auth"]
+        AUDIT["📜 Audit Trail"]
+        POLICY["📋 Policy Engine"]
+    end
+
+    subgraph MULTIAGENT["🌐 Multi-Agent Network"]
+        COORD["🤝 Coordinator"]
+        PROTO["📡 Protocol"]
+        UPLINK["📡 UplinkNode"]
     end
 
     EP -.->|"API Sync"| SG
@@ -101,11 +143,17 @@ graph TB
     BUS <--> META
     BUS <--> MEMORY
     BUS ==> ACTIONS
+    BUS <--> AUTONOMY
+    BUS <--> SECURITY
+    BUS <--> MULTIAGENT
     CORE <==> SNN
     SNN --> MEMORY
+    AUTONOMY --> CORE
+    AUTONOMY --> ACTIONS
 
     SLEEP -->|"compact"| MEMORY
     SPAWN -->|"spawn LoRAs"| CORE
+    IMPORTANCE -->|"score"| MEMORY
 ```
 
 
@@ -117,6 +165,13 @@ Input nodes that transform raw signals into structured messages:
 |---|---|---|
 | `VisionNode` | Images, video frames | Captions, OCR text, object labels |
 | `AudioInputNode` | Microphone stream | Transcribed text (STT) |
+| `VideoStreamNode` | Camera / RTSP feeds | Frame events, motion detection |
+| `GestureNode` | Body/hand landmarks | Gesture classification events |
+| `AmbientAudioClassifier` | Background audio | Scene classification (speech, music, silence, noise) |
+| `SpeakerIdNode` | Audio embeddings | Speaker identification and diarization |
+| `ConversationTurnManager` | STT + TTS events | Turn state management (IDLE → LISTENING → PROCESSING → SPEAKING) |
+| `TemporalFuser` | Multi-sensor streams | Fused perception snapshots with temporal alignment |
+| `WorldStateTracker` | All perception events | Unified world state model (entities, locations, activities) |
 | `IoTMQTTNode` | MQTT sensor topics | Structured sensor events |
 | `ROS2Node` | ROS2 topic subscriptions | Robot state, LIDAR, joint data |
 
@@ -173,7 +228,24 @@ graph LR
 | **API Versioning** | `middleware/api_version.py` | `Accept-Version` validation, `X-API-Version` header |
 | **DB Quotas** | `episodic.py` | Per-tenant turn limits with automatic eviction |
 
-### Layer 3: Meta-Cognitive
+### Layer 3: Autonomy & Executive Control
+
+The executive control system that enables continuous, goal-directed behavior. See [Executive Brain Layer](executive-brain-layer.md) for the full deep-dive.
+
+- **AutonomyCore** — Cognitive heartbeat with hybrid event + tick loop architecture.
+- **CognitiveStateMachine** — Hierarchical state model (IDLE → FOCUSED → PLANNING → EXECUTING) with adaptive tick rates.
+- **AttentionSystem** — Multi-factor event scoring with decay, budgets, and salience tracking.
+- **TaskGraphRuntime** — Persistent DAG-based goal execution with retry, failure cascade, and boot recovery.
+- **GoalDecompositionEngine** — Breaks high-level goals into executable sub-task DAGs using LLM planning.
+- **ReflexLibrary** — Zero-cost deterministic reflexes for system health, security, environment, and routine events.
+- **ReflexLearner** — Promotes frequently-triggered patterns from LLM reasoning into compiled reflexes.
+- **RestraintEngine** — Prevents excessive action, API calls, and resource consumption with configurable budgets.
+- **InterruptDetector** — Classifies incoming events as interruptible vs. deferrable based on cognitive state.
+- **NotificationSuppressor** — Batches and deduplicates notifications during focus states.
+- **ProactiveInsightEngine** — Generates background insights and recommendations from idle-time analysis.
+- **CognitiveLoadEstimator** — Tracks working memory load to prevent cognitive overload.
+
+### Layer 4: Meta-Cognitive
 
 Nodes that monitor, improve, and expand the brain itself:
 
@@ -183,6 +255,7 @@ Nodes that monitor, improve, and expand the brain itself:
 - **SleepCycleNode** — 3-stage memory consolidation (Replay → Prune → Strengthen).
 - **IdentityNode** — Ethical constraints and personality persistence.
 - **WorldModelNode** — Sandboxed AST simulation for "what-if" reasoning.
+- **SocialTimingNode** — Context-aware timing for proactive communication (avoids interrupting during meetings, late at night, etc.).
 
 ## Communication & Security
 
@@ -195,24 +268,33 @@ All nodes communicate via the **MessageBus**, which has been hardened for distri
     - **SynapseGateway** — production edge gateway with JWT/HMAC auth.
     - **DurableBus** — SQLite-backed persistence wrapper for reliable delivery.
 
-### Layer 4: Memory Systems
+### Layer 5: Memory Systems
 
-See [Memory Systems](memory-systems.md) for the full deep-dive.
+See [Memory Systems](memory-systems.md) for the full deep-dive. Now includes 9 subsystems: Working, Episodic, Semantic, Procedural, Knowledge Graph, Value, **Spatial Memory**, **Temporal Patterns**, and **Importance Scorer**.
 
-### Layer 5: Action & Embodiment
+### Layer 6: Action & Embodiment
 
 Execution nodes that interact with the external world safely through the [Embodiment](embodiment.md) adapter:
 
 - **ExecutionNode** — Sandboxed Python evaluation with resource limits.
-- **OS Adapter** — Interacts safely with host operating systems via idempotency hashing.
+- **OS Adapter** — Interacts safely with host operating systems via idempotency hashing. Platform-specific backends for **Linux** and **macOS**.
 - **Execution Verifier** — Async polling to verify actual physical/digital state changes.
-- **MCPClientNode** — Model Context Protocol tool calls.
+- **ConfirmationGate** — Human-in-the-loop approval for high-risk actions before execution.
+- **RollbackEngine** — Undo support for reversible actions with snapshot-based state recovery.
+- **AgentExecutor** — Multi-step agent loop with tool routing and result aggregation.
+- **ToolChain** — Sequential tool execution pipelines with intermediate result passing.
+- **MCPClientNode** — Model Context Protocol tool calls (stdio and SSE transports).
 - **UplinkNode** — WebSocket bridge to central/cloud servers for Hierarchical Swarms.
 - **BrowserNode** — Web page interaction and scraping.
 - **Z3LogicNode** — Formal verification and constraint solving.
 - **FuzzyLogicNode** — Approximate reasoning with scikit-fuzzy.
 
-### Layer 6: Human Control & Safety
+### Layer 7: Security & Governance
+
+- **PII Redactor** — Automatic detection and redaction of personally identifiable information in inputs and outputs.
+- **Voice Authentication** — Speaker verification for voice-activated commands using embedding similarity.
+- **Audit Trail** — Append-only, SOC2/GDPR-compliant logging of all security-sensitive operations.
+- **Policy Engine** — Constitutional AI layer with per-tenant YAML governance rules.
 
 The [Human Control](human-control.md) layer ensures the user remains in command:
 - **Trust Boundaries** — Scoped tokens mapping actions to specific trust zones (SAFE vs SENSITIVE).
@@ -221,13 +303,14 @@ The [Human Control](human-control.md) layer ensures the user remains in command:
 
 ---
 
-## Optional: Hierarchical Swarm Architecture
+## Optional: Hierarchical Swarm & Multi-Agent Architecture
 
 HBLLM supports a decentralized multi-homed architecture. Edge devices (like laptops, mobile phones, or desktop workstations) can run their own local `MessageBus` and connect to a Central Core via WebSockets using the `UplinkNode`.
 
 1. **Auto-Discovery** — Edge devices advertise their local tools (`register_capabilities`) up to the central server.
 2. **Transparent Execution** — The central server sends `tool_call` commands down the WebSocket, the Edge device executes them locally, and pipes the `tool_result` back up.
 3. **Sovereign Sync** — Edge devices append their offline episodic memories and semantic knowledge to the central brain via secure REST APIs (`/v1/sync/*`).
+4. **Multi-Agent Coordination** — The `MultiAgentCoordinator` manages task delegation across agent instances using the `MultiAgentProtocol` for structured message exchange, capability negotiation, and result aggregation.
 
 This allows the central brain to command a swarm of edge limbs dynamically, while edge devices maintain autonomous local execution.
 

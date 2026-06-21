@@ -71,10 +71,16 @@ class SkillEngine(Node):
         )
         self._compiler.node_identity = self.node_identity
 
-        self._intelligence = SkillIntelligenceNode(
-            node_id=f"{self.node_id}.intelligence",
-            skill_registry=self._skill_registry,
-        )
+        if self._skill_registry is not None:
+            self._intelligence = SkillIntelligenceNode(
+                node_id=f"{self.node_id}.intelligence",
+                skill_registry=self._skill_registry,
+            )
+        else:
+            self._intelligence = SkillIntelligenceNode(
+                node_id=f"{self.node_id}.intelligence",
+                skill_registry=SkillRegistry(),  # type: ignore[no-untyped-call]
+            )
         self._intelligence.node_identity = self.node_identity
 
         self._induction = SkillInductionNode(

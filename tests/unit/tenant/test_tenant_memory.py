@@ -3,13 +3,14 @@ import os
 import tempfile
 
 import pytest
+import pytest_asyncio
 
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def memory_env():
     bus = InProcessBus()
     await bus.start()

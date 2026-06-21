@@ -9,6 +9,7 @@ loop and verifies the output flows correctly.
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.critic_node import CriticNode
 from hbllm.brain.decision_node import DecisionNode
@@ -26,7 +27,7 @@ from tests.mock_llm import MockLLM
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def cognitive_system():
     """
     Boot a full cognitive pipeline with real nodes and MockLLM.

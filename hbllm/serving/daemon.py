@@ -60,6 +60,7 @@ class CognitiveDaemon:
         host: str = "0.0.0.0",
         port: int = 8000,
         serve_http: bool = True,
+        enable_perception: bool = True,
         provider_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self.provider = provider
@@ -70,6 +71,7 @@ class CognitiveDaemon:
         self.host = host
         self.port = port
         self.serve_http = serve_http
+        self.enable_perception = enable_perception
         self.provider_kwargs = provider_kwargs or {}
 
         self._brain: Any = None
@@ -93,8 +95,13 @@ class CognitiveDaemon:
         config = BrainConfig(
             data_dir=self.data_dir,
             inject_awareness=True,
-            inject_perception=False,  # Perception added in later batches
+            inject_perception=self.enable_perception,
         )
+
+        if self.enable_perception:
+            logger.info("Perception ENABLED — audio/vision nodes will be injected")
+        else:
+            logger.info("Perception DISABLED — use --no-perception to re-enable")
 
         if self.local:
             self._brain = await BrainFactory.create_local(
@@ -129,6 +136,32 @@ class CognitiveDaemon:
         self._brain.autonomy_core = self._autonomy
 
         logger.info("AutonomyCore started — cognitive heartbeat active")
+
+        # ── 2b. Wire core safety subsystems into AutonomyCore ─────────────
+        if self._brain.restraint_engine:
+            self._autonomy.set_restraint_engine(self._brain.restraint_engine)
+        if self._brain.audit_trail:
+            self._autonomy.set_audit_trail(self._brain.audit_trail)
+
+        # Wire NotificationSuppressor if available
+        try:
+            from hbllm.brain.autonomy.notification_suppressor import (
+                NotificationSuppressor,
+            )
+
+            suppressor = NotificationSuppressor()
+            self._autonomy.set_notification_suppressor(suppressor)
+            self._brain._notification_suppressor = suppressor
+            logger.info("NotificationSuppressor wired into AutonomyCore")
+        except Exception as e:
+            logger.debug("NotificationSuppressor not wired: %s", e)
+
+        # Wire PII redactor into memory nodes
+        if self._brain.pii_redactor:
+            for node in self._brain.nodes:
+                if hasattr(node, "_pii_redactor"):
+                    node._pii_redactor = self._brain.pii_redactor
+                    logger.debug("PII redactor injected into %s", node.node_id)
 
         # ── 3. Start ProactiveProcessor ──────────────────────────
         from hbllm.serving.notifications import NotificationGateway
@@ -193,6 +226,16 @@ class CognitiveDaemon:
 
         # Shutdown Brain (persists state, drains requests)
         if self._brain:
+            # Stop OfflineManager
+            if getattr(self._brain, "offline_manager", None):
+                await self._brain.offline_manager.stop()
+
+            # Prune old audit entries
+            if getattr(self._brain, "audit_trail", None):
+                pruned = self._brain.audit_trail.prune_old_entries()
+                if pruned:
+                    logger.info("Pruned %d old audit entries", pruned)
+
             await self._brain.shutdown()
 
         elapsed = time.monotonic() - self._boot_time
@@ -241,51 +284,16 @@ class CognitiveDaemon:
         except Exception:
             logger.exception("HTTP server failed")
 
-    # ── Default Reflexes (Tier 1 — zero LLM) ─────────────────────
-
     def _register_default_reflexes(self) -> None:
-        """Register built-in reflex rules."""
-        from hbllm.brain.autonomy.attention import AttentionEvent
-        from hbllm.network.messages import Message, MessageType
+        """Register built-in reflex rules from the reflex library."""
+        from hbllm.brain.autonomy.reflexes import get_all_reflexes
 
-        def _system_critical_reflex(event: AttentionEvent) -> Message | None:
-            """Immediately broadcast system-critical events."""
-            if event.source.startswith("system.critical"):
-                return Message(
-                    type=MessageType.EVENT,
-                    source_node_id="autonomy_reflex",
-                    topic="proactive.push",
-                    payload={
-                        "title": "System Alert",
-                        "body": event.payload.get("text", str(event.payload)),
-                        "priority": "critical",
-                        "category": "system",
-                    },
-                )
-            return None
+        # Load all reflexes from the library (system, environment, routine, security)
+        all_reflexes = get_all_reflexes()
+        for name, rule in all_reflexes.items():
+            self._autonomy.add_reflex(name, rule)
 
-        def _memory_pressure_reflex(event: AttentionEvent) -> Message | None:
-            """React to high memory usage."""
-            if event.source == "system.hardware.critical":
-                ram = event.payload.get("ram_percent", 0)
-                if ram > 90:
-                    return Message(
-                        type=MessageType.EVENT,
-                        source_node_id="autonomy_reflex",
-                        topic="proactive.push",
-                        payload={
-                            "title": "Memory Pressure",
-                            "body": f"System RAM at {ram:.0f}%. Consider closing applications.",
-                            "priority": "high",
-                            "category": "system",
-                        },
-                    )
-            return None
-
-        self._autonomy.add_reflex("system_critical", _system_critical_reflex)
-        self._autonomy.add_reflex("memory_pressure", _memory_pressure_reflex)
-
-        logger.debug("Registered %d default reflexes", 2)
+        logger.info("Registered %d reflexes from library", len(all_reflexes))
 
     async def _register_default_handlers(self) -> None:
         """Register built-in proactive handlers (slow path)."""
@@ -361,6 +369,25 @@ class CognitiveDaemon:
             result["proactive"] = self._proactive.snapshot()
         if self._brain and self._brain.cognitive_metrics:
             result["metrics"] = self._brain.cognitive_metrics.get_dashboard_metrics()
+
+        # Core safety subsystem stats
+        if self._brain:
+            safety: dict[str, Any] = {}
+            if getattr(self._brain, "pii_redactor", None):
+                safety["pii_redactor"] = self._brain.pii_redactor.stats()
+            if getattr(self._brain, "restraint_engine", None):
+                safety["restraint"] = self._brain.restraint_engine.stats()
+            if getattr(self._brain, "audit_trail", None):
+                safety["audit_trail"] = self._brain.audit_trail.stats()
+            if getattr(self._brain, "offline_manager", None):
+                safety["offline"] = self._brain.offline_manager.stats()
+            if getattr(self._brain, "voice_auth", None):
+                safety["voice_auth"] = self._brain.voice_auth.stats()
+            if getattr(self._brain, "rollback_registry", None):
+                safety["rollback"] = self._brain.rollback_registry.stats()
+            if safety:
+                result["safety"] = safety
+
         return result
 
 
@@ -388,6 +415,11 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0", help="HTTP host")
     parser.add_argument("--port", type=int, default=8000, help="HTTP port")
     parser.add_argument("--no-http", action="store_true", help="Disable HTTP server")
+    parser.add_argument(
+        "--no-perception",
+        action="store_true",
+        help="Disable perception nodes (audio/vision) — useful on headless servers",
+    )
     parser.add_argument(
         "--mode",
         choices=["foreground", "systemd"],
@@ -422,6 +454,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         serve_http=not args.no_http,
+        enable_perception=not args.no_perception,
     )
 
     asyncio.run(daemon.run_forever())

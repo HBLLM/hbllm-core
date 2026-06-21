@@ -168,7 +168,91 @@ audit.log(
 - **Purge old entries** — configurable retention period (default: 365 days)
 - **Failed login tracking** — `failed_logins(hours=24)` for security alerting
 
-## 6. Encryption at Rest (`hbllm.security.encryption`)
+## 6. PII Redactor (`hbllm.security.pii_redactor`)
+
+Automatic detection and redaction of personally identifiable information in all inputs and outputs.
+
+### Supported PII Categories
+
+| Category | Detection Method | Redaction |
+|----------|-----------------|-----------|
+| **Email addresses** | Regex | `[EMAIL_REDACTED]` |
+| **Phone numbers** | Regex + format normalization | `[PHONE_REDACTED]` |
+| **Credit card numbers** | Luhn validation + regex | `[CC_REDACTED]` |
+| **Social Security Numbers** | Regex | `[SSN_REDACTED]` |
+| **IP addresses** | Regex | `[IP_REDACTED]` |
+| **Physical addresses** | Pattern matching | `[ADDRESS_REDACTED]` |
+| **Names** | NER (when available) / pattern | `[NAME_REDACTED]` |
+
+### Usage
+
+```python
+from hbllm.security.pii_redactor import PIIRedactor
+
+redactor = PIIRedactor()
+clean = redactor.redact("Contact john@example.com or call 555-0123")
+# "Contact [EMAIL_REDACTED] or call [PHONE_REDACTED]"
+
+# Check if text contains PII without redacting
+has_pii = redactor.contains_pii("My SSN is 123-45-6789")
+# True
+```
+
+### Integration Points
+
+- **Pre-processing** — Applied to all user inputs before they reach the cognitive pipeline.
+- **Post-processing** — Applied to all outputs before delivery to the user.
+- **Memory storage** — Applied before persisting to episodic or semantic memory.
+- **Audit logging** — PII is redacted in audit trail entries.
+
+## 7. Voice Authentication (`hbllm.security.voice_auth`)
+
+Speaker verification for voice-activated commands using embedding similarity.
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User (Voice)
+    participant VA as VoiceAuth
+    participant EM as Embedding Model
+    participant DB as Speaker DB
+
+    U->>VA: Speak command
+    VA->>EM: Extract voice embedding
+    EM-->>VA: 256-dim embedding vector
+    VA->>DB: Compare against enrolled speakers
+    DB-->>VA: Similarity scores
+    alt Similarity > threshold
+        VA-->>U: ✅ Authenticated (speaker_id)
+    else Below threshold
+        VA-->>U: ❌ Rejected (unknown speaker)
+    end
+```
+
+### Enrollment & Verification
+
+```python
+from hbllm.security.voice_auth import VoiceAuthenticator
+
+auth = VoiceAuthenticator(threshold=0.85)
+
+# Enroll a speaker (requires 3+ samples)
+auth.enroll("user_01", audio_samples=[sample1, sample2, sample3])
+
+# Verify identity
+result = auth.verify(audio_clip)
+# {"authenticated": True, "speaker_id": "user_01", "confidence": 0.92}
+```
+
+### Security Features
+
+- **Replay detection** — Rejects previously-seen audio segments.
+- **Liveness detection** — Optional integration with liveness detection models.
+- **Configurable threshold** — Per-tenant sensitivity settings (default: 0.85).
+- **Multi-speaker enrollment** — Supports multiple authorized speakers per tenant.
+
+## 8. Encryption at Rest (`hbllm.security.encryption`)
 
 Field-level encryption for sensitive tenant data using symmetric encryption with HMAC-SHA256 authentication:
 
@@ -185,14 +269,14 @@ original = vault.decrypt(encrypted)
 - **Key fingerprinting**: `vault.key_fingerprint` for safe logging (first 12 chars of SHA-256)
 - **Dict encryption**: `vault.encrypt_dict()` / `vault.decrypt_dict()` for structured data
 
-## 7. Policy Engine
+## 9. Policy Engine
 
 - **Constitutional AI layer** intercepting all outputs. Responses are evaluated against safety policies (`DENY`, `TRANSFORM`, `SCOPE`) before delivery.
 - Per-tenant policy scoping with configurable `BLOCK`, `WARN`, `APPEND`, `PREPEND`, `REPLACE`, `RESTRICT` actions.
 
 > 📖 **[Full Policy Engine Reference →](api/governance.md)**
 
-## 8. Configuration Reference
+## 10. Configuration Reference
 
 All security settings are in `hbllm.yaml` under the `security:` key:
 

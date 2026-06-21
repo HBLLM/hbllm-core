@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.network.messages import Message, MessageType, QueryPayload
 
@@ -10,7 +11,7 @@ import redis.asyncio as redis
 from hbllm.network.redis_bus import RedisBus
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def redis_bus():
     bus = RedisBus("redis://localhost:6379")
     try:

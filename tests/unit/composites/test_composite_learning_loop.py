@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from hbllm.brain.composites.learning_loop import LearningLoop
 from hbllm.network.bus import InProcessBus
@@ -21,7 +22,7 @@ pytestmark = pytest.mark.asyncio
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def bus():
     bus = InProcessBus()
     await bus.start()
@@ -29,7 +30,7 @@ async def bus():
     await bus.stop()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def learning(bus):
     node = LearningLoop(node_id="test_learning")
     await node.start(bus)
