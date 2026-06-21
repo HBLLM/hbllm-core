@@ -536,7 +536,7 @@ class PythonExtractor(BaseExtractor):
             self.container_stack.pop()
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-            self.visit_FunctionDef(node)
+            self.visit_FunctionDef(node)  # type: ignore[arg-type]
 
         def visit_Import(self, node: ast.Import) -> None:
             parent_id = self.container_stack[-1]

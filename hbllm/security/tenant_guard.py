@@ -33,7 +33,7 @@ import logging
 import os
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar, overload
 
 logger = logging.getLogger(__name__)
 
@@ -183,9 +183,19 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+@overload
+def require_tenant(func: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+@overload
+def require_tenant(
+    func: None = None, *, param: str = "tenant_id"
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]: ...
+
+
 def require_tenant(
     func: Callable[_P, _R] | None = None, *, param: str = "tenant_id"
-) -> Callable[_P, _R] | Any:
+) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Decorator that enforces tenant_id is present and valid.
 
@@ -236,7 +246,7 @@ def require_identity(
     tenant_param: str = "tenant_id",
     user_param: str = "user_id",
     device_param: str = "device_id",
-) -> Callable[..., Any] | Any:
+) -> Callable[..., Any] | Callable[..., Callable[..., Any]]:
     """
     Decorator that enforces the full identity triplet.
 
