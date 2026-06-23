@@ -154,7 +154,9 @@ class RelationshipNode(Node):
             # If organizer is known, learn relationship
             if organizer and organizer != name:
                 self.memory.learn_relationship(
-                    organizer, name, "colleague",
+                    organizer,
+                    name,
+                    "colleague",
                     context=f"Both attended: {event_name}",
                     tenant_id=tenant_id,
                 )

@@ -1,6 +1,7 @@
 """Unit tests for ExecutiveCortex — unified cognitive control."""
 
 import time
+
 import pytest
 
 from hbllm.brain.executive_cortex import (
@@ -121,7 +122,7 @@ class TestExecutiveCortex:
         cortex._focus_depth = 0.1
         shallow_result = cortex.should_interrupt(event)
         cortex._focus_depth = 0.9
-        deep_result = cortex.should_interrupt(event)
+        _deep_result = cortex.should_interrupt(event)  # noqa: F841
         # Deep focus should be harder to interrupt
         if shallow_result:
             # It's possible deep focus blocks it
@@ -153,9 +154,7 @@ class TestExecutiveCortex:
                 return 0.95
 
         cortex = ExecutiveCortex(load_manager=MockLoadManager())
-        decision = cortex.decide_next_action(
-            pending_events=[{"urgency": 0.5, "priority": 0.5}]
-        )
+        decision = cortex.decide_next_action(pending_events=[{"urgency": 0.5, "priority": 0.5}])
         assert decision.action == "idle"
         assert "pressure" in decision.reasoning.lower()
 
@@ -183,16 +182,20 @@ class TestExecutiveCortex:
     def test_deadline_boost(self):
         cortex = ExecutiveCortex()
         # Goal with imminent deadline
-        urgent = cortex._goal_priority_score({
-            "name": "deploy",
-            "priority": "medium",
-            "deadline": time.time() + 1800,  # 30 min
-        })
+        urgent = cortex._goal_priority_score(
+            {
+                "name": "deploy",
+                "priority": "medium",
+                "deadline": time.time() + 1800,  # 30 min
+            }
+        )
         # Same goal no deadline
-        normal = cortex._goal_priority_score({
-            "name": "deploy",
-            "priority": "medium",
-        })
+        normal = cortex._goal_priority_score(
+            {
+                "name": "deploy",
+                "priority": "medium",
+            }
+        )
         assert urgent > normal
 
     # ── Resource Allocation ──────────────────────────────────────────
@@ -236,8 +239,9 @@ class TestExecutiveCortex:
     # ── UserModel Alignment ──────────────────────────────────────────
 
     def test_goal_alignment_with_user_model(self):
-        from hbllm.brain.user_model import UserModelEngine
         import tempfile
+
+        from hbllm.brain.user_model import UserModelEngine
 
         with tempfile.TemporaryDirectory() as tmp:
             um = UserModelEngine(data_dir=tmp)
@@ -245,6 +249,10 @@ class TestExecutiveCortex:
             cortex = ExecutiveCortex(user_model=um)
 
             # Goal matching user focus should get alignment bonus
-            aligned_score = cortex._goal_priority_score({"name": "HBLLM upgrade", "priority": "medium"})
-            unaligned_score = cortex._goal_priority_score({"name": "Grocery shopping", "priority": "medium"})
+            aligned_score = cortex._goal_priority_score(
+                {"name": "HBLLM upgrade", "priority": "medium"}
+            )
+            unaligned_score = cortex._goal_priority_score(
+                {"name": "Grocery shopping", "priority": "medium"}
+            )
             assert aligned_score >= unaligned_score

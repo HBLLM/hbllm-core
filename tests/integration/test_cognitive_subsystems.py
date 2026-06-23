@@ -8,13 +8,12 @@ Tests the full data flow between:
     All subsystems → ContextFusion (multi-source assembly)
 """
 
-import time
 import pytest
 
 from hbllm.brain.context_fusion import ContextFusionEngine
 from hbllm.brain.executive_cortex import ExecutiveCortex
 from hbllm.brain.project_graph import ProjectGraph
-from hbllm.brain.reality_graph import RealityGraph, RealityEntity
+from hbllm.brain.reality_graph import RealityGraph
 from hbllm.brain.relationship_memory import RelationshipMemory
 from hbllm.brain.user_model import UserModelEngine
 
@@ -31,7 +30,9 @@ class TestUserModelProjectGraphIntegration:
     def test_user_focus_matches_project(self, engines):
         um, pg = engines
         # User is working on HBLLM
-        um.update_from_interaction("test", "working on hbllm brain module", metadata={"topic": "HBLLM"})
+        um.update_from_interaction(
+            "test", "working on hbllm brain module", metadata={"topic": "HBLLM"}
+        )
         pg.create_project("HBLLM", tags=["hbllm", "brain", "cognitive"])
 
         # User model tracks focus
@@ -49,7 +50,9 @@ class TestUserModelExecutiveCortexIntegration:
 
     def test_cortex_uses_user_alignment(self, tmp_path):
         um = UserModelEngine(data_dir=str(tmp_path))
-        um.update_from_interaction("default", "working on brain architecture", metadata={"topic": "brain"})
+        um.update_from_interaction(
+            "default", "working on brain architecture", metadata={"topic": "brain"}
+        )
 
         class MockGoalManager:
             def get_active_goals(self, tenant_id="default"):
@@ -85,7 +88,8 @@ class TestProjectGraphCortexIntegration:
 
             def get_active_goals(self, tenant_id="default"):
                 return [
-                    {"name": g.name, "priority": "high"} for g in self._pg.get_active_goals(self._pid)
+                    {"name": g.name, "priority": "high"}
+                    for g in self._pg.get_active_goals(self._pid)
                 ]
 
         cortex = ExecutiveCortex(goal_manager=PGGoalManager(pg, proj.entity_id))
@@ -258,7 +262,7 @@ class TestFullCognitivePipelineIntegration:
         um, pg, rm, rg, ec, engine = full_setup
 
         um.update_from_interaction("default", "test query")
-        proj = pg.create_project("TestProject", tags=["test"])
+        pg.create_project("TestProject", tags=["test"])
 
         result = await engine.fuse(query="test project query", tenant_id="default")
 
@@ -352,7 +356,8 @@ class TestDataFlowChain:
 
             def get_active_goals(self, tenant_id="default"):
                 return [
-                    {"name": g.name, "priority": "high"} for g in self._pg.get_active_goals(self._pid)
+                    {"name": g.name, "priority": "high"}
+                    for g in self._pg.get_active_goals(self._pid)
                 ]
 
         cortex = ExecutiveCortex(

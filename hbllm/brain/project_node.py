@@ -20,7 +20,6 @@ Bus Topics:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from hbllm.brain.project_graph import ProjectGraph
 from hbllm.network.messages import Message, MessageType
@@ -150,9 +149,7 @@ class ProjectNode(Node):
 
         project = self.graph.auto_detect_project(topic, tenant_id=tenant_id)
         if project:
-            self.graph.add_entity(
-                project.entity_id, "question", topic, tenant_id=tenant_id
-            )
+            self.graph.add_entity(project.entity_id, "question", topic, tenant_id=tenant_id)
 
     async def _handle_query(self, message: Message) -> Message | None:
         """Return project graph stats."""

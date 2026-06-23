@@ -1,6 +1,7 @@
 """Unit tests for RealityGraph — unified world model facade."""
 
 import time
+
 import pytest
 
 from hbllm.brain.reality_graph import RealityEntity, RealityGraph
@@ -8,9 +9,7 @@ from hbllm.brain.reality_graph import RealityEntity, RealityGraph
 
 class TestRealityEntity:
     def test_defaults(self):
-        entity = RealityEntity(
-            entity_id="test_1", entity_type="concept", label="HBLLM"
-        )
+        entity = RealityEntity(entity_id="test_1", entity_type="concept", label="HBLLM")
         assert entity.confidence == 1.0
         assert entity.source == ""
         assert entity.ttl is None
@@ -120,7 +119,11 @@ class TestRealityGraph:
         class MockKG:
             def get_entity(self, label):
                 if label == "python":
-                    return {"entity_type": "concept", "attributes": {"category": "language"}, "confidence": 0.9}
+                    return {
+                        "entity_type": "concept",
+                        "attributes": {"category": "language"},
+                        "confidence": 0.9,
+                    }
                 return None
 
         graph = RealityGraph(knowledge_graph=MockKG())
@@ -210,7 +213,11 @@ class TestRealityGraph:
         class MockKG:
             def get_entity(self, label):
                 if label == "macbook":
-                    return {"entity_type": "device", "attributes": {"owner": "dumith"}, "confidence": 0.8}
+                    return {
+                        "entity_type": "device",
+                        "attributes": {"owner": "dumith"},
+                        "confidence": 0.8,
+                    }
                 return None
 
         class MockPerceptionWS:

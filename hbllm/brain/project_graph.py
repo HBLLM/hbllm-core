@@ -282,8 +282,11 @@ class ProjectGraph:
                 "(source_id, target_id, relation_type, created_at, metadata) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (
-                    rel.source_id, rel.target_id, rel.relation_type,
-                    rel.created_at, json.dumps(rel.metadata),
+                    rel.source_id,
+                    rel.target_id,
+                    rel.relation_type,
+                    rel.created_at,
+                    json.dumps(rel.metadata),
                 ),
             )
         return rel
@@ -309,9 +312,7 @@ class ProjectGraph:
             )
             return cursor.rowcount > 0
 
-    def resolve(
-        self, entity_id: str, resolution: str = "", resolved_by: str = ""
-    ) -> bool:
+    def resolve(self, entity_id: str, resolution: str = "", resolved_by: str = "") -> bool:
         """Mark a question or blocker as resolved."""
         entity = self.get_entity(entity_id)
         if not entity:
@@ -542,7 +543,9 @@ class ProjectGraph:
         # Header
         time_ago = self._time_ago(ctx.last_active if ctx else proj.updated_at)
         conv_count = ctx.conversation_count if ctx else 0
-        parts.append(f"**{proj.name}** ({proj.status}) — last active {time_ago}, {conv_count} conversations")
+        parts.append(
+            f"**{proj.name}** ({proj.status}) — last active {time_ago}, {conv_count} conversations"
+        )
 
         if proj.description:
             parts.append(proj.description)
@@ -588,9 +591,7 @@ class ProjectGraph:
 
         return "\n\n".join(parts)
 
-    async def get_context(
-        self, query: str, tenant_id: str, budget: int
-    ) -> str:
+    async def get_context(self, query: str, tenant_id: str, budget: int) -> str:
         """ContextFusion-compatible provider.
 
         Auto-detects the relevant project and returns its reactivation summary.
@@ -609,9 +610,15 @@ class ProjectGraph:
                 "(entity_id, entity_type, name, description, status, tenant_id, "
                 "created_at, updated_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    entity.entity_id, entity.entity_type, entity.name,
-                    entity.description, entity.status, entity.tenant_id,
-                    entity.created_at, entity.updated_at, json.dumps(entity.metadata),
+                    entity.entity_id,
+                    entity.entity_type,
+                    entity.name,
+                    entity.description,
+                    entity.status,
+                    entity.tenant_id,
+                    entity.created_at,
+                    entity.updated_at,
+                    json.dumps(entity.metadata),
                 ),
             )
 

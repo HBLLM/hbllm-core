@@ -215,9 +215,7 @@ class RealityGraph:
 
     # ── Context Generation ───────────────────────────────────────────
 
-    async def get_context(
-        self, query: str, tenant_id: str, budget: int
-    ) -> str:
+    async def get_context(self, query: str, tenant_id: str, budget: int) -> str:
         """ContextFusion-compatible provider.
 
         Generates a unified world state summary from all backends.
@@ -259,9 +257,7 @@ class RealityGraph:
         if devices:
             dev_strs = []
             for d in devices[:5]:
-                attrs = ", ".join(
-                    f"{k}={v}" for k, v in list(d.attributes.items())[:3]
-                )
+                attrs = ", ".join(f"{k}={v}" for k, v in list(d.attributes.items())[:3])
                 dev_strs.append(f"  - {d.label}: {attrs}")
             parts.append("Devices:\n" + "\n".join(dev_strs))
 
@@ -330,13 +326,15 @@ class RealityGraph:
             if hasattr(self._kg, "get_entities_by_type"):
                 entities = self._kg.get_entities_by_type(entity_type)
                 for label, data in entities.items() if isinstance(entities, dict) else []:
-                    results.append(RealityEntity(
-                        entity_id=f"kg:{label}",
-                        entity_type=entity_type,
-                        label=label,
-                        attributes=data if isinstance(data, dict) else {},
-                        source="kg",
-                    ))
+                    results.append(
+                        RealityEntity(
+                            entity_id=f"kg:{label}",
+                            entity_type=entity_type,
+                            label=label,
+                            attributes=data if isinstance(data, dict) else {},
+                            source="kg",
+                        )
+                    )
         except Exception:
             pass
         return results
@@ -356,7 +354,9 @@ class RealityGraph:
                         attributes=entity.properties if hasattr(entity, "properties") else {},
                         confidence=entity.confidence if hasattr(entity, "confidence") else 0.5,
                         source="brain_ws",
-                        last_updated=entity.last_updated if hasattr(entity, "last_updated") else time.time(),
+                        last_updated=entity.last_updated
+                        if hasattr(entity, "last_updated")
+                        else time.time(),
                         ttl=3600.0,  # Brain WS entities expire after 1 hour
                     )
         except Exception as e:
@@ -370,16 +370,20 @@ class RealityGraph:
         results: list[RealityEntity] = []
         try:
             for entity_id, entity in self._brain_ws._graph.items():
-                results.append(RealityEntity(
-                    entity_id=f"brain_ws:{entity_id}",
-                    entity_type="state",
-                    label=entity_id,
-                    attributes=entity.properties if hasattr(entity, "properties") else {},
-                    confidence=entity.confidence if hasattr(entity, "confidence") else 0.5,
-                    source="brain_ws",
-                    last_updated=entity.last_updated if hasattr(entity, "last_updated") else time.time(),
-                    ttl=3600.0,
-                ))
+                results.append(
+                    RealityEntity(
+                        entity_id=f"brain_ws:{entity_id}",
+                        entity_type="state",
+                        label=entity_id,
+                        attributes=entity.properties if hasattr(entity, "properties") else {},
+                        confidence=entity.confidence if hasattr(entity, "confidence") else 0.5,
+                        source="brain_ws",
+                        last_updated=entity.last_updated
+                        if hasattr(entity, "last_updated")
+                        else time.time(),
+                        ttl=3600.0,
+                    )
+                )
         except Exception:
             pass
         return results
@@ -428,27 +432,31 @@ class RealityGraph:
             # IoT devices
             if hasattr(self._perception_ws, "_iot_devices"):
                 for dev_id, dev_data in self._perception_ws._iot_devices.items():
-                    results.append(RealityEntity(
-                        entity_id=f"perc_ws:{dev_id}",
-                        entity_type="device",
-                        label=dev_id,
-                        attributes=dev_data if isinstance(dev_data, dict) else {},
-                        confidence=0.9,
-                        source="perception_ws",
-                        ttl=300.0,
-                    ))
+                    results.append(
+                        RealityEntity(
+                            entity_id=f"perc_ws:{dev_id}",
+                            entity_type="device",
+                            label=dev_id,
+                            attributes=dev_data if isinstance(dev_data, dict) else {},
+                            confidence=0.9,
+                            source="perception_ws",
+                            ttl=300.0,
+                        )
+                    )
 
             # Hardware as a single state entity
             if hasattr(self._perception_ws, "_hardware") and self._perception_ws._hardware:
-                results.append(RealityEntity(
-                    entity_id="perc_ws:hardware",
-                    entity_type="state",
-                    label="hardware",
-                    attributes=self._perception_ws._hardware,
-                    confidence=0.95,
-                    source="perception_ws",
-                    ttl=60.0,
-                ))
+                results.append(
+                    RealityEntity(
+                        entity_id="perc_ws:hardware",
+                        entity_type="state",
+                        label="hardware",
+                        attributes=self._perception_ws._hardware,
+                        confidence=0.95,
+                        source="perception_ws",
+                        ttl=60.0,
+                    )
+                )
         except Exception:
             pass
 

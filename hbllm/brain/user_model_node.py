@@ -20,7 +20,6 @@ Bus Topics:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from hbllm.brain.user_model import UserModelEngine
 from hbllm.network.messages import Message, MessageType
@@ -110,7 +109,6 @@ class UserModelNode(Node):
         """Learn from explicit user feedback."""
         payload = message.payload
         tenant_id = message.tenant_id or "default"
-        feedback_type = payload.get("type", "")
         rating = payload.get("rating", 0)
 
         # Negative feedback = potential preference signal

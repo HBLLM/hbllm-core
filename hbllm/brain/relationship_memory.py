@@ -152,10 +152,29 @@ _NAME_PATTERN = re.compile(
 
 # Common false positives to filter out
 _NAME_BLACKLIST = {
-    "I", "The", "This", "That", "What", "How", "When", "Where", "Why", "Who",
-    "Let Me", "Can You", "Do You", "Thank You", "Good Morning", "Good Night",
-    "New York", "San Francisco", "Los Angeles", "United States",
-    "Google Cloud", "Amazon Web", "Microsoft Azure",
+    "I",
+    "The",
+    "This",
+    "That",
+    "What",
+    "How",
+    "When",
+    "Where",
+    "Why",
+    "Who",
+    "Let Me",
+    "Can You",
+    "Do You",
+    "Thank You",
+    "Good Morning",
+    "Good Night",
+    "New York",
+    "San Francisco",
+    "Los Angeles",
+    "United States",
+    "Google Cloud",
+    "Amazon Web",
+    "Microsoft Azure",
 }
 
 
@@ -238,9 +257,7 @@ class RelationshipMemory:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_re_tenant ON relationship_events(tenant_id)"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_p_tenant ON persons(tenant_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_p_tenant ON persons(tenant_id)")
 
     # ── Core Operations ──────────────────────────────────────────────
 
@@ -265,7 +282,9 @@ class RelationshipMemory:
         person.last_mentioned = now
 
         # EWMA for interaction frequency (approximate weekly rate)
-        days_since_last = (now - person.last_mentioned) / 86400.0 if person.mention_count > 1 else 7.0
+        days_since_last = (
+            (now - person.last_mentioned) / 86400.0 if person.mention_count > 1 else 7.0
+        )
         weekly_rate = 7.0 / max(0.01, days_since_last)
         person.interaction_frequency = 0.7 * person.interaction_frequency + 0.3 * weekly_rate
 
@@ -350,7 +369,9 @@ class RelationshipMemory:
         if self._kg:
             try:
                 self._kg.add_relation(
-                    pa.person_id, pb.person_id, relation_type,
+                    pa.person_id,
+                    pb.person_id,
+                    relation_type,
                     metadata={"context": context, "learned_at": time.time()},
                 )
             except Exception as e:
@@ -358,7 +379,9 @@ class RelationshipMemory:
 
         logger.info(
             "Learned relationship: %s --%s--> %s",
-            person_a, relation_type, person_b,
+            person_a,
+            relation_type,
+            person_b,
         )
 
     # ── Queries ──────────────────────────────────────────────────────
@@ -456,9 +479,7 @@ class RelationshipMemory:
         history = self.get_history(person_name, tenant_id)
         return history.trend
 
-    def prioritize_notification(
-        self, person_name: str, tenant_id: str = "default"
-    ) -> float:
+    def prioritize_notification(self, person_name: str, tenant_id: str = "default") -> float:
         """Compute notification priority for messages about this person.
 
         Higher = more important to notify about.
@@ -480,9 +501,7 @@ class RelationshipMemory:
 
     # ── Context Generation ───────────────────────────────────────────
 
-    async def get_context(
-        self, query: str, tenant_id: str, budget: int
-    ) -> str:
+    async def get_context(self, query: str, tenant_id: str, budget: int) -> str:
         """ContextFusion-compatible provider.
 
         Returns relevant people for the current query.
@@ -497,8 +516,10 @@ class RelationshipMemory:
                 role_str = f" ({person.role})" if person.role else ""
                 org_str = f" at {person.organization}" if person.organization else ""
                 sentiment_label = (
-                    "positive" if person.sentiment > 0.3
-                    else "negative" if person.sentiment < -0.3
+                    "positive"
+                    if person.sentiment > 0.3
+                    else "negative"
+                    if person.sentiment < -0.3
                     else "neutral"
                 )
                 parts.append(
@@ -566,13 +587,22 @@ class RelationshipMemory:
                 "topics_json, preferred_channel, tenant_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    person.person_id, person.name, person.role, person.organization,
-                    person.trust_level, person.trust_confidence,
-                    person.importance, person.importance_confidence,
-                    person.interaction_frequency, person.sentiment,
-                    person.sentiment_confidence, person.mention_count,
-                    person.first_mentioned, person.last_mentioned,
-                    json.dumps(person.topics_discussed), person.preferred_channel,
+                    person.person_id,
+                    person.name,
+                    person.role,
+                    person.organization,
+                    person.trust_level,
+                    person.trust_confidence,
+                    person.importance,
+                    person.importance_confidence,
+                    person.interaction_frequency,
+                    person.sentiment,
+                    person.sentiment_confidence,
+                    person.mention_count,
+                    person.first_mentioned,
+                    person.last_mentioned,
+                    json.dumps(person.topics_discussed),
+                    person.preferred_channel,
                     "default",
                 ),
             )

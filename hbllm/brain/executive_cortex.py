@@ -214,9 +214,7 @@ class ExecutiveCortex:
 
         return event_score > threshold
 
-    def _evaluate_interrupts(
-        self, events: list[dict[str, Any]]
-    ) -> ExecutiveDecision | None:
+    def _evaluate_interrupts(self, events: list[dict[str, Any]]) -> ExecutiveDecision | None:
         """Check if any pending event warrants interruption."""
         for event in sorted(
             events,
@@ -225,9 +223,7 @@ class ExecutiveCortex:
         ):
             if self.should_interrupt(event):
                 old_focus = self._current_focus
-                self._record_switch(
-                    f"interrupt:{event.get('topic', 'unknown')}", "event"
-                )
+                self._record_switch(f"interrupt:{event.get('topic', 'unknown')}", "event")
                 return ExecutiveDecision(
                     action="handle_interrupt",
                     target_event=event,
@@ -411,8 +407,11 @@ class ExecutiveCortex:
         """Score a goal by priority, deadline, and user alignment."""
         # Extract priority
         priority_map = {
-            "critical": 1.0, "high": 0.8, "medium": 0.5,
-            "low": 0.3, "background": 0.1,
+            "critical": 1.0,
+            "high": 0.8,
+            "medium": 0.5,
+            "low": 0.3,
+            "background": 0.1,
         }
 
         if hasattr(goal, "priority"):
@@ -468,7 +467,9 @@ class ExecutiveCortex:
             "current_focus": self._current_focus,
             "current_focus_type": self._current_focus_type,
             "focus_depth": round(self._focus_depth, 3),
-            "focus_age_seconds": round(time.time() - self._focus_started, 1) if self._focus_started else 0,
+            "focus_age_seconds": round(time.time() - self._focus_started, 1)
+            if self._focus_started
+            else 0,
             "switching_cost": round(self.get_switching_cost(), 3),
             "switch_count": self._switch_count,
             "suppressed_events": len(self._suppressed_events),

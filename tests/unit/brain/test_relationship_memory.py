@@ -1,6 +1,7 @@
 """Unit tests for RelationshipMemory — KG-integrated social graph."""
 
 import time
+
 import pytest
 
 from hbllm.brain.relationship_memory import (
@@ -89,7 +90,9 @@ class TestRelationshipHistory:
 
     def test_compute_trend_not_enough_data(self):
         events = [
-            RelationshipEvent(timestamp=time.time(), event_type="mention", context="", sentiment_delta=0.5),
+            RelationshipEvent(
+                timestamp=time.time(), event_type="mention", context="", sentiment_delta=0.5
+            ),
         ]
         history = RelationshipHistory(person_id="p1", person_name="Alice", events=events)
         assert history.compute_trend() == "stable"
@@ -98,11 +101,22 @@ class TestRelationshipHistory:
         now = time.time()
         events = [
             # Old events (negative)
-            RelationshipEvent(timestamp=now - 50 * 86400, event_type="conflict", context="", sentiment_delta=-0.5),
-            RelationshipEvent(timestamp=now - 45 * 86400, event_type="conflict", context="", sentiment_delta=-0.3),
+            RelationshipEvent(
+                timestamp=now - 50 * 86400, event_type="conflict", context="", sentiment_delta=-0.5
+            ),
+            RelationshipEvent(
+                timestamp=now - 45 * 86400, event_type="conflict", context="", sentiment_delta=-0.3
+            ),
             # Recent events (positive)
-            RelationshipEvent(timestamp=now - 5 * 86400, event_type="collaboration", context="", sentiment_delta=0.5),
-            RelationshipEvent(timestamp=now - 2 * 86400, event_type="positive", context="", sentiment_delta=0.4),
+            RelationshipEvent(
+                timestamp=now - 5 * 86400,
+                event_type="collaboration",
+                context="",
+                sentiment_delta=0.5,
+            ),
+            RelationshipEvent(
+                timestamp=now - 2 * 86400, event_type="positive", context="", sentiment_delta=0.4
+            ),
         ]
         history = RelationshipHistory(person_id="p1", person_name="Alice", events=events)
         trend = history.compute_trend()
@@ -142,7 +156,9 @@ class TestRelationshipMemory:
 
     def test_record_event(self, memory):
         memory.record_mention("Bob Smith")
-        memory.record_event("Bob Smith", "collaboration", context="Pair programming", sentiment_delta=0.3)
+        memory.record_event(
+            "Bob Smith", "collaboration", context="Pair programming", sentiment_delta=0.3
+        )
         person = memory.get_person("Bob Smith")
         assert person.sentiment > 0.0
 

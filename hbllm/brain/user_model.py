@@ -30,7 +30,7 @@ import logging
 import math
 import sqlite3
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -242,42 +242,132 @@ class UserModel:
 # Words that indicate domain expertise when used naturally
 _EXPERTISE_SIGNALS: dict[str, list[str]] = {
     "python": [
-        "asyncio", "dataclass", "pydantic", "fastapi", "uvicorn", "mypy",
-        "pytest", "typing", "decorator", "metaclass", "generator", "coroutine",
-        "walrus", "comprehension", "dunder", "virtualenv", "pyproject",
+        "asyncio",
+        "dataclass",
+        "pydantic",
+        "fastapi",
+        "uvicorn",
+        "mypy",
+        "pytest",
+        "typing",
+        "decorator",
+        "metaclass",
+        "generator",
+        "coroutine",
+        "walrus",
+        "comprehension",
+        "dunder",
+        "virtualenv",
+        "pyproject",
     ],
     "rust": [
-        "borrow", "ownership", "lifetime", "cargo", "crate", "trait",
-        "impl", "macro", "unsafe", "tokio", "async-std", "serde",
+        "borrow",
+        "ownership",
+        "lifetime",
+        "cargo",
+        "crate",
+        "trait",
+        "impl",
+        "macro",
+        "unsafe",
+        "tokio",
+        "async-std",
+        "serde",
     ],
     "docker": [
-        "dockerfile", "compose", "swarm", "kubernetes", "k8s", "container",
-        "volume", "network", "registry", "multi-stage", "buildkit",
+        "dockerfile",
+        "compose",
+        "swarm",
+        "kubernetes",
+        "k8s",
+        "container",
+        "volume",
+        "network",
+        "registry",
+        "multi-stage",
+        "buildkit",
     ],
     "machine_learning": [
-        "transformer", "attention", "backprop", "gradient", "epoch",
-        "batch_size", "learning_rate", "fine-tune", "lora", "qlora",
-        "embedding", "tokenizer", "snn", "spiking", "neural",
+        "transformer",
+        "attention",
+        "backprop",
+        "gradient",
+        "epoch",
+        "batch_size",
+        "learning_rate",
+        "fine-tune",
+        "lora",
+        "qlora",
+        "embedding",
+        "tokenizer",
+        "snn",
+        "spiking",
+        "neural",
     ],
     "devops": [
-        "ci/cd", "pipeline", "terraform", "ansible", "nginx", "caddy",
-        "systemd", "cron", "monitoring", "grafana", "prometheus",
+        "ci/cd",
+        "pipeline",
+        "terraform",
+        "ansible",
+        "nginx",
+        "caddy",
+        "systemd",
+        "cron",
+        "monitoring",
+        "grafana",
+        "prometheus",
     ],
     "database": [
-        "postgresql", "mysql", "sqlite", "migration", "index", "join",
-        "transaction", "orm", "query", "normalization", "sharding",
+        "postgresql",
+        "mysql",
+        "sqlite",
+        "migration",
+        "index",
+        "join",
+        "transaction",
+        "orm",
+        "query",
+        "normalization",
+        "sharding",
     ],
     "frontend": [
-        "react", "vue", "svelte", "tailwind", "css-grid", "flexbox",
-        "webpack", "vite", "typescript", "jsx", "component",
+        "react",
+        "vue",
+        "svelte",
+        "tailwind",
+        "css-grid",
+        "flexbox",
+        "webpack",
+        "vite",
+        "typescript",
+        "jsx",
+        "component",
     ],
     "flutter": [
-        "widget", "stateful", "stateless", "bloc", "riverpod", "provider",
-        "pubspec", "dart", "material", "cupertino", "navigator",
+        "widget",
+        "stateful",
+        "stateless",
+        "bloc",
+        "riverpod",
+        "provider",
+        "pubspec",
+        "dart",
+        "material",
+        "cupertino",
+        "navigator",
     ],
     "laravel": [
-        "eloquent", "artisan", "blade", "migration", "seeder", "middleware",
-        "nova", "filament", "livewire", "sanctum", "passport",
+        "eloquent",
+        "artisan",
+        "blade",
+        "migration",
+        "seeder",
+        "middleware",
+        "nova",
+        "filament",
+        "livewire",
+        "sanctum",
+        "passport",
     ],
 }
 
@@ -325,12 +415,8 @@ class UserModelEngine:
                     PRIMARY KEY (tenant_id, topic)
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ua_tenant ON user_attributes(tenant_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ub_tenant ON user_beliefs(tenant_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ua_tenant ON user_attributes(tenant_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ub_tenant ON user_beliefs(tenant_id)")
 
     # ── Model Access ─────────────────────────────────────────────────
 
@@ -411,9 +497,7 @@ class UserModelEngine:
 
         return changes
 
-    def _update_focus(
-        self, model: UserModel, query: str, metadata: dict[str, Any]
-    ) -> bool:
+    def _update_focus(self, model: UserModel, query: str, metadata: dict[str, Any]) -> bool:
         """Track what the user is currently focused on."""
         # Extract topic from metadata or query
         topic = metadata.get("topic", metadata.get("intent", ""))
@@ -449,9 +533,7 @@ class UserModelEngine:
             if d != day:
                 model.active_days[d] *= 0.995
 
-    def _update_interests(
-        self, model: UserModel, query: str, metadata: dict[str, Any]
-    ) -> None:
+    def _update_interests(self, model: UserModel, query: str, metadata: dict[str, Any]) -> None:
         """Track recurring interests."""
         topic = metadata.get("topic", metadata.get("intent", ""))
         if not topic:
@@ -559,9 +641,7 @@ class UserModelEngine:
 
     # ── Context Generation ───────────────────────────────────────────
 
-    async def get_context(
-        self, query: str, tenant_id: str, budget: int
-    ) -> str:
+    async def get_context(self, query: str, tenant_id: str, budget: int) -> str:
         """Generate NL context summary for ContextFusionEngine.
 
         Produces a concise description of the user suitable for
@@ -585,8 +665,10 @@ class UserModelEngine:
             for exp in strong:
                 if exp.level.confidence > 0.3:
                     level_label = (
-                        "expert" if float(exp.level.value) > 0.7
-                        else "proficient" if float(exp.level.value) > 0.4
+                        "expert"
+                        if float(exp.level.value) > 0.7
+                        else "proficient"
+                        if float(exp.level.value) > 0.4
                         else "familiar"
                     )
                     areas.append(f"{exp.domain} ({level_label})")
@@ -594,21 +676,17 @@ class UserModelEngine:
                 parts.append(f"Expertise: {', '.join(areas)}")
 
         # Key preferences
-        confident_prefs = [
-            p for p in model.preferences.values()
-            if p.learned.confidence > 0.5
-        ]
+        confident_prefs = [p for p in model.preferences.values() if p.learned.confidence > 0.5]
         if confident_prefs:
             pref_strs = [f"{p.key}={p.learned.value}" for p in confident_prefs[:5]]
             parts.append(f"Preferences: {', '.join(pref_strs)}")
 
         # Active interests
-        active = [
-            i for i in model.active_interests
-            if i.confidence > 0.3
-        ]
+        active = [i for i in model.active_interests if i.confidence > 0.3]
         if active:
-            interests = [str(i.value) for i in sorted(active, key=lambda x: x.confidence, reverse=True)[:5]]
+            interests = [
+                str(i.value) for i in sorted(active, key=lambda x: x.confidence, reverse=True)[:5]
+            ]
             parts.append(f"Current interests: {', '.join(interests)}")
 
         # Stress/engagement
@@ -619,7 +697,8 @@ class UserModelEngine:
 
         # Trust areas
         high_trust = [
-            t for t in model.trust.values()
+            t
+            for t in model.trust.values()
             if float(t.trust_level.value) > 0.7 and t.trust_level.confidence > 0.5
         ]
         if high_trust:
@@ -669,10 +748,15 @@ class UserModelEngine:
                     "(tenant_id, category, key, value_json, confidence, evidence_count, "
                     "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        model.tenant_id, "expertise", domain,
+                        model.tenant_id,
+                        "expertise",
+                        domain,
                         json.dumps(exp.level.value),
-                        exp.level.confidence, exp.level.evidence_count,
-                        exp.level.source, exp.level.first_observed, exp.level.last_observed,
+                        exp.level.confidence,
+                        exp.level.evidence_count,
+                        exp.level.source,
+                        exp.level.first_observed,
+                        exp.level.last_observed,
                     ),
                 )
 
@@ -683,10 +767,14 @@ class UserModelEngine:
                     "(tenant_id, category, key, value_json, confidence, evidence_count, "
                     "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        model.tenant_id, "preference", key,
+                        model.tenant_id,
+                        "preference",
+                        key,
                         json.dumps(pref.learned.value),
-                        pref.learned.confidence, pref.learned.evidence_count,
-                        pref.learned.source, pref.learned.first_observed,
+                        pref.learned.confidence,
+                        pref.learned.evidence_count,
+                        pref.learned.source,
+                        pref.learned.first_observed,
                         pref.learned.last_observed,
                     ),
                 )
@@ -698,14 +786,20 @@ class UserModelEngine:
                     "(tenant_id, category, key, value_json, confidence, evidence_count, "
                     "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        model.tenant_id, "trust", domain,
-                        json.dumps({
-                            "trust_level": trust.trust_level.value,
-                            "delegations": trust.delegations_count,
-                            "overrides": trust.overrides_count,
-                        }),
-                        trust.trust_level.confidence, trust.trust_level.evidence_count,
-                        trust.trust_level.source, trust.trust_level.first_observed,
+                        model.tenant_id,
+                        "trust",
+                        domain,
+                        json.dumps(
+                            {
+                                "trust_level": trust.trust_level.value,
+                                "delegations": trust.delegations_count,
+                                "overrides": trust.overrides_count,
+                            }
+                        ),
+                        trust.trust_level.confidence,
+                        trust.trust_level.evidence_count,
+                        trust.trust_level.source,
+                        trust.trust_level.first_observed,
                         trust.trust_level.last_observed,
                     ),
                 )
@@ -717,10 +811,15 @@ class UserModelEngine:
                     "(tenant_id, category, key, value_json, confidence, evidence_count, "
                     "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        model.tenant_id, "interest", f"interest_{i}",
+                        model.tenant_id,
+                        "interest",
+                        f"interest_{i}",
                         json.dumps(interest.value),
-                        interest.confidence, interest.evidence_count,
-                        interest.source, interest.first_observed, interest.last_observed,
+                        interest.confidence,
+                        interest.evidence_count,
+                        interest.source,
+                        interest.first_observed,
+                        interest.last_observed,
                     ),
                 )
 
@@ -730,10 +829,14 @@ class UserModelEngine:
                 "(tenant_id, category, key, value_json, confidence, evidence_count, "
                 "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    model.tenant_id, "state", "current_focus",
+                    model.tenant_id,
+                    "state",
+                    "current_focus",
                     json.dumps(model.current_focus.value),
-                    model.current_focus.confidence, model.current_focus.evidence_count,
-                    model.current_focus.source, model.current_focus.first_observed,
+                    model.current_focus.confidence,
+                    model.current_focus.evidence_count,
+                    model.current_focus.source,
+                    model.current_focus.first_observed,
                     model.current_focus.last_observed,
                 ),
             )
@@ -744,9 +847,15 @@ class UserModelEngine:
                 "(tenant_id, category, key, value_json, confidence, evidence_count, "
                 "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    model.tenant_id, "temporal", "active_hours",
+                    model.tenant_id,
+                    "temporal",
+                    "active_hours",
                     json.dumps(model.active_hours),
-                    0.8, 0, "inferred", now, now,
+                    0.8,
+                    0,
+                    "inferred",
+                    now,
+                    now,
                 ),
             )
             conn.execute(
@@ -754,9 +863,15 @@ class UserModelEngine:
                 "(tenant_id, category, key, value_json, confidence, evidence_count, "
                 "source, first_observed, last_observed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    model.tenant_id, "temporal", "active_days",
+                    model.tenant_id,
+                    "temporal",
+                    "active_days",
                     json.dumps(model.active_days),
-                    0.8, 0, "inferred", now, now,
+                    0.8,
+                    0,
+                    "inferred",
+                    now,
+                    now,
                 ),
             )
 
@@ -767,8 +882,12 @@ class UserModelEngine:
                     "(tenant_id, topic, stance, confidence, evidence_count, last_expressed) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (
-                        model.tenant_id, belief.topic, belief.stance,
-                        belief.confidence, belief.evidence_count, belief.last_expressed,
+                        model.tenant_id,
+                        belief.topic,
+                        belief.stance,
+                        belief.confidence,
+                        belief.evidence_count,
+                        belief.last_expressed,
                     ),
                 )
 
@@ -835,13 +954,15 @@ class UserModelEngine:
                 (tenant_id,),
             ).fetchall()
             for row in belief_rows:
-                model.beliefs.append(UserBelief(
-                    topic=row["topic"],
-                    stance=row["stance"],
-                    confidence=row["confidence"],
-                    evidence_count=row["evidence_count"],
-                    last_expressed=row["last_expressed"],
-                ))
+                model.beliefs.append(
+                    UserBelief(
+                        topic=row["topic"],
+                        stance=row["stance"],
+                        confidence=row["confidence"],
+                        evidence_count=row["evidence_count"],
+                        last_expressed=row["last_expressed"],
+                    )
+                )
 
             return model
 

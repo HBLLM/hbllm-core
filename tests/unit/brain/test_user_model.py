@@ -1,18 +1,16 @@
 """Unit tests for UserModel — predictive user simulator."""
 
-import os
 import time
-import tempfile
+
 import pytest
 
 from hbllm.brain.user_model import (
     LearnedAttribute,
+    TrustDimension,
     UserBelief,
     UserExpertise,
     UserModel,
     UserModelEngine,
-    UserPreference,
-    TrustDimension,
 )
 
 
@@ -192,7 +190,7 @@ class TestUserModelEngine:
         assert m1 is m2
 
     def test_update_from_interaction_python(self, engine):
-        changed = engine.update_from_interaction(
+        engine.update_from_interaction(
             tenant_id="test",
             query="I'm using asyncio with pydantic dataclass in my fastapi project",
         )
@@ -301,9 +299,7 @@ class TestUserModelEngine:
         assert isinstance(predictions, list)
 
     def test_snapshot(self, engine):
-        engine.update_from_interaction(
-            "test", "asyncio pydantic test"
-        )
+        engine.update_from_interaction("test", "asyncio pydantic test")
         snap = engine.snapshot("test")
         assert snap["tenant_id"] == "test"
         assert "expertise" in snap

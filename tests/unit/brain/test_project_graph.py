@@ -1,29 +1,25 @@
 """Unit tests for ProjectGraph — graph-based project cognition."""
 
 import time
+
 import pytest
 
 from hbllm.brain.project_graph import (
     ProjectEntity,
     ProjectGraph,
     ProjectRelation,
-    ProjectContext,
 )
 
 
 class TestProjectEntity:
     def test_defaults(self):
-        entity = ProjectEntity(
-            entity_id="proj_1", entity_type="project", name="HBLLM"
-        )
+        entity = ProjectEntity(entity_id="proj_1", entity_type="project", name="HBLLM")
         assert entity.status == "active"
         assert entity.tenant_id == "default"
         assert entity.entity_type == "project"
 
     def test_to_dict(self):
-        entity = ProjectEntity(
-            entity_id="proj_1", entity_type="project", name="Test"
-        )
+        entity = ProjectEntity(entity_id="proj_1", entity_type="project", name="Test")
         d = entity.to_dict()
         assert d["entity_id"] == "proj_1"
         assert d["name"] == "Test"
@@ -32,15 +28,11 @@ class TestProjectEntity:
 
 class TestProjectRelation:
     def test_defaults(self):
-        rel = ProjectRelation(
-            source_id="proj_1", target_id="goal_1", relation_type="has_goal"
-        )
+        rel = ProjectRelation(source_id="proj_1", target_id="goal_1", relation_type="has_goal")
         assert rel.relation_type == "has_goal"
 
     def test_to_dict(self):
-        rel = ProjectRelation(
-            source_id="a", target_id="b", relation_type="blocked_by"
-        )
+        rel = ProjectRelation(source_id="a", target_id="b", relation_type="blocked_by")
         d = rel.to_dict()
         assert d["relation_type"] == "blocked_by"
 
@@ -71,7 +63,7 @@ class TestProjectGraph:
 
     def test_add_entity_creates_relation(self, graph):
         proj = graph.create_project("Test")
-        goal = graph.add_entity(proj.entity_id, "goal", "Goal A")
+        graph.add_entity(proj.entity_id, "goal", "Goal A")
         # Check the relation was auto-created
         children = graph.get_children(proj.entity_id, relation_type="has_goal")
         assert len(children) == 1
@@ -142,7 +134,7 @@ class TestProjectGraph:
 
     def test_get_blockers(self, graph):
         proj = graph.create_project("Test")
-        blocker = graph.add_entity(proj.entity_id, "blocker", "Auth system down")
+        graph.add_entity(proj.entity_id, "blocker", "Auth system down")
         blockers = graph.get_blockers(proj.entity_id)
         assert len(blockers) == 1
         assert blockers[0].name == "Auth system down"
