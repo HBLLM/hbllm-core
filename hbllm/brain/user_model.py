@@ -63,7 +63,6 @@ class LearnedAttribute:
 
         if source == "explicit" or source == "corrected":
             self.value = new_value
-            self.confidence = 0.95
             self.source = "corrected"
         else:
             # For numeric values, use EWMA
@@ -76,6 +75,10 @@ class LearnedAttribute:
 
         # Confidence approaches 1.0 with more evidence
         self.confidence = min(1.0, 1.0 - math.exp(-self.evidence_count / 5.0))
+
+        # Explicit corrections always override to high confidence
+        if source == "explicit" or source == "corrected":
+            self.confidence = 0.95
 
     def decay(self, now: float | None = None, half_life_days: float = 30.0) -> None:
         """Time-based confidence decay for stale attributes."""
