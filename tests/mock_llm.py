@@ -11,16 +11,25 @@ from __future__ import annotations
 
 from typing import Any
 
+from hbllm.brain.provider_adapter import ProviderLLM
 
-class MockLLM:
+
+class MockLLM(ProviderLLM):
     """
     Deterministic LLM stand-in for unit tests.
 
-    Routes generate_json/generate calls to keyword-matched responses
-    so test assertions can be deterministic without a real model.
+    Extends ProviderLLM for type compatibility with brain nodes that
+    declare ``llm: ProviderLLM | None``. Overrides generate/generate_json
+    with keyword-matched deterministic responses.
     """
 
     def __init__(self, overrides: dict[str, Any] | None = None):
+        # Bypass ProviderLLM.__init__ — no real provider needed for tests
+        self.provider = None  # type: ignore[assignment]
+        self.system_prompt = ""
+        self._total_prompt_tokens = 0
+        self._total_completion_tokens = 0
+        self._call_count = 0
         self._overrides = overrides or {}
 
     async def generate(self, prompt: str, max_tokens: int = 256, temperature: float = 0.7) -> str:
