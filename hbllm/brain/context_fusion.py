@@ -84,6 +84,10 @@ _section_headers = {
     "weather": "Weather",
     "location": "Location",
     "iot_devices": "Connected Devices",
+    "user_model": "User Understanding",
+    "active_project": "Active Project",
+    "relationships": "Key People",
+    "reality_graph": "World State",
 }
 
 
@@ -108,9 +112,13 @@ class ContextFusionEngine:
         # Default priority weights (can be overridden)
         self._priority_weights = priority_weights or {
             "episodic_memory": 0.9,
+            "user_model": 0.85,
+            "active_project": 0.85,
             "semantic_memory": 0.8,
             "active_goals": 0.7,
             "world_state": 0.6,
+            "reality_graph": 0.6,
+            "relationships": 0.55,
             "emotion_state": 0.5,
             "self_model": 0.4,
             "calendar": 0.5,
@@ -349,6 +357,62 @@ class ContextFusionEngine:
             except Exception:
                 pass
             return ""
+
+        return _provider
+
+    @staticmethod
+    def user_model_provider(user_model: Any) -> Any:
+        """Create a context provider from a UserModelEngine."""
+
+        async def _provider(query: str, tenant_id: str, budget: int) -> str:
+            if not user_model:
+                return ""
+            try:
+                return await user_model.get_context(query, tenant_id, budget)
+            except Exception:
+                return ""
+
+        return _provider
+
+    @staticmethod
+    def project_provider(project_graph: Any) -> Any:
+        """Create a context provider from a ProjectGraph."""
+
+        async def _provider(query: str, tenant_id: str, budget: int) -> str:
+            if not project_graph:
+                return ""
+            try:
+                return await project_graph.get_context(query, tenant_id, budget)
+            except Exception:
+                return ""
+
+        return _provider
+
+    @staticmethod
+    def relationship_provider(relationship_memory: Any) -> Any:
+        """Create a context provider from a RelationshipMemory."""
+
+        async def _provider(query: str, tenant_id: str, budget: int) -> str:
+            if not relationship_memory:
+                return ""
+            try:
+                return await relationship_memory.get_context(query, tenant_id, budget)
+            except Exception:
+                return ""
+
+        return _provider
+
+    @staticmethod
+    def reality_graph_provider(reality_graph: Any) -> Any:
+        """Create a context provider from a RealityGraph."""
+
+        async def _provider(query: str, tenant_id: str, budget: int) -> str:
+            if not reality_graph:
+                return ""
+            try:
+                return await reality_graph.get_context(query, tenant_id, budget)
+            except Exception:
+                return ""
 
         return _provider
 
