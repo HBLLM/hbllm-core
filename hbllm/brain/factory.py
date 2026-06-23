@@ -137,6 +137,13 @@ class BrainConfig(BaseModel):
     inject_task_graph: bool = True
     inject_mesh: bool = True
 
+    # ── Cognitive subsystems ─────────────────────────
+    inject_user_model: bool = True
+    inject_project_graph: bool = True
+    inject_executive_cortex: bool = True
+    inject_relationship_memory: bool = True
+    inject_reality_graph: bool = True
+
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
     inject_identity: bool = True
@@ -1537,6 +1544,100 @@ class BrainFactory:
         brain.proactive_processor = proactive
         brain.sse_channel = sse
         logger.info("ProactiveProcessor wired — notifications active")
+
+        # ── Cognitive Subsystems ────────────────────────────────────
+
+        # UserModel — predictive user understanding
+        if cfg.inject_user_model:
+            from hbllm.brain.user_model import UserModelEngine
+            from hbllm.brain.user_model_node import UserModelNode
+
+            user_model_engine = UserModelEngine(data_dir=cfg.data_dir)
+            user_model_node = UserModelNode(
+                node_id="user_model",
+                user_model_engine=user_model_engine,
+                data_dir=cfg.data_dir,
+            )
+            await _register_node(registry, user_model_node)
+            await user_model_node.start(message_bus)
+            nodes.append(user_model_node)
+            brain.user_model_engine = user_model_engine
+            brain.user_model_node = user_model_node
+            logger.info("UserModel wired — predictive user understanding active")
+        else:
+            user_model_engine = None
+
+        # ProjectGraph — persistent project cognition
+        if cfg.inject_project_graph:
+            from hbllm.brain.project_graph import ProjectGraph
+            from hbllm.brain.project_node import ProjectNode
+
+            project_graph = ProjectGraph(data_dir=cfg.data_dir)
+            project_node = ProjectNode(
+                node_id="project_graph",
+                project_graph=project_graph,
+                data_dir=cfg.data_dir,
+            )
+            await _register_node(registry, project_node)
+            await project_node.start(message_bus)
+            nodes.append(project_node)
+            brain.project_graph = project_graph
+            brain.project_node = project_node
+            logger.info("ProjectGraph wired — persistent project cognition active")
+        else:
+            project_graph = None
+
+        # ExecutiveCortex — unified cognitive control
+        if cfg.inject_executive_cortex:
+            from hbllm.brain.executive_cortex import ExecutiveCortex
+
+            executive_cortex = ExecutiveCortex(
+                goal_manager=getattr(brain, "goal_manager", None),
+                load_manager=getattr(brain, "load_manager", None),
+                attention_system=None,
+                attention_manager=getattr(brain, "attention_manager", None),
+                state_machine=None,
+                user_model=user_model_engine,
+            )
+            brain.executive_cortex = executive_cortex
+            logger.info("ExecutiveCortex wired — unified cognitive control active")
+
+        # RelationshipMemory — KG-integrated social graph
+        if cfg.inject_relationship_memory:
+            from hbllm.brain.relationship_memory import RelationshipMemory
+            from hbllm.brain.relationship_node import RelationshipNode
+
+            kg = getattr(brain, "knowledge_base", None)
+            kg_graph = getattr(kg, "graph", None) if kg else None
+            relationship_memory = RelationshipMemory(
+                knowledge_graph=kg_graph,
+                data_dir=cfg.data_dir,
+            )
+            relationship_node = RelationshipNode(
+                node_id="relationship_memory",
+                relationship_memory=relationship_memory,
+                data_dir=cfg.data_dir,
+            )
+            await _register_node(registry, relationship_node)
+            await relationship_node.start(message_bus)
+            nodes.append(relationship_node)
+            brain.relationship_memory = relationship_memory
+            brain.relationship_node = relationship_node
+            logger.info("RelationshipMemory wired — social graph active")
+        else:
+            relationship_memory = None
+
+        # RealityGraph — unified world model facade
+        if cfg.inject_reality_graph:
+            from hbllm.brain.reality_graph import RealityGraph
+
+            reality_graph = RealityGraph(
+                knowledge_graph=getattr(brain, "knowledge_base", None),
+                brain_world_state=getattr(brain, "world_state", None),
+                perception_world_state=None,
+            )
+            brain.reality_graph = reality_graph
+            logger.info("RealityGraph wired — unified world model facade active")
 
         logger.info(
             "v4 composite brain ready: %d top-level nodes, autonomy=ACTIVE",

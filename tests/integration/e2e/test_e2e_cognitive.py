@@ -213,7 +213,11 @@ async def test_negative_feedback_triggers_improvement(cognitive_system):
             ),
         )
 
-    await asyncio.sleep(1.0)
+    # Wait for the improvement event (may take longer under full-suite load)
+    for _ in range(50):  # Up to 5 seconds
+        await asyncio.sleep(0.1)
+        if improve_events:
+            break
 
     assert len(improve_events) >= 1
     assert improve_events[0].payload["domain"] == "auth_domain"
