@@ -75,8 +75,7 @@ class TestRequestQueue:
         assert manager.pending_count() == 1
 
     def test_queue_overflow(self):
-        manager = OfflineManager()
-        manager._max_queue = 3
+        manager = OfflineManager(max_queue=3)
         for i in range(5):
             manager.queue_request(f"r{i}", "openai", {"n": i})
         assert manager.pending_count() == 3

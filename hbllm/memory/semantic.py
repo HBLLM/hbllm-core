@@ -188,6 +188,7 @@ class SemanticMemory:
         self._sparse_dirty = True
         self._sparse_cache: np.ndarray[Any, Any] | None = None
         self._content_hashes: set[str] = set()
+        self._norms_cache: np.ndarray[Any, Any] | None = None  # Cached L2 norms of vectors
         self._lock = threading.RLock()
         self._tfidf_timer: threading.Timer | None = None
         self._closed = False
@@ -325,6 +326,7 @@ class SemanticMemory:
             return None
         if self._vectors_dirty:
             self._vectors_cache = np.vstack(self._vector_list)
+            self._norms_cache = None  # Invalidate norms cache
             self._vectors_dirty = False
         return self._vectors_cache
 
@@ -677,13 +679,15 @@ class SemanticMemory:
                 )
             )
         else:
-            norms = np.linalg.norm(self.vectors, axis=1)
+            # Use cached norms (only recomputed when vectors change)
+            if self._norms_cache is None or len(self._norms_cache) != len(self.vectors):
+                self._norms_cache = np.linalg.norm(self.vectors, axis=1)
             query_norm = np.linalg.norm(query_vec)
 
             if query_norm == 0:
                 return []
 
-            dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
+            dense_scores = np.dot(self.vectors, query_vec) / (self._norms_cache * query_norm + 1e-9)
 
         # --- Hybrid: blend with sparse TF-IDF scores if available ---
         if (

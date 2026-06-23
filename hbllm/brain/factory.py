@@ -912,9 +912,9 @@ class BrainFactory:
                 sentinel_node = n
                 break
 
-        # 4. Start all nodes on the bus
+        # 4. Start all nodes on the bus (parallel for faster boot)
+        await asyncio.gather(*(node.start(message_bus) for node in nodes))
         for node in nodes:
-            await node.start(message_bus)
             await _register_node(registry, node)
 
         # 5. Create and start pipeline

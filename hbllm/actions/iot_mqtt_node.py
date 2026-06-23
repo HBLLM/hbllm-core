@@ -143,6 +143,31 @@ class MqttIoTNode(Node):
         self._mqtt_loop_task: asyncio.Task[None] | None = None
         self._connected = False
 
+        # Confirmation gate (created once, reused for all commands)
+        self._risk_classifier: Any | None = None
+        self._confirmation_gate: Any | None = None
+        self._iot_risk_tiers: dict[str, int] = {
+            "light.on": 0,
+            "light.off": 0,
+            "light.toggle": 0,
+            "light.brightness": 1,
+            "light.color": 1,
+            "blinds.open": 0,
+            "blinds.close": 0,
+            "switch.on": 0,
+            "switch.off": 0,
+            "switch.toggle": 0,
+            "sensor.read": 0,
+            "thermostat.set": 1,
+            "thermostat.mode": 1,
+            "lock.lock": 1,
+            "lock.unlock": 3,
+            "camera.snapshot": 1,
+            "camera.stream": 2,
+            "alarm.arm": 2,
+            "alarm.disarm": 3,
+        }
+
     async def on_start(self) -> None:
         """Subscribe to brain messages and connect to MQTT broker."""
         logger.info("Starting MqttIoTNode — Home Automation Bridge")
@@ -326,44 +351,26 @@ class MqttIoTNode(Node):
         # ── Confirmation Gate ──────────────────────────────────────
         # Check if this action requires user confirmation
         try:
-            from hbllm.actions.confirmation import ActionRiskClassifier
+            if self._risk_classifier is None:
+                from hbllm.actions.confirmation import ActionRiskClassifier
 
-            # IoT device actions: most are safe (tier 0-1), only dangerous
-            # ones (unlock, disarm, factory_reset) need confirmation.
-            iot_tiers = {
-                "light.on": 0,
-                "light.off": 0,
-                "light.toggle": 0,
-                "light.brightness": 1,
-                "light.color": 1,
-                "blinds.open": 0,
-                "blinds.close": 0,
-                "switch.on": 0,
-                "switch.off": 0,
-                "switch.toggle": 0,
-                "sensor.read": 0,
-                "thermostat.set": 1,
-                "thermostat.mode": 1,
-                "lock.lock": 1,
-                "lock.unlock": 3,
-                "camera.snapshot": 1,
-                "camera.stream": 2,
-                "alarm.arm": 2,
-                "alarm.disarm": 3,
-            }
-            classifier = ActionRiskClassifier(custom_overrides=iot_tiers)
+                self._risk_classifier = ActionRiskClassifier(custom_overrides=self._iot_risk_tiers)
+
             risk_action = f"{device.type}.{action}"
-            assessment = classifier.classify(risk_action, {"device_id": device_id})
+            assessment = self._risk_classifier.classify(risk_action, {"device_id": device_id})
 
             if assessment.requires_confirmation:
                 # Check if we have a confirmation gate on the bus
                 if self.bus:
-                    from hbllm.actions.confirmation import ConfirmationGate
+                    if self._confirmation_gate is None:
+                        from hbllm.actions.confirmation import ConfirmationGate
 
-                    gate = ConfirmationGate(
-                        bus=self.bus, classifier=classifier, default_timeout_s=5.0
-                    )
-                    approved = await gate.request_confirmation(
+                        self._confirmation_gate = ConfirmationGate(
+                            bus=self.bus,
+                            classifier=self._risk_classifier,
+                            default_timeout_s=5.0,
+                        )
+                    approved = await self._confirmation_gate.request_confirmation(
                         action=risk_action,
                         tenant_id=message.tenant_id or "default",
                         context={"device_id": device_id, "action": action, "params": params},

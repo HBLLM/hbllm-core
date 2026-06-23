@@ -16,6 +16,7 @@ from collections.abc import Callable, Coroutine
 from datetime import timezone
 from typing import Any, Protocol, runtime_checkable
 
+from hbllm.network._tenant_bridge import restore_tenant_ctx
 from hbllm.network.messages import Message
 from hbllm.network.tracing import BusMetrics, trace_span
 
@@ -261,10 +262,16 @@ class InProcessBus:
         if message.topic == "system.dlq":
             return  # Prevent infinite DLQ loops
 
-        dlq_msg = message.model_copy(deep=True)
-        dlq_msg.topic = "system.dlq"
-        dlq_msg.payload["dlq_reason"] = reason
-        dlq_msg.payload["original_topic"] = message.topic
+        dlq_msg = message.model_copy(
+            update={
+                "topic": "system.dlq",
+                "payload": {
+                    **message.payload,
+                    "dlq_reason": reason,
+                    "original_topic": message.topic,
+                },
+            }
+        )
 
         # Bypass interceptors and queue directly
         self._msg_counter += 1
@@ -374,8 +381,6 @@ class InProcessBus:
                     async with self._handler_semaphore:
                         _start = time.monotonic()
                         try:
-                            from hbllm.network._tenant_bridge import restore_tenant_ctx
-
                             with restore_tenant_ctx(m):
                                 with trace_span(
                                     f"handle:{t}", {"topic": t, "node": s.id, "msg_id": m.id}
