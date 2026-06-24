@@ -68,6 +68,14 @@ config = BrainConfig(
     inject_sentinel=True,        # Proactive monitoring
     inject_fuzzy_logic=False,    # Fuzzy reasoning
     inject_symbolic_logic=False, # Z3 theorem prover
+
+    # Cognitive Subsystems (Human Modeling)
+    inject_user_model=True,          # Predictive user model (expertise, preferences, trust)
+    inject_project_graph=True,       # Graph-based project state tracking
+    inject_executive_cortex=True,    # Goal arbitration and focus management
+    inject_relationship_memory=True, # Social graph and interaction history
+    inject_reality_graph=True,       # Unified world state facade
+
     total_timeout=60.0,
     system_prompt="You are a helpful AI assistant.",
 )

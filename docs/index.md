@@ -1,6 +1,6 @@
 ---
 title: "HBLLM Core — An AI That Thinks Like a Person"
-description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 45+ cognitive nodes, 9 memory subsystems, and cryptographic trust for absolute privacy."
+description: "A continuously thinking, goal-driven cognitive brain that runs entirely on your own hardware. Local by default, distributed when you want it. 50+ cognitive nodes, 9 memory subsystems, 5 human modeling subsystems, and cryptographic trust for absolute privacy."
 ---
 
 <!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, No GPU Required, Low VRAM AI, Privacy-First AI, On-Premise AI, Hybrid Quantization, INT4 Quantization, Graph of Thoughts, LoRA Tuning, Python AI Framework, Rust AI Inference, Autonomous Agents, LLMOps, On-Device AI, Small Language Model, Multi-Tenant AI -->
@@ -34,8 +34,8 @@ And it has the **safety instincts of a responsible person** — it knows when it
 
 <div class="feature-grid">
 <div class="feature-card">
-<h3>🧠 45+ Cognitive Nodes</h3>
-<p>Router, Planner, Critic, Decision, Learner, Curiosity, Identity, World Model, Sleep Cycle, Autonomy Core, Restraint Engine, Reflex Library, and more — each running as an isolated, asynchronous service.</p>
+<h3>🧠 50+ Cognitive Nodes</h3>
+<p>Router, Planner, Critic, Decision, Learner, Curiosity, Identity, World Model, Sleep Cycle, Autonomy Core, Restraint Engine, Reflex Library, UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph, and more — each running as an isolated, asynchronous service.</p>
 </div>
 <div class="feature-card">
 <h3>💤 Sleep Cycle Consolidation</h3>
@@ -80,6 +80,10 @@ And it has the **safety instincts of a responsible person** — it knows when it
 <div class="feature-card">
 <h3>🛡️ Restraint & Safety</h3>
 <p>Cognitive restraint engine, PII redaction, voice authentication, action confirmation gates, and rollback support. The system knows when to stop and ask for permission.</p>
+</div>
+<div class="feature-card">
+<h3>👤 Human Modeling Layer</h3>
+<p>UserModel learns expertise, preferences, and trust. ProjectGraph tracks goals and blockers. ExecutiveCortex manages focus. RelationshipMemory builds a social graph. RealityGraph unifies world state. The system models <em>you</em>.</p>
 </div>
 </div>
 
