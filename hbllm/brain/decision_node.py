@@ -54,6 +54,7 @@ class DecisionNode(Node):
         self.utility_engine = CognitiveUtilityEngine()
         self.calibrator = UtilityCalibrator(data_dir=data_dir)
         self.last_mode = "high"
+        self._user_model: Any | None = None  # Optional UserModelEngine — set by factory
 
         # Expression-side Cognitive Stream (wired by factory if available)
         self.expression_stream: Any | None = None

@@ -934,8 +934,8 @@ class UserModelEngine:
                             first_observed=attr.first_observed,
                             last_observed=attr.last_observed,
                         ),
-                        delegations_count=trust_data.get("delegations", 0),
-                        overrides_count=trust_data.get("overrides", 0),
+                        delegations_count=int(trust_data.get("delegations", 0)),
+                        overrides_count=int(trust_data.get("overrides", 0)),
                     )
                 elif category == "interest" and key.startswith("interest_"):
                     model.active_interests.append(attr)

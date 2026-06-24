@@ -6,9 +6,11 @@ build and update the social graph.
 
 Bus Topics:
     Subscribes:
-        system.experience     → Extract person mentions from queries
-        system.evaluation     → Track sentiment in responses about people
-        calendar.event        → Learn relationships from attendees
+        system.experience       → Extract person mentions from queries
+        system.evaluation       → Track sentiment in responses about people
+        calendar.event          → Learn relationships from attendees
+        sensory.transcription   → Record voice-identified speakers in social graph
+        speaker.retroactive_update → Backfill social graph when new speakers are enrolled
 
     Publishes:
         relationship.updated  → Relationship quality changed
@@ -56,6 +58,8 @@ class RelationshipNode(Node):
         await self.bus.subscribe("system.evaluation", self._handle_evaluation)
         await self.bus.subscribe("calendar.event", self._handle_calendar)
         await self.bus.subscribe("relationship.query", self._handle_query)
+        await self.bus.subscribe("sensory.transcription", self._handle_voice_speaker)
+        await self.bus.subscribe("speaker.retroactive_update", self._handle_retroactive_speaker)
 
     async def on_stop(self) -> None:
         logger.info(
@@ -164,3 +168,92 @@ class RelationshipNode(Node):
     async def _handle_query(self, message: Message) -> Message | None:
         """Return relationship stats."""
         return message.create_response(self.memory.stats())
+
+    async def _handle_voice_speaker(self, message: Message) -> None:
+        """Record voice-identified speakers in the social graph.
+
+        When SpeakerIdNode identifies a speaker via voice biometrics,
+        record them as a person with a 'voice_interaction' event.
+        This bridges biometric identity into the relationship graph.
+        """
+        payload = message.payload
+        speaker_id = payload.get("speaker_id", "unknown")
+        speaker_name = payload.get("speaker_name", "")
+        confidence = payload.get("speaker_confidence", 0.0)
+        tenant_id = message.tenant_id or "default"
+
+        if speaker_id == "unknown" or confidence < 0.7 or not speaker_name:
+            return
+
+        existing = self.memory.get_person(speaker_name, tenant_id)
+        is_new = existing is None
+
+        person = self.memory.record_mention(
+            person_name=speaker_name,
+            context=f"Voice identified (confidence={confidence:.0%})",
+            tenant_id=tenant_id,
+            topic="voice_interaction",
+            sentiment=0.1,  # Voice interactions are slightly positive
+        )
+
+        # Set preferred channel to voice
+        person.preferred_channel = "voice"
+        self.memory._save_person(person)
+
+        if is_new:
+            self._new_persons_detected += 1
+            logger.info(
+                "New person detected via voice: %s (speaker_id=%s, confidence=%.2f)",
+                speaker_name,
+                speaker_id,
+                confidence,
+            )
+            await self.publish(
+                "relationship.new",
+                Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="relationship.new",
+                    tenant_id=tenant_id,
+                    payload={
+                        "person_id": person.person_id,
+                        "person_name": person.name,
+                        "source": "voice_identification",
+                        "speaker_id": speaker_id,
+                    },
+                ),
+            )
+
+    async def _handle_retroactive_speaker(self, message: Message) -> None:
+        """Backfill social graph when a new speaker is enrolled.
+
+        When SpeakerIdNode retroactively matches cached unknown embeddings
+        to a newly enrolled speaker, record those interactions.
+        """
+        payload = message.payload
+        speaker_name = payload.get("speaker_name", "")
+        matched_count = payload.get("matched_count", 0)
+        matched_texts = payload.get("matched_texts", [])
+        tenant_id = message.tenant_id or "default"
+
+        if not speaker_name or matched_count == 0:
+            return
+
+        context_parts = [f"Retroactively identified in {matched_count} past utterance(s)"]
+        if matched_texts:
+            context_parts.append(f"Sample: {matched_texts[0][:100]}")
+
+        self.memory.record_event(
+            person_name=speaker_name,
+            event_type="retroactive_voice_match",
+            context=". ".join(context_parts),
+            sentiment_delta=0.05,
+            tenant_id=tenant_id,
+        )
+
+        logger.info(
+            "Retroactive voice match: %s (%d utterances) tenant=%s",
+            speaker_name,
+            matched_count,
+            tenant_id,
+        )

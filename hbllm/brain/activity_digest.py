@@ -11,6 +11,10 @@ ActivityDigest aggregates events from the notification queue, completed
 goals, background insights, and system health changes into a concise
 digest grouped by importance.
 
+Integrations:
+    ProjectGraph     → Enriches digest with active project goal status
+    UserModelEngine  → Adapts digest verbosity to user preferences
+
 Bus Topics:
     digest.generate   → Trigger a digest for a tenant
     digest.result     → The generated digest text
@@ -179,8 +183,15 @@ class ActivityDigestEngine:
         print(digest.to_natural_language())
     """
 
-    def __init__(self, max_events_per_tenant: int = 500) -> None:
+    def __init__(
+        self,
+        max_events_per_tenant: int = 500,
+        user_model: Any | None = None,
+        project_graph: Any | None = None,
+    ) -> None:
         self._max_events = max_events_per_tenant
+        self._user_model = user_model  # Optional UserModelEngine
+        self._project_graph = project_graph  # Optional ProjectGraph
         # Per-tenant event buffers (accumulated since last digest)
         self._buffers: dict[str, list[DigestItem]] = defaultdict(list)
         # Track when each tenant was last active
@@ -188,7 +199,12 @@ class ActivityDigestEngine:
         # Track when last digest was generated
         self._last_digest: dict[str, float] = {}
 
-        logger.info("ActivityDigestEngine initialized (max_events=%d)", max_events_per_tenant)
+        logger.info(
+            "ActivityDigestEngine initialized (max_events=%d, user_model=%s, project_graph=%s)",
+            max_events_per_tenant,
+            "connected" if user_model else "none",
+            "connected" if project_graph else "none",
+        )
 
     def record_event(self, tenant_id: str, item: DigestItem) -> None:
         """Record an event for a tenant's next digest."""
@@ -246,6 +262,14 @@ class ActivityDigestEngine:
             period_end=now,
         )
 
+        # Enrich with project context if ProjectGraph is connected
+        if self._project_graph:
+            self._enrich_with_project_context(digest, tenant_id)
+
+        # Respect user verbosity preference
+        if self._user_model:
+            self._apply_verbosity_preference(digest, tenant_id)
+
         # Update tracking
         self._last_digest[tenant_id] = now
         # Clear consumed events
@@ -254,7 +278,7 @@ class ActivityDigestEngine:
         logger.debug(
             "Generated digest for tenant '%s': %d items over %.1f hours",
             tenant_id,
-            len(items),
+            len(digest.items),
             digest.duration_hours,
         )
         return digest
@@ -273,4 +297,50 @@ class ActivityDigestEngine:
             "tenant_count": len(self._buffers),
             "total_pending": sum(len(b) for b in self._buffers.values()),
             "tenants_with_events": sum(1 for b in self._buffers.values() if b),
+            "user_model_connected": self._user_model is not None,
+            "project_graph_connected": self._project_graph is not None,
         }
+
+    # ── Integration Helpers ────────────────────────────────────────────
+
+    def _enrich_with_project_context(self, digest: Digest, tenant_id: str) -> None:
+        """Add project goal status to the digest."""
+        try:
+            # Get all projects and check for active goals
+            projects = self._project_graph.list_projects(tenant_id)
+            for project in projects[:5]:  # Max 5 projects in digest
+                project_id = (
+                    project.get("id", "")
+                    if isinstance(project, dict)
+                    else getattr(project, "id", "")
+                )
+                if not project_id:
+                    continue
+                goals = self._project_graph.get_active_goals(project_id)
+                if goals:
+                    project_name = (
+                        project.get("name", project_id)
+                        if isinstance(project, dict)
+                        else getattr(project, "name", project_id)
+                    )
+                    digest.items.append(
+                        DigestItem(
+                            category="goal",
+                            title=f"{project_name}: {len(goals)} active goal(s)",
+                            detail=", ".join(getattr(g, "name", str(g))[:40] for g in goals[:3]),
+                            importance=0.6,
+                        )
+                    )
+        except Exception as e:
+            logger.debug("Failed to enrich digest with project context: %s", e)
+
+    def _apply_verbosity_preference(self, digest: Digest, tenant_id: str) -> None:
+        """Trim digest items based on user verbosity preference."""
+        try:
+            model = self._user_model.get_model(tenant_id)
+            verbosity_pref = model.preferences.get("verbosity")
+            if verbosity_pref and verbosity_pref.value == "concise":
+                # Keep only high-importance items for concise users
+                digest.items = [item for item in digest.items if item.importance >= 0.5][:10]
+        except Exception as e:
+            logger.debug("Failed to apply verbosity preference: %s", e)

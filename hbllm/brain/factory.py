@@ -1627,6 +1627,31 @@ class BrainFactory:
         else:
             relationship_memory = None
 
+        # ── Interconnection Wiring ──────────────────────────────────
+        # Wire cross-subsystem connections now that all engines exist.
+        # This activates the bus topology: UserModel → PersonaEngine,
+        # CuriosityNode, SocialTiming, ProactiveInsight, etc.
+
+        # Wire user_model into DecisionNode
+        decision_node = getattr(brain, "decision_node", None)
+        if decision_node and user_model_engine:
+            decision_node._user_model = user_model_engine
+            logger.debug("Wired UserModel → DecisionNode (expertise-aware scoring)")
+
+        # Wire user_model into CuriosityNode
+        curiosity_node = next((n for n in nodes if getattr(n, "node_id", "") == "curiosity"), None)
+        if curiosity_node and user_model_engine:
+            curiosity_node._user_model = user_model_engine
+            logger.debug("Wired UserModel → CuriosityNode (interest-weighted goals)")
+
+        logger.info(
+            "Interconnection wiring complete — user_model=%s, project_graph=%s, "
+            "relationship_memory=%s",
+            "active" if user_model_engine else "none",
+            "active" if project_graph else "none",
+            "active" if relationship_memory else "none",
+        )
+
         # RealityGraph — unified world model facade
         if cfg.inject_reality_graph:
             from hbllm.brain.reality_graph import RealityGraph

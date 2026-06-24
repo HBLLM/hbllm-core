@@ -5,6 +5,9 @@ Monitors low-confidence responses, negative feedback, and error fallbacks
 to identify areas where the system needs improvement. When uncertainty
 accumulates beyond a threshold, it generates autonomous learning goals
 and publishes them to the Planner for investigation.
+
+Integrations:
+    UserModelEngine  → Weights curiosity goals toward user interests and expertise gaps
 """
 
 from __future__ import annotations
@@ -121,6 +124,7 @@ class CuriosityNode(Node):
         node_id: str,
         uncertainty_threshold: int = 3,
         goal_dispatch_interval: float = 60.0,
+        user_model: Any | None = None,
     ):
         super().__init__(
             node_id=node_id,
@@ -129,10 +133,12 @@ class CuriosityNode(Node):
         )
         self.uncertainty_threshold = uncertainty_threshold
         self.goal_dispatch_interval = goal_dispatch_interval
+        self._user_model = user_model  # Optional UserModelEngine for interest-weighted goals
         self.events: list[UncertaintyEvent] = []
         self.topic_counts: dict[str, int] = defaultdict(int)
         self.goal_queue = GoalQueue()
         self._last_dispatch = 0.0
+        self._user_interests: list[str] = []  # Cached from UserModel
 
         # v2: Predictive Curiosity — track topic patterns
         self._topic_sequence: list[str] = []  # Last N topics discussed
@@ -150,6 +156,8 @@ class CuriosityNode(Node):
         await self.bus.subscribe("curiosity.query", self._handle_query)
         # v2: Predictive Curiosity — observe successful queries for patterns
         await self.bus.subscribe("system.experience", self._handle_experience_for_prediction)
+        # v3: UserModel integration — weight curiosity by user interests
+        await self.bus.subscribe("user.model.updated", self._handle_user_model_updated)
 
         # Start predictive exploration loop
         self._predict_loop_task = asyncio.create_task(self._predictive_exploration_loop())
@@ -219,8 +227,8 @@ class CuriosityNode(Node):
             return None  # Only negative feedback signals uncertainty
 
         event = UncertaintyEvent(
-            topic=payload.get("topic", "general"),
-            query=payload.get("prompt", payload.get("query", "")),
+            topic=str(payload.get("topic", "general")),
+            query=str(payload.get("prompt", payload.get("query", ""))),
             reason="negative_feedback",
             confidence=0.0,
             tenant_id=message.tenant_id,
@@ -231,8 +239,8 @@ class CuriosityNode(Node):
     async def _handle_fallback(self, message: Message) -> Message | None:
         """Process workspace error fallbacks as critical uncertainty."""
         event = UncertaintyEvent(
-            topic=message.payload.get("topic", "unknown"),
-            query=message.payload.get("query", ""),
+            topic=str(message.payload.get("topic", "unknown")),
+            query=str(message.payload.get("query", "")),
             reason="error_fallback",
             confidence=0.0,
             tenant_id=message.tenant_id,
@@ -255,7 +263,7 @@ class CuriosityNode(Node):
             return None
 
         event = UncertaintyEvent(
-            topic=payload.get("domain", thought_type or "general"),
+            topic=str(payload.get("domain", thought_type or "general")),
             query=str(payload.get("content", ""))[:200],
             reason="low_confidence",
             confidence=confidence,
@@ -284,11 +292,14 @@ class CuriosityNode(Node):
 
         count = self.topic_counts[event.topic]
         if count >= self.uncertainty_threshold:
+            # Apply interest boost — topics aligned with user interests get higher priority
+            base_priority = min(1.0, count / 10.0)
+            interest_boost = self._compute_interest_boost(event.topic)
             goal = self.goal_queue.add_or_update(
                 topic=event.topic,
                 description=f"Improve handling of '{event.topic}' — "
                 f"{count} uncertainty events recorded",
-                priority=min(1.0, count / 10.0),
+                priority=min(1.0, base_priority * interest_boost),
                 event_count=count,
             )
             logger.info(
@@ -297,6 +308,37 @@ class CuriosityNode(Node):
 
             # Attempt to dispatch
             await self._maybe_dispatch()
+
+    def _compute_interest_boost(self, topic: str) -> float:
+        """Boost priority for topics aligned with user interests.
+
+        Returns a multiplier (1.0 = no boost, up to 1.5 for high-interest topics).
+        """
+        if not self._user_interests:
+            return 1.0
+
+        topic_lower = topic.lower()
+        for interest in self._user_interests:
+            if interest.lower() in topic_lower or topic_lower in interest.lower():
+                return 1.4  # 40% boost for interest-aligned topics
+
+        return 1.0
+
+    async def _handle_user_model_updated(self, message: Message) -> None:
+        """Cache user interests from UserModel for curiosity weighting."""
+        if not self._user_model:
+            return
+
+        tenant_id = message.payload.get("tenant_id", "default")
+        try:
+            model = self._user_model.get_model(tenant_id)
+            self._user_interests = list(model.active_interests)[:20]
+            logger.debug(
+                "CuriosityNode synced %d user interests from UserModel",
+                len(self._user_interests),
+            )
+        except Exception as e:
+            logger.debug("Failed to sync user interests: %s", e)
 
     async def _maybe_dispatch(self) -> None:
         """Dispatch the top pending goal to SpawnerNode and SleepNode."""

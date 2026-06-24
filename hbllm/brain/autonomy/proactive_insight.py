@@ -6,11 +6,14 @@ Generates proactive insights by correlating:
     3. World state (from WorldStateEngine)
     4. User habits (from ValueMemory)
     5. Calendar events (from external calendar feeds)
+    6. User model (from UserModelEngine) — stress, interests, preferences
+    7. Project context (from ProjectGraph) — active goals, blockers
 
 Produces suggestions like:
     "It's Monday 9am — you usually start coding now. Open VS Code?"
     "You're in the kitchen and it's dinner time — want a recipe suggestion?"
     "Battery at 15% — you have a 2-hour meeting in 30 minutes. Plug in."
+    "You have a blocker on the auth module — want me to investigate?"
 
 Architecture:
     Runs as a slow-path check during the AutonomyCore's tick loop.
@@ -51,11 +54,15 @@ class ProactiveInsightGenerator:
         spatial_memory: Any | None = None,
         world_engine: Any | None = None,
         value_db: Any | None = None,
+        user_model: Any | None = None,
+        project_graph: Any | None = None,
     ) -> None:
         self.temporal = temporal_detector
         self.spatial = spatial_memory
         self.world = world_engine
         self.value_db = value_db
+        self._user_model = user_model  # Optional UserModelEngine
+        self._project_graph = project_graph  # Optional ProjectGraph
 
         # Track what insights we've already generated (prevent repeats)
         self._generated: dict[str, float] = {}  # insight_key → last_generated_time
@@ -92,6 +99,13 @@ class ProactiveInsightGenerator:
         # 4. Routine-based insights
         insights.extend(self._routine_insights(tenant_id, dt))
 
+        # 5. Project-aware insights (active goals, blockers)
+        if self._project_graph:
+            insights.extend(self._project_insights(tenant_id, dt))
+
+        # Stress-based suppression: when user is stressed, reduce suggestion volume
+        max_insights = self._get_max_insights(tenant_id)
+
         # Filter out recently generated insights
         filtered: list[Message] = []
         for msg in insights:
@@ -106,7 +120,25 @@ class ProactiveInsightGenerator:
             self._total_generated += 1
             filtered.append(msg)
 
+            if len(filtered) >= max_insights:
+                break
+
         return filtered
+
+    def _get_max_insights(self, tenant_id: str) -> int:
+        """Compute max insights per cycle based on user stress level."""
+        if not self._user_model:
+            return 5  # Default
+
+        try:
+            model = self._user_model.get_model(tenant_id)
+            if model.stress_level > 0.7:
+                return 1  # High stress → minimal suggestions
+            if model.stress_level > 0.4:
+                return 3  # Moderate stress → fewer suggestions
+            return 5
+        except Exception:
+            return 5
 
     def _temporal_insights(
         self,
@@ -308,4 +340,46 @@ class ProactiveInsightGenerator:
             "total_suppressed": self._total_suppressed,
             "tracked_insights": len(self._generated),
             "cooldown_s": self._cooldown_s,
+            "user_model_connected": self._user_model is not None,
+            "project_graph_connected": self._project_graph is not None,
         }
+
+    # ── Project-Aware Insights ────────────────────────────────────────
+
+    def _project_insights(
+        self,
+        tenant_id: str,
+        dt: datetime,
+    ) -> list[Message]:
+        """Generate insights from active projects, goals, and blockers."""
+        messages: list[Message] = []
+
+        try:
+            active_goals = self._project_graph.get_active_goals(tenant_id)
+        except Exception:
+            active_goals = []
+
+        if not active_goals:
+            return []
+
+        # Check for stale goals (no progress in 3+ days)
+        now = time.time()
+        for goal in active_goals[:3]:  # Max 3 project insights
+            last_activity = goal.get("last_activity", now)
+            days_stale = (now - last_activity) / 86400.0
+
+            if days_stale > 3.0:
+                project_name = goal.get("project_name", "a project")
+                goal_desc = goal.get("description", "a goal")[:60]
+                messages.append(
+                    self._make_insight(
+                        title=f"📌 Stale Goal: {project_name}",
+                        body=f"'{goal_desc}' hasn't had activity in "
+                        f"{int(days_stale)} days. Want me to investigate or reprioritize?",
+                        priority="normal",
+                        insight_key=f"stale_goal_{goal.get('goal_id', '')}",
+                        tenant_id=tenant_id,
+                    )
+                )
+
+        return messages

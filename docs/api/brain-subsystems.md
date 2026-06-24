@@ -35,6 +35,11 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | `ContextFusionEngine` | `context_fusion.py` | Always on | Token-budgeted multi-source context assembly |
 | `ActionVerificationBridge` | `autonomy/verification_bridge.py` | Always on | Execute → verify → correct feedback loop |
 | `EmotionEngine` | `emotion_engine.py` | `inject_emotion` | Multi-signal emotion detection with LLM inference |
+| **`UserModelEngine`** | `user_model.py` | `inject_user_model` | Predictive model of the human operator |
+| **`ProjectGraph`** | `project_graph.py` | `inject_project_graph` | Graph-based project state tracking |
+| **`ExecutiveCortex`** | `executive_cortex.py` | `inject_executive_cortex` | Unified cognitive control and budget allocation |
+| **`RelationshipMemory`** | `relationship_memory.py` | `inject_relationship_memory` | Social graph and interaction history |
+| **`RealityGraph`** | `reality_graph.py` | `inject_reality_graph` | Unified read-only world state facade |
 
 ---
 
@@ -556,6 +561,178 @@ await bridge.start()
 
 # Auto-generates verification rules for IoT commands:
 # "turn on kitchen light" → VerificationRule(entity="kitchen_light", property="state", expected="on")
+```
+
+---
+
+## Cognitive Subsystems — Human Modeling
+
+!!! info "New: Human Modeling Layer"
+    These subsystems model the human operator, their projects, their relationships, and their world — making HBLLM feel persistent and personal. See [Architecture: Cognitive Subsystems](../architecture/cognitive-subsystems.md) for the full deep-dive.
+
+### UserModel Engine
+
+**Module:** `hbllm.brain.user_model.UserModelEngine`
+**Config:** `inject_user_model = True`
+
+Continuously learns about the user from every interaction — expertise, preferences, beliefs, trust, temporal patterns, and cognitive state.
+
+```python
+# The engine automatically learns from bus events, but you can also use it directly:
+
+# Get the user model for a tenant
+model = brain.user_model.get_model("tenant-001")
+print(model.expertise)        # {"python": UserExpertise(level=0.85), ...}
+print(model.current_focus)    # LearnedAttribute(value="authentication", confidence=0.72)
+print(model.stress_level)     # 0.3
+
+# Explicitly teach a preference
+brain.user_model.learn_preference(
+    tenant_id="tenant-001",
+    key="verbosity",
+    value="concise",
+    source="explicit",  # High confidence override
+)
+
+# Get context for prompt injection
+context = await brain.user_model.get_context(
+    query="How do I fix the auth module?",
+    tenant_id="tenant-001",
+    budget=500,
+)
+# "User expertise: Python (expert, 0.85), Flutter (intermediate, 0.60). ..."
+
+# Predict next actions from temporal patterns
+predictions = brain.user_model.predict_next_actions("tenant-001")
+# ["run_tests", "commit_code", "check_deployment"]
+
+# Full stats
+stats = brain.user_model.stats("tenant-001")
+```
+
+### ProjectGraph
+
+**Module:** `hbllm.brain.project_graph.ProjectGraph`
+**Config:** `inject_project_graph = True`
+
+Graph-based project state tracker — goals, blockers, questions, decisions, milestones.
+
+```python
+# Create a project
+project = brain.project_graph.create_project(
+    name="HBLLM",
+    tags=["ai", "cognitive", "python"],
+)
+
+# Add goals and blockers
+goal = brain.project_graph.add_entity(project.entity_id, "goal", "Ship v3")
+blocker = brain.project_graph.add_entity(project.entity_id, "blocker", "Test flakiness")
+
+# Record a design decision
+brain.project_graph.record_decision(project.entity_id, "Use SQLite for user model persistence")
+
+# Auto-detect project from a query
+detected = brain.project_graph.auto_detect_project("fix the HBLLM authentication bug")
+# ProjectEntity(name="HBLLM", ...)
+
+# Reactivate a project (generates context summary)
+context = brain.project_graph.reactivate(project.entity_id)
+# "Project HBLLM: 3 active goals, 1 blocker, 2 open questions..."
+
+# Query state
+goals = brain.project_graph.get_active_goals(project.entity_id)
+blockers = brain.project_graph.get_blockers(project.entity_id)
+```
+
+### ExecutiveCortex
+
+**Module:** `hbllm.brain.executive_cortex.ExecutiveCortex`
+**Config:** `inject_executive_cortex = True`
+
+Cognitive control center — goal arbitration, focus management, interruption control.
+
+```python
+# Ask "what should I do next?"
+decision = brain.executive_cortex.decide_next_action()
+# ExecutiveDecision(action="continue_focus", target_goal="Ship v3", ...)
+
+# Enter deep focus mode
+brain.executive_cortex.set_focus("writing UserModel tests")
+
+# Check if an event should interrupt focus
+should_break = brain.executive_cortex.should_interrupt(incoming_event)
+
+# Get cognitive budget allocation
+budget = brain.executive_cortex.allocate_budget(pressure=0.6)
+# CognitiveBudget(heavy_llm=0.4, fast_router=0.3, reflex=0.2, reserve=0.1)
+
+# Full state dump
+state = brain.executive_cortex.snapshot()
+```
+
+### RelationshipMemory
+
+**Module:** `hbllm.brain.relationship_memory.RelationshipMemory`
+**Config:** `inject_relationship_memory = True`
+
+Social graph — tracks people, roles, sentiment, interaction history.
+
+```python
+# Record a mention
+brain.relationship_memory.record_mention(
+    name="Alice Chen",
+    context="Alice reviewed the PR and approved it",
+    topic="code_review",
+    sentiment=0.8,
+)
+
+# Track an interaction event
+brain.relationship_memory.record_event(
+    name="Alice Chen",
+    event_type="collaboration",
+    context="Pair programming on auth module",
+    sentiment_delta=0.2,
+)
+
+# Establish a relationship
+brain.relationship_memory.learn_relationship("Alice Chen", "Bob Smith", "colleague")
+
+# Find relevant people for a topic
+people = brain.relationship_memory.get_relevant_people("authentication")
+# [Person(name="Alice Chen", importance=0.85, topics=["code_review", "auth"]), ...]
+
+# Get interaction history with trend
+history = brain.relationship_memory.get_history("Alice Chen")
+# RelationshipHistory(events=[...], trend="improving")
+```
+
+### RealityGraph
+
+**Module:** `hbllm.brain.reality_graph.RealityGraph`
+**Config:** `inject_reality_graph = True`
+
+Unified read-only facade over KnowledgeGraph, BrainWorldState, and PerceptionWorldState.
+
+```python
+# Query an entity across all backends
+entity = brain.reality_graph.query_entity("kitchen_light")
+# RealityEntity(label="kitchen_light", entity_type="device",
+#   attributes={"state": "on", "brightness": 80}, confidence=0.95)
+
+# Query by type
+devices = brain.reality_graph.query_by_type("device")
+people = brain.reality_graph.query_by_type("person")
+
+# Expire stale entities
+expired = brain.reality_graph.tick()
+# 3 (entities expired)
+
+# Get context for prompt injection
+context = brain.reality_graph.get_context("What's the temperature?", "user1", budget=200)
+
+# Backend stats
+stats = brain.reality_graph.stats()
+# {"backends": {"knowledge_graph": True, "brain_world_state": True, ...}, ...}
 ```
 
 

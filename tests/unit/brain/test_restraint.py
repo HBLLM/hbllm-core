@@ -12,7 +12,9 @@ from hbllm.brain.autonomy.restraint import (
 
 @pytest.fixture
 def engine():
-    return RestraintEngine(quiet_hours=(3, 4))  # narrow range to avoid test flakiness
+    # Use hour range 2-3 to avoid flakiness; tests run between ~7-23 local time.
+    # For deterministic quiet-hour tests, see TestSocialTiming.
+    return RestraintEngine(quiet_hours=(2, 3))
 
 
 class TestConfidenceThreshold:

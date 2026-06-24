@@ -81,7 +81,7 @@ class ProjectNode(Node):
         project = self.graph.auto_detect_project(query, files=files, tenant_id=tenant_id)
         if project:
             # Associate this conversation with the project
-            topic = payload.get("topic", query[:50])
+            topic = str(payload.get("topic", query[:50]))
             self.graph.associate_conversation(project.entity_id, topic=topic, files=files)
 
             # Generate and publish reactivation context

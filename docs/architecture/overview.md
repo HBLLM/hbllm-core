@@ -1,6 +1,6 @@
 ---
 title: "Architecture Overview — HBLLM Cognitive Architecture"
-description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 45+ cognitive nodes, async message bus, 9 memory subsystems, autonomous goal pursuit, and the edge-optimized zoning model."
+description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 50+ cognitive nodes, async message bus, 9 memory subsystems, 5 cognitive subsystems for human modeling, autonomous goal pursuit, and the edge-optimized zoning model."
 ---
 
 # Architecture Overview
@@ -101,6 +101,14 @@ graph TB
         SOCIAL["🗓️ Social Timing"]
     end
 
+    subgraph HUMAN["👤 Cognitive Subsystems (Human Modeling)"]
+        UM["👤 UserModel\n(expertise, preferences, trust)"]
+        PG["📋 ProjectGraph\n(goals, blockers, decisions)"]
+        EC["🧠 ExecutiveCortex\n(focus, budget, interrupts)"]
+        RM["🤝 RelationshipMemory\n(social graph, sentiment)"]
+        RG["🌍 RealityGraph\n(unified world state)"]
+    end
+
     subgraph MEMORY["💾 Memory Systems (9 Subsystems)"]
         EPISODIC["📖 Episodic"]
         SEMANTIC["📚 Semantic (RAG)"]
@@ -146,6 +154,7 @@ graph TB
     BUS <--> AUTONOMY
     BUS <--> SECURITY
     BUS <--> MULTIAGENT
+    BUS <--> HUMAN
     CORE <==> SNN
     SNN --> MEMORY
     AUTONOMY --> CORE
@@ -154,6 +163,11 @@ graph TB
     SLEEP -->|"compact"| MEMORY
     SPAWN -->|"spawn LoRAs"| CORE
     IMPORTANCE -->|"score"| MEMORY
+    UM -->|"user context"| CORE
+    PG -->|"project context"| CORE
+    RM -->|"social context"| CORE
+    RG -->|"world state"| CORE
+    UM -->|"alignment"| EC
 ```
 
 
@@ -256,6 +270,16 @@ Nodes that monitor, improve, and expand the brain itself:
 - **IdentityNode** — Ethical constraints and personality persistence.
 - **WorldModelNode** — Sandboxed AST simulation for "what-if" reasoning.
 - **SocialTimingNode** — Context-aware timing for proactive communication (avoids interrupting during meetings, late at night, etc.).
+
+### Layer 4b: Cognitive Subsystems (Human Modeling)
+
+The human modeling layer that makes HBLLM feel persistent and personal. See [Cognitive Subsystems](cognitive-subsystems.md) for the full deep-dive.
+
+- **UserModel** — Continuously learns expertise, preferences, beliefs, trust, stress, engagement, and temporal work patterns from every interaction. SQLite-backed.
+- **ProjectGraph** — Graph-based project state tracker with goals, blockers, open questions, decisions, and milestones. Auto-detects which project the user is talking about.
+- **ExecutiveCortex** — Unified cognitive control: goal arbitration, task switching costs, interruption control, and cognitive budget allocation.
+- **RelationshipMemory** — Social graph of people mentioned in conversations with roles, sentiment trends, interaction history, and notification prioritization.
+- **RealityGraph** — Read-only unified facade over KnowledgeGraph, BrainWorldState, and PerceptionWorldState. Merges entities by confidence.
 
 ## Communication & Security
 
@@ -360,6 +384,7 @@ sequenceDiagram
 ## Next Steps
 
 - [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
+- [Cognitive Subsystems](cognitive-subsystems.md) — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph.
 - [Message Bus](message-bus.md) — How Pub/Sub routing works.
 - [Memory Systems](memory-systems.md) — The 6 memory types explained.
 - [Embodiment](embodiment.md) — Actuator safety and verification.

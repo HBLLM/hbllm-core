@@ -140,6 +140,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Auto-generates verification rules for IoT commands
   - Re-executes tasks that fail verification (with correction limit)
 
+#### Cognitive Subsystems — Human Modeling Layer
+
+- **UserModelEngine** — `hbllm/brain/user_model.py` + `user_model_node.py` (~1160 lines)
+  - Predictive model of the human operator: expertise, preferences, beliefs, trust
+  - Continuous learning from interactions via 9-domain vocabulary analysis
+  - Temporal pattern detection (active hours/days) and next-action prediction
+  - Ebbinghaus-curve confidence decay with configurable half-life
+  - SQLite persistence with per-tenant isolation
+  - ContextFusion provider (priority 0.85)
+
+- **ProjectGraph** — `hbllm/brain/project_graph.py` + `project_node.py` (~860 lines)
+  - Graph-based project state: goals, blockers, questions, decisions, milestones
+  - Auto-detection of active project from query context
+  - Project reactivation with context summary generation
+  - Cross-project dependency tracking
+  - SQLite persistence with entity/relation tables
+
+- **ExecutiveCortex** — `hbllm/brain/executive_cortex.py` (~494 lines)
+  - Unified cognitive control: goal arbitration, focus management, interruption control
+  - Cognitive budget allocation (heavy_llm / fast_router / reflex / reserve)
+  - Task switching cost calculation with fatigue modeling
+  - Reads from UserModel (alignment) and GoalManager (priorities)
+
+- **RelationshipMemory** — `hbllm/brain/relationship_memory.py` + `relationship_node.py` (~826 lines)
+  - Social graph of people: roles, sentiment, interaction history, topics
+  - Trend detection (improving / stable / declining)
+  - Notification prioritization based on importance and recency
+  - Regex-based multi-word person name extraction
+  - SQLite persistence with people/events/relationships tables
+
+- **RealityGraph** — `hbllm/brain/reality_graph.py` (~531 lines)
+  - Unified read-only facade over KnowledgeGraph, BrainWorldState, PerceptionWorldState
+  - Cross-backend entity merging by confidence score
+  - TTL-based entity expiry via `tick()`
+  - ContextFusion provider (priority 0.60)
+
+- **ContextFusion Integration** — 4 new providers in `context_fusion.py`
+  - `user_model` (0.85), `active_project` (0.85), `relationships` (0.55), `reality_graph` (0.60)
+
+- **BrainFactory Integration** — 5 new `inject_*` config flags
+  - All subsystems auto-wired with bus adapters and ContextFusion providers
+
 - **DeviceBridge** — `hbllm/serving/device_bridge.py`
   - Cross-device session continuity and presence tracking
   - Device registration with capabilities and push tokens

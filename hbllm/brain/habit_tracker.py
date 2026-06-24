@@ -9,6 +9,9 @@ Monitors episodic memory to discover user routines and behavioral patterns:
 Detected habits feed into PersonaEngine (context modulation) and
 NotificationGateway (proactive suggestions at the right time).
 
+Integrations:
+    UserModelEngine  → Cross-validates detected habits against learned active_hours
+
 Bus Topics:
     habit.detected    → New habit pattern discovered
     habit.suggestion  → Time-triggered habit-based suggestion
@@ -130,10 +133,12 @@ class HabitTracker:
         min_observations: int = 5,
         confidence_threshold: float = 0.5,
         max_events_per_tenant: int = 2000,
+        user_model: Any | None = None,
     ) -> None:
         self._min_observations = min_observations
         self._confidence_threshold = confidence_threshold
         self._max_events = max_events_per_tenant
+        self._user_model = user_model  # Optional UserModelEngine for cross-validation
 
         # Per-tenant event history
         self._events: dict[str, list[InteractionEvent]] = defaultdict(list)
@@ -141,9 +146,10 @@ class HabitTracker:
         self._habits: dict[str, dict[str, HabitPattern]] = defaultdict(dict)
 
         logger.info(
-            "HabitTracker initialized (min_obs=%d, confidence=%.1f)",
+            "HabitTracker initialized (min_obs=%d, confidence=%.1f, user_model=%s)",
             min_observations,
             confidence_threshold,
+            "connected" if user_model else "none",
         )
 
     def record_event(self, event: InteractionEvent) -> None:
@@ -195,6 +201,14 @@ class HabitTracker:
 
                 # Confidence based on consistency and sample size
                 confidence = self._compute_confidence(count, total, ratio)
+
+                # Cross-validate with UserModel's learned active_hours
+                confidence = self._cross_validate_with_user_model(
+                    tenant_id,
+                    confidence,
+                    hour=hour,
+                )
+
                 if confidence < self._confidence_threshold:
                     continue
 
@@ -322,6 +336,47 @@ class HabitTracker:
         sample_factor = 1.0 - math.exp(-count / self._min_observations)
         # Combine ratio and sample size
         return ratio * sample_factor
+
+    def _cross_validate_with_user_model(
+        self,
+        tenant_id: str,
+        confidence: float,
+        hour: int | None = None,
+        day: int | None = None,
+    ) -> float:
+        """Cross-validate a habit's confidence against UserModel data.
+
+        If the user's learned active_hours confirms the habit hour,
+        boost confidence. If the hour is known-inactive, penalize.
+        """
+        if not self._user_model:
+            return confidence
+
+        try:
+            model = self._user_model.get_model(tenant_id)
+            active_hours = getattr(model, "active_hours", {})
+
+            if hour is not None and active_hours:
+                activity_level = active_hours.get(hour, 0.5)
+                if activity_level > 0.6:
+                    # User is known-active at this hour — boost confidence
+                    confidence = min(1.0, confidence * 1.15)
+                elif activity_level < 0.1:
+                    # User is known-inactive — habit is probably noise
+                    confidence *= 0.7
+
+            active_days = getattr(model, "active_days", {})
+            if day is not None and active_days:
+                day_activity = active_days.get(day, 0.5)
+                if day_activity > 0.6:
+                    confidence = min(1.0, confidence * 1.1)
+                elif day_activity < 0.1:
+                    confidence *= 0.8
+
+        except Exception as e:
+            logger.debug("Failed to cross-validate with UserModel: %s", e)
+
+        return confidence
 
     def get_habits(
         self,
