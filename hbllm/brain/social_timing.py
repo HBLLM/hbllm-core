@@ -11,6 +11,8 @@ Uses:
     3. Message urgency classification
     4. Social context (meeting, dinner, sleep)
     5. Channel preference (push, voice, display)
+    6. User active hours (from UserModelEngine)
+    7. Relationship importance (from RelationshipMemory)
 """
 
 from __future__ import annotations
@@ -92,10 +94,14 @@ class SocialTimingEngine:
         quiet_start_hour: int = 23,
         quiet_end_hour: int = 7,
         batch_info_interval_s: float = 1800,  # Batch info messages every 30 min
+        user_model: Any | None = None,
+        relationship_memory: Any | None = None,
     ) -> None:
         self.quiet_start = quiet_start_hour
         self.quiet_end = quiet_end_hour
         self.batch_interval = batch_info_interval_s
+        self._user_model = user_model  # Optional UserModelEngine
+        self._relationship_memory = relationship_memory  # Optional RelationshipMemory
 
         self._social_context = SocialContext()
         self._held_messages: list[dict[str, Any]] = []
@@ -116,6 +122,7 @@ class SocialTimingEngine:
         category: str = "",
         content: str = "",
         social_context: SocialContext | None = None,
+        tenant_id: str = "default",
     ) -> DeliveryDecision:
         """Evaluate the optimal delivery timing for a message.
 
@@ -124,6 +131,7 @@ class SocialTimingEngine:
             category: Message category (e.g., "weather", "security", "iot").
             content: Message content (for context-aware decisions).
             social_context: Override the stored social context.
+            tenant_id: Tenant ID for UserModel-aware quiet hour detection.
 
         Returns:
             DeliveryDecision with timing and channel recommendation.
@@ -203,7 +211,7 @@ class SocialTimingEngine:
                 )
 
         # Rule 7: Quiet hours — hold suggestions and info
-        if self._is_quiet_hours(hour) and priority_level < 2:
+        if self._is_quiet_hours(hour, tenant_id) and priority_level < 2:
             self._delayed += 1
             return DeliveryDecision(
                 deliver_now=False,
@@ -233,6 +241,48 @@ class SocialTimingEngine:
             reason="No delivery restrictions — sending now",
         )
 
+    def boost_priority_for_person(
+        self,
+        content: str,
+        priority: str,
+        tenant_id: str = "default",
+    ) -> str:
+        """Boost notification priority if content mentions an important person.
+
+        Uses RelationshipMemory to check if any mentioned person has high
+        importance, and upgrades the priority level accordingly.
+        """
+        if not self._relationship_memory:
+            return priority
+
+        try:
+            from hbllm.brain.relationship_memory import extract_person_mentions
+
+            mentions = extract_person_mentions(content)
+            if not mentions:
+                return priority
+
+            max_importance = 0.0
+            for name in mentions:
+                score = self._relationship_memory.prioritize_notification(
+                    name, tenant_id
+                )
+                max_importance = max(max_importance, score)
+
+            # Upgrade priority based on person importance
+            if max_importance > 0.8 and priority in ("suggestion", "info", "normal"):
+                logger.debug(
+                    "Boosted priority to 'high' due to important person (score=%.2f)",
+                    max_importance,
+                )
+                return "high"
+            if max_importance > 0.6 and priority in ("suggestion", "info"):
+                return "normal"
+        except Exception as e:
+            logger.debug("Failed to check relationship priority: %s", e)
+
+        return priority
+
     def _select_channel(
         self,
         ctx: SocialContext,
@@ -247,12 +297,36 @@ class SocialTimingEngine:
             return "display"  # Silent display notification
         return "push"
 
-    def _is_quiet_hours(self, hour: int) -> bool:
-        """Check if current hour is within quiet hours."""
-        if self.quiet_start > self.quiet_end:
+    def _is_quiet_hours(self, hour: int, tenant_id: str = "default") -> bool:
+        """Check if current hour is within quiet hours.
+
+        If UserModel is connected, dynamically compute quiet hours from
+        the user's learned active_hours pattern.
+        """
+        quiet_start = self.quiet_start
+        quiet_end = self.quiet_end
+
+        if self._user_model:
+            try:
+                model = self._user_model.get_model(tenant_id)
+                active_hours = getattr(model, "active_hours", {})
+                if active_hours:
+                    # Find hours where activity is very low (≤ 0.1)
+                    # These are the quiet hours
+                    inactive = [h for h, v in active_hours.items() if v <= 0.1]
+                    if len(inactive) >= 4:  # Need at least 4 quiet hours
+                        quiet_start = min(inactive)
+                        quiet_end = max(inactive)
+                        # Clamp to reasonable range
+                        if quiet_end < quiet_start:  # wraps midnight
+                            pass  # Keep the start/end as-is
+            except Exception:
+                pass  # Fall back to static hours
+
+        if quiet_start > quiet_end:
             # Crosses midnight (e.g., 23:00 - 07:00)
-            return hour >= self.quiet_start or hour < self.quiet_end
-        return self.quiet_start <= hour < self.quiet_end
+            return hour >= quiet_start or hour < quiet_end
+        return quiet_start <= hour < quiet_end
 
     def _next_quiet_end(self, now: float) -> float:
         """Calculate the next quiet hours end timestamp."""
@@ -272,6 +346,8 @@ class SocialTimingEngine:
             "delayed": self._delayed,
             "held": self._held,
             "quiet_hours": f"{self.quiet_start:02d}:00-{self.quiet_end:02d}:00",
+            "user_model_connected": self._user_model is not None,
+            "relationship_memory_connected": self._relationship_memory is not None,
             "current_context": {
                 "in_meeting": self._social_context.in_meeting,
                 "in_focus": self._social_context.in_focus_mode,

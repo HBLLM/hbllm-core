@@ -12,6 +12,9 @@ manages the lifecycle of delegated tasks:
     5. Results are reported via NotificationGateway
     6. State persists across restarts
 
+Integrations:
+    ProjectGraph  → Tags delegations with project_id, updates goal status on completion
+
 Bus Topics:
     delegation.create     → New delegation request
     delegation.progress   → Step completed / progress update
@@ -128,6 +131,7 @@ class Delegation:
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     tenant_id: str = ""
     objective: str = ""  # User's original request
+    project_id: str = ""  # Optional: links delegation to a ProjectGraph project
     steps: list[DelegationStep] = field(default_factory=list)
     status: DelegationStatus = DelegationStatus.ACTIVE
     # Lifecycle
@@ -175,6 +179,7 @@ class Delegation:
             "id": self.id,
             "tenant_id": self.tenant_id,
             "objective": self.objective,
+            "project_id": self.project_id,
             "steps": [s.to_dict() for s in self.steps],
             "status": self.status.value,
             "created_at": self.created_at,
@@ -192,6 +197,7 @@ class Delegation:
             id=data["id"],
             tenant_id=data.get("tenant_id", ""),
             objective=data.get("objective", ""),
+            project_id=data.get("project_id", ""),
             status=DelegationStatus(data.get("status", "active")),
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),
@@ -236,16 +242,22 @@ class DelegationManager:
         manager.approve_step("user_1", delegation.id, step.id)
     """
 
-    def __init__(self, storage_dir: str | Path = "data/delegations") -> None:
+    def __init__(
+        self,
+        storage_dir: str | Path = "data/delegations",
+        project_graph: Any | None = None,
+    ) -> None:
         self._storage_dir = Path(storage_dir)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._delegations: dict[str, dict[str, Delegation]] = {}
+        self._project_graph = project_graph  # Optional ProjectGraph for goal tracking
         self._load_all()
 
         logger.info(
-            "DelegationManager initialized with %d delegations from %s",
+            "DelegationManager initialized with %d delegations from %s (project_graph=%s)",
             sum(len(v) for v in self._delegations.values()),
             self._storage_dir,
+            "connected" if project_graph else "none",
         )
 
     def _tenant_dir(self, tenant_id: str) -> Path:
@@ -281,11 +293,13 @@ class DelegationManager:
         tenant_id: str,
         objective: str,
         steps: list[DelegationStep] | None = None,
+        project_id: str = "",
     ) -> Delegation:
         """Create a new delegation."""
         delegation = Delegation(
             tenant_id=tenant_id,
             objective=objective,
+            project_id=project_id,
             steps=steps or [],
         )
         if tenant_id not in self._delegations:
@@ -293,10 +307,11 @@ class DelegationManager:
         self._delegations[tenant_id][delegation.id] = delegation
         self._save(delegation)
         logger.info(
-            "Created delegation '%s' (%d steps) for tenant '%s'",
+            "Created delegation '%s' (%d steps) for tenant '%s' (project=%s)",
             objective[:50],
             len(delegation.steps),
             tenant_id,
+            project_id or "none",
         )
         return delegation
 
@@ -392,10 +407,31 @@ class DelegationManager:
                         delegation.objective[:50],
                         tenant_id,
                     )
+                    # Update project goal status if linked
+                    self._update_project_goal(delegation)
 
                 self._save(delegation)
                 return True
         return False
+
+    def _update_project_goal(self, delegation: Delegation) -> None:
+        """Update the linked ProjectGraph goal when a delegation completes."""
+        if not self._project_graph or not delegation.project_id:
+            return
+
+        try:
+            self._project_graph.complete_goal(
+                project_id=delegation.project_id,
+                goal_description=delegation.objective,
+                result=delegation.summary or "Delegation completed successfully",
+            )
+            logger.info(
+                "Updated ProjectGraph goal for project '%s': '%s'",
+                delegation.project_id,
+                delegation.objective[:50],
+            )
+        except Exception as e:
+            logger.debug("Failed to update project goal: %s", e)
 
     def fail_step(
         self,

@@ -70,6 +70,7 @@ class SkillCompilerNode(Node):
         min_success_rate: float = 0.7,
         pattern_window: int = 200,
         ngram_size: int = 3,
+        user_model: Any | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -82,6 +83,7 @@ class SkillCompilerNode(Node):
         self.min_success_rate = min_success_rate
         self.pattern_window = pattern_window
         self.ngram_size = ngram_size
+        self._user_model = user_model  # Optional UserModelEngine for expertise-aware optimization
 
         # Pattern tracking
         self._patterns: dict[str, ActionPattern] = {}

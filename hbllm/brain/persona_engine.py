@@ -10,10 +10,14 @@ Each tenant/user gets their own persona profile that evolves with interactions.
 The engine exposes a `modulate(text, context)` method that downstream nodes
 (ExpressionStream, Decision) use to style their output.
 
+Integrations:
+    UserModelEngine  → Syncs verbosity, technical_depth, stress from learned preferences
+
 Bus Topics:
     persona.get        → Returns current persona profile
     persona.feedback   → User feedback adjusts persona traits
     emotion.state      → Emotion events modulate response style
+    user.model.updated → Sync persona traits from learned user preferences
 """
 
 from __future__ import annotations
@@ -183,17 +187,19 @@ class PersonaEngine:
         style = engine.get_modulated_prompt("tenant_123", emotion="stressed")
     """
 
-    def __init__(self, storage_dir: str | Path = "data/personas") -> None:
+    def __init__(self, storage_dir: str | Path = "data/personas", user_model: Any | None = None) -> None:
         self._storage_dir = Path(storage_dir)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._profiles: dict[str, PersonaProfile] = {}
+        self._user_model = user_model  # Optional UserModelEngine for preference sync
 
         # Load existing profiles
         self._load_all()
         logger.info(
-            "PersonaEngine initialized with %d profiles from %s",
+            "PersonaEngine initialized with %d profiles from %s (user_model=%s)",
             len(self._profiles),
             self._storage_dir,
+            "connected" if user_model else "none",
         )
 
     def _load_all(self) -> None:
@@ -298,6 +304,75 @@ class PersonaEngine:
             return f"{base_prompt} {' '.join(emotion_parts)}".strip()
 
         return base_prompt
+
+    def sync_from_user_model(self, tenant_id: str) -> bool:
+        """Sync persona traits from UserModel learned preferences.
+
+        Bridges biometric/behavioral learning (UserModel) into style
+        modulation (PersonaEngine). Called when user.model.updated fires.
+
+        Returns True if any traits were updated.
+        """
+        if not self._user_model:
+            return False
+
+        try:
+            model = self._user_model.get_model(tenant_id)
+        except Exception as e:
+            logger.debug("Failed to read UserModel for persona sync: %s", e)
+            return False
+
+        profile = self.get_profile(tenant_id)
+        changed = False
+
+        # Sync verbosity preference
+        verbosity_pref = model.preferences.get("verbosity")
+        if verbosity_pref and verbosity_pref.confidence > 0.5:
+            target = 0.3 if verbosity_pref.value == "concise" else 0.7
+            if abs(profile.verbosity.value - target) > 0.1:
+                profile.verbosity.value = 0.7 * profile.verbosity.value + 0.3 * target
+                changed = True
+
+        # Sync technical depth from expertise
+        if model.expertise:
+            avg_expertise = sum(e.level for e in model.expertise.values()) / len(model.expertise)
+            target_depth = min(1.0, 0.3 + avg_expertise * 0.7)
+            if abs(profile.technical_depth.value - target_depth) > 0.1:
+                profile.technical_depth.value = (
+                    0.7 * profile.technical_depth.value + 0.3 * target_depth
+                )
+                changed = True
+
+        # Sync stress → empathy/brevity
+        if model.stress_level > 0.7:
+            if profile.empathy.value < 0.7:
+                profile.empathy.value = min(1.0, profile.empathy.value + 0.05)
+                changed = True
+            if profile.verbosity.value > 0.4:
+                profile.verbosity.value = max(0.2, profile.verbosity.value - 0.05)
+                changed = True
+
+        # Sync formality preference
+        formality_pref = model.preferences.get("formality")
+        if formality_pref and formality_pref.confidence > 0.5:
+            target = 0.3 if formality_pref.value == "casual" else 0.7
+            if abs(profile.formality.value - target) > 0.1:
+                profile.formality.value = 0.7 * profile.formality.value + 0.3 * target
+                changed = True
+
+        if changed:
+            profile.updated_at = time.time()
+            self._save(profile)
+            logger.info(
+                "Synced persona from UserModel for tenant '%s': "
+                "verbosity=%.2f, technical_depth=%.2f, empathy=%.2f",
+                tenant_id,
+                profile.verbosity.value,
+                profile.technical_depth.value,
+                profile.empathy.value,
+            )
+
+        return changed
 
     def record_interaction(self, tenant_id: str) -> None:
         """Record that an interaction occurred (for tracking engagement)."""

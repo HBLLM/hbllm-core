@@ -203,6 +203,7 @@ async def wire_optional_subsystems(
             node_id="skill_compiler",
             skill_registry=brain.skill_registry,
             llm=llm,
+            user_model=getattr(brain, "user_model_engine", None),
         )
         await _register_node(registry, compiler_node)
         await compiler_node.start(message_bus)
