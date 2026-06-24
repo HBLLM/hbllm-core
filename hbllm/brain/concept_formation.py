@@ -36,9 +36,7 @@ logger = logging.getLogger(__name__)
 class AbstractConcept:
     """A generalized concept discovered from recurring causal patterns."""
 
-    concept_id: str = field(
-        default_factory=lambda: f"abs_{uuid.uuid4().hex[:12]}"
-    )
+    concept_id: str = field(default_factory=lambda: f"abs_{uuid.uuid4().hex[:12]}")
     label: str = ""  # e.g. "Injection Attack Pattern"
     description: str = ""
     generalized_steps: list[str] = field(default_factory=list)
@@ -83,9 +81,7 @@ class AbstractConcept:
 class CrossDomainAnalogy:
     """A discovered analogy between concepts in different domains."""
 
-    analogy_id: str = field(
-        default_factory=lambda: f"ana_{uuid.uuid4().hex[:10]}"
-    )
+    analogy_id: str = field(default_factory=lambda: f"ana_{uuid.uuid4().hex[:10]}")
     domain_a: str = ""
     domain_b: str = ""
     concept_a: str = ""
@@ -296,9 +292,7 @@ class ConceptFormationEngine:
                 continue
 
             # Use LLM to generate abstract concept label and description
-            abstract = await self._generate_abstraction(
-                cluster_models, shared_steps, domain or ""
-            )
+            abstract = await self._generate_abstraction(cluster_models, shared_steps, domain or "")
             if abstract is not None:
                 abstractions.append(abstract)
                 self._abstract_concepts[abstract.label.lower()] = abstract
@@ -350,9 +344,7 @@ class ConceptFormationEngine:
 
                 for model_a in by_domain[domain_a]:
                     for model_b in by_domain[domain_b]:
-                        similarity = self._compute_structural_similarity(
-                            model_a, model_b
-                        )
+                        similarity = self._compute_structural_similarity(model_a, model_b)
                         if similarity > 0.4:
                             shared = self._extract_shared_structure(model_a, model_b)
                             analogy = CrossDomainAnalogy(
@@ -476,9 +468,7 @@ class ConceptFormationEngine:
 
         # Return steps that appear in at least 2 models
         min_models = min(2, len(models))
-        shared = [
-            step for step, count in step_counts.items() if count >= min_models
-        ]
+        shared = [step for step, count in step_counts.items() if count >= min_models]
         return sorted(shared)
 
     async def _generate_abstraction(

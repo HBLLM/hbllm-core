@@ -153,10 +153,7 @@ class MetaLearner:
                     timestamp REAL NOT NULL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ls_domain "
-                "ON learning_sessions(domain)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ls_domain ON learning_sessions(domain)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS strategies (
                     domain TEXT PRIMARY KEY,
@@ -171,11 +168,13 @@ class MetaLearner:
                 conn.row_factory = sqlite3.Row
                 for row in conn.execute("SELECT * FROM strategies"):
                     data = json.loads(row["data"])
-                    strategy = LearningStrategy(**{
-                        k: v
-                        for k, v in data.items()
-                        if k in LearningStrategy.__dataclass_fields__
-                    })
+                    strategy = LearningStrategy(
+                        **{
+                            k: v
+                            for k, v in data.items()
+                            if k in LearningStrategy.__dataclass_fields__
+                        }
+                    )
                     self._strategies[strategy.domain] = strategy
         except Exception as e:
             logger.debug("Failed to load strategies: %s", e)
@@ -319,8 +318,7 @@ class MetaLearner:
             pass
 
         return {
-            method: sum(vals) / len(vals) if vals else 0.0
-            for method, vals in effectiveness.items()
+            method: sum(vals) / len(vals) if vals else 0.0 for method, vals in effectiveness.items()
         }
 
     def stats(self) -> dict[str, Any]:
@@ -418,9 +416,7 @@ class MetaLearner:
                 best_source_types=best_methods[:3],
                 optimal_depth=depth,
                 retention_rate=(
-                    sum(retention_scores) / len(retention_scores)
-                    if retention_scores
-                    else 0.5
+                    sum(retention_scores) / len(retention_scores) if retention_scores else 0.5
                 ),
                 experiment_effectiveness=experiment_eff,
                 preferred_evaluation="prediction",

@@ -284,12 +284,14 @@ class AutonomousLearner(Node):
             return message.create_response(self._goals[goal_id].to_dict())
 
         # Return all goals
-        return message.create_response({
-            "active": self._active_goal.to_dict() if self._active_goal else None,
-            "total_goals": len(self._goals),
-            "completed": self._total_goals_completed,
-            "goals": {gid: g.to_dict() for gid, g in self._goals.items()},
-        })
+        return message.create_response(
+            {
+                "active": self._active_goal.to_dict() if self._active_goal else None,
+                "total_goals": len(self._goals),
+                "completed": self._total_goals_completed,
+                "goals": {gid: g.to_dict() for gid, g in self._goals.items()},
+            }
+        )
 
     # ── Core Learning Loop ───────────────────────────────────────────────
 
@@ -390,8 +392,7 @@ class AutonomousLearner(Node):
                 self._is_learning = False
 
         logger.info(
-            "Learning goal '%s' %s: confidence=%.2f, "
-            "models=%d, experiments=%d, contradictions=%d",
+            "Learning goal '%s' %s: confidence=%.2f, models=%d, experiments=%d, contradictions=%d",
             topic,
             goal.status,
             goal.current_confidence,
@@ -460,8 +461,7 @@ class AutonomousLearner(Node):
             try:
                 for edge in causal_model.edges:
                     claim = (
-                        f"{edge.source_id} causes {edge.target_id} "
-                        f"via {edge.mechanism.description}"
+                        f"{edge.source_id} causes {edge.target_id} via {edge.mechanism.description}"
                     )
                     contradiction = await self.contradiction_detector.check_contradiction(
                         new_claim=claim,
@@ -516,9 +516,7 @@ class AutonomousLearner(Node):
         eval_score = await self._self_evaluate(concept, causal_model)
 
         # Update goal confidence (rolling average)
-        goal.current_confidence = (
-            goal.current_confidence * 0.6 + eval_score * 0.4
-        )
+        goal.current_confidence = goal.current_confidence * 0.6 + eval_score * 0.4
 
         # Step F: If weak, publish for CuriosityNode
         if eval_score < 0.4:

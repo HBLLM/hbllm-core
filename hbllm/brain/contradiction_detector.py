@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 class BeliefHypothesis:
     """A single hypothesis within a belief state."""
 
-    hypothesis_id: str = field(
-        default_factory=lambda: f"bh_{uuid.uuid4().hex[:10]}"
-    )
+    hypothesis_id: str = field(default_factory=lambda: f"bh_{uuid.uuid4().hex[:10]}")
     claim: str = ""
     confidence: float = 0.5
     evidence_for: list[str] = field(default_factory=list)
@@ -111,9 +109,7 @@ class BeliefState:
 class Contradiction:
     """A detected contradiction between existing and new knowledge."""
 
-    contradiction_id: str = field(
-        default_factory=lambda: f"ctr_{uuid.uuid4().hex[:10]}"
-    )
+    contradiction_id: str = field(default_factory=lambda: f"ctr_{uuid.uuid4().hex[:10]}")
     existing_claim: str = ""
     new_claim: str = ""
     concept: str = ""
@@ -268,9 +264,7 @@ class ContradictionDetector:
             with sqlite3.connect(self.causal_graph.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 # Find all unique source_ids
-                sources = conn.execute(
-                    "SELECT DISTINCT source_id FROM causal_links"
-                ).fetchall()
+                sources = conn.execute("SELECT DISTINCT source_id FROM causal_links").fetchall()
 
                 for row in sources:
                     source_id = row["source_id"]
@@ -331,10 +325,7 @@ class ContradictionDetector:
                     )
                 causes = self.causal_graph.get_causes(concept)
                 for c in causes[:5]:
-                    claims.append(
-                        f"{c.source_id} causes {concept}"
-                        f" (p={c.probability:.2f})"
-                    )
+                    claims.append(f"{c.source_id} causes {concept} (p={c.probability:.2f})")
             except Exception:
                 pass
 
@@ -344,8 +335,7 @@ class ContradictionDetector:
                 neighbors = self.knowledge_graph.neighbors(concept, direction="both")
                 for n in neighbors[:5]:
                     claims.append(
-                        f"{concept} {n.get('relation', 'relates_to')} "
-                        f"{n.get('entity', 'unknown')}"
+                        f"{concept} {n.get('relation', 'relates_to')} {n.get('entity', 'unknown')}"
                     )
             except Exception:
                 pass
@@ -426,10 +416,7 @@ class BeliefRevisionEngine:
                     detected_at REAL NOT NULL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_belief_concept "
-                "ON contradictions(concept)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_belief_concept ON contradictions(concept)")
 
     def _load_from_db(self) -> None:
         try:
@@ -535,12 +522,10 @@ class BeliefRevisionEngine:
 
         # Ensure both claims exist as hypotheses
         has_existing = any(
-            self._claims_similar(h.claim, contradiction.existing_claim)
-            for h in state.hypotheses
+            self._claims_similar(h.claim, contradiction.existing_claim) for h in state.hypotheses
         )
         has_new = any(
-            self._claims_similar(h.claim, contradiction.new_claim)
-            for h in state.hypotheses
+            self._claims_similar(h.claim, contradiction.new_claim) for h in state.hypotheses
         )
 
         if not has_existing:
@@ -564,13 +549,9 @@ class BeliefRevisionEngine:
         # Add cross-evidence
         for hyp in state.hypotheses:
             if self._claims_similar(hyp.claim, contradiction.existing_claim):
-                hyp.evidence_against.append(
-                    f"Contradicted by: {contradiction.new_claim[:100]}"
-                )
+                hyp.evidence_against.append(f"Contradicted by: {contradiction.new_claim[:100]}")
             elif self._claims_similar(hyp.claim, contradiction.new_claim):
-                hyp.evidence_against.append(
-                    f"Contradicts: {contradiction.existing_claim[:100]}"
-                )
+                hyp.evidence_against.append(f"Contradicts: {contradiction.existing_claim[:100]}")
 
         state.last_updated = time.time()
         self._persist(state)
@@ -592,9 +573,7 @@ class BeliefRevisionEngine:
         pruned = 0
         for concept, state in self._beliefs.items():
             before = len(state.hypotheses)
-            state.hypotheses = [
-                h for h in state.hypotheses if h.confidence >= threshold
-            ]
+            state.hypotheses = [h for h in state.hypotheses if h.confidence >= threshold]
             removed = before - len(state.hypotheses)
             if removed > 0:
                 pruned += removed
@@ -640,9 +619,7 @@ class BeliefRevisionEngine:
                 else:
                     rows = conn.execute("SELECT * FROM contradictions").fetchall()
                 for row in rows:
-                    contradictions.append(
-                        Contradiction.from_dict(json.loads(row["data"]))
-                    )
+                    contradictions.append(Contradiction.from_dict(json.loads(row["data"])))
         except Exception as e:
             logger.debug("Failed to load contradictions: %s", e)
         return contradictions

@@ -1359,5 +1359,3 @@ class SleepCycleNode(Node):
         except Exception:
             logger.debug("[SleepNode] Belief pruning not available")
         return 0
-
-

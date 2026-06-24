@@ -1158,10 +1158,12 @@ class BrainFactory:
 
                 # Build learning subsystems
                 causal_builder = CausalModelBuilder(
-                    llm=llm, data_dir=learning_data_dir,
+                    llm=llm,
+                    data_dir=learning_data_dir,
                 )
                 experiment_engine = ExperimentEngine(
-                    llm=llm, data_dir=learning_data_dir,
+                    llm=llm,
+                    data_dir=learning_data_dir,
                 )
                 contradiction_detector = ContradictionDetector(llm=llm)
                 belief_engine = BeliefRevisionEngine(data_dir=learning_data_dir)
@@ -1194,9 +1196,7 @@ class BrainFactory:
                     "MetaLearner, ConceptFormation"
                 )
             except Exception as e:
-                logger.warning(
-                    "Autonomous Learning Engine init failed (non-critical): %s", e
-                )
+                logger.warning("Autonomous Learning Engine init failed (non-critical): %s", e)
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:

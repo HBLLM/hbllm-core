@@ -159,9 +159,7 @@ class CuriosityNode(Node):
         # v3: UserModel integration — weight curiosity by user interests
         await self.bus.subscribe("user.model.updated", self._handle_user_model_updated)
         # v5: Autonomous Learning — contradictions and weak areas trigger curiosity
-        await self.bus.subscribe(
-            "learning.contradiction", self._handle_learning_contradiction
-        )
+        await self.bus.subscribe("learning.contradiction", self._handle_learning_contradiction)
         await self.bus.subscribe("learning.weak_area", self._handle_learning_weak_area)
 
         # Start predictive exploration loop
@@ -514,9 +512,7 @@ class CuriosityNode(Node):
             confidence=0.3,
             metadata={"source": "learning.contradiction", **message.payload},
         )
-        logger.info(
-            "[CuriosityNode] Contradiction-driven curiosity: '%s'", concept
-        )
+        logger.info("[CuriosityNode] Contradiction-driven curiosity: '%s'", concept)
 
     async def _handle_learning_weak_area(self, message: Message) -> None:
         """Convert weak learning areas into high-priority curiosity goals.
@@ -540,4 +536,3 @@ class CuriosityNode(Node):
             concept,
             score,
         )
-

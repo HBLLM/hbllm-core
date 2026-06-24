@@ -749,9 +749,7 @@ class KnowledgeGraph:
 
         Used to trigger knowledge refresh or re-learning.
         """
-        return [
-            e for e in self._entities.values() if e.confidence < threshold
-        ]
+        return [e for e in self._entities.values() if e.confidence < threshold]
 
     def reinforce(
         self,

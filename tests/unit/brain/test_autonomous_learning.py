@@ -11,15 +11,11 @@ Tests all 6 new components:
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import tempfile
-import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -41,44 +37,46 @@ class MockLLM:
             self._call_idx += 1
             return resp
         # Default: return a valid JSON causal decomposition
-        return json.dumps({
-            "nodes": [
-                {"label": "User Input", "node_type": "precondition", "confidence": 0.8},
-                {"label": "SQL Parser", "node_type": "process", "confidence": 0.7},
-                {"label": "Query Execution", "node_type": "outcome", "confidence": 0.9},
-            ],
-            "edges": [
-                {
-                    "source_label": "User Input",
-                    "target_label": "SQL Parser",
-                    "mechanism": {
-                        "description": "Input passed to parser without sanitization",
-                        "steps": [
-                            "receive user input",
-                            "concatenate into SQL string",
-                            "pass to database driver",
-                        ],
-                        "assumptions": ["input is not sanitized"],
+        return json.dumps(
+            {
+                "nodes": [
+                    {"label": "User Input", "node_type": "precondition", "confidence": 0.8},
+                    {"label": "SQL Parser", "node_type": "process", "confidence": 0.7},
+                    {"label": "Query Execution", "node_type": "outcome", "confidence": 0.9},
+                ],
+                "edges": [
+                    {
+                        "source_label": "User Input",
+                        "target_label": "SQL Parser",
+                        "mechanism": {
+                            "description": "Input passed to parser without sanitization",
+                            "steps": [
+                                "receive user input",
+                                "concatenate into SQL string",
+                                "pass to database driver",
+                            ],
+                            "assumptions": ["input is not sanitized"],
+                        },
+                        "probability": 0.8,
                     },
-                    "probability": 0.8,
-                },
-                {
-                    "source_label": "SQL Parser",
-                    "target_label": "Query Execution",
-                    "mechanism": {
-                        "description": "Manipulated query executed on database",
-                        "steps": [
-                            "parse SQL string",
-                            "execute against database",
-                            "return results to caller",
-                        ],
-                        "assumptions": ["database accepts the query"],
+                    {
+                        "source_label": "SQL Parser",
+                        "target_label": "Query Execution",
+                        "mechanism": {
+                            "description": "Manipulated query executed on database",
+                            "steps": [
+                                "parse SQL string",
+                                "execute against database",
+                                "return results to caller",
+                            ],
+                            "assumptions": ["database accepts the query"],
+                        },
+                        "probability": 0.9,
                     },
-                    "probability": 0.9,
-                },
-            ],
-            "domain": "cybersecurity",
-        })
+                ],
+                "domain": "cybersecurity",
+            }
+        )
 
 
 @pytest.fixture
@@ -225,12 +223,8 @@ class TestCausalModelBuilder:
             confidence=0.8,
         )
         node = CausalNode(label="test node", node_type="process", confidence=0.7)
-        edge = CausalEdge(
-            source_id="a", target_id="b", mechanism=mech, probability=0.9
-        )
-        model = CausalModel(
-            concept="test", nodes=[node], edges=[edge], confidence=0.75
-        )
+        edge = CausalEdge(source_id="a", target_id="b", mechanism=mech, probability=0.9)
+        model = CausalModel(concept="test", nodes=[node], edges=[edge], confidence=0.75)
 
         d = model.to_dict()
         restored = CausalModel.from_dict(d)
@@ -250,13 +244,17 @@ class TestExperimentEngine:
         from hbllm.brain.causality.causal_model_builder import CausalModel, CausalNode
         from hbllm.brain.experiment_engine import ExperimentEngine
 
-        llm = MockLLM([
-            json.dumps({
-                "statement": "If input is not sanitized, SQL injection occurs",
-                "target_edge": "input → parser",
-                "expected_outcome": "injection succeeds",
-            })
-        ])
+        llm = MockLLM(
+            [
+                json.dumps(
+                    {
+                        "statement": "If input is not sanitized, SQL injection occurs",
+                        "target_edge": "input → parser",
+                        "expected_outcome": "injection succeeds",
+                    }
+                )
+            ]
+        )
         engine = ExperimentEngine(llm=llm, data_dir=tmp_data_dir)
 
         model = CausalModel(
@@ -270,14 +268,18 @@ class TestExperimentEngine:
     async def test_design_experiment(self, tmp_data_dir):
         from hbllm.brain.experiment_engine import ExperimentEngine, Hypothesis
 
-        llm = MockLLM([
-            json.dumps({
-                "setup": "Create a vulnerable SQL query",
-                "method": "code_simulation",
-                "success_criteria": "Injection alters query behavior",
-                "failure_criteria": "Input is properly escaped",
-            })
-        ])
+        llm = MockLLM(
+            [
+                json.dumps(
+                    {
+                        "setup": "Create a vulnerable SQL query",
+                        "method": "code_simulation",
+                        "success_criteria": "Injection alters query behavior",
+                        "failure_criteria": "Input is properly escaped",
+                    }
+                )
+            ]
+        )
         engine = ExperimentEngine(llm=llm, data_dir=tmp_data_dir)
 
         hyp = Hypothesis(statement="SQL injection occurs on unsanitized input")
@@ -308,23 +310,25 @@ class TestExperimentEngine:
             RealityLevel,
         )
 
-        llm = MockLLM([
-            # Evaluation prompt response
-            json.dumps({
-                "confirmed": True,
-                "confidence": 0.8,
-                "reasoning": "Input manipulation confirmed",
-                "new_knowledge": ["parameterized queries prevent this"],
-                "causal_updates": [],
-            }),
-            # For the LLM evaluation
-            "The hypothesis is confirmed based on the experiment.",
-        ])
+        llm = MockLLM(
+            [
+                # Evaluation prompt response
+                json.dumps(
+                    {
+                        "confirmed": True,
+                        "confidence": 0.8,
+                        "reasoning": "Input manipulation confirmed",
+                        "new_knowledge": ["parameterized queries prevent this"],
+                        "causal_updates": [],
+                    }
+                ),
+                # For the LLM evaluation
+                "The hypothesis is confirmed based on the experiment.",
+            ]
+        )
         engine = ExperimentEngine(llm=llm, data_dir=tmp_data_dir)
 
-        hyp = Hypothesis(
-            statement="SQL injection occurs", confidence_before=0.5
-        )
+        hyp = Hypothesis(statement="SQL injection occurs", confidence_before=0.5)
         exp = Experiment(
             hypothesis=hyp,
             reality_level=RealityLevel.LLM_PREDICTED,
@@ -354,14 +358,18 @@ class TestContradictionDetector:
     async def test_detect_contradiction(self):
         from hbllm.brain.contradiction_detector import ContradictionDetector
 
-        llm = MockLLM([
-            json.dumps({
-                "is_contradiction": True,
-                "severity": 0.8,
-                "contradicted_claim": "A causes B",
-                "reasoning": "New evidence says A does not cause B",
-            })
-        ])
+        llm = MockLLM(
+            [
+                json.dumps(
+                    {
+                        "is_contradiction": True,
+                        "severity": 0.8,
+                        "contradicted_claim": "A causes B",
+                        "reasoning": "New evidence says A does not cause B",
+                    }
+                )
+            ]
+        )
         # Mock KnowledgeGraph with existing claims
         kg = MagicMock()
         kg.neighbors.return_value = [
@@ -377,14 +385,18 @@ class TestContradictionDetector:
     async def test_no_contradiction(self):
         from hbllm.brain.contradiction_detector import ContradictionDetector
 
-        llm = MockLLM([
-            json.dumps({
-                "is_contradiction": False,
-                "severity": 0.0,
-                "contradicted_claim": "",
-                "reasoning": "Claims are compatible",
-            })
-        ])
+        llm = MockLLM(
+            [
+                json.dumps(
+                    {
+                        "is_contradiction": False,
+                        "severity": 0.0,
+                        "contradicted_claim": "",
+                        "reasoning": "Claims are compatible",
+                    }
+                )
+            ]
+        )
         kg = MagicMock()
         kg.neighbors.return_value = [{"relation": "causes", "entity": "B"}]
 
@@ -638,14 +650,18 @@ class TestConceptFormationEngine:
         ]
         builder.get_all_models.return_value = models
 
-        llm = MockLLM([
-            json.dumps({
-                "label": "Injection Attack Pattern",
-                "description": "Input manipulation leading to unauthorized execution",
-                "generalized_steps": ["receive input", "inject payload", "execute"],
-                "generalized_assumptions": ["input is not validated"],
-            })
-        ])
+        llm = MockLLM(
+            [
+                json.dumps(
+                    {
+                        "label": "Injection Attack Pattern",
+                        "description": "Input manipulation leading to unauthorized execution",
+                        "generalized_steps": ["receive input", "inject payload", "execute"],
+                        "generalized_assumptions": ["input is not validated"],
+                    }
+                )
+            ]
+        )
 
         engine = ConceptFormationEngine(
             llm=llm,
@@ -661,7 +677,6 @@ class TestConceptFormationEngine:
         from hbllm.brain.causality.causal_model_builder import (
             CausalEdge,
             CausalModel,
-            CausalNode,
             Mechanism,
         )
         from hbllm.brain.concept_formation import ConceptFormationEngine
@@ -692,9 +707,7 @@ class TestConceptFormationEngine:
             ),
         ]
 
-        engine = ConceptFormationEngine(
-            causal_model_builder=builder, data_dir=tmp_data_dir
-        )
+        engine = ConceptFormationEngine(causal_model_builder=builder, data_dir=tmp_data_dir)
         analogies = await engine.discover_cross_domain_analogies()
         assert len(analogies) >= 1
         assert analogies[0].domain_a != analogies[0].domain_b
@@ -736,31 +749,35 @@ class TestAutonomousLearner:
         await bus.start()
 
         try:
-            llm = MockLLM([
-                # Needs identification
-                json.dumps({
-                    "needs": [
+            llm = MockLLM(
+                [
+                    # Needs identification
+                    json.dumps(
                         {
-                            "concept": "SQL Basics",
-                            "why": "Foundation",
-                            "priority": 1,
-                            "prerequisites": [],
+                            "needs": [
+                                {
+                                    "concept": "SQL Basics",
+                                    "why": "Foundation",
+                                    "priority": 1,
+                                    "prerequisites": [],
+                                }
+                            ]
                         }
-                    ]
-                }),
-                # Causal model build
-                json.dumps({
-                    "nodes": [{"label": "SQL Query", "node_type": "process"}],
-                    "edges": [],
-                    "domain": "databases",
-                }),
-                # Self-evaluation questions
-                json.dumps({
-                    "questions": [
-                        {"question": "test", "type": "prediction", "weight": 1.0}
-                    ]
-                }),
-            ])
+                    ),
+                    # Causal model build
+                    json.dumps(
+                        {
+                            "nodes": [{"label": "SQL Query", "node_type": "process"}],
+                            "edges": [],
+                            "domain": "databases",
+                        }
+                    ),
+                    # Self-evaluation questions
+                    json.dumps(
+                        {"questions": [{"question": "test", "type": "prediction", "weight": 1.0}]}
+                    ),
+                ]
+            )
 
             builder = CausalModelBuilder(llm=llm, data_dir=tmp_data_dir)
 
@@ -835,7 +852,7 @@ class TestKnowledgeGraphConfidence:
         from hbllm.memory.knowledge_graph import KnowledgeGraph
 
         kg = KnowledgeGraph()
-        e1 = kg.add_entity("Strong")
+        e1 = kg.add_entity("Strong")  # noqa: F841
         e2 = kg.add_entity("Weak")
         e2.confidence = 0.1
 

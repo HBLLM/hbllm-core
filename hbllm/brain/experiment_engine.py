@@ -56,9 +56,7 @@ REALITY_CONFIDENCE_WEIGHTS: dict[RealityLevel, float] = {
 class Hypothesis:
     """A testable hypothesis derived from a causal model."""
 
-    hypothesis_id: str = field(
-        default_factory=lambda: f"hyp_{uuid.uuid4().hex[:10]}"
-    )
+    hypothesis_id: str = field(default_factory=lambda: f"hyp_{uuid.uuid4().hex[:10]}")
     statement: str = ""
     concept: str = ""
     causal_model_id: str | None = None
@@ -91,9 +89,7 @@ class Hypothesis:
 class Experiment:
     """A designed experiment to verify a hypothesis."""
 
-    experiment_id: str = field(
-        default_factory=lambda: f"exp_{uuid.uuid4().hex[:10]}"
-    )
+    experiment_id: str = field(default_factory=lambda: f"exp_{uuid.uuid4().hex[:10]}")
     hypothesis: Hypothesis = field(default_factory=Hypothesis)
     reality_level: RealityLevel = RealityLevel.LLM_PREDICTED
     setup: str = ""  # Code, scenario, or simulation description
@@ -268,10 +264,7 @@ class ExperimentEngine:
                     executed_at REAL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_exp_concept "
-                "ON experiments(concept)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_concept ON experiments(concept)")
 
     def _persist(self, experiment: Experiment) -> None:
         try:
@@ -389,9 +382,7 @@ class ExperimentEngine:
         experiment: Experiment,
     ) -> ExperimentResult:
         """Execute an experiment and return weighted results."""
-        reality_weight = REALITY_CONFIDENCE_WEIGHTS.get(
-            experiment.reality_level, 0.3
-        )
+        reality_weight = REALITY_CONFIDENCE_WEIGHTS.get(experiment.reality_level, 0.3)
 
         # Execute based on reality level
         if experiment.reality_level == RealityLevel.WORLD_MODEL and self.world_model:
@@ -429,8 +420,7 @@ class ExperimentEngine:
             self._falsified += 1
 
         logger.info(
-            "Experiment %s: concept='%s' reality=%s confirmed=%s "
-            "confidence_delta=%.2f weight=%.1f",
+            "Experiment %s: concept='%s' reality=%s confirmed=%s confidence_delta=%.2f weight=%.1f",
             experiment.experiment_id,
             experiment.hypothesis.concept,
             experiment.reality_level.value,
@@ -482,8 +472,7 @@ class ExperimentEngine:
                 )
 
         logger.info(
-            "Experiential learning for '%s': %d experiments, "
-            "%d confirmed, %d falsified",
+            "Experiential learning for '%s': %d experiments, %d confirmed, %d falsified",
             concept,
             len(results),
             sum(1 for r in results if r.experiment.success),
@@ -499,9 +488,7 @@ class ExperimentEngine:
             "falsified": self._falsified,
             "total_cost": self._total_cost,
             "confirmation_rate": (
-                self._confirmed / self._total_experiments
-                if self._total_experiments > 0
-                else 0.0
+                self._confirmed / self._total_experiments if self._total_experiments > 0 else 0.0
             ),
         }
 

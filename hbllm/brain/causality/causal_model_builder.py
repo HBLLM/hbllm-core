@@ -262,9 +262,7 @@ class CausalModelBuilder:
                     last_verified_at REAL
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_cm_concept ON causal_models(concept)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cm_concept ON causal_models(concept)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS mechanisms (
                     mechanism_id TEXT PRIMARY KEY,
@@ -683,9 +681,7 @@ class CausalModelBuilder:
             edges.append(edge)
 
         # Calculate overall confidence as average of edge probabilities
-        avg_prob = (
-            sum(e.probability for e in edges) / len(edges) if edges else 0.3
-        )
+        avg_prob = sum(e.probability for e in edges) / len(edges) if edges else 0.3
 
         return CausalModel(
             concept=concept,
