@@ -11,6 +11,7 @@ Bus Topics:
         system.evaluation    → Track trust (did user accept output?)
         emotion.state        → Update stress/engagement proxy
         habit.detected       → Incorporate temporal patterns
+        sensory.transcription → Link voice identity to user model
 
     Publishes:
         user.model.updated   → When model changes significantly
@@ -57,6 +58,7 @@ class UserModelNode(Node):
         await self.bus.subscribe("emotion.state", self._handle_emotion)
         await self.bus.subscribe("habit.detected", self._handle_habit)
         await self.bus.subscribe("user_model.query", self._handle_query)
+        await self.bus.subscribe("sensory.transcription", self._handle_voice_identity)
 
     async def on_stop(self) -> None:
         logger.info(
@@ -127,7 +129,7 @@ class UserModelNode(Node):
         """Track trust from evaluation results."""
         payload = message.payload
         tenant_id = message.tenant_id or "default"
-        domain = payload.get("domain", payload.get("category", "general"))
+        domain = str(payload.get("domain", payload.get("category", "general")))
         accepted = payload.get("accepted", payload.get("overall_score", 0.5) > 0.6)
         overridden = payload.get("overridden", False)
 
@@ -169,3 +171,46 @@ class UserModelNode(Node):
         """Return user model stats."""
         tenant_id = message.tenant_id or "default"
         return message.create_response(self.engine.stats(tenant_id))
+
+    async def _handle_voice_identity(self, message: Message) -> None:
+        """Link voice-identified speaker to the user model.
+
+        When SpeakerIdNode identifies a speaker via voice biometrics,
+        this handler bridges that identity into the cognitive model:
+        - Maps speaker_id → tenant_id for user model lookups
+        - Updates engagement level (speaking = engaged)
+        - Records the voice interaction channel preference
+        - Feeds the transcribed text as an interaction for learning
+        """
+        payload = message.payload
+        speaker_id = payload.get("speaker_id", "unknown")
+        speaker_name = payload.get("speaker_name", "")
+        confidence = payload.get("speaker_confidence", 0.0)
+        text = payload.get("text", "")
+
+        if speaker_id == "unknown" or confidence < 0.7:
+            return
+
+        # Use speaker_id as tenant_id when available — this bridges
+        # biometric identity to the cognitive model
+        tenant_id = message.tenant_id or speaker_id
+
+        # Record that this user prefers voice interaction
+        self.engine.learn_preference(tenant_id, "interaction_channel", "voice", source="inferred")
+
+        # Voice interaction signals engagement
+        self.engine.update_engagement(tenant_id, 0.7)
+
+        # Feed the transcription into the model for expertise/focus learning
+        if text:
+            self.engine.update_from_interaction(
+                tenant_id=tenant_id,
+                query=text,
+                response="",
+                metadata={
+                    "source": "voice",
+                    "speaker_id": speaker_id,
+                    "speaker_name": speaker_name,
+                    "speaker_confidence": confidence,
+                },
+            )
