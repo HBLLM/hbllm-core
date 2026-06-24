@@ -4,6 +4,7 @@ Spiking Neural Network (SNN) modules for cognitive modeling.
 
 from hbllm.brain.snn.lif import LIFConfig, LIFNeuron, SpikeEvent, SpikingAccumulator
 from hbllm.brain.snn.network import LayerProjection, NeuronLayer, SpikingNetwork
+from hbllm.brain.snn.neuromodulation import NeuromodulationEngine, NeuromodulatorState
 from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule, SynapticConnection
 
 __all__ = [
@@ -19,6 +20,9 @@ __all__ = [
     "SynapticConnection",
     "STDPRule",
     "PlasticWeightMatrix",
+    # Neuromodulation
+    "NeuromodulationEngine",
+    "NeuromodulatorState",
     # Comprehension subpackage
     "comprehension",
     # Expression subpackage

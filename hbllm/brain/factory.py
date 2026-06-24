@@ -581,14 +581,18 @@ async def _register_node(registry: Any, node: Node) -> None:
     await registry.update_health(NodeHealth(node_id=node.node_id, status=HealthStatus.HEALTHY))
 
 
-def _wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
+def _wire_comprehension_stream(
+    router_node: Any,
+    domain_registry: Any,
+    neuromodulator: Any | None = None,
+) -> None:
     """Wire the Cognitive Stream comprehension pipeline into a RouterNode.
 
     Delegated to hbllm.brain.wiring.snn for maintainability.
     """
     from hbllm.brain.wiring.snn import wire_comprehension_stream
 
-    wire_comprehension_stream(router_node, domain_registry)
+    wire_comprehension_stream(router_node, domain_registry, neuromodulator=neuromodulator)
 
 
 def _wire_expression_stream(
@@ -596,6 +600,7 @@ def _wire_expression_stream(
     router_node: Any | None = None,
     llm: Any | None = None,
     dual_router: Any | None = None,
+    neuromodulator: Any | None = None,
 ) -> None:
     """Wire the expression-side Cognitive Stream into a DecisionNode.
 
@@ -603,7 +608,9 @@ def _wire_expression_stream(
     """
     from hbllm.brain.wiring.snn import wire_expression_stream
 
-    wire_expression_stream(decision_node, router_node, llm, dual_router)
+    wire_expression_stream(
+        decision_node, router_node, llm, dual_router, neuromodulator=neuromodulator
+    )
 
 
 class BrainFactory:
@@ -807,6 +814,7 @@ class BrainFactory:
 
         # 1b. Create dual LLM router if external provider is configured
         dual_router = None
+        _neuromodulator = None  # Created later if SNN streams are injected
         if cfg.external_provider:
             try:
                 external_provider = get_provider(
@@ -1108,11 +1116,26 @@ class BrainFactory:
 
         # Wire Cognitive Stream comprehension into the ReasoningCore's inner RouterNode
         if cfg.inject_comprehension and reasoning is not None and reasoning.router is not None:
-            _wire_comprehension_stream(reasoning.router, domain_registry)
+            # Create shared NeuromodulationEngine for SNN streams
+            from hbllm.brain.snn.neuromodulation import NeuromodulationEngine
+
+            neuromodulator = NeuromodulationEngine()
+            # Will be wired to UserModel after it's created (see below)
+            _neuromodulator = neuromodulator
+
+            _wire_comprehension_stream(
+                reasoning.router,
+                domain_registry,
+                neuromodulator=neuromodulator,
+            )
             # Wire expression-side Cognitive Stream (Layer 5) into the DecisionNode
             if reasoning.decision is not None:
                 _wire_expression_stream(
-                    reasoning.decision, reasoning.router, llm, dual_router=dual_router
+                    reasoning.decision,
+                    reasoning.router,
+                    llm,
+                    dual_router=dual_router,
+                    neuromodulator=neuromodulator,
                 )
 
         # Perception nodes (optional — require ML models)
@@ -1564,6 +1587,18 @@ class BrainFactory:
             brain.user_model_engine = user_model_engine
             brain.user_model_node = user_model_node
             logger.info("UserModel wired — predictive user understanding active")
+
+            # Wire NeuromodulationEngine to UserModel updates (if SNN streams were created)
+            if _neuromodulator is not None:
+                try:
+
+                    async def _sync_neuromod(msg: Any) -> None:
+                        _neuromodulator.signal_from_user_model(user_model_engine, msg.tenant_id)
+
+                    await message_bus.subscribe("user_model.updated", _sync_neuromod)
+                    logger.info("NeuromodulationEngine wired to UserModel updates")
+                except Exception as e:
+                    logger.debug("Failed to wire neuromodulator to UserModel: %s", e)
         else:
             user_model_engine = None
 

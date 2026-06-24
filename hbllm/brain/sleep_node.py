@@ -471,12 +471,18 @@ class SleepCycleNode(Node):
         return replayed
 
     async def _consolidate_snn_weights(self) -> int:
-        """Phase 2c: Persist STDP-learned SNN weights so they survive restarts.
+        """Phase 2c: Consolidate and persist STDP-learned SNN weights.
+
+        Performs sleep-inspired weight consolidation:
+          1. Prune weak connections (forgetting spurious patterns)
+          2. Strengthen well-reinforced connections (making them permanent)
+          3. Persist weight matrices so they survive restarts
 
         Saves weight matrices from:
           - TrainedPRM (reward scoring network)
           - ContentPlanner (content decision network)
           - ThoughtController (gating plastic weights)
+          - ComprehensionEnsemble (comprehension plastic weights)
 
         Returns:
             Number of weight matrices saved.
@@ -486,6 +492,8 @@ class SleepCycleNode(Node):
 
         logger.info("[SleepNode] Phase 2c: Consolidating SNN weights...")
         saved = 0
+        pruned_total = 0
+        consolidated_total = 0
 
         # Find DecisionNode and its ExpressionStream
         brain = None
@@ -508,74 +516,126 @@ class SleepCycleNode(Node):
             cls_name = type(node).__name__
             node_map[cls_name] = node
 
-        decision_node = node_map.get("DecisionNode")
-        if not decision_node:
-            return 0
-
-        expression_stream = getattr(decision_node, "expression_stream", None)
-        if not expression_stream:
-            logger.debug("[SleepNode] No ExpressionStream — skipping SNN consolidation.")
-            return 0
-
         import os
 
         data_dir = Path(os.environ.get("HBLLM_DATA_DIR", "data"))
         snn_dir = data_dir / "snn_weights"
         snn_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save TrainedPRM network weights
-        trained_prm = getattr(expression_stream, "trained_prm", None)
-        if trained_prm is not None:
+        # ── Helper: consolidate a PlasticWeightMatrix ────────────────
+        def _consolidate_plastic(
+            plastic: Any,
+            name: str,
+            path: Path,
+        ) -> tuple[int, int, int]:
+            """Prune, consolidate, and save a PlasticWeightMatrix."""
+            _saved = 0
+            _pruned = 0
+            _consolidated = 0
             try:
-                network = getattr(trained_prm, "_network", None)
-                if network and hasattr(network, "export_weights"):
-                    weights = network.export_weights()
-                    (snn_dir / "prm_weights.json").write_text(json.dumps(weights, default=str))
-                    saved += 1
-                    logger.info("[SleepNode] Saved TrainedPRM weights (%d layers)", len(weights))
-            except Exception as e:
-                logger.warning("[SleepNode] Failed to save PRM weights: %s", e)
+                # Step 1: Prune weak connections
+                if hasattr(plastic, "prune_weak_connections"):
+                    _pruned = plastic.prune_weak_connections(threshold=0.05)
 
-        # Save ContentPlanner network weights
-        content_planner = getattr(expression_stream, "content_planner", None)
-        if content_planner is not None:
-            try:
-                network = getattr(content_planner, "_network", None)
-                if network and hasattr(network, "export_weights"):
-                    weights = network.export_weights()
-                    (snn_dir / "content_planner_weights.json").write_text(
-                        json.dumps(weights, default=str)
-                    )
-                    saved += 1
+                # Step 2: Consolidate strong connections
+                if hasattr(plastic, "consolidate"):
+                    _consolidated = plastic.consolidate(strengthen_factor=0.1)
+
+                # Step 3: Save to disk
+                if hasattr(plastic, "save"):
+                    plastic.save(path)
+                    _saved = 1
+                elif hasattr(plastic, "to_dict"):
+                    path.write_text(json.dumps(plastic.to_dict(), default=str))
+                    _saved = 1
+
+                if _saved:
                     logger.info(
-                        "[SleepNode] Saved ContentPlanner weights (%d layers)", len(weights)
+                        "[SleepNode] Saved %s weights (pruned=%d, consolidated=%d)",
+                        name,
+                        _pruned,
+                        _consolidated,
                     )
             except Exception as e:
-                logger.warning("[SleepNode] Failed to save ContentPlanner weights: %s", e)
+                logger.warning("[SleepNode] Failed to consolidate %s: %s", name, e)
+            return _saved, _pruned, _consolidated
 
-        # Save ThoughtController plastic weights
-        controller = getattr(expression_stream, "controller", None)
-        if controller is not None:
-            plastic = getattr(controller, "plastic_weights", None)
-            if plastic is not None:
+        # ── Expression Stream: DecisionNode ──────────────────────────
+        decision_node = node_map.get("DecisionNode")
+        expression_stream = (
+            getattr(decision_node, "expression_stream", None) if decision_node else None
+        )
+
+        if expression_stream:
+            # Save TrainedPRM network weights
+            trained_prm = getattr(expression_stream, "trained_prm", None)
+            if trained_prm is not None:
                 try:
-                    weights = {}
-                    if hasattr(plastic, "weights"):
-                        # PlasticWeightMatrix — save as nested lists
-                        w = plastic.weights
-                        if hasattr(w, "tolist"):
-                            weights["matrix"] = w.tolist()
-                        else:
-                            weights["matrix"] = [[float(v) for v in row] for row in w]
-                    (snn_dir / "controller_plastic.json").write_text(
-                        json.dumps(weights, default=str)
-                    )
-                    saved += 1
-                    logger.info("[SleepNode] Saved ThoughtController plastic weights")
+                    network = getattr(trained_prm, "_network", None)
+                    if network and hasattr(network, "export_weights"):
+                        weights = network.export_weights()
+                        (snn_dir / "prm_weights.json").write_text(json.dumps(weights, default=str))
+                        saved += 1
+                        logger.info(
+                            "[SleepNode] Saved TrainedPRM weights (%d layers)", len(weights)
+                        )
                 except Exception as e:
-                    logger.warning("[SleepNode] Failed to save controller weights: %s", e)
+                    logger.warning("[SleepNode] Failed to save PRM weights: %s", e)
 
-        logger.info("[SleepNode] SNN weight consolidation complete: %d matrices saved.", saved)
+            # Save ContentPlanner network weights
+            content_planner = getattr(expression_stream, "content_planner", None)
+            if content_planner is not None:
+                try:
+                    network = getattr(content_planner, "_network", None)
+                    if network and hasattr(network, "export_weights"):
+                        weights = network.export_weights()
+                        (snn_dir / "content_planner_weights.json").write_text(
+                            json.dumps(weights, default=str)
+                        )
+                        saved += 1
+                        logger.info(
+                            "[SleepNode] Saved ContentPlanner weights (%d layers)", len(weights)
+                        )
+                except Exception as e:
+                    logger.warning("[SleepNode] Failed to save ContentPlanner weights: %s", e)
+
+            # Consolidate ThoughtController plastic weights
+            controller = getattr(expression_stream, "controller", None)
+            if controller is not None:
+                plastic = getattr(controller, "plastic_weights", None)
+                if plastic is not None:
+                    s, p, c = _consolidate_plastic(
+                        plastic, "ThoughtController", snn_dir / "controller_plastic.json"
+                    )
+                    saved += s
+                    pruned_total += p
+                    consolidated_total += c
+        else:
+            logger.debug("[SleepNode] No ExpressionStream — skipping expression consolidation.")
+
+        # ── Comprehension Stream: RouterNode ──────────────────────────
+        router_node = node_map.get("RouterNode")
+        comp_stream = getattr(router_node, "comprehension_stream", None) if router_node else None
+
+        if comp_stream:
+            ensemble = getattr(comp_stream, "ensemble", None)
+            if ensemble is not None:
+                plastic = getattr(ensemble, "plastic_weights", None)
+                if plastic is not None:
+                    s, p, c = _consolidate_plastic(
+                        plastic, "ComprehensionEnsemble", snn_dir / "comprehension_plastic.json"
+                    )
+                    saved += s
+                    pruned_total += p
+                    consolidated_total += c
+
+        logger.info(
+            "[SleepNode] SNN weight consolidation complete: "
+            "%d matrices saved, %d connections pruned, %d connections consolidated.",
+            saved,
+            pruned_total,
+            consolidated_total,
+        )
         return saved
 
     # ── Gap Closers: Contradiction Detection, Temporal Normalization, Dream Journal ──
