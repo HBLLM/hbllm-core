@@ -219,6 +219,9 @@ class BrainConfig(BaseModel):
     iot_mqtt_broker: str = "localhost"
     iot_mqtt_port: int = 1883
 
+    # Autonomous Learning Engine (goal-driven learning)
+    inject_autonomous_learning: bool = True
+
     # Live World State (environment graph fed by perception + IoT)
     inject_world_state: bool = True
 
@@ -1136,6 +1139,63 @@ class BrainFactory:
                     llm,
                     dual_router=dual_router,
                     neuromodulator=neuromodulator,
+                )
+
+        # ── Autonomous Learning Engine ────────────────────────────────────
+        if cfg.inject_autonomous_learning:
+            try:
+                from hbllm.brain.autonomous_learner import AutonomousLearner
+                from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
+                from hbllm.brain.concept_formation import ConceptFormationEngine
+                from hbllm.brain.contradiction_detector import (
+                    BeliefRevisionEngine,
+                    ContradictionDetector,
+                )
+                from hbllm.brain.experiment_engine import ExperimentEngine
+                from hbllm.brain.meta_learner import MetaLearner
+
+                learning_data_dir = f"{cfg.data_dir}/learning"
+
+                # Build learning subsystems
+                causal_builder = CausalModelBuilder(
+                    llm=llm, data_dir=learning_data_dir,
+                )
+                experiment_engine = ExperimentEngine(
+                    llm=llm, data_dir=learning_data_dir,
+                )
+                contradiction_detector = ContradictionDetector(llm=llm)
+                belief_engine = BeliefRevisionEngine(data_dir=learning_data_dir)
+                meta_learner = MetaLearner(data_dir=learning_data_dir)
+                concept_engine = ConceptFormationEngine(
+                    llm=llm,
+                    causal_model_builder=causal_builder,
+                    data_dir=learning_data_dir,
+                )
+
+                # Create and register the orchestrator node
+                autonomous_learner = AutonomousLearner(
+                    node_id="autonomous_learner",
+                    llm=llm,
+                    causal_model_builder=causal_builder,
+                    experiment_engine=experiment_engine,
+                    contradiction_detector=contradiction_detector,
+                    belief_engine=belief_engine,
+                    meta_learner=meta_learner,
+                    concept_engine=concept_engine,
+                )
+                await _register_node(registry, autonomous_learner)
+                await autonomous_learner.start(message_bus)
+                nodes.append(autonomous_learner)
+
+                logger.info(
+                    "Autonomous Learning Engine wired: "
+                    "CausalModelBuilder, ExperimentEngine, "
+                    "ContradictionDetector, BeliefRevision, "
+                    "MetaLearner, ConceptFormation"
+                )
+            except Exception as e:
+                logger.warning(
+                    "Autonomous Learning Engine init failed (non-critical): %s", e
                 )
 
         # Perception nodes (optional — require ML models)

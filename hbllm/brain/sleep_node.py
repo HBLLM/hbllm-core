@@ -207,6 +207,36 @@ class SleepCycleNode(Node):
                 return
             report["snn_weights_saved"] = await self._consolidate_snn_weights()
 
+            # ── Phase 2d: Knowledge Confidence Decay ──────────────────────
+            if not self.is_sleeping:
+                return
+            report["knowledge_decayed"] = await self._decay_knowledge_confidence()
+
+            # ── Phase 2e: Deep Contradiction Scan ─────────────────────────
+            if not self.is_sleeping:
+                return
+            report["deep_contradictions"] = await self._scan_contradictions()
+
+            # ── Phase 2f: Concept Formation ───────────────────────────────
+            if not self.is_sleeping:
+                return
+            report["concepts_formed"] = await self._form_concepts()
+
+            # ── Phase 2g: Cross-Domain Analogy Discovery ──────────────────
+            if not self.is_sleeping:
+                return
+            report["analogies_discovered"] = await self._discover_analogies()
+
+            # ── Phase 2h: Meta-Learner Strategy Refinement ────────────────
+            if not self.is_sleeping:
+                return
+            report["strategies_refined"] = await self._refine_learning_strategies()
+
+            # ── Phase 2i: Weak Belief Pruning ─────────────────────────────
+            if not self.is_sleeping:
+                return
+            report["beliefs_pruned"] = await self._prune_weak_beliefs()
+
             # ── Phase 3: Curiosity Goal Replay ───────────────────────────
             if not self.is_sleeping:
                 return
@@ -1192,3 +1222,155 @@ class SleepCycleNode(Node):
                 {"status": "consolidation_started", "message": "Dream cycle initiated."}
             )
         return None
+
+    # ── Autonomous Learning Sleep Operations ─────────────────────────────
+
+    async def _decay_knowledge_confidence(self) -> int:
+        """Phase 2d: Apply biological confidence decay to knowledge graph.
+
+        Knowledge that isn't reinforced gradually loses confidence,
+        mimicking biological memory consolidation.
+        """
+        decayed = 0
+        try:
+
+            kg_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="memory.knowledge_graph.get",
+                payload={"operation": "get_instance"},
+            )
+            # Try to get the KnowledgeGraph instance via bus
+            try:
+                response = await self.bus.request(
+                    "memory.knowledge_graph.get", kg_msg, timeout=5.0
+                )
+                kg = response.payload.get("instance")
+                if kg and hasattr(kg, "decay_confidence"):
+                    decayed = kg.decay_confidence(rate=0.005)
+                    logger.info(
+                        "[SleepNode] Knowledge confidence decay: %d entities decayed",
+                        decayed,
+                    )
+            except Exception:
+                logger.debug("[SleepNode] KnowledgeGraph not available for decay")
+        except Exception as e:
+            logger.debug("[SleepNode] Knowledge decay skipped: %s", e)
+        return decayed
+
+    async def _scan_contradictions(self) -> int:
+        """Phase 2e: Scan causal graph for internal contradictions."""
+        found = 0
+        try:
+
+            scan_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.contradiction.scan",
+                payload={"operation": "scan"},
+            )
+            try:
+                response = await self.bus.request(
+                    "learning.contradiction.scan", scan_msg, timeout=10.0
+                )
+                found = response.payload.get("contradictions_found", 0)
+            except Exception:
+                logger.debug("[SleepNode] Contradiction scan not available")
+        except Exception as e:
+            logger.debug("[SleepNode] Contradiction scan skipped: %s", e)
+        if found > 0:
+            logger.info("[SleepNode] Deep contradiction scan found %d issues", found)
+        return found
+
+    async def _form_concepts(self) -> int:
+        """Phase 2f: Run concept formation engine to discover abstractions."""
+        formed = 0
+        try:
+            form_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.concept.form",
+                payload={"operation": "discover_abstractions"},
+            )
+            try:
+                response = await self.bus.request(
+                    "learning.concept.form", form_msg, timeout=15.0
+                )
+                formed = response.payload.get("concepts_formed", 0)
+            except Exception:
+                logger.debug("[SleepNode] Concept formation not available")
+        except Exception as e:
+            logger.debug("[SleepNode] Concept formation skipped: %s", e)
+        if formed > 0:
+            logger.info("[SleepNode] Concept formation: %d abstractions created", formed)
+        return formed
+
+    async def _discover_analogies(self) -> int:
+        """Phase 2g: Search for cross-domain analogies in causal models."""
+        found = 0
+        try:
+            analogy_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.analogy.discover",
+                payload={"operation": "cross_domain"},
+            )
+            try:
+                response = await self.bus.request(
+                    "learning.analogy.discover", analogy_msg, timeout=15.0
+                )
+                found = response.payload.get("analogies_found", 0)
+            except Exception:
+                logger.debug("[SleepNode] Analogy discovery not available")
+        except Exception as e:
+            logger.debug("[SleepNode] Analogy discovery skipped: %s", e)
+        if found > 0:
+            logger.info("[SleepNode] Cross-domain analogies discovered: %d", found)
+        return found
+
+    async def _refine_learning_strategies(self) -> int:
+        """Phase 2h: Update meta-learner strategies based on recent sessions."""
+        refined = 0
+        try:
+            strategy_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.meta.refine",
+                payload={"operation": "refine_strategies"},
+            )
+            try:
+                response = await self.bus.request(
+                    "learning.meta.refine", strategy_msg, timeout=5.0
+                )
+                refined = response.payload.get("strategies_refined", 0)
+            except Exception:
+                logger.debug("[SleepNode] Meta-learner not available for refinement")
+        except Exception as e:
+            logger.debug("[SleepNode] Strategy refinement skipped: %s", e)
+        if refined > 0:
+            logger.info("[SleepNode] Learning strategies refined: %d domains", refined)
+        return refined
+
+    async def _prune_weak_beliefs(self) -> int:
+        """Phase 2i: Remove beliefs with confidence below threshold."""
+        pruned = 0
+        try:
+            prune_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.belief.prune",
+                payload={"threshold": 0.1},
+            )
+            try:
+                response = await self.bus.request(
+                    "learning.belief.prune", prune_msg, timeout=5.0
+                )
+                pruned = response.payload.get("beliefs_pruned", 0)
+            except Exception:
+                logger.debug("[SleepNode] Belief pruning not available")
+        except Exception as e:
+            logger.debug("[SleepNode] Belief pruning skipped: %s", e)
+        if pruned > 0:
+            logger.info("[SleepNode] Weak beliefs pruned: %d", pruned)
+        return pruned
+

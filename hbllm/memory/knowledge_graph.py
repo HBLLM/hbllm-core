@@ -45,6 +45,11 @@ class Entity:
     entity_type: str = "concept"
     attributes: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
+    # Knowledge confidence — decays over time, reinforced by evidence
+    confidence: float = 1.0
+    evidence_count: int = 1
+    verified: bool = False
+    last_reinforced: float = field(default_factory=time.time)
 
     def __hash__(self) -> int:
         return hash(self.id)
@@ -720,6 +725,62 @@ class KnowledgeGraph:
 
         return added
 
+    # ── Confidence Management ────────────────────────────────────────────
+
+    def decay_confidence(self, rate: float = 0.01) -> int:
+        """Apply confidence decay to all entities.
+
+        Knowledge confidence gradually drops unless reinforced.
+        Called during sleep to simulate biological memory decay.
+
+        Returns:
+            Number of entities whose confidence was decayed.
+        """
+        decayed = 0
+        for entity in self._entities.values():
+            old = entity.confidence
+            entity.confidence = max(0.0, entity.confidence - rate)
+            if old != entity.confidence:
+                decayed += 1
+        return decayed
+
+    def get_low_confidence(self, threshold: float = 0.3) -> list[Entity]:
+        """Get entities with confidence below threshold.
+
+        Used to trigger knowledge refresh or re-learning.
+        """
+        return [
+            e for e in self._entities.values() if e.confidence < threshold
+        ]
+
+    def reinforce(
+        self,
+        label: str,
+        evidence: str = "",
+        confidence_boost: float = 0.1,
+    ) -> Entity | None:
+        """Reinforce an entity's confidence with new evidence.
+
+        Increases confidence (with diminishing returns) and updates
+        evidence count and last_reinforced timestamp.
+        """
+        eid = _entity_id(label)
+        entity = self._entities.get(eid)
+        if entity is None:
+            return None
+
+        entity.confidence = min(1.0, entity.confidence + confidence_boost)
+        entity.evidence_count += 1
+        entity.last_reinforced = time.time()
+        if evidence:
+            # Store evidence in attributes
+            existing_evidence = entity.attributes.get("evidence", [])
+            if isinstance(existing_evidence, list):
+                existing_evidence.append(evidence[:200])
+                entity.attributes["evidence"] = existing_evidence[-10:]  # Keep last 10
+        self._entities.move_to_end(eid)
+        return entity
+
     def clear(self) -> None:
         """Clear all entities and relations."""
         self._entities.clear()
@@ -737,6 +798,9 @@ class KnowledgeGraph:
                     "type": e.entity_type,
                     "attributes": e.attributes,
                     "created_at": e.created_at,
+                    "confidence": e.confidence,
+                    "evidence_count": e.evidence_count,
+                    "verified": e.verified,
                 }
                 for e in self._entities.values()
             ],
@@ -764,6 +828,9 @@ class KnowledgeGraph:
                 entity_type=e_data.get("type", "concept"),
                 attributes=e_data.get("attributes", {}),
                 created_at=e_data.get("created_at", time.time()),
+                confidence=e_data.get("confidence", 1.0),
+                evidence_count=e_data.get("evidence_count", 1),
+                verified=e_data.get("verified", False),
             )
             graph._entities[entity.id] = entity
 
