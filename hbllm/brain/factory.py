@@ -1639,9 +1639,7 @@ class BrainFactory:
             logger.debug("Wired UserModel → DecisionNode (expertise-aware scoring)")
 
         # Wire user_model into CuriosityNode
-        curiosity_node = next(
-            (n for n in nodes if getattr(n, "node_id", "") == "curiosity"), None
-        )
+        curiosity_node = next((n for n in nodes if getattr(n, "node_id", "") == "curiosity"), None)
         if curiosity_node and user_model_engine:
             curiosity_node._user_model = user_model_engine
             logger.debug("Wired UserModel → CuriosityNode (interest-weighted goals)")

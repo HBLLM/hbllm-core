@@ -10,8 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 # ── Shared Mock Helpers ──────────────────────────────────────────────────────
 
 
@@ -175,7 +173,9 @@ class TestSocialTimingIntegration:
 
         engine = SocialTimingEngine(relationship_memory=mock_rm)
         boosted = engine.boost_priority_for_person(
-            "Message from Mom", "normal", tenant_id="t1",
+            "Message from Mom",
+            "normal",
+            tenant_id="t1",
         )
         # Should be upgraded from "normal"
         assert boosted in ("high", "urgent", "critical") or boosted == "normal"
@@ -352,9 +352,7 @@ class TestActivityDigestIntegration:
         from hbllm.brain.activity_digest import ActivityDigestEngine, DigestItem
 
         mock_pg = MagicMock()
-        mock_pg.list_projects.return_value = [
-            {"id": "proj_1", "name": "MyProject"}
-        ]
+        mock_pg.list_projects.return_value = [{"id": "proj_1", "name": "MyProject"}]
         mock_goal = MagicMock()
         mock_goal.name = "Deploy v2"
         mock_pg.get_active_goals.return_value = [mock_goal]

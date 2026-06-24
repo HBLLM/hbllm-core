@@ -187,7 +187,9 @@ class PersonaEngine:
         style = engine.get_modulated_prompt("tenant_123", emotion="stressed")
     """
 
-    def __init__(self, storage_dir: str | Path = "data/personas", user_model: Any | None = None) -> None:
+    def __init__(
+        self, storage_dir: str | Path = "data/personas", user_model: Any | None = None
+    ) -> None:
         self._storage_dir = Path(storage_dir)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._profiles: dict[str, PersonaProfile] = {}

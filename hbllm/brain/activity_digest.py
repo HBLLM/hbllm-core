@@ -309,20 +309,28 @@ class ActivityDigestEngine:
             # Get all projects and check for active goals
             projects = self._project_graph.list_projects(tenant_id)
             for project in projects[:5]:  # Max 5 projects in digest
-                project_id = project.get("id", "") if isinstance(project, dict) else getattr(project, "id", "")
+                project_id = (
+                    project.get("id", "")
+                    if isinstance(project, dict)
+                    else getattr(project, "id", "")
+                )
                 if not project_id:
                     continue
                 goals = self._project_graph.get_active_goals(project_id)
                 if goals:
-                    project_name = project.get("name", project_id) if isinstance(project, dict) else getattr(project, "name", project_id)
-                    digest.items.append(DigestItem(
-                        category="goal",
-                        title=f"{project_name}: {len(goals)} active goal(s)",
-                        detail=", ".join(
-                            getattr(g, "name", str(g))[:40] for g in goals[:3]
-                        ),
-                        importance=0.6,
-                    ))
+                    project_name = (
+                        project.get("name", project_id)
+                        if isinstance(project, dict)
+                        else getattr(project, "name", project_id)
+                    )
+                    digest.items.append(
+                        DigestItem(
+                            category="goal",
+                            title=f"{project_name}: {len(goals)} active goal(s)",
+                            detail=", ".join(getattr(g, "name", str(g))[:40] for g in goals[:3]),
+                            importance=0.6,
+                        )
+                    )
         except Exception as e:
             logger.debug("Failed to enrich digest with project context: %s", e)
 
@@ -333,8 +341,6 @@ class ActivityDigestEngine:
             verbosity_pref = model.preferences.get("verbosity")
             if verbosity_pref and verbosity_pref.value == "concise":
                 # Keep only high-importance items for concise users
-                digest.items = [
-                    item for item in digest.items if item.importance >= 0.5
-                ][:10]
+                digest.items = [item for item in digest.items if item.importance >= 0.5][:10]
         except Exception as e:
             logger.debug("Failed to apply verbosity preference: %s", e)

@@ -264,9 +264,7 @@ class SocialTimingEngine:
 
             max_importance = 0.0
             for name in mentions:
-                score = self._relationship_memory.prioritize_notification(
-                    name, tenant_id
-                )
+                score = self._relationship_memory.prioritize_notification(name, tenant_id)
                 max_importance = max(max_importance, score)
 
             # Upgrade priority based on person importance

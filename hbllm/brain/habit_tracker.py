@@ -204,7 +204,9 @@ class HabitTracker:
 
                 # Cross-validate with UserModel's learned active_hours
                 confidence = self._cross_validate_with_user_model(
-                    tenant_id, confidence, hour=hour,
+                    tenant_id,
+                    confidence,
+                    hour=hour,
                 )
 
                 if confidence < self._confidence_threshold:
