@@ -107,6 +107,7 @@ class LearningGoal:
     status: str = "pending"  # "pending" | "active" | "completed" | "budget_exhausted"
     started_at: float | None = None
     completed_at: float | None = None
+    parent_goal_id: str | None = None  # Links to GoalManager.Goal
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,6 +127,7 @@ class LearningGoal:
             "status": self.status,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "parent_goal_id": self.parent_goal_id,
         }
 
 
@@ -213,6 +215,7 @@ class AutonomousLearner(Node):
         belief_engine: Any | None = None,
         meta_learner: Any | None = None,
         concept_engine: Any | None = None,
+        goal_manager: Any | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -230,6 +233,7 @@ class AutonomousLearner(Node):
         self.belief_engine = belief_engine
         self.meta_learner = meta_learner
         self.concept_engine = concept_engine
+        self.goal_manager = goal_manager
 
         # Active learning goals
         self._goals: dict[str, LearningGoal] = {}
@@ -385,6 +389,22 @@ class AutonomousLearner(Node):
 
                 # Publish completion
                 await self._publish_complete(goal)
+
+                # Update GoalManager if this learning goal is linked
+                if self.goal_manager and goal.parent_goal_id:
+                    try:
+                        progress = goal.current_confidence / goal.confidence_target
+                        self.goal_manager.update_progress(
+                            goal.parent_goal_id,
+                            min(1.0, progress),
+                            action=(
+                                f"Learning completed: confidence={goal.current_confidence:.2f}, "
+                                f"models={goal.causal_models_built}, "
+                                f"experiments={goal.experiments_run}"
+                            ),
+                        )
+                    except Exception as gm_err:
+                        logger.debug("Failed to update GoalManager: %s", gm_err)
 
             except Exception as e:
                 logger.error("Learning goal '%s' failed: %s", topic, e)

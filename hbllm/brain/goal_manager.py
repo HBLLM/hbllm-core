@@ -367,6 +367,178 @@ class GoalManager:
 
         return goals
 
+    # ─── Learning Goal Integration ────────────────────────────────────
+
+    def create_learning_goal(
+        self,
+        topic: str,
+        motivation: str = "system",
+        parent_goal_id: str | None = None,
+        priority: GoalPriority = GoalPriority.MEDIUM,
+    ) -> Goal:
+        """Create a goal that dispatches to AutonomousLearner.
+
+        This bridges GoalManager (what to learn) with AutonomousLearner
+        (how to learn). The goal's metadata includes a learning_topic
+        that AutonomousLearner reads when executing.
+
+        Args:
+            topic: What to learn (passed to AutonomousLearner)
+            motivation: Why this goal was created
+            parent_goal_id: Optional parent goal for hierarchy
+            priority: Goal priority level
+        """
+        goal = self.create_goal(
+            name=f"Learn: {topic}",
+            description=f"Autonomously learn about '{topic}' ({motivation})",
+            goal_type="learning",
+            priority=priority,
+            success_criteria=f"confidence >= 0.8 for '{topic}'",
+            dependencies=[parent_goal_id] if parent_goal_id else None,
+        )
+
+        # Tag with learning-specific metadata
+        goal.metadata["learning_topic"] = topic
+        goal.metadata["motivation"] = motivation
+        if parent_goal_id:
+            goal.metadata["parent_goal_id"] = parent_goal_id
+        self._save(goal)
+
+        return goal
+
+    def generate_from_contradictions(
+        self,
+        contradictions: list[dict[str, Any]],
+        parent_goal_id: str | None = None,
+    ) -> list[Goal]:
+        """Auto-generate learning goals from unresolved contradictions.
+
+        Contradictions are persistent tension between beliefs.
+        Each contradiction becomes a learning goal to resolve.
+
+        Example:
+            Contradiction: "X causes Y" vs "X prevents Y"
+            → Goal: "Learn: Resolve X-Y relationship"
+        """
+        goals = []
+        for ctr in contradictions:
+            concept = ctr.get("concept", "unknown")
+            claim_a = ctr.get("claim_a", "?")[:60]
+            claim_b = ctr.get("claim_b", "?")[:60]
+            severity = ctr.get("severity", 0.5)
+
+            # Higher severity → higher priority
+            if severity >= 0.7:
+                priority = GoalPriority.HIGH
+            elif severity >= 0.4:
+                priority = GoalPriority.MEDIUM
+            else:
+                priority = GoalPriority.LOW
+
+            goal = self.create_learning_goal(
+                topic=f"Resolve contradiction in '{concept}': '{claim_a}' vs '{claim_b}'",
+                motivation="contradiction_resolution",
+                parent_goal_id=parent_goal_id,
+                priority=priority,
+            )
+            goal.metadata["contradiction_id"] = ctr.get("contradiction_id", "")
+            goal.metadata["severity"] = severity
+            self._save(goal)
+            goals.append(goal)
+
+        if goals:
+            logger.info(
+                "Generated %d learning goals from contradictions",
+                len(goals),
+            )
+        return goals
+
+    def generate_from_weak_areas(
+        self,
+        weak_areas: list[dict[str, Any]],
+        parent_goal_id: str | None = None,
+    ) -> list[Goal]:
+        """Auto-generate learning goals from MetaLearner weak areas.
+
+        Weak areas are concepts where confidence is below target.
+        Each becomes a learning goal.
+
+        Example:
+            Weak area: "buffer overflow" (confidence=0.3)
+            → Goal: "Learn: Strengthen understanding of buffer overflow"
+        """
+        goals = []
+        for area in weak_areas:
+            concept = area.get("concept", "unknown")
+            score = area.get("score", 0.5)
+
+            # Lower score → higher priority
+            if score < 0.3:
+                priority = GoalPriority.HIGH
+            elif score < 0.5:
+                priority = GoalPriority.MEDIUM
+            else:
+                priority = GoalPriority.LOW
+
+            goal = self.create_learning_goal(
+                topic=f"Strengthen understanding of '{concept}'",
+                motivation="weak_area_improvement",
+                parent_goal_id=parent_goal_id,
+                priority=priority,
+            )
+            goal.metadata["weak_area_score"] = score
+            self._save(goal)
+            goals.append(goal)
+
+        if goals:
+            logger.info(
+                "Generated %d learning goals from weak areas",
+                len(goals),
+            )
+        return goals
+
+    def get_learning_goals(self) -> list[Goal]:
+        """Get all active learning-type goals."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM goals WHERE goal_type = 'learning' "
+                "AND status IN ('pending', 'active', 'blocked') "
+                "ORDER BY created_at DESC",
+            ).fetchall()
+        return [self._row_to_goal(r) for r in rows]
+
+    def subordinate_to(self, child_goal_id: str, parent_goal_id: str) -> None:
+        """Link a child goal to a parent goal.
+
+        Creates a goal hierarchy where the child is a sub-goal of the parent.
+        """
+        # Add dependency
+        with sqlite3.connect(str(self._db_path)) as conn:
+            row = conn.execute(
+                "SELECT dependencies FROM goals WHERE goal_id = ?", (child_goal_id,)
+            ).fetchone()
+            if row:
+                deps = json.loads(row[0] or "[]")
+                if parent_goal_id not in deps:
+                    deps.append(parent_goal_id)
+                    conn.execute(
+                        "UPDATE goals SET dependencies = ? WHERE goal_id = ?",
+                        (json.dumps(deps), child_goal_id),
+                    )
+
+            # Add sub-goal reference to parent
+            parent_row = conn.execute(
+                "SELECT sub_goals FROM goals WHERE goal_id = ?", (parent_goal_id,)
+            ).fetchone()
+            if parent_row:
+                subs = json.loads(parent_row[0] or "[]")
+                if child_goal_id not in subs:
+                    subs.append(child_goal_id)
+                    conn.execute(
+                        "UPDATE goals SET sub_goals = ? WHERE goal_id = ?",
+                        (json.dumps(subs), parent_goal_id),
+                    )
+
     # ─── Helpers ──────────────────────────────────────────────────────
 
     def _row_to_goal(self, row: tuple[Any, ...]) -> Goal:
@@ -398,4 +570,13 @@ class GoalManager:
             completed = conn.execute(
                 "SELECT COUNT(*) FROM goals WHERE status = 'completed'"
             ).fetchone()[0]
-        return {"total_goals": total, "active": active, "completed": completed}
+            learning = conn.execute(
+                "SELECT COUNT(*) FROM goals WHERE goal_type = 'learning' "
+                "AND status IN ('pending','active','blocked')"
+            ).fetchone()[0]
+        return {
+            "total_goals": total,
+            "active": active,
+            "completed": completed,
+            "active_learning_goals": learning,
+        }
