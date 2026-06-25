@@ -1,10 +1,12 @@
 """
-Attention Budget Manager — importance-weighted memory retention and focus allocation.
+Attention Budget Manager — importance-weighted memory retention, focus allocation,
+and cognitive task scheduling.
 
 Controls how cognitive resources are distributed across:
   - Memory types (episodic, semantic, procedural, value)
   - Domain focus (which topics get priority context window space)
   - Retention decisions (which memories to keep vs prune)
+  - Cognitive tasks (which contradictions, curiosities, reviews to pursue)
 
 This prevents the system from drowning in low-value information
 while ensuring critical knowledge is always accessible.
@@ -14,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
+import uuid
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
@@ -55,6 +60,207 @@ class FocusAllocation:
     last_active: float = field(default_factory=time.time)
 
 
+# ── Cognitive Priority Scheduler ─────────────────────────────────────────────
+
+
+class CognitiveTaskType(StrEnum):
+    """Types of cognitive tasks that compete for attention."""
+
+    CONTRADICTION = "contradiction"  # Resolve conflicting beliefs
+    CURIOSITY = "curiosity"  # Investigate unknown territory
+    MECHANISM_REFINEMENT = "mechanism_refinement"  # Strengthen weak mechanisms
+    BELIEF_REVISION = "belief_revision"  # Update outdated beliefs
+    CONCEPT_FORMATION = "concept_formation"  # Abstract recurring patterns
+    LEARNING = "learning"  # Acquire new knowledge
+    MAINTENANCE = "maintenance"  # Prune, consolidate, decay
+
+
+@dataclass
+class CognitiveTask:
+    """A cognitive task competing for attention.
+
+    Priority is computed as a weighted sum (not multiplication)
+    to prevent any single zero factor from permanently burying a task.
+    """
+
+    task_id: str = field(default_factory=lambda: f"ct_{uuid.uuid4().hex[:10]}")
+    task_type: CognitiveTaskType = CognitiveTaskType.LEARNING
+    domain: str = "general"
+    source: str = ""  # which node generated this
+    description: str = ""
+    created_at: float = field(default_factory=time.time)
+
+    # Scoring factors (0.0 to 1.0)
+    uncertainty: float = 0.5  # How uncertain is the current state?
+    goal_relevance: float = 0.5  # How relevant to active goals?
+    contradiction_severity: float = 0.0  # Severity if contradiction-type
+    novelty: float = 0.5  # How novel is the domain/concept?
+    expected_value: float = 0.5  # Expected cognitive value of resolution
+
+    # Lifecycle
+    priority_score: float = 0.0  # Computed, not set directly
+    claimed_by: str | None = None  # Node that picked this up
+    completed: bool = False
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def compute_priority(self) -> float:
+        """Weighted sum priority with age boost.
+
+        priority =
+            0.30 * uncertainty
+            + 0.25 * goal_relevance
+            + 0.20 * contradiction_severity
+            + 0.15 * novelty
+            + 0.10 * expected_value
+
+        Then:
+            priority *= age_boost
+
+        Age boost prevents starvation — old tasks gradually
+        rise in priority even if their base score is low.
+        """
+        base = (
+            0.30 * self.uncertainty
+            + 0.25 * self.goal_relevance
+            + 0.20 * self.contradiction_severity
+            + 0.15 * self.novelty
+            + 0.10 * self.expected_value
+        )
+
+        # Age boost: logarithmic growth, caps at ~2x after 1 hour
+        age_seconds = max(0.0, time.time() - self.created_at)
+        age_boost = 1.0 + 0.15 * math.log1p(age_seconds / 60.0)
+
+        self.priority_score = base * age_boost
+        return self.priority_score
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "task_type": self.task_type.value,
+            "domain": self.domain,
+            "source": self.source,
+            "description": self.description,
+            "priority_score": round(self.priority_score, 4),
+            "uncertainty": self.uncertainty,
+            "goal_relevance": self.goal_relevance,
+            "contradiction_severity": self.contradiction_severity,
+            "novelty": self.novelty,
+            "expected_value": self.expected_value,
+            "claimed_by": self.claimed_by,
+            "completed": self.completed,
+            "age_s": round(time.time() - self.created_at, 1),
+        }
+
+
+class CognitivePriorityScheduler:
+    """Decides which cognitive task deserves attention next.
+
+    This is the prefrontal attention system — the global scheduler
+    for all cognitive work that isn't immediate query handling.
+
+    Consumers:
+        AutonomousLearner — picks up learning tasks during idle
+        SleepNode — picks up maintenance/consolidation tasks
+        CuriosityNode — picks up curiosity tasks
+    """
+
+    def __init__(self, max_pending: int = 200) -> None:
+        self._tasks: dict[str, CognitiveTask] = {}
+        self._max_pending = max_pending
+        self._stats = {
+            "tasks_created": 0,
+            "tasks_completed": 0,
+            "tasks_pruned": 0,
+        }
+
+    def submit(self, task: CognitiveTask) -> CognitiveTask:
+        """Submit a cognitive task for scheduling."""
+        task.compute_priority()
+        self._tasks[task.task_id] = task
+        self._stats["tasks_created"] += 1
+
+        # Prune if over capacity (drop lowest priority completed/old)
+        if len(self._tasks) > self._max_pending:
+            self._prune()
+
+        return task
+
+    def next_task(
+        self,
+        task_type: CognitiveTaskType | None = None,
+        claimer: str | None = None,
+    ) -> CognitiveTask | None:
+        """Get the highest-priority unclaimed task.
+
+        Optionally filter by task_type and auto-claim for a node.
+        """
+        candidates = [
+            t for t in self._tasks.values()
+            if not t.completed and t.claimed_by is None
+        ]
+        if task_type is not None:
+            candidates = [t for t in candidates if t.task_type == task_type]
+
+        if not candidates:
+            return None
+
+        # Recompute priorities (age boost changes over time)
+        for t in candidates:
+            t.compute_priority()
+
+        candidates.sort(key=lambda t: t.priority_score, reverse=True)
+        best = candidates[0]
+
+        if claimer:
+            best.claimed_by = claimer
+
+        return best
+
+    def complete_task(self, task_id: str) -> None:
+        """Mark a task as completed."""
+        if task_id in self._tasks:
+            self._tasks[task_id].completed = True
+            self._stats["tasks_completed"] += 1
+
+    def get_pending(self, limit: int = 20) -> list[CognitiveTask]:
+        """Get top pending tasks by priority."""
+        pending = [t for t in self._tasks.values() if not t.completed]
+        for t in pending:
+            t.compute_priority()
+        pending.sort(key=lambda t: t.priority_score, reverse=True)
+        return pending[:limit]
+
+    def _prune(self) -> None:
+        """Remove completed and lowest-priority tasks to stay within budget."""
+        # Remove completed first
+        completed = [tid for tid, t in self._tasks.items() if t.completed]
+        for tid in completed:
+            del self._tasks[tid]
+            self._stats["tasks_pruned"] += 1
+
+        # If still over, remove lowest priority
+        if len(self._tasks) > self._max_pending:
+            tasks_by_priority = sorted(
+                self._tasks.items(),
+                key=lambda kv: kv[1].priority_score,
+            )
+            to_remove = len(self._tasks) - self._max_pending
+            for tid, _ in tasks_by_priority[:to_remove]:
+                del self._tasks[tid]
+                self._stats["tasks_pruned"] += 1
+
+    def stats(self) -> dict[str, Any]:
+        pending = sum(1 for t in self._tasks.values() if not t.completed)
+        claimed = sum(1 for t in self._tasks.values() if t.claimed_by and not t.completed)
+        return {
+            **self._stats,
+            "pending": pending,
+            "claimed": claimed,
+            "total_tracked": len(self._tasks),
+        }
+
+
 class AttentionManager(Node):
     """
     Manages cognitive resource distribution.
@@ -69,6 +275,10 @@ class AttentionManager(Node):
         system.evaluation — tracks domain activity
         system.sleep.prune_trigger — runs pruning during sleep
         attention.query — returns current allocations
+        learning.contradiction.discovered — creates contradiction tasks
+        learning.weak_area — creates learning tasks
+        learning.session.complete — creates concept formation tasks
+        curiosity.investigate — creates curiosity tasks
 
     Publishes:
         system.attention.pruned — after memory pruning
@@ -115,6 +325,9 @@ class AttentionManager(Node):
         self._rebalance_count = 0
         self._polling_task: asyncio.Task[None] | None = None
 
+        # Cognitive Priority Scheduler
+        self.scheduler = CognitivePriorityScheduler()
+
     async def on_start(self) -> None:
         logger.info("Starting AttentionManager (budget=%d tokens)", self.total_context_budget)
         await self.bus.subscribe("system.evaluation", self._track_activity)
@@ -122,8 +335,18 @@ class AttentionManager(Node):
         await self.bus.subscribe("attention.query", self._handle_query)
         await self.bus.subscribe("attention.score", self._handle_score_request)
         await self.bus.subscribe("workspace.thought", self._handle_thought_utility)
-        # Coordinate with LoadManager — adjust budget when load pressure changes
+        # Coordinate with LoadManager
         await self.bus.subscribe("system.load.policy_update", self._handle_load_policy)
+        # Cognitive task ingestion
+        await self.bus.subscribe(
+            "learning.contradiction.discovered", self._ingest_contradiction
+        )
+        await self.bus.subscribe("learning.weak_area", self._ingest_weak_area)
+        await self.bus.subscribe(
+            "learning.session.complete", self._ingest_session_complete
+        )
+        await self.bus.subscribe("curiosity.investigate", self._ingest_curiosity)
+        await self.bus.subscribe("attention.next_task", self._handle_next_task)
         self._polling_task = asyncio.create_task(self._poll_memory_stats())
 
     async def on_stop(self) -> None:
@@ -420,6 +643,7 @@ class AttentionManager(Node):
             "tracked_memories": len(self._importance_scores),
             "prune_cycles": self._prune_count,
             "rebalance_cycles": self._rebalance_count,
+            "cognitive_scheduler": self.scheduler.stats(),
         }
 
     async def _handle_thought_utility(self, message: Message) -> None:
@@ -452,3 +676,94 @@ class AttentionManager(Node):
                     )
         except Exception as e:
             logger.debug("[AttentionManager] Error handling thought utility: %s", e)
+
+    # ── Cognitive Task Ingestion ──────────────────────────────────────
+
+    async def _ingest_contradiction(self, message: Message) -> None:
+        """Create a cognitive task from a discovered contradiction."""
+        payload = message.payload
+        self.scheduler.submit(CognitiveTask(
+            task_type=CognitiveTaskType.CONTRADICTION,
+            domain=payload.get("concept", "general"),
+            source=message.source_node_id,
+            description=(
+                f"Resolve: '{payload.get('claim_a', '?')[:50]}' "
+                f"vs '{payload.get('claim_b', '?')[:50]}'"
+            ),
+            uncertainty=0.8,
+            contradiction_severity=payload.get("severity", 0.5),
+            novelty=0.6,
+            expected_value=0.7,
+            payload=payload,
+        ))
+
+    async def _ingest_weak_area(self, message: Message) -> None:
+        """Create a cognitive task from a weak learning area."""
+        payload = message.payload
+        score = payload.get("score", 0.5)
+        self.scheduler.submit(CognitiveTask(
+            task_type=CognitiveTaskType.LEARNING,
+            domain=payload.get("goal_topic", "general"),
+            source=message.source_node_id,
+            description=f"Strengthen weak area: {payload.get('concept', '?')}",
+            uncertainty=1.0 - score,
+            goal_relevance=0.7,
+            novelty=0.4,
+            expected_value=0.6,
+            payload=payload,
+        ))
+
+    async def _ingest_session_complete(self, message: Message) -> None:
+        """Create concept formation task after learning session."""
+        payload = message.payload
+        models_built = payload.get("causal_models_built", 0)
+        if models_built >= 2:
+            # Enough models to attempt abstraction
+            self.scheduler.submit(CognitiveTask(
+                task_type=CognitiveTaskType.CONCEPT_FORMATION,
+                domain=payload.get("topic", "general"),
+                source=message.source_node_id,
+                description=(
+                    f"Abstract patterns from {models_built} models "
+                    f"in '{payload.get('topic', '?')}'"
+                ),
+                uncertainty=0.5,
+                goal_relevance=0.4,
+                novelty=0.7,
+                expected_value=0.6,
+                payload=payload,
+            ))
+
+    async def _ingest_curiosity(self, message: Message) -> None:
+        """Create a cognitive task from a curiosity signal."""
+        payload = message.payload
+        priority_map = {"high": 0.8, "medium": 0.5, "low": 0.3}
+        priority_str = payload.get("priority", "medium")
+        self.scheduler.submit(CognitiveTask(
+            task_type=CognitiveTaskType.CURIOSITY,
+            domain=payload.get("domain", "general"),
+            source=message.source_node_id,
+            description=payload.get("question", "Unknown curiosity")[:200],
+            uncertainty=0.7,
+            goal_relevance=priority_map.get(priority_str, 0.5),
+            novelty=0.8,
+            expected_value=0.5,
+            payload=payload,
+        ))
+
+    async def _handle_next_task(self, message: Message) -> Message | None:
+        """Return the highest-priority cognitive task."""
+        task_type_str = message.payload.get("task_type")
+        claimer = message.payload.get("claimer")
+
+        task_type = None
+        if task_type_str:
+            try:
+                task_type = CognitiveTaskType(task_type_str)
+            except ValueError:
+                pass
+
+        task = self.scheduler.next_task(task_type=task_type, claimer=claimer)
+        if task:
+            return message.create_response(task.to_dict())
+        return message.create_response({"task": None})
