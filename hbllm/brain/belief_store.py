@@ -332,16 +332,36 @@ class BeliefStore:
 
     def get_contested_beliefs(self) -> list[Belief]:
         """Get all beliefs with active contradictions."""
+        return self.get_beliefs_by_status(BeliefStatus.CONTESTED)
+
+    def get_beliefs_by_status(self, status: BeliefStatus) -> list[Belief]:
+        """Get all beliefs with a specific status."""
         self._lookups += 1
         try:
             with sqlite3.connect(self._db_path) as conn:
                 rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE status = 'contested' "
-                    "ORDER BY confidence ASC",
+                    "SELECT data FROM beliefs WHERE status = ? "
+                    "ORDER BY confidence DESC",
+                    (status.value,),
                 ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:
-            logger.debug("Failed to get contested beliefs: %s", e)
+            logger.debug("Failed to get beliefs by status %s: %s", status, e)
+            return []
+
+    def get_strongest(self, n: int = 10) -> list[Belief]:
+        """Get the highest-confidence active beliefs."""
+        self._lookups += 1
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute(
+                    "SELECT data FROM beliefs WHERE status = 'active' "
+                    "ORDER BY confidence DESC LIMIT ?",
+                    (n,),
+                ).fetchall()
+                return [Belief.from_dict(json.loads(r[0])) for r in rows]
+        except Exception as e:
+            logger.debug("Failed to get strongest beliefs: %s", e)
             return []
 
     def decay_beliefs(self, rate: float = 0.01, threshold: float = 0.05) -> int:

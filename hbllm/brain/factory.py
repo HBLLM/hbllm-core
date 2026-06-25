@@ -1149,6 +1149,7 @@ class BrainFactory:
                 )
 
         # ── Autonomous Learning Engine ────────────────────────────────────
+        _cognitive_graph_ref = None  # Will be wired to GoalManager later
         if cfg.inject_autonomous_learning:
             try:
                 from hbllm.brain.autonomous_learner import AutonomousLearner
@@ -1161,7 +1162,7 @@ class BrainFactory:
                 )
                 from hbllm.brain.experiment_engine import ExperimentEngine
                 from hbllm.brain.failure_analyzer import FailureAnalyzer
-                from hbllm.brain.learning_subsystem import LearningSubsystem
+                from hbllm.brain.learning_subsystem import CognitiveGraph
                 from hbllm.brain.meta_learner import MetaLearner
 
                 learning_data_dir = f"{cfg.data_dir}/learning"
@@ -1195,8 +1196,8 @@ class BrainFactory:
                 # Persistent belief storage (Phase 3) — use same instance
                 belief_store = concept_engine.belief_store
 
-                # Build shared LearningSubsystem container
-                learning_subsystem = LearningSubsystem(
+                # Build shared CognitiveGraph (was LearningSubsystem)
+                learning_subsystem = CognitiveGraph(
                     mechanism_store=mechanism_store,
                     failure_analyzer=FailureAnalyzer(),
                     belief_engine=belief_engine,
@@ -1206,6 +1207,9 @@ class BrainFactory:
                     belief_store=belief_store,
                     concept_engine=concept_engine,
                 )
+
+                # Store reference for later GoalManager wiring
+                _cognitive_graph_ref = learning_subsystem
 
                 # Wire LearningSubsystem into SkillEngine's LearningEventHandler
                 if skills is not None:
@@ -1231,7 +1235,7 @@ class BrainFactory:
                     "CausalModelBuilder, ExperimentEngine, "
                     "ContradictionDetector, BeliefRevision, "
                     "MetaLearner, ConceptFormation, "
-                    "LearningSubsystem (shared)"
+                    "CognitiveGraph (shared)"
                 )
             except Exception as e:
                 logger.warning("Autonomous Learning Engine init failed (non-critical): %s", e)
@@ -1547,6 +1551,10 @@ class BrainFactory:
 
         if cfg.inject_goals:
             brain.goal_manager = GoalManager(data_dir=cfg.data_dir)
+
+            # Wire GoalManager into CognitiveGraph if available
+            if _cognitive_graph_ref is not None:
+                _cognitive_graph_ref.goal_manager = brain.goal_manager
 
         if cfg.inject_self_model:
             brain.self_model = SelfModel(data_dir=cfg.data_dir)
