@@ -1187,11 +1187,13 @@ class BrainFactory:
                 concept_engine = ConceptFormationEngine(
                     llm=llm,
                     causal_model_builder=causal_builder,
+                    mechanism_store=mechanism_store,
+                    belief_store=BeliefStore(data_dir=learning_data_dir),
                     data_dir=learning_data_dir,
                 )
 
-                # Persistent belief storage (Phase 3)
-                belief_store = BeliefStore(data_dir=learning_data_dir)
+                # Persistent belief storage (Phase 3) — use same instance
+                belief_store = concept_engine.belief_store
 
                 # Build shared LearningSubsystem container
                 learning_subsystem = LearningSubsystem(

@@ -264,6 +264,15 @@ class MechanismStore:
             ).fetchall()
         return [self._row_to_mechanism(r) for r in rows]
 
+    def list_all(self, limit: int = 500) -> list[Mechanism]:
+        """Get all mechanisms, ordered by confidence descending."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM mechanisms ORDER BY confidence DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._row_to_mechanism(r) for r in rows]
+
     # ─── Update ──────────────────────────────────────────────────────
 
     def record_usage(self, mechanism_id: str, success: bool) -> None:
