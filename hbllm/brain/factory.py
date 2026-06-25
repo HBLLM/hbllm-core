@@ -1150,6 +1150,7 @@ class BrainFactory:
 
         # ── Autonomous Learning Engine ────────────────────────────────────
         _cognitive_graph_ref = None  # Will be wired to GoalManager later
+        _autonomous_learner_ref = None  # Will be wired to GoalManager later
         if cfg.inject_autonomous_learning:
             try:
                 from hbllm.brain.autonomous_learner import AutonomousLearner
@@ -1226,6 +1227,7 @@ class BrainFactory:
                     meta_learner=meta_learner,
                     concept_engine=concept_engine,
                 )
+                _autonomous_learner_ref = autonomous_learner
                 await _register_node(registry, autonomous_learner)
                 await autonomous_learner.start(message_bus)
                 nodes.append(autonomous_learner)
@@ -1552,9 +1554,11 @@ class BrainFactory:
         if cfg.inject_goals:
             brain.goal_manager = GoalManager(data_dir=cfg.data_dir)
 
-            # Wire GoalManager into CognitiveGraph if available
+            # Wire GoalManager into CognitiveGraph and AutonomousLearner
             if _cognitive_graph_ref is not None:
                 _cognitive_graph_ref.goal_manager = brain.goal_manager
+            if _autonomous_learner_ref is not None:
+                _autonomous_learner_ref.goal_manager = brain.goal_manager
 
         if cfg.inject_self_model:
             brain.self_model = SelfModel(data_dir=cfg.data_dir)
