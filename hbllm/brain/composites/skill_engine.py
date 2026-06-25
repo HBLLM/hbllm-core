@@ -195,3 +195,14 @@ class SkillEngine(Node):
     @property
     def learning_handler(self):
         return self._learning_handler
+
+    @property
+    def mechanism_store(self):
+        return self._mechanism_store
+
+    def inject_learning_subsystem(self, subsystem) -> None:
+        """Wire the shared LearningSubsystem into the learning handler.
+
+        Called by the factory after all learning components are created.
+        """
+        self._learning_handler.inject_subsystem(subsystem)

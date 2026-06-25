@@ -194,11 +194,13 @@ class AutonomousLearner(Node):
         system.idle        — learn during idle time
 
     Bus publications:
-        system.research.request  — trigger WebResearchNode
-        learning.progress        — progress updates
-        learning.complete        — finished learning
-        learning.contradiction   — contradiction detected
-        learning.weak_area       — weak area for CuriosityNode
+        system.research.request           — trigger WebResearchNode
+        learning.progress                 — progress updates
+        learning.complete                 — finished learning (legacy)
+        learning.session.complete         — rich session data for LearningEventHandler
+        learning.contradiction            — contradiction detected (legacy)
+        learning.contradiction.discovered — for LearningEventHandler (no echo)
+        learning.weak_area                — weak area for CuriosityNode
     """
 
     def __init__(
@@ -469,11 +471,11 @@ class AutonomousLearner(Node):
                     )
                     if contradiction is not None:
                         goal.contradictions_found += 1
-                        # Route to belief revision
+                        # Route to belief revision (AutonomousLearner handles this directly)
                         if self.belief_engine is not None:
                             await self.belief_engine.handle_contradiction(contradiction)
                             goal.contradictions_resolved += 1
-                        # Publish for CuriosityNode
+                        # Publish for CuriosityNode (legacy)
                         await self.publish(
                             "learning.contradiction",
                             Message(
@@ -481,6 +483,22 @@ class AutonomousLearner(Node):
                                 source_node_id=self.node_id,
                                 topic="learning.contradiction",
                                 payload=contradiction.to_dict(),
+                            ),
+                        )
+                        # Emit for LearningEventHandler (log only — NO belief update)
+                        await self.publish(
+                            "learning.contradiction.discovered",
+                            Message(
+                                type=MessageType.EVENT,
+                                source_node_id=self.node_id,
+                                topic="learning.contradiction.discovered",
+                                payload={
+                                    "claim_a": contradiction.existing_claim,
+                                    "claim_b": contradiction.new_claim,
+                                    "concept": concept,
+                                    "severity": contradiction.severity,
+                                    "source": "autonomous_research",
+                                },
                             ),
                         )
             except Exception as e:
@@ -631,8 +649,15 @@ class AutonomousLearner(Node):
             pass
 
     async def _publish_complete(self, goal: LearningGoal) -> None:
-        """Publish learning completion."""
+        """Publish learning completion.
+
+        Emits two events:
+        1. learning.complete — legacy, full goal dict
+        2. learning.session.complete — for LearningEventHandler
+           (mechanisms only, NO belief/meta — already handled above)
+        """
         try:
+            # Legacy event
             await self.publish(
                 "learning.complete",
                 Message(
@@ -640,6 +665,33 @@ class AutonomousLearner(Node):
                     source_node_id=self.node_id,
                     topic="learning.complete",
                     payload=goal.to_dict(),
+                ),
+            )
+            # New event for LearningEventHandler (no echo risk)
+            duration = (
+                (goal.completed_at - goal.started_at)
+                if goal.completed_at and goal.started_at
+                else 0.0
+            )
+            await self.publish(
+                "learning.session.complete",
+                Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    topic="learning.session.complete",
+                    payload={
+                        "session_id": goal.goal_id,
+                        "topic": goal.topic,
+                        "concepts_learned": goal.needs_completed,
+                        "causal_models_built": goal.causal_models_built,
+                        "confidence_before": 0.0,
+                        "confidence_after": goal.current_confidence,
+                        "experiments_run": goal.experiments_run,
+                        "contradictions_found": goal.contradictions_found,
+                        "contradictions_resolved": goal.contradictions_resolved,
+                        "duration_s": duration,
+                        "status": goal.status,
+                    },
                 ),
             )
         except Exception:

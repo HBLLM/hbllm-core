@@ -1159,13 +1159,21 @@ class BrainFactory:
                     ContradictionDetector,
                 )
                 from hbllm.brain.experiment_engine import ExperimentEngine
+                from hbllm.brain.failure_analyzer import FailureAnalyzer
+                from hbllm.brain.learning_subsystem import LearningSubsystem
                 from hbllm.brain.meta_learner import MetaLearner
 
                 learning_data_dir = f"{cfg.data_dir}/learning"
 
+                # Get mechanism_store from SkillEngine if available
+                mechanism_store = (
+                    skills.mechanism_store if skills is not None else None
+                )
+
                 # Build learning subsystems
                 causal_builder = CausalModelBuilder(
                     llm=llm,
+                    mechanism_store=mechanism_store,
                     data_dir=learning_data_dir,
                 )
                 experiment_engine = ExperimentEngine(
@@ -1180,6 +1188,20 @@ class BrainFactory:
                     causal_model_builder=causal_builder,
                     data_dir=learning_data_dir,
                 )
+
+                # Build shared LearningSubsystem container
+                learning_subsystem = LearningSubsystem(
+                    mechanism_store=mechanism_store,
+                    failure_analyzer=FailureAnalyzer(),
+                    belief_engine=belief_engine,
+                    contradiction_detector=contradiction_detector,
+                    meta_learner=meta_learner,
+                    causal_model_builder=causal_builder,
+                )
+
+                # Wire LearningSubsystem into SkillEngine's LearningEventHandler
+                if skills is not None:
+                    skills.inject_learning_subsystem(learning_subsystem)
 
                 # Create and register the orchestrator node
                 autonomous_learner = AutonomousLearner(
@@ -1200,10 +1222,12 @@ class BrainFactory:
                     "Autonomous Learning Engine wired: "
                     "CausalModelBuilder, ExperimentEngine, "
                     "ContradictionDetector, BeliefRevision, "
-                    "MetaLearner, ConceptFormation"
+                    "MetaLearner, ConceptFormation, "
+                    "LearningSubsystem (shared)"
                 )
             except Exception as e:
                 logger.warning("Autonomous Learning Engine init failed (non-critical): %s", e)
+
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:
