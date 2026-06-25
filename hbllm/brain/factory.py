@@ -1152,6 +1152,7 @@ class BrainFactory:
         if cfg.inject_autonomous_learning:
             try:
                 from hbllm.brain.autonomous_learner import AutonomousLearner
+                from hbllm.brain.belief_store import BeliefStore
                 from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
                 from hbllm.brain.concept_formation import ConceptFormationEngine
                 from hbllm.brain.contradiction_detector import (
@@ -1189,6 +1190,9 @@ class BrainFactory:
                     data_dir=learning_data_dir,
                 )
 
+                # Persistent belief storage (Phase 3)
+                belief_store = BeliefStore(data_dir=learning_data_dir)
+
                 # Build shared LearningSubsystem container
                 learning_subsystem = LearningSubsystem(
                     mechanism_store=mechanism_store,
@@ -1197,6 +1201,8 @@ class BrainFactory:
                     contradiction_detector=contradiction_detector,
                     meta_learner=meta_learner,
                     causal_model_builder=causal_builder,
+                    belief_store=belief_store,
+                    concept_engine=concept_engine,
                 )
 
                 # Wire LearningSubsystem into SkillEngine's LearningEventHandler
