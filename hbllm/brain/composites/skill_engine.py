@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
+    from hbllm.brain.mechanism_store import MechanismStore
     from hbllm.brain.provider_adapter import ProviderLLM
     from hbllm.brain.skill_registry import SkillRegistry
     from hbllm.network.messages import Message
@@ -34,6 +35,7 @@ class SkillEngine(Node):
         *,
         llm: ProviderLLM | None = None,
         skill_registry: SkillRegistry | None = None,
+        mechanism_store: MechanismStore | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -44,11 +46,13 @@ class SkillEngine(Node):
                 "skill_intelligence",
                 "failure_analysis",
                 "rule_extraction",
+                "experience_learning",
             ],
         )
-        self.description = "Unified skill lifecycle (compile → induce → govern → repair → rules)"
+        self.description = "Unified skill lifecycle (compile → induce → govern → repair → rules → learn)"
         self._llm = llm
         self._skill_registry = skill_registry
+        self._mechanism_store = mechanism_store
 
         # Sub-nodes
         self._compiler: Any = None
@@ -56,9 +60,12 @@ class SkillEngine(Node):
         self._induction: Any = None
         self._failure_analyzer: Any = None
         self._rule_extractor: Any = None
+        self._learning_handler: Any = None
 
     async def on_start(self) -> None:
+        from hbllm.brain.failure_analyzer import FailureAnalyzer
         from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
+        from hbllm.brain.learning_event_handler import LearningEventHandler
         from hbllm.brain.rule_extractor import RuleExtractorNode
         from hbllm.brain.skill_compiler_node import SkillCompilerNode
         from hbllm.brain.skill_induction_node import SkillInductionNode
@@ -74,6 +81,7 @@ class SkillEngine(Node):
         self._intelligence = SkillIntelligenceNode(
             node_id=f"{self.node_id}.intelligence",
             skill_registry=self._skill_registry,  # type: ignore[arg-type]
+            mechanism_store=self._mechanism_store,
         )
         self._intelligence.node_identity = self.node_identity
 
@@ -93,6 +101,14 @@ class SkillEngine(Node):
         )
         self._rule_extractor.node_identity = self.node_identity
 
+        # Learning Event Handler — bridges experience to learning
+        self._learning_handler = LearningEventHandler(
+            node_id=f"{self.node_id}.learning",
+            mechanism_store=self._mechanism_store,
+            failure_analyzer=FailureAnalyzer(),
+        )
+        self._learning_handler.node_identity = self.node_identity
+
         bus = self.bus
         for sub in [
             self._compiler,
@@ -100,12 +116,13 @@ class SkillEngine(Node):
             self._induction,
             self._failure_analyzer,
             self._rule_extractor,
+            self._learning_handler,
         ]:
             await sub.start(bus)
 
         logger.info(
             "SkillEngine started with sub-nodes: compiler, intelligence, "
-            "induction, failure_analyzer, rule_extractor"
+            "induction, failure_analyzer, rule_extractor, learning_handler"
         )
 
     async def on_stop(self) -> None:
@@ -115,6 +132,7 @@ class SkillEngine(Node):
             self._induction,
             self._failure_analyzer,
             self._rule_extractor,
+            self._learning_handler,
         ]:
             if sub is not None:
                 await sub.stop()
@@ -131,6 +149,7 @@ class SkillEngine(Node):
             self._induction,
             self._failure_analyzer,
             self._rule_extractor,
+            self._learning_handler,
         ]
         sub_healths = []
         for sub in subs:
@@ -172,3 +191,7 @@ class SkillEngine(Node):
     @property
     def rule_extractor(self):
         return self._rule_extractor
+
+    @property
+    def learning_handler(self):
+        return self._learning_handler

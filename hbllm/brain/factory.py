@@ -1078,10 +1078,17 @@ class BrainFactory:
                 data_dir=cfg.data_dir,
             )
 
-        # 5. SkillEngine
+        # 5. SkillEngine + MechanismStore
         skills = None
         if cfg.inject_skill_engine:
-            skills = SkillEngine(llm=llm, skill_registry=skill_registry)
+            from hbllm.brain.mechanism_store import MechanismStore
+
+            mechanism_store = MechanismStore(data_dir=cfg.data_dir)
+            skills = SkillEngine(
+                llm=llm,
+                skill_registry=skill_registry,
+                mechanism_store=mechanism_store,
+            )
 
         # 6. ResourceManager
         resources = None
@@ -1686,11 +1693,21 @@ class BrainFactory:
         if cfg.inject_executive_cortex:
             from hbllm.brain.executive_cortex import ExecutiveCortex
 
+            _goal_mgr = getattr(brain, "goal_manager", None)
+            _load_mgr = getattr(brain, "load_manager", None)
+            _attn_mgr = getattr(brain, "attention_manager", None)
+            if not _goal_mgr:
+                logger.debug("[Factory] ExecutiveCortex: goal_manager not available on brain")
+            if not _load_mgr:
+                logger.debug("[Factory] ExecutiveCortex: load_manager not available on brain")
+            if not _attn_mgr:
+                logger.debug("[Factory] ExecutiveCortex: attention_manager not available on brain")
+
             executive_cortex = ExecutiveCortex(
-                goal_manager=getattr(brain, "goal_manager", None),
-                load_manager=getattr(brain, "load_manager", None),
+                goal_manager=_goal_mgr,
+                load_manager=_load_mgr,
                 attention_system=None,
-                attention_manager=getattr(brain, "attention_manager", None),
+                attention_manager=_attn_mgr,
                 state_machine=None,
                 user_model=user_model_engine,
             )
