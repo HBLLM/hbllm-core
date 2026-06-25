@@ -1,0 +1,255 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/Dumith_Salinda/Projects/HBLLM/core
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, asyncio-1.3.0
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1620 items
+
+tests/modules/test_adapter_registry.py ................................. [  2%]
+......                                                                   [  2%]
+tests/test_adaptive_context.py ...                                       [  2%]
+tests/test_advanced_cognitive.py .....................                   [  3%]
+tests/test_agentic_chains.py ...........                                 [  4%]
+tests/test_api_endpoints.py .........                                    [  5%]
+tests/test_api_node.py ..                                                [  5%]
+tests/test_api_server.py ....                                            [  5%]
+tests/test_audio_streaming.py ......                                     [  5%]
+tests/test_audio_voice.py ........                                       [  6%]
+tests/test_backup.py ................                                    [  7%]
+tests/test_benchmarks.py ..........                                      [  7%]
+tests/test_brain_cognitive_subsystems.py ......................          [  9%]
+tests/test_brain_factory.py .......                                      [  9%]
+tests/test_brain_state.py ...............                                [ 10%]
+tests/test_byzantine_stress.py .                                         [ 10%]
+tests/test_circuit_breaker.py ................                           [ 11%]
+tests/test_cluster_config.py ..................                          [ 12%]
+tests/test_cognition_optimizer.py ................                       [ 13%]
+tests/test_cognitive_awareness.py ..............                         [ 14%]
+tests/test_cognitive_flow.py ....                                        [ 14%]
+tests/test_cognitive_training.py ....................................... [ 17%]
+....                                                                     [ 17%]
+tests/test_collective.py ........                                        [ 18%]
+tests/test_composite_governance_guard.py ..........                      [ 18%]
+tests/test_composite_learning_loop.py .............                      [ 19%]
+tests/test_composite_memory_system.py .............                      [ 20%]
+tests/test_composite_reasoning_core.py .............                     [ 21%]
+tests/test_composite_resource_manager.py ..........                      [ 21%]
+tests/test_composite_social_layer.py ...........                         [ 22%]
+tests/test_constitutional_principles.py .....                            [ 22%]
+tests/test_critic_node.py .                                              [ 22%]
+tests/test_curiosity.py ..........                                       [ 23%]
+tests/test_data.py .......................                               [ 24%]
+tests/test_decision_node.py ........                                     [ 25%]
+tests/test_deep_reflection.py ......................                     [ 26%]
+tests/test_downloader.py ...........................                     [ 28%]
+tests/test_dpo.py ..                                                     [ 28%]
+tests/test_e2e_cognitive.py .....                                        [ 28%]
+tests/test_e2e_pipeline.py ......                                        [ 29%]
+tests/test_e2e_tenant.py ....................                            [ 30%]
+tests/test_enterprise.py ....................                            [ 31%]
+tests/test_episodic_memory.py ...........                                [ 32%]
+tests/test_evaluation_node.py .................                          [ 33%]
+tests/test_execution_node.py .............                               [ 34%]
+tests/test_export_dpo.py ...................                             [ 35%]
+tests/test_failure_analyzer.py ......................                    [ 36%]
+tests/test_fallback_chain.py ........                                    [ 37%]
+tests/test_feedback.py ....                                              [ 37%]
+tests/test_got_planner.py ...........                                    [ 38%]
+tests/test_governance.py ..........................................      [ 40%]
+tests/test_graphrag_clustering.py .                                      [ 40%]
+tests/test_grpc_bus.py ......                                            [ 41%]
+tests/test_hf_adapter.py ....................                            [ 42%]
+tests/test_hierarchical.py ...                                           [ 42%]
+tests/test_hybrid_quant.py ..                                            [ 42%]
+tests/test_hybrid_search.py ................                             [ 43%]
+tests/test_identity.py ..........                                        [ 44%]
+tests/test_identity_isolation.py ....................                    [ 45%]
+tests/test_integration.py .......                                        [ 45%]
+tests/test_intelligence_loop.py .............................            [ 47%]
+tests/test_interaction_miner.py ......                                   [ 48%]
+tests/test_iot_mqtt_node.py ...........                                  [ 48%]
+tests/test_knowledge_base.py ..................                          [ 49%]
+tests/test_knowledge_graph.py .................                          [ 50%]
+tests/test_learner_node.py ...                                           [ 51%]
+tests/test_llm_interface.py ........                                     [ 51%]
+tests/test_load_balancer.py .........                                    [ 52%]
+tests/test_lora.py ..                                                    [ 52%]
+tests/test_lora_concurrency.py .                                         [ 52%]
+tests/test_lora_hotswap.py ..                                            [ 52%]
+tests/test_lora_loop.py ......                                           [ 52%]
+tests/test_lora_moe_blending.py .                                        [ 52%]
+tests/test_mcp.py .................                                      [ 53%]
+tests/test_memory_persistence.py ............                            [ 54%]
+tests/test_meta_reasoning.py .                                           [ 54%]
+tests/test_model.py ...................................................  [ 57%]
+tests/test_moe.py ...                                                    [ 58%]
+tests/test_multi_agent.py ........................                       [ 59%]
+tests/test_multi_tenant.py .                                             [ 59%]
+tests/test_multi_tenant_isolation.py .                                   [ 59%]
+tests/test_multimodal_pipeline.py .....                                  [ 60%]
+tests/test_nats_bus.py ..sss                                             [ 60%]
+tests/test_network.py .................................................. [ 63%]
+..                                                                       [ 63%]
+tests/test_onnx.py .                                                     [ 63%]
+tests/test_otel_tracing.py ......................                        [ 64%]
+tests/test_owner_rules.py .........................                      [ 66%]
+tests/test_pipeline.py ....................                              [ 67%]
+tests/test_plugin_bundle.py .............................                [ 69%]
+tests/test_plugin_discovery.py .                                         [ 69%]
+tests/test_plugin_manager.py ..........                                  [ 70%]
+tests/test_plugin_sdk.py .                                               [ 70%]
+tests/test_policy_optimizer.py ..........                                [ 70%]
+tests/test_prm.py ...                                                    [ 71%]
+tests/test_proactive_policy.py .                                         [ 71%]
+tests/test_procedural.py .......                                         [ 71%]
+tests/test_protobuf.py .......                                           [ 71%]
+tests/test_provider_adapter.py ............                              [ 72%]
+tests/test_redis_bus.py ss                                               [ 72%]
+tests/test_resilience.py ........                                        [ 73%]
+tests/test_resource_intelligence.py .................................... [ 75%]
+.                                                                        [ 75%]
+tests/test_revision_confidence.py ..........                             [ 76%]
+tests/test_reward_model.py ............                                  [ 76%]
+tests/test_ros2_node.py ..............                                   [ 77%]
+tests/test_router_node.py .                                              [ 77%]
+tests/test_router_unknown.py .                                           [ 77%]
+tests/test_rule_extractor.py .............                               [ 78%]
+tests/test_scheduler_node.py .....                                       [ 79%]
+tests/test_scorer.py ..........                                          [ 79%]
+tests/test_secure_execution.py ...                                       [ 79%]
+tests/test_self_model.py ...................                             [ 81%]
+tests/test_semantic_memory.py .............                              [ 81%]
+tests/test_sentinel.py .............                                     [ 82%]
+tests/test_sft_eval_embeddings.py .................................      [ 84%]
+tests/test_simulation.py ........                                        [ 85%]
+tests/test_skill_induction.py ...............                            [ 86%]
+tests/test_skill_intelligence.py .........                               [ 86%]
+tests/test_sleep_cycle.py .......                                        [ 87%]
+tests/test_sliding_window_direct.py ............                         [ 87%]
+tests/test_speculative.py .                                              [ 87%]
+tests/test_streaming.py .....                                            [ 88%]
+tests/test_structured_logging.py .........                               [ 88%]
+tests/test_swarm_handoffs.py .                                           [ 88%]
+tests/test_synthesizer.py .                                              [ 88%]
+tests/test_tenant_memory.py ..                                           [ 89%]
+tests/test_tokenizer.py ............                                     [ 89%]
+tests/test_tool_memory.py ......                                         [ 90%]
+tests/test_tool_registry.py ...............                              [ 91%]
+tests/test_tool_resilience.py ..................................         [ 93%]
+tests/test_tracing.py .......                                            [ 93%]
+tests/test_training.py ....................                              [ 94%]
+tests/test_training_smoke.py ...........                                 [ 95%]
+tests/test_value_memory.py .......                                       [ 95%]
+tests/test_vision_ocr.py ...                                             [ 96%]
+tests/test_web_research.py ..........................                    [ 97%]
+tests/test_weighted_domains.py ............................              [ 99%]
+tests/test_workspace_recovery.py ...                                     [ 99%]
+tests/test_workspace_verification.py ...                                 [ 99%]
+tests/test_world_model.py ...                                            [100%]
+
+=============================== warnings summary ===============================
+tests/test_cognitive_flow.py::test_full_cognitive_loop
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+tests/test_cognitive_flow.py::test_full_cognitive_loop
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+tests/test_hierarchical.py::test_sync_endpoints
+  /usr/local/lib/python3.11/site-packages/jwt/api_jwt.py:153: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_hierarchical.py::test_sync_endpoints
+  /usr/local/lib/python3.11/site-packages/jwt/api_jwt.py:371: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_intelligence_loop.py::TestBenchmarkTaskDatasets::test_reasoning_tasks_loadable
+  tests/test_intelligence_loop.py:617: PytestWarning: The test <Function test_reasoning_tasks_loadable> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_reasoning_tasks_loadable(self, tasks_dir):
+
+tests/test_intelligence_loop.py::TestBenchmarkTaskDatasets::test_coding_tasks_loadable
+  tests/test_intelligence_loop.py:629: PytestWarning: The test <Function test_coding_tasks_loadable> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_coding_tasks_loadable(self, tasks_dir):
+
+tests/test_intelligence_loop.py::TestBenchmarkTaskDatasets::test_planning_tasks_loadable
+  tests/test_intelligence_loop.py:637: PytestWarning: The test <Function test_planning_tasks_loadable> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_planning_tasks_loadable(self, tasks_dir):
+
+tests/test_intelligence_loop.py::TestBenchmarkTaskDatasets::test_memory_tasks_loadable
+  tests/test_intelligence_loop.py:645: PytestWarning: The test <Function test_memory_tasks_loadable> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_memory_tasks_loadable(self, tasks_dir):
+
+tests/test_intelligence_loop.py::TestBenchmarkTaskDatasets::test_all_tasks_have_grading_rubric
+  tests/test_intelligence_loop.py:653: PytestWarning: The test <Function test_all_tasks_have_grading_rubric> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_all_tasks_have_grading_rubric(self, tasks_dir):
+
+tests/test_llm_interface.py::TestLLMInterfaceJSONExtraction::test_extract_json_markdown_block
+  tests/test_llm_interface.py:87: PytestWarning: The test <Function test_extract_json_markdown_block> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_extract_json_markdown_block(self):
+
+tests/test_llm_interface.py::TestLLMInterfaceJSONExtraction::test_extract_json_raw_braces
+  tests/test_llm_interface.py:93: PytestWarning: The test <Function test_extract_json_raw_braces> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_extract_json_raw_braces(self):
+
+tests/test_llm_interface.py::TestLLMInterfaceJSONExtraction::test_extract_json_invalid
+  tests/test_llm_interface.py:99: PytestWarning: The test <Function test_extract_json_invalid> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_extract_json_invalid(self):
+
+tests/test_multi_agent.py::TestDataModels::test_knowledge_digest_checksum
+  tests/test_multi_agent.py:87: PytestWarning: The test <Function test_knowledge_digest_checksum> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_knowledge_digest_checksum(self):
+
+tests/test_multi_agent.py::TestDataModels::test_agent_profile_round_trip
+  tests/test_multi_agent.py:93: PytestWarning: The test <Function test_agent_profile_round_trip> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_agent_profile_round_trip(self):
+
+tests/test_multi_agent.py::TestDataModels::test_vote_request_to_dict
+  tests/test_multi_agent.py:106: PytestWarning: The test <Function test_vote_request_to_dict> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_vote_request_to_dict(self):
+
+tests/test_multi_agent.py::TestDataModels::test_vote_response_round_trip
+  tests/test_multi_agent.py:113: PytestWarning: The test <Function test_vote_response_round_trip> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_vote_response_round_trip(self):
+
+tests/test_multi_agent.py::TestDataModels::test_delegation_result_defaults
+  tests/test_multi_agent.py:125: PytestWarning: The test <Function test_delegation_result_defaults> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_delegation_result_defaults(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_record_outcome_stores_history
+  tests/test_resource_intelligence.py:231: PytestWarning: The test <Function test_record_outcome_stores_history> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_record_outcome_stores_history(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_calibration_error_computed
+  tests/test_resource_intelligence.py:241: PytestWarning: The test <Function test_calibration_error_computed> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_calibration_error_computed(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_domain_adjustment_overconfident
+  tests/test_resource_intelligence.py:252: PytestWarning: The test <Function test_domain_adjustment_overconfident> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_domain_adjustment_overconfident(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_calibrated_score_adjusts
+  tests/test_resource_intelligence.py:262: PytestWarning: The test <Function test_calibrated_score_adjusts> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_calibrated_score_adjusts(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_calibrated_score_bounded
+  tests/test_resource_intelligence.py:278: PytestWarning: The test <Function test_calibrated_score_bounded> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_calibrated_score_bounded(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_calibration_stats_structure
+  tests/test_resource_intelligence.py:288: PytestWarning: The test <Function test_calibration_stats_structure> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_calibration_stats_structure(self):
+
+tests/test_resource_intelligence.py::TestConfidenceEstimatorV2::test_no_history_returns_empty_stats
+  tests/test_resource_intelligence.py:300: PytestWarning: The test <Function test_no_history_returns_empty_stats> is marked with '@pytest.mark.asyncio' but it is not an async function. Please remove the asyncio mark. If the test is not marked explicitly, check for global marks applied via 'pytestmark'.
+    def test_no_history_returns_empty_stats(self):
+
+tests/test_sft_eval_embeddings.py::TestEmbeddingTrainer::test_encode_via_model
+  /usr/local/lib/python3.11/site-packages/torch/nn/modules/transformer.py:384: UserWarning: The PyTorch API of nested tensors is in prototype stage and will change in the near future. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/aten/src/ATen/NestedTensorImpl.cpp:179.)
+    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========== 1615 passed, 5 skipped, 25 warnings in 1523.40s (0:25:23) ===========
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

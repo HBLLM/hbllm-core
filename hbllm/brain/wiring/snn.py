@@ -13,10 +13,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from hbllm.brain.snn.neuromodulation import NeuromodulationEngine
+
 logger = logging.getLogger(__name__)
 
 
-def wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
+def wire_comprehension_stream(
+    router_node: Any,
+    domain_registry: Any,
+    neuromodulator: NeuromodulationEngine | None = None,
+) -> None:
     """Wire the Cognitive Stream comprehension pipeline into a RouterNode.
 
     Creates a ComprehensionStream with:
@@ -55,7 +61,11 @@ def wire_comprehension_stream(router_node: Any, domain_registry: Any) -> None:
             )
             # Create a temporary ensemble to get static weights
             _tmp = ComprehensionEnsemble(domain="general")
-            plastic_weights = PlasticWeightMatrix(_tmp._signal_weights, stdp_rule)
+            plastic_weights = PlasticWeightMatrix(
+                _tmp._signal_weights,
+                stdp_rule,
+                neuromodulator=neuromodulator,
+            )
             logger.info("STDP plasticity enabled for ComprehensionEnsemble")
         except Exception as e:
             logger.debug("STDP plasticity not available (non-fatal): %s", e)
@@ -127,6 +137,7 @@ def wire_expression_stream(
     router_node: Any | None = None,
     llm: Any | None = None,
     dual_router: Any | None = None,
+    neuromodulator: NeuromodulationEngine | None = None,
 ) -> None:
     """Wire the expression-side Cognitive Stream into a DecisionNode.
 
@@ -168,7 +179,11 @@ def wire_expression_stream(
                 w_min=0.0,
                 w_max=2.0,
             )
-            ctrl_plastic = PlasticWeightMatrix(controller._static_weights, stdp_rule)
+            ctrl_plastic = PlasticWeightMatrix(
+                controller._static_weights,
+                stdp_rule,
+                neuromodulator=neuromodulator,
+            )
             controller.plastic_weights = ctrl_plastic
             logger.info("STDP plasticity enabled for ThoughtController")
         except Exception as e:

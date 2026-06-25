@@ -158,6 +158,9 @@ class CuriosityNode(Node):
         await self.bus.subscribe("system.experience", self._handle_experience_for_prediction)
         # v3: UserModel integration — weight curiosity by user interests
         await self.bus.subscribe("user.model.updated", self._handle_user_model_updated)
+        # v5: Autonomous Learning — contradictions and weak areas trigger curiosity
+        await self.bus.subscribe("learning.contradiction", self._handle_learning_contradiction)
+        await self.bus.subscribe("learning.weak_area", self._handle_learning_weak_area)
 
         # Start predictive exploration loop
         self._predict_loop_task = asyncio.create_task(self._predictive_exploration_loop())
@@ -490,3 +493,46 @@ class CuriosityNode(Node):
             self._prediction_cache = self._prediction_cache[-50:]
 
         return generated
+
+    # ── Autonomous Learning Integration ──────────────────────────────────
+
+    async def _handle_learning_contradiction(self, message: Message) -> None:
+        """Convert learning contradictions into curiosity goals.
+
+        When the autonomous learner detects contradictory knowledge,
+        curiosity triggers a deeper investigation.
+        """
+        concept = message.payload.get("concept", "")
+        if not concept:
+            return
+
+        topic = f"Resolve contradiction about {concept}"
+        self.note_uncertainty(
+            topic=topic,
+            confidence=0.3,
+            metadata={"source": "learning.contradiction", **message.payload},
+        )
+        logger.info("[CuriosityNode] Contradiction-driven curiosity: '%s'", concept)
+
+    async def _handle_learning_weak_area(self, message: Message) -> None:
+        """Convert weak learning areas into high-priority curiosity goals.
+
+        When the autonomous learner finds weak understanding,
+        curiosity schedules re-learning with higher urgency.
+        """
+        concept = message.payload.get("concept", "")
+        score = message.payload.get("score", 0.0)
+        if not concept:
+            return
+
+        topic = f"Deepen understanding of {concept}"
+        self.note_uncertainty(
+            topic=topic,
+            confidence=score,
+            metadata={"source": "learning.weak_area", **message.payload},
+        )
+        logger.info(
+            "[CuriosityNode] Weak-area curiosity: '%s' (score=%.2f)",
+            concept,
+            score,
+        )

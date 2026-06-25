@@ -158,6 +158,7 @@ class STDPRule:
         post_fired: bool,
         timestamp: float,
         global_step: int = 0,
+        reward_signal: float = 1.0,
     ) -> float:
         """Apply STDP update to a connection.
 
@@ -170,6 +171,11 @@ class STDPRule:
             post_fired: Whether the target neuron spiked.
             timestamp: Current timestamp in seconds.
             global_step: Global step counter for decay tracking.
+            reward_signal: Reward modulation factor in [-1.0, 2.0].
+                1.0 = standard Hebbian STDP (default, backward compatible).
+                >1.0 = amplified learning (high reward).
+                0.0 = no learning.
+                <0.0 = inverted learning (punishment).
 
         Returns:
             The weight delta applied (can be 0.0 if no update).
@@ -206,6 +212,12 @@ class STDPRule:
         else:
             # Simultaneous — small potentiation
             delta = self.learning_rate * 0.5
+
+        # Apply reward modulation (R-STDP)
+        # reward_signal=1.0 → standard STDP (backward compatible)
+        # reward_signal>1.0 → amplified learning
+        # reward_signal<0 → inverted (anti-Hebbian punishment)
+        delta *= reward_signal
 
         # Apply update
         old_weight = conn.weight
@@ -255,11 +267,13 @@ class PlasticWeightMatrix:
         stdp_rule: STDPRule,
         decay_interval: int = 100,
         decay_rate: float = 0.01,
+        neuromodulator: Any | None = None,
     ) -> None:
         self._static_weights = static_weights
         self._stdp_rule = stdp_rule
         self._decay_interval = decay_interval
         self._decay_rate = decay_rate
+        self._neuromodulator = neuromodulator  # Optional NeuromodulationEngine
         self._global_step = 0
 
         # Initialize SynapticConnections from static weights
@@ -350,6 +364,7 @@ class PlasticWeightMatrix:
                     post_fired=True,
                     timestamp=timestamp,
                     global_step=self._global_step,
+                    reward_signal=self._get_reward_signal(),
                 )
 
                 if delta != 0.0:
@@ -372,6 +387,7 @@ class PlasticWeightMatrix:
                         post_fired=False,
                         timestamp=timestamp,
                         global_step=self._global_step,
+                        reward_signal=self._get_reward_signal(),
                     )
                     if delta != 0.0:
                         key = f"{channel}.{signal}"
@@ -397,6 +413,68 @@ class PlasticWeightMatrix:
                     # Nudge toward base weight
                     diff = conn.base_weight - conn.weight
                     conn.weight += diff * self._decay_rate
+
+    def _get_reward_signal(self) -> float:
+        """Get the current reward modulation factor from neuromodulator.
+
+        Returns 1.0 (standard STDP) if no neuromodulator is connected.
+        """
+        if self._neuromodulator is None:
+            return 1.0
+        try:
+            return self._neuromodulator.get_learning_rate_factor()
+        except Exception:
+            return 1.0
+
+    def prune_weak_connections(self, threshold: float = 0.05) -> int:
+        """Prune connections weaker than threshold (sleep consolidation).
+
+        Resets weak connections to their base weight, effectively
+        "forgetting" spurious learned patterns.
+
+        Args:
+            threshold: Connections with abs(weight) below this are pruned.
+
+        Returns:
+            Number of connections pruned.
+        """
+        pruned = 0
+        for channel_conns in self._connections.values():
+            for conn in channel_conns.values():
+                if abs(conn.weight) < threshold:
+                    conn.weight = conn.base_weight
+                    conn.update_count = 0
+                    conn.last_reinforced_step = 0
+                    pruned += 1
+        if pruned > 0:
+            logger.info("Pruned %d weak SNN connections (threshold=%.3f)", pruned, threshold)
+        return pruned
+
+    def consolidate(self, strengthen_factor: float = 0.1) -> int:
+        """Consolidate strong connections (sleep consolidation).
+
+        Nudges well-reinforced connections slightly toward their
+        current (learned) values, making them more permanent.
+
+        Args:
+            strengthen_factor: How much to lock in learned weights (0.0–1.0).
+
+        Returns:
+            Number of connections consolidated.
+        """
+        consolidated = 0
+        for channel_conns in self._connections.values():
+            for conn in channel_conns.values():
+                drift = abs(conn.weight - conn.base_weight)
+                if drift > 0.01 and conn.update_count > 3:
+                    # Move base_weight toward learned weight
+                    conn.base_weight += (conn.weight - conn.base_weight) * strengthen_factor
+                    consolidated += 1
+        if consolidated > 0:
+            logger.info(
+                "Consolidated %d SNN connections (strengthen=%.2f)", consolidated, strengthen_factor
+            )
+        return consolidated
 
     def get_weight_drift(self) -> dict[str, float]:
         """Get the total drift from static weights for each connection.

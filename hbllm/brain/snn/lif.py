@@ -29,6 +29,11 @@ class LIFConfig:
     decay_half_life: float = 1.0  # seconds; time for potential to decay by 50%
     reset_potential: float = 0.0
     refractory_period: float = 0.0  # seconds; cooldown period after firing
+    is_inhibitory: bool = False  # If True, this neuron's output current is inverted
+
+    # Homeostatic plasticity: auto-adjust threshold to maintain target firing rate
+    target_firing_rate: float = 0.0  # 0.0 = disabled; e.g., 0.1 = fire 10% of steps
+    adaptation_rate: float = 0.01  # How fast threshold adapts per step
 
 
 class LIFNeuron:
@@ -46,6 +51,11 @@ class LIFNeuron:
         self.last_reported_v = 0.0
         self.last_update_time: float | None = None
         self.refractory_time_remaining: float = 0.0
+
+        # Homeostatic state
+        self._firing_history: list[bool] = []  # Recent firing history (ring buffer)
+        self._homeostatic_window: int = 50  # Steps to average over
+        self._effective_threshold: float = config.threshold  # May drift via homeostasis
 
     def step(self, current: float, timestamp: float) -> SpikeEvent:
         """
@@ -81,17 +91,33 @@ class LIFNeuron:
         if self.refractory_time_remaining <= 0:
             self.v += current
 
-        # 4. Check if threshold is crossed
+        # 4. Check if threshold is crossed (use effective threshold for homeostasis)
         fired = False
         strength = 0.0
-        if self.v >= self.config.threshold:
+        if self.v >= self._effective_threshold:
             fired = True
             # Strength is proportional to the overshoot ratio
-            strength = self.v / self.config.threshold
+            strength = self.v / self._effective_threshold
             # Reset membrane potential
             self.v = self.config.reset_potential
             # Activate refractory period
             self.refractory_time_remaining = self.config.refractory_period
+
+        # 5. Homeostatic plasticity: adapt threshold to maintain target firing rate
+        if self.config.target_firing_rate > 0.0:
+            self._firing_history.append(fired)
+            if len(self._firing_history) > self._homeostatic_window:
+                self._firing_history = self._firing_history[-self._homeostatic_window :]
+            if len(self._firing_history) >= self._homeostatic_window:
+                actual_rate = sum(self._firing_history) / len(self._firing_history)
+                error = actual_rate - self.config.target_firing_rate
+                # If firing too much, raise threshold; too little, lower it
+                self._effective_threshold += error * self.config.adaptation_rate
+                # Clamp to reasonable range
+                self._effective_threshold = max(
+                    self.config.threshold * 0.5,
+                    min(self.config.threshold * 2.0, self._effective_threshold),
+                )
 
         # 5. Record SNN telemetry via MetricsCollector (Tier 2 delta-filtered)
         if (
@@ -117,6 +143,8 @@ class LIFNeuron:
         self.last_reported_v = 0.0
         self.last_update_time = None
         self.refractory_time_remaining = 0.0
+        self._firing_history = []
+        self._effective_threshold = self.config.threshold
 
 
 class SpikingAccumulator:

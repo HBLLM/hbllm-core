@@ -207,6 +207,36 @@ class SleepCycleNode(Node):
                 return
             report["snn_weights_saved"] = await self._consolidate_snn_weights()
 
+            # ── Phase 2d: Knowledge Confidence Decay ──────────────────────
+            if not self.is_sleeping:
+                return
+            report["knowledge_decayed"] = await self._decay_knowledge_confidence()
+
+            # ── Phase 2e: Deep Contradiction Scan ─────────────────────────
+            if not self.is_sleeping:
+                return
+            report["deep_contradictions"] = await self._scan_contradictions()
+
+            # ── Phase 2f: Concept Formation ───────────────────────────────
+            if not self.is_sleeping:
+                return
+            report["concepts_formed"] = await self._form_concepts()
+
+            # ── Phase 2g: Cross-Domain Analogy Discovery ──────────────────
+            if not self.is_sleeping:
+                return
+            report["analogies_discovered"] = await self._discover_analogies()
+
+            # ── Phase 2h: Meta-Learner Strategy Refinement ────────────────
+            if not self.is_sleeping:
+                return
+            report["strategies_refined"] = await self._refine_learning_strategies()
+
+            # ── Phase 2i: Weak Belief Pruning ─────────────────────────────
+            if not self.is_sleeping:
+                return
+            report["beliefs_pruned"] = await self._prune_weak_beliefs()
+
             # ── Phase 3: Curiosity Goal Replay ───────────────────────────
             if not self.is_sleeping:
                 return
@@ -471,12 +501,18 @@ class SleepCycleNode(Node):
         return replayed
 
     async def _consolidate_snn_weights(self) -> int:
-        """Phase 2c: Persist STDP-learned SNN weights so they survive restarts.
+        """Phase 2c: Consolidate and persist STDP-learned SNN weights.
+
+        Performs sleep-inspired weight consolidation:
+          1. Prune weak connections (forgetting spurious patterns)
+          2. Strengthen well-reinforced connections (making them permanent)
+          3. Persist weight matrices so they survive restarts
 
         Saves weight matrices from:
           - TrainedPRM (reward scoring network)
           - ContentPlanner (content decision network)
           - ThoughtController (gating plastic weights)
+          - ComprehensionEnsemble (comprehension plastic weights)
 
         Returns:
             Number of weight matrices saved.
@@ -486,6 +522,8 @@ class SleepCycleNode(Node):
 
         logger.info("[SleepNode] Phase 2c: Consolidating SNN weights...")
         saved = 0
+        pruned_total = 0
+        consolidated_total = 0
 
         # Find DecisionNode and its ExpressionStream
         brain = None
@@ -508,74 +546,126 @@ class SleepCycleNode(Node):
             cls_name = type(node).__name__
             node_map[cls_name] = node
 
-        decision_node = node_map.get("DecisionNode")
-        if not decision_node:
-            return 0
-
-        expression_stream = getattr(decision_node, "expression_stream", None)
-        if not expression_stream:
-            logger.debug("[SleepNode] No ExpressionStream — skipping SNN consolidation.")
-            return 0
-
         import os
 
         data_dir = Path(os.environ.get("HBLLM_DATA_DIR", "data"))
         snn_dir = data_dir / "snn_weights"
         snn_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save TrainedPRM network weights
-        trained_prm = getattr(expression_stream, "trained_prm", None)
-        if trained_prm is not None:
+        # ── Helper: consolidate a PlasticWeightMatrix ────────────────
+        def _consolidate_plastic(
+            plastic: Any,
+            name: str,
+            path: Path,
+        ) -> tuple[int, int, int]:
+            """Prune, consolidate, and save a PlasticWeightMatrix."""
+            _saved = 0
+            _pruned = 0
+            _consolidated = 0
             try:
-                network = getattr(trained_prm, "_network", None)
-                if network and hasattr(network, "export_weights"):
-                    weights = network.export_weights()
-                    (snn_dir / "prm_weights.json").write_text(json.dumps(weights, default=str))
-                    saved += 1
-                    logger.info("[SleepNode] Saved TrainedPRM weights (%d layers)", len(weights))
-            except Exception as e:
-                logger.warning("[SleepNode] Failed to save PRM weights: %s", e)
+                # Step 1: Prune weak connections
+                if hasattr(plastic, "prune_weak_connections"):
+                    _pruned = plastic.prune_weak_connections(threshold=0.05)
 
-        # Save ContentPlanner network weights
-        content_planner = getattr(expression_stream, "content_planner", None)
-        if content_planner is not None:
-            try:
-                network = getattr(content_planner, "_network", None)
-                if network and hasattr(network, "export_weights"):
-                    weights = network.export_weights()
-                    (snn_dir / "content_planner_weights.json").write_text(
-                        json.dumps(weights, default=str)
-                    )
-                    saved += 1
+                # Step 2: Consolidate strong connections
+                if hasattr(plastic, "consolidate"):
+                    _consolidated = plastic.consolidate(strengthen_factor=0.1)
+
+                # Step 3: Save to disk
+                if hasattr(plastic, "save"):
+                    plastic.save(path)
+                    _saved = 1
+                elif hasattr(plastic, "to_dict"):
+                    path.write_text(json.dumps(plastic.to_dict(), default=str))
+                    _saved = 1
+
+                if _saved:
                     logger.info(
-                        "[SleepNode] Saved ContentPlanner weights (%d layers)", len(weights)
+                        "[SleepNode] Saved %s weights (pruned=%d, consolidated=%d)",
+                        name,
+                        _pruned,
+                        _consolidated,
                     )
             except Exception as e:
-                logger.warning("[SleepNode] Failed to save ContentPlanner weights: %s", e)
+                logger.warning("[SleepNode] Failed to consolidate %s: %s", name, e)
+            return _saved, _pruned, _consolidated
 
-        # Save ThoughtController plastic weights
-        controller = getattr(expression_stream, "controller", None)
-        if controller is not None:
-            plastic = getattr(controller, "plastic_weights", None)
-            if plastic is not None:
+        # ── Expression Stream: DecisionNode ──────────────────────────
+        decision_node = node_map.get("DecisionNode")
+        expression_stream = (
+            getattr(decision_node, "expression_stream", None) if decision_node else None
+        )
+
+        if expression_stream:
+            # Save TrainedPRM network weights
+            trained_prm = getattr(expression_stream, "trained_prm", None)
+            if trained_prm is not None:
                 try:
-                    weights = {}
-                    if hasattr(plastic, "weights"):
-                        # PlasticWeightMatrix — save as nested lists
-                        w = plastic.weights
-                        if hasattr(w, "tolist"):
-                            weights["matrix"] = w.tolist()
-                        else:
-                            weights["matrix"] = [[float(v) for v in row] for row in w]
-                    (snn_dir / "controller_plastic.json").write_text(
-                        json.dumps(weights, default=str)
-                    )
-                    saved += 1
-                    logger.info("[SleepNode] Saved ThoughtController plastic weights")
+                    network = getattr(trained_prm, "_network", None)
+                    if network and hasattr(network, "export_weights"):
+                        weights = network.export_weights()
+                        (snn_dir / "prm_weights.json").write_text(json.dumps(weights, default=str))
+                        saved += 1
+                        logger.info(
+                            "[SleepNode] Saved TrainedPRM weights (%d layers)", len(weights)
+                        )
                 except Exception as e:
-                    logger.warning("[SleepNode] Failed to save controller weights: %s", e)
+                    logger.warning("[SleepNode] Failed to save PRM weights: %s", e)
 
-        logger.info("[SleepNode] SNN weight consolidation complete: %d matrices saved.", saved)
+            # Save ContentPlanner network weights
+            content_planner = getattr(expression_stream, "content_planner", None)
+            if content_planner is not None:
+                try:
+                    network = getattr(content_planner, "_network", None)
+                    if network and hasattr(network, "export_weights"):
+                        weights = network.export_weights()
+                        (snn_dir / "content_planner_weights.json").write_text(
+                            json.dumps(weights, default=str)
+                        )
+                        saved += 1
+                        logger.info(
+                            "[SleepNode] Saved ContentPlanner weights (%d layers)", len(weights)
+                        )
+                except Exception as e:
+                    logger.warning("[SleepNode] Failed to save ContentPlanner weights: %s", e)
+
+            # Consolidate ThoughtController plastic weights
+            controller = getattr(expression_stream, "controller", None)
+            if controller is not None:
+                plastic = getattr(controller, "plastic_weights", None)
+                if plastic is not None:
+                    s, p, c = _consolidate_plastic(
+                        plastic, "ThoughtController", snn_dir / "controller_plastic.json"
+                    )
+                    saved += s
+                    pruned_total += p
+                    consolidated_total += c
+        else:
+            logger.debug("[SleepNode] No ExpressionStream — skipping expression consolidation.")
+
+        # ── Comprehension Stream: RouterNode ──────────────────────────
+        router_node = node_map.get("RouterNode")
+        comp_stream = getattr(router_node, "comprehension_stream", None) if router_node else None
+
+        if comp_stream:
+            ensemble = getattr(comp_stream, "ensemble", None)
+            if ensemble is not None:
+                plastic = getattr(ensemble, "plastic_weights", None)
+                if plastic is not None:
+                    s, p, c = _consolidate_plastic(
+                        plastic, "ComprehensionEnsemble", snn_dir / "comprehension_plastic.json"
+                    )
+                    saved += s
+                    pruned_total += p
+                    consolidated_total += c
+
+        logger.info(
+            "[SleepNode] SNN weight consolidation complete: "
+            "%d matrices saved, %d connections pruned, %d connections consolidated.",
+            saved,
+            pruned_total,
+            consolidated_total,
+        )
         return saved
 
     # ── Gap Closers: Contradiction Detection, Temporal Normalization, Dream Journal ──
@@ -1132,3 +1222,140 @@ class SleepCycleNode(Node):
                 {"status": "consolidation_started", "message": "Dream cycle initiated."}
             )
         return None
+
+    # ── Autonomous Learning Sleep Operations ─────────────────────────────
+
+    async def _decay_knowledge_confidence(self) -> int:
+        """Phase 2d: Apply biological confidence decay to knowledge graph.
+
+        Knowledge that isn't reinforced gradually loses confidence,
+        mimicking biological memory consolidation.
+        """
+        topic = "memory.knowledge_graph.get"
+        if not self.bus.has_subscribers(topic):
+            return 0
+        try:
+            kg_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"operation": "get_instance"},
+            )
+            response = await self.bus.request(topic, kg_msg, timeout=2.0)
+            kg = response.payload.get("instance")
+            if kg and hasattr(kg, "decay_confidence"):
+                decayed = kg.decay_confidence(rate=0.005)
+                if decayed:
+                    logger.info(
+                        "[SleepNode] Knowledge confidence decay: %d entities decayed",
+                        decayed,
+                    )
+                return decayed
+        except Exception:
+            logger.debug("[SleepNode] KnowledgeGraph not available for decay")
+        return 0
+
+    async def _scan_contradictions(self) -> int:
+        """Phase 2e: Scan causal graph for internal contradictions."""
+        topic = "learning.contradiction.scan"
+        if not self.bus.has_subscribers(topic):
+            return 0
+        try:
+            scan_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"operation": "scan"},
+            )
+            response = await self.bus.request(topic, scan_msg, timeout=2.0)
+            found = response.payload.get("contradictions_found", 0)
+            if found > 0:
+                logger.info("[SleepNode] Deep contradiction scan found %d issues", found)
+            return found
+        except Exception:
+            logger.debug("[SleepNode] Contradiction scan not available")
+        return 0
+
+    async def _form_concepts(self) -> int:
+        """Phase 2f: Run concept formation engine to discover abstractions."""
+        topic = "learning.concept.form"
+        if not self.bus.has_subscribers(topic):
+            return 0
+        try:
+            form_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"operation": "discover_abstractions"},
+            )
+            response = await self.bus.request(topic, form_msg, timeout=2.0)
+            formed = response.payload.get("concepts_formed", 0)
+            if formed > 0:
+                logger.info("[SleepNode] Concept formation: %d abstractions created", formed)
+            return formed
+        except Exception:
+            logger.debug("[SleepNode] Concept formation not available")
+        return 0
+
+    async def _discover_analogies(self) -> int:
+        """Phase 2g: Search for cross-domain analogies in causal models."""
+        topic = "learning.analogy.discover"
+        if not self.bus.has_subscribers(topic):
+            return 0
+        try:
+            analogy_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"operation": "cross_domain"},
+            )
+            response = await self.bus.request(topic, analogy_msg, timeout=2.0)
+            found = response.payload.get("analogies_found", 0)
+            if found > 0:
+                logger.info("[SleepNode] Cross-domain analogies discovered: %d", found)
+            return found
+        except Exception:
+            logger.debug("[SleepNode] Analogy discovery not available")
+        return 0
+
+    async def _refine_learning_strategies(self) -> int:
+        """Phase 2h: Update meta-learner strategies based on recent sessions."""
+        topic = "learning.meta.refine"
+        if not self.bus.has_subscribers(topic):
+            return 0
+        try:
+            strategy_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"operation": "refine_strategies"},
+            )
+            response = await self.bus.request(topic, strategy_msg, timeout=2.0)
+            refined = response.payload.get("strategies_refined", 0)
+            if refined > 0:
+                logger.info("[SleepNode] Learning strategies refined: %d domains", refined)
+            return refined
+        except Exception:
+            logger.debug("[SleepNode] Meta-learner not available for refinement")
+        return 0
+
+    async def _prune_weak_beliefs(self) -> int:
+        """Phase 2i: Remove beliefs with confidence below threshold."""
+        topic = "learning.belief.prune"
+        if not self.bus.has_subscribers(topic):
+            return 0
+        try:
+            prune_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic=topic,
+                payload={"threshold": 0.1},
+            )
+            response = await self.bus.request(topic, prune_msg, timeout=2.0)
+            pruned = response.payload.get("beliefs_pruned", 0)
+            if pruned > 0:
+                logger.info("[SleepNode] Weak beliefs pruned: %d", pruned)
+            return pruned
+        except Exception:
+            logger.debug("[SleepNode] Belief pruning not available")
+        return 0

@@ -76,6 +76,7 @@ class NeuronLayer:
         self.name = name
         self.neuron_count = neuron_count
         self.config = config
+        self.is_inhibitory = config.is_inhibitory  # Layer-level flag for projections
         self.neurons: list[LIFNeuron] = [
             LIFNeuron(
                 config=LIFConfig(
@@ -83,6 +84,9 @@ class NeuronLayer:
                     decay_half_life=config.decay_half_life,
                     reset_potential=config.reset_potential,
                     refractory_period=config.refractory_period,
+                    is_inhibitory=config.is_inhibitory,
+                    target_firing_rate=config.target_firing_rate,
+                    adaptation_rate=config.adaptation_rate,
                 ),
                 neuron_id=f"{name}.{i}",
             )
@@ -224,29 +228,38 @@ class LayerProjection:
                 for _ in range(source_size)
             ]
 
-    def project(self, source_spikes: list[SpikeEvent], timestamp: float) -> list[float]:
+    def project(
+        self,
+        source_spikes: list[SpikeEvent],
+        timestamp: float,
+        source_is_inhibitory: bool = False,
+    ) -> list[float]:
         """Convert source spikes to target input currents.
 
         For each target neuron *j*, computes::
 
             current_j = Σ_i (fired_i × strength_i × weight_i_j)
 
+        If the source layer is inhibitory, the current is negated.
+
         Args:
             source_spikes: Spike events from the source layer.
             timestamp: Current timestamp.
+            source_is_inhibitory: If True, negate projected current.
 
         Returns:
             List of input currents for each target neuron.
         """
         self._global_step += 1
         target_currents = [0.0] * self.target_size
+        sign = -1.0 if source_is_inhibitory else 1.0
 
         for i, spike in enumerate(source_spikes):
             if not spike.fired:
                 continue
             for j in range(self.target_size):
                 pw = self._weights[i][j]
-                target_currents[j] += spike.strength * pw.weight
+                target_currents[j] += sign * spike.strength * pw.weight
                 pw.last_pre_time = timestamp
 
         return target_currents
@@ -526,7 +539,13 @@ class SpikingNetwork:
                     continue
                 if proj.source_name not in all_spikes:
                     continue  # source hasn't been stepped yet
-                projected = proj.project(all_spikes[proj.source_name], timestamp)
+                source_layer = self._layers.get(proj.source_name)
+                is_inhib = source_layer.is_inhibitory if source_layer else False
+                projected = proj.project(
+                    all_spikes[proj.source_name],
+                    timestamp,
+                    source_is_inhibitory=is_inhib,
+                )
                 for j in range(layer.neuron_count):
                     currents[j] += projected[j]
 
