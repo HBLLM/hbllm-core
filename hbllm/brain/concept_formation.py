@@ -147,16 +147,19 @@ Return ONLY valid JSON, no markdown."""
 
 
 class ConceptFormationEngine:
-    """Discovers abstract concepts from recurring causal patterns.
+    """Discovers abstract concepts from recurring causal patterns and beliefs.
 
     Runs during sleep to:
     1. Find causal models with similar mechanism structures
-    2. Abstract shared patterns into generalized concepts
-    3. Discover cross-domain analogies
-    4. Compress knowledge by linking specific instances to abstractions
+    2. Discover recurring mechanism patterns across domains
+    3. Abstract stabilized beliefs into generalized concepts
+    4. Discover cross-domain analogies
+    5. Compress knowledge by linking specific instances to abstractions
 
-    This is where intelligence compresses knowledge — the same mechanism
-    of concept formation that humans use during sleep.
+    Abstraction hierarchy:
+        Mechanisms → Beliefs → Concepts
+
+    Concepts are abstractions over stabilized beliefs, not raw observations.
     """
 
     def __init__(
@@ -164,11 +167,15 @@ class ConceptFormationEngine:
         llm: Any | None = None,
         causal_model_builder: Any | None = None,
         knowledge_graph: Any | None = None,
+        mechanism_store: Any | None = None,
+        belief_store: Any | None = None,
         data_dir: str | Path = "data",
     ) -> None:
         self.llm = llm
         self.causal_model_builder = causal_model_builder
         self.knowledge_graph = knowledge_graph
+        self.mechanism_store = mechanism_store
+        self.belief_store = belief_store
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -184,6 +191,8 @@ class ConceptFormationEngine:
         # Telemetry
         self._concepts_formed = 0
         self._analogies_found = 0
+        self._mechanism_patterns_found = 0
+        self._belief_abstractions_found = 0
 
     def _init_db(self) -> None:
         with sqlite3.connect(self._db_path) as conn:
@@ -415,7 +424,261 @@ class ConceptFormationEngine:
             "cross_domain_analogies": len(self._analogies),
             "concepts_formed": self._concepts_formed,
             "analogies_found": self._analogies_found,
+            "mechanism_patterns_found": self._mechanism_patterns_found,
+            "belief_abstractions_found": self._belief_abstractions_found,
+            "has_mechanism_store": self.mechanism_store is not None,
+            "has_belief_store": self.belief_store is not None,
         }
+
+    # ── Mechanism Pattern Discovery ──────────────────────────────────────
+
+    async def discover_mechanism_patterns(
+        self,
+        domain: str | None = None,
+        min_cluster_size: int = 2,
+    ) -> list[AbstractConcept]:
+        """Find recurring mechanism patterns across domains.
+
+        Groups mechanisms by structural similarity (shared process steps),
+        then creates an abstract concept for each cluster.
+
+        Returns created AbstractConcepts.
+        """
+        if self.mechanism_store is None:
+            logger.debug("No MechanismStore — skipping mechanism pattern discovery")
+            return []
+
+        if domain:
+            mechanisms = self.mechanism_store.find_by_domain(domain)
+        else:
+            mechanisms = self.mechanism_store.list_all()
+
+        if len(mechanisms) < min_cluster_size:
+            return []
+
+        # Cluster mechanisms by pairwise step overlap rather than
+        # fragile word fingerprinting. Two mechanisms sharing >= 50%
+        # of their process steps belong to the same cluster.
+        assigned: dict[int, int] = {}  # mechanism index → cluster id
+        cluster_id = 0
+
+        for i, mech_a in enumerate(mechanisms):
+            if i in assigned:
+                continue
+            assigned[i] = cluster_id
+            steps_a = {s.lower().strip() for s in getattr(mech_a, "process_steps", [])}
+            for j in range(i + 1, len(mechanisms)):
+                if j in assigned:
+                    continue
+                steps_b = {s.lower().strip() for s in getattr(mechanisms[j], "process_steps", [])}
+                if not steps_a or not steps_b:
+                    continue
+                overlap = len(steps_a & steps_b) / len(steps_a | steps_b)
+                if overlap >= 0.3:
+                    assigned[j] = assigned[i]
+            cluster_id += 1
+
+        clusters: dict[int, list[Any]] = defaultdict(list)
+        for idx, cid in assigned.items():
+            clusters[cid].append(mechanisms[idx])
+
+        abstractions: list[AbstractConcept] = []
+        for _fp, cluster in clusters.items():
+            if len(cluster) < min_cluster_size:
+                continue
+
+            # Extract shared steps across the cluster
+            shared_steps = self._mechanism_shared_steps(cluster)
+            if not shared_steps:
+                continue
+
+            # Create abstract concept from mechanism pattern
+            instances = [m.description for m in cluster]
+            concept = AbstractConcept(
+                label=f"Mechanism Pattern: {shared_steps[0][:40]}" if shared_steps else "Unknown",
+                description=f"Recurring pattern across {len(cluster)} mechanisms",
+                generalized_steps=shared_steps,
+                instances=instances,
+                confidence=0.3 + 0.1 * min(len(cluster), 7),
+                domain=domain or "",
+            )
+
+            self._abstract_concepts[concept.label.lower()] = concept
+            self._persist_concept(concept)
+            self._mechanism_patterns_found += 1
+            abstractions.append(concept)
+
+            # Create meta-mechanism in store if available
+            if self.mechanism_store is not None and len(shared_steps) > 0:
+                try:
+                    self.mechanism_store.create(
+                        description=concept.label,
+                        preconditions=[],
+                        process_steps=shared_steps,
+                        expected_outcomes=[f"Abstraction of {len(cluster)} mechanisms"],
+                        confidence=concept.confidence,
+                        abstraction_level=2,  # Meta-mechanism
+                        domain=domain or "",
+                    )
+                except Exception as e:
+                    logger.debug("Failed to create meta-mechanism: %s", e)
+
+        if abstractions:
+            logger.info(
+                "Mechanism pattern discovery: %d patterns from %d mechanisms",
+                len(abstractions),
+                len(mechanisms),
+            )
+        return abstractions
+
+    # ── Belief-Based Abstraction ─────────────────────────────────────────
+
+    async def discover_belief_abstractions(
+        self,
+        domain: str | None = None,
+        min_beliefs: int = 3,
+        min_confidence: float = 0.4,
+    ) -> list[AbstractConcept]:
+        """Abstract over stabilized beliefs into generalized concepts.
+
+        This is the key Phase 2 capability:
+            Mechanisms → Beliefs → Concepts
+
+        Humans don't abstract raw observations directly.
+        They abstract stabilized beliefs.
+
+        Example:
+            Belief: "SQL injection exploits user input"
+            Belief: "XSS exploits user input"
+            Belief: "Command injection exploits user input"
+                →
+            Concept: "External input can alter execution flow"
+        """
+        if self.belief_store is None:
+            logger.debug("No BeliefStore — skipping belief abstraction")
+            return []
+
+        # Get causal beliefs (best candidates for abstraction)
+        from hbllm.brain.belief_store import BeliefType
+
+        causal_beliefs = self.belief_store.get_beliefs_by_type(
+            BeliefType.CAUSAL, min_confidence=min_confidence
+        )
+
+        if domain:
+            causal_beliefs = [b for b in causal_beliefs if b.domain == domain]
+
+        if len(causal_beliefs) < min_beliefs:
+            return []
+
+        # Cluster beliefs by concept (primary) or word fingerprint (fallback).
+        # Beliefs about the same concept should abstract together.
+        clusters: dict[str, list[Any]] = defaultdict(list)
+        for belief in causal_beliefs:
+            if belief.concept:
+                clusters[belief.concept.lower()].append(belief)
+            else:
+                words = set(belief.claim.lower().split())
+                key_words = sorted(w for w in words if len(w) > 3)[:3]
+                fingerprint = "|".join(key_words) if key_words else "misc"
+                clusters[fingerprint].append(belief)
+
+        abstractions: list[AbstractConcept] = []
+        for _fp, cluster in clusters.items():
+            if len(cluster) < min_beliefs:
+                continue
+
+            claims = [b.claim for b in cluster]
+            concepts = list({b.concept for b in cluster})
+            avg_confidence = sum(b.confidence for b in cluster) / len(cluster)
+
+            if self.llm is not None:
+                abstract = await self._abstract_beliefs_via_llm(claims, concepts, domain or "")
+                if abstract:
+                    abstract.confidence = avg_confidence
+                    abstractions.append(abstract)
+                    self._abstract_concepts[abstract.label.lower()] = abstract
+                    self._persist_concept(abstract)
+                    self._belief_abstractions_found += 1
+                    continue
+
+            # Fallback: generate without LLM
+            concept = AbstractConcept(
+                label=f"Belief Pattern: {claims[0][:40]}" if claims else "Unknown",
+                description=f"Abstraction over {len(cluster)} stabilized beliefs",
+                generalized_steps=claims[:5],
+                instances=concepts,
+                confidence=avg_confidence,
+                domain=domain or "",
+            )
+            abstractions.append(concept)
+            self._abstract_concepts[concept.label.lower()] = concept
+            self._persist_concept(concept)
+            self._belief_abstractions_found += 1
+
+        if abstractions:
+            logger.info(
+                "Belief abstraction: %d concepts from %d causal beliefs",
+                len(abstractions),
+                len(causal_beliefs),
+            )
+        return abstractions
+
+    async def _abstract_beliefs_via_llm(
+        self,
+        claims: list[str],
+        concepts: list[str],
+        domain: str,
+    ) -> AbstractConcept | None:
+        """Use LLM to abstract shared beliefs into a concept."""
+        prompt = (
+            "Given these related beliefs:\n"
+            + "\n".join(f"- {c}" for c in claims[:8])
+            + "\n\nRelated concepts: "
+            + ", ".join(concepts[:5])
+            + "\n\nWhat general principle or concept unifies them?\n"
+            'Return JSON: {"label": "...", "description": "...", '
+            '"generalized_steps": ["..."], "generalized_assumptions": ["..."]}\n'
+            "Return ONLY valid JSON, no markdown."
+        )
+        try:
+            response = await self.llm.generate(prompt)
+            content = response if isinstance(response, str) else str(response)
+            parsed = self._parse_json(content)
+            return AbstractConcept(
+                label=parsed.get("label", f"Pattern from {len(claims)} beliefs"),
+                description=parsed.get("description", ""),
+                generalized_steps=parsed.get("generalized_steps", claims[:3]),
+                generalized_assumptions=parsed.get("generalized_assumptions", []),
+                instances=concepts,
+                domain=domain,
+            )
+        except Exception as e:
+            logger.warning("LLM belief abstraction failed: %s", e)
+            return None
+
+    def link_mechanisms_to_concepts(self) -> int:
+        """Connect specific mechanisms to their abstract concepts.
+
+        Returns number of links created.
+        """
+        if self.mechanism_store is None:
+            return 0
+
+        linked = 0
+        for concept in self._abstract_concepts.values():
+            for instance_desc in concept.instances:
+                # Find mechanisms matching this instance
+                all_mechs = self.mechanism_store.list_all()
+                for mech in all_mechs:
+                    if self._text_similar(mech.description, instance_desc):
+                        # Tag mechanism with concept reference
+                        if not hasattr(mech, "metadata"):
+                            continue
+                        if isinstance(mech.metadata, dict):
+                            mech.metadata["abstract_concept"] = concept.label
+                            linked += 1
+        return linked
 
     # ── Internal Helpers ─────────────────────────────────────────────────
 
@@ -618,3 +881,46 @@ class ConceptFormationEngine:
                 except json.JSONDecodeError:
                     pass
             return {}
+
+    def _mechanism_obj_fingerprint(self, mechanism: Any) -> str:
+        """Create a structural fingerprint from a Mechanism object's steps.
+
+        Uses only top 3 key words to allow mechanisms with shared
+        core steps but different specifics to cluster together.
+        """
+        steps = getattr(mechanism, "process_steps", [])
+        if not steps:
+            return ""
+        all_words: list[str] = []
+        for step in steps:
+            words = step.lower().split()
+            key_words = [w for w in words if len(w) > 3][:2]
+            all_words.extend(key_words)
+        # Use top 3 most common key words for broader clustering
+        return "|".join(sorted(set(all_words))[:3])
+
+    def _mechanism_shared_steps(self, mechanisms: list[Any]) -> list[str]:
+        """Find process steps shared across multiple mechanisms."""
+        step_counts: dict[str, int] = defaultdict(int)
+        for mech in mechanisms:
+            mech_steps: set[str] = set()
+            for step in getattr(mech, "process_steps", []):
+                normalized = step.lower().strip()
+                if normalized:
+                    mech_steps.add(normalized)
+            for step in mech_steps:
+                step_counts[step] += 1
+
+        min_mechs = min(2, len(mechanisms))
+        shared = [step for step, count in step_counts.items() if count >= min_mechs]
+        return sorted(shared)
+
+    def _text_similar(self, a: str, b: str) -> bool:
+        """Jaccard similarity check between two text strings."""
+        a_words = set(a.lower().split())
+        b_words = set(b.lower().split())
+        if not a_words or not b_words:
+            return False
+        intersection = a_words & b_words
+        union = a_words | b_words
+        return len(intersection) / len(union) > 0.4 if union else False

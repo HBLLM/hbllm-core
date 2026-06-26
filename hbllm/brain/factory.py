@@ -1078,10 +1078,17 @@ class BrainFactory:
                 data_dir=cfg.data_dir,
             )
 
-        # 5. SkillEngine
+        # 5. SkillEngine + MechanismStore
         skills = None
         if cfg.inject_skill_engine:
-            skills = SkillEngine(llm=llm, skill_registry=skill_registry)
+            from hbllm.brain.mechanism_store import MechanismStore
+
+            mechanism_store = MechanismStore(data_dir=cfg.data_dir)
+            skills = SkillEngine(
+                llm=llm,
+                skill_registry=skill_registry,
+                mechanism_store=mechanism_store,
+            )
 
         # 6. ResourceManager
         resources = None
@@ -1142,9 +1149,12 @@ class BrainFactory:
                 )
 
         # ── Autonomous Learning Engine ────────────────────────────────────
+        _cognitive_graph_ref = None  # Will be wired to GoalManager later
+        _autonomous_learner_ref = None  # Will be wired to GoalManager later
         if cfg.inject_autonomous_learning:
             try:
                 from hbllm.brain.autonomous_learner import AutonomousLearner
+                from hbllm.brain.belief_store import BeliefStore
                 from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
                 from hbllm.brain.concept_formation import ConceptFormationEngine
                 from hbllm.brain.contradiction_detector import (
@@ -1152,13 +1162,19 @@ class BrainFactory:
                     ContradictionDetector,
                 )
                 from hbllm.brain.experiment_engine import ExperimentEngine
+                from hbllm.brain.failure_analyzer import FailureAnalyzer
+                from hbllm.brain.learning_subsystem import CognitiveGraph
                 from hbllm.brain.meta_learner import MetaLearner
 
                 learning_data_dir = f"{cfg.data_dir}/learning"
 
+                # Get mechanism_store from SkillEngine if available
+                mechanism_store = skills.mechanism_store if skills is not None else None
+
                 # Build learning subsystems
                 causal_builder = CausalModelBuilder(
                     llm=llm,
+                    mechanism_store=mechanism_store,
                     data_dir=learning_data_dir,
                 )
                 experiment_engine = ExperimentEngine(
@@ -1171,8 +1187,32 @@ class BrainFactory:
                 concept_engine = ConceptFormationEngine(
                     llm=llm,
                     causal_model_builder=causal_builder,
+                    mechanism_store=mechanism_store,
+                    belief_store=BeliefStore(data_dir=learning_data_dir),
                     data_dir=learning_data_dir,
                 )
+
+                # Persistent belief storage (Phase 3) — use same instance
+                belief_store = concept_engine.belief_store
+
+                # Build shared CognitiveGraph (was LearningSubsystem)
+                learning_subsystem = CognitiveGraph(
+                    mechanism_store=mechanism_store,
+                    failure_analyzer=FailureAnalyzer(),
+                    belief_engine=belief_engine,
+                    contradiction_detector=contradiction_detector,
+                    meta_learner=meta_learner,
+                    causal_model_builder=causal_builder,
+                    belief_store=belief_store,
+                    concept_engine=concept_engine,
+                )
+
+                # Store reference for later GoalManager wiring
+                _cognitive_graph_ref = learning_subsystem
+
+                # Wire LearningSubsystem into SkillEngine's LearningEventHandler
+                if skills is not None:
+                    skills.inject_learning_subsystem(learning_subsystem)
 
                 # Create and register the orchestrator node
                 autonomous_learner = AutonomousLearner(
@@ -1185,6 +1225,7 @@ class BrainFactory:
                     meta_learner=meta_learner,
                     concept_engine=concept_engine,
                 )
+                _autonomous_learner_ref = autonomous_learner
                 await _register_node(registry, autonomous_learner)
                 await autonomous_learner.start(message_bus)
                 nodes.append(autonomous_learner)
@@ -1193,7 +1234,8 @@ class BrainFactory:
                     "Autonomous Learning Engine wired: "
                     "CausalModelBuilder, ExperimentEngine, "
                     "ContradictionDetector, BeliefRevision, "
-                    "MetaLearner, ConceptFormation"
+                    "MetaLearner, ConceptFormation, "
+                    "CognitiveGraph (shared)"
                 )
             except Exception as e:
                 logger.warning("Autonomous Learning Engine init failed (non-critical): %s", e)
@@ -1509,6 +1551,12 @@ class BrainFactory:
         if cfg.inject_goals:
             brain.goal_manager = GoalManager(data_dir=cfg.data_dir)
 
+            # Wire GoalManager into CognitiveGraph and AutonomousLearner
+            if _cognitive_graph_ref is not None:
+                _cognitive_graph_ref.goal_manager = brain.goal_manager
+            if _autonomous_learner_ref is not None:
+                _autonomous_learner_ref.goal_manager = brain.goal_manager
+
         if cfg.inject_self_model:
             brain.self_model = SelfModel(data_dir=cfg.data_dir)
 
@@ -1686,11 +1734,21 @@ class BrainFactory:
         if cfg.inject_executive_cortex:
             from hbllm.brain.executive_cortex import ExecutiveCortex
 
+            _goal_mgr = getattr(brain, "goal_manager", None)
+            _load_mgr = getattr(brain, "load_manager", None)
+            _attn_mgr = getattr(brain, "attention_manager", None)
+            if not _goal_mgr:
+                logger.debug("[Factory] ExecutiveCortex: goal_manager not available on brain")
+            if not _load_mgr:
+                logger.debug("[Factory] ExecutiveCortex: load_manager not available on brain")
+            if not _attn_mgr:
+                logger.debug("[Factory] ExecutiveCortex: attention_manager not available on brain")
+
             executive_cortex = ExecutiveCortex(
-                goal_manager=getattr(brain, "goal_manager", None),
-                load_manager=getattr(brain, "load_manager", None),
+                goal_manager=_goal_mgr,
+                load_manager=_load_mgr,
                 attention_system=None,
-                attention_manager=getattr(brain, "attention_manager", None),
+                attention_manager=_attn_mgr,
                 state_machine=None,
                 user_model=user_model_engine,
             )

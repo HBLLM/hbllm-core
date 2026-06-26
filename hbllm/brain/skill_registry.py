@@ -26,7 +26,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Skill:
-    """A learned, reusable skill."""
+    """A learned, reusable skill.
+
+    Skills are *applications* of underlying mechanisms.
+    A skill knows not just WHAT to do, but WHY it works
+    via its ``causal_model_id`` and ``mechanism_ids``.
+    """
 
     skill_id: str
     name: str
@@ -48,6 +53,8 @@ class Skill:
     confidence_score: float = 0.8
     tenant_id: str = "global"
     source: str = ""  # provenance: "plugin:<name>", "auto-compiled", "user", "graduated"
+    causal_model_id: str | None = None  # Links to CausalModelBuilder output
+    mechanism_ids: list[str] = field(default_factory=list)  # Mechanisms this skill relies on
 
 
 class SkillRegistry:
@@ -108,6 +115,10 @@ class SkillRegistry:
                 conn.execute("ALTER TABLE skills ADD COLUMN tenant_id TEXT DEFAULT 'global'")
             if "source" not in columns:
                 conn.execute("ALTER TABLE skills ADD COLUMN source TEXT DEFAULT ''")
+            if "causal_model_id" not in columns:
+                conn.execute("ALTER TABLE skills ADD COLUMN causal_model_id TEXT")
+            if "mechanism_ids" not in columns:
+                conn.execute("ALTER TABLE skills ADD COLUMN mechanism_ids TEXT DEFAULT '[]'")
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_cat ON skills(category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_tenant ON skills(tenant_id)")
@@ -175,8 +186,9 @@ class SkillRegistry:
                 (skill_id, name, description, category, steps, tools_used,
                  success_criteria, examples, success_rate, invocations,
                  avg_latency_ms, created_at, updated_at,
-                 version, parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 version, parent_skill_id, tokens_used, cost_score, failure_types,
+                 confidence_score, tenant_id, source, causal_model_id, mechanism_ids)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     skill.skill_id,
@@ -200,6 +212,8 @@ class SkillRegistry:
                     skill.confidence_score,
                     skill.tenant_id,
                     skill.source,
+                    skill.causal_model_id,
+                    json.dumps(skill.mechanism_ids),
                 ),
             )
 
@@ -208,7 +222,8 @@ class SkillRegistry:
     _SELECT_COLS = (
         "skill_id, name, description, category, steps, tools_used, success_criteria, "
         "examples, success_rate, invocations, avg_latency_ms, created_at, version, "
-        "parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id, source"
+        "parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id, source, "
+        "causal_model_id, mechanism_ids"
     )
 
     def find_skill(
@@ -378,7 +393,43 @@ class SkillRegistry:
             confidence_score=row[17],
             tenant_id=row[18] if len(row) > 18 else "global",
             source=row[19] if len(row) > 19 else "",
+            causal_model_id=row[20] if len(row) > 20 else None,
+            mechanism_ids=json.loads(row[21]) if len(row) > 21 and row[21] else [],
         )
+
+    def find_skill_by_mechanism(self, mechanism_id: str, tenant_id: str = "global") -> list[Skill]:
+        """Find all skills that rely on a specific mechanism."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute(
+                f"SELECT {self._SELECT_COLS} FROM skills "
+                f"WHERE mechanism_ids LIKE ? AND tenant_id IN (?, 'global') "
+                f"ORDER BY confidence_score DESC",
+                (f'%"{mechanism_id}"%', tenant_id),
+            ).fetchall()
+        return [self._row_to_skill(r) for r in rows]
+
+    def link_mechanism(
+        self, skill_id: str, mechanism_id: str, causal_model_id: str | None = None
+    ) -> None:
+        """Link a mechanism to an existing skill."""
+        with sqlite3.connect(str(self._db_path)) as conn:
+            row = conn.execute(
+                "SELECT mechanism_ids FROM skills WHERE skill_id = ?", (skill_id,)
+            ).fetchone()
+            if not row:
+                return
+            existing = json.loads(row[0]) if row[0] else []
+            if mechanism_id not in existing:
+                existing.append(mechanism_id)
+            updates = {"mechanism_ids": json.dumps(existing), "updated_at": time.time()}
+            if causal_model_id:
+                updates["causal_model_id"] = causal_model_id
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            conn.execute(
+                f"UPDATE skills SET {set_clause} WHERE skill_id = ?",
+                (*updates.values(), skill_id),
+            )
+        logger.info("Linked mechanism %s to skill %s", mechanism_id, skill_id)
 
     def list_skills(
         self, category: str | None = None, limit: int = 50, tenant_id: str = "global"

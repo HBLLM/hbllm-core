@@ -97,11 +97,13 @@ async def test_workspace_compresses_dpo_payload():
     workspace = WorkspaceNode(node_id="test_workspace")
     workspace._bus = MagicMock()
 
-    published_msg = None
+    feedback_msg = None
 
     async def mock_publish(topic, msg):
-        nonlocal published_msg
-        published_msg = msg
+        nonlocal feedback_msg
+        # Capture only the system.feedback message (not learning.experience.*)
+        if topic == "system.feedback":
+            feedback_msg = msg
 
     workspace._bus.publish = mock_publish
 
@@ -115,8 +117,8 @@ async def test_workspace_compresses_dpo_payload():
 
     await workspace._emit_training_feedback(board, massive_thought, rating=1)
 
-    assert published_msg is not None
-    response_payload = published_msg.payload["response"]
+    assert feedback_msg is not None
+    response_payload = feedback_msg.payload["response"]
 
     # Default compression bound for Workspace is 4000
     assert 4000 < len(response_payload) < 4100

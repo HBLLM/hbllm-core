@@ -224,11 +224,13 @@ class CausalModelBuilder:
         llm: Any,
         causal_graph: Any | None = None,
         knowledge_graph: Any | None = None,
+        mechanism_store: Any | None = None,
         data_dir: str | Path = "data",
     ) -> None:
         self.llm = llm
         self.causal_graph = causal_graph
         self.knowledge_graph = knowledge_graph
+        self.mechanism_store = mechanism_store
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -697,7 +699,12 @@ class CausalModelBuilder:
         mech_data: dict[str, Any],
         domain: str,
     ) -> Mechanism:
-        """Create or reuse a Mechanism."""
+        """Create or reuse a Mechanism.
+
+        Also registers the mechanism in the shared MechanismStore
+        if available, bridging causal model mechanisms to the
+        cognitive primitive store.
+        """
         if isinstance(mech_data, str):
             mech_data = {"description": mech_data}
 
@@ -711,6 +718,24 @@ class CausalModelBuilder:
         self._mechanisms[mech.mechanism_id] = mech
         self._persist_mechanism(mech)
         self._mechanisms_created += 1
+
+        # Register in shared MechanismStore (cognitive primitive store)
+        if self.mechanism_store is not None:
+            try:
+                self.mechanism_store.create(
+                    description=mech.description,
+                    preconditions=mech.assumptions,
+                    process_steps=mech.steps,
+                    expected_outcomes=[],
+                    domain=domain,
+                    abstraction_level=0,
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to register mechanism in MechanismStore",
+                    exc_info=True,
+                )
+
         return mech
 
     def _store_in_causal_graph(self, model: CausalModel) -> None:

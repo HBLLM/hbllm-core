@@ -242,6 +242,21 @@ class SleepCycleNode(Node):
                 return
             report["goals_replayed"] = await self._replay_curiosity_goals()
 
+            # ── Phase 3b: Mechanism Confidence Decay ─────────────────────
+            if not self.is_sleeping:
+                return
+            report["mechanisms_decayed"] = await self._decay_mechanism_confidence()
+
+            # ── Phase 3c: Causal Model Queue Processing ──────────────────
+            if not self.is_sleeping:
+                return
+            report["models_built"] = await self._process_learning_queue()
+
+            # ── Phase 3d: Mechanism Promotion ────────────────────────────
+            if not self.is_sleeping:
+                return
+            report["mechanisms_promoted"] = await self._promote_mechanisms()
+
         except (TimeoutError, asyncio.TimeoutError):
             logger.warning("[SleepNode] Timeout during sleep cycle. Waking up.")
         except Exception as e:
@@ -1359,3 +1374,118 @@ class SleepCycleNode(Node):
         except Exception:
             logger.debug("[SleepNode] Belief pruning not available")
         return 0
+
+    # ─── Phase 3b: Mechanism Confidence Decay ────────────────────────
+
+    async def _decay_mechanism_confidence(self) -> int:
+        """Biological forgetting: decay confidence of non-core mechanisms.
+
+        Core mechanisms (cognitive primitives) are immune to decay.
+        This ensures the system forgets unreliable mechanisms over time,
+        making room for better-understood ones.
+
+        Returns:
+            Number of mechanisms decayed.
+        """
+        if not self.bus.has_subscribers("learning.mechanism.decay"):
+            logger.debug("[SleepNode] No mechanism decay handler — skipping Phase 3b")
+            return 0
+
+        logger.info("[SleepNode] Phase 3b: Decaying mechanism confidence...")
+
+        try:
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.mechanism.decay",
+                payload={"rate": 0.01},
+            )
+            resp = await self.bus.request("learning.mechanism.decay", req, timeout=5.0)
+            count = resp.payload.get("decayed", 0)
+            logger.info("[SleepNode] Decayed confidence for %d mechanisms", count)
+            return count
+        except Exception:
+            logger.debug("[SleepNode] Mechanism decay failed", exc_info=True)
+            return 0
+
+    # ─── Phase 3c: Causal Model Queue Processing ────────────────────
+
+    async def _process_learning_queue(self) -> int:
+        """Process queued causal model building during sleep.
+
+        This is where LLM-heavy operations happen — building causal models
+        from accumulated experience.  Done during sleep to avoid impacting
+        query latency.
+
+        Returns:
+            Number of models built.
+        """
+        if not self.bus.has_subscribers("learning.queue.process"):
+            logger.debug("[SleepNode] No learning queue handler — skipping Phase 3c")
+            return 0
+
+        logger.info("[SleepNode] Phase 3c: Processing causal model build queue...")
+
+        try:
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.queue.process",
+                payload={},
+            )
+            resp = await self.bus.request("learning.queue.process", req, timeout=30.0)
+            built = resp.payload.get("models_built", 0)
+            logger.info("[SleepNode] Built %d causal models from experience queue", built)
+            return built
+        except Exception:
+            logger.debug("[SleepNode] Learning queue processing failed", exc_info=True)
+            return 0
+
+    # ─── Phase 3d: Mechanism Promotion ──────────────────────────────
+
+    async def _promote_mechanisms(self) -> int:
+        """Discover high-usage mechanisms and promote to core status.
+
+        Core mechanisms become cognitive primitives — highly trusted,
+        immune to confidence decay, and prioritized in skill selection.
+
+        Criteria for promotion:
+        - Used at least 10 times
+        - Success rate >= 90%
+        - Confidence >= 0.8
+
+        Examples of promoted mechanisms:
+        - Variable Assignment
+        - HTTP Request
+        - Authentication
+        - Dependency Resolution
+
+        Returns:
+            Number of mechanisms promoted.
+        """
+        if not self.bus.has_subscribers("learning.mechanism.promote"):
+            logger.debug("[SleepNode] No mechanism promotion handler — skipping Phase 3d")
+            return 0
+
+        logger.info("[SleepNode] Phase 3d: Checking for mechanism promotions...")
+
+        try:
+            req = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                topic="learning.mechanism.promote",
+                payload={"min_usage": 10, "min_success_rate": 0.9},
+            )
+            resp = await self.bus.request("learning.mechanism.promote", req, timeout=5.0)
+            promoted = resp.payload.get("promoted", 0)
+            names = resp.payload.get("promoted_names", [])
+            if promoted:
+                logger.info(
+                    "[SleepNode] Promoted %d mechanisms to core: %s",
+                    promoted,
+                    ", ".join(names[:5]),
+                )
+            return promoted
+        except Exception:
+            logger.debug("[SleepNode] Mechanism promotion failed", exc_info=True)
+            return 0

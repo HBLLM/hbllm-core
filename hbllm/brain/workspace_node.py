@@ -710,7 +710,12 @@ class WorkspaceNode(Node):
         # Run both in parallel with a hard 2.5s ceiling
         try:
             await asyncio.wait_for(
-                asyncio.gather(_try_semantic(), _try_procedural(), return_exceptions=True),
+                asyncio.gather(
+                    _try_semantic(),
+                    _try_procedural(),
+                    self._try_causal_context(corr_id, board),
+                    return_exceptions=True,
+                ),
                 timeout=2.5,
             )
         except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
@@ -808,8 +813,102 @@ class WorkspaceNode(Node):
             logger.info(
                 "Emitted autonomous training feedback (rating=%d) for auto-training loop", rating
             )
+
+            # ── Emit learning experience events for causal learning ──
+            domain = board.get("original_query", {}).get("domain_hint", "general")
+            if isinstance(domain, dict):
+                domain = max(domain.items(), key=lambda x: x[1])[0] if domain else "general"
+
+            if rating > 0 and self.bus.has_subscribers("learning.experience.success"):
+                await self.bus.publish(
+                    "learning.experience.success",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="learning.experience.success",
+                        payload={
+                            "domain": domain,
+                            "query": prompt,
+                            "execution_trace": [{"action": response[:500], "result": "success"}],
+                            "mechanism_ids": [],  # Populated by SIL when skills are involved
+                        },
+                    ),
+                )
+            elif rating < 0 and self.bus.has_subscribers("learning.experience.failure"):
+                await self.bus.publish(
+                    "learning.experience.failure",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="learning.experience.failure",
+                        payload={
+                            "domain": domain,
+                            "expected": "successful execution",
+                            "actual": "execution failed",
+                            "error_message": response[:500],
+                            "query": prompt,
+                            "mechanism_ids": [],
+                        },
+                    ),
+                )
         except Exception as e:
             logger.exception("Failed to emit autonomous training feedback: %s", e)
+
+    async def _try_causal_context(self, corr_id: str, board: dict[str, Any]) -> None:
+        """Query MechanismStore for relevant causal mechanisms.
+
+        Injects mechanism-based context as thoughts weighted by belief
+        confidence.  This replaces pure keyword matching with causal
+        reasoning about *why* certain approaches work.
+
+        Lightweight — uses precondition keyword matching, no LLM.
+        """
+        if not self.bus.has_subscribers("memory.mechanism.find"):
+            return
+
+        query_text = str(board["original_query"].get("text", ""))
+        if not query_text:
+            return
+
+        try:
+            mech_msg = Message(
+                type=MessageType.QUERY,
+                source_node_id=self.node_id,
+                tenant_id=board["tenant_id"],
+                session_id=board["session_id"],
+                topic="memory.mechanism.find",
+                payload={
+                    "situation_keywords": query_text.lower().split()[:20],
+                    "limit": 3,
+                },
+                correlation_id=corr_id,
+            )
+            resp = await asyncio.wait_for(
+                self.bus.request("memory.mechanism.find", mech_msg, timeout=1.5),
+                timeout=2.0,
+            )
+            mechanisms = list(resp.payload.get("mechanisms", []))
+            if mechanisms:
+                mech_text = "\n".join(
+                    f"- {m.get('description', 'unknown')} "
+                    f"(confidence={m.get('confidence', 0):.2f}, "
+                    f"outcomes: {', '.join(m.get('expected_outcomes', [])[:2])})"
+                    for m in mechanisms[:3]
+                )
+                # Weight by average mechanism confidence
+                avg_conf = sum(m.get("confidence", 0.5) for m in mechanisms) / len(mechanisms)
+                board["thoughts"].append(
+                    {
+                        "node": "causal_reasoning",
+                        "type": "causal_context",
+                        "confidence": min(0.6, avg_conf),
+                        "content": f"Relevant causal mechanisms:\n{mech_text}",
+                    }
+                )
+        except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+        except Exception:
+            logger.debug("Causal context retrieval failed", exc_info=True)
 
     async def _periodic_sweeper(self) -> None:
         """Periodically clean up blackboard entries that have exceeded max age."""

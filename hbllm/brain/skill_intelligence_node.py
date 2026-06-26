@@ -13,11 +13,14 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.brain.skill_registry import SkillRegistry
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+
+if TYPE_CHECKING:
+    from hbllm.brain.mechanism_store import MechanismStore
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +32,19 @@ class SkillIntelligenceNode(Node):
     detecting failures, and triggering automated skill repair.
     """
 
-    def __init__(self, node_id: str, skill_registry: SkillRegistry) -> None:
+    def __init__(
+        self,
+        node_id: str,
+        skill_registry: SkillRegistry,
+        mechanism_store: MechanismStore | None = None,
+    ) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.META,
             capabilities=["skill_selection", "skill_lifecycle", "execution_governance"],
         )
         self.skill_registry = skill_registry
+        self.mechanism_store = mechanism_store
 
     async def on_start(self) -> None:
         logger.info("Starting SkillIntelligenceNode")
@@ -71,14 +80,17 @@ class SkillIntelligenceNode(Node):
             # Fallback to direct raw execution, letting SkillCompiler capture it on success later.
             return await self._fallback_raw_execution(message, query)
 
-        # Sort by confidence + success_rate
-        best_skill = max(viable_skills, key=lambda s: (s.confidence_score, s.success_rate))
+        # Sort by confidence + success_rate, adjusted by mechanism belief
+        best_skill = max(
+            viable_skills,
+            key=lambda s: (self._adjusted_confidence(s), s.success_rate),
+        )
 
         logger.info(
-            "SIL selected skill '%s' (v%d) with confidence %.2f for task: %s",
+            "SIL selected skill '%s' (v%d) with adjusted_confidence %.2f for task: %s",
             best_skill.name,
             getattr(best_skill, "version", 1),
-            getattr(best_skill, "confidence_score", 0.8),
+            self._adjusted_confidence(best_skill),
             query,
         )
 
@@ -115,6 +127,31 @@ class SkillIntelligenceNode(Node):
             self.skill_registry.record_execution(
                 best_skill.skill_id, True, latency_ms, tokens=tokens_used
             )
+
+            # Reinforce mechanisms used by this skill
+            mechanism_ids = getattr(best_skill, "mechanism_ids", []) or []
+            if self.mechanism_store and mechanism_ids:
+                for mech_id in mechanism_ids:
+                    self.mechanism_store.record_usage(mech_id, success=True)
+
+            # Emit learning event
+            if self.bus.has_subscribers("learning.experience.success"):
+                await self.bus.publish(
+                    "learning.experience.success",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="learning.experience.success",
+                        payload={
+                            "domain": best_skill.category,
+                            "query": query,
+                            "skill_id": best_skill.skill_id,
+                            "execution_trace": trace,
+                            "mechanism_ids": mechanism_ids,
+                        },
+                    ),
+                )
+
             return message.create_response(
                 {"status": "SUCCESS", "skill": best_skill.name, "execution_trace": trace}
             )
@@ -156,6 +193,33 @@ class SkillIntelligenceNode(Node):
             self.skill_registry.record_execution(
                 best_skill.skill_id, False, latency_ms, failure_type=failure_type
             )
+
+            # Record mechanism failures
+            mechanism_ids = getattr(best_skill, "mechanism_ids", []) or []
+            if self.mechanism_store and mechanism_ids:
+                for mech_id in mechanism_ids:
+                    self.mechanism_store.record_usage(mech_id, success=False)
+
+            # Emit learning failure event for root cause analysis
+            if self.bus.has_subscribers("learning.experience.failure"):
+                await self.bus.publish(
+                    "learning.experience.failure",
+                    Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        topic="learning.experience.failure",
+                        payload={
+                            "domain": best_skill.category,
+                            "expected": f"Skill '{best_skill.name}' executes successfully",
+                            "actual": f"Execution failed: {error_msg}",
+                            "error_message": error_msg,
+                            "query": query,
+                            "skill_id": best_skill.skill_id,
+                            "mechanism_ids": mechanism_ids,
+                            "context": {"previous_success": best_skill.success_rate > 0.5},
+                        },
+                    ),
+                )
 
             return message.create_error(f"Execution failed: {error_msg}")
 
@@ -228,3 +292,28 @@ class SkillIntelligenceNode(Node):
                 "execution_trace": [],
             }
         )
+
+    def _adjusted_confidence(self, skill: Any) -> float:
+        """Compute belief-weighted confidence for a skill.
+
+        ``adjusted_confidence = skill.confidence × avg(mechanism.confidence)``
+
+        Skills with weak causal foundations are automatically demoted.
+        """
+        base_conf = getattr(skill, "confidence_score", 0.8)
+        mechanism_ids = getattr(skill, "mechanism_ids", []) or []
+
+        if not self.mechanism_store or not mechanism_ids:
+            return base_conf
+
+        mech_confs: list[float] = []
+        for mech_id in mechanism_ids:
+            mech = self.mechanism_store.get(mech_id)
+            if mech:
+                mech_confs.append(mech.confidence)
+
+        if not mech_confs:
+            return base_conf
+
+        avg_mech_conf = sum(mech_confs) / len(mech_confs)
+        return base_conf * avg_mech_conf
