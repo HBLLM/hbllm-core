@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 # ── Cognitive IR (Intermediate Representation) ──────────────────────────────
 
+
 @dataclass
 class CognitiveQueryResult:
     """Cross-store contract for unified query results.
@@ -82,6 +83,7 @@ class CognitiveBeliefs:
         if domain:
             return self._store.get_beliefs_by_domain(domain)
         from hbllm.brain.belief_store import BeliefStatus
+
         return self._store.get_beliefs_by_status(BeliefStatus.ACTIVE)
 
     def contested(self) -> list[Any]:
@@ -116,19 +118,23 @@ class CognitiveBeliefs:
             if b.belief_id in seen:
                 continue
             seen.add(b.belief_id)
-            results.append(CognitiveQueryResult(
-                source="beliefs",
-                entity_id=b.belief_id,
-                content=b.claim,
-                relevance=_text_relevance(topic, b.claim),
-                confidence=b.confidence,
-                metadata={
-                    "belief_type": b.belief_type.value if hasattr(b.belief_type, "value") else str(b.belief_type),
-                    "status": b.status.value if hasattr(b.status, "value") else str(b.status),
-                    "concept": b.concept,
-                    "domain": b.domain,
-                },
-            ))
+            results.append(
+                CognitiveQueryResult(
+                    source="beliefs",
+                    entity_id=b.belief_id,
+                    content=b.claim,
+                    relevance=_text_relevance(topic, b.claim),
+                    confidence=b.confidence,
+                    metadata={
+                        "belief_type": b.belief_type.value
+                        if hasattr(b.belief_type, "value")
+                        else str(b.belief_type),
+                        "status": b.status.value if hasattr(b.status, "value") else str(b.status),
+                        "concept": b.concept,
+                        "domain": b.domain,
+                    },
+                )
+            )
         return results
 
     def stats(self) -> dict[str, Any]:
@@ -187,20 +193,22 @@ class CognitiveMechanisms:
             if m.id in seen:
                 continue
             seen.add(m.id)
-            results.append(CognitiveQueryResult(
-                source="mechanisms",
-                entity_id=m.id,
-                content=m.description,
-                relevance=_text_relevance(topic, m.description),
-                confidence=m.confidence,
-                metadata={
-                    "domain": m.domain,
-                    "abstraction_level": m.abstraction_level,
-                    "is_core": m.is_core,
-                    "usage_count": m.usage_count,
-                    "success_rate": m.success_rate,
-                },
-            ))
+            results.append(
+                CognitiveQueryResult(
+                    source="mechanisms",
+                    entity_id=m.id,
+                    content=m.description,
+                    relevance=_text_relevance(topic, m.description),
+                    confidence=m.confidence,
+                    metadata={
+                        "domain": m.domain,
+                        "abstraction_level": m.abstraction_level,
+                        "is_core": m.is_core,
+                        "usage_count": m.usage_count,
+                        "success_rate": m.success_rate,
+                    },
+                )
+            )
         return results
 
     def stats(self) -> dict[str, Any]:
@@ -241,18 +249,20 @@ class CognitiveConcepts:
         results = []
         concepts = self._engine.get_abstract_concepts(domain=topic)
         for c in concepts:
-            results.append(CognitiveQueryResult(
-                source="concepts",
-                entity_id=c.concept_id,
-                content=f"{c.label}: {c.description}",
-                relevance=_text_relevance(topic, f"{c.label} {c.description}"),
-                confidence=c.confidence,
-                metadata={
-                    "domain": c.domain,
-                    "instances": c.instances,
-                    "generalized_steps": c.generalized_steps,
-                },
-            ))
+            results.append(
+                CognitiveQueryResult(
+                    source="concepts",
+                    entity_id=c.concept_id,
+                    content=f"{c.label}: {c.description}",
+                    relevance=_text_relevance(topic, f"{c.label} {c.description}"),
+                    confidence=c.confidence,
+                    metadata={
+                        "domain": c.domain,
+                        "instances": c.instances,
+                        "generalized_steps": c.generalized_steps,
+                    },
+                )
+            )
         return results
 
     def stats(self) -> dict[str, Any]:
@@ -300,19 +310,25 @@ class CognitiveGoals:
         for g in self._manager.get_active_goals():
             relevance = _text_relevance(topic, f"{g.name} {g.description}")
             if relevance > 0.0:
-                results.append(CognitiveQueryResult(
-                    source="goals",
-                    entity_id=g.goal_id,
-                    content=f"{g.name}: {g.description}",
-                    relevance=relevance,
-                    confidence=g.progress,
-                    metadata={
-                        "goal_type": g.goal_type,
-                        "priority": g.priority.value if hasattr(g.priority, "value") else str(g.priority),
-                        "status": g.status.value if hasattr(g.status, "value") else str(g.status),
-                        "progress": g.progress,
-                    },
-                ))
+                results.append(
+                    CognitiveQueryResult(
+                        source="goals",
+                        entity_id=g.goal_id,
+                        content=f"{g.name}: {g.description}",
+                        relevance=relevance,
+                        confidence=g.progress,
+                        metadata={
+                            "goal_type": g.goal_type,
+                            "priority": g.priority.value
+                            if hasattr(g.priority, "value")
+                            else str(g.priority),
+                            "status": g.status.value
+                            if hasattr(g.status, "value")
+                            else str(g.status),
+                            "progress": g.progress,
+                        },
+                    )
+                )
         return results
 
     def stats(self) -> dict[str, Any]:
@@ -594,11 +610,13 @@ class CognitiveGraph:
         if self.goals.available:
             for g in self.goals.active():
                 if domain.lower() in g.name.lower() or domain.lower() in g.description.lower():
-                    result["goals"].append({
-                        "name": g.name,
-                        "progress": g.progress,
-                        "priority": str(g.priority),
-                    })
+                    result["goals"].append(
+                        {
+                            "name": g.name,
+                            "progress": g.progress,
+                            "priority": str(g.priority),
+                        }
+                    )
 
         # Layer 3: Synthesis (deep mode only)
         if mode == "deep":
@@ -627,15 +645,17 @@ class CognitiveGraph:
             for ctr in unresolved:
                 concept = ctr.get("concept", "")
                 if topic.lower() in concept.lower() or not topic:
-                    conflicts.append({
-                        "type": "belief_contradiction",
-                        "source_a": "beliefs",
-                        "source_b": "beliefs",
-                        "claim_a": ctr.get("claim_a", ""),
-                        "claim_b": ctr.get("claim_b", ""),
-                        "severity": ctr.get("severity", 0.5),
-                        "concept": concept,
-                    })
+                    conflicts.append(
+                        {
+                            "type": "belief_contradiction",
+                            "source_a": "beliefs",
+                            "source_b": "beliefs",
+                            "claim_a": ctr.get("claim_a", ""),
+                            "claim_b": ctr.get("claim_b", ""),
+                            "severity": ctr.get("severity", 0.5),
+                            "concept": concept,
+                        }
+                    )
 
         # 2. Mechanism vs belief conflicts
         if self.mechanism_store is not None and self.belief_store is not None:
@@ -650,15 +670,17 @@ class CognitiveGraph:
                         and belief.confidence > 0.7
                         and _text_overlap(mech.description, belief.claim) > 0.2
                     ):
-                        conflicts.append({
-                            "type": "mechanism_belief_tension",
-                            "source_a": "mechanisms",
-                            "source_b": "beliefs",
-                            "claim_a": mech.description,
-                            "claim_b": belief.claim,
-                            "severity": belief.confidence - mech.confidence,
-                            "concept": topic,
-                        })
+                        conflicts.append(
+                            {
+                                "type": "mechanism_belief_tension",
+                                "source_a": "mechanisms",
+                                "source_b": "beliefs",
+                                "claim_a": mech.description,
+                                "claim_b": belief.claim,
+                                "severity": belief.confidence - mech.confidence,
+                                "concept": topic,
+                            }
+                        )
 
         return conflicts
 
@@ -711,6 +733,7 @@ LearningSubsystem = CognitiveGraph
 
 
 # ── Helpers (module-private) ────────────────────────────────────────────────
+
 
 def _text_relevance(query: str, text: str) -> float:
     """Simple word-overlap relevance score."""

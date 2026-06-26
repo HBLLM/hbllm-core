@@ -119,15 +119,9 @@ class MechanismStore:
                     related_mechanism_ids TEXT DEFAULT '[]'
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mech_domain ON mechanisms(domain)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mech_core ON mechanisms(is_core)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mech_confidence ON mechanisms(confidence)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mech_domain ON mechanisms(domain)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mech_core ON mechanisms(is_core)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mech_confidence ON mechanisms(confidence)")
 
     # ─── Create ──────────────────────────────────────────────────────
 
@@ -198,9 +192,7 @@ class MechanismStore:
     def get(self, mechanism_id: str) -> Mechanism | None:
         """Retrieve a mechanism by ID."""
         with sqlite3.connect(str(self._db_path)) as conn:
-            row = conn.execute(
-                "SELECT * FROM mechanisms WHERE id = ?", (mechanism_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM mechanisms WHERE id = ?", (mechanism_id,)).fetchone()
         return self._row_to_mechanism(row) if row else None
 
     def find_by_domain(
@@ -242,11 +234,7 @@ class MechanismStore:
         for row in rows:
             mechanism = self._row_to_mechanism(row)
             # Score by precondition overlap
-            precond_words = {
-                w.lower()
-                for p in mechanism.preconditions
-                for w in p.split()
-            }
+            precond_words = {w.lower() for p in mechanism.preconditions for w in p.split()}
             overlap = len(situation_set & precond_words)
             if overlap > 0:
                 # Weight by confidence and abstraction level
@@ -296,9 +284,7 @@ class MechanismStore:
                     (now, mechanism_id),
                 )
 
-    def reinforce(
-        self, mechanism_id: str, confidence_boost: float = 0.05
-    ) -> None:
+    def reinforce(self, mechanism_id: str, confidence_boost: float = 0.05) -> None:
         """Reinforce a mechanism's confidence (e.g. after evidence confirms it)."""
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.execute(
@@ -378,12 +364,8 @@ class MechanismStore:
         """Get summary statistics."""
         with sqlite3.connect(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM mechanisms").fetchone()[0]
-            core = conn.execute(
-                "SELECT COUNT(*) FROM mechanisms WHERE is_core = 1"
-            ).fetchone()[0]
-            avg_conf = conn.execute(
-                "SELECT AVG(confidence) FROM mechanisms"
-            ).fetchone()[0]
+            core = conn.execute("SELECT COUNT(*) FROM mechanisms WHERE is_core = 1").fetchone()[0]
+            avg_conf = conn.execute("SELECT AVG(confidence) FROM mechanisms").fetchone()[0]
             domains = conn.execute(
                 "SELECT domain, COUNT(*) FROM mechanisms GROUP BY domain"
             ).fetchall()

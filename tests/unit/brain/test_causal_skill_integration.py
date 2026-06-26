@@ -95,13 +95,17 @@ class TestBeliefWeightedSkillSelection:
     def test_multiple_mechanisms_averaged(self, skill_registry, mechanism_store):
         sil = SkillIntelligenceNode("sil", skill_registry, mechanism_store)
         m1 = mechanism_store.create(
-            description="m1", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="m1",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.9,
         )
         m2 = mechanism_store.create(
-            description="m2", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="m2",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.5,
         )
         skill = Skill(
@@ -161,9 +165,7 @@ class TestSkillMechanismLinking:
             success=True,
             category="devops",
         )
-        skill_registry.link_mechanism(
-            skill.skill_id, "mech_container", causal_model_id="model_123"
-        )
+        skill_registry.link_mechanism(skill.skill_id, "mech_container", causal_model_id="model_123")
 
         retrieved = skill_registry.get_skill(skill.skill_id)
         assert retrieved.causal_model_id == "model_123"
@@ -289,8 +291,6 @@ class TestMechanismAbstraction:
             assert m.parent_mechanism_id == injection.id
 
         # Abstract mechanism should match "user input" situations
-        results = mechanism_store.find_by_preconditions(
-            ["user", "input", "form", "submission"]
-        )
+        results = mechanism_store.find_by_preconditions(["user", "input", "form", "submission"])
         # Higher abstraction_level gets boosted in scoring
         assert any(r.id == injection.id for r in results)

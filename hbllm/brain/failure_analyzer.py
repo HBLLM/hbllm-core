@@ -55,11 +55,13 @@ class FailureCategory(Enum):
 
 
 # Categories that indicate a belief should be revised
-BELIEF_RELEVANT_CATEGORIES = frozenset({
-    FailureCategory.TRUE_CONTRADICTION,
-    FailureCategory.STALE_KNOWLEDGE,
-    FailureCategory.LOGIC_ERROR,
-})
+BELIEF_RELEVANT_CATEGORIES = frozenset(
+    {
+        FailureCategory.TRUE_CONTRADICTION,
+        FailureCategory.STALE_KNOWLEDGE,
+        FailureCategory.LOGIC_ERROR,
+    }
+)
 
 
 @dataclass

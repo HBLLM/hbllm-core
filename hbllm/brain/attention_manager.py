@@ -195,10 +195,7 @@ class CognitivePriorityScheduler:
 
         Optionally filter by task_type and auto-claim for a node.
         """
-        candidates = [
-            t for t in self._tasks.values()
-            if not t.completed and t.claimed_by is None
-        ]
+        candidates = [t for t in self._tasks.values() if not t.completed and t.claimed_by is None]
         if task_type is not None:
             candidates = [t for t in candidates if t.task_type == task_type]
 
@@ -338,13 +335,9 @@ class AttentionManager(Node):
         # Coordinate with LoadManager
         await self.bus.subscribe("system.load.policy_update", self._handle_load_policy)
         # Cognitive task ingestion
-        await self.bus.subscribe(
-            "learning.contradiction.discovered", self._ingest_contradiction
-        )
+        await self.bus.subscribe("learning.contradiction.discovered", self._ingest_contradiction)
         await self.bus.subscribe("learning.weak_area", self._ingest_weak_area)
-        await self.bus.subscribe(
-            "learning.session.complete", self._ingest_session_complete
-        )
+        await self.bus.subscribe("learning.session.complete", self._ingest_session_complete)
         await self.bus.subscribe("curiosity.investigate", self._ingest_curiosity)
         await self.bus.subscribe("attention.next_task", self._handle_next_task)
         self._polling_task = asyncio.create_task(self._poll_memory_stats())
@@ -682,36 +675,40 @@ class AttentionManager(Node):
     async def _ingest_contradiction(self, message: Message) -> None:
         """Create a cognitive task from a discovered contradiction."""
         payload = message.payload
-        self.scheduler.submit(CognitiveTask(
-            task_type=CognitiveTaskType.CONTRADICTION,
-            domain=payload.get("concept", "general"),
-            source=message.source_node_id,
-            description=(
-                f"Resolve: '{payload.get('claim_a', '?')[:50]}' "
-                f"vs '{payload.get('claim_b', '?')[:50]}'"
-            ),
-            uncertainty=0.8,
-            contradiction_severity=payload.get("severity", 0.5),
-            novelty=0.6,
-            expected_value=0.7,
-            payload=payload,
-        ))
+        self.scheduler.submit(
+            CognitiveTask(
+                task_type=CognitiveTaskType.CONTRADICTION,
+                domain=payload.get("concept", "general"),
+                source=message.source_node_id,
+                description=(
+                    f"Resolve: '{payload.get('claim_a', '?')[:50]}' "
+                    f"vs '{payload.get('claim_b', '?')[:50]}'"
+                ),
+                uncertainty=0.8,
+                contradiction_severity=payload.get("severity", 0.5),
+                novelty=0.6,
+                expected_value=0.7,
+                payload=payload,
+            )
+        )
 
     async def _ingest_weak_area(self, message: Message) -> None:
         """Create a cognitive task from a weak learning area."""
         payload = message.payload
         score = payload.get("score", 0.5)
-        self.scheduler.submit(CognitiveTask(
-            task_type=CognitiveTaskType.LEARNING,
-            domain=payload.get("goal_topic", "general"),
-            source=message.source_node_id,
-            description=f"Strengthen weak area: {payload.get('concept', '?')}",
-            uncertainty=1.0 - score,
-            goal_relevance=0.7,
-            novelty=0.4,
-            expected_value=0.6,
-            payload=payload,
-        ))
+        self.scheduler.submit(
+            CognitiveTask(
+                task_type=CognitiveTaskType.LEARNING,
+                domain=payload.get("goal_topic", "general"),
+                source=message.source_node_id,
+                description=f"Strengthen weak area: {payload.get('concept', '?')}",
+                uncertainty=1.0 - score,
+                goal_relevance=0.7,
+                novelty=0.4,
+                expected_value=0.6,
+                payload=payload,
+            )
+        )
 
     async def _ingest_session_complete(self, message: Message) -> None:
         """Create concept formation task after learning session."""
@@ -719,37 +716,41 @@ class AttentionManager(Node):
         models_built = payload.get("causal_models_built", 0)
         if models_built >= 2:
             # Enough models to attempt abstraction
-            self.scheduler.submit(CognitiveTask(
-                task_type=CognitiveTaskType.CONCEPT_FORMATION,
-                domain=payload.get("topic", "general"),
-                source=message.source_node_id,
-                description=(
-                    f"Abstract patterns from {models_built} models "
-                    f"in '{payload.get('topic', '?')}'"
-                ),
-                uncertainty=0.5,
-                goal_relevance=0.4,
-                novelty=0.7,
-                expected_value=0.6,
-                payload=payload,
-            ))
+            self.scheduler.submit(
+                CognitiveTask(
+                    task_type=CognitiveTaskType.CONCEPT_FORMATION,
+                    domain=payload.get("topic", "general"),
+                    source=message.source_node_id,
+                    description=(
+                        f"Abstract patterns from {models_built} models "
+                        f"in '{payload.get('topic', '?')}'"
+                    ),
+                    uncertainty=0.5,
+                    goal_relevance=0.4,
+                    novelty=0.7,
+                    expected_value=0.6,
+                    payload=payload,
+                )
+            )
 
     async def _ingest_curiosity(self, message: Message) -> None:
         """Create a cognitive task from a curiosity signal."""
         payload = message.payload
         priority_map = {"high": 0.8, "medium": 0.5, "low": 0.3}
         priority_str = payload.get("priority", "medium")
-        self.scheduler.submit(CognitiveTask(
-            task_type=CognitiveTaskType.CURIOSITY,
-            domain=payload.get("domain", "general"),
-            source=message.source_node_id,
-            description=payload.get("question", "Unknown curiosity")[:200],
-            uncertainty=0.7,
-            goal_relevance=priority_map.get(priority_str, 0.5),
-            novelty=0.8,
-            expected_value=0.5,
-            payload=payload,
-        ))
+        self.scheduler.submit(
+            CognitiveTask(
+                task_type=CognitiveTaskType.CURIOSITY,
+                domain=payload.get("domain", "general"),
+                source=message.source_node_id,
+                description=payload.get("question", "Unknown curiosity")[:200],
+                uncertainty=0.7,
+                goal_relevance=priority_map.get(priority_str, 0.5),
+                novelty=0.8,
+                expected_value=0.5,
+                payload=payload,
+            )
+        )
 
     async def _handle_next_task(self, message: Message) -> Message | None:
         """Return the highest-priority cognitive task."""

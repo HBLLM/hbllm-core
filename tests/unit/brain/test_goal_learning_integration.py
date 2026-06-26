@@ -124,10 +124,14 @@ class TestSubordinateTo:
 
     def test_link_child_to_parent(self, gm):
         parent = gm.create_goal(
-            name="Parent", description="P", goal_type="learning",
+            name="Parent",
+            description="P",
+            goal_type="learning",
         )
         child = gm.create_goal(
-            name="Child", description="C", goal_type="learning",
+            name="Child",
+            description="C",
+            goal_type="learning",
         )
 
         gm.subordinate_to(child.goal_id, parent.goal_id)

@@ -49,7 +49,9 @@ class SkillEngine(Node):
                 "experience_learning",
             ],
         )
-        self.description = "Unified skill lifecycle (compile → induce → govern → repair → rules → learn)"
+        self.description = (
+            "Unified skill lifecycle (compile → induce → govern → repair → rules → learn)"
+        )
         self._llm = llm
         self._skill_registry = skill_registry
         self._mechanism_store = mechanism_store

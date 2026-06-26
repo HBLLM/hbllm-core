@@ -215,6 +215,7 @@ class TestCognitiveIntegrator:
         """Results should be ranked by relevance × confidence."""
         results = graph.query("security")
         if len(results) >= 2:
+
             def _score(r: CognitiveQueryResult) -> float:
                 return r.relevance * 0.6 + r.confidence * 0.4
 

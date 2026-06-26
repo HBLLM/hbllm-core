@@ -854,9 +854,7 @@ class WorkspaceNode(Node):
         except Exception as e:
             logger.exception("Failed to emit autonomous training feedback: %s", e)
 
-    async def _try_causal_context(
-        self, corr_id: str, board: dict[str, Any]
-    ) -> None:
+    async def _try_causal_context(self, corr_id: str, board: dict[str, Any]) -> None:
         """Query MechanismStore for relevant causal mechanisms.
 
         Injects mechanism-based context as thoughts weighted by belief

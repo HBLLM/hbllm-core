@@ -397,9 +397,7 @@ class SkillRegistry:
             mechanism_ids=json.loads(row[21]) if len(row) > 21 and row[21] else [],
         )
 
-    def find_skill_by_mechanism(
-        self, mechanism_id: str, tenant_id: str = "global"
-    ) -> list[Skill]:
+    def find_skill_by_mechanism(self, mechanism_id: str, tenant_id: str = "global") -> list[Skill]:
         """Find all skills that rely on a specific mechanism."""
         with sqlite3.connect(str(self._db_path)) as conn:
             rows = conn.execute(

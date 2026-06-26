@@ -1169,9 +1169,7 @@ class BrainFactory:
                 learning_data_dir = f"{cfg.data_dir}/learning"
 
                 # Get mechanism_store from SkillEngine if available
-                mechanism_store = (
-                    skills.mechanism_store if skills is not None else None
-                )
+                mechanism_store = skills.mechanism_store if skills is not None else None
 
                 # Build learning subsystems
                 causal_builder = CausalModelBuilder(
@@ -1241,7 +1239,6 @@ class BrainFactory:
                 )
             except Exception as e:
                 logger.warning("Autonomous Learning Engine init failed (non-critical): %s", e)
-
 
         # Perception nodes (optional — require ML models)
         if cfg.inject_perception:

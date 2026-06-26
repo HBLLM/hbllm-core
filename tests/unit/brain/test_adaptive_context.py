@@ -123,4 +123,3 @@ async def test_workspace_compresses_dpo_payload():
     # Default compression bound for Workspace is 4000
     assert 4000 < len(response_payload) < 4100
     assert "[... 2000 characters dynamically omitted" in response_payload
-

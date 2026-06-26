@@ -198,22 +198,10 @@ class BeliefStore:
                 )
             """)
             # Indexes for common queries
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_concept "
-                "ON beliefs(concept)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_domain "
-                "ON beliefs(domain)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_type "
-                "ON beliefs(belief_type)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_beliefs_status "
-                "ON beliefs(status)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_concept ON beliefs(concept)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_domain ON beliefs(domain)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_type ON beliefs(belief_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs(status)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_contradictions_resolved "
                 "ON persistent_contradictions(resolved)"
@@ -340,8 +328,7 @@ class BeliefStore:
         try:
             with sqlite3.connect(self._db_path) as conn:
                 rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE status = ? "
-                    "ORDER BY confidence DESC",
+                    "SELECT data FROM beliefs WHERE status = ? ORDER BY confidence DESC",
                     (status.value,),
                 ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
@@ -479,9 +466,7 @@ class BeliefStore:
     def stats(self) -> dict[str, Any]:
         try:
             with sqlite3.connect(self._db_path) as conn:
-                total_beliefs = conn.execute(
-                    "SELECT COUNT(*) FROM beliefs"
-                ).fetchone()[0]
+                total_beliefs = conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0]
                 active_beliefs = conn.execute(
                     "SELECT COUNT(*) FROM beliefs WHERE status = 'active'"
                 ).fetchone()[0]

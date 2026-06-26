@@ -118,15 +118,18 @@ class TestBeliefStorage:
 
     def test_get_beliefs_by_type(self, store):
         store.store_belief(
-            claim="X causes Y", concept="c1",
+            claim="X causes Y",
+            concept="c1",
             belief_type=BeliefType.CAUSAL,
         )
         store.store_belief(
-            claim="Z is true", concept="c2",
+            claim="Z is true",
+            concept="c2",
             belief_type=BeliefType.FACTUAL,
         )
         store.store_belief(
-            claim="A enables B", concept="c3",
+            claim="A enables B",
+            concept="c3",
             belief_type=BeliefType.CAUSAL,
         )
 

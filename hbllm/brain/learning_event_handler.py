@@ -129,38 +129,30 @@ class LearningEventHandler(Node):
     async def on_start(self) -> None:
         logger.info("Starting LearningEventHandler")
         # Experience events (from real execution — full belief pipeline)
-        await self.bus.subscribe(
-            "learning.experience.success", self._handle_success
-        )
-        await self.bus.subscribe(
-            "learning.experience.failure", self._handle_failure
-        )
+        await self.bus.subscribe("learning.experience.success", self._handle_success)
+        await self.bus.subscribe("learning.experience.failure", self._handle_failure)
         # Research events (from AutonomousLearner — NO belief/meta to avoid echo)
-        await self.bus.subscribe(
-            "learning.session.complete", self._handle_session_complete
-        )
+        await self.bus.subscribe("learning.session.complete", self._handle_session_complete)
         await self.bus.subscribe(
             "learning.contradiction.discovered",
             self._handle_contradiction_discovered,
         )
         # Curiosity events
-        await self.bus.subscribe(
-            "curiosity.research.complete", self._handle_research_complete
-        )
+        await self.bus.subscribe("curiosity.research.complete", self._handle_research_complete)
 
     async def on_stop(self) -> None:
-        logger.info(
-            "Stopping LearningEventHandler (stats: %s)", self._stats
-        )
+        logger.info("Stopping LearningEventHandler (stats: %s)", self._stats)
 
     async def handle_message(self, message: Message) -> Message | None:
         """Direct message handling — returns stats."""
         if message.payload.get("action") == "stats":
-            return message.create_response({
-                "stats": self._stats,
-                "model_build_queue_size": len(self._model_build_queue),
-                "subsystem": self._subsystem.summary(),
-            })
+            return message.create_response(
+                {
+                    "stats": self._stats,
+                    "model_build_queue_size": len(self._model_build_queue),
+                    "subsystem": self._subsystem.summary(),
+                }
+            )
         return None
 
     # ─── Experience: Success (full belief pipeline) ──────────────────
@@ -190,8 +182,7 @@ class LearningEventHandler(Node):
                         claim=f"Mechanism {mech_id} is reliable",
                         confidence=0.7,
                         evidence=(
-                            f"Successfully applied in execution: "
-                            f"{payload.get('query', '')[:100]}"
+                            f"Successfully applied in execution: {payload.get('query', '')[:100]}"
                         ),
                         source="execution_experience",
                     )
@@ -214,13 +205,15 @@ class LearningEventHandler(Node):
         # 4. Queue causal model building for background/sleep (NO LLM during queries)
         trace = payload.get("execution_trace", [])
         if trace:
-            self._model_build_queue.append({
-                "domain": payload.get("domain", "general"),
-                "trace": trace,
-                "query": payload.get("query", ""),
-                "skill_id": payload.get("skill_id"),
-                "mechanism_ids": mechanism_ids,
-            })
+            self._model_build_queue.append(
+                {
+                    "domain": payload.get("domain", "general"),
+                    "trace": trace,
+                    "query": payload.get("query", ""),
+                    "skill_id": payload.get("skill_id"),
+                    "mechanism_ids": mechanism_ids,
+                }
+            )
             self._stats["models_queued"] += 1
             logger.info(
                 "Queued causal model building for domain '%s' (queue=%d)",
@@ -291,9 +284,7 @@ class LearningEventHandler(Node):
                                     f"Root cause: {root_cause.category.value}"
                                 ),
                                 "domain": payload.get("domain", "general"),
-                                "priority": (
-                                    "high" if root_cause.confidence > 0.7 else "low"
-                                ),
+                                "priority": ("high" if root_cause.confidence > 0.7 else "low"),
                             },
                         )
                         await self.bus.publish("curiosity.investigate", curiosity_msg)
@@ -338,8 +329,7 @@ class LearningEventHandler(Node):
         topic = payload.get("topic", "unknown")
 
         logger.info(
-            "Learning session complete: topic='%s', confidence_gain=%.2f, "
-            "models=%d",
+            "Learning session complete: topic='%s', confidence_gain=%.2f, models=%d",
             topic,
             payload.get("confidence_after", 0) - payload.get("confidence_before", 0),
             payload.get("causal_models_built", 0),
@@ -350,7 +340,8 @@ class LearningEventHandler(Node):
     # ─── Research: Contradiction Discovered (log only — NO belief update) ─
 
     async def _handle_contradiction_discovered(
-        self, message: Message,
+        self,
+        message: Message,
     ) -> Message | None:
         """Handle contradiction discovered during autonomous research.
 
@@ -361,8 +352,7 @@ class LearningEventHandler(Node):
         payload = message.payload
 
         logger.info(
-            "Research contradiction: concept='%s', severity=%.2f, "
-            "claims: '%s' vs '%s'",
+            "Research contradiction: concept='%s', severity=%.2f, claims: '%s' vs '%s'",
             payload.get("concept", "unknown"),
             payload.get("severity", 0.0),
             payload.get("claim_a", "?")[:50],
@@ -396,12 +386,14 @@ class LearningEventHandler(Node):
         # Queue model building with research findings
         findings = payload.get("findings", [])
         if findings:
-            self._model_build_queue.append({
-                "domain": payload.get("domain", "general"),
-                "trace": findings,
-                "query": payload.get("source_goal", ""),
-                "source": "curiosity_research",
-            })
+            self._model_build_queue.append(
+                {
+                    "domain": payload.get("domain", "general"),
+                    "trace": findings,
+                    "query": payload.get("source_goal", ""),
+                    "source": "curiosity_research",
+                }
+            )
             self._stats["models_queued"] += 1
 
         return None

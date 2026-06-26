@@ -161,10 +161,12 @@ class TestCognitivePriorityScheduler:
     def test_get_pending(self):
         scheduler = CognitivePriorityScheduler()
         for i in range(5):
-            scheduler.submit(CognitiveTask(
-                task_type=CognitiveTaskType.LEARNING,
-                uncertainty=i * 0.2,
-            ))
+            scheduler.submit(
+                CognitiveTask(
+                    task_type=CognitiveTaskType.LEARNING,
+                    uncertainty=i * 0.2,
+                )
+            )
 
         pending = scheduler.get_pending(limit=3)
         assert len(pending) == 3
@@ -174,10 +176,12 @@ class TestCognitivePriorityScheduler:
     def test_prune_on_overflow(self):
         scheduler = CognitivePriorityScheduler(max_pending=5)
         for i in range(10):
-            scheduler.submit(CognitiveTask(
-                task_type=CognitiveTaskType.LEARNING,
-                uncertainty=i * 0.1,
-            ))
+            scheduler.submit(
+                CognitiveTask(
+                    task_type=CognitiveTaskType.LEARNING,
+                    uncertainty=i * 0.1,
+                )
+            )
 
         assert len(scheduler._tasks) <= 5
 

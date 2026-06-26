@@ -637,7 +637,7 @@ class ConceptFormationEngine:
             + "\n\nRelated concepts: "
             + ", ".join(concepts[:5])
             + "\n\nWhat general principle or concept unifies them?\n"
-            "Return JSON: {\"label\": \"...\", \"description\": \"...\", "
+            'Return JSON: {"label": "...", "description": "...", '
             '"generalized_steps": ["..."], "generalized_assumptions": ["..."]}\n'
             "Return ONLY valid JSON, no markdown."
         )
@@ -924,4 +924,3 @@ class ConceptFormationEngine:
         intersection = a_words & b_words
         union = a_words | b_words
         return len(intersection) / len(union) > 0.4 if union else False
-

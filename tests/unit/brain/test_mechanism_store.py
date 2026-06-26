@@ -115,8 +115,10 @@ class TestMechanismConfidence:
 
     def test_record_success(self, store):
         mech = store.create(
-            description="Test", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Test",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.8,
         )
         store.record_usage(mech.id, success=True)
@@ -128,8 +130,10 @@ class TestMechanismConfidence:
 
     def test_record_failure(self, store):
         mech = store.create(
-            description="Test", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Test",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.8,
         )
         store.record_usage(mech.id, success=False)
@@ -141,8 +145,10 @@ class TestMechanismConfidence:
 
     def test_reinforce(self, store):
         mech = store.create(
-            description="Test", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Test",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.5,
         )
         store.reinforce(mech.id, confidence_boost=0.2)
@@ -150,13 +156,17 @@ class TestMechanismConfidence:
 
     def test_decay_confidence(self, store):
         store.create(
-            description="Regular", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Regular",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.5,
         )
         core = store.create(
-            description="Core", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Core",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.9,
         )
         store.promote_to_core(core.id)
@@ -190,12 +200,16 @@ class TestMechanismPromotion:
 
     def test_get_core_mechanisms(self, store):
         m1 = store.create(
-            description="Core 1", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Core 1",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
         )
         store.create(
-            description="Non-core", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Non-core",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
         )
         store.promote_to_core(m1.id)
 
@@ -205,8 +219,10 @@ class TestMechanismPromotion:
 
     def test_find_promotable(self, store):
         mech = store.create(
-            description="Well-used", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Well-used",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.9,
         )
         # Simulate 15 successful uses
@@ -219,13 +235,17 @@ class TestMechanismPromotion:
 
     def test_prune_weak(self, store):
         weak = store.create(
-            description="Weak", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Weak",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.05,
         )
         strong = store.create(
-            description="Strong", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Strong",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.9,
         )
 
@@ -236,13 +256,17 @@ class TestMechanismPromotion:
 
     def test_get_weak(self, store):
         store.create(
-            description="Weak", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Weak",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.2,
         )
         store.create(
-            description="Strong", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="Strong",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             confidence=0.9,
         )
 
@@ -256,13 +280,17 @@ class TestMechanismStats:
 
     def test_stats(self, store):
         store.create(
-            description="A", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="A",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             domain="security",
         )
         store.create(
-            description="B", preconditions=["a"],
-            process_steps=["b"], expected_outcomes=["c"],
+            description="B",
+            preconditions=["a"],
+            process_steps=["b"],
+            expected_outcomes=["c"],
             domain="devops",
         )
 

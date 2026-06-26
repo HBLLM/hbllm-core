@@ -1489,4 +1489,3 @@ class SleepCycleNode(Node):
         except Exception:
             logger.debug("[SleepNode] Mechanism promotion failed", exc_info=True)
             return 0
-
