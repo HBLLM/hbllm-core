@@ -79,6 +79,11 @@ graph TB
     end
 
     subgraph AUTONOMY["🎯 Autonomy & Executive Control"]
+        CEC["🧠 CognitiveExecutiveController\n(Persistent Orchestrator)"]
+        IWS["📋 IntentionalWorkspace\n(SQLite Goal Agenda)"]
+        COGS["❄️ CognitiveState\n(Immutable Versioned Blackboard)"]
+        SGE["⚡ SkillGraphExecutor\n(DAG-based SkillIR)"]
+        LSE["🛡️ LayeredSimulationEngine\n(Safety, Social, Resource layers)"]
         ACORE["🫀 AutonomyCore\n(Cognitive Heartbeat)"]
         CSM["🧠 Cognitive\nState Machine"]
         ATTN["👁️ Attention\nSystem"]
@@ -90,6 +95,10 @@ graph TB
         NSUP["🔕 Notification\nSuppressor"]
         PROACT["💡 Proactive\nInsight"]
         CLOAD["📊 Cognitive Load\nEstimator"]
+        IWS --> CEC
+        CEC --> COGS
+        COGS --> SGE
+        COGS --> LSE
     end
 
     subgraph META["🧬 Meta-Cognitive Layer (Self-Model)"]
@@ -277,7 +286,7 @@ The human modeling layer that makes HBLLM feel persistent and personal. See [Cog
 
 - **UserModel** — Continuously learns expertise, preferences, beliefs, trust, stress, engagement, and temporal work patterns from every interaction. SQLite-backed.
 - **ProjectGraph** — Graph-based project state tracker with goals, blockers, open questions, decisions, and milestones. Auto-detects which project the user is talking about.
-- **ExecutiveCortex** — Unified cognitive control: goal arbitration, task switching costs, interruption control, and cognitive budget allocation.
+- **CognitiveExecutiveController / ExecutiveCortex** — Unified cognitive control operating over a state-centric, versioned-immutable kernel. Goal agendas are maintained in the persistent `IntentionalWorkspace` SQLite database, and policies cascade via a hierarchical priority system (Task → Global) managed in the Bayesian `SelfModel`.
 - **RelationshipMemory** — Social graph of people mentioned in conversations with roles, sentiment trends, interaction history, and notification prioritization.
 - **RealityGraph** — Read-only unified facade over KnowledgeGraph, BrainWorldState, and PerceptionWorldState. Merges entities by confidence.
 

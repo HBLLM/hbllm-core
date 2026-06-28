@@ -13,6 +13,7 @@ Flow:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -55,6 +56,8 @@ class Skill:
     source: str = ""  # provenance: "plugin:<name>", "auto-compiled", "user", "graduated"
     causal_model_id: str | None = None  # Links to CausalModelBuilder output
     mechanism_ids: list[str] = field(default_factory=list)  # Mechanisms this skill relies on
+    nodes: list[dict[str, Any]] = field(default_factory=list)
+    edges: list[dict[str, Any]] = field(default_factory=list)
 
 
 class SkillRegistry:
@@ -119,6 +122,10 @@ class SkillRegistry:
                 conn.execute("ALTER TABLE skills ADD COLUMN causal_model_id TEXT")
             if "mechanism_ids" not in columns:
                 conn.execute("ALTER TABLE skills ADD COLUMN mechanism_ids TEXT DEFAULT '[]'")
+            if "nodes" not in columns:
+                conn.execute("ALTER TABLE skills ADD COLUMN nodes TEXT DEFAULT '[]'")
+            if "edges" not in columns:
+                conn.execute("ALTER TABLE skills ADD COLUMN edges TEXT DEFAULT '[]'")
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_cat ON skills(category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_skills_tenant ON skills(tenant_id)")
@@ -187,8 +194,8 @@ class SkillRegistry:
                  success_criteria, examples, success_rate, invocations,
                  avg_latency_ms, created_at, updated_at,
                  version, parent_skill_id, tokens_used, cost_score, failure_types,
-                 confidence_score, tenant_id, source, causal_model_id, mechanism_ids)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 confidence_score, tenant_id, source, causal_model_id, mechanism_ids, nodes, edges)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     skill.skill_id,
@@ -214,6 +221,8 @@ class SkillRegistry:
                     skill.source,
                     skill.causal_model_id,
                     json.dumps(skill.mechanism_ids),
+                    json.dumps(skill.nodes),
+                    json.dumps(skill.edges),
                 ),
             )
 
@@ -223,7 +232,7 @@ class SkillRegistry:
         "skill_id, name, description, category, steps, tools_used, success_criteria, "
         "examples, success_rate, invocations, avg_latency_ms, created_at, version, "
         "parent_skill_id, tokens_used, cost_score, failure_types, confidence_score, tenant_id, source, "
-        "causal_model_id, mechanism_ids"
+        "causal_model_id, mechanism_ids, nodes, edges"
     )
 
     def find_skill(
@@ -395,6 +404,8 @@ class SkillRegistry:
             source=row[19] if len(row) > 19 else "",
             causal_model_id=row[20] if len(row) > 20 else None,
             mechanism_ids=json.loads(row[21]) if len(row) > 21 and row[21] else [],
+            nodes=json.loads(row[22]) if len(row) > 22 and row[22] else [],
+            edges=json.loads(row[23]) if len(row) > 23 and row[23] else [],
         )
 
     def find_skill_by_mechanism(self, mechanism_id: str, tenant_id: str = "global") -> list[Skill]:
@@ -559,3 +570,119 @@ class SkillRegistry:
             "avg_success_rate": round(avg_sr or 0, 3),
             "by_source": {s: c for s, c in sources},
         }
+
+
+class SkillGraphExecutor:
+    """Orchestrates runtime execution of DAG-based SkillIR graphs."""
+
+    def __init__(self, registry: SkillRegistry, runner_func: Any) -> None:
+        self.registry = registry
+        self.runner_func = runner_func
+
+    async def execute(self, skill: Skill, context: dict[str, Any]) -> dict[str, Any]:
+        """Execute a skill graph DAG, resolving parallel and conditional paths."""
+        nodes = skill.nodes
+        edges = skill.edges
+
+        # 1. Fallback to auto-generate linear steps nodes & edges if empty
+        if not nodes and skill.steps:
+            nodes = [
+                {"id": f"step_{i}", "type": "command", "action": step}
+                for i, step in enumerate(skill.steps)
+            ]
+            edges = [
+                {"source": f"step_{i}", "target": f"step_{i + 1}"}
+                for i in range(len(skill.steps) - 1)
+            ]
+
+        statuses = {node["id"]: "pending" for node in nodes}
+        outputs: dict[str, Any] = {}
+        node_map = {node["id"]: node for node in nodes}
+
+        # Resolve dependencies
+        dependencies = {node["id"]: set() for node in nodes}
+        for edge in edges:
+            src = edge["source"]
+            tgt = edge["target"]
+            if tgt in dependencies:
+                dependencies[tgt].add(src)
+
+        while "pending" in statuses.values():
+            # Find ready nodes
+            ready_nodes = []
+            for node_id, deps in dependencies.items():
+                if statuses[node_id] == "pending":
+                    if all(statuses[d] == "completed" for d in deps):
+                        ready_nodes.append(node_id)
+
+            if not ready_nodes:
+                # Resolve failed/blocked nodes propagation
+                blocked = False
+                for node_id in statuses:
+                    if statuses[node_id] == "pending":
+                        deps = dependencies[node_id]
+                        if any(statuses[d] == "failed" for d in deps):
+                            statuses[node_id] = "failed"
+                            blocked = True
+                if not blocked:
+                    break
+                continue
+
+            async def run_node(nid: str) -> None:
+                node = node_map[nid]
+                try:
+                    # Evaluate incoming edge conditions
+                    for edge in edges:
+                        if edge["target"] == nid:
+                            cond = edge.get("condition")
+                            if cond:
+                                if not self._eval_condition(cond, context, outputs):
+                                    statuses[nid] = "completed"
+                                    return
+
+                    res = await self.runner_func(node, context, outputs)
+                    outputs[nid] = res
+                    statuses[nid] = "completed"
+                except Exception as e:
+                    logger.error("Error executing skill node %s: %s", nid, e)
+                    statuses[nid] = "failed"
+
+            await asyncio.gather(*(run_node(nid) for nid in ready_nodes))
+
+        return {"statuses": statuses, "outputs": outputs}
+
+    def _eval_condition(
+        self, condition: str, context: dict[str, Any], outputs: dict[str, Any]
+    ) -> bool:
+        """Evaluate edge condition string against context and intermediate outputs.
+
+        Supports simple 3-part expressions: ``key == value`` or ``key != value``.
+        Returns True (allow) if the condition cannot be parsed, but logs a warning.
+        """
+        try:
+            parts = condition.split()
+            if len(parts) == 3:
+                key, op, val = parts
+                val = val.strip("'\"")
+                lookup = context.get(key, outputs.get(key))
+                if op == "==":
+                    return str(lookup) == val
+                elif op == "!=":
+                    return str(lookup) != val
+                else:
+                    logger.warning(
+                        "[SkillGraphExecutor] Unsupported operator '%s' in condition: %s",
+                        op,
+                        condition,
+                    )
+            else:
+                logger.warning(
+                    "[SkillGraphExecutor] Malformed condition (expected 3 parts, got %d): %s",
+                    len(parts),
+                    condition,
+                )
+        except Exception as e:
+            logger.warning(
+                "[SkillGraphExecutor] Failed to evaluate condition '%s': %s", condition, e
+            )
+        return True

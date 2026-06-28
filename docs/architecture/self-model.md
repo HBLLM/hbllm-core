@@ -44,11 +44,20 @@ The `ExperienceRecord` preserves raw execution history and validation details fo
 
 ---
 
-## Database Schema
+## Database Schema & Bayesian Policy Optimization
 
-The Self-Model stores its data locally in an SQLite database (`self_model.db`) with four main tables:
+The Self-Model stores its data locally in an SQLite database (`self_model.db`) with five main tables:
 - `capabilities`: Aggregated metrics per domain.
 - `performance_log`: Event-level logs for trend analysis.
 - `capability_profiles`: Running profiles for granular action capabilities.
 - `experience_records`: Full execution counts and validation metadata.
+- `policy_performance`: Tracks performance statistics (invocations, successes) for specific cognitive policy choices per domain, enabling Bayesian optimization.
+
+### Bayesian Policy Selection
+
+During task planning, the system uses an **Epsilon-Greedy Multi-Armed Bandit** strategy to dynamically select the optimal cognitive policy:
+* **Exploration (15%):** Randomly selects a policy to gather performance data.
+* **Exploitation (85%):** Selects the policy with the highest success rate for the target domain.
+
+Outcomes are recorded at the end of each task execution via `record_policy_outcome()`, continuously updating the success statistics in `policy_performance`.
 
