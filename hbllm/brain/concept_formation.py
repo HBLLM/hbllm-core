@@ -418,6 +418,68 @@ class ConceptFormationEngine:
         """Get all discovered cross-domain analogies."""
         return list(self._analogies)
 
+    def generate_analogous_hypothesis(
+        self, concept: str, skill_registry: Any, target_context: dict[str, Any]
+    ) -> Any | None:
+        """Find a cross-domain analogy, fetch the counterpart skill, and translate the graph."""
+        from hbllm.brain.cognitive_state import CandidatePlan
+
+        matching_analogy = None
+        counterpart_concept = None
+        for analogy in self._analogies:
+            # Check concept name matches (either concept_a or concept_b)
+            c_a = getattr(analogy, "concept_a", "")
+            c_b = getattr(analogy, "concept_b", "")
+            if c_a.lower() == concept.lower():
+                matching_analogy = analogy
+                counterpart_concept = c_b
+                break
+            elif c_b.lower() == concept.lower():
+                matching_analogy = analogy
+                counterpart_concept = c_a
+                break
+
+        if not matching_analogy or not counterpart_concept:
+            return None
+
+        # Search the registry for the counterpart skill
+        found_skills = skill_registry.find_skill(counterpart_concept)
+        if not found_skills:
+            return None
+
+        source_skill = found_skills[0]
+        source_nodes = getattr(source_skill, "nodes", [])
+        source_edges = getattr(source_skill, "edges", [])
+
+        if not source_nodes and getattr(source_skill, "steps", []):
+            source_nodes = [
+                {"id": f"step_{i}", "type": "command", "action": step}
+                for i, step in enumerate(source_skill.steps)
+            ]
+            source_edges = [
+                {"source": f"step_{i}", "target": f"step_{i + 1}"}
+                for i in range(len(source_skill.steps) - 1)
+            ]
+
+        mappings = target_context.get("analogy_mappings", {})
+
+        nodes = []
+        for node in source_nodes:
+            new_node = dict(node)
+            action = new_node.get("action", "")
+            for src_term, tgt_term in mappings.items():
+                action = action.replace(src_term, tgt_term)
+            new_node["action"] = action
+            nodes.append(new_node)
+
+        analogy_id = getattr(matching_analogy, "analogy_id", f"anlg_{int(time.time())}")
+        return CandidatePlan(
+            graph={"nodes": nodes, "edges": source_edges},
+            origin="analogy",
+            confidence=0.6,
+            analogy_used=analogy_id,
+        )
+
     def stats(self) -> dict[str, Any]:
         return {
             "abstract_concepts": len(self._abstract_concepts),

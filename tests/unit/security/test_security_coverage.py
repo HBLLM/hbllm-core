@@ -72,7 +72,12 @@ class TestEncryptionVault:
 
         vault = EncryptionVault()
         encrypted = vault.encrypt("test")
-        tampered = encrypted[:10] + "X" + encrypted[11:]
+        # Corrupt multiple bytes in the HMAC signature region to guarantee
+        # Fernet detects tampering regardless of base64 alignment
+        chars = list(encrypted)
+        for i in [-1, -2, -5, -10]:
+            chars[i] = "A" if chars[i] != "A" else "B"
+        tampered = "".join(chars)
         with pytest.raises(ValueError, match="tampered|Invalid"):
             vault.decrypt(tampered)
 

@@ -1,44 +1,371 @@
-"""
-ExecutiveCortex — unified cognitive control.
+"""ExecutiveCortex — unified persistent cognitive kernel controller.
 
-The prefrontal cortex of HBLLM. Orchestrates existing cognitive modules
-into a single decision surface for executive function:
-
-    1. Goal Arbitration    — Which goal gets attention right now?
-    2. Attention Allocation — What deserves focus vs background?
-    3. Task Switching       — When to switch, with switching cost model
-    4. Interruption Control — Should this interrupt current focus?
-    5. Resource Allocation  — How to distribute compute budget
-
-Does NOT replace existing modules — it reads their state and makes
-arbitration decisions. It is a facade, not a controller.
-
-Usage:
-    cortex = ExecutiveCortex(
-        goal_manager=goal_mgr,
-        load_manager=load_mgr,
-    )
-
-    decision = cortex.decide_next_action(current_events)
-    if decision.action == "switch_to_goal":
-        # Switch to decision.target_goal
-    elif decision.action == "handle_interrupt":
-        # Handle the interrupt event
-    elif decision.action == "continue_focus":
-        # Stay on current task
+Orchestrates the cognitive workspace via the CognitiveState blackboard.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
 from typing import Any
+
+from hbllm.brain.autonomy.task_graph import Goal, GoalStatus, TaskPriority
+from hbllm.brain.cognitive_state import (
+    CognitiveBudget as StateCognitiveBudget,
+)
+from hbllm.brain.cognitive_state import (
+    CognitivePolicy,
+    CognitiveState,
+)
+from hbllm.brain.intentional_workspace import IntentionalWorkspace
+from hbllm.brain.self_model import SelfModel
+from hbllm.network.messages import Message, MessageType
+from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
 
-# ── Decision Types ───────────────────────────────────────────────────────────
+class CognitiveExecutiveController(Node):
+    """The persistent prefrontal cortex orchestrator.
+
+    Does not execute reasoning directly. Instantiates CognitiveState, configures
+    hierarchical policies, and tracks workspace progression reactively.
+    """
+
+    def __init__(
+        self,
+        node_id: str,
+        intentional_workspace: IntentionalWorkspace | None = None,
+        self_model: SelfModel | None = None,
+    ) -> None:
+        super().__init__(node_id=node_id, node_type=NodeType.CORE)
+        self.intentional_workspace = intentional_workspace or IntentionalWorkspace()
+        self.self_model = self_model or SelfModel()
+
+        # State log for event sourcing / state history
+        self.state_history: dict[str, list[CognitiveState]] = {}
+        # Active sessions tracking correlation_id -> current CognitiveState
+        self.active_states: dict[str, CognitiveState] = {}
+
+        self._loop_task: asyncio.Task[None] | None = None
+        self._running = False
+
+    async def on_start(self) -> None:
+        """Subscribe to goal and workspace events and start the persistent loop."""
+        logger.info("Starting CognitiveExecutiveController (Kernel Layer)")
+        self._running = True
+
+        # Subscribe to executive cortex triggers
+        await self.bus.subscribe("workspace.cognition.goal", self.handle_new_goal)
+        await self.bus.subscribe("workspace.cognition.state_change", self.handle_state_change)
+
+        # Persistent background monitoring loop
+        self._loop_task = asyncio.create_task(self._executive_loop())
+
+    async def on_stop(self) -> None:
+        """Gracefully stop the persistent executive loop."""
+        logger.info("Stopping CognitiveExecutiveController")
+        self._running = False
+        if self._loop_task:
+            self._loop_task.cancel()
+            try:
+                await self._loop_task
+            except asyncio.CancelledError:
+                pass
+            self._loop_task = None
+
+    async def handle_message(self, message: Message) -> Message | None:
+        return None
+
+    # ─── Goals Agenda Handler ────────────────────────────────────────
+
+    async def handle_new_goal(self, message: Message) -> Message | None:
+        """Ingests a new goal into the Intentional Workspace and initializes cognition."""
+        payload = message.payload
+        goal_id = payload.get("goal_id") or f"goal_{int(time.time())}"
+
+        metadata = payload.get("metadata", {})
+        if "domain" not in metadata and "domain" in payload:
+            metadata["domain"] = payload["domain"]
+
+        goal = Goal(
+            goal_id=goal_id,
+            tenant_id=message.tenant_id or "default",
+            name=payload.get("name", "Unnamed Goal"),
+            description=payload.get("description", ""),
+            status=GoalStatus.ACTIVE,
+            priority=TaskPriority(payload.get("priority", "normal")),
+            metadata=metadata,
+        )
+
+        # 1. Store in the Intentional Workspace agenda
+        self.intentional_workspace.add_goal(goal)
+
+        # 2. Formulate Hierarchical Policy & Budget via Bayesian SelfModel
+        domain = payload.get("domain", "general")
+        policy = self._formulate_policy(domain)
+
+        # 3. Create initial CognitiveState (Version 1)
+        state = CognitiveState(goal=goal, policy=policy)
+        correlation_id = message.correlation_id or goal_id
+
+        self.active_states[correlation_id] = state
+        self.state_history[correlation_id] = [state]
+
+        logger.info(
+            "[Executive] Initialized CognitiveState v1 for goal '%s' (domain: %s, policy: %s)",
+            goal.name,
+            domain,
+            policy.reasoning_strategy,
+        )
+
+        # 4. Publish initial state to the Event Bus
+        await self.bus.publish(
+            "workspace.cognition.state_change",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="workspace.cognition.state_change",
+                correlation_id=correlation_id,
+                payload={"state": state.to_dict()},
+            ),
+        )
+        return None
+
+    # ─── Cognitive Event Sourcing & Transformation ─────────────────────
+
+    async def handle_state_change(self, message: Message) -> Message | None:
+        """Observe state updates from planning/simulation/evaluation services."""
+        correlation_id = message.correlation_id
+        if not correlation_id or correlation_id not in self.active_states:
+            return None
+
+        state_dict = message.payload.get("state")
+        if not state_dict:
+            return None
+
+        # Reconstruct updated state
+        incoming_state = self._reconstruct_state(state_dict)
+        current_state = self.active_states[correlation_id]
+
+        # Ignore stale state versions
+        if incoming_state.version <= current_state.version:
+            return None
+
+        # Append to event sourced state log
+        self.active_states[correlation_id] = incoming_state
+        self.state_history[correlation_id].append(incoming_state)
+
+        logger.debug(
+            "[Executive] State updated to version %d (id: %s, parent: %s)",
+            incoming_state.version,
+            incoming_state.state_id,
+            incoming_state.parent_state_id,
+        )
+
+        # Check if the Goal has completed or failed (terminal state)
+        if incoming_state.goal.status in (GoalStatus.COMPLETED, GoalStatus.FAILED):
+            await self._finalize_cognition(correlation_id, incoming_state)
+
+        return None
+
+    # ─── Persistent Executive Loop ───────────────────────────────────
+
+    async def _executive_loop(self) -> None:
+        """Continuous background execution function monitoring active agendas."""
+        while self._running:
+            try:
+                await asyncio.sleep(5.0)  # Keep periodic polling light
+                active_goals = self.intentional_workspace.get_active_goals()
+                if active_goals:
+                    logger.debug(
+                        "[Executive Loop] Tracking %d active goals in workspace", len(active_goals)
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("[Executive Loop] Error in background monitoring: %s", e)
+
+    # ─── Policy Overrides & Bayesian Formulation ─────────────────────
+
+    def _formulate_policy(self, domain: str) -> CognitivePolicy:
+        """Formulate a hierarchical CognitivePolicy based on SelfModel expertise."""
+        # Query Bayesian recommendation parameters from self-model
+        try:
+            capabilities = self.self_model.get_metrics()
+            weaknesses = capabilities.get("weaknesses", [])
+        except Exception:
+            weaknesses = []
+
+        # Determine strategy & budgets
+        if domain in weaknesses:
+            # Low competence -> High verification, deep simulation, larger model
+            budget = StateCognitiveBudget(
+                attention_budget=1.0,
+                memory_budget=20,
+                simulation_budget=10,
+                reasoning_budget=2000,
+                verification_budget=5,
+                planning_budget=60.0,
+                tool_budget=8,
+            )
+            return CognitivePolicy(
+                reasoning_strategy="GoT",  # Graph-of-Thought for complex/weak areas
+                simulation_depth=2,
+                verification_budget=4,
+                retrieval_budget=10,
+                planner_type="graph",
+                model_selection="large",
+                budget=budget,
+            )
+        else:
+            # High competence / default -> standard CoT, lower verification loops
+            budget = StateCognitiveBudget(
+                attention_budget=0.8,
+                memory_budget=10,
+                simulation_budget=3,
+                reasoning_budget=1000,
+                verification_budget=2,
+                planning_budget=30.0,
+                tool_budget=4,
+            )
+            return CognitivePolicy(
+                reasoning_strategy="CoT",
+                simulation_depth=1,
+                verification_budget=2,
+                retrieval_budget=5,
+                planner_type="chain",
+                model_selection="default",
+                budget=budget,
+            )
+
+    # ─── Post-Cognition Finalization & Learning ──────────────────────
+
+    async def _finalize_cognition(self, correlation_id: str, state: CognitiveState) -> None:
+        """Logs outcomes, evaluates strategy success, and updates SelfModel."""
+        success = state.goal.status == GoalStatus.COMPLETED
+        duration = time.time() - state.created_at
+
+        logger.info(
+            "[Executive] Finalizing goal '%s' (success: %s, duration: %.2fs)",
+            state.goal.name,
+            success,
+            duration,
+        )
+
+        # Update the Intentional Workspace persistence status
+        self.intentional_workspace.update_goal_status(state.goal.goal_id, state.goal.status)
+
+        # Record outcomes in the SelfModel
+        try:
+            # Domain-level logging
+            domain = state.goal.metadata.get("domain", "general")
+            self.self_model.record_outcome(
+                domain=domain,
+                success=success,
+                confidence=state.confidence,
+                latency_ms=duration * 1000.0,
+            )
+        except Exception as e:
+            logger.error("[Executive] Failed to log outcome to SelfModel: %s", e)
+
+        # Clean active state records
+        if correlation_id in self.active_states:
+            del self.active_states[correlation_id]
+
+    # ─── Helper Reconstruction ───────────────────────────────────────
+
+    def _reconstruct_state(self, d: dict[str, Any]) -> CognitiveState:
+        """Utility to deserialize a CognitiveState from event payload."""
+        goal_dict = d.get("goal", {})
+        goal = Goal(
+            goal_id=goal_dict.get("goal_id", ""),
+            tenant_id=goal_dict.get("tenant_id", ""),
+            name=goal_dict.get("name", ""),
+            description=goal_dict.get("description", ""),
+            status=GoalStatus(goal_dict.get("status", "pending")),
+            priority=TaskPriority(goal_dict.get("priority", "normal")),
+            created_at=goal_dict.get("created_at", 0.0),
+            started_at=goal_dict.get("started_at", 0.0),
+            completed_at=goal_dict.get("completed_at", 0.0),
+            metadata=goal_dict.get("metadata", {}),
+        )
+
+        policy_dict = d.get("policy", {})
+        budget_dict = policy_dict.get("budget", {})
+        budget = StateCognitiveBudget(
+            attention_budget=budget_dict.get("attention_budget", 1.0),
+            memory_budget=budget_dict.get("memory_budget", 10),
+            simulation_budget=budget_dict.get("simulation_budget", 5),
+            reasoning_budget=budget_dict.get("reasoning_budget", 1000),
+            verification_budget=budget_dict.get("verification_budget", 3),
+            planning_budget=budget_dict.get("planning_budget", 30.0),
+            tool_budget=budget_dict.get("tool_budget", 5),
+        )
+
+        policy = CognitivePolicy(
+            reasoning_strategy=policy_dict.get("reasoning_strategy", "direct"),
+            simulation_depth=policy_dict.get("simulation_depth", 1),
+            verification_budget=policy_dict.get("verification_budget", 2),
+            retrieval_budget=policy_dict.get("retrieval_budget", 5),
+            planner_type=policy_dict.get("planner_type", "graph"),
+            memory_budget=policy_dict.get("memory_budget", 10),
+            model_selection=policy_dict.get("model_selection", "default"),
+            reflection_enabled=policy_dict.get("reflection_enabled", True),
+            budget=budget,
+        )
+
+        from hbllm.brain.cognitive_state import CandidatePlan, Evidence
+
+        evidence_ledger = {}
+        for k, ev_dict in d.get("evidence_ledger", {}).items():
+            evidence_ledger[k] = Evidence(
+                source=ev_dict.get("source", ""),
+                confidence=ev_dict.get("confidence", 0.0),
+                timestamp=ev_dict.get("timestamp", 0.0),
+                generated_by=ev_dict.get("generated_by", ""),
+                reasoning_path=ev_dict.get("reasoning_path", []),
+            )
+
+        candidate_plans = []
+        for p_dict in d.get("candidate_plans", []):
+            candidate_plans.append(
+                CandidatePlan(
+                    plan_id=p_dict.get("plan_id", ""),
+                    graph=p_dict.get("graph", {}),
+                    origin=p_dict.get("origin", "planner"),
+                    confidence=p_dict.get("confidence", 1.0),
+                    predicted_reward=p_dict.get("predicted_reward", 0.0),
+                    predicted_cost=p_dict.get("predicted_cost", {}),
+                    analogy_used=p_dict.get("analogy_used"),
+                    simulation_result=p_dict.get("simulation_result"),
+                    execution_trace=p_dict.get("execution_trace", []),
+                )
+            )
+
+        return CognitiveState(
+            goal=goal,
+            policy=policy,
+            state_id=d.get("state_id", ""),
+            version=d.get("version", 1),
+            parent_state_id=d.get("parent_state_id"),
+            retrieved_memory=d.get("retrieved_memory", []),
+            simulations=d.get("simulations", []),
+            candidate_plans=candidate_plans,
+            active_skills=d.get("active_skills", []),
+            reflections=d.get("reflections", []),
+            beliefs=d.get("beliefs", []),
+            evidence_ledger=evidence_ledger,
+            working_memory=d.get("working_memory", {}),
+            confidence=d.get("confidence", 1.0),
+            created_at=d.get("created_at", 0.0),
+        )
+
+
+# ─── Legacy Backward Compatibility Implementations ──────────────────────
+
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -78,16 +405,8 @@ class CognitiveBudget:
         }
 
 
-# ── Executive Cortex ─────────────────────────────────────────────────────────
-
-
 class ExecutiveCortex:
-    """Unified cognitive control — the prefrontal cortex.
-
-    Reads state from existing modules and produces arbitration decisions.
-    All parameters are optional — the cortex gracefully degrades when
-    subsystems are unavailable.
-    """
+    """Unified cognitive control — the prefrontal cortex."""
 
     def __init__(
         self,
@@ -105,44 +424,27 @@ class ExecutiveCortex:
         self._state = state_machine
         self._user_model = user_model
 
-        # Executive state
         self._current_focus: str = ""
-        self._current_focus_type: str = ""  # "goal" | "event" | "idle"
+        self._current_focus_type: str = ""
         self._focus_started: float = 0.0
-        self._focus_depth: float = 0.0  # 0.0 (just started) to 1.0 (deep)
+        self._focus_depth: float = 0.0
         self._last_switch: float = 0.0
         self._switch_count: int = 0
         self._suppressed_events: list[dict[str, Any]] = []
 
-        # Tunable parameters
-        self._min_focus_duration: float = 30.0  # Minimum seconds before switching
-        self._base_switch_cost: float = 0.3  # Base cost of task switching
-        self._interrupt_threshold: float = 0.7  # Score needed to interrupt focus
-        self._deep_focus_threshold: float = 0.7  # When focus depth is "deep"
-
-    # ── Core Decision Loop ───────────────────────────────────────────
+        self._min_focus_duration: float = 30.0
+        self._base_switch_cost: float = 0.3
+        self._interrupt_threshold: float = 0.7
+        self._deep_focus_threshold: float = 0.7
 
     def decide_next_action(
         self,
         pending_events: list[dict[str, Any]] | None = None,
         tenant_id: str = "default",
     ) -> ExecutiveDecision:
-        """The core executive decision.
-
-        Considers:
-            - Current focus and depth
-            - Pending events and their urgency
-            - Goal priorities and deadlines
-            - Cognitive pressure (resource availability)
-            - User alignment (from UserModel)
-            - Switching cost
-
-        Returns an ExecutiveDecision specifying what to do next.
-        """
         events = pending_events or []
         pressure = self._get_pressure()
 
-        # If under extreme pressure, shed load
         if pressure > 0.9:
             return ExecutiveDecision(
                 action="idle",
@@ -151,24 +453,19 @@ class ExecutiveCortex:
                 suppress=[e.get("event_id", "") for e in events],
             )
 
-        # Check for interrupts
         if events:
             interrupt = self._evaluate_interrupts(events)
             if interrupt:
                 return interrupt
 
-        # Check if current focus is still valid
         if self._current_focus:
             age = time.time() - self._focus_started
-            # Update focus depth based on time spent
-            self._focus_depth = min(1.0, age / 300.0)  # Reaches 1.0 after 5 minutes
+            self._focus_depth = min(1.0, age / 300.0)
 
-            # Should we continue or switch?
             switch_decision = self._evaluate_switch(tenant_id)
             if switch_decision:
                 return switch_decision
 
-            # Continue current focus
             return ExecutiveDecision(
                 action="continue_focus",
                 target_goal=self._current_focus,
@@ -176,46 +473,31 @@ class ExecutiveCortex:
                 budget=self._compute_budget(pressure),
             )
 
-        # No current focus — pick best goal
         goal_decision = self._select_goal(tenant_id)
         if goal_decision:
             return goal_decision
 
-        # Nothing to do
         return ExecutiveDecision(
             action="idle",
             reasoning="No active goals or pending events.",
             budget=CognitiveBudget(0.0, 0.1, 0.9).to_dict(),
         )
 
-    # ── Interruption Control ─────────────────────────────────────────
-
     def should_interrupt(self, event: dict[str, Any]) -> bool:
-        """Decide if an event should interrupt current focus.
-
-        Combines:
-            - Event urgency/priority
-            - Current focus depth
-            - Switching cost
-            - Time since last switch
-        """
         urgency = event.get("urgency", 0.5)
         priority = event.get("priority", 0.5)
         event_score = urgency * 0.6 + priority * 0.4
 
-        # Higher threshold when deeply focused
         threshold = self._interrupt_threshold
         if self._focus_depth > self._deep_focus_threshold:
-            threshold += 0.15  # Harder to interrupt when deep
+            threshold += 0.15
 
-        # Higher threshold if recently switched (prevent thrashing)
         switch_cost = self.get_switching_cost()
         threshold += switch_cost * 0.1
 
         return event_score > threshold
 
     def _evaluate_interrupts(self, events: list[dict[str, Any]]) -> ExecutiveDecision | None:
-        """Check if any pending event warrants interruption."""
         for event in sorted(
             events,
             key=lambda e: e.get("urgency", 0) * 0.6 + e.get("priority", 0) * 0.4,
@@ -235,11 +517,9 @@ class ExecutiveCortex:
                     budget=self._compute_budget(self._get_pressure()),
                 )
 
-        # Suppress non-interrupting events
         suppressed = [e.get("event_id", "") for e in events if not self.should_interrupt(e)]
         if suppressed:
             self._suppressed_events.extend(events)
-            # Cap suppressed list
             self._suppressed_events = self._suppressed_events[-50:]
         return None
 
@@ -263,14 +543,12 @@ class ExecutiveCortex:
         if not self._goals:
             return None
 
-        # Don't switch too quickly
         age = time.time() - self._focus_started
         if age < self._min_focus_duration:
             return None
 
         switching_cost = self.get_switching_cost()
 
-        # Check if a higher-priority goal exists
         try:
             active_goals = self._goals.get_active_goals(tenant_id=tenant_id)
         except Exception:
@@ -283,7 +561,6 @@ class ExecutiveCortex:
             goal_name = goal.name if hasattr(goal, "name") else str(goal.get("name", ""))
             goal_priority = self._goal_priority_score(goal)
 
-            # Is this goal more important than current focus?
             if goal_name != self._current_focus and goal_priority > (0.7 + switching_cost):
                 self._record_switch(goal_name, "goal")
                 return ExecutiveDecision(
@@ -311,7 +588,6 @@ class ExecutiveCortex:
         if not active_goals:
             return None
 
-        # Score and rank goals
         scored = []
         for goal in active_goals:
             score = self._goal_priority_score(goal)
@@ -361,22 +637,18 @@ class ExecutiveCortex:
         budget = CognitiveBudget()
 
         if pressure > 0.8:
-            # Under heavy load — minimize expensive operations
             budget.heavy_llm_pct = 0.1
             budget.fast_router_pct = 0.3
             budget.reflex_pct = 0.6
         elif pressure > 0.5:
-            # Moderate load — balanced
             budget.heavy_llm_pct = 0.2
             budget.fast_router_pct = 0.5
             budget.reflex_pct = 0.3
         elif self._focus_depth > 0.7:
-            # Deep focus — allow expensive reasoning
             budget.heavy_llm_pct = 0.5
             budget.fast_router_pct = 0.35
             budget.reflex_pct = 0.15
         else:
-            # Default balanced
             budget.heavy_llm_pct = 0.3
             budget.fast_router_pct = 0.5
             budget.reflex_pct = 0.2
@@ -405,7 +677,6 @@ class ExecutiveCortex:
 
     def _goal_priority_score(self, goal: Any) -> float:
         """Score a goal by priority, deadline, and user alignment."""
-        # Extract priority
         priority_map = {
             "critical": 1.0,
             "high": 0.8,
@@ -422,7 +693,6 @@ class ExecutiveCortex:
             priority_str = "medium"
         priority = priority_map.get(priority_str, 0.5)
 
-        # Deadline urgency
         deadline_boost = 0.0
         deadline = None
         if hasattr(goal, "deadline"):
@@ -432,12 +702,11 @@ class ExecutiveCortex:
 
         if deadline and isinstance(deadline, (int, float)):
             time_until = deadline - time.time()
-            if time_until < 3600:  # Less than 1 hour
+            if time_until < 3600:
                 deadline_boost = 0.3
-            elif time_until < 86400:  # Less than 1 day
+            elif time_until < 86400:
                 deadline_boost = 0.15
 
-        # User alignment (if UserModel available)
         alignment = 0.0
         if self._user_model:
             try:
@@ -449,7 +718,6 @@ class ExecutiveCortex:
                 elif isinstance(goal, dict):
                     goal_name = goal.get("name", "").lower()
 
-                # Simple keyword overlap for alignment
                 focus_words = set(focus_value.split())
                 goal_words = set(goal_name.split())
                 if focus_words & goal_words:

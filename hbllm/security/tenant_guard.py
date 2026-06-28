@@ -240,20 +240,34 @@ def require_tenant(
     return decorator
 
 
+@overload
+def require_identity(func: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+@overload
 def require_identity(
-    func: Callable[..., Any] | None = None,
+    func: None = None,
     *,
     tenant_param: str = "tenant_id",
     user_param: str = "user_id",
     device_param: str = "device_id",
-) -> Callable[..., Any] | Callable[..., Callable[..., Any]]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]: ...
+
+
+def require_identity(
+    func: Callable[_P, _R] | None = None,
+    *,
+    tenant_param: str = "tenant_id",
+    user_param: str = "user_id",
+    device_param: str = "device_id",
+) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Decorator that enforces the full identity triplet.
 
     Validates all three identity components are present and match context.
     """
 
-    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
@@ -261,9 +275,9 @@ def require_identity(
                 _validate_tenant(fn, args, kwargs, tenant_param)
                 _validate_identity_field(fn, args, kwargs, user_param, _ctx_user_id)
                 _validate_identity_field(fn, args, kwargs, device_param, _ctx_device_id)
-                return await fn(*args, **kwargs)
+                return await fn(*args, **kwargs)  # type: ignore[misc]
 
-            return async_wrapper
+            return async_wrapper  # type: ignore[return-value]
         else:
 
             @functools.wraps(fn)
@@ -273,7 +287,7 @@ def require_identity(
                 _validate_identity_field(fn, args, kwargs, device_param, _ctx_device_id)
                 return fn(*args, **kwargs)
 
-            return sync_wrapper
+            return sync_wrapper  # type: ignore[return-value]
 
     if func is not None:
         return decorator(func)

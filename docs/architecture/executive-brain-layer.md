@@ -12,76 +12,38 @@ into a **continuously operating cognitive organism**. It provides:
 
 ## Architecture Diagram
 
-```
-                    ┌──────────────────────┐
-                    │  External Events     │
-                    │  (user input, sensor │
-                    │   anomaly, device)   │
-                    └──────────┬───────────┘
-                               │
-                    ╔══════════▼═══════════╗
-                    ║   FAST PATH          ║
-                    ║   (Event-Driven)     ║
-                    ║   MessageBus →       ║
-                    ║   asyncio.Event wake ║
-                    ╚══════════╤═══════════╝
-                               │
-              ┌────────────────▼────────────────┐
-              │         AutonomyCore            │
-              │    (Cognitive Heartbeat)         │
-              │                                 │
-              │  ┌───────────┐ ┌──────────────┐ │
-              │  │ Tier 1    │ │ Tier 2/3     │ │
-              │  │ Reflexes  │ │ LLM Router   │ │
-              │  │ (0 cost)  │ │ (escalation) │ │
-              │  └───────────┘ └──────────────┘ │
-              │                                 │
-              │  ┌────────────────────────────┐ │
-              │  │ Internal Thought Queue     │ │
-              │  │ (deferred goals, reminders)│ │
-              │  └────────────────────────────┘ │
-              └──┬──────────────┬───────────────┘
-                 │              │
-    ┌────────────▼──┐  ┌───────▼──────────┐
-    │  Attention    │  │ Cognitive State  │
-    │  System       │  │ Machine          │
-    │               │  │                  │
-    │ • Scoring     │  │ • State hierarchy│
-    │ • Decay       │  │ • Tick profiles  │
-    │ • Budgets     │  │ • Guards/hooks   │
-    │ • Context     │  │ • Interruption   │
-    └───────┬───────┘  └────────┬────────┘
-            │                   │
-    ┌───────▼───────────────────▼──────┐
-    │   TaskGraphRuntime               │
-    │   (Persistent Goals)             │
-    │                                  │
-    │ • DAG execution                  │
-    │ • SQLite persistence             │
-    │ • Retry / failure cascade        │
-    │ • Boot recovery                  │
-    └───────┬──────────────────────────┘
-            │
-    ┌───────▼──────────────────────────┐
-    │   Autonomy Subsystems            │
-    │                                  │
-    │ ┌──────────────┐ ┌────────────┐  │
-    │ │ Goal         │ │ Reflex     │  │
-    │ │ Decomposition│ │ Library    │  │
-    │ └──────────────┘ └────────────┘  │
-    │ ┌──────────────┐ ┌────────────┐  │
-    │ │ Restraint    │ │ Interrupt  │  │
-    │ │ Engine       │ │ Detector   │  │
-    │ └──────────────┘ └────────────┘  │
-    │ ┌──────────────┐ ┌────────────┐  │
-    │ │ Notification │ │ Proactive  │  │
-    │ │ Suppressor   │ │ Insight    │  │
-    │ └──────────────┘ └────────────┘  │
-    │ ┌──────────────┐ ┌────────────┐  │
-    │ │ Reflex       │ │ Cognitive  │  │
-    │ │ Learner      │ │ Load Est.  │  │
-    │ └──────────────┘ └────────────┘  │
-    └──────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph INPUTS["📥 External Triggers & Inputs"]
+        UserGoal[👤 User Goal / Query]
+        SensorAnomaly[🔌 Sensor Anomaly / IOT]
+        PeriodicHeartbeat[⏱️ AutonomyCore Tick]
+    end
+
+    subgraph KERNEL["🧠 State-centric Cognitive Operating System Kernel"]
+        IWS[💾 IntentionalWorkspace<br/>SQLite Goal Agenda]
+        CEC[🧠 CognitiveExecutiveController<br/>Node orchestrator]
+        COGS[❄️ CognitiveState<br/>Immutable versioned blackboard]
+        HCP[⚙️ HierarchicalCognitivePolicy<br/>Task → Global overrides]
+    end
+
+    subgraph SERVICES["🛠️ Cognitive Executors & Simulators (Services Layer)"]
+        SGE[⚡ SkillGraphExecutor<br/>DAG-based SkillIR]
+        LSE[🛡️ LayeredSimulationEngine<br/>Safety, Social, Resource layers]
+        EVN[⚖️ EvaluationNode<br/>Goal satisfaction check]
+    end
+
+    UserGoal --> IWS
+    SensorAnomaly --> CEC
+    PeriodicHeartbeat --> CEC
+    IWS --> CEC
+    CEC --> HCP
+    HCP --> COGS
+    COGS --> SGE
+    COGS --> LSE
+    COGS --> EVN
+    SGE & LSE & EVN -->|derive_state mutation| COGS
+    EVN -->|goal completed| CEC
 ```
 
 ## Component Reference

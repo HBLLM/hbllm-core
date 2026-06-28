@@ -109,6 +109,16 @@ class SelfModel:
                     validation_runs TEXT DEFAULT '[]'
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS policy_performance (
+                    strategy TEXT,
+                    domain TEXT,
+                    successes INTEGER DEFAULT 0,
+                    failures INTEGER DEFAULT 0,
+                    avg_latency_ms REAL DEFAULT 0.0,
+                    PRIMARY KEY (strategy, domain)
+                )
+            """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_perf_domain ON performance_log(domain)")
 
     # ─── Recording ───────────────────────────────────────────────────
@@ -166,6 +176,105 @@ class SelfModel:
                         now,
                         now,
                     ),
+                )
+
+    def select_policy(self, domain: str) -> Any:
+        """Select an optimized policy for a domain using an epsilon-greedy choice strategy."""
+        import random
+
+        from hbllm.brain.cognitive_state import (
+            CognitiveBudget,
+            CognitivePolicy,
+            HierarchicalCognitivePolicy,
+        )
+
+        policies = {
+            "direct": CognitivePolicy(
+                reasoning_strategy="direct",
+                simulation_depth=0,
+                verification_budget=1,
+                retrieval_budget=3,
+                planner_type="chain",
+                budget=CognitiveBudget(
+                    simulation_budget=0, verification_budget=1, planning_budget=15.0
+                ),
+            ),
+            "CoT": CognitivePolicy(
+                reasoning_strategy="CoT",
+                simulation_depth=1,
+                verification_budget=2,
+                retrieval_budget=5,
+                planner_type="chain",
+                budget=CognitiveBudget(
+                    simulation_budget=3, verification_budget=2, planning_budget=30.0
+                ),
+            ),
+            "GoT": CognitivePolicy(
+                reasoning_strategy="GoT",
+                simulation_depth=2,
+                verification_budget=4,
+                retrieval_budget=10,
+                planner_type="graph",
+                budget=CognitiveBudget(
+                    simulation_budget=10, verification_budget=4, planning_budget=60.0
+                ),
+            ),
+        }
+
+        # Exploration vs Exploitation
+        if random.random() < 0.15:
+            selected_key = random.choice(list(policies.keys()))
+            return HierarchicalCognitivePolicy(global_policy=policies[selected_key])
+
+        # Query past success rates
+        best_strategy = "CoT"
+        max_rate = -1.0
+
+        with sqlite3.connect(str(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT strategy, successes, failures FROM policy_performance WHERE domain = ?",
+                (domain,),
+            ).fetchall()
+
+        for row in rows:
+            strategy, successes, failures = row
+            total = successes + failures
+            if total > 0:
+                rate = successes / total
+                if rate > max_rate:
+                    max_rate = rate
+                    best_strategy = strategy
+
+        return HierarchicalCognitivePolicy(
+            global_policy=policies.get(best_strategy, policies["CoT"])
+        )
+
+    def record_policy_outcome(
+        self, policy: Any, domain: str, success: bool, cost_metrics: dict[str, float]
+    ) -> None:
+        """Update policy success/failure counts and average execution latencies."""
+        strategy = getattr(policy, "reasoning_strategy", "direct")
+        latency = cost_metrics.get("latency_ms", 0.0)
+
+        with sqlite3.connect(str(self._db_path)) as conn:
+            row = conn.execute(
+                "SELECT successes, failures, avg_latency_ms FROM policy_performance WHERE strategy = ? AND domain = ?",
+                (strategy, domain),
+            ).fetchone()
+
+            if row:
+                s = row[0] + (1 if success else 0)
+                f = row[1] + (0 if success else 1)
+                total = s + f
+                new_lat = (row[2] * (total - 1) + latency) / total
+                conn.execute(
+                    "UPDATE policy_performance SET successes = ?, failures = ?, avg_latency_ms = ? WHERE strategy = ? AND domain = ?",
+                    (s, f, new_lat, strategy, domain),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO policy_performance (strategy, domain, successes, failures, avg_latency_ms) VALUES (?, ?, ?, ?, ?)",
+                    (strategy, domain, 1 if success else 0, 0 if success else 1, latency),
                 )
 
     # ─── Querying ────────────────────────────────────────────────────

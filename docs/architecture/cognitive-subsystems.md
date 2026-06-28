@@ -171,46 +171,63 @@ SQLite (`data/project_graph.db`) — tables: `entities`, `relations`.
 
 ---
 
-## 3. ExecutiveCortex — What to Focus On
+## 3. Cognitive Executive Kernel & ExecutiveCortex
 
-**Engine:** `hbllm.brain.executive_cortex.ExecutiveCortex` (494 lines)
-**Config:** `inject_executive_cortex = True`
+**Engine:** `hbllm.brain.executive_cortex.CognitiveExecutiveController` (Node) & `ExecutiveCortex` (Compatibility Facade)
+**Database:** `data/intentional_workspace.db` (SQLite Goal Agenda)
+**State Model:** `hbllm.brain.cognitive_state.CognitiveState` (Immutable Snapshot)
 
-Unified cognitive control center. Answers: "What should I be doing right now?" by arbitrating between competing goals, managing task switching costs, controlling interruptions, and allocating cognitive budget.
+The executive layer has transitioned from a reactive, ephemeral state machine to a **State-Centric Cognitive Operating System Kernel**. It enforces persistent agendas, immutable branching context states, and hierarchical policy cascade governance.
 
-### Decision Model
+### Architecture Topology
 
-```python
-class ExecutiveDecision:
-    action: str          # "idle" | "continue_focus" | "switch_to_goal"
-    target_goal: str     # Which goal to pursue
-    budget: CognitiveBudget
-    reasoning: str       # Why this decision was made
-
-class CognitiveBudget:
-    heavy_llm: float     # % of compute for heavy reasoning
-    fast_router: float   # % for fast classification
-    reflex: float        # % for reflex responses
-    reserve: float       # % kept in reserve
+```mermaid
+graph TD
+    GoalArrival[📩 Goal Message Received] --> IWS[💾 IntentionalWorkspace SQLite]
+    IWS --> CEC[🧠 CognitiveExecutiveController]
+    CEC --> SelfModel[📊 SelfModel Bayesian Lookup]
+    SelfModel --> Policy[⚙️ Hierarchical Policy Resolution]
+    Policy --> InitState[❄️ CognitiveState v1 Created]
+    InitState --> Bus[⚡ Published to Message Bus]
+    Bus --> Executors[🛠️ SkillGraphExecutor / LayeredSimulation]
+    Executors --> NextState[🔄 derive_state mutation]
 ```
 
-### Key Functions
+### Core Architecture Components
 
-| Function | Purpose |
-|----------|---------|
-| `decide_next_action()` | Central arbitration — scores goals by `priority × deadline_boost × user_alignment` |
-| `set_focus(task_name)` | Enter deep focus mode on a task |
-| `get_switching_cost()` | Cost of context switch (increases with focus depth) |
-| `should_interrupt(event)` | Whether an event justifies breaking focus (threshold rises with focus depth) |
-| `allocate_budget(pressure)` | Distribute compute based on cognitive pressure |
-| `snapshot()` | Full state dump for debugging |
+#### 1. CognitiveExecutiveController
+The orchestrator service. Rather than directly executing reasoning, it listens to the Message Bus for goals, configures local policies, instantiates the root version of `CognitiveState`, and tracks workspace execution progress.
 
-### Design Principles
+#### 2. IntentionalWorkspace
+Persistent storage layer managing high-priority and deferred tasks, security threats, opportunities, and curiosity targets. Backed by `intentional_workspace.db`.
 
-- **No persistence** — purely ephemeral cognitive state (rebuilt on restart)
-- **Reads from UserModel** for user alignment scoring
-- **Reads from GoalManager** for goal list and priorities
-- **Fatigue modeling** — cognitive pressure increases with sustained focus, decays during idle
+#### 3. CognitiveState (Blackboard Memory)
+A completely immutable, versioned snapshot of working memory. It is derived using:
+```python
+new_state = state.derive_state(
+    active_skills=["db_query"],
+    working_memory={"temp_result": 42}
+)
+# Automatically increments version, sets parent_state_id, and generates unique state_id
+```
+Contains first-class evidence ledgers:
+$$\text{Belief} \longrightarrow \text{Evidence} \longrightarrow \text{Confidence} \longrightarrow \text{Source}$$
+
+#### 4. HierarchicalCognitivePolicy
+Resolves priorities, latency budgets, and model choice cascading through:
+$$\text{Task Policy} \longrightarrow \text{Goal Policy} \longrightarrow \text{Conversation Policy} \longrightarrow \text{Global Policy} \longrightarrow \text{Defaults}$$
+Ensures that critical global safety thresholds are never overridden.
+
+#### 5. SkillGraphExecutor
+Virtual executor that runs skills represented as DAGs of `nodes` and `edges`, supporting parallel branch execution, conditional paths, and retry propagation loops.
+
+#### 6. LayeredSimulationEngine
+A multi-layered counterfactual forecast module that validates all memory writes, beliefs, actions, and learning commits through domain simulators:
+* **SafetySimulator:** Restricts dangerous terminal commands.
+* **ReliabilitySimulator:** Evaluates self-model competence.
+* **SocialSimulator:** Manages notification interruption.
+* **ResourceSimulator:** Tracks latency and token budgets.
+* **MemoryBeliefSimulator:** Catches belief contradictions.
 
 ---
 

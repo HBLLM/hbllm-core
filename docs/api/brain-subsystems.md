@@ -644,13 +644,55 @@ goals = brain.project_graph.get_active_goals(project.entity_id)
 blockers = brain.project_graph.get_blockers(project.entity_id)
 ```
 
-### ExecutiveCortex
+### Cognitive Executive Kernel & ExecutiveCortex
 
-**Module:** `hbllm.brain.executive_cortex.ExecutiveCortex`
-**Config:** `inject_executive_cortex = True`
+**Modules:** `hbllm.brain.executive_cortex.CognitiveExecutiveController`, `hbllm.brain.executive_cortex.ExecutiveCortex`
+**State Model:** `hbllm.brain.cognitive_state.CognitiveState`
+**Database Model:** `hbllm.brain.intentional_workspace.IntentionalWorkspace`
 
-Cognitive control center — goal arbitration, focus management, interruption control.
+The core executive layer coordinates the system through persistent agendas (`IntentionalWorkspace`), immutable versioned working memory snapshots (`CognitiveState`), and event orchestration.
 
+#### 1. CognitiveExecutiveController (Orchestrator Node)
+```python
+# Starts the persistent background monitoring loop
+await controller.start(bus)
+
+# Ingest a new goal and initialize the CognitiveState sequence
+message = Message(
+    type=MessageType.EVENT,
+    topic="workspace.cognition.goal",
+    payload={"name": "Ship v3", "priority": "high", "domain": "development"}
+)
+await bus.publish("workspace.cognition.goal", message)
+```
+
+#### 2. CognitiveState (Immutable Snapshot)
+```python
+# Read fields from a frozen state snapshot
+goal_id = state.goal.goal_id
+beliefs = state.beliefs
+current_policy = state.effective_policy
+
+# Derive a new state version (bumps version and links parent_state_id)
+new_state = state.derive_state(
+    active_skills=["db_query"],
+    working_memory={"temp_result": 42}
+)
+```
+
+#### 3. IntentionalWorkspace (Goal Agendas)
+```python
+# Access persistent SQLite agenda storage
+workspace = brain.intentional_workspace
+
+# Retrieve all currently active goals
+active_goals = workspace.get_active_goals()
+
+# Add a goal manually
+workspace.add_goal(goal)
+```
+
+#### 4. Legacy ExecutiveCortex (Compatibility Facade)
 ```python
 # Ask "what should I do next?"
 decision = brain.executive_cortex.decide_next_action()
@@ -663,11 +705,10 @@ brain.executive_cortex.set_focus("writing UserModel tests")
 should_break = brain.executive_cortex.should_interrupt(incoming_event)
 
 # Get cognitive budget allocation
-budget = brain.executive_cortex.allocate_budget(pressure=0.6)
-# CognitiveBudget(heavy_llm=0.4, fast_router=0.3, reflex=0.2, reserve=0.1)
+budget = brain.executive_cortex.get_cognitive_budget()
 
 # Full state dump
-state = brain.executive_cortex.snapshot()
+state_snap = brain.executive_cortex.snapshot()
 ```
 
 ### RelationshipMemory
