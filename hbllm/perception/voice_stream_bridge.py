@@ -110,12 +110,30 @@ class _SentenceBuffer:
 
     def _clean(self, text: str) -> str:
         """Clean text for vocalization."""
+        # Remove MCTS Planner headers
+        if "[MCTS Planner]" in text:
+            if "\n\n" in text:
+                parts = text.split("\n\n")
+                text = " ".join(parts[1:])
+            else:
+                return ""
+
+        text = re.sub(
+            r"Best path:\s*(?:\[D\d+:\s*Q=\d*(?:\.\d+)?\s*,\s*N=\d+\](?:\s*(?:→|->)\s*)?)+",
+            "",
+            text,
+        )
+
         if self._config.skip_code_blocks:
             text = re.sub(r"```[\s\S]*?```", " code block omitted ", text)
             text = re.sub(r"`[^`]+`", "", text)
 
         if self._config.skip_urls:
             text = re.sub(r"https?://\S+", "", text)
+
+        # Remove list numbers/bullets at start of sentences
+        text = re.sub(r"(?:^|\s)\d+\.\s+", " ", text)
+        text = re.sub(r"(?:^|\s)[-*•]\s+", " ", text)
 
         # Remove markdown formatting
         text = re.sub(r"[*_~]", "", text)

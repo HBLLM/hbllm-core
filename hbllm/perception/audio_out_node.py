@@ -165,6 +165,7 @@ class AudioOutputNode(Node):
         if not text:
             return message.create_error("Missing 'text' in payload")
 
+        text = self._clean_text(text)
         voice = self._resolve_voice(tenant_id, payload)
         should_stream = bool(payload.get("stream", False))
 
@@ -190,6 +191,9 @@ class AudioOutputNode(Node):
 
         if not text_chunk and not is_final:
             return None
+
+        if text_chunk:
+            text_chunk = self._clean_text(text_chunk)
 
         voice = self._resolve_voice(tenant_id, payload)
 
@@ -288,6 +292,10 @@ class AudioOutputNode(Node):
             audio_segments = []
             for _, _, audio in self._kokoro_pipeline(text, voice=voice.voice_id, speed=voice.speed):
                 if audio is not None:
+                    if hasattr(audio, "cpu"):
+                        audio = audio.cpu()
+                    if hasattr(audio, "numpy"):
+                        audio = audio.numpy()
                     audio_segments.append(audio)
 
             if not audio_segments:
@@ -318,6 +326,10 @@ class AudioOutputNode(Node):
             audio_segments = []
             for _, _, audio in self._kokoro_pipeline(text, voice=voice.voice_id, speed=voice.speed):
                 if audio is not None:
+                    if hasattr(audio, "cpu"):
+                        audio = audio.cpu()
+                    if hasattr(audio, "numpy"):
+                        audio = audio.numpy()
                     audio_segments.append(audio)
 
             if not audio_segments:
@@ -350,6 +362,10 @@ class AudioOutputNode(Node):
                 tagged_text = f"<{voice.orpheus_emotion}>{text}</{voice.orpheus_emotion}>"
 
             audio = self._orpheus_engine.synthesize(tagged_text)
+            if hasattr(audio, "cpu"):
+                audio = audio.cpu()
+            if hasattr(audio, "numpy"):
+                audio = audio.numpy()
             pcm = (audio * 32767).astype(np.int16).tobytes()
             return pcm, 24000
 
@@ -372,6 +388,10 @@ class AudioOutputNode(Node):
                 tagged_text = f"<{voice.orpheus_emotion}>{text}</{voice.orpheus_emotion}>"
 
             audio = self._orpheus_engine.synthesize(tagged_text)
+            if hasattr(audio, "cpu"):
+                audio = audio.cpu()
+            if hasattr(audio, "numpy"):
+                audio = audio.numpy()
             out_path = self.output_dir / filename
             sf.write(str(out_path), audio, samplerate=24000)
             logger.info("Orpheus TTS: saved %s", out_path)
@@ -398,7 +418,7 @@ class AudioOutputNode(Node):
             import torch
 
             self._load_speecht5()
-            if self._speecht5_model is None:
+            if self._speecht5_model is None or self._speecht5_processor is None:
                 return None
 
             import soundfile as sf  # type: ignore[import-not-found]
@@ -531,6 +551,35 @@ class AudioOutputNode(Node):
         return message.create_response({"voices": voices, "backend": backend.value})
 
     # ── Text utilities ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        """Clean text for TTS output (remove markdown, URLs, MCTS logs, list bullets)."""
+        # Remove MCTS Planner headers
+        text = re.sub(
+            r"\s*\[MCTS Planner\][\s\S]*?Best path:\s*(?:\[D\d+:\s*Q=\d*(?:\.\d+)?\s*,\s*N=\d+\](?:\s*(?:→|->)\s*)?)+",
+            "",
+            text,
+        )
+
+        # Remove code blocks
+        text = re.sub(r"```[\s\S]*?```", " code block omitted ", text)
+        text = re.sub(r"`[^`]+`", "", text)
+
+        # Remove URLs
+        text = re.sub(r"https?://\S+", "", text)
+
+        # Remove list numbers/bullets at start of sentences
+        text = re.sub(r"(?:^|\s)\d+\.\s+", " ", text)
+        text = re.sub(r"(?:^|\s)[-*•]\s+", " ", text)
+
+        # Remove markdown formatting
+        text = re.sub(r"[*_~]", "", text)
+
+        # Collapse whitespace
+        text = re.sub(r"\s+", " ", text).strip()
+
+        return text
 
     @staticmethod
     def _split_sentences(text: str) -> list[str]:
