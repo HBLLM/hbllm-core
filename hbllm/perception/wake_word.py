@@ -140,7 +140,7 @@ class OpenWakeWordEngine(WakeWordEngine):
                 openwakeword.utils.download_models()
 
             self._model = Model(
-                wakeword_models=self._config.oww_model_paths or None,
+                wakeword_models=self._config.oww_model_paths,
                 inference_framework=self._config.oww_inference_framework,
             )
             self._loaded = True
