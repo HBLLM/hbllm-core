@@ -202,6 +202,7 @@ class AudioInputNode(Node):
                 vad_threshold=self.config.vad_threshold,
                 max_silence_ms=self.config.vad_max_silence_ms,
                 max_buffer_seconds=self.config.stream_max_buffer_seconds,
+                device_id=message.device_id,
             )
 
         buf = self._stream_buffers[session_id]
@@ -315,6 +316,7 @@ class AudioInputNode(Node):
                     type=MessageType.EVENT,
                     source_node_id=self.node_id,
                     tenant_id=message.tenant_id,
+                    device_id=buf.device_id,
                     session_id=session_id,
                     topic="sensory.transcription",
                     payload={
@@ -331,6 +333,7 @@ class AudioInputNode(Node):
                     type=MessageType.QUERY,
                     source_node_id=self.node_id,
                     tenant_id=message.tenant_id,
+                    device_id=buf.device_id,
                     session_id=session_id,
                     topic="router.query",
                     payload={
@@ -616,11 +619,13 @@ class _StreamBuffer:
         vad_threshold: float = 0.5,
         max_silence_ms: int = 700,
         max_buffer_seconds: float = 15.0,
-    ) -> None:
+        device_id: str = "default",
+    ):
         self.sample_rate = sample_rate
         self.vad_threshold = vad_threshold
         self.max_silence_ms = max_silence_ms
         self.max_buffer_seconds = max_buffer_seconds
+        self.device_id = device_id
 
         self.chunks: list[bytes] = []
         self.start_time = time.monotonic()

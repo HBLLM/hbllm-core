@@ -249,6 +249,7 @@ class AudioOutputNode(Node):
                         type=MessageType.EVENT,
                         source_node_id=self.node_id,
                         tenant_id=message.tenant_id,
+                        device_id=message.device_id,
                         session_id=message.session_id,
                         topic="sensory.audio.chunk",
                         payload={
