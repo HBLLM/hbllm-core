@@ -18,12 +18,16 @@ __plugin__ = {
 
 class LocalMicNode(Node):
     """Listens to the local microphone and streams chunks to the core."""
-    
-    def __init__(self, node_id: str = "local_mic", always_listen: bool = True, device: str | int | None = None, loc_device_id: str = "default"):
+
+    def __init__(
+        self,
+        node_id: str = "local_mic",
+        always_listen: bool = True,
+        device: str | int | None = None,
+        loc_device_id: str = "default",
+    ):
         super().__init__(
-            node_id=node_id, 
-            node_type=NodeType.PERCEPTION,
-            capabilities=["audio_capture"]
+            node_id=node_id, node_type=NodeType.PERCEPTION, capabilities=["audio_capture"]
         )
         self.always_listen = always_listen
         self.device = device
@@ -33,8 +37,8 @@ class LocalMicNode(Node):
         self._task = None
 
     async def on_start(self) -> None:
-        import sounddevice as sd
         import numpy as np
+        import sounddevice as sd
 
         loop = asyncio.get_running_loop()
 
@@ -45,7 +49,9 @@ class LocalMicNode(Node):
                 # Debug: Check if we are receiving pure silence
                 rms = float(np.sqrt(np.mean(indata**2)))
                 if rms < 0.0001 and len(self._queue._queue) % 20 == 0:
-                    logger.debug(f"[{self.node_id}] Mic input is extremely quiet/silent (RMS: {rms:.5f}) - Check OS permissions!")
+                    logger.debug(
+                        f"[{self.node_id}] Mic input is extremely quiet/silent (RMS: {rms:.5f}) - Check OS permissions!"
+                    )
 
                 # Assuming default float32 from sounddevice, converting to int16 PCM
                 pcm = (indata * 32767).astype(np.int16).tobytes()
@@ -57,14 +63,16 @@ class LocalMicNode(Node):
             samplerate=16000,
             blocksize=512,
             channels=1,
-            dtype='float32',
+            dtype="float32",
             device=self.device,
-            callback=audio_callback
+            callback=audio_callback,
         )
         self._stream.start()
 
         self._task = asyncio.create_task(self._process_queue())
-        logger.info(f"[{self.node_id}] Local Microphone started (always_listen={self.always_listen})")
+        logger.info(
+            f"[{self.node_id}] Local Microphone started (always_listen={self.always_listen})"
+        )
 
     async def on_stop(self) -> None:
         if self._task:
@@ -85,23 +93,22 @@ class LocalMicNode(Node):
                     source_node_id=self.node_id,
                     device_id=self.loc_device_id,
                     topic="sensory.audio.stream",
-                    payload={
-                        "chunk": pcm_bytes.hex(),
-                        "sample_rate": 16000,
-                        "is_final": False
-                    }
+                    payload={"chunk": pcm_bytes.hex(), "sample_rate": 16000, "is_final": False},
                 )
                 await self.publish("sensory.audio.stream", msg)
 
 
 class LocalSpeakerNode(Node):
     """Plays audio chunks received from the core through the local speaker."""
-    
-    def __init__(self, node_id: str = "local_speaker", device: str | int | None = None, loc_device_id: str = "default"):
+
+    def __init__(
+        self,
+        node_id: str = "local_speaker",
+        device: str | int | None = None,
+        loc_device_id: str = "default",
+    ):
         super().__init__(
-            node_id=node_id,
-            node_type=NodeType.PERCEPTION,
-            capabilities=["audio_playback"]
+            node_id=node_id, node_type=NodeType.PERCEPTION, capabilities=["audio_playback"]
         )
         self.device = device
         self.loc_device_id = loc_device_id
@@ -126,7 +133,7 @@ class LocalSpeakerNode(Node):
         payload = message.payload
         audio_hex = payload.get("audio")
         # TTS models typically output 24kHz (Kokoro) or 22kHz
-        sample_rate = payload.get("sample_rate", 24000) 
+        sample_rate = payload.get("sample_rate", 24000)
         if audio_hex:
             try:
                 audio_bytes = bytes.fromhex(audio_hex)
@@ -136,8 +143,8 @@ class LocalSpeakerNode(Node):
         return None
 
     async def _play_queue(self):
-        import sounddevice as sd
         import numpy as np
+        import sounddevice as sd
 
         while True:
             audio_bytes, sample_rate = await self._queue.get()
@@ -153,10 +160,12 @@ class LocalSpeakerNode(Node):
 async def register(bus: Any, registry: Any = None) -> Any:
     """Registers the local audio nodes if dependencies are met."""
     try:
-        import sounddevice
         import numpy
+        import sounddevice
     except ImportError:
-        logger.warning("[hbllm_local_audio] sounddevice or numpy not installed. Local audio disabled.")
+        logger.warning(
+            "[hbllm_local_audio] sounddevice or numpy not installed. Local audio disabled."
+        )
         return []
 
     always_listen = os.environ.get("HBLLM_MIC_ALWAYS_LISTEN", "true").lower() == "true"
@@ -172,7 +181,9 @@ async def register(bus: Any, registry: Any = None) -> Any:
     speaker_device = parse_device(os.environ.get("HBLLM_SPEAKER_DEVICE"))
     loc_device_id = os.environ.get("HBLLM_LOGICAL_DEVICE_ID", "default")
 
-    mic_node = LocalMicNode(always_listen=always_listen, device=mic_device, loc_device_id=loc_device_id)
+    mic_node = LocalMicNode(
+        always_listen=always_listen, device=mic_device, loc_device_id=loc_device_id
+    )
     speaker_node = LocalSpeakerNode(device=speaker_device, loc_device_id=loc_device_id)
 
     # Note: PluginManager handles registration with the registry by calling node.get_info().
