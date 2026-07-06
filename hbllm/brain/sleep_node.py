@@ -26,9 +26,22 @@ from enum import Enum
 
 
 class SleepPhase(str, Enum):
+    """Multi-phase sleep cycle for progressive consolidation.
+
+    Each phase activates after increasing idle periods:
+        MICRO (10s)   — Reinforce recent memories, update prediction stats
+        NREM (5min)   — Semantic compression, duplicate merge, prune
+        REM (15min)   — Hypothesis generation, belief resolution, goal review
+        DEEP_REORG (1hr) — Knowledge graph optimization, importance rebalancing
+        OFFLINE (8hr+)   — LoRA/DPO training, curriculum replay
+    """
+
     AWAKE = "awake"
-    NREM = "nrem"  # Deep sleep: memory compression & clustering
-    REM = "rem"  # REM sleep: neuroplasticity, curiosity replays
+    MICRO = "micro"  # Seconds — reinforce recent memories
+    NREM = "nrem"  # Minutes — semantic compression & clustering
+    REM = "rem"  # Minutes — neuroplasticity, belief resolution
+    DEEP_REORG = "deep_reorg"  # Hours — graph optimization, importance rebalancing
+    OFFLINE = "offline"  # Days — LoRA fine-tuning, DPO, curriculum replay
 
 
 class SleepCycleNode(Node):
@@ -42,6 +55,11 @@ class SleepCycleNode(Node):
         idle_timeout_seconds: float = 10.0,
         llm: Any = None,
         self_model: Any = None,
+        # M2: Integration with event-sourced memory and belief systems
+        neuromodulation_engine: Any = None,
+        event_store: Any = None,  # MemoryEventStore
+        belief_graph: Any = None,  # BeliefGraph
+        goal_memory: Any = None,  # GoalMemory
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -56,6 +74,12 @@ class SleepCycleNode(Node):
         self.llm = llm  # Used for local GraphRAG clustering
         self.self_model = self_model  # For targeted DPO training on weak domains
         self._active_queries: dict[str, float] = {}
+
+        # M2: Event-sourced memory integration
+        self.neuromodulation_engine = neuromodulation_engine
+        self.event_store = event_store
+        self.belief_graph = belief_graph
+        self.goal_memory = goal_memory
 
     @property
     def is_sleeping(self) -> bool:

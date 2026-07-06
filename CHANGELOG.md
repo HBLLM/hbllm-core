@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### v3: SNN Cognitive Architecture (Milestones 1–5)
+
+- **M1 — Reactive Brain**: LIF spiking neurons, multi-layer `SpikingNetwork`, `LayerProjection` with STDP plasticity, short-term plasticity (STP), `ComprehensionStream`, `ExpressionStream`, `ReasoningNetwork` — `hbllm/brain/snn/`
+- **M2 — Learning Brain**: Event-sourced `MemoryEventStore` with `MemCube` fold, `BeliefGraph` for provenance tracking, `GoalMemory` with hierarchical lifecycle, `PredictiveMemoryLoader` with Markov prefetch — `hbllm/memory/`
+- **M3 — Predictive Brain**: `DendriticNeuron` (dual-compartment predictive coding), `PopulationEncoder` / `CognitiveStateEncoder` (Gaussian tuning curves), `CognitivePredictors` (multi-domain Markov anticipation), `IzhikevichNeuron` (biologically realistic model) — `hbllm/brain/snn/`
+- **M4 — Deliberative Brain**: `SimulationEngine` (candidate evaluation with `HeuristicCritic`), `DeliberationBudget` (adaptive computation: SKIP/SINGLE/MULTIPLE/BEAM), `EvidencePacket` / `EvidenceBuilder` (structured evidence for reasoning) — `hbllm/brain/`
+- **M5 — Autonomous Brain**: `OscillationManager` with 4 bands (γ/β/θ/δ), `BrainTick` heartbeat events, phase-amplitude coupling, frequency modulation, `NeuromodulationEngine` (6-transmitter system) — `hbllm/brain/snn/oscillations.py`, `hbllm/brain/neuromodulation.py`
+
+#### v3: Integration Wiring (Cognitive Operating System)
+
+- **`BrainContext`** — Separates `BrainServices` (stateless infrastructure) from `BrainState` (serializable runtime), coordinated via `BrainContext` — `hbllm/brain/brain_context.py`
+- **`BrainContainer`** — Bootstrap factory wiring 7 services with 20 capability tags. Single `BrainContainer.build(config)` entry point — `hbllm/brain/brain_container.py`
+- **`CapabilityRegistry`** — Dynamic service discovery: `registry.find("simulation")` returns tagged services — `hbllm/brain/capability_registry.py`
+- **`TraceCollector`** — End-to-end cognitive observability with trace IDs following events through the full pipeline — `hbllm/brain/trace.py`
+- **`MemoryRepository`** — Abstract base for event-sourced memory repositories + `MemoryProjection` layer — `hbllm/memory/repository.py`
+- **`ProjectionType`** — `BASAL`, `APICAL`, `MODULATORY` enum on `LayerProjection` — `hbllm/brain/snn/network.py`
+- **Integration Tests** — 34 tests covering bootstrap, capability discovery, tracing, BrainTick, DeliberationBudget, EvidencePacket, happy-path cognitive cycle, and failure recovery — `tests/integration/test_cognitive_loop.py`
+- **158 total tests** (124 unit + 34 integration) passing with zero regressions
+
 #### Cognitive Features
 
 - **PersonaEngine** — `hbllm/brain/persona_engine.py`
