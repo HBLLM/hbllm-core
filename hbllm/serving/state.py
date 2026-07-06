@@ -117,6 +117,7 @@ def _get_node_map(brain) -> dict[str, Any]:
         "sentinel",
         "revision_node",
         "tool_memory",
+        "executive_cortex",
     ]:
         val = getattr(brain, attr_name, None)
         if val is not None:
