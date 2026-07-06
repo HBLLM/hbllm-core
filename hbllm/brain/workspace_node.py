@@ -15,16 +15,20 @@ import logging
 import time
 from typing import Any
 
+from hbllm.brain.cognitive_interfaces import IWorkspace
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 
 logger = logging.getLogger(__name__)
 
 
-class WorkspaceNode(Node):
+class WorkspaceNode(Node, IWorkspace):
     """
     The central intelligence blackboard. Maintains state of current reasoning
     efforts and aggregates competing or collaborating thoughts.
+
+    Implements ``IWorkspace`` so the ``ExecutiveController`` can route
+    winning cognitive events here for processing.
     """
 
     def __init__(
@@ -89,6 +93,51 @@ class WorkspaceNode(Node):
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
+
+    # ── IWorkspace implementation ────────────────────────────────────
+
+    async def submit_for_reasoning(self, event: object) -> None:
+        """Accept a winning cognitive event from the ExecutiveController.
+
+        Converts the ``CognitiveEvent`` into a ``workspace.update``
+        bus message so the existing blackboard machinery processes it.
+
+        Args:
+            event: A ``CognitiveEvent`` that won competition.
+        """
+        from hbllm.brain.cognitive_event import CognitiveEvent
+
+        if not isinstance(event, CognitiveEvent):
+            logger.warning(
+                "WorkspaceNode.submit_for_reasoning: expected CognitiveEvent, got %s",
+                type(event).__name__,
+            )
+            return
+
+        # Convert CognitiveEvent to a workspace.update message
+        payload = {
+            "text": event.payload.get("text", f"[{event.type.value}]"),
+            "event_type": event.type.value,
+            "source_node": event.source_node,
+            "snn_saliency": event.snn_saliency,
+            **event.payload,
+        }
+
+        message = Message(
+            type=MessageType.TASK,
+            payload=payload,
+            source_node=event.source_node,
+            target_node=self.node_id,
+            tenant_id=event.tenant_id,
+            correlation_id=event.correlation_id or None,
+        )
+
+        await self.handle_update(message)
+        logger.debug(
+            "WorkspaceNode: accepted cognitive event %s (saliency=%.2f)",
+            event.type.value,
+            event.snn_saliency,
+        )
 
     async def handle_update(self, message: Message) -> Message | None:
         """
