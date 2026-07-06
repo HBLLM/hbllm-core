@@ -42,6 +42,7 @@ import json
 import logging
 import math
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -51,20 +52,50 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# ProjectionType — basal, apical, or modulatory
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class ProjectionType(StrEnum):
+    """Type of synaptic projection.
+
+    Determines how projected currents are routed to target neurons:
+
+        BASAL: Bottom-up evidence input (default for standard projections).
+        APICAL: Top-down prediction/context input.
+        MODULATORY: Neuromodulatory influence (gain control).
+
+    For ``DendriticNeuron`` targets, BASAL and APICAL projections
+    route to ``step_dual(basal=..., apical=...)`` respectively.
+    Standard neurons treat all projection types as somatic input.
+    """
+
+    BASAL = "basal"
+    APICAL = "apical"
+    MODULATORY = "modulatory"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # NeuronLayer — a group of LIF neurons
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class NeuronLayer:
-    """A named group of LIF neurons with a shared semantic role.
+    """A named group of spiking neurons with a shared semantic role.
 
-    Each neuron in the layer has an independent membrane potential
-    but shares the same LIF configuration (threshold, decay, etc.).
+    Each neuron in the layer has an independent membrane potential.
+    By default, all neurons are ``LIFNeuron`` instances sharing the
+    same ``LIFConfig``.  A custom ``neuron_factory`` can be provided
+    to use other neuron models (e.g., ``IzhikevichNeuron``).
 
     Args:
         name: Unique identifier for this layer (e.g. ``"association"``).
         neuron_count: Number of neurons in this layer.
-        config: Shared LIF configuration for all neurons.
+        config: Shared LIF configuration for all neurons.  Used as the
+            default when no ``neuron_factory`` is provided.
+        neuron_factory: Optional callable ``(neuron_id: str) → BaseNeuron``.
+            When provided, neurons are created by calling this factory
+            instead of constructing ``LIFNeuron`` from ``config``.
     """
 
     def __init__(
@@ -72,26 +103,37 @@ class NeuronLayer:
         name: str,
         neuron_count: int,
         config: LIFConfig,
+        neuron_factory: Any | None = None,
     ) -> None:
         self.name = name
         self.neuron_count = neuron_count
         self.config = config
         self.is_inhibitory = config.is_inhibitory  # Layer-level flag for projections
-        self.neurons: list[LIFNeuron] = [
-            LIFNeuron(
-                config=LIFConfig(
-                    threshold=config.threshold,
-                    decay_half_life=config.decay_half_life,
-                    reset_potential=config.reset_potential,
-                    refractory_period=config.refractory_period,
-                    is_inhibitory=config.is_inhibitory,
-                    target_firing_rate=config.target_firing_rate,
-                    adaptation_rate=config.adaptation_rate,
-                ),
-                neuron_id=f"{name}.{i}",
-            )
-            for i in range(neuron_count)
-        ]
+
+        if neuron_factory is not None:
+            # Use the provided factory to create neurons
+            self.neurons: list[Any] = [neuron_factory(f"{name}.{i}") for i in range(neuron_count)]
+            # Detect neuron type from first neuron
+            self._neuron_type: str = self.neurons[0].get_type() if self.neurons else "lif"
+        else:
+            # Default: create LIFNeuron instances (backward compatible)
+            self.neurons = [
+                LIFNeuron(
+                    config=LIFConfig(
+                        threshold=config.threshold,
+                        decay_half_life=config.decay_half_life,
+                        reset_potential=config.reset_potential,
+                        refractory_period=config.refractory_period,
+                        is_inhibitory=config.is_inhibitory,
+                        target_firing_rate=config.target_firing_rate,
+                        adaptation_rate=config.adaptation_rate,
+                    ),
+                    neuron_id=f"{name}.{i}",
+                )
+                for i in range(neuron_count)
+            ]
+            self._neuron_type = "lif"
+
         self._last_spikes: list[SpikeEvent] = []
 
     def step(self, currents: list[float], timestamp: float) -> list[SpikeEvent]:
@@ -171,7 +213,8 @@ class LayerProjection:
 
     Maps each source neuron's spike output to each target neuron's
     input current via a weight matrix.  Supports optional STDP
-    plasticity for learnable connections.
+    plasticity for learnable connections and optional STP for
+    transient synaptic modulation.
 
     The weight matrix has shape ``[source_size × target_size]``:
     ``weights[i][j]`` is the connection from source neuron *i*
@@ -186,6 +229,9 @@ class LayerProjection:
             with uniform weights ``1.0 / source_size``.
         stdp_rule: Optional STDP rule for learning. If None, weights
             are fixed.
+        stp_manager: Optional ``STPManager`` for transient synaptic
+            modulation.  When provided, effective weights are
+            ``permanent_weight × stp_factor``.
     """
 
     def __init__(
@@ -196,12 +242,16 @@ class LayerProjection:
         target_size: int,
         initial_weights: list[list[float]] | None = None,
         stdp_rule: Any | None = None,
+        stp_manager: Any | None = None,
+        projection_type: ProjectionType = ProjectionType.BASAL,
     ) -> None:
         self.source_name = source_name
         self.target_name = target_name
         self.source_size = source_size
         self.target_size = target_size
+        self.projection_type = projection_type
         self._stdp_rule = stdp_rule
+        self._stp_manager = stp_manager
         self._global_step = 0
 
         # Initialize weight matrix
@@ -259,7 +309,17 @@ class LayerProjection:
                 continue
             for j in range(self.target_size):
                 pw = self._weights[i][j]
-                target_currents[j] += sign * spike.strength * pw.weight
+                # Apply STP modulation if manager is configured
+                if self._stp_manager is not None:
+                    effective_w = self._stp_manager.get_effective_weight(
+                        permanent_weight=pw.weight,
+                        synapse_id=(i, j),
+                        timestamp=timestamp,
+                        spiked=True,
+                    )
+                else:
+                    effective_w = pw.weight
+                target_currents[j] += sign * spike.strength * effective_w
                 pw.last_pre_time = timestamp
 
         return target_currents
@@ -601,12 +661,13 @@ class SpikingNetwork:
         """Serialize the full network for persistence."""
         return {
             "name": self.name,
-            "version": 1,
+            "version": 2,
             "step_count": self._step_count,
             "layers": [
                 {
                     "name": layer.name,
                     "neuron_count": layer.neuron_count,
+                    "neuron_type": getattr(layer, "_neuron_type", "lif"),
                     "config": {
                         "threshold": layer.config.threshold,
                         "decay_half_life": layer.config.decay_half_life,
@@ -627,16 +688,33 @@ class SpikingNetwork:
 
         for layer_data in data.get("layers", []):
             config_d = layer_data.get("config", {})
+            neuron_type = layer_data.get("neuron_type", "lif")
             config = LIFConfig(
                 threshold=config_d.get("threshold", 1.0),
                 decay_half_life=config_d.get("decay_half_life", 1.0),
                 reset_potential=config_d.get("reset_potential", 0.0),
                 refractory_period=config_d.get("refractory_period", 0.0),
             )
+
+            # Build neuron_factory for non-LIF types
+            factory = None
+            if neuron_type == "izhikevich":
+                from hbllm.brain.snn.neurons import IzhikevichConfig, IzhikevichNeuron
+
+                iz_config = IzhikevichConfig(
+                    is_inhibitory=config.is_inhibitory,
+                    target_firing_rate=config.target_firing_rate,
+                    adaptation_rate=config.adaptation_rate,
+                )
+
+                def factory(nid: str, _cfg: Any = iz_config) -> Any:
+                    return IzhikevichNeuron(_cfg, nid)
+
             layer = NeuronLayer(
                 name=layer_data["name"],
                 neuron_count=layer_data["neuron_count"],
                 config=config,
+                neuron_factory=factory,
             )
             net.add_layer(layer)
 
