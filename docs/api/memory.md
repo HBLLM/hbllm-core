@@ -20,16 +20,32 @@ graph TB
         VM["ValueMemory<br/>(What I prefer)"]
         KG["KnowledgeGraph<br/>(Entity relations)"]
     end
+    subgraph "v3: Event-Sourced Infrastructure"
+        REPO["MemoryRepository (ABC)"]
+        PROJ["MemoryProjection"]
+        MES["MemoryEventStore"]
+        MC["MemCube (state)"]
+        BG["BeliefGraph"]
+        GM["GoalMemory"]
+        EP["EvidencePacket"]
+    end
     subgraph "Learning Pipeline"
         CE["ConceptExtractor<br/>(Pattern mining)"]
+        PL["PredictiveLoader<br/>(Markov prefetch)"]
     end
-    MN --> EM
-    MN --> SM
-    MN --> PM
-    MN --> VM
+    MN --> REPO
+    REPO --> EM
+    REPO --> SM
+    REPO --> PM
+    REPO --> VM
+    REPO --> PROJ
+    PROJ --> MES
+    MES --> |"fold()"| MC
+    BG --> |"construct"| EP
     MN --> KG
     EM --> CE
     CE --> SM
+    PL --> MES
 ```
 
 ---

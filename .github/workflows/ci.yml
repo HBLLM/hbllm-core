@@ -188,14 +188,14 @@ jobs:
         run: mkdocs build --strict
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: site/
           overwrite: true
 
       - name: Deploy to GitHub Pages
         id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4.0.5
 
   # ── Docker Build & Push ──────────────────────────────────────────────
   docker:

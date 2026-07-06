@@ -31,7 +31,10 @@ class AsyncModelManager:
         self._lock = asyncio.Lock()
 
     async def load_model(self, source: str, **kwargs: Any) -> Any:
-        """Asynchronously load a model using the synchronous loader."""
+        """Asynchronously load a model using the synchronous loader.
+
+        Supports optional ``prefix_identity`` kwarg for KV cache warmup.
+        """
         async with self._lock:
             if source in self._models:
                 self._models[source].ref_count += 1

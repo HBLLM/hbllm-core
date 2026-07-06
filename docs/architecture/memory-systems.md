@@ -49,6 +49,52 @@ All memory classes live in `hbllm/memory/`:
 | `memory_node.py` | `MemoryNode` | Bus-connected node wrapping all systems |
 | `concept_extractor.py` | — | Concept extraction utilities |
 
+### v3: Event-Sourced Architecture
+
+| File | Class | Purpose |
+|---|---|---|
+| `memcube.py` | `MemoryEventStore` | Append-only event log; state = `fold(events)` |
+| `memcube.py` | `MemCube` | Immutable memory state (version, content, source) |
+| `repository.py` | `MemoryRepository` | Abstract base for all memory repositories |
+| `repository.py` | `MemoryProjection` | Folds event streams into `MemCube` state |
+| `belief_graph.py` | `BeliefGraph` | Provenance graph: who believed what, why, contradictions |
+| `goal_memory.py` | `GoalMemory` | Goal lifecycle: pending → active → completed/failed |
+| `predictive_loader.py` | `PredictiveMemoryLoader` | Markov-based prefetch of anticipated memories |
+
+```mermaid
+graph TB
+    subgraph "v3 Event-Sourced Memory"
+        MN["MemoryNode"] --> REPO["MemoryRepository (ABC)"]
+        REPO --> PROJ["MemoryProjection"]
+        PROJ --> MES["MemoryEventStore"]
+        MES --> |"fold()"| MC["MemCube (state)"]
+
+        subgraph "Repositories"
+            EM2["EpisodicMemory"]
+            SM2["SemanticMemory"]
+            PM2["ProceduralMemory"]
+            VM2["ValueMemory"]
+        end
+
+        REPO --- EM2
+        REPO --- SM2
+        REPO --- PM2
+        REPO --- VM2
+    end
+
+    subgraph "Belief & Evidence"
+        BG["BeliefGraph"] --> |"construct"| EP["EvidencePacket"]
+        EP --> |"inject"| REASON["Reasoner"]
+    end
+```
+
+**Key Design Decisions:**
+
+- **State = fold(events)**: Memory state is never stored directly. The current state of any memory is computed by folding its event stream (`create → reinforce → correct → decay`).
+- **Repository Pattern**: `EpisodicMemory`, `SemanticMemory`, etc. are thin semantic wrappers. They handle domain-specific logic (search ranking, skill matching) while delegating persistence to `MemoryEventStore` via `MemoryProjection`.
+- **Projection Layer**: `MemoryProjection` owns the `fold()` operation. Neither `MemoryNode` nor individual repositories expose fold directly.
+- **EvidencePacket**: Reasoners never import `BeliefGraph` directly — they receive `EvidencePacket` instances with confidence, support, contradictions, and lineage.
+
 ---
 
 ## 1. Episodic Memory

@@ -41,6 +41,243 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | **`RelationshipMemory`** | `relationship_memory.py` | `inject_relationship_memory` | Social graph and interaction history |
 | **`RealityGraph`** | `reality_graph.py` | `inject_reality_graph` | Unified read-only world state facade |
 
+### v3: Integration Layer
+
+| Subsystem | Module | Purpose |
+|---|---|---|
+| `BrainContext` | `brain/brain_context.py` | Service/state separation — coordination layer |
+| `BrainContainer` | `brain/brain_container.py` | Bootstrap factory (7 services, 20 capabilities) |
+| `CapabilityRegistry` | `brain/capability_registry.py` | Dynamic service discovery by capability tags |
+| `TraceCollector` | `brain/trace.py` | End-to-end cognitive event tracing |
+| `EvidencePacket` | `brain/evidence.py` | Structured evidence for reasoning |
+| `DeliberationBudget` | `brain/simulation_engine.py` | Adaptive computation budgeting |
+| `BrainTick` | `brain/snn/oscillations.py` | Global oscillation heartbeat events |
+
+### v3: Memory Infrastructure
+
+| Subsystem | Module | Purpose |
+|---|---|---|
+| `MemoryRepository` | `memory/repository.py` | Abstract base for event-sourced memory types |
+| `MemoryProjection` | `memory/repository.py` | Folds event streams into MemCube state |
+| `MemoryEventStore` | `memory/memcube.py` | Append-only event log with fold() |
+| `BeliefGraph` | `memory/belief_graph.py` | Belief provenance and contradiction tracking |
+| `GoalMemory` | `memory/goal_memory.py` | Hierarchical goal lifecycle management |
+
+---
+
+## v3: Integration Layer
+
+!!! info "New in v3"
+    These subsystems wire the cognitive architecture into a **Cognitive Operating System** with proper dependency injection, observability, capability discovery, and event-driven architecture.
+
+### BrainContainer — Bootstrap Factory
+
+**Module:** `hbllm.brain.brain_container.BrainContainer`
+
+Single entry point that constructs and wires the entire cognitive system.
+
+```python
+from hbllm.brain.brain_container import BrainContainer, BrainConfig
+
+# Default bootstrap — wires 7 services with 20 capabilities
+ctx = BrainContainer.build()
+
+# Custom config — disable simulation for lightweight mode
+ctx = BrainContainer.build(config=BrainConfig(enable_simulation=False))
+
+# Access services
+sim = ctx.services.simulation        # SimulationEngine | None
+clock = ctx.services.clock           # OscillationManager
+traces = ctx.services.traces         # TraceCollector
+
+# Access state
+goals = ctx.state.goals              # GoalMemory
+neuromod = ctx.state.neuromodulation # NeuromodulationEngine
+
+# Stats
+ctx.stats()
+# {"services": {"capabilities": {...}}, "state": {"goal_count": 3, ...}}
+```
+
+### BrainContext — Service/State Separation
+
+**Module:** `hbllm.brain.brain_context.BrainContext`
+
+Separates `BrainServices` (stateless infrastructure) from `BrainState` (serializable runtime state). Acts as coordination layer, **not** a service locator.
+
+```python
+# BrainServices — infrastructure that lives forever
+ctx.services.clock              # BrainClock (OscillationManager)
+ctx.services.capability_registry # CapabilityRegistry
+ctx.services.traces             # TraceCollector
+ctx.services.simulation         # SimulationEngine
+
+# BrainState — serializable, can snapshot/restore
+ctx.state.cognitive_state       # Current cognitive state
+ctx.state.goals                 # GoalMemory
+ctx.state.neuromodulation       # NeuromodulationEngine
+ctx.state.working_memory        # dict — transient working memory
+ctx.state.attention_focus       # str — current focus
+
+snap = ctx.state.snapshot()     # Serializable dict
+```
+
+### CapabilityRegistry — Dynamic Service Discovery
+
+**Module:** `hbllm.brain.capability_registry.CapabilityRegistry`
+
+```python
+from hbllm.brain.capability_registry import CapabilityRegistry
+
+reg = CapabilityRegistry()
+
+# Register a service with capability tags
+reg.register("simulation_engine", engine, ["simulation", "deliberation"])
+
+# Discover by capability
+sims = reg.find("simulation")       # [SimulationEngine]
+clock = reg.find_one("timing")      # OscillationManager
+all_svcs = reg.all_services         # ["simulation_engine", "brain_clock", ...]
+all_caps = reg.all_capabilities     # ["simulation", "timing", ...]
+
+# Unregister
+reg.unregister("simulation_engine")
+```
+
+### TraceCollector — End-to-End Observability
+
+**Module:** `hbllm.brain.trace.TraceCollector`
+
+Every cognitive event gets a trace ID that follows it through the full pipeline.
+
+```python
+from hbllm.brain.trace import TraceCollector
+
+collector = TraceCollector(max_retained=100)
+
+# Start a trace for a cognitive event
+trace = collector.start_trace(source="user_input")
+trace.record("saliency", "scored", {"score": 0.92})
+trace.record("competition", "selected")
+trace.record("workspace", "broadcast")
+trace.record("planner", "candidates_generated")
+trace.record("simulation", "approved", {"critic_score": 0.85})
+trace.record("decision", "committed")
+trace.record("memory", "stored")
+
+# Finish and retain
+collector.finish_trace(trace)
+
+# Inspect
+trace.component_path  # ["saliency", "competition", "workspace", ...]
+trace.duration        # 0.042 (seconds)
+trace.events          # [TraceEvent(...), ...]
+```
+
+### BrainTick — Oscillation Heartbeat
+
+**Module:** `hbllm.brain.snn.oscillations.BrainTick`
+
+```python
+from hbllm.brain.snn.oscillations import OscillationManager, BrainTick
+
+mgr = OscillationManager()
+
+# Generate a heartbeat
+tick = mgr.generate_tick(
+    timestamp=time.time(),
+    cognitive_load=0.6,
+    attention_level=0.85,
+    fatigue=0.1,
+)
+
+tick.cycle           # 1 (monotonic counter)
+tick.dominant_band   # "gamma"
+tick.phase           # {"gamma": 0.42, "beta": 0.81, ...}
+tick.gate            # {"gamma": 0.95, "beta": 0.12, ...}
+tick.to_dict()       # Serializable
+```
+
+### DeliberationBudget — Adaptive Computation
+
+**Module:** `hbllm.brain.simulation_engine.DeliberationBudget`
+
+Brains don't deliberate over every action. Budget determines how much simulation is warranted.
+
+```python
+from hbllm.brain.simulation_engine import DeliberationBudget, DeliberationLevel
+
+budget = DeliberationBudget(
+    uncertainty=0.8,    # How uncertain
+    importance=0.7,     # How important
+    novelty=0.7,        # How novel
+    goal_priority=0.8,  # Goal priority
+)
+
+budget.score                  # 0.3136
+budget.level                  # "multiple"
+budget.recommended_candidates # 3
+
+# Levels: SKIP(0) → SINGLE(1) → MULTIPLE(3) → BEAM(5)
+```
+
+### EvidencePacket — Structured Evidence for Reasoning
+
+**Module:** `hbllm.brain.evidence.EvidencePacket`
+
+Insulates reasoners from `BeliefGraph` internals. Provides everything a reasoner needs to evaluate trustworthiness.
+
+```python
+from hbllm.brain.evidence import EvidencePacket, EvidenceBuilder
+
+# Manual construction
+packet = EvidencePacket(
+    fact="User prefers dark mode",
+    confidence=0.85,
+    supporting_evidence=["User said 'I like dark mode'"],
+    contradictions=["App settings show light mode"],
+    source_lineage=["perception", "workspace", "belief_graph"],
+    freshness=0.9,
+    importance=0.6,
+)
+packet.is_contested      # True
+packet.reliability_score # 0.383
+
+# From raw input
+packet = EvidenceBuilder.from_raw("Tool succeeded", confidence=0.95, source="executor")
+
+# Merge multiple evidence about the same fact
+merged = EvidenceBuilder.merge_evidence([packet1, packet2])
+
+# From BeliefGraph (async)
+packets = await EvidenceBuilder.from_belief_graph(belief_graph, memory_ids)
+```
+
+### MemoryProjection — Event-Sourced State
+
+**Module:** `hbllm.memory.repository.MemoryProjection`
+
+```python
+from hbllm.memory.repository import MemoryProjection
+from hbllm.memory.memcube import MemoryEventStore, MemoryEvent
+
+store = MemoryEventStore()
+await store.initialize()
+
+# Append events
+event = MemoryEvent.create(
+    memory_id="mem_001", content="User prefers Rust",
+    memory_type="semantic", source_node="perception", tenant_id="default",
+)
+await store.append(event)
+
+# Project current state
+projection = MemoryProjection(store)
+cube = await projection.project("mem_001")
+cube.content  # "User prefers Rust"
+cube.version  # 1
+```
+
 ---
 
 ## Skill Registry
