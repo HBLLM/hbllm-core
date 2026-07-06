@@ -44,6 +44,7 @@ def load_model(
     trust_remote_code: bool = False,
     max_memory: dict[str, str] | None = None,
     attn_implementation: str | None = None,
+    prefix_identity: Any | None = None,
 ) -> nn.Module:
     """
     Load a model for use with the HBLLM cognitive pipeline.
@@ -60,6 +61,8 @@ def load_model(
         trust_remote_code: Trust remote code for custom model architectures
         max_memory: Device memory limits, e.g. {"0": "6GiB", "cpu": "12GiB"}
         attn_implementation: Attention implementation ("flash_attention_2", "sdpa")
+        prefix_identity: Optional ``PrefixIdentity`` from ``hbllm.model.kv_warmup``.
+            When provided, KV cache warmup runs automatically after model load.
 
     Returns:
         A model with the HBLLM interface:
@@ -71,11 +74,13 @@ def load_model(
 
     # Check if it's a native HBLLM preset
     if source_lower in _NATIVE_PRESETS:
-        return _load_native(source_lower, device, dtype)
+        model = _load_native(source_lower, device, dtype)
+        _maybe_warmup(model, prefix_identity)
+        return model
 
     # Check if it's a local path
     if Path(source).is_dir():
-        return _load_huggingface(
+        model = _load_huggingface(
             source,
             device,
             dtype,
@@ -85,9 +90,11 @@ def load_model(
             max_memory,
             attn_implementation,
         )
+        _maybe_warmup(model, prefix_identity)
+        return model
 
     # Assume it's a HuggingFace model name
-    return _load_huggingface(
+    model = _load_huggingface(
         source,
         device,
         dtype,
@@ -97,6 +104,25 @@ def load_model(
         max_memory,
         attn_implementation,
     )
+    _maybe_warmup(model, prefix_identity)
+    return model
+
+
+def _maybe_warmup(model: nn.Module, prefix_identity: Any | None) -> None:
+    """Run KV prefix cache warmup if a PrefixIdentity is provided."""
+    if prefix_identity is None:
+        return
+    try:
+        from hbllm.model.kv_warmup import KVPrefixCache
+
+        cache = KVPrefixCache()
+        cache.warmup(prefix_identity, model, tokenizer=None)
+        logger.info(
+            "KV warmup completed for prefix key=%s",
+            prefix_identity.cache_key[:12],
+        )
+    except Exception as e:
+        logger.warning("KV warmup failed (non-fatal): %s", e)
 
 
 def _load_native(size: str, device: str, dtype: str = "auto") -> nn.Module:
