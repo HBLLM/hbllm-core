@@ -124,6 +124,7 @@ nav:
   - Architecture:
       - Overview: architecture/overview.md
       - Cognitive Nodes: architecture/cognitive-nodes.md
+      - Cognitive Subsystems: architecture/cognitive-subsystems.md
       - Decision & Control Plane: architecture/decision-gatekeeper.md
       - Executive Brain: architecture/executive-brain-layer.md
       - Sleep Cycle: architecture/sleep-cycle.md
@@ -134,6 +135,7 @@ nav:
       - Message Bus: architecture/message-bus.md
       - Memory Systems: architecture/memory-systems.md
       - Network Resilience: architecture/network-resilience.md
+      - Adaptive Network: architecture/adaptive-network.md
       - Distributed Trust: architecture/distributed-trust.md
       - Embodiment: architecture/embodiment.md
       - Human Control: architecture/human-control.md
