@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -92,7 +93,7 @@ _COGNITIVE_FIELDS: dict[str, tuple[float, float]] = {
 
 
 @dataclass(frozen=True)
-class CognitiveState:
+class CognitiveStateSnapshot:
     """Immutable snapshot of the system's cognitive variables.
 
     Never mutated directly.  New states are produced by applying
@@ -162,7 +163,7 @@ class CognitiveState:
             self.stress,
         ]
 
-    def diff(self, other: CognitiveState) -> dict[str, tuple[float, float]]:
+    def diff(self, other: CognitiveStateSnapshot) -> dict[str, tuple[float, float]]:
         """Compare two states, returning fields that differ.
 
         Returns:
@@ -257,16 +258,16 @@ class CognitiveStateReducer:
         clamp_values: bool = True,
         log_deltas: bool = False,
     ) -> None:
-        self._history: deque[CognitiveState] = deque(maxlen=history_size)
+        self._history: deque[CognitiveStateSnapshot] = deque(maxlen=history_size)
         self._delta_log: deque[CognitiveStateDelta] = deque(maxlen=history_size)
         self._clamp = clamp_values
         self._log_deltas = log_deltas
 
     def apply(
         self,
-        state: CognitiveState,
+        state: CognitiveStateSnapshot,
         delta: CognitiveStateDelta,
-    ) -> CognitiveState:
+    ) -> CognitiveStateSnapshot:
         """Apply a delta to produce a new immutable state.
 
         Args:
@@ -324,9 +325,9 @@ class CognitiveStateReducer:
 
     def apply_batch(
         self,
-        state: CognitiveState,
+        state: CognitiveStateSnapshot,
         deltas: list[CognitiveStateDelta],
-    ) -> CognitiveState:
+    ) -> CognitiveStateSnapshot:
         """Apply multiple deltas sequentially.
 
         Args:
@@ -340,7 +341,7 @@ class CognitiveStateReducer:
             state = self.apply(state, delta)
         return state
 
-    def get_history(self, last_n: int = 10) -> list[CognitiveState]:
+    def get_history(self, last_n: int = 10) -> list[CognitiveStateSnapshot]:
         """Return the last N states from history.
 
         Args:
@@ -364,7 +365,7 @@ class CognitiveStateReducer:
         log_list = list(self._delta_log)
         return log_list[-last_n:]
 
-    def rollback(self, to_version: int) -> CognitiveState | None:
+    def rollback(self, to_version: int) -> CognitiveStateSnapshot | None:
         """Roll back to a specific version from history.
 
         Args:
@@ -380,9 +381,9 @@ class CognitiveStateReducer:
 
     def replay_from(
         self,
-        start_state: CognitiveState,
+        start_state: CognitiveStateSnapshot,
         deltas: list[CognitiveStateDelta],
-    ) -> list[CognitiveState]:
+    ) -> list[CognitiveStateSnapshot]:
         """Replay a sequence of deltas from a starting state.
 
         Useful for debugging: reproduce the exact state sequence.
@@ -412,3 +413,344 @@ class CognitiveStateReducer:
         if self._history:
             return self._history[-1].version
         return -1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Legacy types — backward compatibility
+# ═══════════════════════════════════════════════════════════════════════════
+# These classes were part of the pre-v3 CognitiveState module and are still
+# used by executive_cortex.py, layered_simulation, analogical_planning, and
+# related tests.  They remain here for API stability.
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """Provenance and context tracking for facts and beliefs."""
+
+    source: str
+    confidence: float
+    timestamp: float = field(default_factory=time.time)
+    generated_by: str = ""  # Subsystem or Node ID
+    reasoning_path: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp,
+            "generated_by": self.generated_by,
+            "reasoning_path": self.reasoning_path,
+        }
+
+
+@dataclass(frozen=True)
+class CandidatePlan:
+    """A first-class candidate execution or reasoning plan."""
+
+    plan_id: str = ""
+    graph: dict[str, Any] = field(default_factory=dict)
+    origin: str = "planner"  # "planner", "analogy", "fallback"
+    confidence: float = 1.0
+    predicted_reward: float = 0.0
+    predicted_cost: dict[str, float] = field(default_factory=dict)
+    analogy_used: str | None = None
+    simulation_result: dict[str, Any] | None = None
+    execution_trace: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "plan_id": self.plan_id,
+            "graph": self.graph,
+            "origin": self.origin,
+            "confidence": self.confidence,
+            "predicted_reward": self.predicted_reward,
+            "predicted_cost": self.predicted_cost,
+            "analogy_used": self.analogy_used,
+            "simulation_result": self.simulation_result,
+            "execution_trace": self.execution_trace,
+        }
+
+
+@dataclass(frozen=True)
+class CognitiveBudget:
+    """Multidimensional resource allocation parameters."""
+
+    attention_budget: float | None = None
+    memory_budget: int | None = None
+    simulation_budget: int | None = None
+    reasoning_budget: int | None = None
+    verification_budget: int | None = None
+    planning_budget: float | None = None  # seconds
+    tool_budget: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attention_budget": self.attention_budget,
+            "memory_budget": self.memory_budget,
+            "simulation_budget": self.simulation_budget,
+            "reasoning_budget": self.reasoning_budget,
+            "verification_budget": self.verification_budget,
+            "planning_budget": self.planning_budget,
+            "tool_budget": self.tool_budget,
+        }
+
+
+DEFAULT_COGNITIVE_BUDGET = CognitiveBudget(
+    attention_budget=1.0,
+    memory_budget=10,
+    simulation_budget=3,
+    reasoning_budget=5,
+    verification_budget=2,
+    planning_budget=5.0,
+    tool_budget=5,
+)
+
+
+@dataclass(frozen=True)
+class CognitivePolicy:
+    """Hierarchical policy rules configuring system behaviors."""
+
+    reasoning_strategy: str | None = None  # "direct", "CoT", "GoT", "analogical"
+    simulation_depth: int | None = None
+    verification_budget: int | None = None
+    retrieval_budget: int | None = None
+    planner_type: str | None = None
+    memory_budget: int | None = None
+    model_selection: str | None = None
+    reflection_enabled: bool | None = None
+    budget: CognitiveBudget | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reasoning_strategy": self.reasoning_strategy,
+            "simulation_depth": self.simulation_depth,
+            "verification_budget": self.verification_budget,
+            "retrieval_budget": self.retrieval_budget,
+            "planner_type": self.planner_type,
+            "memory_budget": self.memory_budget,
+            "model_selection": self.model_selection,
+            "reflection_enabled": self.reflection_enabled,
+            "budget": self.budget.to_dict() if self.budget else None,
+        }
+
+
+DEFAULT_COGNITIVE_POLICY = CognitivePolicy(
+    reasoning_strategy="direct",
+    simulation_depth=1,
+    verification_budget=2,
+    retrieval_budget=5,
+    planner_type="got",
+    memory_budget=10,
+    model_selection="auto",
+    reflection_enabled=True,
+    budget=DEFAULT_COGNITIVE_BUDGET,
+)
+
+
+class HierarchicalCognitivePolicy:
+    """A cascade of overrides from Global to Task level."""
+
+    def __init__(
+        self,
+        global_policy: CognitivePolicy | None = None,
+        conversation_policy: CognitivePolicy | None = None,
+        goal_policy: CognitivePolicy | None = None,
+        task_policy: CognitivePolicy | None = None,
+    ) -> None:
+        self.global_policy = global_policy or DEFAULT_COGNITIVE_POLICY
+        self.conversation_policy = conversation_policy
+        self.goal_policy = goal_policy
+        self.task_policy = task_policy
+
+    def resolve(self) -> CognitivePolicy:
+        """Resolve effective CognitivePolicy by traversing overrides."""
+        resolved_fields: dict[str, Any] = {}
+        for field_name in [
+            "reasoning_strategy",
+            "simulation_depth",
+            "verification_budget",
+            "retrieval_budget",
+            "planner_type",
+            "memory_budget",
+            "model_selection",
+            "reflection_enabled",
+        ]:
+            # Safety override: global reflection_enabled=True cannot be disabled
+            if (
+                field_name == "reflection_enabled"
+                and self.global_policy
+                and self.global_policy.reflection_enabled
+            ):
+                resolved_fields[field_name] = True
+                continue
+
+            resolved_val = None
+            for p in [
+                self.task_policy,
+                self.goal_policy,
+                self.conversation_policy,
+                self.global_policy,
+                DEFAULT_COGNITIVE_POLICY,
+            ]:
+                if p is not None:
+                    val = getattr(p, field_name)
+                    if val is not None:
+                        resolved_val = val
+                        break
+            resolved_fields[field_name] = resolved_val
+
+        # Merge budgets per-field across levels
+        budget_fields: dict[str, Any] = {}
+        for b_field in [
+            "attention_budget",
+            "memory_budget",
+            "simulation_budget",
+            "reasoning_budget",
+            "verification_budget",
+            "planning_budget",
+            "tool_budget",
+        ]:
+            resolved_val = None
+            for p in [
+                self.task_policy,
+                self.goal_policy,
+                self.conversation_policy,
+                self.global_policy,
+                DEFAULT_COGNITIVE_POLICY,
+            ]:
+                if p is not None:
+                    b_obj = getattr(p, "budget", None)
+                    if b_obj is not None:
+                        val = getattr(b_obj, b_field, None)
+                        if val is not None:
+                            resolved_val = val
+                            break
+            budget_fields[b_field] = resolved_val
+
+        resolved_fields["budget"] = CognitiveBudget(**budget_fields)
+        return CognitivePolicy(**resolved_fields)
+
+    @property
+    def effective(self) -> CognitivePolicy:
+        """Alias for resolve()."""
+        return self.resolve()
+
+    def set_task_policy(self, policy: CognitivePolicy) -> None:
+        self.task_policy = policy
+
+    def clear_task_policy(self) -> None:
+        self.task_policy = None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LegacyCognitiveState — pre-v3 API (goal + policy based)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class LegacyCognitiveState:
+    """Pre-v3 immutable working memory snapshot with goal and policy fields.
+
+    Used by executive_cortex, layered_simulation, analogical_planning,
+    and their tests. Preserved for backward compatibility.
+    """
+
+    goal: Any = None
+    policy: Any = None
+    state_id: str = field(default_factory=lambda: f"state_{uuid.uuid4().hex[:12]}")
+    version: int = 1
+    parent_state_id: str | None = None
+    retrieved_memory: list[dict[str, Any]] = field(default_factory=list)
+    simulations: list[dict[str, Any]] = field(default_factory=list)
+    candidate_plans: list[CandidatePlan] = field(default_factory=list)
+    active_skills: list[str] = field(default_factory=list)
+    reflections: list[str] = field(default_factory=list)
+    beliefs: list[dict[str, Any]] = field(default_factory=list)
+    evidence_ledger: dict[str, Evidence] = field(default_factory=dict)
+    working_memory: dict[str, Any] = field(default_factory=dict)
+    confidence: float = 1.0
+    created_at: float = field(default_factory=time.time)
+
+    @property
+    def effective_policy(self) -> CognitivePolicy:
+        if isinstance(self.policy, HierarchicalCognitivePolicy):
+            return self.policy.resolve()
+        return HierarchicalCognitivePolicy(global_policy=self.policy).resolve()
+
+    def derive_state(self, **mutations: Any) -> LegacyCognitiveState:
+        """Derive a new version with bumped version number."""
+        mutations["version"] = self.version + 1
+        mutations["parent_state_id"] = self.state_id
+        mutations["state_id"] = f"state_{uuid.uuid4().hex[:12]}"
+        mutations["created_at"] = time.time()
+        return replace(self, **mutations)
+
+    def fork(self) -> LegacyCognitiveState:
+        """Create a forked copy with a new state_id and bumped version."""
+        return replace(
+            self,
+            state_id=f"state_{uuid.uuid4().hex[:12]}",
+            parent_state_id=self.state_id,
+            version=self.version + 1,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        goal_dict = None
+        if self.goal is not None:
+            goal_dict = (
+                self.goal.to_dict()
+                if hasattr(self.goal, "to_dict")
+                else {
+                    "name": getattr(self.goal, "name", ""),
+                    "description": getattr(self.goal, "description", ""),
+                }
+            )
+        policy_dict = None
+        if self.policy is not None:
+            policy_dict = (
+                self.policy.to_dict() if hasattr(self.policy, "to_dict") else str(self.policy)
+            )
+        return {
+            "state_id": self.state_id,
+            "version": self.version,
+            "parent_state_id": self.parent_state_id,
+            "goal": goal_dict,
+            "policy": policy_dict,
+            "confidence": self.confidence,
+            "active_skills": self.active_skills,
+            "reflections": self.reflections,
+            "beliefs": self.beliefs,
+            "evidence_ledger": {k: v.to_dict() for k, v in self.evidence_ledger.items()},
+            "candidate_plans": [p.to_dict() for p in self.candidate_plans],
+            "working_memory": self.working_memory,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CognitiveState — smart constructor for backward compatibility
+# ═══════════════════════════════════════════════════════════════════════════
+# When called with goal=/policy= kwargs → returns LegacyCognitiveState
+# When called with v3 kwargs (confidence, etc.) → returns CognitiveStateSnapshot
+
+
+class _CognitiveStateMeta(type):
+    """Metaclass that dispatches CognitiveState() to the right class."""
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        if "goal" in kwargs or "policy" in kwargs:
+            return LegacyCognitiveState(*args, **kwargs)
+        return CognitiveStateSnapshot(*args, **kwargs)
+
+    def __instancecheck__(cls, instance: Any) -> bool:
+        return isinstance(instance, (CognitiveStateSnapshot, LegacyCognitiveState))
+
+
+class CognitiveState(metaclass=_CognitiveStateMeta):
+    """Factory for cognitive state objects.
+
+    - ``CognitiveState(goal=..., policy=...)`` → ``LegacyCognitiveState``
+    - ``CognitiveState(confidence=0.8, ...)``  → ``CognitiveStateSnapshot``
+    - ``CognitiveState()``                     → ``CognitiveStateSnapshot``
+    """
+
+    pass
