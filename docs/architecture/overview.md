@@ -76,6 +76,10 @@ graph TB
         RN_SNN["🧩 ReasoningNetwork\n(4→6→2 SNN)"]
         ES["🗣️ ExpressionStream\n(3-tier rendering)"]
         TPRM["📊 TrainedPRM\n(6→8→4→2 SNN + STDP)"]
+        DN["🌳 DendriticNeuron\n(predictive coding)"]
+        PE["📊 PopulationEncoder\n(state→spikes)"]
+        OSC["🔄 BrainClock\n(γ/β/θ/δ oscillations)"]
+        NM["💊 Neuromodulation\n(DA/5HT/NE/ACh/GABA/Glu)"]
     end
 
     subgraph AUTONOMY["🎯 Autonomy & Executive Control"]
@@ -184,19 +188,19 @@ graph TB
 
 Input nodes that transform raw signals into structured messages:
 
-| Node | Input | Output |
-|---|---|---|
-| `VisionNode` | Images, video frames | Captions, OCR text, object labels |
-| `AudioInputNode` | Microphone stream | Transcribed text (STT) |
-| `VideoStreamNode` | Camera / RTSP feeds | Frame events, motion detection |
-| `GestureNode` | Body/hand landmarks | Gesture classification events |
-| `AmbientAudioClassifier` | Background audio | Scene classification (speech, music, silence, noise) |
-| `SpeakerIdNode` | Audio embeddings | Speaker identification and diarization |
-| `ConversationTurnManager` | STT + TTS events | Turn state management (IDLE → LISTENING → PROCESSING → SPEAKING) |
-| `TemporalFuser` | Multi-sensor streams | Fused perception snapshots with temporal alignment |
-| `WorldStateTracker` | All perception events | Unified world state model (entities, locations, activities) |
-| `IoTMQTTNode` | MQTT sensor topics | Structured sensor events |
-| `ROS2Node` | ROS2 topic subscriptions | Robot state, LIDAR, joint data |
+| Node                      | Input                    | Output                                                           |
+| ------------------------- | ------------------------ | ---------------------------------------------------------------- |
+| `VisionNode`              | Images, video frames     | Captions, OCR text, object labels                                |
+| `AudioInputNode`          | Microphone stream        | Transcribed text (STT)                                           |
+| `VideoStreamNode`         | Camera / RTSP feeds      | Frame events, motion detection                                   |
+| `GestureNode`             | Body/hand landmarks      | Gesture classification events                                    |
+| `AmbientAudioClassifier`  | Background audio         | Scene classification (speech, music, silence, noise)             |
+| `SpeakerIdNode`           | Audio embeddings         | Speaker identification and diarization                           |
+| `ConversationTurnManager` | STT + TTS events         | Turn state management (IDLE → LISTENING → PROCESSING → SPEAKING) |
+| `TemporalFuser`           | Multi-sensor streams     | Fused perception snapshots with temporal alignment               |
+| `WorldStateTracker`       | All perception events    | Unified world state model (entities, locations, activities)      |
+| `IoTMQTTNode`             | MQTT sensor topics       | Structured sensor events                                         |
+| `ROS2Node`                | ROS2 topic subscriptions | Robot state, LIDAR, joint data                                   |
 
 ### Layer 2: Cognitive Core
 
@@ -219,6 +223,23 @@ The SNN layer runs alongside the cognitive core:
 - **TrainedPRM** — 6→8→4→2 SNN evaluates response quality with STDP learning.
 - **ContentPlanner** — 8→12→6→3 SNN for content type selection (v4).
 - **BrocaEncoder** — Ultra-minimal prompt builder for pure text production (v4).
+
+#### v3 SNN Extensions
+
+- **DendriticNeuron** — Dual-compartment neuron (basal + apical) for predictive coding. Computes prediction error when top-down expectations mismatch bottom-up evidence.
+- **PopulationEncoder / CognitiveStateEncoder** — Encodes continuous cognitive state (confidence, urgency, etc.) into population spike patterns using Gaussian tuning curves.
+- **ProjectionType** — Typed synaptic projections (`BASAL`, `APICAL`, `MODULATORY`) on `LayerProjection` for routing to appropriate dendritic compartments.
+- **BrainClock (OscillationManager)** — Global timing with 4 bands (gamma, beta, theta, delta). Emits `BrainTick` heartbeat events that all subsystems subscribe to for phase-gated processing.
+- **NeuromodulationEngine** — 6-transmitter system (dopamine, serotonin, norepinephrine, acetylcholine, GABA, glutamate) modulating learning rate, thresholds, and attention globally.
+- **DeliberationBudget** — Adaptive computation: `budget = uncertainty × importance × novelty × goal_priority`. Maps to SKIP (0 candidates) → SINGLE (1) → MULTIPLE (3) → BEAM (5).
+- **EvidencePacket** — Structured evidence for reasoning with confidence, support, contradictions, source lineage, and freshness scoring.
+
+#### v3 Integration Infrastructure
+
+- **BrainContext** — Separates `BrainServices` (stateless infrastructure: clock, bus, registry) from `BrainState` (serializable runtime: goals, neuromod, working memory). Acts as coordination layer, not service locator.
+- **BrainContainer** — Bootstrap factory that wires 7 services with 20 capability tags. Single `BrainContainer.build(config)` call produces a fully wired system.
+- **CapabilityRegistry** — Dynamic service discovery: `registry.find("simulation")` returns all services tagged with that capability.
+- **TraceCollector / CognitiveTrace** — End-to-end observability: every cognitive event gets a trace ID that follows it from perception → saliency → competition → workspace → planner → simulation → decision → memory.
 
 #### DualLLMRouter & Circuit Breaker
 
@@ -243,13 +264,13 @@ graph LR
 
 #### Production Resilience
 
-| Feature | Module | Behavior |
-|---------|--------|----------|
-| **Graceful Shutdown** | `api.py` | Drains in-flight requests before exit (configurable timeout) |
-| **Rate Limiting** | `middleware/rate_limit.py` | Per-tenant token bucket (429 when exceeded) |
-| **Prometheus Metrics** | `middleware/prometheus.py` | Request count, latency histogram, error counters |
-| **API Versioning** | `middleware/api_version.py` | `Accept-Version` validation, `X-API-Version` header |
-| **DB Quotas** | `episodic.py` | Per-tenant turn limits with automatic eviction |
+| Feature                | Module                      | Behavior                                                     |
+| ---------------------- | --------------------------- | ------------------------------------------------------------ |
+| **Graceful Shutdown**  | `api.py`                    | Drains in-flight requests before exit (configurable timeout) |
+| **Rate Limiting**      | `middleware/rate_limit.py`  | Per-tenant token bucket (429 when exceeded)                  |
+| **Prometheus Metrics** | `middleware/prometheus.py`  | Request count, latency histogram, error counters             |
+| **API Versioning**     | `middleware/api_version.py` | `Accept-Version` validation, `X-API-Version` header          |
+| **DB Quotas**          | `episodic.py`               | Per-tenant turn limits with automatic eviction               |
 
 ### Layer 3: Autonomy & Executive Control
 
@@ -395,7 +416,7 @@ sequenceDiagram
 - [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
 - [Cognitive Subsystems](cognitive-subsystems.md) — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph.
 - [Message Bus](message-bus.md) — How Pub/Sub routing works.
-- [Memory Systems](memory-systems.md) — The 6 memory types explained.
+- [Memory Systems](memory-systems.md) — The 9 memory types and event-sourced repository layer.
 - [Embodiment](embodiment.md) — Actuator safety and verification.
 - [Human Control](human-control.md) — Safety boundaries and intent integrity.
 - [Causality & Compaction](causality-and-compaction.md) — Decision trace graphs and memory folding.
