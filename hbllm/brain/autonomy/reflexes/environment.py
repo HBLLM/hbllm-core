@@ -19,30 +19,12 @@ import logging
 from collections.abc import Callable
 
 from hbllm.brain.autonomy.attention import AttentionEvent
-from hbllm.network.messages import Message, MessageType
+from hbllm.brain.autonomy.reflexes import make_push_message
+from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
 
 ReflexRule = Callable[[AttentionEvent], Message | None]
-
-
-def _make_push_message(
-    title: str,
-    body: str,
-    priority: str = "high",
-    category: str = "environment",
-) -> Message:
-    return Message(
-        type=MessageType.EVENT,
-        source_node_id="autonomy_reflex",
-        topic="proactive.push",
-        payload={
-            "title": title,
-            "body": body,
-            "priority": priority,
-            "category": category,
-        },
-    )
 
 
 def _temperature_alert(event: AttentionEvent) -> Message | None:
@@ -52,13 +34,13 @@ def _temperature_alert(event: AttentionEvent) -> Message | None:
         if temp is not None and isinstance(temp, (int, float)):
             room = event.payload.get("room", "unknown")
             if temp < 16:
-                return _make_push_message(
+                return make_push_message(
                     title="🥶 Temperature Low",
                     body=f"{room} is at {temp:.1f}°C. Consider turning on heating.",
                     priority="high",
                 )
             elif temp > 30:
-                return _make_push_message(
+                return make_push_message(
                     title="🔥 Temperature High",
                     body=f"{room} is at {temp:.1f}°C. Consider turning on cooling.",
                     priority="high",
@@ -73,13 +55,13 @@ def _humidity_alert(event: AttentionEvent) -> Message | None:
         if humidity is not None and isinstance(humidity, (int, float)):
             room = event.payload.get("room", "unknown")
             if humidity < 25:
-                return _make_push_message(
+                return make_push_message(
                     title="💧 Low Humidity",
                     body=f"{room} humidity at {humidity:.0f}%. Consider using a humidifier.",
                     priority="info",
                 )
             elif humidity > 70:
-                return _make_push_message(
+                return make_push_message(
                     title="💧 High Humidity",
                     body=f"{room} humidity at {humidity:.0f}%. Risk of mold — improve ventilation.",
                     priority="high",
@@ -95,7 +77,7 @@ def _motion_at_night(event: AttentionEvent) -> Message | None:
         hour = datetime.datetime.now().hour
         if hour >= 23 or hour < 5:
             room = event.payload.get("room", "unknown")
-            return _make_push_message(
+            return make_push_message(
                 title="🌙 Night Motion",
                 body=f"Motion detected in {room} at {hour:02d}:{datetime.datetime.now().minute:02d}.",
                 priority="high",
@@ -112,7 +94,7 @@ def _door_left_open(event: AttentionEvent) -> Message | None:
         if door_state == "open" and duration_s > 300:  # 5 minutes
             door_name = event.payload.get("device_name", "A door")
             mins = duration_s // 60
-            return _make_push_message(
+            return make_push_message(
                 title="🚪 Door Left Open",
                 body=f"{door_name} has been open for {mins} minutes.",
                 priority="info",
@@ -127,7 +109,7 @@ def _window_open_rain(event: AttentionEvent) -> Message | None:
         window_open = event.payload.get("window_open", False)
         if raining and window_open:
             room = event.payload.get("room", "unknown")
-            return _make_push_message(
+            return make_push_message(
                 title="🌧️ Close Window",
                 body=f"It's raining and a window in {room} is open.",
                 priority="high",
@@ -143,7 +125,7 @@ def _lights_left_on(event: AttentionEvent) -> Message | None:
         if lights_on and no_motion_s > 1800:  # 30 minutes
             room = event.payload.get("room", "unknown")
             mins = no_motion_s // 60
-            return _make_push_message(
+            return make_push_message(
                 title="💡 Lights Still On",
                 body=f"Lights in {room} have been on with no motion for {mins} minutes.",
                 priority="suggestion",
@@ -159,7 +141,7 @@ def _appliance_energy_spike(event: AttentionEvent) -> Message | None:
         if power_w is not None and baseline_w > 0:
             if power_w > baseline_w * 2 and power_w > 100:  # 2x baseline and > 100W
                 device = event.payload.get("device_name", "An appliance")
-                return _make_push_message(
+                return make_push_message(
                     title="⚡ Energy Spike",
                     body=f"{device} is drawing {power_w:.0f}W (usual: {baseline_w:.0f}W).",
                     priority="info",
@@ -175,7 +157,7 @@ def _smoke_co_detected(event: AttentionEvent) -> Message | None:
         if alarm:
             alarm_type = "Smoke" if event.payload.get("smoke_detected") else "CO"
             room = event.payload.get("room", "unknown")
-            return _make_push_message(
+            return make_push_message(
                 title=f"🚨 {alarm_type} Alarm!",
                 body=f"{alarm_type} detected in {room}. Check immediately!",
                 priority="critical",
@@ -188,7 +170,7 @@ def _smoke_co_detected(event: AttentionEvent) -> Message | None:
         if sound_class in ("smoke_detector", "alarm"):
             confidence = event.payload.get("confidence", 0)
             if confidence > 0.5:
-                return _make_push_message(
+                return make_push_message(
                     title="🚨 Alarm Sound Detected!",
                     body=f"Audio classifier detected {sound_class} sound (confidence: {confidence:.0%}).",
                     priority="critical",

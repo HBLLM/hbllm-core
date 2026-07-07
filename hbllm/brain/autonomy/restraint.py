@@ -240,16 +240,24 @@ class RestraintEngine:
                     action=action,
                 )
 
-        # ── Factor 3: Reversibility ──────────────────────────────────
-        if not is_reversible and priority not in ("critical", "high"):
-            return self._result(
-                RestraintDecision.DEFER,
-                confidence,
-                [f"Irreversible action '{action}' — deferring for confirmation"],
-                cooldown_s=30.0,
-                action=action,
-                alternative_action=f"confirm:{action}",
-            )
+        # ── Factor 3: Reversibility ──────────────────────────────────────
+        if not is_reversible:
+            if confidence <= self.config.min_confidence_irreversible and priority not in (
+                "critical",
+                "high",
+            ):
+                return self._result(
+                    RestraintDecision.DEFER,
+                    confidence,
+                    [
+                        f"Irreversible action '{action}' with confidence {confidence:.2f} "
+                        f"below irreversible threshold {self.config.min_confidence_irreversible} "
+                        f"— deferring for confirmation"
+                    ],
+                    cooldown_s=30.0,
+                    action=action,
+                    alternative_action=f"confirm:{action}",
+                )
 
         # ── Factor 4: Social timing ──────────────────────────────────
         if self._is_quiet_hours(hour) and priority not in ("high", "critical"):

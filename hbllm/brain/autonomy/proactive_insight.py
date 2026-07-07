@@ -123,6 +123,12 @@ class ProactiveInsightGenerator:
             if len(filtered) >= max_insights:
                 break
 
+        # Prune stale insight keys (older than 24 hours) to prevent memory growth
+        stale_cutoff = now - 86400
+        stale_keys = [k for k, v in self._generated.items() if v < stale_cutoff]
+        for key in stale_keys:
+            del self._generated[key]
+
         return filtered
 
     def _get_max_insights(self, tenant_id: str) -> int:

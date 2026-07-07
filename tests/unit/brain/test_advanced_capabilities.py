@@ -260,7 +260,7 @@ class TestReflexLearner:
     @pytest_asyncio.fixture
     async def store(self, tmp_path):
         s = ReflexStore(db_path=tmp_path / "reflexes.db")
-        await s.init_db()
+        s.init_db()
         return s
 
     @pytest_asyncio.fixture

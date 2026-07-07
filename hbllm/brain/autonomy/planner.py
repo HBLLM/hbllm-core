@@ -75,7 +75,7 @@ class AnticipatoryPlanner:
 
         scored_scenarios: list[CounterfactualScenario] = []
 
-        # 1. Simulate and Score
+        # 2. Simulate and Score
         for i, task_sequence in enumerate(strategies):
             scenario = self.simulator.simulate_plan(goal, task_sequence, tier=tier)
             scenario.scenario_id = f"{goal.goal_id}_plan_{i}"

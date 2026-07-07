@@ -162,12 +162,47 @@ class InterruptDetector:
         now = time.monotonic()
         since_input = now - self._last_user_input if self._last_user_input > 0 else float("inf")
 
+        old_state = self._current_state
         if since_input >= self.deep_idle_timeout_s:
             self._current_state = UserState.DEEP_IDLE
         elif since_input >= self.present_timeout_s:
             self._current_state = UserState.IDLE
         elif since_input >= self.engaged_timeout_s:
             self._current_state = UserState.PRESENT
+
+        # Emit bus event on passive state decay (mirrors _update_state behavior)
+        if self._current_state != old_state:
+            self._state_since = now
+            self._state_changes += 1
+            logger.info(
+                "User state (passive decay): %s → %s (input %.0fs ago)",
+                old_state.value,
+                self._current_state.value,
+                since_input,
+            )
+            if self.bus:
+                import asyncio
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(
+                        self.bus.publish(
+                            "autonomy.user.state",
+                            Message(
+                                type=MessageType.EVENT,
+                                source_node_id="interrupt_detector",
+                                topic="autonomy.user.state",
+                                payload={
+                                    "state": self._current_state.value,
+                                    "previous_state": old_state.value,
+                                    "since_input_s": since_input,
+                                    "decay": True,
+                                },
+                            ),
+                        )
+                    )
+                except RuntimeError:
+                    pass  # No running event loop (e.g., called from sync context)
 
         return self._current_state
 
@@ -180,7 +215,7 @@ class InterruptDetector:
         Returns:
             True if the notification should be delivered given current state.
         """
-        priority_rank = {"critical": 4, "high": 3, "info": 2, "suggestion": 1}
+        priority_rank = {"critical": 4, "high": 3, "normal": 2, "info": 2, "suggestion": 1}
         threshold = STATE_PRIORITY_THRESHOLDS.get(self.state, "info")
 
         incoming_rank = priority_rank.get(priority, 0)

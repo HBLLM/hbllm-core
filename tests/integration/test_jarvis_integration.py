@@ -212,7 +212,7 @@ async def test_reflex_learner_to_sandbox(tmp_path):
     from hbllm.training.exploration_sandbox import ExplorationSandbox
 
     store = ReflexStore(db_path=tmp_path / "reflexes.db")
-    await store.init_db()
+    store.init_db()
     learner = ReflexLearner(store=store)
     sandbox = ExplorationSandbox()
 

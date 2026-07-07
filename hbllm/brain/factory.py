@@ -156,6 +156,7 @@ class BrainConfig(BaseModel):
     inject_cost_optimizer: bool = True  # Token optimization
     inject_policy_engine: bool = True  # Governance policy enforcement
     inject_owner_rules: bool = True  # Owner-defined behavioral rules
+    inject_audit_trail: bool = True  # Immutable action log with hash chain
     inject_sentinel: bool = True  # Proactive governance monitoring
     inject_evaluation: bool = True  # v2: Intelligence feedback loop
     inject_reflection: bool = True  # v2: Periodic batch reflection
@@ -1582,6 +1583,16 @@ class BrainFactory:
 
         if cfg.inject_owner_rules:
             brain.owner_rules = OwnerRuleStore(db_path=str(Path(cfg.data_dir) / "owner_rules.db"))
+
+        if cfg.inject_audit_trail:
+            from hbllm.security.audit_trail import AuditTrail
+
+            audit_trail = AuditTrail(
+                db_path=str(Path(cfg.data_dir) / "audit_trail.db"),
+            )
+            await audit_trail.init_db()
+            brain.audit_trail = audit_trail
+            logger.info("AuditTrail wired — immutable action log active")
 
         # Cognitive Awareness
         if cfg.inject_awareness:

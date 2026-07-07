@@ -18,31 +18,12 @@ import logging
 from collections.abc import Callable
 
 from hbllm.brain.autonomy.attention import AttentionEvent
-from hbllm.network.messages import Message, MessageType
+from hbllm.brain.autonomy.reflexes import make_push_message
+from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
 
 ReflexRule = Callable[[AttentionEvent], Message | None]
-
-
-def _make_push_message(
-    title: str,
-    body: str,
-    priority: str = "high",
-    category: str = "system",
-) -> Message:
-    """Helper to create a proactive push message."""
-    return Message(
-        type=MessageType.EVENT,
-        source_node_id="autonomy_reflex",
-        topic="proactive.push",
-        payload={
-            "title": title,
-            "body": body,
-            "priority": priority,
-            "category": category,
-        },
-    )
 
 
 def _battery_critical(event: AttentionEvent) -> Message | None:
@@ -50,7 +31,7 @@ def _battery_critical(event: AttentionEvent) -> Message | None:
     if event.source in ("system.hardware.critical", "perception.system.health_alert"):
         battery = event.payload.get("battery_level") or event.payload.get("level")
         if battery is not None and battery < 0.10:
-            return _make_push_message(
+            return make_push_message(
                 title="🔋 Battery Critical",
                 body=f"Battery at {battery:.0%}. Connect charger immediately.",
                 priority="critical",
@@ -63,7 +44,7 @@ def _battery_low(event: AttentionEvent) -> Message | None:
     if event.source in ("system.hardware.critical", "perception.system.health_alert"):
         battery = event.payload.get("battery_level") or event.payload.get("level")
         if battery is not None and 0.10 <= battery < 0.20:
-            return _make_push_message(
+            return make_push_message(
                 title="🔋 Battery Low",
                 body=f"Battery at {battery:.0%}. Consider plugging in.",
                 priority="high",
@@ -76,7 +57,7 @@ def _memory_pressure(event: AttentionEvent) -> Message | None:
     if event.source in ("system.hardware.critical", "perception.system.health_alert"):
         ram = event.payload.get("ram_percent", 0)
         if isinstance(ram, (int, float)) and ram > 90:
-            return _make_push_message(
+            return make_push_message(
                 title="💾 Memory Pressure",
                 body=f"System RAM at {ram:.0f}%. Consider closing applications.",
                 priority="high",
@@ -91,7 +72,7 @@ def _disk_full(event: AttentionEvent) -> Message | None:
         if alert_type == "disk_low":
             free_gb = event.payload.get("free_gb", 999)
             if free_gb < 2.0:
-                return _make_push_message(
+                return make_push_message(
                     title="💿 Disk Almost Full",
                     body=f"Only {free_gb:.1f} GB free. Free up space to avoid issues.",
                     priority="critical" if free_gb < 1.0 else "high",
@@ -105,7 +86,7 @@ def _cpu_sustained_high(event: AttentionEvent) -> Message | None:
         alert_type = event.payload.get("type")
         if alert_type == "cpu_high":
             load = event.payload.get("load_1min", 0)
-            return _make_push_message(
+            return make_push_message(
                 title="🖥️ CPU Load High",
                 body=f"CPU load average: {load:.1f}. System may be sluggish.",
                 priority="high",
@@ -118,7 +99,7 @@ def _network_down(event: AttentionEvent) -> Message | None:
     if event.source == "system.network":
         connected = event.payload.get("connected", True)
         if not connected:
-            return _make_push_message(
+            return make_push_message(
                 title="📡 Network Disconnected",
                 body="Internet connectivity lost. Operating in offline mode.",
                 priority="high",
@@ -131,7 +112,7 @@ def _thermal_throttling(event: AttentionEvent) -> Message | None:
     if event.source in ("perception.system.health_alert", "system.hardware.critical"):
         thermal = event.payload.get("thermal_status") or event.payload.get("thermal")
         if thermal in ("heavy", "critical"):
-            return _make_push_message(
+            return make_push_message(
                 title="🌡️ Thermal Warning",
                 body=f"Device thermal pressure is {thermal}. Performance may be reduced.",
                 priority="critical" if thermal == "critical" else "high",

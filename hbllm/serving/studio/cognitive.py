@@ -8,6 +8,7 @@ interaction from the Studio dashboard.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Request
 
@@ -302,8 +303,8 @@ async def get_studio_topology(request: Request):
             if cat not in all_cats:
                 all_cats.append(cat)
 
-    nodes = []
-    edges = []
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
 
     # SNN Group Node
     nodes.append(
