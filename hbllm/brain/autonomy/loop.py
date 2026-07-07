@@ -141,8 +141,11 @@ class AutonomyCore:
         max_pending_thoughts: int = 50,
         # Fast-path event topics to subscribe to
         fast_path_topics: list[str] | None = None,
+        # Data directory for goal recovery
+        data_dir: str = "data",
     ) -> None:
         self.state_machine = state_machine or CognitiveStateMachine()
+        self._data_dir = data_dir
         self.attention = attention or AttentionSystem()
 
         # Safety
@@ -236,13 +239,11 @@ class AutonomyCore:
 
     async def _recover_active_goals(self) -> None:
         """Startup recovery phase: check for incomplete/blocked goals and resume them."""
-        import os
-
         logger.info("[AutonomyCore] Initiating startup recovery phase...")
         try:
             from hbllm.brain.goal_manager import GoalManager, GoalStatus
 
-            goal_manager = GoalManager(data_dir=os.environ.get("HBLLM_DATA_DIR", "data"))
+            goal_manager = GoalManager(data_dir=self._data_dir)
             active_goals = goal_manager.get_active_goals()
 
             for goal in active_goals:
@@ -260,7 +261,7 @@ class AutonomyCore:
                         source_node_id="autonomy",
                         topic="autonomy.thought",
                         payload={
-                            "text": f"Recovering goal {goal.name}. Resuming from checkpoint: {journal.get('checkpoint', 'start')}",
+                            "content": f"Recovering goal {goal.name}. Resuming from checkpoint: {journal.get('checkpoint', 'start')}",
                             "goal_id": goal.goal_id,
                             "checkpoint": journal.get("checkpoint"),
                             "next_action": journal.get("next_action"),
@@ -680,7 +681,7 @@ class AutonomyCore:
                     logger.debug("Restraint DEFERRED: %s — %s", msg.topic, result.reasons)
                     return
             except Exception as e:
-                logger.debug("Restraint check error (proceeding): %s", e)
+                logger.warning("Restraint check error (proceeding): %s", e)
 
         # 2. Notification suppression (anti-annoyance)
         if self._notification_suppressor and "notification" in msg.topic:
@@ -693,7 +694,7 @@ class AutonomyCore:
                     logger.debug("Notification suppressed: %s", msg.topic)
                     return
             except Exception as e:
-                logger.debug("Suppressor check error (proceeding): %s", e)
+                logger.warning("Suppressor check error (proceeding): %s", e)
 
         # 3. Audit trail logging
         if self._audit_trail:
@@ -706,7 +707,7 @@ class AutonomyCore:
                     target=msg.payload.get("target", ""),
                 )
             except Exception as e:
-                logger.debug("Audit trail error (proceeding): %s", e)
+                logger.warning("Audit trail error (proceeding): %s", e)
 
         # 4. Emit
         self._actions_emitted += 1

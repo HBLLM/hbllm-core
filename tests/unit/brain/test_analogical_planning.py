@@ -5,7 +5,7 @@ from hbllm.brain.skill_registry import Skill, SkillRegistry
 
 def test_generate_analogous_hypothesis(tmp_path):
     # Setup engines
-    concept_engine = ConceptFormationEngine()
+    concept_engine = ConceptFormationEngine(data_dir=str(tmp_path))
     skill_registry = SkillRegistry(data_dir=str(tmp_path))
 
     # 1. Setup mock CrossDomainAnalogy in concept_engine
@@ -15,7 +15,7 @@ def test_generate_analogous_hypothesis(tmp_path):
         domain_b="filesystem",
         concept_a="db_write",
         concept_b="fs_write",
-        shared_structure={},
+        shared_structure=[],
         similarity_score=0.85,
     )
     concept_engine._analogies.append(analogy)

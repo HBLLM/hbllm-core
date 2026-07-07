@@ -37,6 +37,7 @@ class TestActionVerificationBridge:
         """Auto-generate verification rule from IoT action."""
 
         class MockTask:
+            action_topic = "iot.command"
             action_type = "iot.command"
             action_payload = {"device_id": "kitchen_light", "expected_state": "on"}
 
@@ -50,6 +51,7 @@ class TestActionVerificationBridge:
         """No rule for non-IoT actions without explicit metadata."""
 
         class MockTask:
+            action_topic = "web.search"
             action_type = "web.search"
             action_payload = {"query": "test"}
 
@@ -57,9 +59,10 @@ class TestActionVerificationBridge:
         assert rule is None
 
     def test_infer_verification_rule_empty(self):
-        """No rule when action_type is empty."""
+        """No rule when action_topic is empty."""
 
         class MockTask:
+            action_topic = ""
             action_type = ""
             action_payload = {}
 

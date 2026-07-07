@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -236,7 +237,7 @@ class CognitiveStateMachine:
         self._cognitive_load: float = 0.0
 
         # Transition history (ring buffer)
-        self._history: list[StateTransition] = []
+        self._history: deque[StateTransition] = deque(maxlen=history_limit)
 
         # Guards: if any guard returns False, transition is blocked
         self._guards: list[TransitionGuard] = []
@@ -371,8 +372,6 @@ class CognitiveStateMachine:
             metadata=metadata or {},
         )
         self._history.append(record)
-        if len(self._history) > self._history_limit:
-            self._history = self._history[-self._history_limit :]
 
         logger.info(
             "Cognitive state: %s → %s (reason=%s, tick=%.1fs)",
@@ -386,7 +385,7 @@ class CognitiveStateMachine:
         for hook in self._hooks:
             try:
                 hook(record)
-            except (TypeError, ValueError, RuntimeError, AttributeError) as exc:
+            except Exception as exc:
                 logger.warning("Error in transition hook: %s", exc, exc_info=True)
 
         return True
@@ -454,7 +453,7 @@ class CognitiveStateMachine:
 
     def get_history(self, limit: int = 20) -> list[StateTransition]:
         """Return the most recent state transitions."""
-        return self._history[-limit:]
+        return list(self._history)[-limit:]
 
     def snapshot(self) -> dict[str, Any]:
         """Serializable snapshot of the state machine for telemetry."""

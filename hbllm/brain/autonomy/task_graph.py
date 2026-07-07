@@ -839,20 +839,37 @@ class TaskGraphRuntime:
     def _block_dependents(
         self, conn: sqlite3.Connection, goal_id: str, failed_task_id: str
     ) -> None:
-        """Block all tasks that depend on the failed task."""
+        """Block all tasks that depend on the failed task (transitively)."""
         conn.row_factory = sqlite3.Row
         all_tasks = conn.execute(
             "SELECT * FROM task_nodes WHERE goal_id = ? AND status IN (?, ?)",
             (goal_id, TaskStatus.PENDING.value, TaskStatus.READY.value),
         ).fetchall()
 
+        # Build a lookup of task_id → dependency list for efficient traversal
+        task_deps: dict[str, list[str]] = {}
         for row in all_tasks:
-            deps = json.loads(row["dependencies"] or "[]")
-            if failed_task_id in deps:
-                conn.execute(
-                    "UPDATE task_nodes SET status = ? WHERE task_id = ?",
-                    (TaskStatus.BLOCKED.value, row["task_id"]),
-                )
+            task_deps[row["task_id"]] = json.loads(row["dependencies"] or "[]")
+
+        # Worklist algorithm: cascade blocking transitively
+        to_block: set[str] = {failed_task_id}
+        newly_blocked: set[str] = set()
+        while True:
+            found_new = False
+            for tid, deps in task_deps.items():
+                if tid not in newly_blocked and any(d in to_block for d in deps):
+                    newly_blocked.add(tid)
+                    to_block.add(tid)
+                    found_new = True
+            if not found_new:
+                break
+
+        # Apply blocking to the database
+        for tid in newly_blocked:
+            conn.execute(
+                "UPDATE task_nodes SET status = ? WHERE task_id = ?",
+                (TaskStatus.BLOCKED.value, tid),
+            )
 
     def _get_task_goal_id(self, task_id: str) -> str | None:
         with sqlite3.connect(self.db_path) as conn:

@@ -15,30 +15,12 @@ import logging
 from collections.abc import Callable
 
 from hbllm.brain.autonomy.attention import AttentionEvent
-from hbllm.network.messages import Message, MessageType
+from hbllm.brain.autonomy.reflexes import make_push_message
+from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
 
 ReflexRule = Callable[[AttentionEvent], Message | None]
-
-
-def _make_push_message(
-    title: str,
-    body: str,
-    priority: str = "info",
-    category: str = "reminder",
-) -> Message:
-    return Message(
-        type=MessageType.EVENT,
-        source_node_id="autonomy_reflex",
-        topic="proactive.push",
-        payload={
-            "title": title,
-            "body": body,
-            "priority": priority,
-            "category": category,
-        },
-    )
 
 
 def _calendar_conflict(event: AttentionEvent) -> Message | None:
@@ -48,7 +30,7 @@ def _calendar_conflict(event: AttentionEvent) -> Message | None:
         if conflicts and len(conflicts) >= 2:
             event_names = [c.get("summary", "Event") for c in conflicts[:3]]
             time_str = event.payload.get("conflict_time", "")
-            return _make_push_message(
+            return make_push_message(
                 title="📅 Calendar Conflict",
                 body=f"Overlapping events: {', '.join(event_names)}"
                 + (f" at {time_str}" if time_str else ""),
@@ -66,7 +48,7 @@ def _meeting_reminder(event: AttentionEvent) -> Message | None:
             summary = event.payload.get("summary", "Meeting")
             location = event.payload.get("location", "")
             location_text = f" at {location}" if location else ""
-            return _make_push_message(
+            return make_push_message(
                 title=f"📅 {summary} in {minutes_until} min",
                 body=f"Your meeting starts in {minutes_until} minutes{location_text}.",
                 priority="high" if minutes_until <= 5 else "info",
@@ -83,7 +65,7 @@ def _commute_alert(event: AttentionEvent) -> Message | None:
             conditions = event.payload.get("conditions", "")
             eta_minutes = event.payload.get("eta_minutes")
             eta_text = f" Estimated travel: {eta_minutes} min." if eta_minutes else ""
-            return _make_push_message(
+            return make_push_message(
                 title=f"🚗 {commute_type.title()} Commute",
                 body=f"Time to prepare for your {commute_type} commute.{eta_text}"
                 + (f" {conditions}" if conditions else ""),
@@ -99,7 +81,7 @@ def _bedtime_wind_down(event: AttentionEvent) -> Message | None:
         bedtime_approaching = event.payload.get("bedtime_approaching", False)
         if bedtime_approaching:
             minutes_until = event.payload.get("minutes_until_bedtime", 30)
-            return _make_push_message(
+            return make_push_message(
                 title="🌙 Wind Down",
                 body=f"Your usual bedtime is in about {minutes_until} minutes. "
                 f"Consider wrapping up for the night.",

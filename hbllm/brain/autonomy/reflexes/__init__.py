@@ -23,10 +23,30 @@ from collections.abc import Callable
 from typing import Any
 
 from hbllm.brain.autonomy.attention import AttentionEvent
-from hbllm.network.messages import Message
+from hbllm.network.messages import Message, MessageType
 
 # Type alias matching AutonomyCore's ReflexRule
 ReflexRule = Callable[[AttentionEvent], Message | None]
+
+
+def make_push_message(
+    title: str,
+    body: str,
+    priority: str = "high",
+    category: str = "general",
+) -> Message:
+    """Shared helper to create a proactive push message for reflex rules."""
+    return Message(
+        type=MessageType.EVENT,
+        source_node_id="autonomy_reflex",
+        topic="proactive.push",
+        payload={
+            "title": title,
+            "body": body,
+            "priority": priority,
+            "category": category,
+        },
+    )
 
 
 def get_all_reflexes() -> dict[str, ReflexRule]:

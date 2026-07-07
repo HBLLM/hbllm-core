@@ -122,7 +122,7 @@ class ActionVerificationBridge:
 
                 for row in rows:
                     task_id = row["task_id"]
-                    action_type = row["action_type"]
+                    action_topic = row["action_topic"]
                     action_payload_str = row["action_payload"]
                     correction_attempts = row["correction_attempts"]
 
@@ -142,17 +142,17 @@ class ActionVerificationBridge:
                         "Re-executing task %s (attempt %d): %s",
                         task_id,
                         correction_attempts,
-                        action_type,
+                        action_topic,
                     )
 
                     # Re-publish the action command
-                    if action_type and self.bus:
+                    if action_topic and self.bus:
                         await self.bus.publish(
-                            action_type,
+                            action_topic,
                             Message(
                                 type=MessageType.COMMAND,
                                 source_node_id="verification_bridge",
-                                topic=action_type,
+                                topic=action_topic,
                                 payload={
                                     **action_payload,
                                     "_correction_attempt": correction_attempts,
@@ -214,14 +214,14 @@ class ActionVerificationBridge:
         """Infer a verification rule from the task's action metadata."""
         from hbllm.brain.autonomy.task_graph import VerificationRule
 
-        action_type = getattr(task, "action_type", "")
+        action_topic = getattr(task, "action_topic", "") or getattr(task, "action_type", "")
         payload = getattr(task, "action_payload", {})
 
-        if not action_type:
+        if not action_topic:
             return None
 
         # IoT commands: "turn on X" → check device state
-        if "iot" in action_type.lower():
+        if "iot" in action_topic.lower():
             device_id = payload.get("device_id", "")
             expected = payload.get("expected_state") or payload.get("state", "")
             if device_id and expected:

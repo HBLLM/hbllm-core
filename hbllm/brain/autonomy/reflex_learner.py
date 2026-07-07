@@ -71,7 +71,7 @@ class ReflexStore:
     def __init__(self, db_path: str | Path = "data/learned_reflexes.db") -> None:
         self.db_path = Path(db_path)
 
-    async def init_db(self) -> None:
+    def init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         try:

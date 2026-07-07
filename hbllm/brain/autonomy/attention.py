@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -253,7 +253,7 @@ class AttentionSystem:
         # Thought budgets
         self._max_thoughts_per_minute = max_thoughts_per_minute
         self._cooldown_after_burst_s = cooldown_after_burst_s
-        self._thought_timestamps: list[float] = []
+        self._thought_timestamps: deque[float] = deque(maxlen=max_thoughts_per_minute * 2)
         self._cooldown_until: float = 0.0
 
         # Context window
@@ -390,8 +390,7 @@ class AttentionSystem:
 
         # Count thoughts in the last 60 seconds
         cutoff = now - 60.0
-        self._thought_timestamps = [t for t in self._thought_timestamps if t > cutoff]
-        recent_count = len(self._thought_timestamps)
+        recent_count = sum(1 for t in self._thought_timestamps if t > cutoff)
 
         if recent_count >= self._max_thoughts_per_minute:
             self._cooldown_until = now + self._cooldown_after_burst_s

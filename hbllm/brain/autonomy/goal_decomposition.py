@@ -70,7 +70,6 @@ class DecompositionResult:
     original_goal: str
     sub_goals: list[SubGoal] = field(default_factory=list)
     total_estimated_min: float = 0.0
-    critical_path: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -115,6 +114,7 @@ Respond in JSON format:
     ) -> None:
         self.provider = provider
         self._decompositions: dict[str, DecompositionResult] = {}
+        self._max_cached_decompositions = 100
         self._total_decomposed = 0
 
     async def decompose(
@@ -137,6 +137,15 @@ Respond in JSON format:
             result = self._decompose_heuristic(gid, goal_description)
 
         self._decompositions[gid] = result
+
+        # Evict oldest entries if cache exceeds limit
+        if len(self._decompositions) > self._max_cached_decompositions:
+            oldest_keys = list(self._decompositions.keys())[
+                : len(self._decompositions) - self._max_cached_decompositions
+            ]
+            for key in oldest_keys:
+                del self._decompositions[key]
+
         return result
 
     async def _decompose_with_llm(
