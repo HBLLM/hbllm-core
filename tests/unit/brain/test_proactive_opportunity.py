@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 import time
 from pathlib import Path
-import pytest
 
-from hbllm.brain.autonomy.autonomy_manager import PresenceMonitor, ProactiveCoordinator
+from hbllm.brain.autonomy.autonomy_manager import ProactiveCoordinator
 from hbllm.brain.autonomy.opportunity import Opportunity, OpportunityHistory
 from hbllm.brain.autonomy.opportunity_source import (
-    BatterySource,
     OpportunityScorer,
     SilenceSource,
 )

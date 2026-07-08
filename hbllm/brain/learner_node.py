@@ -53,6 +53,7 @@ class LearnerNode(Node):
         micro_learn_threshold: float = 0.3,
         distillation_threshold: float = 0.85,
         learning_adapter: str = "personalization",
+        queue_path: str = "workspace/reflection/dpo_queue.json",
     ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.DOMAIN_MODULE)
         self.node_type = NodeType.MEMORY
@@ -62,7 +63,7 @@ class LearnerNode(Node):
 
         # Continuous Lifelong DPO: persistent queue
         self.pending_pairs: dict[str, dict[str, str | None]] = {}
-        self.queue_path = "workspace/reflection/dpo_queue.json"
+        self.queue_path = queue_path
 
         os.makedirs(os.path.dirname(self.queue_path), exist_ok=True)
 

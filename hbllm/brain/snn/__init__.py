@@ -3,6 +3,7 @@ Spiking Neural Network (SNN) modules for cognitive modeling.
 """
 
 from hbllm.brain.neuromodulation import NeuromodulationEngine, NeuromodulatorState
+from hbllm.brain.snn import comprehension
 from hbllm.brain.snn.dendrite import DendriticConfig, DendriticNeuron
 from hbllm.brain.snn.lif import LIFConfig, LIFNeuron, SpikeEvent, SpikingAccumulator
 from hbllm.brain.snn.network import LayerProjection, NeuronLayer, ProjectionType, SpikingNetwork
@@ -18,6 +19,7 @@ from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule, SynapticCo
 from hbllm.brain.snn.population import CognitiveStateEncoder, PopulationEncoder
 
 __all__ = [
+    "comprehension",
     # Base neuron interface
     "BaseNeuron",
     "create_neuron_from_dict",

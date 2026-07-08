@@ -193,7 +193,7 @@ class ExpressionStream:
             # Step 2a: SNN gating — the controller's built-in bypass
             # fires automatically after max_wait_steps
             if self.enable_gating:
-                gate = self.controller.gate(goal, prev_fragment_text)
+                self.controller.gate(goal, prev_fragment_text)
 
             # Step 2b: Generate text for this goal
             # If shallow mode is active, use shallow rendering prompts

@@ -501,7 +501,10 @@ class CausalModelBuilder:
         for edge_b in b.edges:
             existing_edge = None
             for edge_a in merged.edges:
-                if edge_a.source_id.lower() == edge_b.source_id.lower() and edge_a.target_id.lower() == edge_b.target_id.lower():
+                if (
+                    edge_a.source_id.lower() == edge_b.source_id.lower()
+                    and edge_a.target_id.lower() == edge_b.target_id.lower()
+                ):
                     existing_edge = edge_a
                     break
 

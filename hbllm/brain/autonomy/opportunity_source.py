@@ -40,10 +40,10 @@ class SilenceSource(OpportunitySource):
         super().__init__("silence_monitor")
         # Default policies: category -> silence threshold in seconds
         self.policies = policies or {
-            "task": 300.0,          # 5 minutes
-            "conversation": 1800.0, # 30 minutes
-            "relationship": 28800.0,# 8 hours
-            "elderly": 900.0,       # 15 minutes
+            "task": 300.0,  # 5 minutes
+            "conversation": 1800.0,  # 30 minutes
+            "relationship": 28800.0,  # 8 hours
+            "elderly": 900.0,  # 15 minutes
         }
 
     def detect(self, presence_state: PresenceState, cognitive_state: Any) -> list[Opportunity]:
@@ -159,3 +159,150 @@ class OpportunityScorer:
             opp.priority = min(1.0, opp.priority + 0.2)
 
         return opp
+
+
+class ReflectionSource(OpportunitySource):
+    """Generates reflection opportunities based on internal state triggers."""
+
+    def __init__(self) -> None:
+        super().__init__("internal_reflection")
+        # List of active triggers that have fired
+        self.active_triggers: list[dict[str, Any]] = []
+
+    def add_trigger(self, trigger_type: str, payload: dict[str, Any] | None = None) -> None:
+        """Register a new trigger event from the system."""
+        self.active_triggers.append(
+            {
+                "type": trigger_type,
+                "payload": payload or {},
+                "timestamp": time.time(),
+            }
+        )
+
+    def detect(self, presence_state: PresenceState, cognitive_state: Any) -> list[Opportunity]:
+        now = time.time()
+        opportunities: list[Opportunity] = []
+
+        # We consume all pending triggers and turn them into Reflection Opportunities
+        # To avoid duplicated reflections, we clear triggers as we process them.
+        triggers_to_process = list(self.active_triggers)
+        self.active_triggers.clear()
+
+        for trigger in triggers_to_process:
+            trigger_type = trigger["type"]
+            payload = trigger["payload"]
+
+            # Map the trigger type to specific objectives, expected values, resource/interruption costs
+            objective = "memory_consolidation"
+            priority = 0.5
+            urgency = 0.3
+            expected_value = 0.5
+            resource_cost = 0.2
+            interruption_cost = 0.1
+            confidence = 0.9
+            requires: list[str] = []
+            blocks: list[str] = []
+            conflicts: list[str] = []
+
+            if trigger_type == "user_idle":
+                level = payload.get("level", "idle")
+                if level == "deep_idle":
+                    objective = "deep_memory_consolidation"
+                    priority = 0.7
+                    urgency = 0.4
+                    expected_value = 0.8
+                    resource_cost = 0.7  # heavy computation allowed when user is deeply idle
+                    interruption_cost = 0.05
+                    blocks = ["conversation"]  # don't start conversations while consolidating
+                else:
+                    objective = "lightweight_reflection"
+                    priority = 0.5
+                    urgency = 0.3
+                    expected_value = 0.5
+                    resource_cost = 0.3
+                    interruption_cost = 0.1
+
+            elif trigger_type == "task_completed":
+                objective = "knowledge_review"
+                priority = 0.6
+                urgency = 0.5
+                expected_value = 0.7
+                resource_cost = 0.4
+                interruption_cost = 0.2
+
+            elif trigger_type == "goal_failed":
+                objective = "error_analysis"
+                priority = 0.8
+                urgency = 0.8
+                expected_value = 0.9
+                resource_cost = 0.5
+                interruption_cost = 0.3
+                confidence = 0.95
+
+            elif trigger_type == "goal_achieved":
+                objective = "strategy_evaluation"
+                priority = 0.6
+                urgency = 0.4
+                expected_value = 0.7
+                resource_cost = 0.3
+                interruption_cost = 0.2
+
+            elif trigger_type == "memory_conflict":
+                objective = "conflict_resolution"
+                priority = 0.75
+                urgency = 0.6
+                expected_value = 0.8
+                resource_cost = 0.4
+                interruption_cost = 0.2
+
+            elif trigger_type == "knowledge_gap":
+                objective = "knowledge_retrieval"
+                priority = 0.55
+                urgency = 0.4
+                expected_value = 0.6
+                resource_cost = 0.3
+                interruption_cost = 0.1
+
+            elif trigger_type == "scheduled":
+                objective = "self_improvement"
+                priority = 0.5
+                urgency = 0.2
+                expected_value = 0.6
+                resource_cost = 0.5
+                interruption_cost = 0.1
+
+            elif trigger_type == "sleep":
+                objective = "sleep_cycle_consolidation"
+                priority = 0.85
+                urgency = 0.9
+                expected_value = 0.95
+                resource_cost = 0.9  # sleep allows full resource dedication
+                interruption_cost = 0.0
+                blocks = ["conversation", "task"]
+
+            opp = Opportunity(
+                id=f"opp_reflection_{trigger_type}_{uuid.uuid4().hex[:8]}",
+                source=self.source_name,
+                category="reflection",
+                priority=priority,
+                urgency=urgency,
+                confidence=confidence,
+                created_at=now,
+                expires_at=now + 1800.0,  # expires in 30 minutes
+                reason=f"Internal reflection triggered by {trigger_type}. Objective: {objective}.",
+                context={
+                    "trigger_type": trigger_type,
+                    "objective": objective,
+                    "trigger_payload": payload,
+                },
+                suggested_actions=["consolidate_memory", "update_knowledge_graph"],
+                expected_value=expected_value,
+                resource_cost=resource_cost,
+                interruption_cost=interruption_cost,
+                requires=requires,
+                blocks=blocks,
+                conflicts=conflicts,
+            )
+            opportunities.append(opp)
+
+        return opportunities
