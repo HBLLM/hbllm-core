@@ -340,6 +340,7 @@ class AttentionManager(Node):
         await self.bus.subscribe("learning.session.complete", self._ingest_session_complete)
         await self.bus.subscribe("curiosity.investigate", self._ingest_curiosity)
         await self.bus.subscribe("attention.next_task", self._handle_next_task)
+        await self.bus.subscribe("brain.proactive.evaluate", self._handle_proactive_opportunity)
         self._polling_task = asyncio.create_task(self._poll_memory_stats())
 
     async def on_stop(self) -> None:
@@ -768,3 +769,21 @@ class AttentionManager(Node):
         if task:
             return message.create_response(task.to_dict())
         return message.create_response({"task": None})
+
+    async def _handle_proactive_opportunity(self, message: Message) -> None:
+        """Allocate focus space and priority budget when a proactive opportunity is evaluated."""
+        try:
+            payload = message.payload
+            domain = payload.get("category", "general")
+            priority = float(payload.get("priority", 0.5))
+
+            # Temporarily allocate focus tokens to the proactive domain
+            alloc = self.allocate_focus(domain, priority)
+            alloc.last_active = time.time()
+            logger.info(
+                "[AttentionManager] Allocated focus for proactive domain '%s' with priority %.2f",
+                domain,
+                priority,
+            )
+        except Exception as e:
+            logger.debug("[AttentionManager] Error handling proactive opportunity: %s", e)
