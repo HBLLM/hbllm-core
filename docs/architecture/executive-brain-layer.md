@@ -245,6 +245,36 @@ Tracks working memory utilization to prevent cognitive overload:
 - **Overload protection** — Automatically transitions to REFLECTING state when load exceeds threshold.
 - **Load shedding** — Deprioritizes non-essential processing during high-load periods.
 
+---
+
+### 13. AutonomyManager & Cognitive Economy (`autonomy/`)
+
+Coordinates passive presence monitoring, registers opportunity sources, manages global resource budgets, and proactively evaluates and routes candidate opportunities.
+
+#### The Proactive Pipeline Flow
+
+```mermaid
+graph TD
+    UserActivity["⚡ User / AI / Sensor Activity"] --> PM["👤 PresenceMonitor"]
+    PM --> PS["💾 PresenceState"]
+    PS -->|"telemetry state"| Srcs["🔍 Opportunity Sources<br/>Silence, Battery, Reflection"]
+    Srcs -->|"candidate opportunities"| Scorer["⚖️ OpportunityScorer"]
+    Scorer -->|"context-adjusted priority"| Market["🛒 OpportunityMarket"]
+    Market -->|"budget validation & ranking"| Coord["⏱️ ProactiveCoordinator"]
+    Coord -->|"cooldown & daily caps"| Bus["⚡ Message Bus<br/>brain.proactive.evaluate"]
+```
+
+#### Key Architecture Components
+
+- **PresenceMonitor / PresenceState**: Passively tracks user input, AI output, and sensor activity timestamps to compute and decay environmental and user engagement levels over time.
+- **OpportunitySource**: Pluggable interface for scanning system/user state. Implemented sources include:
+    - `SilenceSource`: Fires when the user has been silent past predefined thresholds (e.g., task, conversation, elderly check-ins).
+    - `BatterySource`: Fires if the host device has low battery under pressure of upcoming calendar meetings.
+    - `ReflectionSource`: Consumes internal system event triggers (e.g., goal failed, memory conflict, knowledge gap, task completed) to produce internal consolidation and cleanup suggestions.
+- **OpportunityScorer**: Dynamically adjusts opportunity priority scores contextually based on the user's current cognitive state (dampening conversational items if user stress is high, or boosting wellness tasks if fatigue is high).
+- **OpportunityMarket & CognitiveBudget**: Resolves dependencies, categories, blocks, and allocates cognitive resources (available CPU, GPU time, and interruption capacity). It ensures that multiple conflicting or budget-exceeding opportunities do not run concurrently.
+- **ProactiveCoordinator**: Evaluates candidates, logs their execution history, and enforces global cooldowns (e.g., minimum gap between proactive triggers) and daily execution limits to avoid user fatigue/interruption.
+
 ## Test Coverage
 
 | Module                     | Tests | Status |
@@ -258,7 +288,8 @@ Tracks working memory utilization to prevent cognitive overload:
 | ReflexLibrary              | 12    | ✅     |
 | RestraintEngine            | 8     | ✅     |
 | AutonomyComponents         | 10    | ✅     |
-| **Total**                  | **108**| ✅    |
+| CognitiveEconomy / Autonomy| 10    | ✅     |
+| **Total**                  | **118**| ✅    |
 
 ## Cross-References
 
