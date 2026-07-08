@@ -65,6 +65,7 @@ class WorkspaceNode(Node, IWorkspace):
         logger.info("Starting Global WorkspaceNode")
         await self.bus.subscribe("workspace.update", self.handle_update)
         await self.bus.subscribe("workspace.thought", self.handle_thought)
+        await self.bus.subscribe("brain.proactive.evaluate", self.handle_proactive_evaluate)
         # Start periodic sweeper to clean orphaned blackboards
         self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
 
@@ -210,6 +211,34 @@ class WorkspaceNode(Node, IWorkspace):
         self._spawn_watcher(correlation_id)
 
         return None
+
+    async def handle_proactive_evaluate(self, message: Message) -> None:
+        """
+        Triggered when AutonomyManager routes a proactive opportunity event.
+        Converts the opportunity into a task payload and updates the blackboard.
+        """
+        payload = message.payload
+        correlation_id = message.correlation_id or f"proactive_{message.id}"
+
+        query_payload = {
+            "text": f"System Log: Proactive Opportunity detected from source '{payload.get('source')}'. Reason: '{payload.get('reason')}'. Suggested Actions: {payload.get('suggested_actions')}.",
+            "intent": "speak",
+            "event_type": "proactive_evaluation",
+            "opportunity_id": payload.get("opportunity_id"),
+            "context": payload.get("context", {}),
+            "suggested_actions": payload.get("suggested_actions", []),
+            "is_fast_path": False,
+        }
+
+        msg = Message(
+            type=MessageType.TASK,
+            payload=query_payload,
+            source_node=message.source_node_id,
+            target_node=self.node_id,
+            tenant_id=message.tenant_id or "default",
+            correlation_id=correlation_id,
+        )
+        await self.handle_update(msg)
 
     async def handle_thought(self, message: Message) -> Message | None:
         """

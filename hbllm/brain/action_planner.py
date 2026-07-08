@@ -74,6 +74,9 @@ class ActionPlanner:
             )
 
         # ── intent-based dispatch ──────────────────────────────────────────
+        if original_query.get("event_type") == "proactive_evaluation":
+            return self._plan_proactive_evaluation(content, original_query)
+
         if intent == "speak" or original_query.get("force_audio", False):
             return self._plan_audio(content, original_query)
 
@@ -276,3 +279,14 @@ class ActionPlanner:
             except Exception as e:
                 logger.debug("[ActionPlanner] Fallback handler not available: %s", e)
         return None
+
+    def _plan_proactive_evaluation(self, content: str, original_query: dict[str, Any]) -> ActionPlan:
+        return ActionPlan(
+            action_type=ActionType.PROACTIVE_EVALUATION,
+            content=content,
+            metadata={
+                "opportunity_id": original_query.get("opportunity_id"),
+                "context": original_query.get("context", {}),
+                "suggested_actions": original_query.get("suggested_actions", []),
+            },
+        )

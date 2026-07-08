@@ -25,6 +25,7 @@ class ActionType(Enum):
     MCP_TOOL = "mcp_tool"
     CLARIFY = "clarify"  # confidence too low — ask the user to clarify
     SHELL_EXECUTION = "shell_execution"
+    PROACTIVE_EVALUATION = "proactive_evaluation"
 
 
 class RiskLevel(Enum):
@@ -40,6 +41,7 @@ _ACTION_RISK: dict[ActionType, RiskLevel] = {
     ActionType.TEXT_RESPONSE: RiskLevel.LOW,
     ActionType.AUDIO_OUTPUT: RiskLevel.LOW,
     ActionType.CLARIFY: RiskLevel.LOW,
+    ActionType.PROACTIVE_EVALUATION: RiskLevel.LOW,
     ActionType.WEB_SEARCH: RiskLevel.MEDIUM,
     ActionType.API_CALL: RiskLevel.MEDIUM,
     ActionType.CODE_EXECUTION: RiskLevel.HIGH,
