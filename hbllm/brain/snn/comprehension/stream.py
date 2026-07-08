@@ -105,10 +105,11 @@ class ComprehensionStream:
             An UnderstandingState with concepts, domain activations,
             memories, and salience map.
         """
-        # Reset state for new query
+        # Reset all per-query state (including prev_concept_words to
+        # prevent inter-novelty leakage from previous queries)
         self._word_buffer = []
         self._concepts = []
-        # Keep prev_concept_words across calls for inter-concept novelty
+        self._prev_concept_words = None
 
         # Tokenize at word level
         words = input_text.split()

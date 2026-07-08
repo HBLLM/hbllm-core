@@ -190,15 +190,10 @@ class ExpressionStream:
                     len(goals),
                 )
                 break
-            # Step 2a: SNN gating
+            # Step 2a: SNN gating — the controller's built-in bypass
+            # fires automatically after max_wait_steps
             if self.enable_gating:
                 gate = self.controller.gate(goal, prev_fragment_text)
-                if not gate.fire:
-                    # Feed additional signals until it fires or bypasses
-                    for _ in range(self.controller._max_wait_steps):
-                        gate = self.controller.gate(goal, prev_fragment_text)
-                        if gate.fire:
-                            break
 
             # Step 2b: Generate text for this goal
             # If shallow mode is active, use shallow rendering prompts

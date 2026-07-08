@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -229,10 +230,10 @@ class CausalReasoner:
         all_paths: list[list[CausalLink]] = []
 
         # BFS queue: (current_node_id, current_path, visited_set)
-        queue: list[tuple[str, list[CausalLink], set[str]]] = [(start_id, [], {start_id})]
+        queue: deque[tuple[str, list[CausalLink], set[str]]] = deque([(start_id, [], {start_id})])
 
         while queue:
-            current_id, current_path, visited = queue.pop(0)
+            current_id, current_path, visited = queue.popleft()
 
             if len(current_path) >= max_depth:
                 continue

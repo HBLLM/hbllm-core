@@ -59,11 +59,11 @@ class CausalLink:
 class CausalGraph:
     """SQLite-backed storage for causal inferences."""
 
-    def __init__(self, data_dir: str | Path) -> None:
+    def __init__(self, data_dir: str | Path, hallucination_threshold: float = 0.5) -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "causal_graph.db"
-        self.hallucination_threshold = 0.5  # Ignore links weaker than this
+        self.hallucination_threshold = hallucination_threshold  # Ignore links weaker than this
         self._init_db()
 
     def _init_db(self) -> None:
@@ -146,19 +146,48 @@ class CausalGraph:
 
     def _insert(self, link: CausalLink) -> None:
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """INSERT INTO causal_links
-                   (link_id, source_id, target_id, probability, created_at, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    link.link_id,
-                    link.source_id,
-                    link.target_id,
-                    link.probability,
-                    link.created_at,
-                    json.dumps(link.metadata),
-                ),
-            )
+            conn.row_factory = sqlite3.Row
+            existing = conn.execute(
+                "SELECT * FROM causal_links WHERE source_id = ? AND target_id = ?",
+                (link.source_id, link.target_id),
+            ).fetchone()
+
+            if existing:
+                try:
+                    existing_meta = json.loads(existing["metadata"] or "{}")
+                except Exception:
+                    existing_meta = {}
+                merged_meta = {**existing_meta, **link.metadata}
+                avg_prob = (existing["probability"] + link.probability) / 2.0
+
+                conn.execute(
+                    """UPDATE causal_links
+                       SET probability = ?, created_at = ?, metadata = ?
+                       WHERE link_id = ?""",
+                    (
+                        avg_prob,
+                        link.created_at,
+                        json.dumps(merged_meta),
+                        existing["link_id"],
+                    ),
+                )
+                link.link_id = existing["link_id"]
+                link.probability = avg_prob
+                link.metadata = merged_meta
+            else:
+                conn.execute(
+                    """INSERT INTO causal_links
+                       (link_id, source_id, target_id, probability, created_at, metadata)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        link.link_id,
+                        link.source_id,
+                        link.target_id,
+                        link.probability,
+                        link.created_at,
+                        json.dumps(link.metadata),
+                    ),
+                )
 
     def get_causes(self, target_id: str) -> list[CausalLink]:
         """Find what caused a specific event/task."""

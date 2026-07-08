@@ -28,6 +28,7 @@ Cost model:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -195,7 +196,6 @@ class AssociationLayer:
             return []
 
         associations: list[ConceptAssociation] = []
-        import time
 
         t = time.time()
 
