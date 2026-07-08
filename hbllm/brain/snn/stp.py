@@ -54,9 +54,12 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STPConfig — configuration for short-term plasticity
@@ -159,15 +162,17 @@ class SynapticActivity:
         cfg = self.config
         dt = max(0.0, timestamp - self.last_spike_time) if self.last_spike_time > 0 else 0.0
 
-        if spiked and dt > 0:
+        if spiked:
             # Recovery between spikes (before processing this spike)
-            if cfg.mode in ("depression", "combined"):
-                # Resources recover: x → 1.0
-                self.x = 1.0 - (1.0 - self.x) * math.exp(-dt / cfg.tau_d)
+            # Skip recovery math when dt == 0 (simultaneous spikes)
+            if dt > 0:
+                if cfg.mode in ("depression", "combined"):
+                    # Resources recover: x → 1.0
+                    self.x = 1.0 - (1.0 - self.x) * math.exp(-dt / cfg.tau_d)
 
-            if cfg.mode in ("facilitation", "combined"):
-                # Release probability decays: u → U
-                self.u = cfg.U + (self.u - cfg.U) * math.exp(-dt / cfg.tau_f)
+                if cfg.mode in ("facilitation", "combined"):
+                    # Release probability decays: u → U
+                    self.u = cfg.U + (self.u - cfg.U) * math.exp(-dt / cfg.tau_f)
 
             # Spike event: update state
             # Facilitation: u increases
@@ -327,7 +332,7 @@ class STPManager:
                 "tau_f": self.config.tau_f,
                 "mode": self.config.mode,
             },
-            "activities": {f"{k[0]}_{k[1]}": v.to_dict() for k, v in self._activities.items()},
+            "activities": {f"{k[0]},{k[1]}": v.to_dict() for k, v in self._activities.items()},
         }
 
     @classmethod
@@ -348,9 +353,16 @@ class STPManager:
         manager = cls(config, source_size, target_size)
 
         for key_str, act_data in data.get("activities", {}).items():
-            parts = key_str.split("_")
+            # Support both new "," separator and legacy "_" separator
+            sep = "," if "," in key_str else "_"
+            parts = key_str.split(sep)
             if len(parts) == 2:
-                synapse_id = (int(parts[0]), int(parts[1]))
-                manager._activities[synapse_id] = SynapticActivity.from_dict(act_data, config)
+                try:
+                    synapse_id = (int(parts[0]), int(parts[1]))
+                    manager._activities[synapse_id] = SynapticActivity.from_dict(act_data, config)
+                except ValueError:
+                    logger.warning("Skipping unparseable STP synapse key: '%s'", key_str)
+            else:
+                logger.warning("Skipping unparseable STP synapse key: '%s'", key_str)
 
         return manager

@@ -134,6 +134,9 @@ class WinnerTakeAll:
         loser_indices = set(active_indices[cfg.k_winners :])
 
         # Build result
+        # Pre-compute the max winner strength (invariant across iterations)
+        winner_max = spike_events[active_indices[0]].strength if cfg.soft_wta else 0.0
+
         result: list[SpikeEvent] = []
         for i, spike in enumerate(spike_events):
             if i in winner_indices:
@@ -153,7 +156,6 @@ class WinnerTakeAll:
             elif i in loser_indices:
                 if cfg.soft_wta:
                     # Attenuate loser proportionally
-                    winner_max = spike_events[active_indices[0]].strength
                     ratio = spike.strength / max(winner_max, 1e-10)
                     attenuated = spike.strength * (ratio / cfg.inhibition_strength)
                     result.append(

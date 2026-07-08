@@ -51,10 +51,4 @@ __all__ = [
     # Neural oscillations (M5)
     "OscillationManager",
     "OscillationBand",
-    # Comprehension subpackage
-    "comprehension",
-    # Expression subpackage
-    "expression",
-    # Reasoning subpackage
-    "reasoning",
 ]

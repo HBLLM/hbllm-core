@@ -435,17 +435,35 @@ class CausalModelBuilder:
                 if label and not any(n.label == label for n in model.nodes):
                     model.nodes.append(CausalNode.from_dict(node_data))
 
-            # Add new edges
+            # Add or update edges
             for edge_data in parsed.get("edges", []):
                 mech = self._create_mechanism(edge_data.get("mechanism", {}), model.domain)
-                edge = CausalEdge(
-                    source_id=edge_data.get("source_label", ""),
-                    target_id=edge_data.get("target_label", ""),
-                    mechanism=mech,
-                    probability=edge_data.get("probability", 0.5),
-                    evidence=[new_evidence[:200]],
-                )
-                model.edges.append(edge)
+                src = edge_data.get("source_label", "")
+                tgt = edge_data.get("target_label", "")
+                prob = edge_data.get("probability", 0.5)
+
+                existing_edge = None
+                for e in model.edges:
+                    if e.source_id.lower() == src.lower() and e.target_id.lower() == tgt.lower():
+                        existing_edge = e
+                        break
+
+                if existing_edge:
+                    existing_edge.probability = (existing_edge.probability + prob) / 2.0
+                    evidence_str = new_evidence[:200]
+                    if evidence_str not in existing_edge.evidence:
+                        existing_edge.evidence.append(evidence_str)
+                    if mech.confidence > existing_edge.mechanism.confidence:
+                        existing_edge.mechanism = mech
+                else:
+                    edge = CausalEdge(
+                        source_id=src,
+                        target_id=tgt,
+                        mechanism=mech,
+                        probability=prob,
+                        evidence=[new_evidence[:200]],
+                    )
+                    model.edges.append(edge)
 
             model.evidence_count += 1
             # Confidence increases with more evidence (diminishing returns)
@@ -479,8 +497,22 @@ class CausalModelBuilder:
                 merged.nodes.append(node)
                 existing_labels.add(node.label)
 
-        # Add all edges from b
-        merged.edges.extend(b.edges)
+        # Add edges from b, merging duplicates
+        for edge_b in b.edges:
+            existing_edge = None
+            for edge_a in merged.edges:
+                if edge_a.source_id.lower() == edge_b.source_id.lower() and edge_a.target_id.lower() == edge_b.target_id.lower():
+                    existing_edge = edge_a
+                    break
+
+            if existing_edge:
+                existing_edge.probability = (existing_edge.probability + edge_b.probability) / 2.0
+                combined_evidence = set(existing_edge.evidence + edge_b.evidence)
+                existing_edge.evidence = list(combined_evidence)
+                if edge_b.mechanism.confidence > existing_edge.mechanism.confidence:
+                    existing_edge.mechanism = edge_b.mechanism
+            else:
+                merged.edges.append(edge_b)
 
         self._models[merged.concept.lower()] = merged
         self._persist_model(merged)
@@ -654,7 +686,6 @@ class CausalModelBuilder:
         model_domain = domain or parsed.get("domain", "")
 
         nodes: list[CausalNode] = []
-        label_to_id: dict[str, str] = {}
 
         for node_data in parsed.get("nodes", []):
             node = CausalNode(
@@ -663,7 +694,6 @@ class CausalModelBuilder:
                 confidence=node_data.get("confidence", 0.5),
             )
             nodes.append(node)
-            label_to_id[node.label.lower()] = node.node_id
 
         edges: list[CausalEdge] = []
         for edge_data in parsed.get("edges", []):
@@ -707,6 +737,14 @@ class CausalModelBuilder:
         """
         if isinstance(mech_data, str):
             mech_data = {"description": mech_data}
+
+        desc = mech_data.get("description", "").lower().strip()
+        # Reuse existing mechanism if descriptions match
+        for existing in self._mechanisms.values():
+            if existing.description.lower().strip() == desc:
+                existing.reuse_count += 1
+                self._persist_mechanism(existing)
+                return existing
 
         mech = Mechanism(
             description=mech_data.get("description", ""),

@@ -248,11 +248,7 @@ class ThoughtController:
 
     def reset(self) -> None:
         """Reset controller state for a new expression session."""
-        self._readiness.v = 0.0
-        self._readiness.last_update_time = None
-        self._readiness.refractory_time_remaining = 0.0
-        self._coherence.v = 0.0
-        self._coherence.last_update_time = None
-        self._coherence.refractory_time_remaining = 0.0
+        self._readiness.reset_state()
+        self._coherence.reset_state()
         self._prev_fragment_text = None
         self._step_count = 0
