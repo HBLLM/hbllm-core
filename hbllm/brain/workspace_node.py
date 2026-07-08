@@ -22,6 +22,42 @@ from hbllm.network.node import Node, NodeType
 logger = logging.getLogger(__name__)
 
 
+class WorkspaceEpisode(dict):
+    """Wrapper around a blackboard session with formal lifecycle state tracking."""
+
+    def __init__(
+        self, corr_id: str, tenant_id: str, session_id: str, original_query: dict[str, Any]
+    ) -> None:
+        super().__init__(
+            {
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "original_query": original_query,
+                "thoughts": [],
+                "start_time": time.monotonic(),
+                "status": "Created",
+                "resolved": False,
+            }
+        )
+        self.corr_id = corr_id
+
+    @property
+    def status(self) -> str:
+        return self["status"]
+
+    @status.setter
+    def status(self, val: str) -> None:
+        self["status"] = val
+
+    @property
+    def resolved(self) -> bool:
+        return self["resolved"]
+
+    @resolved.setter
+    def resolved(self, val: bool) -> None:
+        self["resolved"] = val
+
+
 class WorkspaceNode(Node, IWorkspace):
     """
     The central intelligence blackboard. Maintains state of current reasoning
@@ -126,9 +162,10 @@ class WorkspaceNode(Node, IWorkspace):
 
         message = Message(
             type=MessageType.TASK,
+            topic="workspace.update",
             payload=payload,
-            source_node=event.source_node,
-            target_node=self.node_id,
+            source_node_id=event.source_node,
+            target_node_id=self.node_id,
             tenant_id=event.tenant_id,
             correlation_id=event.correlation_id or None,
         )
@@ -172,19 +209,19 @@ class WorkspaceNode(Node, IWorkspace):
         # Scale absolute deadline: 60s for CPU fast-path, 300s for CPU complex path
         abs_deadline = (60.0 if is_slow else 5.0) if is_fast_path else (300.0 if is_slow else 120.0)
 
-        self.blackboards[correlation_id] = {
-            "tenant_id": message.tenant_id,
-            "session_id": message.session_id,
-            "original_query": payload,
-            "thoughts": [],
-            "start_time": time.monotonic(),
-            "last_update": time.monotonic(),
-            "deadline": time.monotonic() + thinking_time,
-            "resolved": False,
-            "turn_count": 0,  # Track internal monologue turns
-            "absolute_deadline": time.monotonic() + abs_deadline,
-            "is_fast_path": is_fast_path,
-        }
+        episode = WorkspaceEpisode(
+            corr_id=correlation_id,
+            tenant_id=message.tenant_id,
+            session_id=message.session_id,
+            original_query=payload,
+        )
+        episode["deadline"] = time.monotonic() + thinking_time
+        episode["absolute_deadline"] = time.monotonic() + abs_deadline
+        episode["turn_count"] = 0
+        episode["simulating_thought"] = None
+        episode.status = "Activated"
+
+        self.blackboards[correlation_id] = episode
 
         if is_fast_path:
             logger.info(
@@ -232,9 +269,10 @@ class WorkspaceNode(Node, IWorkspace):
 
         msg = Message(
             type=MessageType.TASK,
+            topic="workspace.update",
             payload=query_payload,
-            source_node=message.source_node_id,
-            target_node=self.node_id,
+            source_node_id=message.source_node_id,
+            target_node_id=self.node_id,
             tenant_id=message.tenant_id or "default",
             correlation_id=correlation_id,
         )
@@ -252,6 +290,9 @@ class WorkspaceNode(Node, IWorkspace):
         board = self.blackboards[corr_id]
         if board["resolved"]:
             return None  # Too late
+
+        if hasattr(board, "status") and board.status == "Activated":
+            board.status = "Reasoning"
 
         proposal = message.payload
         thought_type = proposal.get("type", "intuition")
@@ -536,6 +577,8 @@ class WorkspaceNode(Node, IWorkspace):
             return
 
         board["resolved"] = True
+        if hasattr(board, "status"):
+            board.status = "Decision"
 
         if not board["thoughts"]:
             logger.warning("Workspace deadline expired with ZERO thoughts generated.")
@@ -593,7 +636,7 @@ class WorkspaceNode(Node, IWorkspace):
             )
             await self.bus.publish("system.swarm.transfer", transfer_msg)
             # Cleanup the local blackboard as it's no longer our responsibility
-            self.blackboards.pop(corr_id, None)
+            await self._destroy_episode(corr_id)
             return
 
         import re
@@ -826,7 +869,7 @@ class WorkspaceNode(Node, IWorkspace):
             )
         finally:
             # Cleanup memory regardless of success/failure
-            self.blackboards.pop(corr_id, None)
+            await self._destroy_episode(corr_id)
 
     async def _send_error_fallback(self, corr_id: str, error_text: str) -> None:
         """
@@ -848,7 +891,35 @@ class WorkspaceNode(Node, IWorkspace):
         except Exception:
             logger.exception("Failed to send error fallback for %s", corr_id)
         finally:
-            self.blackboards.pop(corr_id, None)
+            await self._destroy_episode(corr_id)
+
+    async def _destroy_episode(self, corr_id: str) -> None:
+        """Transition WorkspaceEpisode to Archived/Destroyed and emit completion event."""
+        board = self.blackboards.get(corr_id)
+        if board and hasattr(board, "status"):
+            board.status = "Archived"
+            try:
+                completed_msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id=self.node_id,
+                    tenant_id=board.get("tenant_id", "unknown"),
+                    session_id=board.get("session_id", "unknown"),
+                    topic="workspace.episode.completed",
+                    payload={
+                        "episode_id": corr_id,
+                        "status": "Archived",
+                        "original_query": board.get("original_query"),
+                        "thoughts_count": len(board.get("thoughts", [])),
+                    },
+                    correlation_id=corr_id,
+                )
+                await self.bus.publish("workspace.episode.completed", completed_msg)
+            except Exception:
+                logger.exception(
+                    "Failed to publish workspace.episode.completed event for %s", corr_id
+                )
+            board.status = "Destroyed"
+        self.blackboards.pop(corr_id, None)
 
     def _compress_text(self, text: str, max_chars: int = 4000) -> str:
         """Middle-out truncation for excessively long strings to protect Learner context."""

@@ -12,7 +12,12 @@ import time
 from typing import Any
 
 from hbllm.brain.autonomy.opportunity import Opportunity, OpportunityHistory
-from hbllm.brain.autonomy.opportunity_source import OpportunityScorer, OpportunitySource
+from hbllm.brain.autonomy.opportunity_market import OpportunityMarket
+from hbllm.brain.autonomy.opportunity_source import (
+    OpportunityScorer,
+    OpportunitySource,
+    ReflectionSource,
+)
 from hbllm.brain.autonomy.presence_state import PresenceState
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -51,10 +56,12 @@ class ProactiveCoordinator:
         history: OpportunityHistory,
         min_gap_seconds: float = 600.0,
         daily_budget: int = 10,
+        market: OpportunityMarket | None = None,
     ) -> None:
         self.history = history
         self.min_gap_seconds = min_gap_seconds
         self.daily_budget = daily_budget
+        self.market = market or OpportunityMarket()
 
         self._last_trigger_time = 0.0
         self._triggers_today = 0
@@ -91,11 +98,13 @@ class ProactiveCoordinator:
         if not active_opps:
             return None
 
-        # Update priorities with aging and sort (highest priority first)
-        for o in active_opps:
-            o.update_priority(now)
-        active_opps.sort(key=lambda o: o.priority, reverse=True)
-        winner = active_opps[0]
+        # Select using OpportunityMarket
+        valid_opps = self.market.select_opportunities(active_opps)
+        if not valid_opps:
+            return None
+
+        # The market ranks them by utility, so valid_opps[0] is the winner!
+        winner = valid_opps[0]
 
         # Log created status for auditing
         for o in active_opps:
@@ -147,10 +156,13 @@ class AutonomyManager(Node):
         self.tick_interval = tick_interval
         self.monitor = PresenceMonitor()
         self.history = OpportunityHistory(db_path)
-        self.coordinator = ProactiveCoordinator(self.history)
+        self.market = OpportunityMarket()
+        self.coordinator = ProactiveCoordinator(self.history, market=self.market)
         self.scorer = OpportunityScorer()
 
+        self.reflection_source = ReflectionSource()
         self._sources: list[OpportunitySource] = []
+        self.register_source(self.reflection_source)
         self._running = False
         self._loop_task: asyncio.Task[None] | None = None
 
@@ -163,6 +175,15 @@ class AutonomyManager(Node):
         await self.bus.subscribe("user.message", self._handle_user_message)
         await self.bus.subscribe("system.experience", self._handle_ai_message)
         await self.bus.subscribe("sensor.activity", self._handle_sensor_message)
+
+        # Internal state reflection triggers
+        await self.bus.subscribe("system.user_idle", self._handle_user_idle)
+        await self.bus.subscribe("system.task_completed", self._handle_task_completed)
+        await self.bus.subscribe("system.goal_failed", self._handle_goal_failed)
+        await self.bus.subscribe("system.goal_completed", self._handle_goal_completed)
+        await self.bus.subscribe("system.memory_conflict", self._handle_memory_conflict)
+        await self.bus.subscribe("system.knowledge_gap", self._handle_knowledge_gap)
+        await self.bus.subscribe("system.sleep.dpo_trigger", self._handle_sleep_trigger)
 
         self._running = True
         self._loop_task = asyncio.create_task(self._tick_loop())
@@ -195,6 +216,27 @@ class AutonomyManager(Node):
         for k, v in msg.payload.items():
             if k != "source" and isinstance(v, (int, float)):
                 self.monitor.state.update_sensor_activity(k, float(v))
+
+    async def _handle_user_idle(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("user_idle", msg.payload)
+
+    async def _handle_task_completed(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("task_completed", msg.payload)
+
+    async def _handle_goal_failed(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("goal_failed", msg.payload)
+
+    async def _handle_goal_completed(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("goal_achieved", msg.payload)
+
+    async def _handle_memory_conflict(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("memory_conflict", msg.payload)
+
+    async def _handle_knowledge_gap(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("knowledge_gap", msg.payload)
+
+    async def _handle_sleep_trigger(self, msg: Message) -> None:
+        self.reflection_source.add_trigger("sleep", msg.payload)
 
     async def _tick_loop(self) -> None:
         while self._running:

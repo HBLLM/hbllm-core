@@ -37,6 +37,14 @@ class Opportunity:
     context: dict[str, Any] = field(default_factory=dict)
     suggested_actions: list[str] = field(default_factory=list)
 
+    # Opportunity Market & Cognitive Budget fields
+    expected_value: float = 0.5
+    resource_cost: float = 0.1
+    interruption_cost: float = 0.1
+    requires: list[str] = field(default_factory=list)
+    blocks: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
     # Aging policies
     aging_strategy: str = "none"  # "escalate", "decay", "none"
     aging_rate: float = 0.0  # priority shift rate per second
@@ -95,6 +103,21 @@ class OpportunityHistory:
                 )
                 """
             )
+            # Check and add new columns if they don't exist
+            new_columns = {
+                "expected_value": "REAL DEFAULT 0.5",
+                "resource_cost": "REAL DEFAULT 0.1",
+                "interruption_cost": "REAL DEFAULT 0.1",
+                "requires": "TEXT DEFAULT '[]'",
+                "blocks": "TEXT DEFAULT '[]'",
+                "conflicts": "TEXT DEFAULT '[]'",
+            }
+            for col, col_type in new_columns.items():
+                try:
+                    conn.execute(f"ALTER TABLE opportunity_history ADD COLUMN {col} {col_type}")
+                except sqlite3.OperationalError:
+                    # Column already exists
+                    pass
 
     def log_opportunity(self, opp: Opportunity, status: str) -> None:
         """Log or update an opportunity's state in history.
@@ -107,8 +130,9 @@ class OpportunityHistory:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO opportunity_history
-                (id, source, category, priority, urgency, confidence, created_at, expires_at, reason, context, suggested_actions, status, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, source, category, priority, urgency, confidence, created_at, expires_at, reason, context, suggested_actions, status, updated_at,
+                 expected_value, resource_cost, interruption_cost, requires, blocks, conflicts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     opp.id,
@@ -124,6 +148,12 @@ class OpportunityHistory:
                     json.dumps(opp.suggested_actions),
                     status,
                     time.time(),
+                    opp.expected_value,
+                    opp.resource_cost,
+                    opp.interruption_cost,
+                    json.dumps(opp.requires),
+                    json.dumps(opp.blocks),
+                    json.dumps(opp.conflicts),
                 ),
             )
 

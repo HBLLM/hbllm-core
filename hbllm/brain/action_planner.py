@@ -280,7 +280,9 @@ class ActionPlanner:
                 logger.debug("[ActionPlanner] Fallback handler not available: %s", e)
         return None
 
-    def _plan_proactive_evaluation(self, content: str, original_query: dict[str, Any]) -> ActionPlan:
+    def _plan_proactive_evaluation(
+        self, content: str, original_query: dict[str, Any]
+    ) -> ActionPlan:
         return ActionPlan(
             action_type=ActionType.PROACTIVE_EVALUATION,
             content=content,

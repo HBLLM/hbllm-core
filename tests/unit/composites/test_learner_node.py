@@ -26,25 +26,25 @@ def _make_feedback(rating=1, prompt="What is AI?", response="AI is..."):
 
 
 @pytest.fixture
-def clean_queue():
-    path = "workspace/reflection/dpo_queue.json"
-    if os.path.exists(path):
-        os.remove(path)
-    yield
-    if os.path.exists(path):
-        os.remove(path)
+def temp_queue_path(tmp_path):
+    path = tmp_path / "dpo_queue.json"
+    if path.exists():
+        path.unlink()
+    yield str(path)
+    if path.exists():
+        path.unlink()
 
 
 # ── Feedback Collection Tests ────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_accepts_valid_feedback_and_queues(clean_queue):
+async def test_accepts_valid_feedback_and_queues(temp_queue_path):
     """Valid feedback should be stitched and written to persistent JSON queue."""
     bus = InProcessBus()
     await bus.start()
 
-    node = LearnerNode(node_id="learner_accept")
+    node = LearnerNode(node_id="learner_accept", queue_path=temp_queue_path)
     await node.start(bus)
 
     msg_pos = _make_feedback(rating=1)
@@ -71,12 +71,14 @@ async def test_accepts_valid_feedback_and_queues(clean_queue):
 
 
 @pytest.mark.asyncio
-async def test_training_triggers_ONLY_on_sleep(clean_queue):
+async def test_training_triggers_ONLY_on_sleep(temp_queue_path):
     """Training should not trigger until system.sleep.dpo_trigger is sent."""
     bus = InProcessBus()
     await bus.start()
 
-    node = LearnerNode(node_id="learner_batch", model=None, tokenizer=None)
+    node = LearnerNode(
+        node_id="learner_batch", model=None, tokenizer=None, queue_path=temp_queue_path
+    )
     node.batch_size = 3
     await node.start(bus)
 
@@ -105,12 +107,14 @@ async def test_training_triggers_ONLY_on_sleep(clean_queue):
 
 
 @pytest.mark.asyncio
-async def test_training_completes_and_broadcasts(clean_queue):
+async def test_training_completes_and_broadcasts(temp_queue_path):
     """After SleepNode triggers training, a LEARNING_UPDATE event should be published."""
     bus = InProcessBus()
     await bus.start()
 
-    node = LearnerNode(node_id="learner_broadcast", model=None, tokenizer=None)
+    node = LearnerNode(
+        node_id="learner_broadcast", model=None, tokenizer=None, queue_path=temp_queue_path
+    )
     node.batch_size = 2
     await node.start(bus)
 
