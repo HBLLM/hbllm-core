@@ -40,6 +40,7 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | **`ExecutiveCortex`** | `executive_cortex.py` | `inject_executive_cortex` | Unified cognitive control and budget allocation |
 | **`RelationshipMemory`** | `relationship_memory.py` | `inject_relationship_memory` | Social graph and interaction history |
 | **`RealityGraph`** | `reality_graph.py` | `inject_reality_graph` | Unified read-only world state facade |
+| **`AutonomyManager`** | `autonomy/autonomy_manager.py` | Always on | Passive presence monitoring & proactive opportunity routing |
 
 ### v3: Integration Layer
 
@@ -1012,5 +1013,81 @@ context = brain.reality_graph.get_context("What's the temperature?", "user1", bu
 stats = brain.reality_graph.stats()
 # {"backends": {"knowledge_graph": True, "brain_world_state": True, ...}, ...}
 ```
+
+### AutonomyManager
+
+**Module:** `hbllm.brain.autonomy.autonomy_manager.AutonomyManager`
+**Config:** Always on (as a Core Node)
+
+Coordinates passive presence tracking, evaluates candidate opportunities from registered sources, and publishes winning opportunities to the message bus.
+
+```python
+from hbllm.brain.autonomy.autonomy_manager import AutonomyManager
+from hbllm.brain.autonomy.opportunity_source import SilenceSource
+
+# Initialize AutonomyManager (normally wired via BrainContainer)
+autonomy = AutonomyManager(node_id="autonomy-manager")
+
+# Register an opportunity source
+silence_src = SilenceSource(policies={"task": 300.0, "conversation": 1800.0})
+autonomy.register_source(silence_src)
+
+# Passive activity monitoring
+autonomy.monitor.report_activity(source="user", category="user_input", timestamp=time.time())
+print(autonomy.monitor.state.engagement_level)  # Boosted engagement
+```
+
+### OpportunityMarket
+
+**Module:** `hbllm.brain.autonomy.opportunity_market.OpportunityMarket`
+**Config:** Always on
+
+Grades, resolves constraints, and ranks active opportunities based on their utility, dependencies, and conflicts.
+
+```python
+from hbllm.brain.autonomy.opportunity import Opportunity
+from hbllm.brain.autonomy.opportunity_market import OpportunityMarket
+
+market = OpportunityMarket()
+
+# Create candidate opportunities
+opp1 = Opportunity(
+    id="opp_cleanup",
+    source="internal_reflection",
+    category="reflection",
+    priority=0.8,
+    urgency=0.5,
+    confidence=0.9,
+    created_at=time.time(),
+    resource_cost=0.3,
+    interruption_cost=0.1
+)
+
+# Ranks and filters candidates based on budget, requires, blocks, and conflicts
+valid_opportunities = market.select_opportunities([opp1])
+```
+
+### CognitiveBudget
+
+**Module:** `hbllm.brain.autonomy.cognitive_budget.CognitiveBudget`
+**Config:** Always on
+
+Enforces resource allocation limits for proactive execution tasks, preventing overloading of the system or human user.
+
+```python
+from hbllm.brain.autonomy.cognitive_budget import CognitiveBudget
+
+# Standard budget allocation
+budget = CognitiveBudget(
+    available_cpu=0.6,
+    available_gpu_time=0.5,
+    interruption_capacity=0.3
+)
+
+# Check if an opportunity can be afforded
+if budget.can_afford(opp):
+    print("Affordable!")
+```
+
 
 

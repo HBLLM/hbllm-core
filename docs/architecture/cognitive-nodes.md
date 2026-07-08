@@ -108,6 +108,12 @@ The `NodeType` enum defines the categories of nodes:
 - **File:** `hbllm/brain/process_reward_node.py`
 - **Purpose:** Provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.
 
+### AutonomyManager
+
+- **Type:** `NodeType.CORE`
+- **File:** `hbllm/brain/autonomy/autonomy_manager.py`
+- **Purpose:** Coordinates passive environmental/user activity monitoring and rate-limits, scores, and schedules proactive candidate opportunities (such as silence and battery alarms, or internal cleanup reflections).
+
 ---
 
 ## Meta-Cognitive Nodes
