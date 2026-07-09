@@ -40,7 +40,7 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 | **`ExecutiveCortex`** | `executive_cortex.py` | `inject_executive_cortex` | Unified cognitive control and budget allocation |
 | **`RelationshipMemory`** | `relationship_memory.py` | `inject_relationship_memory` | Social graph and interaction history |
 | **`RealityGraph`** | `reality_graph.py` | `inject_reality_graph` | Unified read-only world state facade |
-| **`AutonomyManager`** | `autonomy/autonomy_manager.py` | Always on | Passive presence monitoring & proactive opportunity routing |
+| **`AutonomyManager`** | `autonomy/autonomy_manager.py` | `inject_autonomy_manager` | Passive presence monitoring & proactive opportunity routing |
 
 ### v3: Integration Layer
 
@@ -1017,7 +1017,7 @@ stats = brain.reality_graph.stats()
 ### AutonomyManager
 
 **Module:** `hbllm.brain.autonomy.autonomy_manager.AutonomyManager`
-**Config:** Always on (as a Core Node)
+**Config:** `inject_autonomy_manager = True`
 
 Coordinates passive presence tracking, evaluates candidate opportunities from registered sources, and publishes winning opportunities to the message bus.
 

@@ -143,6 +143,7 @@ class BrainConfig(BaseModel):
     inject_executive_cortex: bool = True
     inject_relationship_memory: bool = True
     inject_reality_graph: bool = True
+    inject_autonomy_manager: bool = True
 
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
@@ -317,6 +318,7 @@ class Brain:
 
         # v3: Proactive Execution
         self.scheduler_node: Any = None
+        self.autonomy_manager: Any = None
 
         # Knowledge base
         self.knowledge_base: KnowledgeBase | None = None
@@ -1790,6 +1792,28 @@ class BrainFactory:
             logger.info("RelationshipMemory wired — social graph active")
         else:
             relationship_memory = None
+
+        # AutonomyManager — proactive opportunity monitoring & routing
+        if getattr(cfg, "inject_autonomy_manager", True):
+            from hbllm.brain.autonomy.autonomy_manager import AutonomyManager
+            from hbllm.brain.autonomy.opportunity_source import BatterySource, SilenceSource
+
+            autonomy_db = str(Path(cfg.data_dir) / "opportunity_history.db")
+            autonomy_manager = AutonomyManager(
+                node_id="autonomy_manager",
+                db_path=autonomy_db,
+            )
+            # Register opportunity sources
+            autonomy_manager.register_source(SilenceSource())
+            autonomy_manager.register_source(BatterySource())
+
+            await _register_node(registry, autonomy_manager)
+            await autonomy_manager.start(message_bus)
+            nodes.append(autonomy_manager)
+            brain.autonomy_manager = autonomy_manager
+            logger.info("AutonomyManager wired — proactive opportunity routing active")
+        else:
+            brain.autonomy_manager = None
 
         # ── Interconnection Wiring ──────────────────────────────────
         # Wire cross-subsystem connections now that all engines exist.
