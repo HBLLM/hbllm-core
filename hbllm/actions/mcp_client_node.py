@@ -117,15 +117,106 @@ class McpClientNode(Node):
         import httpx
 
         self._httpx_client = httpx.AsyncClient(timeout=60)
-        # Note: full SSE streaming protocol requires passing endpoints back and forth.
-        # This closes the structural gap; payload routing happens via _httpx_client.
-        logger.info("Connected to MCP via SSE at %s", self.sse_url)
+        logger.info("Connecting to MCP via SSE at %s", self.sse_url)
         self._read_task = asyncio.create_task(self._sse_read_loop())
 
     async def _sse_read_loop(self) -> None:
-        """Placeholder for SSE event loop reading HTTP stream."""
-        while self._running:
-            await asyncio.sleep(1.0)
+        """Read SSE events from HTTP stream and parse JSON-RPC messages."""
+        if not self._httpx_client:
+            logger.error("SSE client not initialized")
+            return
+
+        try:
+            async with self._httpx_client.stream("GET", self.sse_url) as response:
+                response.raise_for_status()
+
+                while self._running:
+                    line = await response.areadline()
+                    if not line:
+                        break
+
+                    line_str = line.decode("utf-8")
+
+                    # SSE format: lines starting with "data:" contain JSON
+                    if line_str.startswith("data:"):
+                        data_content = line_str[5:].strip()
+                        if data_content == "[DONE]":
+                            break
+
+                        try:
+                            msg = json.loads(data_content)
+                            await self._handle_sse_message(msg)
+                        except json.JSONDecodeError as e:
+                            logger.debug("Failed to parse SSE data: %s", e)
+                    elif line_str.strip() == "":
+                        # Empty line marks end of an event
+                        pass
+                    elif line_str.startswith("event:"):
+                        # Event type line (we can ignore for basic MCP)
+                        pass
+                    elif line_str.startswith("id:"):
+                        # Event ID line (we can ignore for basic MCP)
+                        pass
+                    elif line_str.startswith("retry:"):
+                        # Retry directive (we can ignore for basic MCP)
+                        pass
+
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
+            logger.error("SSE connection error: %s", e)
+        except asyncio.CancelledError:
+            logger.info("SSE read loop cancelled")
+
+    async def _handle_sse_message(self, msg: dict[str, Any]) -> None:
+        """Handle a JSON-RPC message received via SSE."""
+        # Dispatch response to pending future
+        if "id" in msg and msg["id"] in self._pending:
+            future = self._pending.pop(msg["id"])
+            if not future.done():
+                if "error" in msg:
+                    future.set_exception(
+                        RuntimeError(f"MCP error: {msg['error'].get('message', 'Unknown')}")
+                    )
+                else:
+                    future.set_result(msg.get("result", {}))
+
+    async def _send_sse_request(
+        self, method: str, params: dict[str, Any], timeout: float = 30.0
+    ) -> dict[str, Any]:
+        """Send a JSON-RPC request via SSE (POST to endpoint)."""
+        if not self._httpx_client:
+            raise RuntimeError("SSE client not initialized")
+
+        self._request_id_counter += 1
+        req_id = self._request_id_counter
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": method,
+            "params": params,
+        }
+
+        future: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
+        self._pending[req_id] = future
+
+        try:
+            response = await self._httpx_client.post(
+                self.sse_url,
+                json=request,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+
+            # For SSE, responses come via the read loop, not the POST response
+            # The POST response is just an acknowledgment
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return json.loads(json.dumps(result)) if not isinstance(result, dict) else result
+        except (TimeoutError, asyncio.TimeoutError):
+            self._pending.pop(req_id, None)
+            raise TimeoutError(f"MCP SSE request '{method}' timed out after {timeout}s")
+        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
+            self._pending.pop(req_id, None)
+            raise
 
     async def on_stop(self) -> None:
         """Shut down the MCP server process."""
@@ -266,6 +357,9 @@ class McpClientNode(Node):
         self, method: str, params: dict[str, Any], timeout: float = 30.0
     ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for response."""
+        if self.sse_url:
+            return await self._send_sse_request(method, params, timeout)
+
         if not self._process or not self._process.stdin:
             raise RuntimeError("MCP server not running")
 
@@ -296,6 +390,27 @@ class McpClientNode(Node):
 
     async def _send_notification(self, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
+        if self.sse_url:
+            # For SSE, notifications are sent via POST without waiting for response
+            if not self._httpx_client:
+                return
+
+            notification = {
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+            }
+
+            try:
+                await self._httpx_client.post(
+                    self.sse_url,
+                    json=notification,
+                    timeout=10.0,
+                )
+            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
+                logger.debug("Failed to send SSE notification: %s", e)
+            return
+
         if not self._process or not self._process.stdin:
             return
 
@@ -361,7 +476,7 @@ class McpClientNode(Node):
                 logger.error("Error reading MCP response: %s", e)
 
     async def _cleanup(self) -> None:
-        """Clean up subprocess and pending requests."""
+        """Clean up subprocess, SSE client, and pending requests."""
         # Cancel pending
         for future in self._pending.values():
             if not future.done():
@@ -375,6 +490,14 @@ class McpClientNode(Node):
                 await self._read_task
             except asyncio.CancelledError:
                 pass
+
+        # Close SSE client
+        if self._httpx_client:
+            try:
+                await self._httpx_client.aclose()
+            except Exception:
+                pass
+            self._httpx_client = None
 
         # Terminate process
         if self._process:

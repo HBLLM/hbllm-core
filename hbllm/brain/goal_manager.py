@@ -77,9 +77,10 @@ class GoalManager:
     5. Completed goals feed back into capability improvements
     """
 
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = "data", bus: Any = None):
         self._db_path = Path(data_dir) / "goals.db"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._bus = bus  # MessageBus for dispatching to execution nodes
         self._init_db()
 
     def _init_db(self) -> None:
@@ -296,16 +297,207 @@ class GoalManager:
         logger.info("Executing goal: %s (type: %s)", goal.name, goal.goal_type)
 
         try:
-            # execution stub that advances progress
-            # In a full system, this dispatches to PlannerNode/ExecutionNode
-            progress = goal.progress + 0.25
-            action = f"Executed auto-step: progressed to {progress * 100:.0f}%"
-
-            self.update_progress(goal.goal_id, min(1.0, progress), action)
-            logger.info("Goal progress updated: %s -> %.2f", goal.name, progress)
+            # Dispatch to appropriate execution engine based on goal type
+            if goal.goal_type == "learning":
+                await self._execute_learning_goal(goal)
+            elif goal.goal_type == "exploration":
+                await self._execute_exploration_goal(goal)
+            elif goal.goal_type == "optimization":
+                await self._execute_optimization_goal(goal)
+            elif goal.goal_type == "maintenance":
+                await self._execute_maintenance_goal(goal)
+            else:
+                # Generic execution via bus if available
+                await self._execute_generic_goal(goal)
         except Exception as e:
             logger.error("Failed to execute goal %s: %s", goal.name, e)
             self.fail_goal(goal.goal_id, str(e))
+
+    async def _execute_learning_goal(self, goal: Goal) -> None:
+        """Execute a learning goal by dispatching to AutonomousLearner."""
+        if not self._bus:
+            logger.warning("No bus available for goal execution, using stub")
+            self._stub_execution(goal)
+            return
+
+        # Extract learning topic from metadata
+        learning_topic = goal.metadata.get("learning_topic", goal.name)
+
+        # Dispatch to AutonomousLearner via bus
+        from hbllm.network.messages import Message, MessageType
+
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="goal_manager",
+            topic="learning.execute",
+            tenant_id="system",
+            payload={
+                "goal_id": goal.goal_id,
+                "topic": learning_topic,
+                "motivation": goal.metadata.get("motivation", "system"),
+            },
+        )
+
+        try:
+            response = await self._bus.request(msg, timeout=60.0)
+            if response and response.payload.get("success"):
+                progress = response.payload.get("progress", 0.5)
+                action = response.payload.get("action", "Learning step completed")
+                self.update_progress(goal.goal_id, min(1.0, progress), action)
+            else:
+                raise RuntimeError(
+                    f"Learning execution failed: {response.payload if response else 'No response'}"
+                )
+        except Exception as e:
+            logger.error("Learning goal execution failed: %s", e)
+            raise
+
+    async def _execute_exploration_goal(self, goal: Goal) -> None:
+        """Execute an exploration goal by dispatching to CuriosityNode."""
+        if not self._bus:
+            logger.warning("No bus available for goal execution, using stub")
+            self._stub_execution(goal)
+            return
+
+        from hbllm.network.messages import Message, MessageType
+
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="goal_manager",
+            topic="curiosity.explore",
+            tenant_id="system",
+            payload={
+                "goal_id": goal.goal_id,
+                "topic": goal.name,
+                "description": goal.description,
+            },
+        )
+
+        try:
+            response = await self._bus.request(msg, timeout=60.0)
+            if response and response.payload.get("success"):
+                progress = response.payload.get("progress", 0.5)
+                action = response.payload.get("action", "Exploration step completed")
+                self.update_progress(goal.goal_id, min(1.0, progress), action)
+            else:
+                raise RuntimeError(
+                    f"Exploration execution failed: {response.payload if response else 'No response'}"
+                )
+        except Exception as e:
+            logger.error("Exploration goal execution failed: %s", e)
+            raise
+
+    async def _execute_optimization_goal(self, goal: Goal) -> None:
+        """Execute an optimization goal by dispatching to appropriate optimizer."""
+        if not self._bus:
+            logger.warning("No bus available for goal execution, using stub")
+            self._stub_execution(goal)
+            return
+
+        from hbllm.network.messages import Message, MessageType
+
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="goal_manager",
+            topic="optimization.execute",
+            tenant_id="system",
+            payload={
+                "goal_id": goal.goal_id,
+                "target": goal.name,
+                "criteria": goal.success_criteria,
+            },
+        )
+
+        try:
+            response = await self._bus.request(msg, timeout=60.0)
+            if response and response.payload.get("success"):
+                progress = response.payload.get("progress", 0.5)
+                action = response.payload.get("action", "Optimization step completed")
+                self.update_progress(goal.goal_id, min(1.0, progress), action)
+            else:
+                raise RuntimeError(
+                    f"Optimization execution failed: {response.payload if response else 'No response'}"
+                )
+        except Exception as e:
+            logger.error("Optimization goal execution failed: %s", e)
+            raise
+
+    async def _execute_maintenance_goal(self, goal: Goal) -> None:
+        """Execute a maintenance goal (memory consolidation, pruning, etc.)."""
+        if not self._bus:
+            logger.warning("No bus available for goal execution, using stub")
+            self._stub_execution(goal)
+            return
+
+        from hbllm.network.messages import Message, MessageType
+
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="goal_manager",
+            topic="maintenance.execute",
+            tenant_id="system",
+            payload={
+                "goal_id": goal.goal_id,
+                "task": goal.name,
+            },
+        )
+
+        try:
+            response = await self._bus.request(msg, timeout=60.0)
+            if response and response.payload.get("success"):
+                progress = response.payload.get("progress", 0.5)
+                action = response.payload.get("action", "Maintenance step completed")
+                self.update_progress(goal.goal_id, min(1.0, progress), action)
+            else:
+                raise RuntimeError(
+                    f"Maintenance execution failed: {response.payload if response else 'No response'}"
+                )
+        except Exception as e:
+            logger.error("Maintenance goal execution failed: %s", e)
+            raise
+
+    async def _execute_generic_goal(self, goal: Goal) -> None:
+        """Execute a generic goal via PlannerNode/ExecutionNode."""
+        if not self._bus:
+            logger.warning("No bus available for goal execution, using stub")
+            self._stub_execution(goal)
+            return
+
+        from hbllm.network.messages import Message, MessageType
+
+        msg = Message(
+            type=MessageType.QUERY,
+            source_node_id="goal_manager",
+            topic="planner.execute",
+            tenant_id="system",
+            payload={
+                "goal_id": goal.goal_id,
+                "goal": goal.name,
+                "description": goal.description,
+                "criteria": goal.success_criteria,
+            },
+        )
+
+        try:
+            response = await self._bus.request(msg, timeout=120.0)
+            if response and response.payload.get("success"):
+                progress = response.payload.get("progress", 0.5)
+                action = response.payload.get("action", "Goal step completed")
+                self.update_progress(goal.goal_id, min(1.0, progress), action)
+            else:
+                raise RuntimeError(
+                    f"Generic goal execution failed: {response.payload if response else 'No response'}"
+                )
+        except Exception as e:
+            logger.error("Generic goal execution failed: %s", e)
+            raise
+
+    def _stub_execution(self, goal: Goal) -> None:
+        """Fallback stub execution when bus is not available."""
+        progress = goal.progress + 0.25
+        action = f"Executed auto-step: progressed to {progress * 100:.0f}%"
+        self.update_progress(goal.goal_id, min(1.0, progress), action)
+        logger.info("Goal progress updated (stub): %s -> %.2f", goal.name, progress)
 
     def get_active_goals(self) -> list[Goal]:
         self._resolve_dag_states()
