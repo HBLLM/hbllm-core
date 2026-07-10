@@ -104,6 +104,11 @@ class GestureNode(Node):
         self._use_mediapipe = False
         self._last_gesture: dict[str, float] = {}  # gesture_type → timestamp
 
+        # Heuristic fallback state
+        self._prev_frame: np.ndarray | None = None
+        self._motion_threshold = 30.0  # Pixel difference threshold
+        self._motion_history: list[float] = []  # Track recent motion levels
+
         # Telemetry
         self._frames_analyzed = 0
         self._gestures_detected = 0
@@ -293,11 +298,74 @@ class GestureNode(Node):
         """Simple motion-based gesture detection (no ML required).
 
         Detects large movements in the frame as potential gestures.
-        Very low accuracy — meant as a placeholder.
+        Uses frame differencing to detect motion patterns.
         """
-        # This is a stub — heuristic gesture detection from raw pixels
-        # is not reliable. MediaPipe is strongly recommended.
-        return []
+        gestures: list[GestureEvent] = []
+
+        if self._prev_frame is None:
+            self._prev_frame = frame
+            return gestures
+
+        # Convert to grayscale for motion detection
+        try:
+            import cv2  # type: ignore[import-not-found]
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            prev_gray = cv2.cvtColor(self._prev_frame, cv2.COLOR_BGR2GRAY)
+
+            # Frame differencing
+            diff = cv2.absdiff(prev_gray, gray)
+            motion_level = np.mean(diff)
+
+            # Track motion history
+            self._motion_history.append(motion_level)
+            if len(self._motion_history) > 10:
+                self._motion_history.pop(0)
+
+            # Detect wave-like motion (alternating high/low motion)
+            if len(self._motion_history) >= 6:
+                recent_motion = self._motion_history[-6:]
+                # Check for oscillating pattern (wave)
+                oscillations = 0
+                for i in range(len(recent_motion) - 1):
+                    if (
+                        recent_motion[i] > self._motion_threshold
+                        and recent_motion[i + 1] < self._motion_threshold * 0.5
+                    ):
+                        oscillations += 1
+
+                if oscillations >= 2 and motion_level > self._motion_threshold:
+                    gestures.append(
+                        GestureEvent(
+                            gesture_type=GestureType.WAVE,
+                            confidence=0.5,
+                            hand="unknown",
+                            action=GESTURE_ACTION_MAP.get(GestureType.WAVE, ""),
+                        )
+                    )
+
+            # Detect large sudden motion (stop/palm)
+            if motion_level > self._motion_threshold * 3:
+                gestures.append(
+                    GestureEvent(
+                        gesture_type=GestureType.STOP,
+                        confidence=0.4,
+                        hand="unknown",
+                        action=GESTURE_ACTION_MAP.get(GestureType.STOP, ""),
+                    )
+                )
+
+            self._prev_frame = frame
+
+        except ImportError:
+            # Fallback without cv2 - just return empty
+            logger.debug("OpenCV not available for heuristic gesture detection")
+            self._prev_frame = frame
+        except Exception as e:
+            logger.debug("Heuristic gesture detection error: %s", e)
+            self._prev_frame = frame
+
+        return gestures
 
     def stats(self) -> dict[str, Any]:
         """Node statistics."""

@@ -232,7 +232,6 @@ class InteractionMiner:
                 """
                 SELECT query, response FROM interactions
                 WHERE reward >= ? AND regenerated = 0
-                AND query LIKE '%?%'
                 ORDER BY reward DESC LIMIT ?
             """,
                 (min_reward, limit),
@@ -470,7 +469,6 @@ class AsyncInteractionMiner:
                     """
                     SELECT query, response FROM interactions
                     WHERE reward >= $1 AND regenerated = 0
-                    AND query LIKE '%?%'
                     ORDER BY reward DESC LIMIT $2
                     """,
                     min_reward,
