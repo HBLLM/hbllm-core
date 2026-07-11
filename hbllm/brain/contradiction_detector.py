@@ -327,7 +327,7 @@ class ContradictionDetector:
                 for c in causes[:5]:
                     claims.append(f"{c.source_id} causes {concept} (p={c.probability:.2f})")
             except Exception:
-                pass
+                logger.debug("Causal graph claim extraction failed", exc_info=True)
 
         # From KnowledgeGraph
         if self.knowledge_graph is not None:
@@ -338,7 +338,7 @@ class ContradictionDetector:
                         f"{concept} {n.get('relation', 'relates_to')} {n.get('entity', 'unknown')}"
                     )
             except Exception:
-                pass
+                logger.debug("Knowledge graph neighbor extraction failed", exc_info=True)
 
         return claims
 

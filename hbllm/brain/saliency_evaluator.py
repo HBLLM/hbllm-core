@@ -31,7 +31,7 @@ from typing import Any
 
 from hbllm.brain.cognitive_event import CognitiveEvent, CognitiveEventType
 from hbllm.brain.cognitive_interfaces import IAttentionSelector
-from hbllm.brain.cognitive_state import CognitiveState
+from hbllm.brain.cognitive_state import CognitiveStateSnapshot
 from hbllm.brain.neuromodulation import NeuromodulationEngine
 
 logger = logging.getLogger(__name__)
@@ -71,16 +71,16 @@ class SaliencyEvaluator(IAttentionSelector):
 
     def __init__(
         self,
-        cognitive_state: CognitiveState | None = None,
+        cognitive_state: CognitiveStateSnapshot | None = None,
         neuromod: NeuromodulationEngine | None = None,
         recency_half_life: float = 30.0,
     ) -> None:
-        self._state = cognitive_state or CognitiveState()
+        self._state = cognitive_state or CognitiveStateSnapshot()
         self._neuromod = neuromod
         self._recency_half_life = max(1.0, recency_half_life)
         self._eval_count = 0
 
-    def update_cognitive_state(self, state: CognitiveState) -> None:
+    def update_cognitive_state(self, state: CognitiveStateSnapshot) -> None:
         """Update the cognitive state used for modulation.
 
         Called by the executive controller when state changes.

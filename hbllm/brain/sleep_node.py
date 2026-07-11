@@ -121,7 +121,7 @@ class SleepCycleNode(Node):
     async def _collect_goal(self, message: Message) -> Message | None:
         """Accumulate curiosity goals for processing during sleep."""
         goal = str(message.payload.get("goal") or message.payload.get("text", ""))
-        if goal and goal not in self._pending_goals:
+        if goal and goal not in self._pending_goals and len(self._pending_goals) < 50:
             self._pending_goals.append(goal)
             logger.debug("[SleepNode] Queued curiosity goal: %s", goal[:80])
         return None

@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import time
 from collections import OrderedDict, defaultdict, deque
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 from hbllm.network.messages import (
     Message,
@@ -857,8 +856,6 @@ class RouterNode(Node):
         sigmoid(a * score + b).  This produces better-calibrated confidence
         values for downstream blending decisions.
         """
-        import math
-
         return 1.0 / (1.0 + math.exp(-(self._platt_a * raw_score + self._platt_b)))
 
     def _save_centroids(self) -> None:
@@ -999,67 +996,67 @@ class RouterNode(Node):
         embedding space doesn't distinguish "LLM already knows this" from
         "needs a live lookup."
         """
-        import re
-
-        # Patterns that strongly indicate need for current/real-time information
-        _WEB_SEARCH_PATTERNS: list[re.Pattern[str]] = [
-            # "Who is/us/iz the [current/new] president/PM/leader of X" (typo-tolerant)
-            re.compile(
-                r"\bwho\s+\w+\s+(?:the\s+)?(?:current|new|present|acting)?\s*"
-                r"(?:president|prime\s+minister|ceo|leader|king|queen|chancellor|mayor|governor)\b",
-                re.IGNORECASE,
-            ),
-            # Standalone "president/PM of [country]" without requiring "who is"
-            re.compile(
-                r"\b(?:current|new|present|acting)\s+"
-                r"(?:president|prime\s+minister|leader|king|queen|chancellor|governor)"
-                r"\s+of\b",
-                re.IGNORECASE,
-            ),
-            # "president of sri lanka / usa / india" etc.
-            re.compile(
-                r"\b(?:president|prime\s+minister|leader|chancellor|governor)\s+of\s+\w",
-                re.IGNORECASE,
-            ),
-            # "latest/recent/breaking news about X"
-            re.compile(
-                r"\b(?:latest|recent|breaking|current|today'?s?)\s+(?:news|updates|developments|headlines)\b",
-                re.IGNORECASE,
-            ),
-            # "what is the current/today's price/score/weather/status/rate"
-            re.compile(
-                r"\b(?:what\s+is|what's)\s+(?:the\s+)?(?:current|today'?s?|latest|live|real[- ]?time)\s+"
-                r"(?:price|stock|score|weather|temperature|exchange\s+rate|status|result)\b",
-                re.IGNORECASE,
-            ),
-            # "search for / look up / find me / google"
-            re.compile(
-                r"\b(?:search\s+(?:for|about)|look\s+up|find\s+me|google|browse)\b",
-                re.IGNORECASE,
-            ),
-            # "search it / search this / look it up" — follow-up requests
-            re.compile(
-                r"\b(?:search|look\s+up|find|google)\s+(?:it|this|that)\b",
-                re.IGNORECASE,
-            ),
-            # "can you search / can you find / can you look up"
-            re.compile(
-                r"\b(?:can|could|please)\s+(?:you\s+)?(?:search|find|look\s+up|google)\b",
-                re.IGNORECASE,
-            ),
-            # "how much does X cost [now/today]"
-            re.compile(
-                r"\b(?:how\s+much\s+(?:does|is|do))\b.*\b(?:cost|worth|price)\b",
-                re.IGNORECASE,
-            ),
-            # "what happened [today/yesterday/recently] in X"
-            re.compile(
-                r"\b(?:what\s+happened|what's\s+happening|what\s+is\s+happening)\b",
-                re.IGNORECASE,
-            ),
-        ]
-
         for pattern in _WEB_SEARCH_PATTERNS:
             if pattern.search(text):
                 return True
         return False
+
+
+# ── Pre-compiled regex patterns for web search detection ─────────────────
+# Compiled once at module import time, not per-call.
+_WEB_SEARCH_PATTERNS: list[re.Pattern[str]] = [
+    # "Who is/us/iz the [current/new] president/PM/leader of X" (typo-tolerant)
+    re.compile(
+        r"\bwho\s+\w+\s+(?:the\s+)?(?:current|new|present|acting)?\s*"
+        r"(?:president|prime\s+minister|ceo|leader|king|queen|chancellor|mayor|governor)\b",
+        re.IGNORECASE,
+    ),
+    # Standalone "president/PM of [country]" without requiring "who is"
+    re.compile(
+        r"\b(?:current|new|present|acting)\s+"
+        r"(?:president|prime\s+minister|leader|king|queen|chancellor|governor)"
+        r"\s+of\b",
+        re.IGNORECASE,
+    ),
+    # "president of sri lanka / usa / india" etc.
+    re.compile(
+        r"\b(?:president|prime\s+minister|leader|chancellor|governor)\s+of\s+\w",
+        re.IGNORECASE,
+    ),
+    # "latest/recent/breaking news about X"
+    re.compile(
+        r"\b(?:latest|recent|breaking|current|today'?s?)\s+(?:news|updates|developments|headlines)\b",
+        re.IGNORECASE,
+    ),
+    # "what is the current/today's price/score/weather/status/rate"
+    re.compile(
+        r"\b(?:what\s+is|what's)\s+(?:the\s+)?(?:current|today'?s?|latest|live|real[- ]?time)\s+"
+        r"(?:price|stock|score|weather|temperature|exchange\s+rate|status|result)\b",
+        re.IGNORECASE,
+    ),
+    # "search for / look up / find me / google"
+    re.compile(
+        r"\b(?:search\s+(?:for|about)|look\s+up|find\s+me|google|browse)\b",
+        re.IGNORECASE,
+    ),
+    # "search it / search this / look it up" — follow-up requests
+    re.compile(
+        r"\b(?:search|look\s+up|find|google)\s+(?:it|this|that)\b",
+        re.IGNORECASE,
+    ),
+    # "can you search / can you find / can you look up"
+    re.compile(
+        r"\b(?:can|could|please)\s+(?:you\s+)?(?:search|find|look\s+up|google)\b",
+        re.IGNORECASE,
+    ),
+    # "how much does X cost [now/today]"
+    re.compile(
+        r"\b(?:how\s+much\s+(?:does|is|do))\b.*\b(?:cost|worth|price)\b",
+        re.IGNORECASE,
+    ),
+    # "what happened [today/yesterday/recently] in X"
+    re.compile(
+        r"\b(?:what\s+happened|what's\s+happening|what\s+is\s+happening)\b",
+        re.IGNORECASE,
+    ),
+]

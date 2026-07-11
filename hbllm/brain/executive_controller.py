@@ -54,9 +54,9 @@ from hbllm.brain.cognitive_interfaces import (
     IWorkspace,
 )
 from hbllm.brain.cognitive_state import (
-    CognitiveState,
     CognitiveStateDelta,
     CognitiveStateReducer,
+    CognitiveStateSnapshot,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class ExecutiveController:
         competition: ICompetition,
         workspace: IWorkspace,
         goals: IGoalProvider | None = None,
-        state: CognitiveState | None = None,
+        state: CognitiveStateSnapshot | None = None,
         max_batch_size: int = 10,
         cycle_interval: float = 0.1,
     ) -> None:
@@ -100,7 +100,7 @@ class ExecutiveController:
         self._goals = goals
 
         # Cognitive state management
-        self._state = state or CognitiveState()
+        self._state = state or CognitiveStateSnapshot()
         self._reducer = CognitiveStateReducer()
 
         # Configuration
@@ -123,11 +123,11 @@ class ExecutiveController:
     # ── State access ─────────────────────────────────────────────────
 
     @property
-    def cognitive_state(self) -> CognitiveState:
+    def cognitive_state(self) -> CognitiveStateSnapshot:
         """Current cognitive state (read-only snapshot)."""
         return self._state
 
-    def apply_delta(self, delta: CognitiveStateDelta) -> CognitiveState:
+    def apply_delta(self, delta: CognitiveStateDelta) -> CognitiveStateSnapshot:
         """Apply a cognitive state delta and return the new state.
 
         Also updates the saliency evaluator's state reference.
@@ -161,7 +161,7 @@ class ExecutiveController:
         Returns:
             List of winning events that were routed to workspace.
         """
-        cycle_start = time.time()
+        cycle_start = time.monotonic()
 
         # 1. Drain events
         raw_events = await self._queue.drain(self._max_batch)
@@ -190,7 +190,7 @@ class ExecutiveController:
         self._total_events_processed += len(raw_events)
         self._total_winners += len(winners)
 
-        cycle_time = time.time() - cycle_start
+        cycle_time = time.monotonic() - cycle_start
 
         if self._cycle_count % 100 == 0:
             logger.info(

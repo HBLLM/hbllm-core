@@ -459,7 +459,7 @@ class ExecutiveCortex:
                 return interrupt
 
         if self._current_focus:
-            age = time.time() - self._focus_started
+            age = time.monotonic() - self._focus_started
             self._focus_depth = min(1.0, age / 300.0)
 
             switch_decision = self._evaluate_switch(tenant_id)
@@ -534,7 +534,7 @@ class ExecutiveCortex:
             - Many recent switches (fatigue)
         """
         depth_cost = self._focus_depth * 0.4
-        recency_cost = max(0.0, 1.0 - (time.time() - self._last_switch) / 60.0) * 0.3
+        recency_cost = max(0.0, 1.0 - (time.monotonic() - self._last_switch) / 60.0) * 0.3
         fatigue_cost = min(0.3, self._switch_count * 0.02)
         return min(1.0, self._base_switch_cost + depth_cost + recency_cost + fatigue_cost)
 
@@ -543,7 +543,7 @@ class ExecutiveCortex:
         if not self._goals:
             return None
 
-        age = time.time() - self._focus_started
+        age = time.monotonic() - self._focus_started
         if age < self._min_focus_duration:
             return None
 
@@ -624,9 +624,9 @@ class ExecutiveCortex:
         """Record a task switch."""
         self._current_focus = new_focus
         self._current_focus_type = focus_type
-        self._focus_started = time.time()
+        self._focus_started = time.monotonic()
         self._focus_depth = 0.0
-        self._last_switch = time.time()
+        self._last_switch = time.monotonic()
         self._switch_count += 1
 
     # ── Resource Allocation ──────────────────────────────────────────
@@ -735,7 +735,7 @@ class ExecutiveCortex:
             "current_focus": self._current_focus,
             "current_focus_type": self._current_focus_type,
             "focus_depth": round(self._focus_depth, 3),
-            "focus_age_seconds": round(time.time() - self._focus_started, 1)
+            "focus_age_seconds": round(time.monotonic() - self._focus_started, 1)
             if self._focus_started
             else 0,
             "switching_cost": round(self.get_switching_cost(), 3),

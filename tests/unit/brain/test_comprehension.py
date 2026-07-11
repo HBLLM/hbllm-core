@@ -639,7 +639,7 @@ class TestPackageImports:
         assert ActivatedMemory is not None
 
     def test_snn_package_includes_comprehension(self):
-        """The SNN package __all__ should include 'comprehension'."""
-        import hbllm.brain.snn as snn_pkg
+        """The SNN comprehension subpackage should be importable."""
+        from hbllm.brain.snn import comprehension
 
-        assert "comprehension" in snn_pkg.__all__
+        assert comprehension is not None

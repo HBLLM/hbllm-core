@@ -12,8 +12,10 @@ safety checks, and dispatches the final command to the Agent Execution Layer
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
+import random
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -88,7 +90,7 @@ class DecisionNode(Node):
         # Stability scores
         self.S_ctrl: float = 0.0  # smoothed version of stability score used for routing stability
 
-        # Cooling state (Schmitt trigger hysteresis)
+        # High confidence ticks accumulated in cooling state
         self.cooling_high_conf_ticks: int = 0
 
         # Bounded invariance (cooling frequency monitor)
@@ -271,7 +273,7 @@ class DecisionNode(Node):
         cpu_percent = original_query.get("cpu_percent") or payload.get("cpu_percent")
         if cpu_percent is None:
             try:
-                import psutil
+                import psutil  # type: ignore[import-not-found]
 
                 cpu_percent = psutil.cpu_percent(interval=None) or 20.0
             except Exception:
@@ -308,8 +310,6 @@ class DecisionNode(Node):
 
         # ── Medium-Timescale: Threshold Smoothing (jittered ~7) ────
         if self.decision_count >= self._next_smooth_tick:
-            import random
-
             self._next_smooth_tick = self.decision_count + 7 + random.randint(-1, 1)
 
             live_high, live_med, live_low = self.calibrator.get_utility_percentiles()
@@ -347,8 +347,6 @@ class DecisionNode(Node):
 
         # ── Slow-Timescale: Lyapunov Invariant & Cooling (jittered ~13) ─
         if self.decision_count >= self._next_observe_tick:
-            import random
-
             self._next_observe_tick = self.decision_count + 13 + random.randint(-2, 2)
 
             traces = self.calibrator.get_traces()
@@ -625,7 +623,7 @@ class DecisionNode(Node):
         # Check system memory percent
         memory_limit = thought_budget.get("max_memory_percent", 90.0)
         try:
-            import psutil
+            import psutil  # type: ignore[import-not-found]
 
             mem_percent = psutil.virtual_memory().percent
             if mem_percent > memory_limit:
@@ -1008,8 +1006,6 @@ class DecisionNode(Node):
                 result_text = f"Tool execution error: {ex}"
 
         # Synthesize result back to the user via LLM
-        import json
-
         final_text = await self._synthesize_result(
             result_text,
             original_query,
