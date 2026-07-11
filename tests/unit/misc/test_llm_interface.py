@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.llm_interface import LLMInterface
+from hbllm.brain.core.llm_interface import LLMInterface
 
 
 class MockTokenizer:

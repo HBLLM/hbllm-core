@@ -51,7 +51,7 @@ async def create_local(
 Controls which cognitive subsystems are injected:
 
 ```python
-from hbllm.brain.factory import BrainConfig
+from hbllm.brain.core.factory import BrainConfig
 
 config = BrainConfig(
     inject_memory=True,          # Memory systems
@@ -145,7 +145,7 @@ Returns stats from all cognitive subsystems: metrics, self-model, skills, goals,
 
 ```python
 import asyncio
-from hbllm.brain.factory import BrainFactory, BrainConfig
+from hbllm.brain.core.factory import BrainFactory, BrainConfig
 
 async def main():
     config = BrainConfig(

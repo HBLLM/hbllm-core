@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from hbllm.brain.self_model import SelfModel
+from hbllm.brain.self_model.self_model import SelfModel
 
 
 @pytest.fixture

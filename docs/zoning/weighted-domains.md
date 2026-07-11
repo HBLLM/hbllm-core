@@ -69,7 +69,7 @@ domain_weights = {
 ### Configuration
 
 ```python
-from hbllm.brain.router_node import RouterNode
+from hbllm.brain.control.router_node import RouterNode
 
 router = RouterNode(
     node_id="router",

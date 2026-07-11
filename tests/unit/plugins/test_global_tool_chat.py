@@ -9,11 +9,11 @@ from typing import Any
 
 import pytest
 
-from hbllm.brain.action_planner import ActionPlanner
-from hbllm.brain.action_schema import ActionType
-from hbllm.brain.decision_node import DecisionNode
-from hbllm.brain.factory import BrainConfig, BrainFactory
-from hbllm.brain.prompt_helper import get_dynamic_system_prompt
+from hbllm.brain.control.decision_node import DecisionNode
+from hbllm.brain.core.factory import BrainConfig, BrainFactory
+from hbllm.brain.core.prompt_helper import get_dynamic_system_prompt
+from hbllm.brain.planning.action_planner import ActionPlanner
+from hbllm.brain.planning.action_schema import ActionType
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeInfo, NodeType
@@ -24,15 +24,15 @@ from hbllm.serving.provider import LLMProvider, LLMResponse
 def configure_test_environment(monkeypatch):
     """Bypass safety checks and signature verification in tests."""
     # Patch RouterNode.__init__ to disable vector routing
-    import hbllm.brain.router_node
+    import hbllm.brain.control.router_node
 
-    original_init = hbllm.brain.router_node.RouterNode.__init__
+    original_init = hbllm.brain.control.router_node.RouterNode.__init__
 
     def patched_init(self, *args, **kwargs):
         kwargs["use_vectors"] = False
         original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(hbllm.brain.router_node.RouterNode, "__init__", patched_init)
+    monkeypatch.setattr(hbllm.brain.control.router_node.RouterNode, "__init__", patched_init)
 
     # Patch ServiceRegistry.verify_message to bypass cryptographic validation in tests
     import hbllm.network.registry
@@ -45,15 +45,17 @@ def configure_test_environment(monkeypatch):
     )
 
     # Patch WorkspaceNode.__init__ to set a short thinking deadline for fast testing
-    import hbllm.brain.workspace_node
+    import hbllm.brain.planning.workspace_node
 
-    original_ws_init = hbllm.brain.workspace_node.WorkspaceNode.__init__
+    original_ws_init = hbllm.brain.planning.workspace_node.WorkspaceNode.__init__
 
     def patched_ws_init(self, *args, **kwargs):
         kwargs["thinking_deadline"] = 1.0
         original_ws_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(hbllm.brain.workspace_node.WorkspaceNode, "__init__", patched_ws_init)
+    monkeypatch.setattr(
+        hbllm.brain.planning.workspace_node.WorkspaceNode, "__init__", patched_ws_init
+    )
 
 
 # ── ActionPlanner Tool Parsing Unit Tests ─────────────────────────────────────

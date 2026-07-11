@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import Any
 
-from hbllm.brain.process_reward_node import ProcessRewardNode
+from hbllm.brain.evaluation.process_reward_node import ProcessRewardNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

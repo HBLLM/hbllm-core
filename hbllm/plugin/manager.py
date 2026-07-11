@@ -618,7 +618,7 @@ class PluginManager:
 
                 # Build the skill and store it
                 if hasattr(skill_registry, "_store"):
-                    from hbllm.brain.skill_registry import Skill
+                    from hbllm.brain.skills.skill_registry import Skill
 
                     skill = Skill(
                         skill_id=skill_id,
@@ -672,7 +672,7 @@ class PluginManager:
 
         for policy_def in loaded.bundle.assets.policies:
             try:
-                from hbllm.brain.policy_engine import (
+                from hbllm.brain.governance.policy_engine import (
                     Policy,
                     PolicyAction,
                     PolicyCondition,

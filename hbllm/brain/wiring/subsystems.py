@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hbllm.actions.tool_memory import ToolMemory
-from hbllm.brain.cognitive_metrics import CognitiveMetrics
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
-from hbllm.brain.goal_manager import GoalManager
-from hbllm.brain.owner_rules import OwnerRuleStore
-from hbllm.brain.self_model import SelfModel
-from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.emotion.goal_manager import GoalManager
+from hbllm.brain.governance.owner_rules import OwnerRuleStore
+from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.self_model.self_model import SelfModel
+from hbllm.brain.skills.skill_registry import SkillRegistry
+from hbllm.brain.world.world_state import WorldStateEngine
 from hbllm.data.interaction_miner import AsyncInteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
@@ -30,7 +30,7 @@ from hbllm.training.policy_optimizer import PolicyOptimizer
 from hbllm.training.reward_model import RewardModel
 
 if TYPE_CHECKING:
-    from hbllm.brain.factory import Brain, BrainConfig
+    from hbllm.brain.core.factory import Brain, BrainConfig
     from hbllm.network.bus import MessageBus
 
 logger = logging.getLogger(__name__)
@@ -91,10 +91,10 @@ async def wire_optional_subsystems(
     This handles the long chain of `if cfg.inject_*` blocks that are
     identical between the legacy and composite brain paths.
     """
-    from hbllm.brain.evaluation_node import EvaluationNode
-    from hbllm.brain.reflection_node import ReflectionNode
-    from hbllm.brain.revision_node import RevisionNode
-    from hbllm.brain.skill_compiler_node import SkillCompilerNode
+    from hbllm.brain.emotion.reflection_node import ReflectionNode
+    from hbllm.brain.evaluation.evaluation_node import EvaluationNode
+    from hbllm.brain.evaluation.revision_node import RevisionNode
+    from hbllm.brain.skills.skill_compiler_node import SkillCompilerNode
 
     # Task Graph Runtime
     if cfg.inject_task_graph:
@@ -212,7 +212,7 @@ async def wire_optional_subsystems(
         logger.info("v2: SkillCompilerNode wired (auto-skill extraction)")
 
     if cfg.inject_failure_analyzer:
-        from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
+        from hbllm.brain.evaluation.failure_analyzer_node import FailureAnalyzerNode
 
         fail_node = FailureAnalyzerNode(node_id="failure_analyzer", llm=llm)
         await _register_node(registry, fail_node)
@@ -222,7 +222,7 @@ async def wire_optional_subsystems(
         logger.info("FailureAnalyzerNode wired (automated skill repair)")
 
     if cfg.inject_sil:
-        from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
+        from hbllm.brain.skills.skill_intelligence_node import SkillIntelligenceNode
 
         sil_node = SkillIntelligenceNode(node_id="sil", skill_registry=brain.skill_registry)  # type: ignore[arg-type]
         await _register_node(registry, sil_node)
@@ -233,7 +233,7 @@ async def wire_optional_subsystems(
 
     # v2: Resource Intelligence
     if cfg.inject_attention:
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         attn_node = AttentionManager(node_id="attention")
         await _register_node(registry, attn_node)
@@ -243,7 +243,7 @@ async def wire_optional_subsystems(
         logger.info("v2: AttentionManager wired (memory budgets & focus)")
 
     if cfg.inject_load_manager:
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         load_node = LoadManager(node_id="load_manager", monitor_interval=60.0)
         await _register_node(registry, load_node)
@@ -254,7 +254,7 @@ async def wire_optional_subsystems(
 
     # v3: Proactive Execution
     if cfg.inject_scheduler:
-        from hbllm.brain.scheduler_node import SchedulerNode
+        from hbllm.brain.control.scheduler_node import SchedulerNode
 
         sched_node = SchedulerNode(node_id="scheduler", data_dir=cfg.data_dir)
         await _register_node(registry, sched_node)
@@ -283,7 +283,7 @@ async def wire_late_subsystems(
     """
     # Cognitive Awareness
     if cfg.inject_awareness:
-        from hbllm.brain.awareness import CognitiveAwareness
+        from hbllm.brain.self_model.awareness import CognitiveAwareness
 
         awareness_node = CognitiveAwareness(node_id="cognitive_awareness")
         await _register_node(registry, awareness_node)

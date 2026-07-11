@@ -135,7 +135,7 @@ class DomainModuleNode(Node):
                 prompt[:30],
             )
             try:
-                from hbllm.brain.prompt_helper import get_dynamic_system_prompt
+                from hbllm.brain.core.prompt_helper import get_dynamic_system_prompt
 
                 tenant = message.tenant_id or "default"
                 system_prompt = await get_dynamic_system_prompt(self.bus, tenant, self.node_id)

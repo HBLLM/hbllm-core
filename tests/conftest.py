@@ -79,7 +79,7 @@ def _isolate_data_dir(tmp_path, monkeypatch):
     try:
         import dataclasses
 
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         # Patch the dataclass field default for data_dir
         for f in dataclasses.fields(BrainConfig):

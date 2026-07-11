@@ -219,7 +219,7 @@ class TestMultiAgent:
 
 # ── Parallel Workspace ────────────────────────────────────────────────────
 
-from hbllm.brain.parallel_workspace import ParallelWorkspaceManager, WorkspaceStatus
+from hbllm.brain.planning.parallel_workspace import ParallelWorkspaceManager, WorkspaceStatus
 
 
 class TestParallelWorkspace:
@@ -296,7 +296,7 @@ class TestReflexLearner:
 
 # ── Social Timing ─────────────────────────────────────────────────────────
 
-from hbllm.brain.social_timing import SocialContext, SocialTimingEngine
+from hbllm.brain.social.social_timing import SocialContext, SocialTimingEngine
 
 
 class TestSocialTiming:
@@ -337,7 +337,7 @@ class TestSocialTiming:
 
 # ── Cognitive Load ────────────────────────────────────────────────────────
 
-from hbllm.brain.cognitive_load_estimator import CognitiveLoadEstimator
+from hbllm.brain.self_model.cognitive_load_estimator import CognitiveLoadEstimator
 
 
 class TestCognitiveLoad:

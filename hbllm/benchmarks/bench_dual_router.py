@@ -19,7 +19,7 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 from hbllm.benchmarks.runner import BenchmarkReport, BenchmarkResult
-from hbllm.brain.dual_llm_router import TaskTier
+from hbllm.brain.control.dual_llm_router import TaskTier
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class DualRouterBenchmark:
     async def _bench_routing_decisions(self, report: BenchmarkReport) -> None:
         """Benchmark the classify() routing decision latency."""
         try:
-            from hbllm.brain.dual_llm_router import DualLLMRouter
+            from hbllm.brain.control.dual_llm_router import DualLLMRouter
 
             local_llm = MagicMock()
             local_llm.generate = AsyncMock(return_value=MagicMock(content="local response"))
@@ -128,7 +128,7 @@ class DualRouterBenchmark:
     async def _bench_circuit_breaker_transitions(self, report: BenchmarkReport) -> None:
         """Benchmark circuit breaker state transition speed."""
         try:
-            from hbllm.brain.dual_llm_router import CircuitBreaker
+            from hbllm.brain.control.dual_llm_router import CircuitBreaker
 
             cb = CircuitBreaker(failure_threshold=3, recovery_timeout=0.1)
 
@@ -207,7 +207,7 @@ class DualRouterBenchmark:
     async def _bench_fallback_overhead(self, report: BenchmarkReport) -> None:
         """Measure added latency when circuit is open and we fall back to local."""
         try:
-            from hbllm.brain.dual_llm_router import DualLLMRouter
+            from hbllm.brain.control.dual_llm_router import DualLLMRouter
 
             local_llm = MagicMock()
             local_llm.generate = AsyncMock(return_value=MagicMock(content="local fallback"))

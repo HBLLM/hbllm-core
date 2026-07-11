@@ -65,34 +65,34 @@ def _make_message(topic="test.topic", payload=None, msg_type=None):
 
 class TestDecisionNode:
     def test_init(self, tmp_path):
-        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.control.decision_node import DecisionNode
 
         node = DecisionNode(node_id="decision_test", data_dir=str(tmp_path))
         assert node is not None
 
     def test_get_info(self, tmp_path):
-        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.control.decision_node import DecisionNode
 
         node = DecisionNode(node_id="decision_test", data_dir=str(tmp_path))
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self, tmp_path):
-        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.control.decision_node import DecisionNode
 
         node = DecisionNode(node_id="decision_test", data_dir=str(tmp_path))
         health = node.health_check()
         assert health is not None
 
     def test_node_type(self, tmp_path):
-        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.control.decision_node import DecisionNode
 
         node = DecisionNode(node_id="decision_test", data_dir=str(tmp_path))
         info = node.get_info()
         assert info.node_id == "decision_test"
 
     def test_init_with_llm(self, tmp_path):
-        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.control.decision_node import DecisionNode
 
         node = DecisionNode(node_id="decision_test", llm=_mock_llm(), data_dir=str(tmp_path))
         assert node is not None
@@ -105,34 +105,34 @@ class TestDecisionNode:
 
 class TestPlannerNode:
     def test_init(self):
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="planner_test")
         assert node is not None
 
     def test_get_info(self):
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="planner_test")
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self):
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="planner_test")
         health = node.health_check()
         assert health is not None
 
     def test_node_type(self):
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="planner_test")
         info = node.get_info()
         assert info.node_id == "planner_test"
 
     def test_init_with_llm(self):
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="planner_test", llm=_mock_llm(), branch_factor=2, max_depth=1)
         assert node is not None
@@ -145,34 +145,34 @@ class TestPlannerNode:
 
 class TestSleepCycleNode:
     def test_init(self):
-        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.emotion.sleep_node import SleepCycleNode
 
         node = SleepCycleNode(node_id="sleep_test")
         assert node is not None
 
     def test_get_info(self):
-        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.emotion.sleep_node import SleepCycleNode
 
         node = SleepCycleNode(node_id="sleep_test")
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self):
-        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.emotion.sleep_node import SleepCycleNode
 
         node = SleepCycleNode(node_id="sleep_test")
         health = node.health_check()
         assert health is not None
 
     def test_node_type(self):
-        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.emotion.sleep_node import SleepCycleNode
 
         node = SleepCycleNode(node_id="sleep_test")
         info = node.get_info()
         assert info.node_id == "sleep_test"
 
     def test_sleep_phase_enum(self):
-        from hbllm.brain.sleep_node import SleepPhase
+        from hbllm.brain.emotion.sleep_node import SleepPhase
 
         assert SleepPhase is not None
         phases = list(SleepPhase)
@@ -186,34 +186,34 @@ class TestSleepCycleNode:
 
 class TestRouterNode:
     def test_init(self):
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         node = RouterNode(node_id="router_test")
         assert node is not None
 
     def test_get_info(self):
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         node = RouterNode(node_id="router_test")
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self):
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         node = RouterNode(node_id="router_test")
         health = node.health_check()
         assert health is not None
 
     def test_node_type(self):
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         node = RouterNode(node_id="router_test")
         info = node.get_info()
         assert info.node_id == "router_test"
 
     def test_device_tier_enum(self):
-        from hbllm.brain.router_node import DeviceTier
+        from hbllm.brain.control.router_node import DeviceTier
 
         tiers = list(DeviceTier)
         assert len(tiers) > 0
@@ -226,27 +226,27 @@ class TestRouterNode:
 
 class TestLearnerNode:
     def test_init(self):
-        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(node_id="learner_test")
         assert node is not None
 
     def test_get_info(self):
-        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(node_id="learner_test")
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self):
-        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(node_id="learner_test")
         health = node.health_check()
         assert health is not None
 
     def test_node_type(self):
-        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(node_id="learner_test")
         info = node.get_info()
@@ -260,22 +260,22 @@ class TestLearnerNode:
 
 class TestCognitiveAwareness:
     def test_awareness_sensor(self):
-        from hbllm.brain.awareness import AwarenessSensor
+        from hbllm.brain.self_model.awareness import AwarenessSensor
 
         assert AwarenessSensor is not None
 
     def test_cognitive_awareness_import(self):
-        from hbllm.brain.awareness import CognitiveAwareness
+        from hbllm.brain.self_model.awareness import CognitiveAwareness
 
         assert CognitiveAwareness is not None
 
     def test_cognitive_snapshot(self):
-        from hbllm.brain.awareness import CognitiveSnapshot
+        from hbllm.brain.self_model.awareness import CognitiveSnapshot
 
         assert CognitiveSnapshot is not None
 
     def test_cognitive_trigger(self):
-        from hbllm.brain.awareness import CognitiveTrigger
+        from hbllm.brain.self_model.awareness import CognitiveTrigger
 
         assert CognitiveTrigger is not None
 
@@ -287,40 +287,40 @@ class TestCognitiveAwareness:
 
 class TestCollectiveNode:
     def test_init(self):
-        from hbllm.brain.collective_node import CollectiveNode
+        from hbllm.brain.world.collective_node import CollectiveNode
 
         node = CollectiveNode(node_id="collective_test")
         assert node is not None
 
     def test_get_info(self):
-        from hbllm.brain.collective_node import CollectiveNode
+        from hbllm.brain.world.collective_node import CollectiveNode
 
         node = CollectiveNode(node_id="collective_test")
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self):
-        from hbllm.brain.collective_node import CollectiveNode
+        from hbllm.brain.world.collective_node import CollectiveNode
 
         node = CollectiveNode(node_id="collective_test")
         health = node.health_check()
         assert health is not None
 
     def test_stats_property(self):
-        from hbllm.brain.collective_node import CollectiveNode
+        from hbllm.brain.world.collective_node import CollectiveNode
 
         node = CollectiveNode(node_id="collective_test")
         s = node.stats
         assert isinstance(s, dict)
 
     def test_voting_strategy_enum(self):
-        from hbllm.brain.collective_node import VotingStrategy
+        from hbllm.brain.world.collective_node import VotingStrategy
 
         strategies = list(VotingStrategy)
         assert len(strategies) > 0
 
     def test_agent_profile(self):
-        from hbllm.brain.collective_node import AgentProfile
+        from hbllm.brain.world.collective_node import AgentProfile
 
         assert AgentProfile is not None
 
@@ -332,27 +332,27 @@ class TestCollectiveNode:
 
 class TestExperienceNode:
     def test_init(self):
-        from hbllm.brain.experience_node import ExperienceNode
+        from hbllm.brain.learning.experience_node import ExperienceNode
 
         node = ExperienceNode(node_id="experience_test")
         assert node is not None
 
     def test_get_info(self):
-        from hbllm.brain.experience_node import ExperienceNode
+        from hbllm.brain.learning.experience_node import ExperienceNode
 
         node = ExperienceNode(node_id="experience_test")
         info = node.get_info()
         assert info is not None
 
     def test_health_check(self):
-        from hbllm.brain.experience_node import ExperienceNode
+        from hbllm.brain.learning.experience_node import ExperienceNode
 
         node = ExperienceNode(node_id="experience_test")
         health = node.health_check()
         assert health is not None
 
     def test_node_type(self):
-        from hbllm.brain.experience_node import ExperienceNode
+        from hbllm.brain.learning.experience_node import ExperienceNode
 
         node = ExperienceNode(node_id="experience_test")
         info = node.get_info()
@@ -366,29 +366,29 @@ class TestExperienceNode:
 
 class TestDelegationManager:
     def test_delegation_status_enum(self):
-        from hbllm.brain.delegation_chain import DelegationStatus
+        from hbllm.brain.planning.delegation_chain import DelegationStatus
 
         statuses = list(DelegationStatus)
         assert len(statuses) > 0
 
     def test_step_sensitivity_enum(self):
-        from hbllm.brain.delegation_chain import StepSensitivity
+        from hbllm.brain.planning.delegation_chain import StepSensitivity
 
         assert StepSensitivity is not None
 
     def test_step_status_enum(self):
-        from hbllm.brain.delegation_chain import StepStatus
+        from hbllm.brain.planning.delegation_chain import StepStatus
 
         assert StepStatus is not None
 
     def test_delegation_manager_init(self, tmp_path):
-        from hbllm.brain.delegation_chain import DelegationManager
+        from hbllm.brain.planning.delegation_chain import DelegationManager
 
         mgr = DelegationManager(storage_dir=str(tmp_path))
         assert mgr is not None
 
     def test_create_delegation(self, tmp_path):
-        from hbllm.brain.delegation_chain import DelegationManager
+        from hbllm.brain.planning.delegation_chain import DelegationManager
 
         mgr = DelegationManager(storage_dir=str(tmp_path))
         delegation = mgr.create(
@@ -405,13 +405,13 @@ class TestDelegationManager:
 
 class TestBrainFactory:
     def test_import(self):
-        from hbllm.brain.factory import BrainFactory
+        from hbllm.brain.core.factory import BrainFactory
 
         assert BrainFactory is not None
 
     def test_create_with_mock_provider(self):
         """Test that BrainFactory.create works with a mock provider."""
-        from hbllm.brain.factory import BrainFactory
+        from hbllm.brain.core.factory import BrainFactory
         from hbllm.testing import MockProvider
 
         provider = MockProvider()
@@ -430,7 +430,7 @@ class TestBrainFactory:
 
 class TestPromptHelper:
     def test_import(self):
-        from hbllm.brain import prompt_helper
+        from hbllm.brain.core import prompt_helper
 
         exports = [x for x in dir(prompt_helper) if not x.startswith("_")]
         assert len(exports) > 0
@@ -443,7 +443,7 @@ class TestPromptHelper:
 
 class TestEvaluationNode:
     def test_import(self):
-        from hbllm.brain import evaluation_node
+        from hbllm.brain.evaluation import evaluation_node
 
         exports = [x for x in dir(evaluation_node) if not x.startswith("_") and x[0].isupper()]
         assert len(exports) > 0

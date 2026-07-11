@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from hbllm.brain.simulation_engine import (
+from hbllm.brain.world.simulation_engine import (
     HeuristicCritic,
     SimulationEngine,
     SimulationResult,

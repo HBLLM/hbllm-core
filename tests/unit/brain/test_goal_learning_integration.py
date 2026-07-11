@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.goal_manager import GoalManager, GoalPriority
+from hbllm.brain.emotion.goal_manager import GoalManager, GoalPriority
 
 
 @pytest.fixture
@@ -167,7 +167,7 @@ class TestLearningGoalParentId:
     """Test LearningGoal.parent_goal_id integration."""
 
     def test_parent_goal_id_serialized(self):
-        from hbllm.brain.autonomous_learner import LearningGoal
+        from hbllm.brain.learning.autonomous_learner import LearningGoal
 
         goal = LearningGoal(topic="test", parent_goal_id="goal_123")
         d = goal.to_dict()

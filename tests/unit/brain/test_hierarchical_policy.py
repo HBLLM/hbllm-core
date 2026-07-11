@@ -1,9 +1,9 @@
-from hbllm.brain.cognitive_state import (
+from hbllm.brain.core.cognitive_state import (
     CognitiveBudget,
     CognitivePolicy,
     HierarchicalCognitivePolicy,
 )
-from hbllm.brain.self_model import SelfModel
+from hbllm.brain.self_model.self_model import SelfModel
 
 
 def test_hierarchical_policy_overrides():

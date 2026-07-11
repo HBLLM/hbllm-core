@@ -21,7 +21,7 @@ sanitize_proxy_env()
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hbllm.brain.prompt_helper import ChatContext
+    from hbllm.brain.core.prompt_helper import ChatContext
 
 from fastapi import (
     FastAPI,
@@ -199,7 +199,7 @@ async def _boot_brain(
     await bus.start()
 
     # 2. Delegate cognitive loading to unified factory
-    from hbllm.brain.factory import BrainConfig, BrainFactory, _is_slow_cpu
+    from hbllm.brain.core.factory import BrainConfig, BrainFactory, _is_slow_cpu
 
     is_slow = _is_slow_cpu()
     if is_slow:
@@ -457,7 +457,7 @@ async def lifespan(app: FastAPI) -> Any:
         )
         from hbllm_cloud.tenant_manager import TenantManager  # type: ignore[import-not-found]
 
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
         from hbllm.serving.security import ApiKeyManager
 
         tm = TenantManager(db_path="data/tenants.db")
@@ -986,7 +986,7 @@ async def _prepare_chat_context(
     Returns:
         (filtered_history, ChatContext)
     """
-    from hbllm.brain.prompt_helper import ChatContext
+    from hbllm.brain.core.prompt_helper import ChatContext
 
     # 1. Fetch history ONCE
     history: list[dict[str, Any]] = []
@@ -1015,7 +1015,7 @@ async def _prepare_chat_context(
     # 2. Run 4-layer memory recall
     ctx = ChatContext()
     try:
-        from hbllm.brain.prompt_helper import get_chat_memories
+        from hbllm.brain.core.prompt_helper import get_chat_memories
 
         ctx = await get_chat_memories(bus, tenant_id, session_id, user_text, filtered_history)
     except Exception as e:
@@ -1110,7 +1110,7 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
     if not system_content:
         if bus:
             try:
-                from hbllm.brain.prompt_helper import get_dynamic_system_prompt
+                from hbllm.brain.core.prompt_helper import get_dynamic_system_prompt
 
                 system_content = await get_dynamic_system_prompt(
                     bus, request.tenant_id, "api_server"
@@ -1233,7 +1233,7 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
 
 async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     """Handle chat using the full brain pipeline."""
-    from hbllm.brain.factory import BrainConfig
+    from hbllm.brain.core.factory import BrainConfig
 
     config = _state.get("config") or BrainConfig()
     timeout = config.api_timeout
@@ -1905,8 +1905,8 @@ async def get_cognitive_telemetry():
     import os
 
     try:
-        from hbllm.brain.goal_manager import GoalManager
-        from hbllm.brain.utility_calibrator import UtilityCalibrator
+        from hbllm.brain.emotion.goal_manager import GoalManager
+        from hbllm.brain.evaluation.utility_calibrator import UtilityCalibrator
 
         data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
 
@@ -2161,7 +2161,7 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
     )
     await bus.publish("router.query", query_msg)
 
-    from hbllm.brain.factory import BrainConfig
+    from hbllm.brain.core.factory import BrainConfig
 
     config = _state.get("config") or BrainConfig()
     timeout = config.stream_timeout
@@ -2205,7 +2205,7 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     """
     OpenAI-compatible chat completions endpoint for AI coding assistants like Cursor, Claude Code, etc.
     """
-    from hbllm.brain.factory import BrainConfig
+    from hbllm.brain.core.factory import BrainConfig
 
     config = _state.get("config") or BrainConfig()
     api_timeout = config.api_timeout
@@ -2467,7 +2467,7 @@ async def chat_websocket(ws: WebSocket) -> None:
                 )
                 await bus.publish("router.query", query_msg)
 
-                from hbllm.brain.factory import BrainConfig
+                from hbllm.brain.core.factory import BrainConfig
 
                 config = _state.get("config") or BrainConfig()
                 api_timeout = config.api_timeout

@@ -199,7 +199,7 @@ export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics (requires rclpy)
 
 ```python
 import asyncio
-from hbllm.brain.factory import BrainFactory, BrainConfig
+from hbllm.brain.core.factory import BrainFactory, BrainConfig
 
 async def main():
     # Cloud-backed (easy start)

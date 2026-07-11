@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.world.world_state import WorldStateEngine
 from hbllm.perception.event_log import EventLog
 from hbllm.perception.reality_bus import (
     EventOrigin,
@@ -104,7 +104,7 @@ class TestWorldStateEngine:
     async def test_simulation_interface_retained(self):
         """Ensure the legacy simulator is still available via WorldStateEngine
         module exports (SimulationInterface)."""
-        from hbllm.brain.world_state import SimulationInterface
+        from hbllm.brain.world.world_state import SimulationInterface
 
         sim = SimulationInterface()
         result = await sim.simulate("Test goal", [{"name": "strategy_1", "steps": ["step1"]}])

@@ -2,7 +2,7 @@
 
 import pytest_asyncio
 
-from hbllm.brain.context_window import (
+from hbllm.brain.reasoning.context_window import (
     ContextBlock,
     ContextWindowManager,
     estimate_tokens,

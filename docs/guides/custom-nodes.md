@@ -77,7 +77,7 @@ There are two primary ways to register your custom node.
 Add your node to the brain manually via `BrainFactory`:
 
 ```python
-from hbllm.brain.factory import BrainFactory
+from hbllm.brain.core.factory import BrainFactory
 
 brain = await BrainFactory.create("openai/gpt-4o")
 

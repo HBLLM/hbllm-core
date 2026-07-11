@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.sleep_node import SleepCycleNode
+from hbllm.brain.emotion.sleep_node import SleepCycleNode
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType

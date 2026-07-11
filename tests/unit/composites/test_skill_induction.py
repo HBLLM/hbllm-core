@@ -3,7 +3,7 @@
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.skill_induction_node import SecurityInterceptor, SkillInductionNode
+from hbllm.brain.skills.skill_induction_node import SecurityInterceptor, SkillInductionNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

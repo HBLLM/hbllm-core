@@ -3,7 +3,7 @@ confidence_estimator, persona_engine, habit_tracker."""
 
 import time
 
-from hbllm.brain.value_system import (
+from hbllm.brain.governance.value_system import (
     DynamicValueArbitrator,
     InterruptionPenaltyPolicy,
     ResourceConservationPolicy,
@@ -58,7 +58,7 @@ class TestValueSystem:
 
 # ── Source Verifier ──────────────────────────────────────────────────────────
 
-from hbllm.brain.source_verifier import SourceCredibility, SourceVerifier
+from hbllm.brain.reasoning.source_verifier import SourceCredibility, SourceVerifier
 
 
 class TestSourceVerifier:
@@ -125,7 +125,7 @@ class TestSourceVerifier:
 
 # ── Activity Digest ──────────────────────────────────────────────────────────
 
-from hbllm.brain.activity_digest import ActivityDigestEngine, Digest, DigestItem
+from hbllm.brain.social.activity_digest import ActivityDigestEngine, Digest, DigestItem
 
 
 class TestActivityDigest:
@@ -184,7 +184,7 @@ class TestActivityDigest:
 
 # ── Confidence Estimator ─────────────────────────────────────────────────────
 
-from hbllm.brain.confidence_estimator import ConfidenceEstimator, ConfidenceReport
+from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator, ConfidenceReport
 
 
 class TestConfidenceEstimator:
@@ -233,7 +233,7 @@ class TestConfidenceEstimator:
 
 # ── Habit Tracker ────────────────────────────────────────────────────────────
 
-from hbllm.brain.habit_tracker import HabitPattern, HabitTracker, InteractionEvent
+from hbllm.brain.learning.habit_tracker import HabitPattern, HabitTracker, InteractionEvent
 
 
 class TestHabitTracker:
@@ -306,7 +306,7 @@ class TestHabitTracker:
 
 # ── Persona Engine ───────────────────────────────────────────────────────────
 
-from hbllm.brain.persona_engine import PersonaEngine, PersonaProfile, PersonaTrait
+from hbllm.brain.social.persona_engine import PersonaEngine, PersonaProfile, PersonaTrait
 
 
 class TestPersonaEngine:

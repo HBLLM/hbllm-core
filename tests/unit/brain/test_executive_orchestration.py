@@ -3,9 +3,9 @@ import asyncio
 import pytest
 
 from hbllm.brain.autonomy.task_graph import Goal, GoalStatus
-from hbllm.brain.executive_cortex import CognitiveExecutiveController
-from hbllm.brain.intentional_workspace import IntentionalWorkspace
-from hbllm.brain.self_model import SelfModel
+from hbllm.brain.control.executive_cortex import CognitiveExecutiveController
+from hbllm.brain.planning.intentional_workspace import IntentionalWorkspace
+from hbllm.brain.self_model.self_model import SelfModel
 from hbllm.network.messages import Message, MessageType
 
 

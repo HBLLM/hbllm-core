@@ -134,14 +134,14 @@ class TestMemoryScope:
 
 class TestToolReliabilityTracker:
     def test_default_reliability(self):
-        from hbllm.brain.self_state import ToolReliabilityTracker
+        from hbllm.brain.self_model.self_state import ToolReliabilityTracker
 
         tracker = ToolReliabilityTracker()
         r = tracker.get_reliability("unknown_tool")
         assert isinstance(r, float) and r >= 0
 
     def test_record_success(self):
-        from hbllm.brain.self_state import ToolReliabilityTracker
+        from hbllm.brain.self_model.self_state import ToolReliabilityTracker
 
         tracker = ToolReliabilityTracker()
         tracker.record_execution("tool1", True)
@@ -149,7 +149,7 @@ class TestToolReliabilityTracker:
         assert isinstance(r, float)
 
     def test_record_failure_degrades(self):
-        from hbllm.brain.self_state import ToolReliabilityTracker
+        from hbllm.brain.self_model.self_state import ToolReliabilityTracker
 
         tracker = ToolReliabilityTracker()
         initial = tracker.get_reliability("tool1")
@@ -160,14 +160,14 @@ class TestToolReliabilityTracker:
 
 class TestEpistemicCalibrationTracker:
     def test_default_calibration(self):
-        from hbllm.brain.self_state import EpistemicCalibrationTracker
+        from hbllm.brain.self_model.self_state import EpistemicCalibrationTracker
 
         tracker = EpistemicCalibrationTracker()
         cal = tracker.get_calibration("unknown")
         assert isinstance(cal, float)
 
     def test_record_verification_match(self):
-        from hbllm.brain.self_state import EpistemicCalibrationTracker
+        from hbllm.brain.self_model.self_state import EpistemicCalibrationTracker
 
         tracker = EpistemicCalibrationTracker()
         tracker.record_verification("math", predicted_outcome="A", verified_outcome="A", match=True)
@@ -175,7 +175,7 @@ class TestEpistemicCalibrationTracker:
         assert isinstance(cal, float)
 
     def test_record_verification_mismatch(self):
-        from hbllm.brain.self_state import EpistemicCalibrationTracker
+        from hbllm.brain.self_model.self_state import EpistemicCalibrationTracker
 
         tracker = EpistemicCalibrationTracker()
         tracker.record_verification(
@@ -187,7 +187,7 @@ class TestEpistemicCalibrationTracker:
 
 class TestSelfStateEngine:
     def test_cognitive_pressure_no_governance(self):
-        from hbllm.brain.self_state import SelfStateEngine
+        from hbllm.brain.self_model.self_state import SelfStateEngine
 
         engine = SelfStateEngine(governance=None)
         pressure = engine.get_cognitive_pressure()

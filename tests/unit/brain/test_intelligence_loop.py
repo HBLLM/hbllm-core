@@ -18,13 +18,13 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.cognitive_metrics import CognitiveMetrics
-from hbllm.brain.evaluation_node import EvaluationNode
-from hbllm.brain.goal_manager import GoalManager
-from hbllm.brain.reflection_node import ReflectionInsight, ReflectionNode
-from hbllm.brain.self_model import SelfModel
-from hbllm.brain.skill_compiler_node import ActionPattern, SkillCompilerNode
-from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.emotion.goal_manager import GoalManager
+from hbllm.brain.emotion.reflection_node import ReflectionInsight, ReflectionNode
+from hbllm.brain.evaluation.evaluation_node import EvaluationNode
+from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.self_model.self_model import SelfModel
+from hbllm.brain.skills.skill_compiler_node import ActionPattern, SkillCompilerNode
+from hbllm.brain.skills.skill_registry import SkillRegistry
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -467,7 +467,7 @@ class TestV2FactoryIntegration:
 
     @pytest_asyncio.fixture
     async def brain(self, tmp_path):
-        from hbllm.brain.factory import BrainConfig, BrainFactory
+        from hbllm.brain.core.factory import BrainConfig, BrainFactory
         from hbllm.serving.provider import LLMProvider, LLMResponse
 
         class _Mock(LLMProvider):
@@ -559,7 +559,7 @@ class TestV2FactoryIntegration:
 
     async def test_disable_v2_nodes(self, tmp_path):
         """Disabling v2 flags should skip wiring."""
-        from hbllm.brain.factory import BrainConfig, BrainFactory
+        from hbllm.brain.core.factory import BrainConfig, BrainFactory
         from hbllm.serving.provider import LLMProvider, LLMResponse
 
         class _Mock(LLMProvider):

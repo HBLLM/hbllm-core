@@ -6,8 +6,8 @@ import time
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.source_verifier import SourceCredibility, SourceVerifier
-from hbllm.brain.web_research_node import (
+from hbllm.brain.reasoning.source_verifier import SourceCredibility, SourceVerifier
+from hbllm.brain.world.web_research_node import (
     ResearchTier,
     WebResearchNode,
     classify_tier,

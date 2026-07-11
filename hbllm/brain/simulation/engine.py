@@ -9,11 +9,11 @@ from typing import Any
 
 from hbllm.brain.autonomy.task_graph import Goal, TaskNode
 from hbllm.brain.causality.causal_graph import CausalGraph
-from hbllm.brain.cognitive_state import CognitiveState
+from hbllm.brain.core.cognitive_state import CognitiveState
 from hbllm.brain.simulation.models import CounterfactualScenario, PredictionOrigin
 from hbllm.brain.simulation.projector import ProjectedState
 from hbllm.brain.simulation.risk import RiskCategory, RiskEngine
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.world.world_state import WorldStateEngine
 
 logger = logging.getLogger(__name__)
 

@@ -23,7 +23,7 @@ class TestBrainConfigValidation:
     """BrainConfig is now Pydantic — verify validation works."""
 
     def test_default_config_is_valid(self):
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         cfg = BrainConfig()
         assert cfg.total_timeout > 0
@@ -33,7 +33,7 @@ class TestBrainConfigValidation:
     def test_invalid_timeout_rejected(self):
         from pydantic import ValidationError
 
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         with pytest.raises(ValidationError, match="greater than 0"):
             BrainConfig(total_timeout=-1.0)
@@ -41,7 +41,7 @@ class TestBrainConfigValidation:
     def test_invalid_threshold_rejected(self):
         from pydantic import ValidationError
 
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         with pytest.raises(ValidationError, match="less than or equal to 1"):
             BrainConfig(dual_llm_complexity_threshold=1.5)
@@ -49,7 +49,7 @@ class TestBrainConfigValidation:
     def test_planner_depth_out_of_range(self):
         from pydantic import ValidationError
 
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         with pytest.raises(ValidationError, match="less than or equal to 5"):
             BrainConfig(planner_max_depth=10)
@@ -57,13 +57,13 @@ class TestBrainConfigValidation:
     def test_empty_data_dir_rejected(self):
         from pydantic import ValidationError
 
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         with pytest.raises(ValidationError, match="at least 1"):
             BrainConfig(data_dir="")
 
     def test_valid_custom_config(self):
-        from hbllm.brain.factory import BrainConfig
+        from hbllm.brain.core.factory import BrainConfig
 
         cfg = BrainConfig(
             total_timeout=120.0,
@@ -85,7 +85,7 @@ class TestDualRouterCircuitBreaker:
     """Verify circuit breaker opens after failures and auto-fallbacks."""
 
     def _make_router(self, local_fn, external_fn, threshold=3):
-        from hbllm.brain.dual_llm_router import DualLLMRouter
+        from hbllm.brain.control.dual_llm_router import DualLLMRouter
 
         local = MagicMock()
         local.generate = local_fn
@@ -104,7 +104,7 @@ class TestDualRouterCircuitBreaker:
 
     @pytest.mark.asyncio
     async def test_circuit_opens_after_consecutive_failures(self):
-        from hbllm.brain.dual_llm_router import TaskTier
+        from hbllm.brain.control.dual_llm_router import TaskTier
         from hbllm.network.circuit_breaker import CircuitState
 
         fail_count = 0
@@ -154,7 +154,7 @@ class TestDualRouterCircuitBreaker:
         router._external_circuit._current_recovery_timeout = 0.01
 
         # Trigger circuit open
-        from hbllm.brain.dual_llm_router import TaskTier
+        from hbllm.brain.control.dual_llm_router import TaskTier
 
         for _ in range(2):
             await router.generate("x", tier=TaskTier.EXTERNAL)
@@ -227,7 +227,7 @@ class TestGracefulShutdown:
     """Verify Brain.shutdown() drains in-flight requests."""
 
     def _make_brain(self):
-        from hbllm.brain.factory import Brain
+        from hbllm.brain.core.factory import Brain
         from hbllm.network.bus import InProcessBus
         from hbllm.network.registry import ServiceRegistry
         from hbllm.serving.pipeline import CognitivePipeline

@@ -85,7 +85,7 @@ class TestCorePluginManagerStandalone:
     @pytest.mark.asyncio
     async def test_load_with_policy_engine(self, tmp_path):
         """Load with a PolicyEngine for policy ingestion."""
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         bundle_dir = _create_bundle(tmp_path)
         engine = PolicyEngine()
@@ -97,7 +97,7 @@ class TestCorePluginManagerStandalone:
     @pytest.mark.asyncio
     async def test_unload_soft_deactivation(self, tmp_path):
         """Unload deactivates policies, archives prompts."""
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         bundle_dir = _create_bundle(tmp_path)
         engine = PolicyEngine()

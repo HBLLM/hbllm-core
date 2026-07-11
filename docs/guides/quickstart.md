@@ -83,7 +83,7 @@ The server starts on `http://localhost:8000` with auto-generated OpenAPI docs at
 
 ```python
 import asyncio
-from hbllm.brain.factory import BrainFactory
+from hbllm.brain.core.factory import BrainFactory
 
 async def main():
     # Create a brain with OpenAI backend

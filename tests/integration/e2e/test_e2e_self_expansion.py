@@ -16,7 +16,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.spawner_node import SpawnerNode, _classify_domain_rank
+from hbllm.brain.emotion.spawner_node import SpawnerNode, _classify_domain_rank
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

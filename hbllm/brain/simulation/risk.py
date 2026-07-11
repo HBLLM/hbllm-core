@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from enum import StrEnum
 
-from hbllm.brain.self_state import SelfStateEngine
+from hbllm.brain.self_model.self_state import SelfStateEngine
 from hbllm.brain.simulation.models import CounterfactualScenario
 
 logger = logging.getLogger(__name__)

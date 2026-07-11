@@ -10,7 +10,7 @@ import httpx
 import jwt
 import pytest
 
-from hbllm.brain.factory import BrainConfig, BrainFactory
+from hbllm.brain.core.factory import BrainConfig, BrainFactory
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message
 from hbllm.serving.api import _state, app
@@ -91,15 +91,15 @@ def configure_test_environment(monkeypatch):
     monkeypatch.setenv("HBLLM_REQUIRE_SHELL_APPROVAL", "false")
 
     # Patch RouterNode.__init__ to disable vector routing
-    import hbllm.brain.router_node
+    import hbllm.brain.control.router_node
 
-    original_init = hbllm.brain.router_node.RouterNode.__init__
+    original_init = hbllm.brain.control.router_node.RouterNode.__init__
 
     def patched_init(self, *args, **kwargs):
         kwargs["use_vectors"] = False
         original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(hbllm.brain.router_node.RouterNode, "__init__", patched_init)
+    monkeypatch.setattr(hbllm.brain.control.router_node.RouterNode, "__init__", patched_init)
 
     # Patch ServiceRegistry.verify_message to bypass cryptographic validation
     import hbllm.network.registry
@@ -112,18 +112,20 @@ def configure_test_environment(monkeypatch):
     )
 
     # Patch WorkspaceNode.__init__ to set a short thinking deadline for fast testing
-    import hbllm.brain.workspace_node
+    import hbllm.brain.planning.workspace_node
 
-    original_ws_init = hbllm.brain.workspace_node.WorkspaceNode.__init__
+    original_ws_init = hbllm.brain.planning.workspace_node.WorkspaceNode.__init__
 
     def patched_ws_init(self, *args, **kwargs):
         kwargs["thinking_deadline"] = 1.0
         original_ws_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(hbllm.brain.workspace_node.WorkspaceNode, "__init__", patched_ws_init)
+    monkeypatch.setattr(
+        hbllm.brain.planning.workspace_node.WorkspaceNode, "__init__", patched_ws_init
+    )
 
     # Patch WorkspaceNode._finalize_board to prioritize GoT thoughts
-    original_finalize = hbllm.brain.workspace_node.WorkspaceNode._finalize_board
+    original_finalize = hbllm.brain.planning.workspace_node.WorkspaceNode._finalize_board
 
     async def patched_finalize(self, corr_id):
         board = self.blackboards.get(corr_id)
@@ -134,13 +136,13 @@ def configure_test_environment(monkeypatch):
         await original_finalize(self, corr_id)
 
     monkeypatch.setattr(
-        hbllm.brain.workspace_node.WorkspaceNode, "_finalize_board", patched_finalize
+        hbllm.brain.planning.workspace_node.WorkspaceNode, "_finalize_board", patched_finalize
     )
 
     # Patch PlannerNode.handle_message to strip GoT stats prefix for JSON parsing
-    import hbllm.brain.planner_node
+    import hbllm.brain.planning.planner_node
 
-    original_handle_message = hbllm.brain.planner_node.PlannerNode.handle_message
+    original_handle_message = hbllm.brain.planning.planner_node.PlannerNode.handle_message
 
     async def patched_handle_message(self, message):
         resp = await original_handle_message(self, message)
@@ -153,7 +155,7 @@ def configure_test_environment(monkeypatch):
         return resp
 
     monkeypatch.setattr(
-        hbllm.brain.planner_node.PlannerNode, "handle_message", patched_handle_message
+        hbllm.brain.planning.planner_node.PlannerNode, "handle_message", patched_handle_message
     )
 
 

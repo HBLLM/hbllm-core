@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.critic_node import CriticNode
+from hbllm.brain.evaluation.critic_node import CriticNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

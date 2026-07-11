@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-from hbllm.brain.factory import Brain, BrainConfig, BrainFactory
-from hbllm.brain.provider_adapter import ProviderLLM
+from hbllm.brain.core.factory import Brain, BrainConfig, BrainFactory
+from hbllm.brain.core.provider_adapter import ProviderLLM
 from hbllm.serving.provider import LLMProvider, LLMResponse
 
 # ── Mock Provider ────────────────────────────────────────────────────────────

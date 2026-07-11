@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.mechanism_store import Mechanism, MechanismStore
+from hbllm.brain.emotion.mechanism_store import Mechanism, MechanismStore
 
 
 @pytest.fixture

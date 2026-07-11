@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from hbllm.brain.workspace_node import WorkspaceNode
+from hbllm.brain.planning.workspace_node import WorkspaceNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -79,7 +79,7 @@ async def test_workspace_absolute_deadline_cap():
     assert "absolute_deadline" in board
     assert board["absolute_deadline"] > time.monotonic()
 
-    from hbllm.brain.factory import _is_slow_cpu
+    from hbllm.brain.core.factory import _is_slow_cpu
 
     max_offset = 301 if _is_slow_cpu() else 121
     assert board["absolute_deadline"] <= time.monotonic() + max_offset

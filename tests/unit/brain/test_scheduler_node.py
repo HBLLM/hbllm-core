@@ -6,7 +6,7 @@ import time
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.scheduler_node import SchedulerNode
+from hbllm.brain.control.scheduler_node import SchedulerNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

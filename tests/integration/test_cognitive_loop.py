@@ -22,24 +22,24 @@ import time
 import pytest
 
 # ── Infrastructure (Phase A) ──
-from hbllm.brain.brain_container import BrainConfig, BrainContainer
-from hbllm.brain.brain_context import BrainContext, BrainServices, BrainState
-from hbllm.brain.capability_registry import CapabilityRegistry
-from hbllm.brain.evidence import EvidenceBuilder, EvidencePacket
+from hbllm.brain.core.brain_container import BrainConfig, BrainContainer
+from hbllm.brain.core.brain_context import BrainContext, BrainServices, BrainState
+from hbllm.brain.core.trace import TraceCollector
+from hbllm.brain.reasoning.evidence import EvidenceBuilder, EvidencePacket
 
 # ── Prediction (Phase D) ──
-from hbllm.brain.prediction import CognitivePredictors
-from hbllm.brain.simulation_engine import (
-    DeliberationBudget,
-    DeliberationLevel,
-    SimulationEngine,
-)
+from hbllm.brain.reasoning.prediction import CognitivePredictors
+from hbllm.brain.skills.capability_registry import CapabilityRegistry
 
 # ── Brain (Phase C) ──
 from hbllm.brain.snn.network import ProjectionType
 from hbllm.brain.snn.oscillations import BrainTick, OscillationBand, OscillationManager
 from hbllm.brain.snn.population import PopulationEncoder
-from hbllm.brain.trace import TraceCollector
+from hbllm.brain.world.simulation_engine import (
+    DeliberationBudget,
+    DeliberationLevel,
+    SimulationEngine,
+)
 
 # ── Memory (Phase B) ──
 from hbllm.memory.belief_graph import BeliefGraph, BeliefRecord

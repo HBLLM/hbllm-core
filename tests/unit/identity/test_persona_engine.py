@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from hbllm.brain.persona_engine import (
+from hbllm.brain.social.persona_engine import (
     EMOTION_MODULATIONS,
     PersonaEngine,
     PersonaProfile,

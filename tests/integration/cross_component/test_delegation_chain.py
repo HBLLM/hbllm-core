@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from hbllm.brain.delegation_chain import (
+from hbllm.brain.planning.delegation_chain import (
     Delegation,
     DelegationManager,
     DelegationStatus,

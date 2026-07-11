@@ -2,7 +2,7 @@
 
 import time
 
-from hbllm.brain.awareness import (
+from hbllm.brain.self_model.awareness import (
     AwarenessSensor,
     CognitiveAwareness,
     CognitiveSnapshot,

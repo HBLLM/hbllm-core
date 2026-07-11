@@ -58,7 +58,7 @@ async def _run_agent(
     from rich.panel import Panel
     from rich.table import Table
 
-    from hbllm.brain.factory import BrainConfig, BrainFactory
+    from hbllm.brain.core.factory import BrainConfig, BrainFactory
 
     console = Console()
 

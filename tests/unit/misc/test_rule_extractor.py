@@ -7,7 +7,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.rule_extractor import (
+from hbllm.brain.learning.rule_extractor import (
     ExtractedRule,
     RuleExtractorNode,
     extract_rules_from_text,

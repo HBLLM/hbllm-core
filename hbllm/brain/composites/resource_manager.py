@@ -59,10 +59,10 @@ class ResourceManager(Node):
         self._scheduler: Any = None
 
     async def on_start(self) -> None:
-        from hbllm.brain.attention_manager import AttentionManager
-        from hbllm.brain.load_manager import LoadManager
-        from hbllm.brain.scheduler_node import SchedulerNode
-        from hbllm.brain.workspace_node import WorkspaceNode
+        from hbllm.brain.control.load_manager import LoadManager
+        from hbllm.brain.control.scheduler_node import SchedulerNode
+        from hbllm.brain.planning.workspace_node import WorkspaceNode
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         self._workspace = WorkspaceNode(node_id=f"{self.node_id}.workspace")
         self._workspace.node_identity = self.node_identity

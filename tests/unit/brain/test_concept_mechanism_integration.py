@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.belief_store import BeliefStore, BeliefType
-from hbllm.brain.concept_formation import ConceptFormationEngine
-from hbllm.brain.mechanism_store import MechanismStore
+from hbllm.brain.emotion.mechanism_store import MechanismStore
+from hbllm.brain.reasoning.belief_store import BeliefStore, BeliefType
+from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
 
 
 @pytest.fixture

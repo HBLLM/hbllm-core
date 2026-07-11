@@ -63,8 +63,8 @@ graph TB
 
 ## 1. UserModel — Who They Are
 
-**Engine:** `hbllm.brain.user_model.UserModelEngine` (989 lines)
-**Bus Adapter:** `hbllm.brain.user_model_node.UserModelNode` (171 lines)
+**Engine:** `hbllm.brain.social.user_model.UserModelEngine` (989 lines)
+**Bus Adapter:** `hbllm.brain.social.user_model_node.UserModelNode` (171 lines)
 **Config:** `inject_user_model = True`
 
 The UserModel continuously learns about the human operator from every interaction — their expertise domains, communication preferences, beliefs, trust levels, temporal work patterns, and current cognitive state (stress, engagement).
@@ -119,8 +119,8 @@ SQLite (`data/user_model.db`) with two tables:
 
 ## 2. ProjectGraph — What They're Building
 
-**Engine:** `hbllm.brain.project_graph.ProjectGraph` (704 lines)
-**Bus Adapter:** `hbllm.brain.project_node.ProjectNode` (156 lines)
+**Engine:** `hbllm.brain.world.project_graph.ProjectGraph` (704 lines)
+**Bus Adapter:** `hbllm.brain.world.project_node.ProjectNode` (156 lines)
 **Config:** `inject_project_graph = True`
 
 Graph-based project state tracker. When the user mentions "the auth system" or "HBLLM", the ProjectGraph auto-detects which project they're talking about and injects relevant goals, blockers, and open questions into the context.
@@ -173,9 +173,9 @@ SQLite (`data/project_graph.db`) — tables: `entities`, `relations`.
 
 ## 3. Cognitive Executive Kernel & ExecutiveCortex
 
-**Engine:** `hbllm.brain.executive_cortex.CognitiveExecutiveController` (Node) & `ExecutiveCortex` (Compatibility Facade)
+**Engine:** `hbllm.brain.control.executive_cortex.CognitiveExecutiveController` (Node) & `ExecutiveCortex` (Compatibility Facade)
 **Database:** `data/intentional_workspace.db` (SQLite Goal Agenda)
-**State Model:** `hbllm.brain.cognitive_state.CognitiveState` (Immutable Snapshot)
+**State Model:** `hbllm.brain.core.cognitive_state.CognitiveState` (Immutable Snapshot)
 
 The executive layer has transitioned from a reactive, ephemeral state machine to a **State-Centric Cognitive Operating System Kernel**. It enforces persistent agendas, immutable branching context states, and hierarchical policy cascade governance.
 
@@ -233,8 +233,8 @@ A multi-layered counterfactual forecast module that validates all memory writes,
 
 ## 4. RelationshipMemory — Who Matters
 
-**Engine:** `hbllm.brain.relationship_memory.RelationshipMemory` (660 lines)
-**Bus Adapter:** `hbllm.brain.relationship_node.RelationshipNode` (166 lines)
+**Engine:** `hbllm.brain.social.relationship_memory.RelationshipMemory` (660 lines)
+**Bus Adapter:** `hbllm.brain.social.relationship_node.RelationshipNode` (166 lines)
 **Config:** `inject_relationship_memory = True`
 
 Social graph that tracks people mentioned in conversations — their roles, sentiment trends, interaction history, and relevance to current topics.
@@ -285,7 +285,7 @@ SQLite (`data/relationship_memory.db`) — tables: `people`, `events`, `relation
 
 ## 5. RealityGraph — What's Happening
 
-**Engine:** `hbllm.brain.reality_graph.RealityGraph` (531 lines)
+**Engine:** `hbllm.brain.reasoning.reality_graph.RealityGraph` (531 lines)
 **Config:** `inject_reality_graph = True`
 
 Unified read-only facade over all existing world state backends. Instead of replacing the KnowledgeGraph, BrainWorldState, or PerceptionWorldState, the RealityGraph queries all three and returns a merged view.

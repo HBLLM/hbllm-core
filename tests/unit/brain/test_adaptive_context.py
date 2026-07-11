@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hbllm.brain.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
-from hbllm.brain.workspace_node import WorkspaceNode
+from hbllm.brain.planning.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
+from hbllm.brain.planning.workspace_node import WorkspaceNode
 from hbllm.network.messages import Message, MessageType
 
 

@@ -11,8 +11,8 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.experience_node import ExperienceNode
-from hbllm.brain.meta_node import MetaReasoningNode
+from hbllm.brain.learning.experience_node import ExperienceNode
+from hbllm.brain.self_model.meta_node import MetaReasoningNode
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import (

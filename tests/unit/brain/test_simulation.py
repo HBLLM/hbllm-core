@@ -9,7 +9,7 @@ from hbllm.brain.causality.causal_graph import CausalGraph
 from hbllm.brain.simulation.engine import PredictiveSimulationEngine
 from hbllm.brain.simulation.models import PredictionOrigin
 from hbllm.brain.simulation.risk import RiskEngine
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.world.world_state import WorldStateEngine
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@
 
 import time
 
-from hbllm.brain.activity_digest import ActivityDigestEngine, Digest, DigestItem
+from hbllm.brain.social.activity_digest import ActivityDigestEngine, Digest, DigestItem
 
 
 class TestDigestItem:

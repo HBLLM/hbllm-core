@@ -222,10 +222,10 @@ async def profile_throughput() -> BenchmarkReport:
 
 async def profile_startup() -> BenchmarkReport:
     """Time to start/stop each node type."""
-    from hbllm.brain.critic_node import CriticNode
-    from hbllm.brain.decision_node import DecisionNode
-    from hbllm.brain.planner_node import PlannerNode
-    from hbllm.brain.router_node import RouterNode
+    from hbllm.brain.control.decision_node import DecisionNode
+    from hbllm.brain.control.router_node import RouterNode
+    from hbllm.brain.evaluation.critic_node import CriticNode
+    from hbllm.brain.planning.planner_node import PlannerNode
     from hbllm.network.bus import InProcessBus
 
     report = BenchmarkReport(suite="profile_startup")

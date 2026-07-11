@@ -53,7 +53,7 @@ class DataSynthesizer:
             return None
 
         try:
-            from hbllm.brain.llm_interface import LLMInterface
+            from hbllm.brain.core.llm_interface import LLMInterface
 
             self._llm = LLMInterface(self.model, self.tokenizer)
             return self._llm

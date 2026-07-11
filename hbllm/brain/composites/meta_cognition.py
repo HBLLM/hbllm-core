@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING, Any
 from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
-    from hbllm.brain.cognitive_metrics import CognitiveMetrics
-    from hbllm.brain.goal_manager import GoalManager
-    from hbllm.brain.self_model import SelfModel
-    from hbllm.brain.skill_registry import SkillRegistry
+    from hbllm.brain.emotion.goal_manager import GoalManager
+    from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
+    from hbllm.brain.self_model.self_model import SelfModel
+    from hbllm.brain.skills.skill_registry import SkillRegistry
     from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
@@ -65,10 +65,10 @@ class MetaCognition(Node):
         self._curiosity: Any = None
 
     async def on_start(self) -> None:
-        from hbllm.brain.curiosity_node import CuriosityNode
-        from hbllm.brain.evaluation_node import EvaluationNode
-        from hbllm.brain.meta_node import MetaReasoningNode
-        from hbllm.brain.reflection_node import ReflectionNode
+        from hbllm.brain.emotion.curiosity_node import CuriosityNode
+        from hbllm.brain.emotion.reflection_node import ReflectionNode
+        from hbllm.brain.evaluation.evaluation_node import EvaluationNode
+        from hbllm.brain.self_model.meta_node import MetaReasoningNode
 
         self._meta = MetaReasoningNode(node_id=f"{self.node_id}.meta")
         self._meta.node_identity = self.node_identity

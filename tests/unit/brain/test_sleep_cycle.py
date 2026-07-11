@@ -3,7 +3,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.sleep_node import SleepCycleNode
+from hbllm.brain.emotion.sleep_node import SleepCycleNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -122,7 +122,7 @@ async def test_sleep_cycle_interrupted_by_user(simulated_sleep_env):
 @pytest.mark.asyncio
 async def test_sleep_phase_transitions(simulated_sleep_env):
     bus, sleep_node, memory = simulated_sleep_env
-    from hbllm.brain.sleep_node import SleepPhase
+    from hbllm.brain.emotion.sleep_node import SleepPhase
 
     # Initially awake
     assert sleep_node.current_phase == SleepPhase.AWAKE

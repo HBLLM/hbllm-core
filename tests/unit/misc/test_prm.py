@@ -5,7 +5,7 @@ Process Reward Model Tests.
 import pytest
 import torch
 
-from hbllm.brain.process_reward_node import ProcessRewardNode
+from hbllm.brain.evaluation.process_reward_node import ProcessRewardNode
 from hbllm.model.config import get_config
 from hbllm.model.transformer import HBLLMForProcessReward
 from hbllm.network.bus import InProcessBus

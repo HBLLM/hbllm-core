@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from hbllm.brain.executive_cortex import (
+from hbllm.brain.control.executive_cortex import (
     CognitiveBudget,
     ExecutiveCortex,
     ExecutiveDecision,
@@ -241,7 +241,7 @@ class TestExecutiveCortex:
     def test_goal_alignment_with_user_model(self):
         import tempfile
 
-        from hbllm.brain.user_model import UserModelEngine
+        from hbllm.brain.social.user_model import UserModelEngine
 
         with tempfile.TemporaryDirectory() as tmp:
             um = UserModelEngine(data_dir=tmp)

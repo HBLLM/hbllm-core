@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, Any
 from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
-    from hbllm.brain.policy_engine import PolicyEngine
-    from hbllm.brain.provider_adapter import ProviderLLM
+    from hbllm.brain.core.provider_adapter import ProviderLLM
+    from hbllm.brain.governance.policy_engine import PolicyEngine
     from hbllm.modules.domain_registry import DomainRegistry
     from hbllm.network.messages import Message
 
@@ -84,11 +84,11 @@ class ReasoningCore(Node):
         """Create and start all sub-nodes, registering their subscriptions."""
         from pathlib import Path
 
-        from hbllm.brain.critic_node import CriticNode
-        from hbllm.brain.decision_node import DecisionNode
-        from hbllm.brain.planner_node import PlannerNode
-        from hbllm.brain.revision_node import RevisionNode
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.decision_node import DecisionNode
+        from hbllm.brain.control.router_node import RouterNode
+        from hbllm.brain.evaluation.critic_node import CriticNode
+        from hbllm.brain.evaluation.revision_node import RevisionNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         # Router
         self._router = RouterNode(

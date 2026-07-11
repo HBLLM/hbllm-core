@@ -15,7 +15,7 @@ import pytest
 # ═══════════════════════════════════════════════════════════════════════════
 # Markov Predictor Tests
 # ═══════════════════════════════════════════════════════════════════════════
-from hbllm.brain.prediction import (
+from hbllm.brain.reasoning.prediction import (
     CognitivePredictors,
     MarkovPredictor,
 )

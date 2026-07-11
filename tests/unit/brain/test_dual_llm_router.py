@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hbllm.brain.dual_llm_router import (
+from hbllm.brain.control.dual_llm_router import (
     DualLLMRouter,
     DualLLMStats,
     TaskTier,

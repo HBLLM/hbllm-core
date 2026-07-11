@@ -6,7 +6,7 @@ import copy
 from typing import Any
 
 from hbllm.brain.simulation.models import FutureWorldState, PredictionOrigin
-from hbllm.brain.world_state import EntityState, WorldStateEngine
+from hbllm.brain.world.world_state import EntityState, WorldStateEngine
 
 
 class ProjectedState:
@@ -36,7 +36,7 @@ class ProjectedState:
         """Apply a simulated mutation to an entity."""
         entity = self.get_entity_state(entity_id)
         if not entity:
-            from hbllm.brain.world_state import EntityState
+            from hbllm.brain.world.world_state import EntityState
 
             entity = EntityState(entity_id=entity_id, confidence=confidence)
 

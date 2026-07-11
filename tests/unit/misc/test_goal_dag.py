@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.goal_manager import GoalManager, GoalPriority, GoalStatus
+from hbllm.brain.emotion.goal_manager import GoalManager, GoalPriority, GoalStatus
 
 
 @pytest.fixture

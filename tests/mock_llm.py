@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hbllm.brain.provider_adapter import ProviderLLM
+from hbllm.brain.core.provider_adapter import ProviderLLM
 
 
 class MockLLM(ProviderLLM):

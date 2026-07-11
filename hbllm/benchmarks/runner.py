@@ -153,7 +153,7 @@ class LatencyBenchmark:
         )
 
         # 2. Node start/stop overhead
-        from hbllm.brain.decision_node import DecisionNode
+        from hbllm.brain.control.decision_node import DecisionNode
 
         start_times = []
         for i in range(20):
@@ -204,7 +204,7 @@ class LatencyBenchmark:
         )
 
         # 4. PlannerNode Early Convergence
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         planner = PlannerNode(node_id="bench_planner")
         await planner.start(bus)
@@ -283,7 +283,7 @@ class MemoryBenchmark:
     async def run(self) -> BenchmarkReport:
         import tracemalloc
 
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
         from hbllm.network.bus import InProcessBus
 
         report = BenchmarkReport(suite="memory")
@@ -345,7 +345,7 @@ class SpecializationBenchmark:
     async def run(self) -> BenchmarkReport:
         import time
 
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
         from hbllm.network.bus import InProcessBus
         from hbllm.network.messages import Message, MessageType
 

@@ -1,7 +1,7 @@
 import pytest
 
 from hbllm.brain.autonomy.task_graph import Goal
-from hbllm.brain.cognitive_state import CognitiveBudget, CognitivePolicy, CognitiveState
+from hbllm.brain.core.cognitive_state import CognitiveBudget, CognitivePolicy, CognitiveState
 from hbllm.brain.simulation.engine import (
     LayeredSimulationEngine,
     MemoryBeliefSimulator,

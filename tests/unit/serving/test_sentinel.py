@@ -2,15 +2,15 @@
 
 import pytest
 
-from hbllm.brain.planner_node import PlannerNode
-from hbllm.brain.policy_engine import (
+from hbllm.brain.governance.policy_engine import (
     Policy,
     PolicyAction,
     PolicyCondition,
     PolicyEngine,
     PolicyType,
 )
-from hbllm.brain.sentinel_node import SentinelNode
+from hbllm.brain.governance.sentinel_node import SentinelNode
+from hbllm.brain.planning.planner_node import PlannerNode
 from hbllm.network.messages import Message, MessageType
 
 # ── Helpers ────────────────────────────────────────────────────────────────

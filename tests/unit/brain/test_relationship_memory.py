@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from hbllm.brain.relationship_memory import (
+from hbllm.brain.social.relationship_memory import (
     Person,
     RelationshipEvent,
     RelationshipHistory,
