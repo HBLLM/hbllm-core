@@ -289,7 +289,7 @@ class LoadManager(Node):
                 "queued_at": time.time(),
             }
         )
-        self._task_queue.sort(key=lambda t: t["priority"], reverse=True)
+        self._task_queue.sort(key=lambda t: t["priority"])
         self._tasks_queued += 1
         return True
 
@@ -299,7 +299,7 @@ class LoadManager(Node):
             return None
         if not self.can_accept_task():
             return None
-        return self._task_queue.pop(0)
+        return self._task_queue.pop()
 
     async def _handle_task_start(self, message: Message) -> None:
         """Track task start."""

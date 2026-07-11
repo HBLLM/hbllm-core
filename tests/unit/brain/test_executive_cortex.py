@@ -92,15 +92,15 @@ class TestExecutiveCortex:
         assert cost_deep > cost_shallow
 
     def test_switching_cost_increases_with_recency(self, cortex):
-        cortex._last_switch = time.time() - 120  # 2 minutes ago
+        cortex._last_switch = time.monotonic() - 120  # 2 minutes ago
         cost_old = cortex.get_switching_cost()
-        cortex._last_switch = time.time() - 5  # 5 seconds ago
+        cortex._last_switch = time.monotonic() - 5  # 5 seconds ago
         cost_recent = cortex.get_switching_cost()
         assert cost_recent > cost_old
 
     def test_switching_cost_capped(self, cortex):
         cortex._focus_depth = 1.0
-        cortex._last_switch = time.time()
+        cortex._last_switch = time.monotonic()
         cortex._switch_count = 100
         cost = cortex.get_switching_cost()
         assert cost <= 1.0

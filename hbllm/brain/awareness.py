@@ -517,7 +517,8 @@ class CognitiveAwareness(Node):
 
                 # Store and publish triggers
                 for trigger in triggers:
-                    self._pending_triggers.append(trigger)
+                    if len(self._pending_triggers) < 100:
+                        self._pending_triggers.append(trigger)
 
                     logger.info(
                         "🧠 Awareness trigger [%s]: %s",

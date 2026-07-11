@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
@@ -83,7 +84,7 @@ class LearningEventHandler(Node):
             )
 
         # Queue for background model building (processed during idle/sleep)
-        self._model_build_queue: list[dict[str, Any]] = []
+        self._model_build_queue: deque[dict[str, Any]] = deque()
         self._stats = {
             "successes_processed": 0,
             "failures_processed": 0,
@@ -411,7 +412,7 @@ class LearningEventHandler(Node):
 
         built = 0
         while self._model_build_queue:
-            item = self._model_build_queue.pop(0)
+            item = self._model_build_queue.popleft()
             try:
                 model = await asyncio.wait_for(
                     self.causal_model_builder.build_model(

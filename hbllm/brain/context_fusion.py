@@ -234,7 +234,13 @@ class ContextFusionEngine:
             if hasattr(provider, "get_context"):
                 content = await provider.get_context(query, tenant_id, budget)
             elif callable(provider):
-                content = await provider(query, tenant_id, budget)
+                import inspect
+
+                res = provider(query, tenant_id, budget)
+                if inspect.isawaitable(res):
+                    content = await res
+                else:
+                    content = res
             else:
                 content = str(provider)
 
@@ -269,7 +275,7 @@ class ContextFusionEngine:
                         )
                         parts.append(f"**Recent experiences:**\n{formatted}")
                 except Exception:
-                    pass
+                    logger.debug("Episodic memory recall failed in context fusion", exc_info=True)
 
             # Semantic memory (relevant facts)
             if hasattr(memory_system, "semantic") and memory_system.semantic:
@@ -281,7 +287,7 @@ class ContextFusionEngine:
                         formatted = "\n".join(f"- {f.get('content', '')[:200]}" for f in facts[:5])
                         parts.append(f"**Known facts:**\n{formatted}")
                 except Exception:
-                    pass
+                    logger.debug("Semantic memory search failed in context fusion", exc_info=True)
 
             return "\n\n".join(parts) if parts else ""
 
@@ -330,7 +336,7 @@ class ContextFusionEngine:
                     arousal = state.get("arousal", 0.5)
                     return f"User mood: {mood} (valence={valence:+.1f}, arousal={arousal:.1f})"
             except Exception:
-                pass
+                logger.debug("Emotion state retrieval failed in context fusion", exc_info=True)
             return ""
 
         return _provider
@@ -355,7 +361,7 @@ class ContextFusionEngine:
 
                 return "**Active goals:**\n" + "\n".join(parts) if parts else ""
             except Exception:
-                pass
+                logger.debug("Goal retrieval failed in context fusion", exc_info=True)
             return ""
 
         return _provider

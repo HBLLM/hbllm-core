@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -585,9 +586,7 @@ class PlannerNode(Node):
         budget: ThoughtBudget | None = None,
     ) -> tuple[str, int, float]:
         """Generate one diverse initial thought. Returns (content, tokens_used, latency_ms)."""
-        import time
-
-        start_t = time.time()
+        start_t = time.monotonic()
         tokens_used = 0
 
         prompt = f"Exploring Approach {branch_id} to solve: {query}"
@@ -630,7 +629,7 @@ class PlannerNode(Node):
         if budget:
             budget.spend_tokens(response_tokens)
 
-        latency_ms = (time.time() - start_t) * 1000.0
+        latency_ms = (time.monotonic() - start_t) * 1000.0
         return content, tokens_used, latency_ms
 
     async def _score_thought(
@@ -820,9 +819,7 @@ class PlannerNode(Node):
         budget: ThoughtBudget | None = None,
     ) -> None:
         """Refine a thought by branching deeper with an adaptive context window."""
-        import time
-
-        start_t = time.time()
+        start_t = time.monotonic()
         tokens_used = 0
 
         trajectory = parent.trajectory_history + [parent.content]
@@ -897,7 +894,7 @@ class PlannerNode(Node):
         if budget:
             budget.spend_tokens(response_tokens)
 
-        latency_ms = (time.time() - start_t) * 1000.0
+        latency_ms = (time.monotonic() - start_t) * 1000.0
 
         if content:
             child = graph.branch(parent.id, content)
