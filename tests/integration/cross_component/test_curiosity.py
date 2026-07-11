@@ -4,7 +4,7 @@ import asyncio
 
 import pytest_asyncio
 
-from hbllm.brain.curiosity_node import (
+from hbllm.brain.emotion.curiosity_node import (
     CuriosityNode,
     GoalQueue,
 )

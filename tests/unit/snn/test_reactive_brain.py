@@ -271,7 +271,7 @@ class TestWTA:
 # 5. Neuromodulation (global, 6 modulators)
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.neuromodulation import NeuromodulationEngine, NeuromodulatorState
+from hbllm.brain.emotion.neuromodulation import NeuromodulationEngine, NeuromodulatorState
 
 
 class TestNeuromodulation:
@@ -349,7 +349,7 @@ class TestNeuromodulation:
 # 6. Immutable CognitiveState
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.cognitive_state import (
+from hbllm.brain.core.cognitive_state import (
     CognitiveState,
     CognitiveStateDelta,
     CognitiveStateReducer,
@@ -421,11 +421,11 @@ class TestCognitiveState:
 # 7. Cognitive Event-Driven Scheduler
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.cognitive_event import CognitiveEvent, CognitiveEventType
-from hbllm.brain.competition_engine import CompetitionEngine
-from hbllm.brain.event_queue import CognitiveEventQueue
-from hbllm.brain.executive_controller import ExecutiveController
-from hbllm.brain.saliency_evaluator import SaliencyEvaluator
+from hbllm.brain.control.competition_engine import CompetitionEngine
+from hbllm.brain.control.event_queue import CognitiveEventQueue
+from hbllm.brain.control.executive_controller import ExecutiveController
+from hbllm.brain.core.cognitive_event import CognitiveEvent, CognitiveEventType
+from hbllm.brain.self_model.saliency_evaluator import SaliencyEvaluator
 
 
 class TestCognitiveEvent:

@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 from hbllm.actions.shell_node import HostShellNode
-from hbllm.brain.policy_engine import Policy, PolicyAction, PolicyEngine, PolicyType
+from hbllm.brain.governance.policy_engine import Policy, PolicyAction, PolicyEngine, PolicyType
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

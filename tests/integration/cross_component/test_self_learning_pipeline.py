@@ -10,8 +10,8 @@ import os
 
 import pytest
 
-from hbllm.brain.evaluation_node import EvaluationNode
-from hbllm.brain.learner_node import LearnerNode
+from hbllm.brain.evaluation.evaluation_node import EvaluationNode
+from hbllm.brain.learning.learner_node import LearnerNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

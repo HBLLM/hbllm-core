@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
-    from hbllm.brain.skill_registry import SkillRegistry
+    from hbllm.brain.skills.skill_registry import SkillRegistry
     from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,8 @@ class SocialLayer(Node):
         self._identity: Any = None
 
     async def on_start(self) -> None:
-        from hbllm.brain.collective_node import CollectiveNode
-        from hbllm.brain.identity_node import IdentityNode
+        from hbllm.brain.social.identity_node import IdentityNode
+        from hbllm.brain.world.collective_node import CollectiveNode
 
         self._collective = CollectiveNode(
             node_id=f"{self.node_id}.collective",

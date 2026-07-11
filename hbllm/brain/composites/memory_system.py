@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
-    from hbllm.brain.provider_adapter import ProviderLLM
+    from hbllm.brain.core.provider_adapter import ProviderLLM
     from hbllm.network.messages import Message
     from hbllm.network.registry import ServiceRegistry
 
@@ -70,8 +70,8 @@ class MemorySystem(Node):
 
     async def on_start(self) -> None:
         """Create and start all memory sub-nodes."""
-        from hbllm.brain.experience_node import ExperienceNode
-        from hbllm.brain.sleep_node import SleepCycleNode
+        from hbllm.brain.emotion.sleep_node import SleepCycleNode
+        from hbllm.brain.learning.experience_node import ExperienceNode
         from hbllm.memory.memory_node import MemoryNode
 
         self._memory = MemoryNode(

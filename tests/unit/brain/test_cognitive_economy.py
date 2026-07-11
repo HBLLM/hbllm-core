@@ -9,7 +9,7 @@ from hbllm.brain.autonomy.opportunity import Opportunity
 from hbllm.brain.autonomy.opportunity_market import OpportunityMarket
 from hbllm.brain.autonomy.opportunity_source import ReflectionSource
 from hbllm.brain.autonomy.presence_state import PresenceState
-from hbllm.brain.workspace_node import WorkspaceEpisode
+from hbllm.brain.planning.workspace_node import WorkspaceEpisode
 
 
 def test_cognitive_budget_can_afford():

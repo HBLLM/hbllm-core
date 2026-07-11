@@ -3,7 +3,7 @@
 Validates parsing and formatting of the constitutional rules.
 """
 
-from hbllm.brain.constitutional_principles import (
+from hbllm.brain.governance.constitutional_principles import (
     CONSTITUTION,
     Principle,
     format_principles_for_prompt,

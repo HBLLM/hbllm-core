@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.belief_store import BeliefStore, BeliefType
-from hbllm.brain.goal_manager import GoalManager, GoalPriority
-from hbllm.brain.learning_subsystem import (
+from hbllm.brain.emotion.goal_manager import GoalManager, GoalPriority
+from hbllm.brain.emotion.mechanism_store import MechanismStore
+from hbllm.brain.learning.learning_subsystem import (
     CognitiveGraph,
     CognitiveQueryResult,
     LearningSubsystem,
 )
-from hbllm.brain.mechanism_store import MechanismStore
+from hbllm.brain.reasoning.belief_store import BeliefStore, BeliefType
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import pytest
 
 from hbllm.brain.simulation.models import PredictionOrigin
 from hbllm.brain.simulation.projector import ProjectedState
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.world.world_state import WorldStateEngine
 from hbllm.perception.reality_bus import PerceptionEvent
 
 

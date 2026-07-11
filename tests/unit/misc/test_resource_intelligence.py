@@ -17,14 +17,14 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.attention_manager import AttentionManager, FocusAllocation, MemoryBudget
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
-from hbllm.brain.load_manager import (
+from hbllm.brain.control.load_manager import (
     DEFAULT_POLICIES,
     DegradationPolicy,
     LoadManager,
     SystemResources,
 )
+from hbllm.brain.self_model.attention_manager import AttentionManager, FocusAllocation, MemoryBudget
+from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -322,7 +322,7 @@ class TestLearnerNodeMicroLearning:
 
     @pytest_asyncio.fixture
     async def learner(self, bus, tmp_path):
-        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(
             node_id="test_learner",
@@ -448,7 +448,7 @@ class TestLearnerNodeMicroLearning:
 
     async def test_disable_micro_learning(self, bus, tmp_path):
         """With micro_learning disabled, evaluation events should be ignored."""
-        from hbllm.brain.learner_node import LearnerNode
+        from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(
             node_id="disabled_learner",
@@ -486,7 +486,7 @@ class TestPhase2FactoryIntegration:
 
     @pytest_asyncio.fixture
     async def brain(self, tmp_path):
-        from hbllm.brain.factory import BrainConfig, BrainFactory
+        from hbllm.brain.core.factory import BrainConfig, BrainFactory
         from hbllm.serving.provider import LLMProvider, LLMResponse
 
         class _Mock(LLMProvider):
@@ -558,7 +558,7 @@ class TestPhase2FactoryIntegration:
         assert "load_manager" in node_ids
 
     async def test_disable_phase2_nodes(self, tmp_path):
-        from hbllm.brain.factory import BrainConfig, BrainFactory
+        from hbllm.brain.core.factory import BrainConfig, BrainFactory
         from hbllm.serving.provider import LLMProvider, LLMResponse
 
         class _Mock(LLMProvider):

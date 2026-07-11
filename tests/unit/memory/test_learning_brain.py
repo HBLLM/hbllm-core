@@ -628,7 +628,7 @@ class TestGoalMemory:
 # Sleep Phase Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.sleep_node import SleepPhase
+from hbllm.brain.emotion.sleep_node import SleepPhase
 
 
 class TestSleepPhases:

@@ -2,8 +2,8 @@
 
 import pytest
 
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
-from hbllm.brain.revision_node import RevisionNode
+from hbllm.brain.evaluation.revision_node import RevisionNode
+from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
 
 # ─── ConfidenceEstimator Tests ───────────────────────────────────────────
 

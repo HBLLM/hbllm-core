@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hbllm.brain.attention_manager import (
+from hbllm.brain.self_model.attention_manager import (
     AttentionManager,
     CognitivePriorityScheduler,
     CognitiveTask,

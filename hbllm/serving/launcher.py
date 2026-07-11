@@ -60,18 +60,18 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
     # Standard nodes
     node_map: dict[str, tuple[str, str]] = {
         # node_id → (module_path, class_name)
-        "router": ("hbllm.brain.router_node", "RouterNode"),
-        "workspace": ("hbllm.brain.workspace_node", "WorkspaceNode"),
-        "planner": ("hbllm.brain.planner_node", "PlannerNode"),
-        "critic": ("hbllm.brain.critic_node", "CriticNode"),
-        "decision": ("hbllm.brain.decision_node", "DecisionNode"),
-        "meta": ("hbllm.brain.meta_node", "MetaReasoningNode"),
-        "identity": ("hbllm.brain.identity_node", "IdentityNode"),
-        "curiosity": ("hbllm.brain.curiosity_node", "CuriosityNode"),
-        "collective": ("hbllm.brain.collective_node", "CollectiveNode"),
-        "learner": ("hbllm.brain.learner_node", "LearnerNode"),
-        "sleep_cycle": ("hbllm.brain.sleep_node", "SleepCycleNode"),
-        "world_model": ("hbllm.brain.world_model_node", "WorldModelNode"),
+        "router": ("hbllm.brain.control.router_node", "RouterNode"),
+        "workspace": ("hbllm.brain.planning.workspace_node", "WorkspaceNode"),
+        "planner": ("hbllm.brain.planning.planner_node", "PlannerNode"),
+        "critic": ("hbllm.brain.evaluation.critic_node", "CriticNode"),
+        "decision": ("hbllm.brain.control.decision_node", "DecisionNode"),
+        "meta": ("hbllm.brain.self_model.meta_node", "MetaReasoningNode"),
+        "identity": ("hbllm.brain.social.identity_node", "IdentityNode"),
+        "curiosity": ("hbllm.brain.emotion.curiosity_node", "CuriosityNode"),
+        "collective": ("hbllm.brain.world.collective_node", "CollectiveNode"),
+        "learner": ("hbllm.brain.learning.learner_node", "LearnerNode"),
+        "sleep_cycle": ("hbllm.brain.emotion.sleep_node", "SleepCycleNode"),
+        "world_model": ("hbllm.brain.world.world_model_node", "WorldModelNode"),
         "memory": ("hbllm.memory.memory_node", "MemoryNode"),
     }
 

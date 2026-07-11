@@ -11,9 +11,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from hbllm.brain.policy_engine import PolicyEngine
-from hbllm.brain.provider_adapter import ProviderLLM
-from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.core.provider_adapter import ProviderLLM
+from hbllm.brain.governance.policy_engine import PolicyEngine
+from hbllm.brain.skills.skill_registry import SkillRegistry
 from hbllm.brain.wiring.snn import wire_comprehension_stream, wire_expression_stream
 from hbllm.network.node import Node
 from hbllm.serving.provider import LLMProvider
@@ -35,21 +35,21 @@ def create_legacy_nodes(
 
     Does NOT start them on the bus — caller must iterate and start.
     """
-    from hbllm.brain.collective_node import CollectiveNode
-    from hbllm.brain.critic_node import CriticNode
-    from hbllm.brain.curiosity_node import CuriosityNode
-    from hbllm.brain.decision_node import DecisionNode
-    from hbllm.brain.experience_node import ExperienceNode
-    from hbllm.brain.identity_node import IdentityNode
-    from hbllm.brain.learner_node import LearnerNode
-    from hbllm.brain.meta_node import MetaReasoningNode
-    from hbllm.brain.planner_node import PlannerNode
-    from hbllm.brain.router_node import RouterNode
-    from hbllm.brain.rule_extractor import RuleExtractorNode
-    from hbllm.brain.sentinel_node import SentinelNode
-    from hbllm.brain.sleep_node import SleepCycleNode
-    from hbllm.brain.workspace_node import WorkspaceNode
-    from hbllm.brain.world_model_node import WorldModelNode
+    from hbllm.brain.control.decision_node import DecisionNode
+    from hbllm.brain.control.router_node import RouterNode
+    from hbllm.brain.emotion.curiosity_node import CuriosityNode
+    from hbllm.brain.emotion.sleep_node import SleepCycleNode
+    from hbllm.brain.evaluation.critic_node import CriticNode
+    from hbllm.brain.governance.sentinel_node import SentinelNode
+    from hbllm.brain.learning.experience_node import ExperienceNode
+    from hbllm.brain.learning.learner_node import LearnerNode
+    from hbllm.brain.learning.rule_extractor import RuleExtractorNode
+    from hbllm.brain.planning.planner_node import PlannerNode
+    from hbllm.brain.planning.workspace_node import WorkspaceNode
+    from hbllm.brain.self_model.meta_node import MetaReasoningNode
+    from hbllm.brain.social.identity_node import IdentityNode
+    from hbllm.brain.world.collective_node import CollectiveNode
+    from hbllm.brain.world.world_model_node import WorldModelNode
     from hbllm.memory.memory_node import MemoryNode
 
     # Router + Comprehension Stream

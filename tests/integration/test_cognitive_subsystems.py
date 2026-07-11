@@ -10,12 +10,12 @@ Tests the full data flow between:
 
 import pytest
 
-from hbllm.brain.context_fusion import ContextFusionEngine
-from hbllm.brain.executive_cortex import ExecutiveCortex
-from hbllm.brain.project_graph import ProjectGraph
-from hbllm.brain.reality_graph import RealityGraph
-from hbllm.brain.relationship_memory import RelationshipMemory
-from hbllm.brain.user_model import UserModelEngine
+from hbllm.brain.control.executive_cortex import ExecutiveCortex
+from hbllm.brain.reasoning.context_fusion import ContextFusionEngine
+from hbllm.brain.reasoning.reality_graph import RealityGraph
+from hbllm.brain.social.relationship_memory import RelationshipMemory
+from hbllm.brain.social.user_model import UserModelEngine
+from hbllm.brain.world.project_graph import ProjectGraph
 
 
 class TestUserModelProjectGraphIntegration:

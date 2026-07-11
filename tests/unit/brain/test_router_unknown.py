@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.router_node import RouterNode
+from hbllm.brain.control.router_node import RouterNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType, QueryPayload
 from tests.mock_llm import MockLLM

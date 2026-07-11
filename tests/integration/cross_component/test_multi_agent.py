@@ -12,7 +12,7 @@ import time
 
 import pytest_asyncio
 
-from hbllm.brain.collective_node import (
+from hbllm.brain.world.collective_node import (
     AgentProfile,
     CollectiveNode,
     DelegationResult,

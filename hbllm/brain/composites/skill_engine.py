@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, Any
 from hbllm.network.node import Node, NodeType
 
 if TYPE_CHECKING:
-    from hbllm.brain.mechanism_store import MechanismStore
-    from hbllm.brain.provider_adapter import ProviderLLM
-    from hbllm.brain.skill_registry import SkillRegistry
+    from hbllm.brain.core.provider_adapter import ProviderLLM
+    from hbllm.brain.emotion.mechanism_store import MechanismStore
+    from hbllm.brain.skills.skill_registry import SkillRegistry
     from hbllm.network.messages import Message
 
 logger = logging.getLogger(__name__)
@@ -65,13 +65,13 @@ class SkillEngine(Node):
         self._learning_handler: Any = None
 
     async def on_start(self) -> None:
-        from hbllm.brain.failure_analyzer import FailureAnalyzer
-        from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
-        from hbllm.brain.learning_event_handler import LearningEventHandler
-        from hbllm.brain.rule_extractor import RuleExtractorNode
-        from hbllm.brain.skill_compiler_node import SkillCompilerNode
-        from hbllm.brain.skill_induction_node import SkillInductionNode
-        from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
+        from hbllm.brain.evaluation.failure_analyzer import FailureAnalyzer
+        from hbllm.brain.evaluation.failure_analyzer_node import FailureAnalyzerNode
+        from hbllm.brain.learning.learning_event_handler import LearningEventHandler
+        from hbllm.brain.learning.rule_extractor import RuleExtractorNode
+        from hbllm.brain.skills.skill_compiler_node import SkillCompilerNode
+        from hbllm.brain.skills.skill_induction_node import SkillInductionNode
+        from hbllm.brain.skills.skill_intelligence_node import SkillIntelligenceNode
 
         self._compiler = SkillCompilerNode(
             node_id=f"{self.node_id}.compiler",

@@ -15,7 +15,7 @@ import pytest
 import pytest_asyncio
 
 from hbllm.actions.tool_router import ToolRouterNode
-from hbllm.brain.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
+from hbllm.brain.planning.planner_node import PlannerNode, ThoughtGraph, ThoughtNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

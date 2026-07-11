@@ -141,7 +141,7 @@ class TestPlattCalibration:
 
     def test_calibrate_midpoint(self):
         """Score 0.4 with default params should be ~0.5."""
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         router = RouterNode(node_id="test", use_vectors=False)
         result = router._calibrate(0.4)
@@ -149,7 +149,7 @@ class TestPlattCalibration:
 
     def test_calibrate_high_score(self):
         """High raw score should produce high calibrated score."""
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         router = RouterNode(node_id="test", use_vectors=False)
         result = router._calibrate(0.9)
@@ -157,7 +157,7 @@ class TestPlattCalibration:
 
     def test_calibrate_low_score(self):
         """Low raw score should produce low calibrated score."""
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         router = RouterNode(node_id="test", use_vectors=False)
         result = router._calibrate(0.1)
@@ -165,7 +165,7 @@ class TestPlattCalibration:
 
     def test_calibrate_monotonic(self):
         """Higher raw scores should always produce higher calibrated scores."""
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         router = RouterNode(node_id="test", use_vectors=False)
         scores = [router._calibrate(x / 10.0) for x in range(11)]
@@ -182,7 +182,7 @@ class TestPersistentCentroids:
     def test_save_load_roundtrip(self):
         import numpy as np
 
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "centroids.json"
@@ -214,7 +214,7 @@ class TestPersistentCentroids:
 
     def test_load_missing_file(self):
         """Loading from non-existent path should not raise."""
-        from hbllm.brain.router_node import RouterNode
+        from hbllm.brain.control.router_node import RouterNode
 
         router = RouterNode(node_id="test", use_vectors=False)
         router._centroids_path = Path("/nonexistent/centroids.json")
@@ -228,27 +228,27 @@ class TestSpawnerSubDomain:
     """Test SpawnerNode sub-domain classification."""
 
     def test_classify_coding_python(self):
-        from hbllm.brain.spawner_node import _classify_domain_rank
+        from hbllm.brain.emotion.spawner_node import _classify_domain_rank
 
         assert _classify_domain_rank("coding.python") == 32
 
     def test_classify_math_calculus(self):
-        from hbllm.brain.spawner_node import _classify_domain_rank
+        from hbllm.brain.emotion.spawner_node import _classify_domain_rank
 
         assert _classify_domain_rank("math.calculus") == 32
 
     def test_classify_writing_poetry(self):
-        from hbllm.brain.spawner_node import _classify_domain_rank
+        from hbllm.brain.emotion.spawner_node import _classify_domain_rank
 
         assert _classify_domain_rank("writing.poetry") == 16
 
     def test_classify_unknown(self):
-        from hbllm.brain.spawner_node import _classify_domain_rank
+        from hbllm.brain.emotion.spawner_node import _classify_domain_rank
 
         assert _classify_domain_rank("gardening") == 8
 
     def test_classify_deep_subdomain(self):
-        from hbllm.brain.spawner_node import _classify_domain_rank
+        from hbllm.brain.emotion.spawner_node import _classify_domain_rank
 
         assert _classify_domain_rank("coding.python.django") == 32
 

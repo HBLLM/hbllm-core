@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from hbllm.brain.user_model import (
+from hbllm.brain.social.user_model import (
     LearnedAttribute,
     TrustDimension,
     UserBelief,

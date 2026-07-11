@@ -4,8 +4,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from hbllm.brain.planner_node import PlannerNode
-from hbllm.brain.process_reward_node import ProcessRewardNode
+from hbllm.brain.evaluation.process_reward_node import ProcessRewardNode
+from hbllm.brain.planning.planner_node import PlannerNode
 from hbllm.network.bus import InProcessBus
 
 

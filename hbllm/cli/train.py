@@ -759,7 +759,7 @@ def run_serve_local(args: argparse.Namespace) -> None:
     import asyncio
 
     async def _serve() -> None:
-        from hbllm.brain.factory import BrainFactory
+        from hbllm.brain.core.factory import BrainFactory
 
         brain = await BrainFactory.create_local(
             checkpoint_path=args.checkpoint,

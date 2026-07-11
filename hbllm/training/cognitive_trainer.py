@@ -23,7 +23,7 @@ from typing import Any
 
 import torch
 
-from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.skills.skill_registry import SkillRegistry
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.model.transformer import HBLLMForCausalLM
 from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder

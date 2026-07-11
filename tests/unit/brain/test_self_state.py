@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hbllm.brain.self_state import EpistemicCalibrationTracker, ToolReliabilityTracker
+from hbllm.brain.self_model.self_state import EpistemicCalibrationTracker, ToolReliabilityTracker
 
 
 def test_tool_ewma_reliability():

@@ -32,13 +32,13 @@ from __future__ import annotations
 
 class TestAttentionManager:
     def test_init(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         assert mgr is not None
 
     def test_score_importance(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         score = mgr.score_importance(
@@ -47,21 +47,21 @@ class TestAttentionManager:
         assert isinstance(score, float) and score > 0
 
     def test_get_importance_default(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         imp = mgr.get_importance("unknown_mem")
         assert isinstance(imp, float)
 
     def test_allocate_focus(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         alloc = mgr.allocate_focus("math", priority=0.8)
         assert alloc is not None
 
     def test_get_focus(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         mgr.allocate_focus("math", priority=0.8)
@@ -69,14 +69,14 @@ class TestAttentionManager:
         assert focus is not None
 
     def test_should_accept(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         result = mgr.should_accept("episodic", importance=0.9)
         assert isinstance(result, bool)
 
     def test_decay_all_scores(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         mgr.score_importance("m1", recency=0.9, frequency=0.5, relevance=0.7)
@@ -85,7 +85,7 @@ class TestAttentionManager:
         assert isinstance(after, float)
 
     def test_get_pruning_candidates(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         mgr.update_item_count("episodic", 100)
@@ -94,7 +94,7 @@ class TestAttentionManager:
         assert isinstance(candidates, list)
 
     def test_rebalance_focus(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         mgr.allocate_focus("math", priority=0.8)
@@ -103,7 +103,7 @@ class TestAttentionManager:
         assert isinstance(result, dict)
 
     def test_stats(self):
-        from hbllm.brain.attention_manager import AttentionManager
+        from hbllm.brain.self_model.attention_manager import AttentionManager
 
         mgr = AttentionManager(node_id="attn_test")
         s = mgr.stats()
@@ -117,33 +117,33 @@ class TestAttentionManager:
 
 class TestPolicyEngine:
     def test_init(self):
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         engine = PolicyEngine()
         assert engine is not None
 
     def test_list_policies_empty(self):
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         engine = PolicyEngine()
         policies = engine.list_policies()
         assert isinstance(policies, list)
 
     def test_evaluate_empty_policies(self):
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         engine = PolicyEngine()
         result = engine.evaluate("Hello world", tenant_id="t1")
         assert result is not None
 
     def test_get_policy_missing(self):
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         engine = PolicyEngine()
         assert engine.get_policy("nonexistent") is None
 
     def test_remove_policy_missing(self):
-        from hbllm.brain.policy_engine import PolicyEngine
+        from hbllm.brain.governance.policy_engine import PolicyEngine
 
         engine = PolicyEngine()
         assert not engine.remove_policy("nonexistent")
@@ -156,19 +156,19 @@ class TestPolicyEngine:
 
 class TestLoadManager:
     def test_init(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         assert mgr is not None
 
     def test_can_accept_task(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         assert isinstance(mgr.can_accept_task(), bool)
 
     def test_queue_and_dequeue(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         queued = mgr.queue_task("task_1", priority=0.7)
@@ -178,27 +178,27 @@ class TestLoadManager:
         assert task is None or isinstance(task, dict)
 
     def test_get_max_context_tokens(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         tokens = mgr.get_max_context_tokens()
         assert isinstance(tokens, int) and tokens > 0
 
     def test_get_model_preference(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         pref = mgr.get_model_preference()
         assert isinstance(pref, str)
 
     def test_is_simulation_enabled(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         assert isinstance(mgr.is_simulation_enabled(), bool)
 
     def test_stats(self):
-        from hbllm.brain.load_manager import LoadManager
+        from hbllm.brain.control.load_manager import LoadManager
 
         mgr = LoadManager(node_id="load_test")
         s = mgr.stats()
@@ -212,20 +212,20 @@ class TestLoadManager:
 
 class TestEmotionEngine:
     def test_init(self):
-        from hbllm.brain.emotion_engine import EmotionEngine
+        from hbllm.brain.emotion.emotion_engine import EmotionEngine
 
         engine = EmotionEngine(node_id="emotion_test")
         assert engine is not None
 
     def test_get_adaptation_hints(self):
-        from hbllm.brain.emotion_engine import EmotionEngine
+        from hbllm.brain.emotion.emotion_engine import EmotionEngine
 
         engine = EmotionEngine(node_id="emotion_test")
         hints = engine.get_adaptation_hints()
         assert isinstance(hints, dict)
 
     def test_stats(self):
-        from hbllm.brain.emotion_engine import EmotionEngine
+        from hbllm.brain.emotion.emotion_engine import EmotionEngine
 
         engine = EmotionEngine(node_id="emotion_test")
         s = engine.stats()
@@ -419,6 +419,6 @@ class TestSkillEngine:
 
 class TestSkillRegistry:
     def test_import(self):
-        from hbllm.brain import skill_registry
+        from hbllm.brain.skills import skill_registry
 
         assert skill_registry is not None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
+from hbllm.brain.evaluation.failure_analyzer_node import FailureAnalyzerNode
 from hbllm.network.messages import Message, MessageType
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

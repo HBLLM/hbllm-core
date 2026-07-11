@@ -81,7 +81,7 @@ class TestEnvironmentSimulator:
 
 # ── Skill Induction Node ─────────────────────────────────────────────────────
 
-from hbllm.brain.skill_induction_node import SecurityInterceptor, SkillInductionNode
+from hbllm.brain.skills.skill_induction_node import SecurityInterceptor, SkillInductionNode
 
 
 class TestSecurityInterceptor:
@@ -117,7 +117,7 @@ class TestSkillInductionNode:
 
 # ── Web Research Node ────────────────────────────────────────────────────────
 
-from hbllm.brain.web_research_node import ResearchFinding, ResearchTier, classify_tier
+from hbllm.brain.world.web_research_node import ResearchFinding, ResearchTier, classify_tier
 
 
 class TestResearchTier:
@@ -147,7 +147,7 @@ class TestResearchFinding:
 
 # ── World Model Node ─────────────────────────────────────────────────────────
 
-from hbllm.brain.world_model_node import WorldModelNode
+from hbllm.brain.world.world_model_node import WorldModelNode
 
 
 class TestWorldModelNode:
@@ -175,7 +175,7 @@ class TestWorldModelNode:
 
 # ── LLM Interface ────────────────────────────────────────────────────────────
 
-from hbllm.brain.llm_interface import LLMInterface
+from hbllm.brain.core.llm_interface import LLMInterface
 
 
 class TestLLMInterface:

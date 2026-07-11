@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.governance import CognitiveBudget, CognitiveGovernanceEngine
+from hbllm.brain.governance.governance import CognitiveBudget, CognitiveGovernanceEngine
 
 
 @pytest.fixture

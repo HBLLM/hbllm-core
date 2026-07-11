@@ -1,6 +1,6 @@
 import pytest
 
-from hbllm.brain.skill_registry import Skill, SkillGraphExecutor, SkillRegistry
+from hbllm.brain.skills.skill_registry import Skill, SkillGraphExecutor, SkillRegistry
 
 
 @pytest.mark.asyncio

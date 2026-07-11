@@ -4,7 +4,7 @@ import pytest
 import pytest_asyncio
 
 from hbllm.actions.execution_node import ExecutionNode
-from hbllm.brain.workspace_node import WorkspaceNode
+from hbllm.brain.planning.workspace_node import WorkspaceNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -153,7 +153,7 @@ async def test_workspace_fails_bad_python_and_monologues(bus):
         await asyncio.sleep(0.1)
 
 
-from hbllm.brain.learner_node import LearnerNode
+from hbllm.brain.learning.learner_node import LearnerNode
 
 
 @pytest.mark.asyncio

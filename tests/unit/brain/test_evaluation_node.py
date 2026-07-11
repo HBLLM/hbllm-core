@@ -5,7 +5,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.evaluation_node import EvaluationNode, EvaluationReport
+from hbllm.brain.evaluation.evaluation_node import EvaluationNode, EvaluationReport
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

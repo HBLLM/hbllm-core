@@ -6,8 +6,7 @@ import pytest_asyncio
 
 from hbllm.actions.browser_node import BrowserNode
 from hbllm.actions.execution_node import ExecutionNode
-from hbllm.brain.identity_node import IdentityNode, IdentityProfile
-from hbllm.brain.prompt_helper import (
+from hbllm.brain.core.prompt_helper import (
     ChatContext,
     _compute_recency_bonus,
     _find_last_high_signal_message,
@@ -19,6 +18,7 @@ from hbllm.brain.prompt_helper import (
     get_chat_memories,
     get_dynamic_system_prompt,
 )
+from hbllm.brain.social.identity_node import IdentityNode, IdentityProfile
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType

@@ -33,7 +33,7 @@ def mock_encode_text(self, text: str) -> np.ndarray:
     return emb / np.linalg.norm(emb)
 
 
-from hbllm.brain.router_node import RouterNode
+from hbllm.brain.control.router_node import RouterNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

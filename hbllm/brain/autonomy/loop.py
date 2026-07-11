@@ -241,7 +241,7 @@ class AutonomyCore:
         """Startup recovery phase: check for incomplete/blocked goals and resume them."""
         logger.info("[AutonomyCore] Initiating startup recovery phase...")
         try:
-            from hbllm.brain.goal_manager import GoalManager, GoalStatus
+            from hbllm.brain.emotion.goal_manager import GoalManager, GoalStatus
 
             goal_manager = GoalManager(data_dir=self._data_dir)
             active_goals = goal_manager.get_active_goals()

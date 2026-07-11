@@ -62,8 +62,8 @@ class LearningLoop(Node):
         self._spawner: Any = None
 
     async def on_start(self) -> None:
-        from hbllm.brain.learner_node import LearnerNode
-        from hbllm.brain.world_model_node import WorldModelNode
+        from hbllm.brain.learning.learner_node import LearnerNode
+        from hbllm.brain.world.world_model_node import WorldModelNode
 
         self._learner = LearnerNode(node_id=f"{self.node_id}.learner")
         self._learner.node_identity = self.node_identity
@@ -80,7 +80,7 @@ class LearningLoop(Node):
 
             provider = self._llm.provider
             if isinstance(provider, LocalProvider):
-                from hbllm.brain.spawner_node import SpawnerNode
+                from hbllm.brain.emotion.spawner_node import SpawnerNode
 
                 self._spawner = SpawnerNode(
                     node_id=f"{self.node_id}.spawner",
@@ -92,7 +92,7 @@ class LearningLoop(Node):
 
         # Process Reward Model (optional — may require ML model / torch)
         try:
-            from hbllm.brain.process_reward_node import ProcessRewardNode
+            from hbllm.brain.evaluation.process_reward_node import ProcessRewardNode
 
             self._process_reward = ProcessRewardNode(
                 node_id=f"{self.node_id}.prm",

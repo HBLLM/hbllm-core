@@ -146,7 +146,7 @@ class TestBrainSNN:
 
 class TestConstitutionalPrinciples:
     def test_import(self):
-        from hbllm.brain import constitutional_principles
+        from hbllm.brain.governance import constitutional_principles
 
         exports = [x for x in dir(constitutional_principles) if not x.startswith("_")]
         assert len(exports) > 0
@@ -172,7 +172,7 @@ class TestCompactionEntropy:
 
 class TestActionSchema:
     def test_import(self):
-        from hbllm.brain import action_schema
+        from hbllm.brain.planning import action_schema
 
         exports = [x for x in dir(action_schema) if not x.startswith("_")]
         assert len(exports) > 0

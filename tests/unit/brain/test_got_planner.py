@@ -2,7 +2,7 @@
 
 import pytest
 
-from hbllm.brain.planner_node import ThoughtGraph, ThoughtNode
+from hbllm.brain.planning.planner_node import ThoughtGraph, ThoughtNode
 
 
 def test_thought_graph_add_root():

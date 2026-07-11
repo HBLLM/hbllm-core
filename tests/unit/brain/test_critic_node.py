@@ -3,8 +3,8 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.critic_node import CriticNode
-from hbllm.brain.workspace_node import WorkspaceNode
+from hbllm.brain.evaluation.critic_node import CriticNode
+from hbllm.brain.planning.workspace_node import WorkspaceNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 from tests.mock_llm import MockLLM

@@ -4,10 +4,10 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.action_planner import ActionPlanner
-from hbllm.brain.action_schema import ActionPlan, ActionType, RiskLevel
-from hbllm.brain.decision_node import DecisionNode
-from hbllm.brain.utility_calibrator import UtilityCalibrator
+from hbllm.brain.control.decision_node import DecisionNode
+from hbllm.brain.evaluation.utility_calibrator import UtilityCalibrator
+from hbllm.brain.planning.action_planner import ActionPlanner
+from hbllm.brain.planning.action_schema import ActionPlan, ActionType, RiskLevel
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -1170,7 +1170,7 @@ async def test_router_lyapunov_cooling_hysteresis(tmp_path):
             },
         )
 
-    from hbllm.brain.utility_calibrator import CalibrationTrace
+    from hbllm.brain.evaluation.utility_calibrator import CalibrationTrace
 
     high_var_traces = [
         CalibrationTrace(
@@ -1290,7 +1290,7 @@ async def test_router_high_confidence_anchor_gating(tmp_path):
             },
         )
 
-    from hbllm.brain.utility_calibrator import CalibrationTrace
+    from hbllm.brain.evaluation.utility_calibrator import CalibrationTrace
 
     high_var_traces = [
         CalibrationTrace(
@@ -1401,7 +1401,7 @@ async def test_router_stable_lock_invariance(tmp_path):
             },
         )
 
-    from hbllm.brain.utility_calibrator import CalibrationTrace
+    from hbllm.brain.evaluation.utility_calibrator import CalibrationTrace
 
     high_var_traces = [
         CalibrationTrace(
@@ -1553,7 +1553,7 @@ async def test_router_s_ctrl_smoothing(tmp_path):
             },
         )
 
-    from hbllm.brain.utility_calibrator import CalibrationTrace
+    from hbllm.brain.evaluation.utility_calibrator import CalibrationTrace
 
     mock_traces = [
         CalibrationTrace(

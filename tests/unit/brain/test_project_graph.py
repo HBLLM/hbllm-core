@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from hbllm.brain.project_graph import (
+from hbllm.brain.world.project_graph import (
     ProjectEntity,
     ProjectGraph,
     ProjectRelation,

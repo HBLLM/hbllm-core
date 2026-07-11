@@ -4,7 +4,7 @@ import asyncio
 
 import pytest_asyncio
 
-from hbllm.brain.collective_node import CollectiveNode, KnowledgeDigest
+from hbllm.brain.world.collective_node import CollectiveNode, KnowledgeDigest
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

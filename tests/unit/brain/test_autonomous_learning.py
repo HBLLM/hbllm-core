@@ -242,7 +242,7 @@ class TestExperimentEngine:
     @pytest.mark.asyncio
     async def test_generate_hypothesis(self, tmp_data_dir):
         from hbllm.brain.causality.causal_model_builder import CausalModel, CausalNode
-        from hbllm.brain.experiment_engine import ExperimentEngine
+        from hbllm.brain.learning.experiment_engine import ExperimentEngine
 
         llm = MockLLM(
             [
@@ -266,7 +266,7 @@ class TestExperimentEngine:
 
     @pytest.mark.asyncio
     async def test_design_experiment(self, tmp_data_dir):
-        from hbllm.brain.experiment_engine import ExperimentEngine, Hypothesis
+        from hbllm.brain.learning.experiment_engine import ExperimentEngine, Hypothesis
 
         llm = MockLLM(
             [
@@ -289,7 +289,7 @@ class TestExperimentEngine:
 
     @pytest.mark.asyncio
     async def test_reality_level_weights(self, tmp_data_dir):
-        from hbllm.brain.experiment_engine import (
+        from hbllm.brain.learning.experiment_engine import (
             REALITY_CONFIDENCE_WEIGHTS,
             RealityLevel,
         )
@@ -303,7 +303,7 @@ class TestExperimentEngine:
 
     @pytest.mark.asyncio
     async def test_run_experiment(self, tmp_data_dir):
-        from hbllm.brain.experiment_engine import (
+        from hbllm.brain.learning.experiment_engine import (
             Experiment,
             ExperimentEngine,
             Hypothesis,
@@ -340,7 +340,7 @@ class TestExperimentEngine:
 
     @pytest.mark.asyncio
     async def test_stats(self, tmp_data_dir):
-        from hbllm.brain.experiment_engine import ExperimentEngine
+        from hbllm.brain.learning.experiment_engine import ExperimentEngine
 
         engine = ExperimentEngine(llm=MockLLM(), data_dir=tmp_data_dir)
         stats = engine.stats()
@@ -356,7 +356,7 @@ class TestExperimentEngine:
 class TestContradictionDetector:
     @pytest.mark.asyncio
     async def test_detect_contradiction(self):
-        from hbllm.brain.contradiction_detector import ContradictionDetector
+        from hbllm.brain.reasoning.contradiction_detector import ContradictionDetector
 
         llm = MockLLM(
             [
@@ -383,7 +383,7 @@ class TestContradictionDetector:
 
     @pytest.mark.asyncio
     async def test_no_contradiction(self):
-        from hbllm.brain.contradiction_detector import ContradictionDetector
+        from hbllm.brain.reasoning.contradiction_detector import ContradictionDetector
 
         llm = MockLLM(
             [
@@ -407,7 +407,7 @@ class TestContradictionDetector:
 
 class TestBeliefRevisionEngine:
     def test_create_belief_state(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import BeliefRevisionEngine
+        from hbllm.brain.reasoning.contradiction_detector import BeliefRevisionEngine
 
         engine = BeliefRevisionEngine(data_dir=tmp_data_dir)
         state = engine.get_belief_state("SQL Injection")
@@ -416,7 +416,7 @@ class TestBeliefRevisionEngine:
 
     @pytest.mark.asyncio
     async def test_integrate_evidence(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import BeliefRevisionEngine
+        from hbllm.brain.reasoning.contradiction_detector import BeliefRevisionEngine
 
         engine = BeliefRevisionEngine(data_dir=tmp_data_dir)
         state = await engine.integrate_evidence(
@@ -430,7 +430,7 @@ class TestBeliefRevisionEngine:
 
     @pytest.mark.asyncio
     async def test_competing_beliefs(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import (
+        from hbllm.brain.reasoning.contradiction_detector import (
             BeliefRevisionEngine,
             Contradiction,
         )
@@ -450,7 +450,7 @@ class TestBeliefRevisionEngine:
 
     @pytest.mark.asyncio
     async def test_dominant_belief(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import BeliefRevisionEngine
+        from hbllm.brain.reasoning.contradiction_detector import BeliefRevisionEngine
 
         engine = BeliefRevisionEngine(data_dir=tmp_data_dir)
         await engine.integrate_evidence("A", "Claim 1", 0.9, "evidence 1")
@@ -461,7 +461,7 @@ class TestBeliefRevisionEngine:
 
     @pytest.mark.asyncio
     async def test_prune_weak_beliefs(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import BeliefRevisionEngine
+        from hbllm.brain.reasoning.contradiction_detector import BeliefRevisionEngine
 
         engine = BeliefRevisionEngine(data_dir=tmp_data_dir)
         await engine.integrate_evidence("A", "Strong claim", 0.9, "evidence")
@@ -471,12 +471,12 @@ class TestBeliefRevisionEngine:
         assert pruned == 1
 
     def test_confidence_decay(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import BeliefRevisionEngine
+        from hbllm.brain.reasoning.contradiction_detector import BeliefRevisionEngine
 
         engine = BeliefRevisionEngine(data_dir=tmp_data_dir)
         # Manually add a belief
         state = engine.get_belief_state("A")
-        from hbllm.brain.contradiction_detector import BeliefHypothesis
+        from hbllm.brain.reasoning.contradiction_detector import BeliefHypothesis
 
         state.hypotheses.append(BeliefHypothesis(claim="test", confidence=0.5))
         engine._persist(state)
@@ -486,11 +486,11 @@ class TestBeliefRevisionEngine:
         assert state.hypotheses[0].confidence < 0.5
 
     def test_persistence(self, tmp_data_dir):
-        from hbllm.brain.contradiction_detector import BeliefRevisionEngine
+        from hbllm.brain.reasoning.contradiction_detector import BeliefRevisionEngine
 
         engine1 = BeliefRevisionEngine(data_dir=tmp_data_dir)
         state = engine1.get_belief_state("test")
-        from hbllm.brain.contradiction_detector import BeliefHypothesis
+        from hbllm.brain.reasoning.contradiction_detector import BeliefHypothesis
 
         state.hypotheses.append(BeliefHypothesis(claim="persisted", confidence=0.7))
         engine1._persist(state)
@@ -509,7 +509,7 @@ class TestBeliefRevisionEngine:
 class TestMetaLearner:
     @pytest.mark.asyncio
     async def test_record_session(self, tmp_data_dir):
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml = MetaLearner(data_dir=tmp_data_dir)
         session = await ml.record_session(
@@ -526,7 +526,7 @@ class TestMetaLearner:
     async def test_strategy_computed(self, tmp_data_dir):
         import asyncio
 
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml = MetaLearner(data_dir=tmp_data_dir)
         await ml.record_session("cyber", "research", 0.2, 0.4, 2.0)
@@ -538,14 +538,14 @@ class TestMetaLearner:
         assert strategy.cost_efficiency > 0
 
     def test_recommend_beginner(self, tmp_data_dir):
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml = MetaLearner(data_dir=tmp_data_dir)
         action = ml.recommend_next_action("unknown", current_confidence=0.1)
         assert action == "research"  # Beginners should research
 
     def test_recommend_advanced(self, tmp_data_dir):
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml = MetaLearner(data_dir=tmp_data_dir)
         action = ml.recommend_next_action("unknown", current_confidence=0.9)
@@ -555,7 +555,7 @@ class TestMetaLearner:
     async def test_method_effectiveness(self, tmp_data_dir):
         import asyncio
 
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml = MetaLearner(data_dir=tmp_data_dir)
         await ml.record_session("cyber", "research", 0.2, 0.5, 2.0)
@@ -568,7 +568,7 @@ class TestMetaLearner:
 
     @pytest.mark.asyncio
     async def test_stats(self, tmp_data_dir):
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml = MetaLearner(data_dir=tmp_data_dir)
         await ml.record_session("cyber", "research", 0.2, 0.5, 2.0)
@@ -579,7 +579,7 @@ class TestMetaLearner:
 
     @pytest.mark.asyncio
     async def test_persistence(self, tmp_data_dir):
-        from hbllm.brain.meta_learner import MetaLearner
+        from hbllm.brain.learning.meta_learner import MetaLearner
 
         ml1 = MetaLearner(data_dir=tmp_data_dir)
         await ml1.record_session("cyber", "research", 0.2, 0.5, 2.0)
@@ -597,7 +597,7 @@ class TestMetaLearner:
 class TestConceptFormationEngine:
     @pytest.mark.asyncio
     async def test_discover_abstractions_no_builder(self, tmp_data_dir):
-        from hbllm.brain.concept_formation import ConceptFormationEngine
+        from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
 
         engine = ConceptFormationEngine(data_dir=tmp_data_dir)
         result = await engine.discover_abstractions()
@@ -611,7 +611,7 @@ class TestConceptFormationEngine:
             CausalNode,
             Mechanism,
         )
-        from hbllm.brain.concept_formation import ConceptFormationEngine
+        from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
 
         # Create mock builder with similar models
         builder = MagicMock()
@@ -679,7 +679,7 @@ class TestConceptFormationEngine:
             CausalModel,
             Mechanism,
         )
-        from hbllm.brain.concept_formation import ConceptFormationEngine
+        from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
 
         builder = MagicMock()
         builder.get_all_models.return_value = [
@@ -713,14 +713,14 @@ class TestConceptFormationEngine:
         assert analogies[0].domain_a != analogies[0].domain_b
 
     def test_stats(self, tmp_data_dir):
-        from hbllm.brain.concept_formation import ConceptFormationEngine
+        from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
 
         engine = ConceptFormationEngine(data_dir=tmp_data_dir)
         stats = engine.stats()
         assert stats["abstract_concepts"] == 0
 
     def test_serialization(self):
-        from hbllm.brain.concept_formation import AbstractConcept
+        from hbllm.brain.reasoning.concept_formation import AbstractConcept
 
         concept = AbstractConcept(
             label="Test Pattern",
@@ -741,8 +741,8 @@ class TestConceptFormationEngine:
 class TestAutonomousLearner:
     @pytest.mark.asyncio
     async def test_learn_basic(self, mock_llm, tmp_data_dir):
-        from hbllm.brain.autonomous_learner import AutonomousLearner
         from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
+        from hbllm.brain.learning.autonomous_learner import AutonomousLearner
         from hbllm.network.bus import InProcessBus
 
         bus = InProcessBus()
@@ -796,7 +796,7 @@ class TestAutonomousLearner:
 
     @pytest.mark.asyncio
     async def test_learning_budget(self):
-        from hbllm.brain.autonomous_learner import LearningBudget
+        from hbllm.brain.learning.autonomous_learner import LearningBudget
 
         budget = LearningBudget()
         assert budget.can_afford("research")
@@ -807,7 +807,7 @@ class TestAutonomousLearner:
 
     @pytest.mark.asyncio
     async def test_learning_goal_serialization(self):
-        from hbllm.brain.autonomous_learner import LearningGoal
+        from hbllm.brain.learning.autonomous_learner import LearningGoal
 
         goal = LearningGoal(
             topic="Cybersecurity",

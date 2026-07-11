@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.failure_analyzer import FailureAnalyzer
-from hbllm.brain.learning_event_handler import LearningEventHandler
-from hbllm.brain.learning_subsystem import LearningSubsystem
-from hbllm.brain.mechanism_store import MechanismStore
+from hbllm.brain.emotion.mechanism_store import MechanismStore
+from hbllm.brain.evaluation.failure_analyzer import FailureAnalyzer
+from hbllm.brain.learning.learning_event_handler import LearningEventHandler
+from hbllm.brain.learning.learning_subsystem import LearningSubsystem
 from hbllm.network.messages import Message, MessageType
 
 

@@ -2,7 +2,7 @@
 Spiking Neural Network (SNN) modules for cognitive modeling.
 """
 
-from hbllm.brain.neuromodulation import NeuromodulationEngine, NeuromodulatorState
+from hbllm.brain.emotion.neuromodulation import NeuromodulationEngine, NeuromodulatorState
 from hbllm.brain.snn import comprehension
 from hbllm.brain.snn.dendrite import DendriticConfig, DendriticNeuron
 from hbllm.brain.snn.lif import LIFConfig, LIFNeuron, SpikeEvent, SpikingAccumulator

@@ -3,7 +3,12 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from hbllm.brain.autonomy.task_graph import Goal
-from hbllm.brain.cognitive_state import CandidatePlan, CognitivePolicy, CognitiveState, Evidence
+from hbllm.brain.core.cognitive_state import (
+    CandidatePlan,
+    CognitivePolicy,
+    CognitiveState,
+    Evidence,
+)
 
 
 def test_cognitive_state_immutability():

@@ -152,7 +152,7 @@ class TestPlannerCache:
 
     def test_cache_key_deterministic(self):
         """Same text should produce the same cache key."""
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         key1 = PlannerNode._cache_key("Hello world")
         key2 = PlannerNode._cache_key("Hello world")
@@ -160,7 +160,7 @@ class TestPlannerCache:
 
     def test_cache_key_case_insensitive(self):
         """Cache keys should be case-insensitive."""
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         key1 = PlannerNode._cache_key("Hello World")
         key2 = PlannerNode._cache_key("hello world")
@@ -168,7 +168,7 @@ class TestPlannerCache:
 
     def test_cache_key_strips_whitespace(self):
         """Cache keys should ignore leading/trailing whitespace."""
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         key1 = PlannerNode._cache_key("  Hello World  ")
         key2 = PlannerNode._cache_key("Hello World")
@@ -176,7 +176,7 @@ class TestPlannerCache:
 
     def test_cache_eviction(self):
         """Cache should evict oldest entries when full."""
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="test_planner")
 
@@ -192,7 +192,7 @@ class TestPlannerCache:
 
     def test_cache_hit_tracking(self):
         """Cache should track hit/miss counts."""
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="test_planner")
         assert node._cache_hits == 0
@@ -200,7 +200,7 @@ class TestPlannerCache:
 
     def test_cache_stores_and_retrieves(self):
         """Cache should store and retrieve responses correctly."""
-        from hbllm.brain.planner_node import PlannerNode
+        from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="test_planner")
 

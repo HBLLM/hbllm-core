@@ -436,7 +436,7 @@ class CognitivePipeline:
 
         # If it needs web search, it's complex
         try:
-            from hbllm.brain.router_node import RouterNode
+            from hbllm.brain.control.router_node import RouterNode
 
             if RouterNode._is_web_search_query(text):
                 return "complex"

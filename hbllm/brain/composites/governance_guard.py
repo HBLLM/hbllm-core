@@ -49,9 +49,9 @@ class GovernanceGuard(Node):
         self._confidence_estimator: Any = None
 
     async def on_start(self) -> None:
-        from hbllm.brain.confidence_estimator import ConfidenceEstimator
-        from hbllm.brain.policy_engine import PolicyEngine
-        from hbllm.brain.sentinel_node import SentinelNode
+        from hbllm.brain.governance.policy_engine import PolicyEngine
+        from hbllm.brain.governance.sentinel_node import SentinelNode
+        from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
 
         # PolicyEngine is a plain class (not a Node)
         self._policy_engine = PolicyEngine()

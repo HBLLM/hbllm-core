@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from hbllm.brain.meta_node import MetaReasoningNode
+from hbllm.brain.self_model.meta_node import MetaReasoningNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import FeedbackPayload, Message, MessageType
 

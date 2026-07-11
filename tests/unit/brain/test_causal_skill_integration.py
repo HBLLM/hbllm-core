@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.failure_analyzer import FailureAnalyzer, FailureCategory
-from hbllm.brain.mechanism_store import MechanismStore
-from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
-from hbllm.brain.skill_registry import Skill, SkillRegistry
+from hbllm.brain.emotion.mechanism_store import MechanismStore
+from hbllm.brain.evaluation.failure_analyzer import FailureAnalyzer, FailureCategory
+from hbllm.brain.skills.skill_intelligence_node import SkillIntelligenceNode
+from hbllm.brain.skills.skill_registry import Skill, SkillRegistry
 
 
 @pytest.fixture

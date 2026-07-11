@@ -2,7 +2,7 @@
 
 import pytest
 
-from hbllm.brain.context_fusion import (
+from hbllm.brain.reasoning.context_fusion import (
     ContextFusionEngine,
     ContextSlice,
     FusedContext,

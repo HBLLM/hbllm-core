@@ -848,56 +848,56 @@ async def studio_stats() -> Any:
     result["nodes"] = node_health
 
     # ── Cognitive metrics ──
-    from hbllm.brain.cognitive_metrics import CognitiveMetrics
+    from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
 
     cm = node_map.get("CognitiveMetrics")
     if cm and isinstance(cm, CognitiveMetrics):
         result["metrics"] = cm.get_dashboard_metrics()
 
     # ── Self model ──
-    from hbllm.brain.self_model import SelfModel
+    from hbllm.brain.self_model.self_model import SelfModel
 
     sm = node_map.get("SelfModel")
     if sm and isinstance(sm, SelfModel):
         result["self_model"] = sm.get_metrics()
 
     # ── Skill registry ──
-    from hbllm.brain.skill_registry import SkillRegistry
+    from hbllm.brain.skills.skill_registry import SkillRegistry
 
     sr = node_map.get("SkillRegistry")
     if sr and isinstance(sr, SkillRegistry):
         result["skills"] = sr.stats()
 
     # ── Goals ──
-    from hbllm.brain.goal_manager import GoalManager
+    from hbllm.brain.emotion.goal_manager import GoalManager
 
     gm = node_map.get("GoalManager")
     if gm and isinstance(gm, GoalManager):
         result["goals"] = gm.stats()
 
     # ── Evaluation ──
-    from hbllm.brain.evaluation_node import EvaluationNode
+    from hbllm.brain.evaluation.evaluation_node import EvaluationNode
 
     ev = node_map.get("EvaluationNode")
     if ev and isinstance(ev, EvaluationNode):
         result["evaluation"] = ev.stats()
 
     # ── Attention ──
-    from hbllm.brain.attention_manager import AttentionManager
+    from hbllm.brain.self_model.attention_manager import AttentionManager
 
     am = node_map.get("AttentionManager")
     if am and isinstance(am, AttentionManager):
         result["attention"] = am.stats()
 
     # ── Load manager ──
-    from hbllm.brain.load_manager import LoadManager
+    from hbllm.brain.control.load_manager import LoadManager
 
     lm = node_map.get("LoadManager")
     if lm and isinstance(lm, LoadManager):
         result["load_manager"] = lm.stats()
 
     # ── Collective ──
-    from hbllm.brain.collective_node import CollectiveNode
+    from hbllm.brain.world.collective_node import CollectiveNode
 
     cn = node_map.get("CollectiveNode")
     if cn and isinstance(cn, CollectiveNode):
@@ -918,14 +918,14 @@ async def studio_stats() -> Any:
         }
 
     # ── Reflection ──
-    from hbllm.brain.reflection_node import ReflectionNode
+    from hbllm.brain.emotion.reflection_node import ReflectionNode
 
     rn = node_map.get("ReflectionNode")
     if rn and isinstance(rn, ReflectionNode):
         result["reflection"] = rn.stats()
 
     # ── Learning (LearnerNode) ──
-    from hbllm.brain.learner_node import LearnerNode
+    from hbllm.brain.learning.learner_node import LearnerNode
 
     ln = node_map.get("LearnerNode")
     if ln and isinstance(ln, LearnerNode):
@@ -943,7 +943,7 @@ async def studio_stats() -> Any:
         result["learning"] = learning_stats
 
     # ── Skill compiler ──
-    from hbllm.brain.skill_compiler_node import SkillCompilerNode
+    from hbllm.brain.skills.skill_compiler_node import SkillCompilerNode
 
     sc = node_map.get("SkillCompilerNode")
     if sc and isinstance(sc, SkillCompilerNode):
@@ -1138,7 +1138,7 @@ async def studio_learning() -> Any:
     result: dict[str, Any] = {"status": "active"}
 
     # ── LearnerNode stats ──
-    from hbllm.brain.learner_node import LearnerNode
+    from hbllm.brain.learning.learner_node import LearnerNode
 
     ln = node_map.get("LearnerNode")
     if ln and isinstance(ln, LearnerNode):
@@ -1170,7 +1170,7 @@ async def studio_learning() -> Any:
         result["learner"] = {"status": "not_found"}
 
     # ── EvaluationNode aggregate ──
-    from hbllm.brain.evaluation_node import EvaluationNode
+    from hbllm.brain.evaluation.evaluation_node import EvaluationNode
 
     ev = node_map.get("EvaluationNode")
     if ev and isinstance(ev, EvaluationNode):
@@ -1179,7 +1179,7 @@ async def studio_learning() -> Any:
         result["evaluation"] = {"status": "not_found"}
 
     # ── ReflectionNode insights ──
-    from hbllm.brain.reflection_node import ReflectionNode
+    from hbllm.brain.emotion.reflection_node import ReflectionNode
 
     rn = node_map.get("ReflectionNode")
     if rn and isinstance(rn, ReflectionNode):
@@ -1280,7 +1280,7 @@ async def studio_learning_trigger(request: Request) -> Any:
     await bus.publish("system.evaluation", eval_msg)
 
     # Determine what should happen based on score
-    from hbllm.brain.learner_node import LearnerNode
+    from hbllm.brain.learning.learner_node import LearnerNode
 
     node_map = _get_node_map(brain)
     ln = node_map.get("LearnerNode")

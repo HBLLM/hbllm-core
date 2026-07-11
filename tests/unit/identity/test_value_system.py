@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hbllm.brain.value_system import (
+from hbllm.brain.governance.value_system import (
     DynamicValueArbitrator,
     InterruptionPenaltyPolicy,
     ResourceConservationPolicy,

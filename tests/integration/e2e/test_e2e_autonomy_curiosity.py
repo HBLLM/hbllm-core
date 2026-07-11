@@ -17,8 +17,8 @@ import pytest_asyncio
 
 from hbllm.brain.autonomy.loop import AutonomyCore
 from hbllm.brain.autonomy.state_machine import CognitiveState
-from hbllm.brain.curiosity_node import CuriosityNode
-from hbllm.brain.spawner_node import SpawnerNode
+from hbllm.brain.emotion.curiosity_node import CuriosityNode
+from hbllm.brain.emotion.spawner_node import SpawnerNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

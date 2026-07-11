@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from hbllm.brain.reality_graph import RealityEntity, RealityGraph
+from hbllm.brain.reasoning.reality_graph import RealityEntity, RealityGraph
 
 
 class TestRealityEntity:

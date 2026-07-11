@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.belief_store import (
+from hbllm.brain.reasoning.belief_store import (
     Belief,
     BeliefStatus,
     BeliefStore,

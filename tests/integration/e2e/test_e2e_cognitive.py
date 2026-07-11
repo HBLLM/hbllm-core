@@ -11,14 +11,14 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.critic_node import CriticNode
-from hbllm.brain.decision_node import DecisionNode
-from hbllm.brain.experience_node import ExperienceNode
-from hbllm.brain.identity_node import IdentityNode
-from hbllm.brain.meta_node import MetaReasoningNode
-from hbllm.brain.planner_node import PlannerNode
-from hbllm.brain.router_node import RouterNode
-from hbllm.brain.workspace_node import WorkspaceNode
+from hbllm.brain.control.decision_node import DecisionNode
+from hbllm.brain.control.router_node import RouterNode
+from hbllm.brain.evaluation.critic_node import CriticNode
+from hbllm.brain.learning.experience_node import ExperienceNode
+from hbllm.brain.planning.planner_node import PlannerNode
+from hbllm.brain.planning.workspace_node import WorkspaceNode
+from hbllm.brain.self_model.meta_node import MetaReasoningNode
+from hbllm.brain.social.identity_node import IdentityNode
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType

@@ -32,7 +32,7 @@ graph TB
 
 ## PolicyEngine
 
-::: hbllm.brain.policy_engine.PolicyEngine
+::: hbllm.brain.governance.policy_engine.PolicyEngine
 
 The governance evaluation layer. Every response passes through the PolicyEngine
 before delivery to the user.
@@ -61,7 +61,7 @@ before delivery to the user.
 ### Usage
 
 ```python
-from hbllm.brain.policy_engine import PolicyEngine, Policy, PolicyType, PolicyAction
+from hbllm.brain.governance.policy_engine import PolicyEngine, Policy, PolicyType, PolicyAction
 
 engine = PolicyEngine()
 
@@ -127,7 +127,7 @@ print(f"Loaded {loaded} policies")
 Policies can have runtime conditions that check against sensor/state context:
 
 ```python
-from hbllm.brain.policy_engine import PolicyCondition
+from hbllm.brain.governance.policy_engine import PolicyCondition
 
 # Only activate after 9 PM
 policy = Policy(
@@ -161,7 +161,7 @@ class PolicyResult:
 
 ## SentinelNode
 
-::: hbllm.brain.sentinel_node.SentinelNode
+::: hbllm.brain.governance.sentinel_node.SentinelNode
 
 Proactive governance monitor that watches world state and takes corrective action
 when owner rules are violated. Unlike `DecisionNode` (which gates responses
@@ -235,7 +235,7 @@ alerts = await sentinel.handle_message(Message(
 
 ## DecisionNode
 
-::: hbllm.brain.decision_node.DecisionNode
+::: hbllm.brain.control.decision_node.DecisionNode
 
 The gatekeeper that separates **generation** from **execution**. After the
 Workspace has formed a consensus (selected the best thought), the DecisionNode:
@@ -260,7 +260,7 @@ Workspace has formed a consensus (selected the best thought), the DecisionNode:
 
 ## Owner Rules
 
-::: hbllm.brain.owner_rules
+::: hbllm.brain.governance.owner_rules
 
 User-defined rules that the system must follow. These are loaded at startup and
 converted into `Policy` objects for the PolicyEngine.
@@ -272,7 +272,7 @@ policies with conditions, patterns, and actions.
 
 ## Constitutional Principles
 
-::: hbllm.brain.constitutional_principles
+::: hbllm.brain.governance.constitutional_principles
 
 Core values that are always active regardless of tenant or configuration:
 

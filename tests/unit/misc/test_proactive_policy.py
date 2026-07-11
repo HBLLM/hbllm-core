@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.sentinel_node import SentinelNode
+from hbllm.brain.governance.sentinel_node import SentinelNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

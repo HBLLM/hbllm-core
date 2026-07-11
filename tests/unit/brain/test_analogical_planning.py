@@ -1,6 +1,6 @@
-from hbllm.brain.cognitive_state import CandidatePlan
-from hbllm.brain.concept_formation import ConceptFormationEngine, CrossDomainAnalogy
-from hbllm.brain.skill_registry import Skill, SkillRegistry
+from hbllm.brain.core.cognitive_state import CandidatePlan
+from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine, CrossDomainAnalogy
+from hbllm.brain.skills.skill_registry import Skill, SkillRegistry
 
 
 def test_generate_analogous_hypothesis(tmp_path):

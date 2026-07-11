@@ -3,7 +3,7 @@
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.identity_node import IdentityNode, IdentityProfile, IdentityStore
+from hbllm.brain.social.identity_node import IdentityNode, IdentityProfile, IdentityStore
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

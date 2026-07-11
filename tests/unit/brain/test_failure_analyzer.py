@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.failure_analyzer import (
+from hbllm.brain.evaluation.failure_analyzer import (
     FailureAnalyzer,
     FailureCategory,
     RootCause,

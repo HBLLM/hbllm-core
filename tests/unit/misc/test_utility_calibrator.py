@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.utility_calibrator import UtilityCalibrator
+from hbllm.brain.evaluation.utility_calibrator import UtilityCalibrator
 
 
 @pytest.fixture

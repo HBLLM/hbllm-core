@@ -3,7 +3,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from hbllm.brain.world_model_node import WorldModelNode
+from hbllm.brain.world.world_model_node import WorldModelNode
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 

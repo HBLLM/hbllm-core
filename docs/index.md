@@ -328,7 +328,7 @@ hbllm data --dataset fineweb       # Run data preparation pipeline
 
 ```python
 import asyncio
-from hbllm.brain.factory import BrainFactory
+from hbllm.brain.core.factory import BrainFactory
 
 async def main():
     brain = await BrainFactory.create("openai/gpt-4o")

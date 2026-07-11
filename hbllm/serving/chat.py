@@ -20,17 +20,17 @@ from hbllm.actions.browser_node import BrowserNode
 from hbllm.actions.execution_node import ExecutionNode
 from hbllm.actions.fuzzy_node import FuzzyNode
 from hbllm.actions.logic_node import LogicNode
-from hbllm.brain.critic_node import CriticNode
-from hbllm.brain.decision_node import DecisionNode
-from hbllm.brain.learner_node import LearnerNode
-from hbllm.brain.llm_interface import LLMInterface
-from hbllm.brain.meta_node import MetaReasoningNode
-from hbllm.brain.planner_node import PlannerNode
-from hbllm.brain.router_node import RouterNode
-from hbllm.brain.sleep_node import SleepCycleNode
-from hbllm.brain.spawner_node import SpawnerNode
-from hbllm.brain.workspace_node import WorkspaceNode
-from hbllm.brain.world_model_node import WorldModelNode
+from hbllm.brain.control.decision_node import DecisionNode
+from hbllm.brain.control.router_node import RouterNode
+from hbllm.brain.core.llm_interface import LLMInterface
+from hbllm.brain.emotion.sleep_node import SleepCycleNode
+from hbllm.brain.emotion.spawner_node import SpawnerNode
+from hbllm.brain.evaluation.critic_node import CriticNode
+from hbllm.brain.learning.learner_node import LearnerNode
+from hbllm.brain.planning.planner_node import PlannerNode
+from hbllm.brain.planning.workspace_node import WorkspaceNode
+from hbllm.brain.self_model.meta_node import MetaReasoningNode
+from hbllm.brain.world.world_model_node import WorldModelNode
 from hbllm.memory.memory_node import MemoryNode
 
 # We use the transformer from Phase 1

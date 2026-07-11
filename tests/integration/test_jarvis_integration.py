@@ -153,7 +153,7 @@ async def test_risk_classification_to_audit(tmp_path):
 async def test_interrupt_to_social_timing():
     """Interrupt detector state influences social timing decisions."""
     from hbllm.brain.autonomy.interrupt_detector import InterruptDetector, UserState
-    from hbllm.brain.social_timing import SocialContext, SocialTimingEngine
+    from hbllm.brain.social.social_timing import SocialContext, SocialTimingEngine
 
     detector = InterruptDetector()
     timing = SocialTimingEngine()
@@ -180,7 +180,7 @@ async def test_interrupt_to_social_timing():
 @pytest.mark.asyncio
 async def test_online_learner_to_cognitive_load(tmp_path):
     """Online learner context + cognitive load together shape response."""
-    from hbllm.brain.cognitive_load_estimator import CognitiveLoadEstimator
+    from hbllm.brain.self_model.cognitive_load_estimator import CognitiveLoadEstimator
     from hbllm.training.online_learner import OnlineLearner
 
     learner = OnlineLearner(db_path=tmp_path / "learning.db")
@@ -258,7 +258,7 @@ async def test_goal_decomposition_with_delegation():
 async def test_full_notification_pipeline(tmp_path):
     """Event → fused sequence → world state → timing → delivery decision."""
     from hbllm.brain.autonomy.notification_suppressor import NotificationSuppressor
-    from hbllm.brain.social_timing import SocialTimingEngine
+    from hbllm.brain.social.social_timing import SocialTimingEngine
     from hbllm.perception.temporal_fuser import PerceptionSnapshot, TemporalFuser
     from hbllm.perception.world_state import WorldStateEngine
     from hbllm.security.audit_trail import AuditTrail
@@ -352,8 +352,8 @@ async def test_sandbox_plan_with_audit(tmp_path):
 @pytest.mark.asyncio
 async def test_parallel_workspace_with_load_monitoring():
     """Background workspaces run while cognitive load is tracked."""
-    from hbllm.brain.cognitive_load_estimator import CognitiveLoadEstimator
-    from hbllm.brain.parallel_workspace import ParallelWorkspaceManager
+    from hbllm.brain.planning.parallel_workspace import ParallelWorkspaceManager
+    from hbllm.brain.self_model.cognitive_load_estimator import CognitiveLoadEstimator
 
     manager = ParallelWorkspaceManager(max_concurrent=3)
     estimator = CognitiveLoadEstimator()

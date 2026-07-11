@@ -14,7 +14,7 @@ from hbllm.brain.autonomy.task_graph import (
     TaskStatus,
     VerificationRule,
 )
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.world.world_state import WorldStateEngine
 from hbllm.perception.reality_bus import EventOrigin, PerceptionEvent, PerceptionModality
 
 
@@ -121,7 +121,7 @@ class TestVerificationAndConflictResolution:
         # We manually update for test
         entity_state = world_engine.get_entity_state("test_entity")
         if not entity_state:
-            from hbllm.brain.world_state import EntityState
+            from hbllm.brain.world.world_state import EntityState
 
             entity_state = EntityState(entity_id="test_entity")
             world_engine._graph["test_entity"] = entity_state

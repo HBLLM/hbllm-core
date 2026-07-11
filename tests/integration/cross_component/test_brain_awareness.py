@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from hbllm.brain.awareness import (
+from hbllm.brain.self_model.awareness import (
     CognitiveAwareness,
     CognitiveSnapshot,
     CognitiveTrigger,

@@ -90,7 +90,7 @@ class CognitiveDaemon:
         logger.info("═" * 60)
 
         # ── 1. Create Brain ──────────────────────────────────────
-        from hbllm.brain.factory import BrainConfig, BrainFactory
+        from hbllm.brain.core.factory import BrainConfig, BrainFactory
 
         config = BrainConfig(
             data_dir=self.data_dir,

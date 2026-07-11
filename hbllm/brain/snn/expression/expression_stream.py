@@ -489,7 +489,7 @@ class ExpressionStream:
                     # Use DualLLMRouter with tier-aware routing:
                     # - Broca/Shallow modes use LOCAL tier (fast, on-device)
                     # - Deep generation uses AUTO tier (complexity-based)
-                    from hbllm.brain.dual_llm_router import TaskTier
+                    from hbllm.brain.control.dual_llm_router import TaskTier
 
                     if self.broca_mode or self.shallow_mode:
                         tier = TaskTier.LOCAL

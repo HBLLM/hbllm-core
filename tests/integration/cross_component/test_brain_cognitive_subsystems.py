@@ -7,14 +7,14 @@ import pytest
 import pytest_asyncio
 
 from hbllm.actions.tool_memory import ToolMemory
-from hbllm.brain.cognitive_metrics import CognitiveMetrics
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
-from hbllm.brain.factory import BrainConfig, BrainFactory
-from hbllm.brain.goal_manager import GoalManager
-from hbllm.brain.revision_node import RevisionNode
-from hbllm.brain.self_model import SelfModel
-from hbllm.brain.skill_registry import SkillRegistry
-from hbllm.brain.world_state import WorldStateEngine
+from hbllm.brain.core.factory import BrainConfig, BrainFactory
+from hbllm.brain.emotion.goal_manager import GoalManager
+from hbllm.brain.evaluation.revision_node import RevisionNode
+from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
+from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.self_model.self_model import SelfModel
+from hbllm.brain.skills.skill_registry import SkillRegistry
+from hbllm.brain.world.world_state import WorldStateEngine
 from hbllm.data.interaction_miner import AsyncInteractionMiner, InteractionMiner
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter

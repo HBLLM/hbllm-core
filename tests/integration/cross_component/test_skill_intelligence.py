@@ -4,9 +4,9 @@ from typing import Any
 
 import pytest
 
-from hbllm.brain.failure_analyzer_node import FailureAnalyzerNode
-from hbllm.brain.skill_intelligence_node import SkillIntelligenceNode
-from hbllm.brain.skill_registry import SkillRegistry
+from hbllm.brain.evaluation.failure_analyzer_node import FailureAnalyzerNode
+from hbllm.brain.skills.skill_intelligence_node import SkillIntelligenceNode
+from hbllm.brain.skills.skill_registry import SkillRegistry
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -257,7 +257,7 @@ async def test_dry_run_simulation_blocks_on_failure(skill_registry):
 @pytest.mark.asyncio
 async def test_derived_skill_optimization(skill_registry):
     """Test offline skill optimization via SkillCompilerNode."""
-    from hbllm.brain.skill_compiler_node import SkillCompilerNode
+    from hbllm.brain.skills.skill_compiler_node import SkillCompilerNode
 
     bus = InProcessBus()
     await bus.start()
@@ -326,7 +326,7 @@ async def test_derived_skill_optimization(skill_registry):
 @pytest.mark.asyncio
 async def test_collective_sync_skills(skill_registry):
     """Test that CollectiveNode promotes high-confidence skills to global."""
-    from hbllm.brain.collective_node import CollectiveNode
+    from hbllm.brain.world.collective_node import CollectiveNode
 
     bus = InProcessBus()
     await bus.start()

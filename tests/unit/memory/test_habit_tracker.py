@@ -2,7 +2,7 @@
 
 import time
 
-from hbllm.brain.habit_tracker import HabitTracker, InteractionEvent
+from hbllm.brain.learning.habit_tracker import HabitTracker, InteractionEvent
 
 
 class TestInteractionEvent:

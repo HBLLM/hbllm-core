@@ -22,7 +22,7 @@ logger = logging.getLogger("standalone")
 
 
 async def main() -> None:
-    from hbllm.brain.factory import BrainConfig, BrainFactory
+    from hbllm.brain.core.factory import BrainConfig, BrainFactory
 
     # ── Configuration ─────────────────────────────────────────────────
     # All subsystems are opt-in via inject_* flags.

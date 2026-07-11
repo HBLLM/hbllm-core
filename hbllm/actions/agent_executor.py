@@ -28,7 +28,7 @@ from hbllm.actions.builtin_tools import (
 )
 from hbllm.actions.complexity import ComplexityDetector
 from hbllm.actions.tool_registry import ToolRegistry, ToolResult
-from hbllm.brain.confidence_estimator import ConfidenceEstimator
+from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
 
 logger = logging.getLogger(__name__)
 
