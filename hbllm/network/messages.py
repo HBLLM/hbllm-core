@@ -60,6 +60,22 @@ class MessageType(StrEnum):
     SYSTEM_IMPROVE = "system_improve"
     SALIENCE_SCORE = "salience_score"
 
+    # Session lifecycle (Gateway ↔ Executive)
+    SESSION_START = "session_start"
+    SESSION_MESSAGE = "session_message"
+    SESSION_RESPONSE = "session_response"
+    SESSION_END = "session_end"
+    SESSION_MIGRATE = "session_migrate"
+
+    # Workspace management
+    WORKSPACE_SWITCH = "workspace_switch"
+    WORKSPACE_CREATED = "workspace_created"
+
+    # EventBus — background system events (separate from ConversationBus)
+    BACKGROUND_EVENT = "background_event"
+    OPPORTUNITY = "opportunity"
+    SCHEDULED_TASK = "scheduled_task"
+
 
 class Priority(int, Enum):
     """Message priority levels for queue ordering (lower value = higher priority)."""
