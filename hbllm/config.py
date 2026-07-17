@@ -13,6 +13,7 @@ from typing import Any
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from hbllm.config.brain_profile import BrainProfile, load_profile
 from hbllm.modules.adapter_registry import AdapterRegistryConfig
 from hbllm.network.cluster_config import ClusterConfig
 
@@ -69,6 +70,10 @@ class HBLLMCoreConfig(BaseModel):
 
     # Environment identity
     env: str = "development"
+
+    # Brain Profile — determines which subsystems are active
+    profile_name: str = "full"  # full | lite | edge | research | robot
+    profile: BrainProfile = Field(default_factory=lambda: load_profile("full"))
 
     # Nested configurations
     cluster: ClusterConfig = Field(default_factory=ClusterConfig)
