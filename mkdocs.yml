@@ -123,6 +123,8 @@ nav:
   - Home: index.md
   - Architecture:
       - Overview: architecture/overview.md
+      - ADR 001 (Core Architecture): adr/0001-hbllm-core-architecture.md
+      - ADR 002 (Operational & Governance): adr/0002-operational-architecture-and-governance.md
       - Cognitive Nodes: architecture/cognitive-nodes.md
       - Cognitive Subsystems: architecture/cognitive-subsystems.md
       - Decision & Control Plane: architecture/decision-gatekeeper.md
@@ -140,6 +142,7 @@ nav:
       - Embodiment: architecture/embodiment.md
       - Human Control: architecture/human-control.md
       - Causality & Compaction: architecture/causality-and-compaction.md
+      - Telemetry & Observability: architecture/telemetry-observability.md
   - Zoning Model:
       - How It Works: zoning/how-it-works.md
       - LoRA Routing: zoning/lora-routing.md

@@ -1,18 +1,29 @@
 """
-Executive Controller — thin orchestrator for the cognitive event loop.
+Executive Controller — tripartite orchestrator for the cognitive event loop.
 
-The ExecutiveController knows **only interfaces** — every subsystem is
-swappable.  It contains NO cognition of its own; it simply wires:
+Coordinates three cooperating control loops (ADR 002 §1):
 
-    IEventQueue → IAttentionSelector → ICompetition → IWorkspace
+    1. **ReactiveController**: Sub-10ms reflex arcs, interrupts, safety.
+    2. **DeliberativeController**: Multi-step GoT planning and reasoning.
+    3. **ReflectiveController**: Post-execution evaluation and memory events.
+
+The ExecutiveController itself knows **only interfaces** — every subsystem
+is swappable.  It contains NO cognition of its own; it simply wires:
+
+    IEventQueue → ReactiveController → IAttentionSelector → ICompetition
+                                                                ↓
+                                                            IWorkspace
+                                                                ↓
+                                                       ReflectiveController
 
 Pipeline per cycle::
 
     1. Drain events from the queue
-    2. Score events for saliency (attention)
-    3. Run WTA competition (select top-K)
-    4. Route winners to the workspace for reasoning
-    5. Update cognitive state via deltas
+    2. Route urgent events through ReactiveController
+    3. Score remaining events for saliency (attention)
+    4. Run WTA competition (select top-K)
+    5. Route winners to the workspace for reasoning
+    6. Update cognitive state via deltas
 
 The controller can run as:
     - **Single cycle** (``run_cycle``): Called from existing pipeline
@@ -24,6 +35,7 @@ Design principles:
     - No business logic — just orchestration
     - Deterministic given the same inputs
     - Observable via stats and event logging
+    - Tripartite dispatch: reactive → deliberative → reflective
 
 Usage::
 
@@ -45,6 +57,8 @@ import logging
 import time
 from typing import Any
 
+from hbllm.brain.control.reactive_controller import ReactiveController
+from hbllm.brain.control.reflective_controller import ReflectiveController
 from hbllm.brain.core.cognitive_event import CognitiveEvent
 from hbllm.brain.core.cognitive_interfaces import (
     IAttentionSelector,
@@ -78,6 +92,8 @@ class ExecutiveController:
         workspace: Target for winning events.
         goals: Optional goal provider for context.
         state: Initial cognitive state snapshot.
+        reactive: Optional ReactiveController for reflex handling.
+        reflective: Optional ReflectiveController for post-eval.
         max_batch_size: Maximum events per cycle.
         cycle_interval: Seconds between continuous cycles.
     """
@@ -90,6 +106,8 @@ class ExecutiveController:
         workspace: IWorkspace,
         goals: IGoalProvider | None = None,
         state: CognitiveStateSnapshot | None = None,
+        reactive: ReactiveController | None = None,
+        reflective: ReflectiveController | None = None,
         max_batch_size: int = 10,
         cycle_interval: float = 0.1,
     ) -> None:
@@ -98,6 +116,8 @@ class ExecutiveController:
         self._competition = competition
         self._workspace = workspace
         self._goals = goals
+        self._reactive = reactive
+        self._reflective = reflective
 
         # Cognitive state management
         self._state = state or CognitiveStateSnapshot()
@@ -111,13 +131,17 @@ class ExecutiveController:
         self._cycle_count = 0
         self._total_events_processed = 0
         self._total_winners = 0
+        self._total_reactive_handled = 0
         self._running = False
         self._run_task: asyncio.Task[None] | None = None
 
         logger.info(
-            "ExecutiveController initialized (batch=%d, interval=%.2fs)",
+            "ExecutiveController initialized (batch=%d, interval=%.2fs, "
+            "reactive=%s, reflective=%s)",
             max_batch_size,
             cycle_interval,
+            "enabled" if reactive else "disabled",
+            "enabled" if reflective else "disabled",
         )
 
     # ── State access ─────────────────────────────────────────────────
@@ -168,8 +192,25 @@ class ExecutiveController:
         if not raw_events:
             return []
 
-        # 2. Score for saliency
-        scored_events = await self._attention.evaluate(raw_events)
+        # 2. Route through ReactiveController (if available)
+        deliberative_events: list[CognitiveEvent] = []
+        if self._reactive:
+            for event in raw_events:
+                result = await self._reactive.process(event)
+                if not result.handled:
+                    deliberative_events.append(event)
+                else:
+                    self._total_reactive_handled += 1
+        else:
+            deliberative_events = list(raw_events)
+
+        if not deliberative_events:
+            self._cycle_count += 1
+            self._total_events_processed += len(raw_events)
+            return []
+
+        # 3. Score for saliency
+        scored_events = await self._attention.evaluate(deliberative_events)
 
         # 3. Competition (WTA)
         winners = await self._competition.compete(scored_events)

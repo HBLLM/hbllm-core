@@ -61,3 +61,36 @@ During task planning, the system uses an **Epsilon-Greedy Multi-Armed Bandit** s
 
 Outcomes are recorded at the end of each task execution via `record_policy_outcome()`, continuously updating the success statistics in `policy_performance`.
 
+---
+
+## DigitalTwin — Ephemeral Operational State (ADR 002)
+
+!!! info "Architecture Decision"
+    See **[ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md)** for the full rationale behind the SelfModel / DigitalTwin separation.
+
+The **DigitalTwin** (`brain/self_model/digital_twin.py`) decouples **persistent identity** from **live operational runtime state**.
+
+### SelfModel vs. DigitalTwin
+
+| Aspect | SelfModel | DigitalTwin |
+|---|---|---|
+| **Purpose** | Enduring identity, ethics, capabilities, personality | Live hardware, tasks, devices, cluster state |
+| **Persistence** | SQLite-backed, survives restarts | **Ephemeral** — rebuilt on every startup |
+| **Memory consolidation** | Included in episodic memory | **Excluded** from memory consolidation |
+| **Example data** | Domain expertise scores, trend analysis, capability profiles | CPU %, active goals, loaded plugins, connected IoT devices |
+
+### What DigitalTwin Tracks
+
+- **Hardware state**: CPU, RAM, VRAM, disk, temperature, battery
+- **Active goals**: Currently executing cognitive goals
+- **Loaded plugins**: Runtime plugin registry
+- **Connected devices**: IoT and robotics peripherals
+- **Cluster peers**: Distributed swarm node registry
+- **Running tasks**: Fed by the `CognitiveScheduler`
+- **Memory stats**: Live memory subsystem metrics
+
+### Key Design Invariant
+
+> The DigitalTwin is **disposable and rebuildable**. After a restart, it is reconstructed from active subsystem queries — never from persistent storage.
+
+This ensures that live runtime state never pollutes the system's episodic memory or long-term self-model.

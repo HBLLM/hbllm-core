@@ -5,6 +5,9 @@ description: "Technical deep-dive into HBLLM's modular brain architecture that r
 
 # Architecture Overview
 
+> [!NOTE]
+> For the formal architectural decisions, trade-offs, and design invariants covering the entire core, see **[ADR 001: Master Core Architecture](../adr/0001-hbllm-core-architecture.md)**.
+
 HBLLM Core is built on four foundational principles:
 
 1.  **Local-First Autonomy** — The system is designed to provide full cognitive utility on a single device without cloud dependencies.
