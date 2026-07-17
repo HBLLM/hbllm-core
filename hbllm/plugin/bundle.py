@@ -116,15 +116,49 @@ class PluginManifest:
     capabilities: list[str] = field(default_factory=list)
     permissions: list[str] = field(default_factory=list)
 
+    # v3 additions (.hbpkg format)
+    compatible_profiles: list[str] = field(default_factory=lambda: ["full", "lite"])
+    capability_descriptors: list[dict[str, Any]] = field(default_factory=list)
+
     @property
     def is_v2(self) -> bool:
         """Check if this is a v2 manifest with bundle support."""
         return self.manifest_version >= 2
 
     @property
+    def is_v3(self) -> bool:
+        """Check if this is a v3 manifest (.hbpkg format)."""
+        return self.manifest_version >= 3
+
+    @property
     def namespace(self) -> str:
         """Plugin namespace for scoped asset storage."""
         return f"plugin:{self.name}"
+
+    def to_hbpkg_manifest(self) -> Any:
+        """Convert to HBPkgManifest if v3.
+
+        Returns an HBPkgManifest for use with the Packager and
+        SemanticCapabilityRegistry. Returns None for v1/v2 manifests.
+        """
+        if not self.is_v3:
+            return None
+        try:
+            from hbllm.hbpkg.manifest import HBPkgManifest
+            return HBPkgManifest.from_dict({
+                "name": self.name,
+                "version": self.version,
+                "description": self.description,
+                "author": self.author,
+                "license": self.license,
+                "manifest_version": self.manifest_version,
+                "capabilities": self.capability_descriptors,
+                "permissions": self.permissions,
+                "compatible_profiles": self.compatible_profiles,
+                "tags": self.tags,
+            })
+        except ImportError:
+            return None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict."""
