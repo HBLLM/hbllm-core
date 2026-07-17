@@ -79,19 +79,10 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Memory Types
+# Memory Types — imported from canonical definition
 # ═══════════════════════════════════════════════════════════════════════════
 
-
-class MemoryType(StrEnum):
-    """Semantic categories for memory cubes."""
-
-    EPISODIC = "episodic"  # Events, interactions, conversations
-    SEMANTIC = "semantic"  # Facts, knowledge, beliefs
-    PROCEDURAL = "procedural"  # Skills, how-to, recipes
-    VALUE = "value"  # User preferences, constraints
-    GOAL = "goal"  # Active and completed goals
-
+from hbllm.memory.interface import MemoryType  # noqa: E402
 
 # ═══════════════════════════════════════════════════════════════════════════
 # MemCube — Lightweight memory core

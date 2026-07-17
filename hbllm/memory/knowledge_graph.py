@@ -14,7 +14,6 @@ import logging
 import re
 import time
 from collections import OrderedDict, defaultdict, deque
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,44 +33,10 @@ except ImportError:
 
 
 # ── Data types ───────────────────────────────────────────────────────────────
+# Entity and Relation are canonical graph primitives, now defined in
+# hbllm.graph.types.  Re-exported here for backwards compatibility.
 
-
-@dataclass
-class Entity:
-    """A node in the knowledge graph."""
-
-    id: str
-    label: str
-    entity_type: str = "concept"
-    attributes: dict[str, Any] = field(default_factory=dict)
-    created_at: float = field(default_factory=time.time)
-    # Knowledge confidence — decays over time, reinforced by evidence
-    confidence: float = 1.0
-    evidence_count: int = 1
-    verified: bool = False
-    last_reinforced: float = field(default_factory=time.time)
-
-    def __hash__(self) -> int:
-        return hash(self.id)
-
-
-@dataclass
-class Relation:
-    """A directed edge in the knowledge graph."""
-
-    source_id: str
-    target_id: str
-    relation_type: str
-    weight: float = 1.0
-    metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: float = field(default_factory=time.time)
-    valid_from: float | None = None
-    valid_until: float | None = None
-
-    @property
-    def key(self) -> str:
-        return f"{self.source_id}--{self.relation_type}-->{self.target_id}"
-
+from hbllm.graph.types import Entity, Relation  # noqa: F401
 
 # ── Simple NLP entity extraction ─────────────────────────────────────────────
 

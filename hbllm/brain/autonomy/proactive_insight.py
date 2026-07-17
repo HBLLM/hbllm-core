@@ -90,7 +90,7 @@ class ProactiveInsightGenerator:
 
         # 2. Spatial + temporal combo insights
         if self.spatial and self.world:
-            insights.extend(self._spatial_temporal_insights(tenant_id, dt))
+            insights.extend(await self._spatial_temporal_insights(tenant_id, dt))
 
         # 3. Hardware-aware insights
         if self.world:
@@ -194,7 +194,7 @@ class ProactiveInsightGenerator:
 
         return messages
 
-    def _spatial_temporal_insights(
+    async def _spatial_temporal_insights(
         self,
         tenant_id: str,
         dt: datetime,
@@ -208,7 +208,7 @@ class ProactiveInsightGenerator:
 
         # Check if user's location is known
         try:
-            location_domains = self.spatial.get_domains_by_location(tenant_id)
+            location_domains = await self.spatial.get_domains_by_location(tenant_id)
         except Exception:
             return []
 

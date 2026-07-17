@@ -15,12 +15,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hbllm.memory.interface import MemoryType
 from hbllm.memory.pool import DatabasePool
+from hbllm.memory.repository import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
 
-class ValueMemory:
+class ValueMemory(MemoryRepository):
     """
     SQLite-backed preference/reward signal storage.
 
@@ -155,23 +157,32 @@ class ValueMemory:
         return {action: sum(values) / len(values) for action, values in preferences.items()}
 
     async def get_top_preferences(
-        self, tenant_id: str, top_k: int = 5, user_id: str = "", device_id: str = ""
+        self,
+        tenant_id: str,
+        top_k: int = 5,
+        user_id: str = "",
+        device_id: str = "",
+        topic: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Get the tenant's strongest preferences across all topics.
+        Get the tenant's strongest preferences across topics.
 
         Returns top_k (topic, action) pairs ranked by average reward.
         """
-        async with self.pool.acquire() as conn:
-            async with conn.execute(
-                """SELECT topic, action, AVG(reward) as avg_reward, COUNT(*) as count
+        query_sql = """SELECT topic, action, AVG(reward) as avg_reward, COUNT(*) as count
                    FROM rewards
-                   WHERE tenant_id = ? AND user_id = ? AND device_id = ?
-                   GROUP BY topic, action
+                   WHERE tenant_id = ? AND user_id = ? AND device_id = ?"""
+        params: list[Any] = [tenant_id, user_id, device_id]
+        if topic:
+            query_sql += " AND topic = ?"
+            params.append(topic)
+        query_sql += """ GROUP BY topic, action
                    ORDER BY avg_reward DESC
-                   LIMIT ?""",
-                (tenant_id, user_id, device_id, top_k),
-            ) as cursor:
+                   LIMIT ?"""
+        params.append(top_k)
+
+        async with self.pool.acquire() as conn:
+            async with conn.execute(query_sql, tuple(params)) as cursor:
                 rows = await cursor.fetchall()
 
         return [
@@ -216,3 +227,75 @@ class ValueMemory:
             ) as cursor:
                 rows = await cursor.fetchall()
         return [row[0] for row in rows]
+
+    # ── MemoryRepository interface ───────────────────────────────────
+    # Transitional adapters.
+
+    @property
+    def memory_type(self) -> MemoryType:
+        return MemoryType.VALUE
+
+    async def initialize(self) -> None:
+        await self.init_db()
+
+    async def shutdown(self) -> None:
+        await self.close()
+
+    async def store(self, content: str, tenant_id: str = "default", **kwargs: Any) -> str:
+        """Store a reward signal.
+
+        Keyword Args:
+            topic: Topic key for the preference.
+            action: Action that triggered the reward.
+            reward: Float reward value (default: 1.0).
+        """
+        return await self.record_reward(
+            tenant_id=tenant_id,
+            topic=kwargs.get("topic", "general"),
+            action=kwargs.get("action", content),
+            reward=kwargs.get("reward", 1.0),
+        )
+
+    async def retrieve(
+        self, memory_id: str, tenant_id: str = "default", **kwargs: Any
+    ) -> dict[str, Any] | None:
+        """Retrieve a single reward event by ID."""
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                "SELECT * FROM rewards WHERE id = ? AND tenant_id = ?",
+                (memory_id, tenant_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "tenant_id": row[1],
+            "topic": row[2],
+            "action": row[3],
+            "reward": row[4],
+        }
+
+    async def search(
+        self, query: str, tenant_id: str = "default", **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        """Search preferences by topic."""
+        raw_limit = kwargs.get("top_k")
+        if raw_limit is None:
+            raw_limit = kwargs.get("limit")
+
+        limit = 5
+        if raw_limit is not None:
+            try:
+                limit = int(raw_limit)
+            except (ValueError, TypeError):
+                pass
+
+        return await self.get_top_preferences(tenant_id=tenant_id, topic=query, top_k=limit)
+
+    async def stats(self, tenant_id: str = "default") -> dict[str, Any]:
+        topics = await self.get_all_topics(tenant_id)
+        return {
+            "memory_type": self.memory_type.value,
+            "topics": len(topics),
+        }

@@ -12,8 +12,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
-# Import the Entity and Relation dataclasses from the core knowledge graph module
-from hbllm.memory.knowledge_graph import Entity, Relation
+from hbllm.core.constants import SKIP_DIRS
+from hbllm.graph.types import Entity, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -93,31 +93,9 @@ class FolderExtractor:
                 )
             )
 
-        skip_dirs = {
-            "node_modules",
-            ".git",
-            "__pycache__",
-            ".venv",
-            "venv",
-            ".mypy_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            "dist",
-            "build",
-            ".next",
-            ".nuxt",
-            "target",
-            ".idea",
-            ".vscode",
-            ".DS_Store",
-            "vendor",
-            "coverage",
-            ".tox",
-        }
-
         for root, dirs, files in os.walk(self.root_path):
             # Prune skipped directories
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
             # Calculate current depth relative to root
             try:
@@ -680,30 +658,8 @@ class KnowledgeGraphExtractor:
         yaml_files = []
 
         # Find files locally in root_path (respecting skip dirs)
-        skip_dirs = {
-            "node_modules",
-            ".git",
-            "__pycache__",
-            ".venv",
-            "venv",
-            ".mypy_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            "dist",
-            "build",
-            ".next",
-            ".nuxt",
-            "target",
-            ".idea",
-            ".vscode",
-            ".DS_Store",
-            "vendor",
-            "coverage",
-            ".tox",
-        }
-
         for root, dirs, files in os.walk(self.root_path):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
             for f in files:
                 full_path = os.path.join(root, f)
                 ext = os.path.splitext(f)[1].lower()

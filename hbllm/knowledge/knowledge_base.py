@@ -107,28 +107,8 @@ def get_all_supported_extensions() -> dict[str, str]:
     return exts
 
 
-# Directories to always skip
-SKIP_DIRS = {
-    "node_modules",
-    ".git",
-    "__pycache__",
-    ".venv",
-    "venv",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "dist",
-    "build",
-    ".next",
-    ".nuxt",
-    "target",
-    ".idea",
-    ".vscode",
-    ".DS_Store",
-    "vendor",
-    "coverage",
-    ".tox",
-}
+# Directories to always skip — centralised in hbllm.core.constants
+from hbllm.core.constants import SKIP_DIRS  # noqa: E402
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 

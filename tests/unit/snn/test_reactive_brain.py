@@ -350,9 +350,9 @@ class TestNeuromodulation:
 # ═══════════════════════════════════════════════════════════════════════════
 
 from hbllm.brain.core.cognitive_state import (
-    CognitiveState,
     CognitiveStateDelta,
     CognitiveStateReducer,
+    CognitiveStateSnapshot,
 )
 
 
@@ -360,15 +360,15 @@ class TestCognitiveState:
     """Test immutable cognitive state with delta/reducer."""
 
     def test_immutable(self) -> None:
-        """CognitiveState is frozen."""
-        state = CognitiveState()
+        """CognitiveStateSnapshot is frozen."""
+        state = CognitiveStateSnapshot()
         with pytest.raises(AttributeError):
-            state.confidence = 0.9  # type: ignore[misc]
+            state.confidence = 0.9  # type: ignore
 
     def test_delta_apply(self) -> None:
         """Delta + reducer produces new versioned state."""
         reducer = CognitiveStateReducer()
-        state = CognitiveState()
+        state = CognitiveStateSnapshot()
         assert state.version == 0
 
         delta = CognitiveStateDelta(
@@ -387,7 +387,7 @@ class TestCognitiveState:
     def test_history_replayable(self) -> None:
         """State history is maintained for replay."""
         reducer = CognitiveStateReducer()
-        state = CognitiveState()
+        state = CognitiveStateSnapshot()
 
         for i in range(5):
             delta = CognitiveStateDelta(
@@ -403,7 +403,7 @@ class TestCognitiveState:
     def test_rollback(self) -> None:
         """Can roll back to previous version."""
         reducer = CognitiveStateReducer()
-        state = CognitiveState()
+        state = CognitiveStateSnapshot()
 
         state = reducer.apply(
             state, CognitiveStateDelta(source_node="a", changes={"confidence": 0.9})
@@ -421,10 +421,13 @@ class TestCognitiveState:
 # 7. Cognitive Event-Driven Scheduler
 # ═══════════════════════════════════════════════════════════════════════════
 
+from typing import Any
+
 from hbllm.brain.control.competition_engine import CompetitionEngine
 from hbllm.brain.control.event_queue import CognitiveEventQueue
 from hbllm.brain.control.executive_controller import ExecutiveController
 from hbllm.brain.core.cognitive_event import CognitiveEvent, CognitiveEventType
+from hbllm.brain.core.cognitive_interfaces import IWorkspace
 from hbllm.brain.self_model.saliency_evaluator import SaliencyEvaluator
 
 
@@ -597,11 +600,11 @@ class TestExecutiveController:
         competition = CompetitionEngine(executive_k_winners=3)
 
         # Minimal workspace mock
-        class MockWorkspace:
-            def __init__(self):
+        class MockWorkspace(IWorkspace):
+            def __init__(self) -> None:
                 self.received: list = []
 
-            async def submit_for_reasoning(self, event):
+            async def submit_for_reasoning(self, event: Any) -> None:
                 self.received.append(event)
 
         workspace = MockWorkspace()

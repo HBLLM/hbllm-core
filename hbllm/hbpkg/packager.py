@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hbllm.hbpkg.manifest import HBPkgManifest, PermissionScope
+from hbllm.hbpkg.manifest import HBPkgManifest
 from hbllm.skills.installer import SkillInstaller
 from hbllm.skills.parser import SkillParser
 
@@ -147,9 +147,7 @@ class Packager:
 
         manifest_path = source_dir / self.MANIFEST_FILENAME
         if not manifest_path.exists():
-            raise FileNotFoundError(
-                f"No {self.MANIFEST_FILENAME} found in {source_dir}"
-            )
+            raise FileNotFoundError(f"No {self.MANIFEST_FILENAME} found in {source_dir}")
 
         manifest = HBPkgManifest.from_yaml(manifest_path)
         errors = manifest.validate()
@@ -375,9 +373,7 @@ class Packager:
         """
         denied: list[str] = []
         for perm in manifest.permissions:
-            if self._permission_engine and hasattr(
-                self._permission_engine, "is_allowed"
-            ):
+            if self._permission_engine and hasattr(self._permission_engine, "is_allowed"):
                 if not self._permission_engine.is_allowed(manifest.name, perm):
                     denied.append(perm)
         return denied

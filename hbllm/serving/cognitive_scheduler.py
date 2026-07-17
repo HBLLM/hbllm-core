@@ -273,9 +273,7 @@ class CognitiveScheduler:
         try:
             self._queue.put_nowait((sort_key[0], sort_key[1], task))
         except asyncio.QueueFull:
-            logger.warning(
-                "Scheduler queue full — dropping task '%s'", task.name
-            )
+            logger.warning("Scheduler queue full — dropping task '%s'", task.name)
             task.state = TaskState.CANCELLED
             return task.id
 
@@ -325,9 +323,7 @@ class CognitiveScheduler:
                     await asyncio.sleep(interval_s)
                     if self._started:
                         coro = coro_factory()
-                        await self.submit_background(
-                            coro, name=f"{name}-tick", priority=priority
-                        )
+                        await self.submit_background(coro, name=f"{name}-tick", priority=priority)
                 except asyncio.CancelledError:
                     return
                 except Exception:
@@ -375,9 +371,7 @@ class CognitiveScheduler:
 
             try:
                 async with self._resources.llm:
-                    task.result = await asyncio.wait_for(
-                        task.coro, timeout=task.timeout_s
-                    )
+                    task.result = await asyncio.wait_for(task.coro, timeout=task.timeout_s)
                 task.state = TaskState.COMPLETED
             except asyncio.TimeoutError:
                 task.state = TaskState.FAILED
@@ -421,9 +415,7 @@ class CognitiveScheduler:
             "completed": len(completed),
             "failed": len(failed),
             "avg_latency_ms": (
-                sum(t.elapsed_ms for t in completed) / len(completed)
-                if completed
-                else 0.0
+                sum(t.elapsed_ms for t in completed) / len(completed) if completed else 0.0
             ),
             "resources": self._resources.stats(),
         }

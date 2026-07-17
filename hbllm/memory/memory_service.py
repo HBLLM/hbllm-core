@@ -47,31 +47,20 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
+
+from hbllm.memory.interface import MemoryType
+from hbllm.memory.repository import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Memory Types (superset of existing MemoryType enum)
+# Backwards-compatible alias — callers using MemoryBackend keep working.
+# New code should import MemoryType directly.
 # ═══════════════════════════════════════════════════════════════════════════
 
-
-class MemoryBackend(StrEnum):
-    """All available memory backends."""
-
-    EPISODIC = "episodic"
-    SEMANTIC = "semantic"
-    PROCEDURAL = "procedural"
-    VALUE = "value"
-    KNOWLEDGE_GRAPH = "knowledge_graph"
-    BELIEF_GRAPH = "belief_graph"
-    CONVERSATION = "conversation"
-    GOAL = "goal"
-    SPATIAL = "spatial"
-    TEMPORAL = "temporal"
-    LATENT_CLUSTER = "latent_cluster"
+MemoryBackend = MemoryType
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -159,18 +148,98 @@ class _QueryCache:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class RepositoryRegistry:
+    """Plugin-friendly registry for memory repositories.
+
+    Allows dynamic registration of ``MemoryRepository`` instances,
+    keyed by ``MemoryType``. Supports iteration, lookup, and
+    lifecycle management (initialize/shutdown all).
+    """
+
+    def __init__(self) -> None:
+        self._repos: dict[MemoryType, MemoryRepository] = {}
+
+    def register(self, repo: MemoryRepository) -> None:
+        """Register a repository. Uses ``repo.memory_type`` as key."""
+        self._repos[repo.memory_type] = repo
+        logger.info("Registry: registered %s", repo.memory_type.value)
+
+    def register_untyped(self, memory_type: MemoryType, instance: Any) -> None:
+        """Register a backend that may not inherit MemoryRepository.
+
+        Backwards-compatibility path — logs a warning for untyped instances.
+        """
+        if isinstance(instance, MemoryRepository):
+            self._repos[memory_type] = instance
+        else:
+            logger.warning(
+                "Backend '%s' does not inherit MemoryRepository — "
+                "registering as untyped (duck-typed fallback)",
+                memory_type.value,
+            )
+            # Wrap in a dict entry anyway for backwards compat
+            self._repos[memory_type] = instance  # type: ignore[assignment]
+        logger.info("Registry: registered %s", memory_type.value)
+
+    def get(self, memory_type: MemoryType) -> MemoryRepository | None:
+        return self._repos.get(memory_type)
+
+    def has(self, memory_type: MemoryType) -> bool:
+        return memory_type in self._repos
+
+    @property
+    def available(self) -> list[str]:
+        return [mt.value for mt in self._repos]
+
+    def __iter__(self):
+        return iter(self._repos.items())
+
+    def __len__(self) -> int:
+        return len(self._repos)
+
+    async def initialize_all(self) -> None:
+        """Call initialize() on all registered repositories."""
+        for mt, repo in self._repos.items():
+            if isinstance(repo, MemoryRepository):
+                try:
+                    await repo.initialize()
+                except Exception as e:
+                    logger.warning("Failed to initialize %s: %s", mt.value, e)
+
+    async def shutdown_all(self) -> None:
+        """Call shutdown() on all registered repositories."""
+        for mt, repo in self._repos.items():
+            if isinstance(repo, MemoryRepository):
+                try:
+                    await repo.shutdown()
+                except Exception as e:
+                    logger.warning("Failed to shutdown %s: %s", mt.value, e)
+
+    async def health_all(self) -> dict[str, dict[str, Any]]:
+        """Aggregate health from all repositories."""
+        health: dict[str, dict[str, Any]] = {}
+        for mt, repo in self._repos.items():
+            if isinstance(repo, MemoryRepository):
+                try:
+                    health[mt.value] = await repo.health()
+                except Exception as e:
+                    health[mt.value] = {"status": "error", "error": str(e)}
+        return health
+
+
 class MemoryService:
     """Versioned facade wrapping all HBLLM memory backends.
 
     Provides a unified API for store, retrieve, search, and recall
-    operations across 11 memory backends. Includes LRU caching and
+    operations across memory backends. Includes LRU caching and
     per-tenant isolation.
 
-    Backends are lazily registered — the service works with whatever
-    backends are available. Missing backends are gracefully skipped.
+    Backends are registered via ``RepositoryRegistry`` — typed
+    ``MemoryRepository`` instances are preferred. Legacy untyped
+    backends are supported via ``register_backend()`` with a warning.
     """
 
-    API_VERSION = "3.0"
+    API_VERSION = "3.1"
 
     def __init__(
         self,
@@ -179,36 +248,57 @@ class MemoryService:
         cache_ttl: float = 60.0,
     ) -> None:
         self._data_dir = data_dir
-        self._backends: dict[MemoryBackend, Any] = {}
+        self._registry = RepositoryRegistry()
         self._cache = _QueryCache(max_size=cache_size, ttl_seconds=cache_ttl)
         self._store_count = 0
         self._search_count = 0
 
+    # ── Backwards-compatible dict access ──────────────────────────────
+    # MemoryNode and other callers may still use self._backends directly.
+
+    @property
+    def _backends(self) -> dict[MemoryType, Any]:
+        """Backwards-compatible access to the registry as a dict."""
+        return dict(self._registry._repos)
+
     # ── Backend Registration ─────────────────────────────────────────
 
+    def register(self, repo: MemoryRepository) -> None:
+        """Register a typed MemoryRepository (preferred API).
+
+        The repository's ``memory_type`` property determines its slot.
+        """
+        self._registry.register(repo)
+
     def register_backend(self, backend_type: MemoryBackend, instance: Any) -> None:
-        """Register a memory backend instance.
+        """Register a memory backend instance (backwards-compatible).
+
+        New code should use ``register(repo)`` instead.
 
         Args:
             backend_type: Which backend slot this fills.
-            instance: The backend instance (e.g., SemanticMemory, EpisodicMemory).
+            instance: The backend instance.
         """
-        self._backends[backend_type] = instance
-        logger.info("Registered memory backend: %s", backend_type.value)
+        self._registry.register_untyped(backend_type, instance)
 
     def has_backend(self, backend_type: MemoryBackend) -> bool:
-        return backend_type in self._backends
+        return self._registry.has(backend_type)
 
     @property
     def available_backends(self) -> list[str]:
-        return [b.value for b in self._backends]
+        return self._registry.available
+
+    @property
+    def registry(self) -> RepositoryRegistry:
+        """Access the underlying registry for lifecycle operations."""
+        return self._registry
 
     async def init(self) -> None:
         """Initialize the service (backends should already be registered)."""
         logger.info(
             "MemoryService v%s initialized (%d backends: %s)",
             self.API_VERSION,
-            len(self._backends),
+            len(self._registry),
             ", ".join(self.available_backends),
         )
 
@@ -235,7 +325,7 @@ class MemoryService:
             Memory ID from the backend, or None if backend unavailable.
         """
         backend_enum = MemoryBackend(backend) if isinstance(backend, str) else backend
-        instance = self._backends.get(backend_enum)
+        instance = self._registry.get(backend_enum)
         if instance is None:
             logger.debug("Backend '%s' not registered — skipping store", backend_enum.value)
             return None
@@ -247,13 +337,16 @@ class MemoryService:
 
         # Delegate to the backend's store method
         try:
-            if hasattr(instance, "store"):
+            if isinstance(instance, MemoryRepository):
                 result = await instance.store(
                     content, tenant_id=tenant_id, metadata=metadata or {}, **kwargs
                 )
                 return str(result) if result else None
-            elif hasattr(instance, "add"):
-                result = instance.add(content, tenant_id=tenant_id, metadata=metadata or {}, **kwargs)
+            # Fallback for untyped backends
+            elif hasattr(instance, "store"):
+                result = await instance.store(
+                    content, tenant_id=tenant_id, metadata=metadata or {}, **kwargs
+                )
                 return str(result) if result else None
         except Exception as e:
             logger.warning("Store to '%s' failed: %s", backend_enum.value, e)
@@ -296,18 +389,16 @@ class MemoryService:
                 return cached
 
         # Determine which backends to query
-        target_backends: list[MemoryBackend]
+        target_backends: list[MemoryType]
         if backends:
-            target_backends = [
-                MemoryBackend(b) if isinstance(b, str) else b for b in backends
-            ]
+            target_backends = [MemoryBackend(b) if isinstance(b, str) else b for b in backends]
         else:
-            target_backends = list(self._backends.keys())
+            target_backends = [mt for mt, _ in self._registry]
 
         # Query each backend
         all_results: list[MemoryResult] = []
         for backend_type in target_backends:
-            instance = self._backends.get(backend_type)
+            instance = self._registry.get(backend_type)
             if instance is None:
                 continue
 
@@ -381,7 +472,7 @@ class MemoryService:
         """Aggregate statistics across all backends."""
         return {
             "api_version": self.API_VERSION,
-            "backends_registered": len(self._backends),
+            "backends_registered": len(self._registry),
             "backends": self.available_backends,
             "total_stores": self._store_count,
             "total_searches": self._search_count,
@@ -402,7 +493,15 @@ class MemoryService:
         """Query a single backend and normalize results."""
         results: list[MemoryResult] = []
 
-        # Try the most common memory API methods
+        # Typed path: use MemoryRepository.search() directly
+        if isinstance(instance, MemoryRepository):
+            raw = await instance.search(query, tenant_id=tenant_id, top_k=top_k, **kwargs)
+            if raw:
+                for item in raw:
+                    results.append(self._normalize_result(backend_type, item, tenant_id))
+            return results
+
+        # Fallback: duck-typed backends (legacy, will be removed)
         if hasattr(instance, "search"):
             raw = await instance.search(query, tenant_id=tenant_id, top_k=top_k, **kwargs)
             if raw:
@@ -430,27 +529,31 @@ class MemoryService:
         tenant_id: str,
     ) -> MemoryResult:
         """Normalize a backend-specific result into MemoryResult."""
-        # Handle dict-like results
+        # Handle dict-like results (primary path for MemoryRepository backends)
         if isinstance(item, dict):
             return MemoryResult(
                 backend=backend_type,
                 content=str(item.get("content", item.get("text", str(item)))),
-                score=float(item.get("score", item.get("similarity", 0.5))),
+                score=float(item.get("score") or item.get("similarity") or 0.5),
                 memory_id=str(item.get("id", "")),
                 metadata=item.get("metadata", {}),
-                timestamp=float(item.get("timestamp", item.get("created_at", 0))),
+                timestamp=float(item.get("timestamp") or item.get("created_at") or 0),
                 tenant_id=tenant_id,
             )
 
-        # Handle objects with common attributes
+        # Handle objects with common attributes (legacy)
         if hasattr(item, "content"):
             return MemoryResult(
                 backend=backend_type,
                 content=str(item.content),
-                score=float(getattr(item, "score", getattr(item, "similarity", 0.5))),
+                score=float(
+                    getattr(item, "score", None) or getattr(item, "similarity", None) or 0.5
+                ),
                 memory_id=str(getattr(item, "id", "")),
                 metadata=getattr(item, "metadata", {}),
-                timestamp=float(getattr(item, "timestamp", getattr(item, "created_at", 0))),
+                timestamp=float(
+                    getattr(item, "timestamp", None) or getattr(item, "created_at", None) or 0
+                ),
                 tenant_id=tenant_id,
             )
 

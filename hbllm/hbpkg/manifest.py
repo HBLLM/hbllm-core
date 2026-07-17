@@ -285,10 +285,7 @@ class HBPkgManifest:
         if not data.get("name"):
             raise ValueError("hbpkg.yaml missing required field: 'name'")
 
-        capabilities = [
-            CapabilityDeclaration.from_dict(c)
-            for c in data.get("capabilities", [])
-        ]
+        capabilities = [CapabilityDeclaration.from_dict(c) for c in data.get("capabilities", [])]
 
         return cls(
             name=data["name"],

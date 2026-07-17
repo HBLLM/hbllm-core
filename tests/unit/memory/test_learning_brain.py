@@ -55,13 +55,16 @@ class TestMemCube:
         assert restored.tags == cube.tags
 
     def test_memory_types(self) -> None:
-        """All 5 memory types are available."""
-        assert len(MemoryType) == 5
+        """All cognitive memory types are available."""
+        assert len(MemoryType) == 8
         assert MemoryType.EPISODIC.value == "episodic"
         assert MemoryType.SEMANTIC.value == "semantic"
         assert MemoryType.PROCEDURAL.value == "procedural"
         assert MemoryType.VALUE.value == "value"
         assert MemoryType.GOAL.value == "goal"
+        assert MemoryType.SPATIAL.value == "spatial"
+        assert MemoryType.TEMPORAL.value == "temporal"
+        assert MemoryType.KNOWLEDGE_GRAPH.value == "knowledge_graph"
 
 
 class TestMemoryEvent:

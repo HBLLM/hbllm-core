@@ -7,3 +7,4 @@ from hbllm.config.brain_profile import (  # noqa: F401
     load_profile,
     register_profile,
 )
+from hbllm.config.core_config import HBLLMCoreConfig, SecurityConfig  # noqa: F401

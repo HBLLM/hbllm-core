@@ -150,7 +150,6 @@ class SkillInstaller:
         # 3. Register in SkillRegistry
         if self._skill_registry:
             try:
-                skill_dict = parsed.to_skill_dict()
                 self._skill_registry.store_skill(
                     name=parsed.name,
                     description=parsed.description,
@@ -221,11 +220,13 @@ class SkillInstaller:
         batch = BatchInstallResult()
 
         if not directory.is_dir():
-            batch.results.append(InstallResult(
-                name=str(directory),
-                success=False,
-                message=f"Not a directory: {directory}",
-            ))
+            batch.results.append(
+                InstallResult(
+                    name=str(directory),
+                    success=False,
+                    message=f"Not a directory: {directory}",
+                )
+            )
             return batch
 
         for path in sorted(directory.glob("*.md")):

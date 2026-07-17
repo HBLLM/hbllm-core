@@ -4,10 +4,10 @@ Knowledge Base — file/folder ingestion, chunking, and semantic search.
 Core knowledge management backed by HBLLM SemanticMemory.
 """
 
+from hbllm.core.constants import SKIP_DIRS
 from hbllm.knowledge.knowledge_base import (
     MARKITDOWN_EXTENSIONS,
     MAX_FILE_SIZE,
-    SKIP_DIRS,
     SUPPORTED_EXTENSIONS,
     KnowledgeBase,
     Source,

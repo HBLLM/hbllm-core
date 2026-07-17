@@ -95,3 +95,35 @@ async def test_delete_skill(proc_mem):
 async def test_find_no_results(proc_mem):
     """Finding with no matching skills returns empty list."""
     assert await proc_mem.find_skill("t1", "nonexistent") == []
+
+
+@pytest.mark.asyncio
+async def test_retrieve_and_search(proc_mem):
+    """Test the MemoryRepository interface methods search and retrieve."""
+    skill_id = await proc_mem.store(
+        "deploy_docker",
+        tenant_id="t1",
+        skill_name="deploy_docker",
+        steps=[{"action": "build_image"}],
+    )
+
+    # Test retrieve
+    retrieved = await proc_mem.retrieve(skill_id, tenant_id="t1")
+    assert retrieved is not None
+    assert retrieved["skill_name"] == "deploy_docker"
+    assert retrieved["steps"] == [{"action": "build_image"}]
+
+    # Test retrieve nonexistent
+    assert await proc_mem.retrieve("nonexistent", tenant_id="t1") is None
+
+    # Test search
+    results = await proc_mem.search("deploy", tenant_id="t1")
+    assert len(results) == 1
+    assert results[0]["skill_name"] == "deploy_docker"
+
+    # Test search with top_k and limit
+    results_limit = await proc_mem.search("deploy", tenant_id="t1", limit=1)
+    assert len(results_limit) == 1
+
+    results_top_k = await proc_mem.search("deploy", tenant_id="t1", top_k=2)
+    assert len(results_top_k) == 1

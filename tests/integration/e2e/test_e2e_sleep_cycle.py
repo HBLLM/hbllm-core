@@ -75,7 +75,13 @@ async def test_e2e_sleep_cycle_consolidation(e2e_sleep_env) -> None:
         await bus.publish("memory.store", store_msg)
 
     # Let the bus deliver the store messages
-    await asyncio.sleep(0.3)
+    for _ in range(30):
+        initial_turns = await memory.db.retrieve_recent(
+            "default_session", limit=10, tenant_id="default"
+        )
+        if len(initial_turns) == 5:
+            break
+        await asyncio.sleep(0.1)
 
     # Verify turns were stored
     initial_turns = await memory.db.retrieve_recent(
@@ -113,7 +119,13 @@ async def test_e2e_sleep_cycle_consolidation(e2e_sleep_env) -> None:
 
     # Wait for the background consolidation task to finish
     # It consolidates memory, normalizes temporal, resolves contradictions, and writes the dream journal
-    await asyncio.sleep(1.5)
+    for _ in range(30):
+        final_turns = await memory.db.retrieve_recent(
+            "default_session", limit=10, tenant_id="default"
+        )
+        if any("[CONSOLIDATED MEMORY]" in t["content"] for t in final_turns):
+            break
+        await asyncio.sleep(0.1)
 
     # 3. Verify that [CONSOLIDATED MEMORY] was stored in the real database
     final_turns = await memory.db.retrieve_recent("default_session", limit=10, tenant_id="default")
@@ -143,7 +155,10 @@ async def test_e2e_sleep_cycle_contradiction_resolution(e2e_sleep_env) -> None:
     resolved = await sleep_node._resolve_contradictions()
 
     # Let the bus deliver the remove_relation events to MemoryNode
-    await asyncio.sleep(0.3)
+    for _ in range(30):
+        if kg.relation_count == 1:
+            break
+        await asyncio.sleep(0.1)
 
     # 3. Assertions
     # It should have detected the conflict and pruned the older one ("prefers dark mode")
