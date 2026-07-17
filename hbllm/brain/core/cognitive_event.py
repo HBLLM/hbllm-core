@@ -47,6 +47,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from hbllm.brain.core.provenance import ProvenanceMetadata
+
 
 class CognitiveEventType(StrEnum):
     """Typed categories for cognitive events.
@@ -123,6 +125,7 @@ class CognitiveEvent:
     snn_saliency: float = 0.0
     tenant_id: str = "default"
     correlation_id: str = ""
+    provenance: ProvenanceMetadata | None = None
 
     @property
     def effective_priority(self) -> float:
@@ -147,11 +150,12 @@ class CognitiveEvent:
             snn_saliency=saliency,
             tenant_id=self.tenant_id,
             correlation_id=self.correlation_id,
+            provenance=self.provenance,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for logging and persistence."""
-        return {
+        d: dict[str, Any] = {
             "type": self.type.value,
             "source_node": self.source_node,
             "timestamp": self.timestamp,
@@ -162,6 +166,9 @@ class CognitiveEvent:
             "correlation_id": self.correlation_id,
             "payload": self.payload,
         }
+        if self.provenance is not None:
+            d["provenance"] = self.provenance.to_dict()
+        return d
 
     def __repr__(self) -> str:
         return (

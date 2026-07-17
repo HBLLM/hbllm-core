@@ -289,10 +289,81 @@ graph TD
 | RestraintEngine            | 8     | ✅     |
 | AutonomyComponents         | 10    | ✅     |
 | CognitiveEconomy / Autonomy| 10    | ✅     |
-| **Total**                  | **118**| ✅    |
+| ADR 002 Operational (Tripartite, Scheduler, Provenance, Intent, Telemetry, Forecasting, DigitalTwin) | 43 | ✅ |
+| **Total**                  | **161**| ✅    |
+
+---
+
+## Tripartite Executive Controller (ADR 002)
+
+!!! info "Architecture Decision"
+    See **[ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md)** for full rationale and design invariants.
+
+The Executive Brain Layer now implements a **Tripartite Executive** architecture that separates three fundamentally different execution modes:
+
+```mermaid
+graph LR
+    EQ["EventQueue"] --> EC["ExecutiveController<br/>(Orchestrator)"]
+    EC --> RC["ReactiveController<br/>⚡ <10ms reflexes"]
+    EC --> AS["AttentionSelector<br/>🎯 Saliency scoring"]
+    AS --> WTA["Competition<br/>🏆 WTA selection"]
+    WTA --> WS["Workspace<br/>📝 Reasoning"]
+    WS --> RFC["ReflectiveController<br/>🔄 Post-eval"]
+    
+    subgraph "Deliberative Path"
+        AS
+        WTA
+        WS
+    end
+```
+
+### Reactive Controller (`reactive_controller.py`)
+
+Sub-10ms reflex handler for urgent events. Bypasses the full deliberative pipeline.
+
+| Property | Value |
+|---|---|
+| **Latency budget** | <10ms per reflex |
+| **Priority tier** | `USER_INTERACTIVE` |
+| **LLM calls** | None — pattern-matched arcs only |
+| **Reflex types** | `WAKE_WORD`, `SAFETY_INTERRUPT`, `USER_CANCEL`, `EMERGENCY_STOP`, `ATTENTION_SPIKE`, `TIMEOUT` |
+
+### Deliberative Controller (`deliberative_controller.py`)
+
+Multi-step planning pipeline: Intent → Goal → Plan → SkillGraph.
+
+- Produces validated `Plan` DAGs with provenance
+- Extensible hooks for LLM/GoT integration (`_extract_goal()`, `_decompose_goal()`)
+- Full reasoning trace capture for decision replay
+
+### Reflective Controller (`reflective_controller.py`)
+
+Post-execution evaluator that emits structured events to the Memory Service.
+
+- Outcome evaluation via reward scoring
+- Skill effectiveness scoring
+- Memory consolidation requests
+- Periodic compaction triggers
+
+### Supporting Components (ADR 002)
+
+| Component | File | Purpose |
+|---|---|---|
+| **Provenance** | `brain/core/provenance.py` | Universal causal & epistemic metadata on every cognitive event |
+| **Intent** | `brain/control/intent.py` | Language-independent normalized semantics |
+| **Cognitive Scheduler** | `brain/control/cognitive_scheduler.py` | 5-tier priority scheduler with resource budgets |
+| **Timeline** | `telemetry/timeline.py` | High-resolution event recording |
+| **Decision Replay** | `telemetry/replay.py` | Deterministic decision recording and playback |
+| **Forecasting** | `perception/world_state.py` | Forward state prediction & uncertainty estimation |
+| **DigitalTwin** | `brain/self_model/digital_twin.py` | Ephemeral runtime state (decoupled from SelfModel identity) |
+
+---
 
 ## Cross-References
 
+- [ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md) — Tripartite Executive, Provenance, and DigitalTwin design decisions
 - [Adaptive Network Architecture](./adaptive-network.md) — the transport layer below this
 - [Memory Systems](./memory-systems.md) — importance scoring integrates with autonomy
+- [Self-Model](./self-model.md) — persistent identity (complementary to DigitalTwin)
 - `hbllm/brain/attention_manager.py` — memory-focused attention (complementary)
+

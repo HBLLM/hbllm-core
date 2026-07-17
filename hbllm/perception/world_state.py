@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -286,3 +287,186 @@ class WorldStateEngine:
                 for section in ["hardware", "iot", "audio", "user_state", "weather", "calendar"]
             },
         }
+
+    # ═════════════════════════════════════════════════════════════════════
+    # Generalized Forecasting Interface — ADR 002 §4
+    # ═════════════════════════════════════════════════════════════════════
+
+    async def predict(self, horizon_seconds: float) -> StatePrediction:
+        """Predict the world state at a future time horizon.
+
+        Uses current trends, temporal patterns, and TTL expiry profiles
+        to project the expected world state forward.
+
+        Args:
+            horizon_seconds: How far into the future to predict (seconds).
+
+        Returns:
+            StatePrediction with the projected state and confidence.
+        """
+        now = time.time()
+        future_time = now + horizon_seconds
+        current = self.get_state()
+
+        # Predict section freshness at future time
+        predicted_fresh: dict[str, bool] = {}
+        for section in ["hardware", "iot", "audio", "user_state", "weather", "calendar"]:
+            ts = self._timestamps.get(section, 0)
+            remaining_ttl = self.state_ttl_s - (now - ts)
+            predicted_fresh[section] = remaining_ttl > horizon_seconds
+
+        # Project user state based on temporal patterns
+        predicted_user_state = self._user_state.get("state", "unknown")
+        if horizon_seconds > 1800:  # > 30 minutes
+            predicted_user_state = "likely_idle"
+
+        return StatePrediction(
+            predicted_state={
+                **current,
+                "predicted_at": future_time,
+                "horizon_seconds": horizon_seconds,
+                "predicted_user_state": predicted_user_state,
+            },
+            confidence=max(0.1, 1.0 - (horizon_seconds / 3600.0)),
+            horizon_seconds=horizon_seconds,
+            sections_available=predicted_fresh,
+            timestamp=now,
+        )
+
+    async def simulate(self, action_sequence: list[dict[str, Any]]) -> SimulationOutcome:
+        """Simulate the effect of a sequence of actions on the world state.
+
+        Projects how the world state would change if the given actions
+        were executed sequentially.
+
+        Args:
+            action_sequence: List of action descriptors to simulate.
+
+        Returns:
+            SimulationOutcome with projected changes and risk assessment.
+        """
+        now = time.time()
+        changes: list[dict[str, Any]] = []
+        risk_score = 0.0
+
+        for i, action in enumerate(action_sequence):
+            action_type = action.get("type", "unknown")
+            target = action.get("target", "")
+
+            change = {
+                "step": i,
+                "action_type": action_type,
+                "target": target,
+                "projected_effect": f"Effect of {action_type} on {target}",
+                "confidence": max(0.3, 1.0 - (i * 0.1)),
+            }
+
+            # Assess risk for mutating actions
+            if action_type in ("execute", "delete", "modify", "shell"):
+                risk_score += 0.2
+                change["risk_flag"] = True
+
+            changes.append(change)
+
+        return SimulationOutcome(
+            projected_changes=changes,
+            risk_score=min(1.0, risk_score),
+            action_count=len(action_sequence),
+            confidence=max(0.2, 1.0 - (len(action_sequence) * 0.05)),
+            timestamp=now,
+        )
+
+    async def estimate_uncertainty(self) -> UncertaintyMetrics:
+        """Estimate the current uncertainty of the world state model.
+
+        Measures data staleness, coverage gaps, and confidence decay
+        across all perception sections.
+
+        Returns:
+            UncertaintyMetrics with per-section and aggregate scores.
+        """
+        now = time.time()
+        section_uncertainty: dict[str, float] = {}
+        sections = ["hardware", "iot", "audio", "user_state", "weather", "calendar"]
+
+        for section in sections:
+            ts = self._timestamps.get(section, 0)
+            if ts == 0:
+                section_uncertainty[section] = 1.0  # No data
+            else:
+                age = now - ts
+                # Uncertainty increases linearly with age relative to TTL
+                section_uncertainty[section] = min(1.0, age / self.state_ttl_s)
+
+        # Aggregate uncertainty
+        total = sum(section_uncertainty.values()) / max(1, len(section_uncertainty))
+
+        return UncertaintyMetrics(
+            aggregate_uncertainty=round(total, 4),
+            section_uncertainty=section_uncertainty,
+            stale_sections=[s for s, u in section_uncertainty.items() if u >= 1.0],
+            fresh_sections=[s for s, u in section_uncertainty.items() if u < 0.5],
+            timestamp=now,
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Forecasting Data Classes — ADR 002 §4
+# ═════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class StatePrediction:
+    """Result of a forward state prediction.
+
+    Attributes:
+        predicted_state: The projected world state dict.
+        confidence: Overall prediction confidence [0.0, 1.0].
+        horizon_seconds: How far into the future this predicts.
+        sections_available: Which data sections will still be fresh.
+        timestamp: When this prediction was generated.
+    """
+
+    predicted_state: dict[str, Any] = field(default_factory=dict)
+    confidence: float = 0.5
+    horizon_seconds: float = 0.0
+    sections_available: dict[str, bool] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class SimulationOutcome:
+    """Result of simulating an action sequence on the world state.
+
+    Attributes:
+        projected_changes: Step-by-step projected effects.
+        risk_score: Aggregate risk score [0.0, 1.0].
+        action_count: Number of actions simulated.
+        confidence: Overall simulation confidence [0.0, 1.0].
+        timestamp: When this simulation was run.
+    """
+
+    projected_changes: list[dict[str, Any]] = field(default_factory=list)
+    risk_score: float = 0.0
+    action_count: int = 0
+    confidence: float = 0.5
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class UncertaintyMetrics:
+    """Uncertainty measurements of the current world state model.
+
+    Attributes:
+        aggregate_uncertainty: Overall uncertainty [0.0, 1.0].
+        section_uncertainty: Per-section uncertainty scores.
+        stale_sections: Sections with uncertainty >= 1.0.
+        fresh_sections: Sections with uncertainty < 0.5.
+        timestamp: When this estimate was generated.
+    """
+
+    aggregate_uncertainty: float = 0.5
+    section_uncertainty: dict[str, float] = field(default_factory=dict)
+    stale_sections: list[str] = field(default_factory=list)
+    fresh_sections: list[str] = field(default_factory=list)
+    timestamp: float = field(default_factory=time.time)
