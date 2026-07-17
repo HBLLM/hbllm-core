@@ -18,12 +18,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hbllm.memory.interface import MemoryType
 from hbllm.memory.pool import DatabasePool
+from hbllm.memory.repository import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
 
-class ProceduralMemory:
+class ProceduralMemory(MemoryRepository):
     """
     SQLite-backed skill/procedure storage.
 
@@ -225,6 +227,18 @@ class ProceduralMemory:
             await conn.commit()
             return cursor.rowcount > 0
 
+    def _row_to_dict(self, row: Any) -> dict[str, Any]:
+        """Convert a database row to a skill dictionary."""
+        return {
+            "id": row[0],
+            "tenant_id": row[1],
+            "skill_name": row[2],
+            "trigger_pattern": row[3],
+            "steps": json.loads(row[4]),
+            "success_rate": row[5],
+            "usage_count": row[6],
+        }
+
     async def get_skill_by_id(self, skill_id: str) -> dict[str, Any] | None:
         """Retrieve a single skill by its ID."""
         async with self.pool.acquire() as conn:
@@ -237,12 +251,75 @@ class ProceduralMemory:
         if not row:
             return None
 
+        return self._row_to_dict(row)
+
+    # ── MemoryRepository interface ───────────────────────────────────
+    # Transitional adapters.
+
+    @property
+    def memory_type(self) -> MemoryType:
+        return MemoryType.PROCEDURAL
+
+    async def initialize(self) -> None:
+        await self.init_db()
+
+    async def shutdown(self) -> None:
+        await self.close()
+
+    async def store(self, content: str, tenant_id: str = "default", **kwargs: Any) -> str:
+        """Store content as a procedural skill.
+
+        Keyword Args:
+            skill_name: Name of the skill (default: auto-generated).
+            trigger_pattern: When to use this skill.
+            steps: List of step dicts.
+        """
+        return await self.store_skill(
+            tenant_id=tenant_id,
+            skill_name=kwargs.get("skill_name", content[:50]),
+            trigger_pattern=kwargs.get("trigger_pattern", content),
+            steps=kwargs.get("steps", [{"action": content}]),
+        )
+
+    async def retrieve(
+        self, memory_id: str, tenant_id: str = "default", **kwargs: Any
+    ) -> dict[str, Any] | None:
+        """Retrieve a skill by ID."""
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                "SELECT * FROM skills WHERE id = ? AND tenant_id = ?",
+                (memory_id, tenant_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
+    async def search(
+        self, query: str, tenant_id: str = "default", **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        """Search skills by trigger pattern."""
+        raw_top_k = kwargs.get("top_k")
+        if raw_top_k is None:
+            raw_top_k = kwargs.get("limit")
+
+        top_k = 3
+        if raw_top_k is not None:
+            try:
+                top_k = int(raw_top_k)
+            except (ValueError, TypeError):
+                pass
+
+        return await self.find_skill(tenant_id=tenant_id, query=query, top_k=top_k)
+
+    async def stats(self, tenant_id: str = "default") -> dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM skills WHERE tenant_id = ?",
+                (tenant_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
         return {
-            "id": row[0],
-            "tenant_id": row[1],
-            "skill_name": row[2],
-            "trigger_pattern": row[3],
-            "steps": json.loads(row[4]),
-            "success_rate": row[5],
-            "usage_count": row[6],
+            "memory_type": self.memory_type.value,
+            "skills": row[0] if row else 0,
         }

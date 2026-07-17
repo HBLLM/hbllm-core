@@ -207,6 +207,7 @@ class RequestBudget:
     @property
     def utilization(self) -> dict[str, float]:
         """Resource utilization as percentages."""
+
         def _pct(used: int, limit: int) -> float:
             return round(used / limit * 100, 1) if limit > 0 else 0.0
 

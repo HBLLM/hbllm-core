@@ -16,12 +16,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hbllm.memory.interface import MemoryType
 from hbllm.memory.pool import DatabasePool
+from hbllm.memory.repository import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
 
-class EpisodicMemory:
+class EpisodicMemory(MemoryRepository):
     """
     Lightweight SQLite storage for conversation history.
     """
@@ -322,3 +324,92 @@ class EpisodicMemory:
             ) as cursor:
                 row = await cursor.fetchone()
         return row[0] if row else 0
+
+    # ── MemoryRepository interface ───────────────────────────────────
+    # These are transitional adapters. Eventually the specialized methods
+    # (store_turn, search_by_content, etc.) should converge to the
+    # standard store/search/retrieve API.
+
+    @property
+    def memory_type(self) -> MemoryType:
+        return MemoryType.EPISODIC
+
+    async def initialize(self) -> None:
+        await self.init_db()
+
+    async def shutdown(self) -> None:
+        await self.close()
+
+    async def store(self, content: str, tenant_id: str = "default", **kwargs: Any) -> str:
+        """Store content as an episodic turn.
+
+        Keyword Args:
+            session_id: Conversation session ID (default: ``"default"``).
+            role: Turn role (default: ``"user"``).
+            domain: Domain tag.
+            metadata: Additional metadata dict.
+        """
+        return await self.store_turn(
+            session_id=kwargs.get("session_id", "default"),
+            role=kwargs.get("role", "user"),
+            content=content,
+            domain=kwargs.get("domain"),
+            metadata=kwargs.get("metadata"),
+            tenant_id=tenant_id,
+        )
+
+    async def retrieve(
+        self, memory_id: str, tenant_id: str = "default", **kwargs: Any
+    ) -> dict[str, Any] | None:
+        """Retrieve a single turn by ID."""
+        async with self.pool.acquire() as conn:
+            async with conn.execute(
+                "SELECT * FROM turns WHERE id = ? AND tenant_id = ?",
+                (memory_id, tenant_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "tenant_id": row["tenant_id"],
+            "role": row["role"],
+            "content": row["content"],
+            "domain": row["domain"],
+            "timestamp": row["timestamp_iso"],
+            "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+        }
+
+    async def search(
+        self, query: str, tenant_id: str = "default", **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        """Search episodic turns by content substring."""
+        raw_limit = kwargs.get("top_k")
+        if raw_limit is None:
+            raw_limit = kwargs.get("limit")
+
+        limit = 10
+        if raw_limit is not None:
+            try:
+                limit = int(raw_limit)
+            except (ValueError, TypeError):
+                pass
+
+        return await self.search_by_content(query, tenant_id=tenant_id, limit=limit)
+
+    async def delete(self, memory_id: str, tenant_id: str = "default", **kwargs: Any) -> bool:
+        """Delete a single turn by ID."""
+        async with self.pool.acquire() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM turns WHERE id = ? AND tenant_id = ?",
+                (memory_id, tenant_id),
+            )
+            await conn.commit()
+        return cursor.rowcount > 0
+
+    async def stats(self, tenant_id: str = "default") -> dict[str, Any]:
+        return {
+            "memory_type": self.memory_type.value,
+            "sessions": await self.get_session_count(tenant_id),
+            "turns": await self.get_turn_count(tenant_id),
+        }

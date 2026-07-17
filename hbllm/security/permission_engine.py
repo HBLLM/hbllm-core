@@ -48,7 +48,6 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
@@ -295,8 +294,7 @@ class PermissionEngine:
                      granted_at, expires_at, tenant_id)
                     VALUES (?, ?, ?, 'granted', ?, ?, ?, ?, ?)
                     """,
-                    (grant_id, principal, scope, granted_by, reason,
-                     now, expires, tenant_id),
+                    (grant_id, principal, scope, granted_by, reason, now, expires, tenant_id),
                 )
                 self._cache[(principal, scope)] = GrantStatus.GRANTED
                 count += 1
@@ -479,18 +477,14 @@ class PermissionEngine:
     async def _warm_cache(self) -> None:
         """Load all grants into memory cache."""
         with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute(
-                "SELECT principal, scope, status FROM permission_grants"
-            ).fetchall()
+            rows = conn.execute("SELECT principal, scope, status FROM permission_grants").fetchall()
 
         for principal, scope, status in rows:
             self._cache[(principal, scope)] = GrantStatus(status)
 
         logger.debug("Warmed permission cache with %d entries", len(self._cache))
 
-    def _record_audit(
-        self, principal: str, scope: str, result: str, context: str
-    ) -> None:
+    def _record_audit(self, principal: str, scope: str, result: str, context: str) -> None:
         """Record an audit entry (in-memory ring buffer)."""
         self._audit.append(
             PermissionAuditEntry(

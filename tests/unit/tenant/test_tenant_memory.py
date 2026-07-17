@@ -167,7 +167,7 @@ async def test_knowledge_graph_tenant_isolation(memory_env):
         topic="knowledge.query",
         payload={"action": "all_entities"},
     )
-    resp_a = await mem.handle_knowledge_query(query_msg_a)
+    resp_a = await mem.reflection_handler.handle_knowledge_query(query_msg_a)
     assert resp_a is not None
     entities_a = resp_a.payload["entities"]
     assert any(e["label"] == "apple" for e in entities_a)
@@ -181,7 +181,7 @@ async def test_knowledge_graph_tenant_isolation(memory_env):
         topic="knowledge.query",
         payload={"action": "all_entities"},
     )
-    resp_b = await mem.handle_knowledge_query(query_msg_b)
+    resp_b = await mem.reflection_handler.handle_knowledge_query(query_msg_b)
     assert resp_b is not None
     entities_b = resp_b.payload["entities"]
     assert any(e["label"] == "banana" for e in entities_b)

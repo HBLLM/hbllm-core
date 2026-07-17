@@ -226,7 +226,7 @@ async def test_full_cognitive_loop():
         # The bus dispatches handlers via create_task, so instead of racing
         # against async scheduling, we directly invoke handle_improvement
         # on the MemoryNode to verify the handler logic deterministically.
-        await memory.handle_improvement(improve_msg)
+        await memory.reflection_handler.handle_improvement(improve_msg)
 
         docs = memory.semantic_db.get_all()
         assert any("Learned pattern in domain 'auth_domain'" in d["content"] for d in docs), (

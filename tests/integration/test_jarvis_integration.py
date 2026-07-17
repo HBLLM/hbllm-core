@@ -63,14 +63,14 @@ async def test_temporal_to_spatial_correlation(tmp_path):
     await spatial.init_db()
 
     # Record coding at office
-    spatial.register_location("office", identifiers={"wifi_ssid": "CorpWiFi"})
+    await spatial.register_location("office", identifiers={"wifi_ssid": "CorpWiFi"})
     for i in range(15):
         temporal.record_interaction("t1", "coding", timestamp=time.time() - i * 1800)
-        spatial.record_interaction("t1", "office", "coding")
+        await spatial.record_interaction("t1", "office", "coding")
 
     # Both subsystems have data
     _patterns = temporal.detect_patterns("t1")  # noqa: F841
-    location_ctx = spatial.get_location_context("t1", "office")
+    location_ctx = await spatial.get_location_context("t1", "office")
     assert len(location_ctx) >= 1
     assert location_ctx[0].domain == "coding"
 

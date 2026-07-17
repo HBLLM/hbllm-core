@@ -250,7 +250,9 @@ class IdentityStateManager:
         else:
             self._identity = CoreIdentity()
             await self._persist_identity()
-            logger.info("Created new identity '%s' (id=%s)", self._identity.name, self._identity.agent_id)
+            logger.info(
+                "Created new identity '%s' (id=%s)", self._identity.name, self._identity.agent_id
+            )
 
         return self._identity
 

@@ -36,7 +36,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.memory.interface import MemoryType
 from hbllm.memory.latent_cluster import LatentClusterManager
+from hbllm.memory.repository import MemoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +141,7 @@ class _TfIdfEmbedder:
         return cast(np.ndarray[Any, Any], vectors)
 
 
-class SemanticMemory:
+class SemanticMemory(MemoryRepository):
     """
     A lightweight in-memory vector database for the Modular Brain.
 
@@ -1576,3 +1578,65 @@ class SemanticMemory:
                         doc_meta["category"] = f"cluster_{c_id}"
 
             return {"tenant_id": tenant_id, "removed": removed, "merged_into": merged_into}
+
+    # ── MemoryRepository interface ───────────────────────────────────
+    # These are transitional adapters. Eventually the sync API (store,
+    # search) should be replaced by async-first (astore, asearch) as
+    # the primary interface.
+
+    @property
+    def memory_type(self) -> MemoryType:
+        return MemoryType.SEMANTIC
+
+    async def initialize(self) -> None:
+        """SemanticMemory initialises lazily in __init__ — no-op here."""
+
+    async def shutdown(self) -> None:
+        self.close()
+
+    async def repo_store(self, content: str, tenant_id: str = "default", **kwargs: Any) -> str:
+        """MemoryRepository.store — delegates to astore.
+
+        Note: Named repo_store to avoid shadowing the existing sync store().
+        """
+        result = await self.astore(
+            content,
+            metadata=kwargs.get("metadata"),
+            is_priority=kwargs.get("is_priority", False),
+            tenant_id=tenant_id,
+        )
+        return result or ""
+
+    async def retrieve(
+        self, memory_id: str, tenant_id: str = "default", **kwargs: Any
+    ) -> dict[str, Any] | None:
+        """Retrieve a single document by ID."""
+        doc = self.documents.get(memory_id)
+        if doc is None:
+            return None
+        return {
+            "id": memory_id,
+            "content": doc.get("content", ""),
+            "metadata": doc.get("metadata", {}),
+            "score": 1.0,
+        }
+
+    async def repo_search(
+        self, query: str, tenant_id: str = "default", **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        """MemoryRepository.search — delegates to asearch.
+
+        Note: Named repo_search to avoid shadowing the existing sync search().
+        """
+        top_k = kwargs.get("top_k", 5)
+        results = await self.asearch(query, top_k=top_k, tenant_id=tenant_id)
+        if isinstance(results, dict):
+            return results.get("results", [])
+        return results
+
+    async def stats(self, tenant_id: str = "default") -> dict[str, Any]:
+        return {
+            "memory_type": self.memory_type.value,
+            "total_documents": len(self.documents),
+            "embedder": "sentence-transformers" if not self._use_tfidf else "tfidf",
+        }

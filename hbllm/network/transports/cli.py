@@ -70,8 +70,6 @@ class _RichRenderer:
         self._has_rich = False
         try:
             from rich.console import Console
-            from rich.markdown import Markdown
-            from rich.panel import Panel
 
             self._console = Console()
             self._has_rich = True

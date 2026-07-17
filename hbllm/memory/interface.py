@@ -5,15 +5,26 @@ Unified Memory Interface for HBLLM Core.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol
 
 
-class MemoryType(Enum):
+class MemoryType(StrEnum):
+    """Cognitive memory domains.
+
+    These represent genuine memory types in the cognitive architecture.
+    Storage backends, indexing layers, and reasoning systems (e.g.
+    KnowledgeGraph, BeliefGraph, LatentCluster) are NOT memory types
+    and should not be added here.
+    """
+
     EPISODIC = "episodic"
     SEMANTIC = "semantic"
     PROCEDURAL = "procedural"
     VALUE = "value"
+    GOAL = "goal"
+    SPATIAL = "spatial"
+    TEMPORAL = "temporal"
     KNOWLEDGE_GRAPH = "knowledge_graph"
 
 

@@ -259,14 +259,18 @@ class BootOrchestrator:
 
         logger.info("═" * 60)
         logger.info("  Cognitive OS ready (%.0fms boot)", ctx.boot_time_ms)
-        logger.info("  Profile: %s | Gateway: %s | Scheduler: %s",
-                     cfg.profile_name,
-                     "ON" if ctx.gateway else "OFF",
-                     "ON" if ctx.scheduler else "OFF")
-        logger.info("  Identity: %s | Workspaces: %s | Permissions: %s",
-                     "ON" if ctx.identity else "OFF",
-                     "ON" if ctx.workspace_manager else "OFF",
-                     "ON" if ctx.permission_engine else "OFF")
+        logger.info(
+            "  Profile: %s | Gateway: %s | Scheduler: %s",
+            cfg.profile_name,
+            "ON" if ctx.gateway else "OFF",
+            "ON" if ctx.scheduler else "OFF",
+        )
+        logger.info(
+            "  Identity: %s | Workspaces: %s | Permissions: %s",
+            "ON" if ctx.identity else "OFF",
+            "ON" if ctx.workspace_manager else "OFF",
+            "ON" if ctx.permission_engine else "OFF",
+        )
         logger.info("═" * 60)
 
         self._started = True

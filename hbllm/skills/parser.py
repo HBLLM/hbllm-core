@@ -286,7 +286,7 @@ class SkillParser:
         """Remove YAML frontmatter, leaving only the body."""
         match = _FRONTMATTER_RE.match(content)
         if match:
-            return content[match.end():]
+            return content[match.end() :]
         return content
 
     @staticmethod
