@@ -1,6 +1,6 @@
 VENV := venv
 PYTHON := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
+PIP := $(PYTHON) -m pip
 PYTEST := $(PYTHON) -m pytest
 
 .PHONY: test test-v test-fast test-unit test-integration lint format typecheck install clean \

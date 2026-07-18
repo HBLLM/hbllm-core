@@ -123,10 +123,16 @@ class MemorySystem(Node):
                     logger.debug("[MemorySystem] No entities in KG to warm cache.")
                     return
 
+                from hbllm.security.tenant_guard import get_current_tenant
+
+                current_tenant = get_current_tenant() or "default"
                 for entity in entities:
                     logger.debug("[MemorySystem] Warming cache for concept: %s", entity.label)
                     await asyncio.to_thread(
-                        self._memory.semantic_db.search, entity.label, top_k=5, tenant_id="default"
+                        self._memory.semantic_db.search,
+                        entity.label,
+                        top_k=5,
+                        tenant_id=current_tenant,
                     )
             logger.info("[MemorySystem] Proactive memory warming complete.")
         except Exception as e:

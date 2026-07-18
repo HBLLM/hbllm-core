@@ -326,6 +326,9 @@ class KnowledgeBase:
                 try:
                     chunks = self._read_and_chunk(file_path)
                     for chunk_text in chunks:
+                        from hbllm.security.tenant_guard import get_current_tenant
+
+                        current_tenant = get_current_tenant() or "default"
                         doc_id = self.memory.store(
                             content=chunk_text,
                             metadata={
@@ -333,6 +336,7 @@ class KnowledgeBase:
                                 "file_path": file_path,
                                 "file_name": os.path.basename(file_path),
                             },
+                            tenant_id=current_tenant,
                         )
                         if doc_id:
                             doc_ids.append(doc_id)
@@ -513,7 +517,10 @@ class KnowledgeBase:
         if not query.strip():
             return []
 
-        results = self.memory.search(query, top_k=top_k)
+        from hbllm.security.tenant_guard import get_current_tenant
+
+        current_tenant = get_current_tenant() or "default"
+        results = self.memory.search(query, top_k=top_k, tenant_id=current_tenant)
 
         # Enrich results with source info
         enriched = []
@@ -559,6 +566,9 @@ class KnowledgeBase:
 
         doc_ids = []
         for chunk_text in chunks:
+            from hbllm.security.tenant_guard import get_current_tenant
+
+            current_tenant = get_current_tenant() or "default"
             doc_id = self.memory.store(
                 content=chunk_text,
                 metadata={
@@ -572,6 +582,7 @@ class KnowledgeBase:
                     "ingested_at": time.time(),
                     "status": "active",
                 },
+                tenant_id=current_tenant,
             )
             if doc_id:
                 doc_ids.append(doc_id)

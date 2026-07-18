@@ -165,7 +165,7 @@ async def _run_agent(
         console.print(f"\n[bold yellow]🚀 Running task: {task}[/]\n")
         result = await brain.process(text=task, tenant_id=tenant_id, session_id="oneshot")
         console.print(Panel(result.text, border_style="green", title="Output"))
-        await brain.stop()
+        await brain.shutdown()
         return
 
     # ── Interactive REPL ─────────────────────────────────────────────
@@ -205,7 +205,7 @@ async def _run_agent(
             console.print(f"\n[bold red]❌ Error executing task: {e}[/]\n")
 
     console.print("[bold yellow]Stopping agent nodes and saving state...[/]")
-    await brain.stop()
+    await brain.shutdown()
     console.print("[bold green]Goodbye![/]")
 
 

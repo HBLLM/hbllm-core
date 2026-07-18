@@ -2,37 +2,12 @@
 
 from __future__ import annotations
 
-import importlib.util
-import os
-import sys
 import tempfile
 import time
 
-
-# Import TemporalEngine from the plugin directory (dashes in path).
-def _import_temporal():
-    # Navigate from tests/unit/memory/ → tests/ → core/ (project root)
-    _tests_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    _project_root = os.path.dirname(_tests_root)
-    engine_path = os.path.join(
-        _project_root,
-        "hbllm",
-        "plugins",
-        "temporal-reasoning",
-        "temporal_engine.py",
-    )
-    spec = importlib.util.spec_from_file_location("temporal_engine", engine_path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["temporal_engine"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_te = _import_temporal()
-TemporalEngine = _te.TemporalEngine
-TemporalEvent = _te.TemporalEvent
-parse_temporal_references = _te.parse_temporal_references
-
+from hbllm.brain.self_model.temporal_node import TemporalEvent
+from hbllm.brain.self_model.temporal_node import TemporalNode as TemporalEngine
+from hbllm.utils.temporal import parse_temporal_references
 
 # ── TemporalEvent ────────────────────────────────────────────────────────
 
