@@ -125,7 +125,7 @@ class BrainConfig(BaseModel):
         import json
         import os
 
-        for field_name, field_info in self.model_fields.items():
+        for field_name, field_info in self.__class__.model_fields.items():
             if field_name not in data:
                 env_key = f"HBLLM_{field_name.upper()}"
                 if env_key in os.environ:
