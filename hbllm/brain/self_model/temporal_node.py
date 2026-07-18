@@ -1,10 +1,5 @@
 """
-Temporal Reasoning Plugin — Time-aware context for conversations.
-
-Tracks conversation timestamps, recognizes temporal references ("yesterday",
-"last week"), and provides deadline tracking for scheduled tasks.
-
-Now with SQLite persistence — temporal context survives restarts.
+Temporal Node — Tracks time-aware events, task start/completions, and deadlines.
 """
 
 from __future__ import annotations
@@ -19,12 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
-from hbllm.plugin.sdk import HBLLMPlugin, subscribe
+from hbllm.network.node import Node, NodeType
+from hbllm.utils.temporal import parse_temporal_references
 
 logger = logging.getLogger(__name__)
-
-
-# ── Data Structures ───────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -106,55 +99,24 @@ class Deadline:
         }
 
 
-# ── Temporal Reference Parser ─────────────────────────────────────────────────
+class TemporalNode(Node):
+    """Tracks conversation timestamps, temporal queries, and task deadlines.
 
-# Keywords that indicate temporal references in user queries
-_TEMPORAL_KEYWORDS = {
-    "yesterday": timedelta(days=1),
-    "last week": timedelta(weeks=1),
-    "last month": timedelta(days=30),
-    "earlier today": timedelta(hours=6),
-    "earlier": timedelta(hours=2),
-    "recently": timedelta(hours=24),
-    "before": timedelta(hours=1),
-    "previously": timedelta(hours=24),
-    "last time": timedelta(days=7),
-    "a while ago": timedelta(days=3),
-}
-
-
-def parse_temporal_references(text: str) -> list[tuple[str, timedelta]]:
-    """Extract temporal references from text."""
-    text_lower = text.lower()
-    found = []
-    for keyword, delta in _TEMPORAL_KEYWORDS.items():
-        if keyword in text_lower:
-            found.append((keyword, delta))
-    return found
-
-
-# ── Temporal Engine Plugin ────────────────────────────────────────────────────
-
-
-class TemporalEngine(HBLLMPlugin):
-    """Adds time-aware context to conversations.
-
-    Uses SQLite for persistent event storage with an in-memory hot cache
-    for fast recent event access.
+    Uses SQLite for persistent event storage with an in-memory hot cache.
     """
 
     def __init__(
         self,
-        node_id: str = "temporal_engine",
+        node_id: str = "temporal_node",
         history_size: int = 500,
         max_deadlines: int = 50,
         data_dir: str | Path | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
+            node_type=NodeType.DETECTOR,
             capabilities=["temporal_awareness", "deadline_tracking", "time_references"],
         )
-        # In-memory hot cache for fast access to recent events
         self._events: deque[TemporalEvent] = deque(maxlen=history_size)
         self._deadlines: dict[str, Deadline] = {}
         self._max_deadlines = max_deadlines
@@ -210,10 +172,10 @@ class TemporalEngine(HBLLMPlugin):
                         )
                     )
             logger.info(
-                "[TemporalEngine] Loaded %d events from persistent storage", len(self._events)
+                "[%s] Loaded %d events from persistent storage", self.node_id, len(self._events)
             )
         except Exception as e:
-            logger.warning("[TemporalEngine] Failed to load events: %s", e)
+            logger.warning("[%s] Failed to load events: %s", self.node_id, e)
 
     def _persist_event(self, event: TemporalEvent) -> None:
         """Persist an event to SQLite."""
@@ -234,9 +196,20 @@ class TemporalEngine(HBLLMPlugin):
                     ),
                 )
         except Exception as e:
-            logger.debug("[TemporalEngine] Failed to persist event: %s", e)
+            logger.debug("[%s] Failed to persist event: %s", self.node_id, e)
 
-    @subscribe("system.experience")
+    async def on_start(self) -> None:
+        """Wire message bus subscriptions."""
+        await self.bus.subscribe("system.experience", self.on_experience)
+        await self.bus.subscribe("system.task.started", self.on_task_started)
+        await self.bus.subscribe("system.task.completed", self.on_task_completed)
+
+    async def on_stop(self) -> None:
+        pass
+
+    async def handle_message(self, message: Message) -> Message | None:
+        return None
+
     async def on_experience(self, message: Message) -> None:
         """Record conversation events with timestamps."""
         text = message.payload.get("text", "")
@@ -261,7 +234,6 @@ class TemporalEngine(HBLLMPlugin):
                 if context:
                     await self._publish_context(context, message.correlation_id)
 
-    @subscribe("system.task.started")
     async def on_task_started(self, message: Message) -> None:
         """Track task start times."""
         task_id = message.payload.get("task_id", "")
@@ -274,7 +246,6 @@ class TemporalEngine(HBLLMPlugin):
             self._events.append(event)
             self._persist_event(event)
 
-    @subscribe("system.task.completed")
     async def on_task_completed(self, message: Message) -> None:
         """Track task completions and update deadlines."""
         task_id = message.payload.get("task_id", "")
@@ -383,17 +354,11 @@ class TemporalEngine(HBLLMPlugin):
                         for r in rows
                     ]
             except Exception as e:
-                logger.debug("[TemporalEngine] Fallback to in-memory: %s", e)
+                logger.debug("[%s] Fallback to in-memory: %s", self.node_id, e)
         return [e for e in self._events if start <= e.timestamp <= end][:max_results]
 
     def detect_patterns(self, window_days: int = 7) -> list[dict[str, Any]]:
-        """Detect recurring patterns in recent events.
-
-        Looks for domains/topics that appear frequently within the window.
-
-        Returns:
-            List of detected patterns with domain, count, and frequency.
-        """
+        """Detect recurring patterns in recent events."""
         cutoff = time.time() - (window_days * 86400)
         domain_counts: dict[str, int] = {}
 
@@ -410,7 +375,7 @@ class TemporalEngine(HBLLMPlugin):
                     ).fetchall()
                     domain_counts = {r[0]: r[1] for r in rows}
             except Exception as e:
-                logger.debug("[TemporalEngine] non-critical error: %s", e)
+                logger.debug("[%s] non-critical error: %s", self.node_id, e)
         if not domain_counts:
             for event in self._events:
                 if event.timestamp > cutoff:
@@ -418,7 +383,7 @@ class TemporalEngine(HBLLMPlugin):
 
         patterns = []
         for domain, count in sorted(domain_counts.items(), key=lambda x: x[1], reverse=True):
-            if count >= 3:  # Minimum threshold for a pattern
+            if count >= 3:
                 patterns.append(
                     {
                         "domain": domain,
@@ -427,7 +392,6 @@ class TemporalEngine(HBLLMPlugin):
                         "window_days": window_days,
                     }
                 )
-
         return patterns
 
     def _find_relevant_events(
@@ -451,7 +415,6 @@ class TemporalEngine(HBLLMPlugin):
                         "event": event.to_dict(),
                     }
                 )
-
         return context
 
     async def _publish_context(
@@ -486,7 +449,7 @@ class TemporalEngine(HBLLMPlugin):
                         "SELECT COUNT(*) FROM temporal_events"
                     ).fetchone()[0]
             except Exception as e:
-                logger.debug("[TemporalEngine] non-critical error: %s", e)
+                logger.debug("[%s] non-critical error: %s", self.node_id, e)
         return {
             "total_events_cached": len(self._events),
             "total_events_persisted": total_persisted,

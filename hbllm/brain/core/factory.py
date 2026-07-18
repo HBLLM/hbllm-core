@@ -54,6 +54,7 @@ from hbllm.brain.self_model.attention_manager import AttentionManager
 from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
 from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
 from hbllm.brain.self_model.self_model import SelfModel
+from hbllm.brain.self_model.temporal_node import TemporalNode
 from hbllm.brain.skills.skill_compiler_node import SkillCompilerNode
 
 # New cognitive modules
@@ -144,6 +145,7 @@ class BrainConfig(BaseModel):
     inject_relationship_memory: bool = True
     inject_reality_graph: bool = True
     inject_autonomy_manager: bool = True
+    inject_temporal: bool = True
 
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
@@ -290,6 +292,7 @@ class Brain:
         self.skill_registry: SkillRegistry | None = None
         self.goal_manager: GoalManager | None = None
         self.self_model: SelfModel | None = None
+        self.temporal: TemporalNode | None = None
         self.cognitive_metrics: CognitiveMetrics | None = None
         self.world_state: WorldStateEngine | None = None
         self.revision_node: RevisionNode | None = None
@@ -1605,6 +1608,18 @@ class BrainFactory:
             await awareness_node.start(message_bus)
             brain.awareness = awareness_node
             nodes.append(awareness_node)
+
+        if cfg.inject_temporal:
+            from hbllm.brain.self_model.temporal_node import TemporalNode
+
+            temporal_node = TemporalNode(
+                node_id="temporal_node",
+                data_dir=cfg.data_dir,
+            )
+            await _register_node(registry, temporal_node)
+            await temporal_node.start(message_bus)
+            brain.temporal = temporal_node
+            nodes.append(temporal_node)
 
             # EmotionEngine — publishes emotion.state consumed by Awareness & PersonaEngine
             from hbllm.brain.emotion.emotion_engine import EmotionEngine

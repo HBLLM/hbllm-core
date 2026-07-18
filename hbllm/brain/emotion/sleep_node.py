@@ -810,31 +810,7 @@ class SleepCycleNode(Node):
         logger.info("[SleepNode] Phase 1.6: Normalizing temporal references in memories...")
         normalized = 0
 
-        try:
-            from hbllm.plugins.temporal_reasoning.temporal_engine import (
-                parse_temporal_references,
-            )
-        except ImportError:
-            try:
-                # Plugin may be installed under hyphenated path
-                import importlib
-                import sys
-
-                plugin_path = str(
-                    __import__("pathlib").Path(__file__).parent.parent
-                    / "plugins"
-                    / "temporal-reasoning"
-                )
-                if plugin_path not in sys.path:
-                    sys.path.insert(0, plugin_path)
-                mod = importlib.import_module("temporal_engine")
-                parse_temporal_references = mod.parse_temporal_references
-            except Exception:
-                logger.warning(
-                    "[SleepNode] temporal-reasoning plugin not available. "
-                    "Skipping temporal normalization."
-                )
-                return 0
+        from hbllm.utils.temporal import parse_temporal_references
 
         try:
             # Fetch recent episodic entries
