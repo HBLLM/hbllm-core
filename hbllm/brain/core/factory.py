@@ -121,6 +121,31 @@ class BrainConfig(BaseModel):
         arbitrary_types_allowed=True,
     )
 
+    def __init__(self, **data: Any) -> None:
+        import json
+        import os
+
+        for field_name, field_info in self.model_fields.items():
+            if field_name not in data:
+                env_key = f"HBLLM_{field_name.upper()}"
+                if env_key in os.environ:
+                    env_val = os.environ[env_key]
+                    annotation = field_info.annotation
+                    if annotation is bool or "bool" in str(annotation):
+                        data[field_name] = env_val.lower() in ("true", "1", "yes")
+                    elif annotation is int or "int" in str(annotation):
+                        data[field_name] = int(env_val)
+                    elif annotation is float or "float" in str(annotation):
+                        data[field_name] = float(env_val)
+                    elif annotation is str or "str" in str(annotation):
+                        data[field_name] = env_val
+                    else:
+                        try:
+                            data[field_name] = json.loads(env_val)
+                        except Exception:
+                            data[field_name] = env_val
+        super().__init__(**data)
+
     # ── Composite node flags (v4: consolidated architecture) ──────
     inject_reasoning: bool = True  # ReasoningCore (router+planner+critic+decision+revision+prm)
     inject_memory_system: bool = True  # MemorySystem (memory+experience+sleep)
