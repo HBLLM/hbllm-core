@@ -19,6 +19,7 @@ Covers the largest gap files:
 
 from __future__ import annotations
 
+import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -77,11 +78,12 @@ class TestDecisionNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_health_check(self, tmp_path):
         from hbllm.brain.control.decision_node import DecisionNode
 
         node = DecisionNode(node_id="decision_test", data_dir=str(tmp_path))
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_node_type(self, tmp_path):
@@ -117,11 +119,12 @@ class TestPlannerNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         from hbllm.brain.planning.planner_node import PlannerNode
 
         node = PlannerNode(node_id="planner_test")
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_node_type(self):
@@ -157,11 +160,12 @@ class TestSleepCycleNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         from hbllm.brain.emotion.sleep_node import SleepCycleNode
 
         node = SleepCycleNode(node_id="sleep_test")
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_node_type(self):
@@ -198,11 +202,12 @@ class TestRouterNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         from hbllm.brain.control.router_node import RouterNode
 
         node = RouterNode(node_id="router_test")
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_node_type(self):
@@ -238,11 +243,12 @@ class TestLearnerNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         from hbllm.brain.learning.learner_node import LearnerNode
 
         node = LearnerNode(node_id="learner_test")
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_node_type(self):
@@ -299,11 +305,12 @@ class TestCollectiveNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         from hbllm.brain.world.collective_node import CollectiveNode
 
         node = CollectiveNode(node_id="collective_test")
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_stats_property(self):
@@ -344,11 +351,12 @@ class TestExperienceNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         from hbllm.brain.learning.experience_node import ExperienceNode
 
         node = ExperienceNode(node_id="experience_test")
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_node_type(self):
@@ -409,14 +417,15 @@ class TestBrainFactory:
 
         assert BrainFactory is not None
 
-    def test_create_with_mock_provider(self):
+    @pytest.mark.asyncio
+    async def test_create_with_mock_provider(self):
         """Test that BrainFactory.create works with a mock provider."""
         from hbllm.brain.core.factory import BrainFactory
         from hbllm.testing import MockProvider
 
         provider = MockProvider()
         try:
-            brain = BrainFactory.create(provider=provider)
+            brain = await BrainFactory.create(provider=provider)
             assert brain is not None
         except Exception:
             # May require additional setup

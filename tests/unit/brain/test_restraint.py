@@ -11,9 +11,8 @@ from hbllm.brain.autonomy.restraint import (
 
 
 @pytest.fixture
-def engine():
-    # Use hour range 2-3 to avoid flakiness; tests run between ~7-23 local time.
-    # For deterministic quiet-hour tests, see TestSocialTiming.
+def engine(monkeypatch):
+    monkeypatch.setattr("hbllm.brain.autonomy.restraint._current_hour", lambda: 12)
     return RestraintEngine(quiet_hours=(2, 3))
 
 
@@ -26,7 +25,8 @@ class TestConfidenceThreshold:
         result = engine.evaluate(ActionProposal(action_type="test.action", confidence=0.9))
         assert result.decision == RestraintDecision.APPROVE
 
-    def test_threshold_boundary(self):
+    def test_threshold_boundary(self, monkeypatch):
+        monkeypatch.setattr("hbllm.brain.autonomy.restraint._current_hour", lambda: 12)
         engine = RestraintEngine(
             config=RestraintConfig(min_confidence_approve=0.5),
             quiet_hours=(3, 4),
@@ -75,12 +75,17 @@ class TestReversibility:
 class TestSocialTiming:
     """Quiet hours are set to (3, 4) — only hour 3 is quiet."""
 
-    def test_quiet_hours_suppressed(self):
+    def test_quiet_hours_suppressed(self, monkeypatch):
+        monkeypatch.setattr("hbllm.brain.autonomy.restraint._current_hour", lambda: 23)
         engine = RestraintEngine(quiet_hours=(22, 7))
         result = engine.evaluate(ActionProposal(action_type="remind", confidence=0.8))
-        # This only suppresses if current hour is in [22, 7) — can't control that
-        # Use context signals for deterministic tests instead
-        assert isinstance(result.decision, RestraintDecision)
+        assert result.decision == RestraintDecision.SUPPRESS
+
+    def test_quiet_hours_not_suppressed(self, monkeypatch):
+        monkeypatch.setattr("hbllm.brain.autonomy.restraint._current_hour", lambda: 12)
+        engine = RestraintEngine(quiet_hours=(22, 7))
+        result = engine.evaluate(ActionProposal(action_type="remind", confidence=0.8))
+        assert result.decision == RestraintDecision.APPROVE
 
     def test_high_priority_bypasses_quiet_hours(self):
         engine = RestraintEngine(quiet_hours=(0, 24))  # Always quiet
