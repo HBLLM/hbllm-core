@@ -48,6 +48,7 @@ from hbllm.brain.evaluation.evaluation_node import EvaluationNode
 from hbllm.brain.evaluation.revision_node import RevisionNode
 from hbllm.brain.governance.owner_rules import OwnerRuleStore
 from hbllm.brain.governance.policy_engine import PolicyEngine
+from hbllm.brain.planning.swarm_node import SwarmNode
 
 # v2: Resource Intelligence
 from hbllm.brain.self_model.attention_manager import AttentionManager
@@ -146,6 +147,7 @@ class BrainConfig(BaseModel):
     inject_reality_graph: bool = True
     inject_autonomy_manager: bool = True
     inject_temporal: bool = True
+    inject_swarm: bool = True
 
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
@@ -293,6 +295,7 @@ class Brain:
         self.goal_manager: GoalManager | None = None
         self.self_model: SelfModel | None = None
         self.temporal: TemporalNode | None = None
+        self.swarm: SwarmNode | None = None
         self.cognitive_metrics: CognitiveMetrics | None = None
         self.world_state: WorldStateEngine | None = None
         self.revision_node: RevisionNode | None = None
@@ -1620,6 +1623,18 @@ class BrainFactory:
             await temporal_node.start(message_bus)
             brain.temporal = temporal_node
             nodes.append(temporal_node)
+
+        if cfg.inject_swarm:
+            from hbllm.brain.planning.swarm_node import SwarmNode
+
+            swarm_node = SwarmNode(
+                node_id="swarm_node",
+                llm_generate=llm.generate if llm else None,
+            )
+            await _register_node(registry, swarm_node)
+            await swarm_node.start(message_bus)
+            brain.swarm = swarm_node
+            nodes.append(swarm_node)
 
             # EmotionEngine — publishes emotion.state consumed by Awareness & PersonaEngine
             from hbllm.brain.emotion.emotion_engine import EmotionEngine

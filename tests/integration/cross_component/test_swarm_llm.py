@@ -2,38 +2,16 @@
 
 from __future__ import annotations
 
-import importlib.util
-import os
-import sys
-
 import pytest
 
-
-# Import from plugin directory with dashes
-def _import_swarm():
-    # Navigate from tests/integration/cross_component/ → tests/ → core/ (project root)
-    _tests_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    _project_root = os.path.dirname(_tests_root)
-    engine_path = os.path.join(
-        _project_root,
-        "hbllm",
-        "plugins",
-        "swarm-orchestrator",
-        "swarm_engine.py",
-    )
-    spec = importlib.util.spec_from_file_location("swarm_engine", engine_path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["swarm_engine"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_se = _import_swarm()
-SwarmEngine = _se.SwarmEngine
-SwarmTask = _se.SwarmTask
-TaskDecomposer = _se.TaskDecomposer
-TaskStatus = _se.TaskStatus
-
+from hbllm.brain.planning.swarm_node import (
+    SwarmNode as SwarmEngine,
+)
+from hbllm.brain.planning.swarm_node import (
+    SwarmTask,
+    TaskDecomposer,
+    TaskStatus,
+)
 
 # ── Heuristic Decomposition ─────────────────────────────────────────────
 
