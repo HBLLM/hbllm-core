@@ -344,10 +344,10 @@ class EpisodicMemory(MemoryRepository):
         """Store content as an episodic turn.
 
         Keyword Args:
-            session_id: Conversation session ID (default: ``"default"``).
-            role: Turn role (default: ``"user"``).
-            domain: Domain tag.
-            metadata: Additional metadata dict.
+            session_id (str): Conversation session ID (default: ``"default"``).
+            role (str): Turn role (default: ``"user"``).
+            domain (str | None): Domain tag.
+            metadata (dict[str, Any] | None): Additional metadata dict.
         """
         return await self.store_turn(
             session_id=kwargs.get("session_id", "default"),

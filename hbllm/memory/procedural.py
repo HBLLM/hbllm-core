@@ -270,9 +270,9 @@ class ProceduralMemory(MemoryRepository):
         """Store content as a procedural skill.
 
         Keyword Args:
-            skill_name: Name of the skill (default: auto-generated).
-            trigger_pattern: When to use this skill.
-            steps: List of step dicts.
+            skill_name (str): Name of the skill (default: auto-generated).
+            trigger_pattern (str): When to use this skill.
+            steps (list[dict[str, Any]]): List of step dicts.
         """
         return await self.store_skill(
             tenant_id=tenant_id,

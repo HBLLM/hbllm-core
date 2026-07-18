@@ -245,9 +245,9 @@ class ValueMemory(MemoryRepository):
         """Store a reward signal.
 
         Keyword Args:
-            topic: Topic key for the preference.
-            action: Action that triggered the reward.
-            reward: Float reward value (default: 1.0).
+            topic (str): Topic key for the preference.
+            action (str): Action that triggered the reward.
+            reward (float): Float reward value (default: 1.0).
         """
         return await self.record_reward(
             tenant_id=tenant_id,
