@@ -49,11 +49,12 @@ class TestMemoryNode:
         info = node.get_info()
         assert info is not None
 
-    def test_health_check(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_health_check(self, tmp_path):
         from hbllm.memory.memory_node import MemoryNode
 
         node = MemoryNode(node_id="memory_test", db_path=str(tmp_path / "mem.db"))
-        health = node.health_check()
+        health = await node.health_check()
         assert health is not None
 
     def test_stats(self, tmp_path):
