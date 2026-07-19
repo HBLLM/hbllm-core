@@ -350,15 +350,16 @@ class InProcessBus:
                     )
                     await self._route_to_dlq(message, "ttl_expired")
                     continue
-
             # Check if this is a response to a pending request
-            if message.correlation_id and message.correlation_id in self._pending_requests:
+            if (
+                message.type != "event"
+                and message.correlation_id
+                and message.correlation_id in self._pending_requests
+            ):
                 pending_f = self._pending_requests.pop(message.correlation_id)
                 if not pending_f.done():
                     pending_f.set_result(message)
-                continue
-
-            # Dispatch to topic subscribers
+                continue  # Dispatch to topic subscribers
             await self._dispatch_to_subscribers(topic, message)
 
     async def _dispatch_to_subscribers(self, topic: str, message: Message) -> None:
