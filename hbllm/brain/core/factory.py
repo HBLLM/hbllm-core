@@ -897,7 +897,7 @@ class BrainFactory:
             registry = RedisRegistry(redis_url=cfg.redis_url)
             logger.info("[Factory] Using RedisRegistry for distributed service discovery")
         else:
-            registry = ServiceRegistry()
+            registry = ServiceRegistry(node_timeout=0.0)
         await registry.start(message_bus)
 
         # ── Tenant context propagation ───────────────────────────────

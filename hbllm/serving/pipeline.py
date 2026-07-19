@@ -111,6 +111,21 @@ class CognitivePipeline:
 
     async def start(self) -> None:
         """Subscribe to decision output and sensory output to capture final responses."""
+        if self.registry:
+            from hbllm.network.node import HealthStatus, NodeHealth, NodeInfo, NodeType
+
+            node_info = NodeInfo(
+                node_id="pipeline",
+                node_type=NodeType.CORE,
+                scopes=["admin", "episodic", "public"],
+                capabilities=["pipeline"],
+                description="Cognitive Pipeline Entry Point",
+            )
+            await self.registry.register(node_info)
+            await self.registry.update_health(
+                NodeHealth(node_id="pipeline", status=HealthStatus.HEALTHY)
+            )
+
         self._subscriptions = [
             await self.bus.subscribe("decision.output", self._handle_decision_output),
             await self.bus.subscribe("sensory.output", self._handle_decision_output),
