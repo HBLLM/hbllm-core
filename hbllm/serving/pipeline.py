@@ -106,6 +106,7 @@ class CognitivePipeline:
         self.registry = registry
         self.config = config or PipelineConfig()
         self._response_futures: dict[str, asyncio.Future[Message]] = {}
+        self._response_creation_times: dict[str, float] = {}
         self._subscriptions: list[Subscription] = []
         self._cleanup_task: asyncio.Task[None] | None = None
 
@@ -150,6 +151,7 @@ class CognitivePipeline:
             if not future.done():
                 future.cancel()
         self._response_futures.clear()
+        self._response_creation_times.clear()
         logger.info("CognitivePipeline stopped")
 
     async def _cleanup_stale_futures(self) -> None:
@@ -157,13 +159,22 @@ class CognitivePipeline:
         while True:
             try:
                 await asyncio.sleep(30.0)
-                stale_ids = [cid for cid, fut in self._response_futures.items() if not fut.done()]
-                # We can't easily track creation time on futures, so we cancel
-                # any that are still pending after a full sweep interval.
-                # In practice, total_timeout handles the primary case; this
-                # catches futures whose callers were cancelled externally.
+                import time
+
+                now = time.monotonic()
+                stale_ids = []
+                for cid, fut in list(self._response_futures.items()):
+                    if fut.done():
+                        self._response_futures.pop(cid, None)
+                        self._response_creation_times.pop(cid, None)
+                    else:
+                        created_at = self._response_creation_times.get(cid, now)
+                        if now - created_at > self.config.total_timeout:
+                            stale_ids.append(cid)
+
                 for cid in stale_ids:
                     fut = self._response_futures.pop(cid, None)
+                    self._response_creation_times.pop(cid, None)
                     if fut and not fut.done():
                         fut.cancel()
                         logger.debug("Cleaned up stale future: %s", cid)
@@ -390,8 +401,11 @@ class CognitivePipeline:
         Send query to the router and wait for the decision output.
         """
         # Create a future for the final decision output
+        import time
+
         future: asyncio.Future[Message] = asyncio.get_running_loop().create_future()
         self._response_futures[correlation_id] = future
+        self._response_creation_times[correlation_id] = time.monotonic()
 
         # Build the router message with enriched context
         query_msg = Message(
@@ -418,6 +432,7 @@ class CognitivePipeline:
             return response.payload
         finally:
             self._response_futures.pop(correlation_id, None)
+            self._response_creation_times.pop(correlation_id, None)
 
     # Verbs that should never be routed to the fast path, even in short queries.
     _DANGEROUS_VERBS = {
