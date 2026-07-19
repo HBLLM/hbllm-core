@@ -175,6 +175,23 @@ class DomainModuleNode(Node):
                 logger.error(
                     "External LLM generation failed for domain '%s': %s", self.domain_name, e
                 )
+                try:
+                    thought_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=self.node_id,
+                        tenant_id=message.tenant_id,
+                        session_id=message.session_id,
+                        topic="workspace.thought",
+                        payload={
+                            "type": "error",
+                            "confidence": 0.0,
+                            "content": f"LLM Error on domain '{self.domain_name}': {e}",
+                        },
+                        correlation_id=message.correlation_id,
+                    )
+                    await self.bus.publish("workspace.thought", thought_msg)
+                except Exception:
+                    logger.exception("Failed to publish error thought to workspace")
                 return None
 
         model = self.model
