@@ -161,9 +161,9 @@ class QueryPayload(BaseModel):
     """Payload for user queries routed to domain modules."""
 
     text: str
-    context: list[dict[str, Any]] = Field(
+    context: list[dict[str, Any]] | dict[str, Any] | None = Field(
         default_factory=list,
-        description="Conversation history as a list of message dicts (role + content).",
+        description="Conversation history as a list of message dicts (role + content) or enriched context dict.",
     )
     media: list[dict[str, Any]] = Field(default_factory=list)  # Multimodal items (images/audio)
     metadata: dict[str, Any] = Field(default_factory=dict)
