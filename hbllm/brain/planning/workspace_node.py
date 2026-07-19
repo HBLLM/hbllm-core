@@ -296,6 +296,16 @@ class WorkspaceNode(Node, IWorkspace):
 
         proposal = message.payload
         thought_type = proposal.get("type", "intuition")
+
+        if thought_type == "error":
+            logger.warning(
+                "Workspace received error thought from %s: %s",
+                message.source_node_id,
+                proposal.get("content"),
+            )
+            await self._send_error_fallback(corr_id, str(proposal.get("content")))
+            return None
+
         confidence = float(proposal.get("confidence", 0.0))
 
         logger.info(
