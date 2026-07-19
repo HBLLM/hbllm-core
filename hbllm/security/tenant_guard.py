@@ -33,7 +33,7 @@ import logging
 import os
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, ParamSpec, TypeVar, overload
+from typing import Any, NoReturn, ParamSpec, TypeVar, overload
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class TenantGuardMode(str, Enum):
 
     OFF = "off"  # No enforcement (dev only)
     WARN = "warn"  # Log violations, don't block
+    DEVELOPMENT = "warn"  # Alias for dev
     STRICT = "strict"  # Raise on violation
 
 
@@ -88,6 +89,10 @@ _ctx_device_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "device_id", default=None
 )
 _ctx_guard_mode: contextvars.ContextVar[TenantGuardMode] = contextvars.ContextVar("guard_mode")
+_ctx_system: contextvars.ContextVar[bool] = contextvars.ContextVar("system", default=False)
+_ctx_system_capabilities: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "system_capabilities", default=None
+)
 
 
 def _get_guard_mode() -> TenantGuardMode:
@@ -113,18 +118,14 @@ class TenantContext:
 
     Sets the current identity scope for a block of operations.
     All guarded operations within this block validate against the set identity.
-
-    Usage::
-
-        async with TenantContext("acme", user_id="alice"):
-            # All guarded operations validate against tenant="acme", user="alice"
-            await store(tenant_id="acme", ...)   # OK
-            await store(tenant_id="other", ...)  # Violation
-
-        # Also works synchronously:
-        with TenantContext("acme"):
-            store(tenant_id="acme", ...)
     """
+
+    tenant_id: str
+    user_id: str | None
+    device_id: str | None
+    mode: TenantGuardMode | None
+    _tokens: list[contextvars.Token[Any]]
+    _entered: bool
 
     def __init__(
         self,
@@ -134,13 +135,20 @@ class TenantContext:
         *,
         mode: TenantGuardMode | None = None,
     ):
-        self.tenant_id = tenant_id
-        self.user_id = user_id
-        self.device_id = device_id
-        self.mode = mode
-        self._tokens: list[contextvars.Token[Any]] = []
+        super().__setattr__("tenant_id", tenant_id)
+        super().__setattr__("user_id", user_id)
+        super().__setattr__("device_id", device_id)
+        super().__setattr__("mode", mode)
+        super().__setattr__("_tokens", [])
+        super().__setattr__("_entered", False)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_entered", False):
+            raise AttributeError("TenantContext is immutable after entering")
+        super().__setattr__(name, value)
 
     def __enter__(self) -> TenantContext:
+        super().__setattr__("_entered", True)
         self._tokens.append(_ctx_tenant_id.set(self.tenant_id))
         if self.user_id is not None:
             self._tokens.append(_ctx_user_id.set(self.user_id))
@@ -154,12 +162,71 @@ class TenantContext:
         for token in reversed(self._tokens):
             token.var.reset(token)
         self._tokens.clear()
+        super().__setattr__("_entered", False)
 
     async def __aenter__(self) -> TenantContext:
         return self.__enter__()
 
     async def __aexit__(self, *exc: Any) -> None:
         self.__exit__()
+
+
+class SystemContext:
+    """
+    Async-safe system context manager using contextvars.
+    Bypasses normal tenant check when executing maintenance tasks.
+    """
+
+    def __init__(self, capabilities: set[str] | list[str] | None = None):
+        caps = frozenset(capabilities) if capabilities is not None else frozenset(["*"])
+        super().__setattr__("capabilities", caps)
+        super().__setattr__("_tokens", [])
+        super().__setattr__("_entered", False)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_entered", False):
+            raise AttributeError("SystemContext is immutable after entering")
+        super().__setattr__(name, value)
+
+    def __enter__(self) -> SystemContext:
+        super().__setattr__("_entered", True)
+        self._tokens.append(_ctx_system.set(True))
+        self._tokens.append(_ctx_system_capabilities.set(self.capabilities))
+        # Clear active tenant context when in SystemContext
+        self._tokens.append(_ctx_tenant_id.set(None))
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        for token in reversed(self._tokens):
+            token.var.reset(token)
+        self._tokens.clear()
+        super().__setattr__("_entered", False)
+
+    async def __aenter__(self) -> SystemContext:
+        return self.__enter__()
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.__exit__()
+
+
+def require_capability(capability: str) -> None:
+    """Enforce that the current execution is within a SystemContext with the given capability."""
+    if not _ctx_system.get(False):
+        # We also raise TenantIsolationError with a detailed message to prevent silent leaks
+        _log_and_raise_violation(
+            message=f"Operation requires capability '{capability}' but no SystemContext is active.",
+            tenant_id="None",
+            operation=f"require_capability({capability})",
+            reason="missing_system_context",
+        )
+    caps = _ctx_system_capabilities.get(None)
+    if caps is not None and "*" not in caps and capability not in caps:
+        _log_and_raise_violation(
+            message=f"Operation requires capability '{capability}' but active SystemContext only has: {list(caps)}",
+            tenant_id="None",
+            operation=f"require_capability({capability})",
+            reason="missing_capability",
+        )
 
 
 def get_current_tenant() -> str | None:
@@ -297,6 +364,44 @@ def require_identity(
 # ─── Internal Validation ────────────────────────────────────────────────────
 
 
+def _log_and_raise_violation(
+    message: str,
+    tenant_id: str,
+    operation: str,
+    reason: str,
+) -> NoReturn:
+    """Log structured security audit event and raise TenantIsolationError."""
+    import json
+    import time
+
+    # Extract caller using inspect
+    caller = "unknown"
+    try:
+        stack = inspect.stack()
+        # Find the first frame outside tenant_guard.py
+        for frame in stack[1:]:
+            if "tenant_guard.py" not in frame.filename:
+                caller = f"{frame.function} at {frame.filename}:{frame.lineno}"
+                break
+    except Exception:
+        pass
+
+    event = {
+        "timestamp": time.time(),
+        "event_type": "tenant_isolation_violation",
+        "tenant_id": tenant_id,
+        "system_capabilities": list(_ctx_system_capabilities.get(frozenset()) or []),
+        "operation": operation,
+        "resource": "unknown",
+        "caller": caller,
+        "decision": "deny",
+        "reason": reason,
+    }
+
+    logger.error("AUDIT_LOG: %s", json.dumps(event))
+    raise TenantIsolationError(message, tenant_id=tenant_id, operation=operation)
+
+
 def _validate_tenant(
     fn: Callable[..., Any],
     args: tuple[Any, ...],
@@ -308,20 +413,47 @@ def _validate_tenant(
     if mode == TenantGuardMode.OFF:
         return
 
+    # 1. System Context bypass
+    if _ctx_system.get(False):
+        return
+
     tid = _extract_param(fn, args, kwargs, param)
 
     # Validate not empty
     if not tid or not str(tid).strip():
         msg = f"{fn.__qualname__}() requires a non-empty '{param}' argument"
         if mode == TenantGuardMode.STRICT:
-            raise TenantIsolationError(msg, operation=fn.__qualname__)
+            _log_and_raise_violation(
+                message=msg,
+                tenant_id=str(tid),
+                operation=fn.__qualname__,
+                reason="missing_tenant_argument",
+            )
         else:
             logger.warning("TENANT_GUARD_WARN: %s", msg)
             return
 
     # Cross-tenant context check
     ctx_tenant = _ctx_tenant_id.get(None)
-    if ctx_tenant is not None and str(tid) != ctx_tenant:
+    if ctx_tenant is None:
+        # Fail-secure check: in STRICT mode, missing tenant context is denied!
+        msg = (
+            f"Access denied in {fn.__qualname__}(): "
+            f"No active TenantContext (attempted access to tenant '{tid}')"
+        )
+        if mode == TenantGuardMode.STRICT:
+            _log_and_raise_violation(
+                message=msg,
+                tenant_id=str(tid),
+                operation=fn.__qualname__,
+                reason="missing_context",
+            )
+        else:
+            logger.warning("TENANT_GUARD_WARN: %s", msg)
+        return
+
+    assert ctx_tenant is not None
+    if str(tid) != ctx_tenant:
         try:
             from hbllm.security.tenant_registry import get_tenant_registry
 
@@ -338,7 +470,12 @@ def _validate_tenant(
             f"context={ctx_tenant}, requested={tid}"
         )
         if mode == TenantGuardMode.STRICT:
-            raise TenantIsolationError(msg, tenant_id=str(tid), operation=fn.__qualname__)
+            _log_and_raise_violation(
+                message=msg,
+                tenant_id=str(tid),
+                operation=fn.__qualname__,
+                reason="tenant_mismatch",
+            )
         else:
             logger.warning("TENANT_GUARD_WARN: %s", msg)
 
