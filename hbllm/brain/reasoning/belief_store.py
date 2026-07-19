@@ -173,14 +173,17 @@ class BeliefStore(TenantSQLiteRepository):
 
     def _init_db(self) -> None:
         with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute("PRAGMA user_version")
-            version = cur.fetchone()[0]
+            # Check if beliefs table exists
+            cur = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='beliefs'"
+            )
+            beliefs_exists = cur.fetchone() is not None
 
-            if version == 0:
+            if not beliefs_exists:
                 conn.execute("BEGIN TRANSACTION")
                 try:
                     conn.execute("""
-                        CREATE TABLE IF NOT EXISTS beliefs (
+                        CREATE TABLE beliefs (
                             belief_id TEXT PRIMARY KEY,
                             tenant_id TEXT DEFAULT '__legacy__',
                             concept TEXT NOT NULL,
@@ -195,7 +198,7 @@ class BeliefStore(TenantSQLiteRepository):
                         )
                     """)
                     conn.execute("""
-                        CREATE TABLE IF NOT EXISTS persistent_contradictions (
+                        CREATE TABLE persistent_contradictions (
                             contradiction_id TEXT PRIMARY KEY,
                             tenant_id TEXT DEFAULT '__legacy__',
                             concept TEXT NOT NULL,
@@ -225,22 +228,31 @@ class BeliefStore(TenantSQLiteRepository):
                 except Exception:
                     conn.rollback()
                     raise
-            elif version == 1:
-                # Upgrade path: schema v1 -> v2
+            else:
+                # Tables exist. Check if tenant_id column exists in beliefs
+                cur = conn.execute("PRAGMA table_info(beliefs)")
+                beliefs_columns = [row[1] for row in cur.fetchall()]
+
+                # Check if tenant_id column exists in persistent_contradictions
+                cur = conn.execute("PRAGMA table_info(persistent_contradictions)")
+                contradictions_columns = [row[1] for row in cur.fetchall()]
+
                 conn.execute("BEGIN TRANSACTION")
                 try:
-                    conn.execute(
-                        "ALTER TABLE beliefs ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
-                    )
-                    conn.execute(
-                        "ALTER TABLE persistent_contradictions ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
-                    )
-                    conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_beliefs_tenant_concept ON beliefs(tenant_id, concept)"
-                    )
-                    conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_contradictions_tenant ON persistent_contradictions(tenant_id, concept)"
-                    )
+                    if "tenant_id" not in beliefs_columns:
+                        conn.execute(
+                            "ALTER TABLE beliefs ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                        )
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_beliefs_tenant_concept ON beliefs(tenant_id, concept)"
+                        )
+                    if "tenant_id" not in contradictions_columns:
+                        conn.execute(
+                            "ALTER TABLE persistent_contradictions ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                        )
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_contradictions_tenant ON persistent_contradictions(tenant_id, concept)"
+                        )
                     conn.execute("PRAGMA user_version = 2")
                     conn.commit()
                 except Exception:

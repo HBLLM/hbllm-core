@@ -89,14 +89,15 @@ class GoalManager(TenantSQLiteRepository):
 
     def _init_db(self) -> None:
         with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute("PRAGMA user_version")
-            version = cur.fetchone()[0]
+            # Check if goals table exists
+            cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='goals'")
+            table_exists = cur.fetchone() is not None
 
-            if version == 0:
+            if not table_exists:
                 conn.execute("BEGIN TRANSACTION")
                 try:
                     conn.execute("""
-                        CREATE TABLE IF NOT EXISTS goals (
+                        CREATE TABLE goals (
                             goal_id TEXT PRIMARY KEY,
                             tenant_id TEXT DEFAULT '__legacy__',
                             name TEXT NOT NULL,
@@ -125,19 +126,27 @@ class GoalManager(TenantSQLiteRepository):
                 except Exception:
                     conn.rollback()
                     raise
-            elif version == 1:
-                # Upgrade path: v1 -> v2
-                conn.execute("BEGIN TRANSACTION")
-                try:
-                    conn.execute("ALTER TABLE goals ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'")
-                    conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_goals_tenant ON goals(tenant_id, status)"
-                    )
+            else:
+                # Table exists. Check if tenant_id column exists.
+                cur = conn.execute("PRAGMA table_info(goals)")
+                columns = [row[1] for row in cur.fetchall()]
+                if "tenant_id" not in columns:
+                    conn.execute("BEGIN TRANSACTION")
+                    try:
+                        conn.execute(
+                            "ALTER TABLE goals ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                        )
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_goals_tenant ON goals(tenant_id, status)"
+                        )
+                        conn.execute("PRAGMA user_version = 2")
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
+                else:
+                    # Column exists, just ensure user_version is set to 2
                     conn.execute("PRAGMA user_version = 2")
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
 
     # ─── Goal CRUD ───────────────────────────────────────────────────
 

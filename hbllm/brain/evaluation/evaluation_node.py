@@ -143,14 +143,17 @@ class EvaluationNode(Node, TenantSQLiteRepository):
             return
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute("PRAGMA user_version")
-            version = cur.fetchone()[0]
+            # Check if evaluations table exists
+            cur = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='evaluations'"
+            )
+            table_exists = cur.fetchone() is not None
 
-            if version == 0:
+            if not table_exists:
                 conn.execute("BEGIN TRANSACTION")
                 try:
                     conn.execute("""
-                        CREATE TABLE IF NOT EXISTS evaluations (
+                        CREATE TABLE evaluations (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             correlation_id TEXT UNIQUE NOT NULL,
                             tenant_id TEXT DEFAULT '__legacy__',
@@ -172,21 +175,27 @@ class EvaluationNode(Node, TenantSQLiteRepository):
                 except Exception:
                     conn.rollback()
                     raise
-            elif version == 1:
-                # Upgrade path: v1 -> v2
-                conn.execute("BEGIN TRANSACTION")
-                try:
-                    conn.execute(
-                        "ALTER TABLE evaluations ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
-                    )
-                    conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_eval_tenant_time ON evaluations(tenant_id, timestamp DESC)"
-                    )
+            else:
+                # Table exists. Check if tenant_id column exists.
+                cur = conn.execute("PRAGMA table_info(evaluations)")
+                columns = [row[1] for row in cur.fetchall()]
+                if "tenant_id" not in columns:
+                    conn.execute("BEGIN TRANSACTION")
+                    try:
+                        conn.execute(
+                            "ALTER TABLE evaluations ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                        )
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_eval_tenant_time ON evaluations(tenant_id, timestamp DESC)"
+                        )
+                        conn.execute("PRAGMA user_version = 2")
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
+                else:
+                    # Column exists, just ensure user_version is set to 2
                     conn.execute("PRAGMA user_version = 2")
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
 
     def _restore_from_db(self) -> None:
         """Restore in-memory history and stats counters from SQLite on startup."""
