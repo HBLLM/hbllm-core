@@ -344,6 +344,8 @@ class ServiceRegistry:
         while self._running:
             try:
                 await asyncio.sleep(self._health_check_interval)
+                if self._node_timeout <= 0.0:
+                    continue
                 now = time.monotonic()
 
                 for node_id, health in list(self._health.items()):
