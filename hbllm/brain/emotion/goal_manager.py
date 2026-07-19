@@ -22,6 +22,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.security import TenantSQLiteRepository
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +67,7 @@ class Goal:
     execution_journal: dict[str, Any] = field(default_factory=dict)
 
 
-class GoalManager:
+class GoalManager(TenantSQLiteRepository):
     """
     Manages persistent goals for autonomous self-improvement.
 
@@ -78,41 +80,64 @@ class GoalManager:
     """
 
     def __init__(self, data_dir: str = "data", bus: Any = None):
-        self._db_path = Path(data_dir) / "goals.db"
+        db_path = Path(data_dir) / "goals.db"
+        super().__init__(db_path)
+        self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._bus = bus  # MessageBus for dispatching to execution nodes
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS goals (
-                    goal_id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    goal_type TEXT NOT NULL,
-                    priority TEXT NOT NULL,
-                    status TEXT DEFAULT 'pending',
-                    progress REAL DEFAULT 0.0,
-                    success_criteria TEXT DEFAULT '',
-                    sub_goals TEXT DEFAULT '[]',
-                    actions_taken TEXT DEFAULT '[]',
-                    metadata TEXT DEFAULT '{}',
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    deadline REAL
-                )
-            """)
-            # Add DAG and journals columns if not present
-            for col, col_type in [
-                ("dependencies", "TEXT DEFAULT '[]'"),
-                ("block_reason", "TEXT DEFAULT ''"),
-                ("execution_journal", "TEXT DEFAULT '{}'"),
-            ]:
+        with sqlite3.connect(self._db_path) as conn:
+            cur = conn.execute("PRAGMA user_version")
+            version = cur.fetchone()[0]
+
+            if version == 0:
+                conn.execute("BEGIN TRANSACTION")
                 try:
-                    conn.execute(f"ALTER TABLE goals ADD COLUMN {col} {col_type}")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS goals (
+                            goal_id TEXT PRIMARY KEY,
+                            tenant_id TEXT DEFAULT '__legacy__',
+                            name TEXT NOT NULL,
+                            description TEXT NOT NULL,
+                            goal_type TEXT NOT NULL,
+                            priority TEXT NOT NULL,
+                            status TEXT DEFAULT 'pending',
+                            progress REAL DEFAULT 0.0,
+                            success_criteria TEXT DEFAULT '',
+                            sub_goals TEXT DEFAULT '[]',
+                            actions_taken TEXT DEFAULT '[]',
+                            metadata TEXT DEFAULT '{}',
+                            created_at REAL NOT NULL,
+                            updated_at REAL NOT NULL,
+                            deadline REAL,
+                            dependencies TEXT DEFAULT '[]',
+                            block_reason TEXT DEFAULT '',
+                            execution_journal TEXT DEFAULT '{}'
+                        )
+                    """)
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_goals_tenant ON goals(tenant_id, status)"
+                    )
+                    conn.execute("PRAGMA user_version = 2")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+            elif version == 1:
+                # Upgrade path: v1 -> v2
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute("ALTER TABLE goals ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'")
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_goals_tenant ON goals(tenant_id, status)"
+                    )
+                    conn.execute("PRAGMA user_version = 2")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
 
     # ─── Goal CRUD ───────────────────────────────────────────────────
 
@@ -145,17 +170,20 @@ class GoalManager:
 
     def _save(self, goal: Goal) -> None:
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute(
+        tenant_id = self.current_tenant() or "__legacy__"
+        with sqlite3.connect(self._db_path) as conn:
+            self.execute_tenant(
+                conn,
                 """
                 INSERT OR REPLACE INTO goals
-                (goal_id, name, description, goal_type, priority, status,
+                (goal_id, tenant_id, name, description, goal_type, priority, status,
                  progress, success_criteria, sub_goals, actions_taken,
                  metadata, created_at, updated_at, deadline, dependencies, block_reason, execution_journal)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     goal.goal_id,
+                    tenant_id,
                     goal.name,
                     goal.description,
                     goal.goal_type,
@@ -173,14 +201,26 @@ class GoalManager:
                     goal.block_reason,
                     json.dumps(goal.execution_journal),
                 ),
+                required_capability="goal_maintenance",
             )
 
     def update_progress(self, goal_id: str, progress: float, action: str = "") -> None:
         """Update goal progress and optionally record an action."""
-        with sqlite3.connect(str(self._db_path)) as conn:
-            row = conn.execute(
-                "SELECT actions_taken FROM goals WHERE goal_id = ?", (goal_id,)
-            ).fetchone()
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                row = self.execute_tenant(
+                    conn,
+                    "SELECT actions_taken FROM goals WHERE goal_id = ? AND tenant_id = ?",
+                    (goal_id, tenant_id),
+                ).fetchone()
+            else:
+                row = self.execute_tenant(
+                    conn,
+                    "SELECT actions_taken FROM goals WHERE goal_id = ?",
+                    (goal_id,),
+                    required_capability="goal_maintenance",
+                ).fetchone()
             if not row:
                 return
 
@@ -190,20 +230,47 @@ class GoalManager:
 
             status = GoalStatus.COMPLETED.value if progress >= 1.0 else GoalStatus.ACTIVE.value
 
-            conn.execute(
-                "UPDATE goals SET progress = ?, status = ?, actions_taken = ?, updated_at = ? "
-                "WHERE goal_id = ?",
-                (min(1.0, progress), status, json.dumps(actions), time.time(), goal_id),
-            )
+            if tenant_id:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET progress = ?, status = ?, actions_taken = ?, updated_at = ? "
+                    "WHERE goal_id = ? AND tenant_id = ?",
+                    (
+                        min(1.0, progress),
+                        status,
+                        json.dumps(actions),
+                        time.time(),
+                        goal_id,
+                        tenant_id,
+                    ),
+                )
+            else:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET progress = ?, status = ?, actions_taken = ?, updated_at = ? "
+                    "WHERE goal_id = ?",
+                    (min(1.0, progress), status, json.dumps(actions), time.time(), goal_id),
+                    required_capability="goal_maintenance",
+                )
         self._resolve_dag_states()
 
     def update_goal_status(self, goal_id: str, status: GoalStatus, block_reason: str = "") -> None:
         """Update goal status and block reason."""
-        with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute(
-                "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ?",
-                (status.value, block_reason, time.time(), goal_id),
-            )
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ? AND tenant_id = ?",
+                    (status.value, block_reason, time.time(), goal_id, tenant_id),
+                )
+            else:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ?",
+                    (status.value, block_reason, time.time(), goal_id),
+                    required_capability="goal_maintenance",
+                )
 
     def update_execution_journal(
         self,
@@ -221,27 +288,59 @@ class GoalManager:
             "blocked_reason": blocked_reason,
             "next_action": next_action,
         }
-        with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute(
-                "UPDATE goals SET execution_journal = ?, updated_at = ? WHERE goal_id = ?",
-                (json.dumps(journal), time.time(), goal_id),
-            )
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET execution_journal = ?, updated_at = ? WHERE goal_id = ? AND tenant_id = ?",
+                    (json.dumps(journal), time.time(), goal_id, tenant_id),
+                )
+            else:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET execution_journal = ?, updated_at = ? WHERE goal_id = ?",
+                    (json.dumps(journal), time.time(), goal_id),
+                    required_capability="goal_maintenance",
+                )
 
     def complete_goal(self, goal_id: str) -> None:
         self.update_progress(goal_id, 1.0, "Goal completed")
 
     def fail_goal(self, goal_id: str, reason: str = "") -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute(
-                "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ?",
-                (GoalStatus.ABANDONED.value, reason, time.time(), goal_id),
-            )
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ? AND tenant_id = ?",
+                    (GoalStatus.ABANDONED.value, reason, time.time(), goal_id, tenant_id),
+                )
+            else:
+                self.execute_tenant(
+                    conn,
+                    "UPDATE goals SET status = ?, block_reason = ?, updated_at = ? WHERE goal_id = ?",
+                    (GoalStatus.ABANDONED.value, reason, time.time(), goal_id),
+                    required_capability="goal_maintenance",
+                )
         self._resolve_dag_states()
 
     def _resolve_dag_states(self) -> None:
         """Resolve blocked/pending states based on goal dependency DAG."""
-        with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute("SELECT goal_id, status, dependencies FROM goals").fetchall()
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT goal_id, status, dependencies FROM goals WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchall()
+            else:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT goal_id, status, dependencies FROM goals",
+                    required_capability="goal_maintenance",
+                ).fetchall()
 
         status_map = {r[0]: r[1] for r in rows}
         dep_map = {r[0]: json.loads(r[2] or "[]") for r in rows}
@@ -274,10 +373,20 @@ class GoalManager:
             GoalPriority.LOW.value: 3,
             GoalPriority.BACKGROUND.value: 4,
         }
-        with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute(
-                "SELECT * FROM goals WHERE status IN ('pending', 'active') ORDER BY updated_at ASC",
-            ).fetchall()
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT * FROM goals WHERE status IN ('pending', 'active') AND tenant_id = ? ORDER BY updated_at ASC",
+                    (tenant_id,),
+                ).fetchall()
+            else:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT * FROM goals WHERE status IN ('pending', 'active') ORDER BY updated_at ASC",
+                    required_capability="goal_maintenance",
+                ).fetchall()
 
         if not rows:
             return None
@@ -293,6 +402,15 @@ class GoalManager:
         """
         if goal.status.value in (GoalStatus.COMPLETED.value, GoalStatus.ABANDONED.value):
             return
+
+        # Double check if we are blocked before starting
+        self._resolve_dag_states()
+        # Reload status from db
+        reloaded = self._get_goal_by_id(goal.goal_id)
+        if not reloaded or reloaded.status.value != GoalStatus.PENDING.value:
+            return
+
+        self.update_goal_status(goal.goal_id, GoalStatus.ACTIVE)
 
         logger.info("Executing goal: %s (type: %s)", goal.name, goal.goal_type)
 
@@ -501,10 +619,20 @@ class GoalManager:
 
     def get_active_goals(self) -> list[Goal]:
         self._resolve_dag_states()
-        with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute(
-                "SELECT * FROM goals WHERE status IN ('pending', 'active', 'blocked') ORDER BY created_at DESC"
-            ).fetchall()
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT * FROM goals WHERE status IN ('pending', 'active', 'blocked') AND tenant_id = ? ORDER BY created_at DESC",
+                    (tenant_id,),
+                ).fetchall()
+            else:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT * FROM goals WHERE status IN ('pending', 'active', 'blocked') ORDER BY created_at DESC",
+                    required_capability="goal_maintenance",
+                ).fetchall()
         return [self._row_to_goal(r) for r in rows]
 
     # ─── Auto-Goal Generation ────────────────────────────────────────
@@ -516,47 +644,52 @@ class GoalManager:
         if metrics.get("hallucination_rate", 0) > 0.1:
             goals.append(
                 self.create_goal(
-                    name="Reduce hallucination rate",
-                    description="Hallucination rate is above 10%. Improve factual accuracy.",
+                    name="Calibrate Hallucination Detectors",
+                    description="Run semantic consistency sweeps to tune detector sensitivity thresholds.",
                     goal_type="optimization",
                     priority=GoalPriority.HIGH,
-                    success_criteria="hallucination_rate < 0.05",
+                    success_criteria="Hallucination rate drops below 5%",
                 )
             )
 
-        if metrics.get("avg_latency_ms", 0) > 5000:
+        if metrics.get("context_leakage_events", 0) > 0:
             goals.append(
                 self.create_goal(
-                    name="Optimize response latency",
-                    description="Average latency exceeds 5s. Optimize inference pipeline.",
-                    goal_type="optimization",
+                    name="Audit Tenant Boundaries",
+                    description="Run automated cross-tenant retrieval queries to verify isolation integrity.",
+                    goal_type="security",
+                    priority=GoalPriority.CRITICAL,
+                    success_criteria="Zero boundary leakage events for 48 consecutive hours",
+                )
+            )
+
+        if metrics.get("avg_latency_ms", 0) > 2500:
+            goals.append(
+                self.create_goal(
+                    name="Optimize Memory Retrieval Cache",
+                    description="Prune old episodic context windows and run sqlite VACUUM index maintenance.",
+                    goal_type="maintenance",
                     priority=GoalPriority.MEDIUM,
-                    success_criteria="avg_latency_ms < 2000",
+                    success_criteria="Average latency drops below 1500ms",
                 )
             )
 
-        if metrics.get("tool_success_rate", 1.0) < 0.8:
+        if metrics.get("concept_drift_score", 0) > 0.4:
             goals.append(
                 self.create_goal(
-                    name="Improve tool usage accuracy",
-                    description="Tool success rate below 80%. Learn better tool selection.",
+                    name="Reflect and Formulate Abstract Concepts",
+                    description="Consolidate recent episodic memories into high-level concept abstractions.",
                     goal_type="learning",
-                    priority=GoalPriority.MEDIUM,
-                    success_criteria="tool_success_rate > 0.9",
+                    priority=GoalPriority.HIGH,
+                    success_criteria="Average concept representation error drops below threshold",
                 )
             )
 
-        if metrics.get("memory_utilization", 0) < 0.3:
-            goals.append(
-                self.create_goal(
-                    name="Improve memory utilization",
-                    description="Memory is underutilized. Store more contextual knowledge.",
-                    goal_type="exploration",
-                    priority=GoalPriority.LOW,
-                    success_criteria="memory_utilization > 0.6",
-                )
+        if goals:
+            logger.info(
+                "Generated %d learning goals from weak areas",
+                len(goals),
             )
-
         return goals
 
     # ─── Learning Goal Integration ────────────────────────────────────
@@ -568,18 +701,7 @@ class GoalManager:
         parent_goal_id: str | None = None,
         priority: GoalPriority = GoalPriority.MEDIUM,
     ) -> Goal:
-        """Create a goal that dispatches to AutonomousLearner.
-
-        This bridges GoalManager (what to learn) with AutonomousLearner
-        (how to learn). The goal's metadata includes a learning_topic
-        that AutonomousLearner reads when executing.
-
-        Args:
-            topic: What to learn (passed to AutonomousLearner)
-            motivation: Why this goal was created
-            parent_goal_id: Optional parent goal for hierarchy
-            priority: Goal priority level
-        """
+        """Create a goal that dispatches to AutonomousLearner."""
         goal = self.create_goal(
             name=f"Learn: {topic}",
             description=f"Autonomously learn about '{topic}' ({motivation})",
@@ -589,7 +711,6 @@ class GoalManager:
             dependencies=[parent_goal_id] if parent_goal_id else None,
         )
 
-        # Tag with learning-specific metadata
         goal.metadata["learning_topic"] = topic
         goal.metadata["motivation"] = motivation
         if parent_goal_id:
@@ -603,15 +724,7 @@ class GoalManager:
         contradictions: list[dict[str, Any]],
         parent_goal_id: str | None = None,
     ) -> list[Goal]:
-        """Auto-generate learning goals from unresolved contradictions.
-
-        Contradictions are persistent tension between beliefs.
-        Each contradiction becomes a learning goal to resolve.
-
-        Example:
-            Contradiction: "X causes Y" vs "X prevents Y"
-            → Goal: "Learn: Resolve X-Y relationship"
-        """
+        """Auto-generate learning goals from unresolved contradictions."""
         goals = []
         for ctr in contradictions:
             concept = ctr.get("concept", "unknown")
@@ -619,7 +732,6 @@ class GoalManager:
             claim_b = ctr.get("claim_b", "?")[:60]
             severity = ctr.get("severity", 0.5)
 
-            # Higher severity → higher priority
             if severity >= 0.7:
                 priority = GoalPriority.HIGH
             elif severity >= 0.4:
@@ -650,21 +762,12 @@ class GoalManager:
         weak_areas: list[dict[str, Any]],
         parent_goal_id: str | None = None,
     ) -> list[Goal]:
-        """Auto-generate learning goals from MetaLearner weak areas.
-
-        Weak areas are concepts where confidence is below target.
-        Each becomes a learning goal.
-
-        Example:
-            Weak area: "buffer overflow" (confidence=0.3)
-            → Goal: "Learn: Strengthen understanding of buffer overflow"
-        """
+        """Auto-generate learning goals from MetaLearner weak areas."""
         goals = []
         for area in weak_areas:
             concept = area.get("concept", "unknown")
             score = area.get("score", 0.5)
 
-            # Lower score → higher priority
             if score < 0.3:
                 priority = GoalPriority.HIGH
             elif score < 0.5:
@@ -691,81 +794,178 @@ class GoalManager:
 
     def get_learning_goals(self) -> list[Goal]:
         """Get all active learning-type goals."""
-        with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute(
-                "SELECT * FROM goals WHERE goal_type = 'learning' "
-                "AND status IN ('pending', 'active', 'blocked') "
-                "ORDER BY created_at DESC",
-            ).fetchall()
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT * FROM goals WHERE goal_type = 'learning' "
+                    "AND status IN ('pending', 'active', 'blocked') AND tenant_id = ? "
+                    "ORDER BY created_at DESC",
+                    (tenant_id,),
+                ).fetchall()
+            else:
+                rows = self.execute_tenant(
+                    conn,
+                    "SELECT * FROM goals WHERE goal_type = 'learning' "
+                    "AND status IN ('pending', 'active', 'blocked') "
+                    "ORDER BY created_at DESC",
+                    required_capability="goal_maintenance",
+                ).fetchall()
         return [self._row_to_goal(r) for r in rows]
 
     def subordinate_to(self, child_goal_id: str, parent_goal_id: str) -> None:
-        """Link a child goal to a parent goal.
-
-        Creates a goal hierarchy where the child is a sub-goal of the parent.
-        """
-        # Add dependency
-        with sqlite3.connect(str(self._db_path)) as conn:
-            row = conn.execute(
-                "SELECT dependencies FROM goals WHERE goal_id = ?", (child_goal_id,)
-            ).fetchone()
+        """Link a child goal to a parent goal."""
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                row = self.execute_tenant(
+                    conn,
+                    "SELECT dependencies FROM goals WHERE goal_id = ? AND tenant_id = ?",
+                    (child_goal_id, tenant_id),
+                ).fetchone()
+            else:
+                row = self.execute_tenant(
+                    conn,
+                    "SELECT dependencies FROM goals WHERE goal_id = ?",
+                    (child_goal_id,),
+                    required_capability="goal_maintenance",
+                ).fetchone()
             if row:
                 deps = json.loads(row[0] or "[]")
                 if parent_goal_id not in deps:
                     deps.append(parent_goal_id)
-                    conn.execute(
-                        "UPDATE goals SET dependencies = ? WHERE goal_id = ?",
-                        (json.dumps(deps), child_goal_id),
-                    )
+                    if tenant_id:
+                        self.execute_tenant(
+                            conn,
+                            "UPDATE goals SET dependencies = ? WHERE goal_id = ? AND tenant_id = ?",
+                            (json.dumps(deps), child_goal_id, tenant_id),
+                        )
+                    else:
+                        self.execute_tenant(
+                            conn,
+                            "UPDATE goals SET dependencies = ? WHERE goal_id = ?",
+                            (json.dumps(deps), child_goal_id),
+                            required_capability="goal_maintenance",
+                        )
 
-            # Add sub-goal reference to parent
-            parent_row = conn.execute(
-                "SELECT sub_goals FROM goals WHERE goal_id = ?", (parent_goal_id,)
-            ).fetchone()
+            if tenant_id:
+                parent_row = self.execute_tenant(
+                    conn,
+                    "SELECT sub_goals FROM goals WHERE goal_id = ? AND tenant_id = ?",
+                    (parent_goal_id, tenant_id),
+                ).fetchone()
+            else:
+                parent_row = self.execute_tenant(
+                    conn,
+                    "SELECT sub_goals FROM goals WHERE goal_id = ?",
+                    (parent_goal_id,),
+                    required_capability="goal_maintenance",
+                ).fetchone()
             if parent_row:
                 subs = json.loads(parent_row[0] or "[]")
                 if child_goal_id not in subs:
                     subs.append(child_goal_id)
-                    conn.execute(
-                        "UPDATE goals SET sub_goals = ? WHERE goal_id = ?",
-                        (json.dumps(subs), parent_goal_id),
-                    )
+                    if tenant_id:
+                        self.execute_tenant(
+                            conn,
+                            "UPDATE goals SET sub_goals = ? WHERE goal_id = ? AND tenant_id = ?",
+                            (json.dumps(subs), parent_goal_id, tenant_id),
+                        )
+                    else:
+                        self.execute_tenant(
+                            conn,
+                            "UPDATE goals SET sub_goals = ? WHERE goal_id = ?",
+                            (json.dumps(subs), parent_goal_id),
+                            required_capability="goal_maintenance",
+                        )
 
     # ─── Helpers ──────────────────────────────────────────────────────
 
     def _row_to_goal(self, row: tuple[Any, ...]) -> Goal:
-        return Goal(
-            goal_id=row[0],
-            name=row[1],
-            description=row[2],
-            goal_type=row[3],
-            priority=GoalPriority(row[4]),
-            status=GoalStatus(row[5]),
-            progress=row[6],
-            success_criteria=row[7],
-            sub_goals=json.loads(row[8] or "[]"),
-            actions_taken=json.loads(row[9] or "[]"),
-            metadata=json.loads(row[10] or "{}"),
-            created_at=row[11],
-            deadline=row[13],
-            dependencies=json.loads(row[14] or "[]") if len(row) > 14 else [],
-            block_reason=row[15] if len(row) > 15 else "",
-            execution_journal=json.loads(row[16] or "{}") if len(row) > 16 else {},
-        )
+        if len(row) > 17:  # v2 schema has 18 columns
+            return Goal(
+                goal_id=row[0],
+                name=row[2],
+                description=row[3],
+                goal_type=row[4],
+                priority=GoalPriority(row[5]),
+                status=GoalStatus(row[6]),
+                progress=row[7],
+                success_criteria=row[8],
+                sub_goals=json.loads(row[9] or "[]"),
+                actions_taken=json.loads(row[10] or "[]"),
+                metadata=json.loads(row[11] or "{}"),
+                created_at=row[12],
+                deadline=row[14],
+                dependencies=json.loads(row[15] or "[]"),
+                block_reason=row[16],
+                execution_journal=json.loads(row[17] or "{}"),
+            )
+        else:
+            # v1 legacy fallback
+            return Goal(
+                goal_id=row[0],
+                name=row[1],
+                description=row[2],
+                goal_type=row[3],
+                priority=GoalPriority(row[4]),
+                status=GoalStatus(row[5]),
+                progress=row[6],
+                success_criteria=row[7],
+                sub_goals=json.loads(row[8] or "[]"),
+                actions_taken=json.loads(row[9] or "[]"),
+                metadata=json.loads(row[10] or "{}"),
+                created_at=row[11],
+                deadline=row[13],
+                dependencies=json.loads(row[14] or "[]") if len(row) > 14 else [],
+                block_reason=row[15] if len(row) > 15 else "",
+                execution_journal=json.loads(row[16] or "{}") if len(row) > 16 else {},
+            )
 
     def stats(self) -> dict[str, Any]:
-        with sqlite3.connect(str(self._db_path)) as conn:
-            total = conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0]
-            active = conn.execute(
-                "SELECT COUNT(*) FROM goals WHERE status IN ('pending','active','blocked')"
-            ).fetchone()[0]
-            completed = conn.execute(
-                "SELECT COUNT(*) FROM goals WHERE status = 'completed'"
-            ).fetchone()[0]
-            learning = conn.execute(
-                "SELECT COUNT(*) FROM goals WHERE goal_type = 'learning' "
-                "AND status IN ('pending','active','blocked')"
-            ).fetchone()[0]
+        tenant_id = self.current_tenant()
+        with sqlite3.connect(self._db_path) as conn:
+            if tenant_id:
+                total = self.execute_tenant(
+                    conn, "SELECT COUNT(*) FROM goals WHERE tenant_id = ?", (tenant_id,)
+                ).fetchone()[0]
+                active = self.execute_tenant(
+                    conn,
+                    "SELECT COUNT(*) FROM goals WHERE status IN ('pending','active','blocked') AND tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()[0]
+                completed = self.execute_tenant(
+                    conn,
+                    "SELECT COUNT(*) FROM goals WHERE status = 'completed' AND tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()[0]
+                learning = self.execute_tenant(
+                    conn,
+                    "SELECT COUNT(*) FROM goals WHERE goal_type = 'learning' "
+                    "AND status IN ('pending','active','blocked') AND tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()[0]
+            else:
+                total = self.execute_tenant(
+                    conn, "SELECT COUNT(*) FROM goals", required_capability="goal_maintenance"
+                ).fetchone()[0]
+                active = self.execute_tenant(
+                    conn,
+                    "SELECT COUNT(*) FROM goals WHERE status IN ('pending','active','blocked')",
+                    required_capability="goal_maintenance",
+                ).fetchone()[0]
+                completed = self.execute_tenant(
+                    conn,
+                    "SELECT COUNT(*) FROM goals WHERE status = 'completed'",
+                    required_capability="goal_maintenance",
+                ).fetchone()[0]
+                learning = self.execute_tenant(
+                    conn,
+                    "SELECT COUNT(*) FROM goals WHERE goal_type = 'learning' "
+                    "AND status IN ('pending','active','blocked')",
+                    required_capability="goal_maintenance",
+                ).fetchone()[0]
         return {
             "total_goals": total,
             "active": active,

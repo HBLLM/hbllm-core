@@ -28,6 +28,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.security import TenantSQLiteRepository
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,7 +143,7 @@ class Belief:
 # ── Belief Store ─────────────────────────────────────────────────────────────
 
 
-class BeliefStore:
+class BeliefStore(TenantSQLiteRepository):
     """SQLite-backed persistent store for beliefs and contradictions.
 
     Responsibilities:
@@ -154,7 +156,9 @@ class BeliefStore:
     """
 
     def __init__(self, data_dir: str | Path = "data") -> None:
-        self._db_path = Path(data_dir) / "belief_store.db"
+        db_path = Path(data_dir) / "belief_store.db"
+        super().__init__(db_path)
+        self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -169,43 +173,79 @@ class BeliefStore:
 
     def _init_db(self) -> None:
         with sqlite3.connect(self._db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS beliefs (
-                    belief_id TEXT PRIMARY KEY,
-                    concept TEXT NOT NULL,
-                    claim TEXT NOT NULL,
-                    belief_type TEXT NOT NULL DEFAULT 'factual',
-                    confidence REAL NOT NULL DEFAULT 0.5,
-                    status TEXT NOT NULL DEFAULT 'active',
-                    domain TEXT DEFAULT '',
-                    data TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    last_updated REAL NOT NULL
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS persistent_contradictions (
-                    contradiction_id TEXT PRIMARY KEY,
-                    concept TEXT NOT NULL,
-                    claim_a TEXT NOT NULL,
-                    claim_b TEXT NOT NULL,
-                    severity REAL NOT NULL DEFAULT 0.5,
-                    resolved INTEGER DEFAULT 0,
-                    resolution TEXT DEFAULT '',
-                    data TEXT NOT NULL,
-                    detected_at REAL NOT NULL,
-                    resolved_at REAL
-                )
-            """)
-            # Indexes for common queries
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_concept ON beliefs(concept)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_domain ON beliefs(domain)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_type ON beliefs(belief_type)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs(status)")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_contradictions_resolved "
-                "ON persistent_contradictions(resolved)"
-            )
+            cur = conn.execute("PRAGMA user_version")
+            version = cur.fetchone()[0]
+
+            if version == 0:
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS beliefs (
+                            belief_id TEXT PRIMARY KEY,
+                            tenant_id TEXT DEFAULT '__legacy__',
+                            concept TEXT NOT NULL,
+                            claim TEXT NOT NULL,
+                            belief_type TEXT NOT NULL DEFAULT 'factual',
+                            confidence REAL NOT NULL DEFAULT 0.5,
+                            status TEXT NOT NULL DEFAULT 'active',
+                            domain TEXT DEFAULT '',
+                            data TEXT NOT NULL,
+                            created_at REAL NOT NULL,
+                            last_updated REAL NOT NULL
+                        )
+                    """)
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS persistent_contradictions (
+                            contradiction_id TEXT PRIMARY KEY,
+                            tenant_id TEXT DEFAULT '__legacy__',
+                            concept TEXT NOT NULL,
+                            claim_a TEXT NOT NULL,
+                            claim_b TEXT NOT NULL,
+                            severity REAL NOT NULL DEFAULT 0.5,
+                            resolved INTEGER DEFAULT 0,
+                            resolution TEXT DEFAULT '',
+                            data TEXT NOT NULL,
+                            detected_at REAL NOT NULL,
+                            resolved_at REAL
+                        )
+                    """)
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_beliefs_tenant_concept ON beliefs(tenant_id, concept)"
+                    )
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_domain ON beliefs(domain)")
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_beliefs_type ON beliefs(belief_type)"
+                    )
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs(status)")
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_contradictions_tenant ON persistent_contradictions(tenant_id, concept)"
+                    )
+                    conn.execute("PRAGMA user_version = 2")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+            elif version == 1:
+                # Upgrade path: schema v1 -> v2
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute(
+                        "ALTER TABLE beliefs ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                    )
+                    conn.execute(
+                        "ALTER TABLE persistent_contradictions ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                    )
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_beliefs_tenant_concept ON beliefs(tenant_id, concept)"
+                    )
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_contradictions_tenant ON persistent_contradictions(tenant_id, concept)"
+                    )
+                    conn.execute("PRAGMA user_version = 2")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
 
     # ── Belief CRUD ──────────────────────────────────────────────────────
 
@@ -245,18 +285,30 @@ class BeliefStore:
     def get_belief(self, belief_id: str) -> Belief | None:
         """Get a specific belief by ID."""
         self._lookups += 1
-        if belief_id in self._cache:
-            return self._cache[belief_id]
+        tenant_id = self.current_tenant()
+        cache_key = f"{tenant_id}:{belief_id}" if tenant_id else belief_id
+        if cache_key in self._cache:
+            return self._cache[cache_key]
 
         try:
             with sqlite3.connect(self._db_path) as conn:
-                row = conn.execute(
-                    "SELECT data FROM beliefs WHERE belief_id = ?",
-                    (belief_id,),
-                ).fetchone()
+                if tenant_id:
+                    row = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE belief_id = ? AND tenant_id = ?",
+                        (belief_id, tenant_id),
+                    ).fetchone()
+                else:
+                    row = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE belief_id = ?",
+                        (belief_id,),
+                        required_capability="belief_maintenance",
+                    ).fetchone()
                 if row:
                     belief = Belief.from_dict(json.loads(row[0]))
-                    self._cache[belief.belief_id] = belief
+                    if tenant_id:
+                        self._cache[cache_key] = belief
                     return belief
         except Exception as e:
             logger.debug("Failed to get belief %s: %s", belief_id, e)
@@ -265,13 +317,24 @@ class BeliefStore:
     def get_beliefs_for_concept(self, concept: str) -> list[Belief]:
         """Get all beliefs related to a concept."""
         self._lookups += 1
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE concept = ? AND status != 'decayed' "
-                    "ORDER BY confidence DESC",
-                    (concept.lower(),),
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE concept = ? AND tenant_id = ? AND status != 'decayed' "
+                        "ORDER BY confidence DESC",
+                        (concept.lower(), tenant_id),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE concept = ? AND status != 'decayed' "
+                        "ORDER BY confidence DESC",
+                        (concept.lower(),),
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:
             logger.debug("Failed to get beliefs for concept %s: %s", concept, e)
@@ -280,13 +343,24 @@ class BeliefStore:
     def get_beliefs_by_domain(self, domain: str) -> list[Belief]:
         """Get all active beliefs in a domain."""
         self._lookups += 1
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE domain = ? AND status = 'active' "
-                    "ORDER BY confidence DESC",
-                    (domain,),
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE domain = ? AND tenant_id = ? AND status = 'active' "
+                        "ORDER BY confidence DESC",
+                        (domain, tenant_id),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE domain = ? AND status = 'active' "
+                        "ORDER BY confidence DESC",
+                        (domain,),
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:
             logger.debug("Failed to get beliefs for domain %s: %s", domain, e)
@@ -299,14 +373,26 @@ class BeliefStore:
     ) -> list[Belief]:
         """Get all beliefs of a specific type above a confidence threshold."""
         self._lookups += 1
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE belief_type = ? "
-                    "AND confidence >= ? AND status = 'active' "
-                    "ORDER BY confidence DESC",
-                    (belief_type.value, min_confidence),
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE belief_type = ? AND tenant_id = ? "
+                        "AND confidence >= ? AND status = 'active' "
+                        "ORDER BY confidence DESC",
+                        (belief_type.value, tenant_id, min_confidence),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE belief_type = ? "
+                        "AND confidence >= ? AND status = 'active' "
+                        "ORDER BY confidence DESC",
+                        (belief_type.value, min_confidence),
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:
             logger.debug("Failed to get beliefs by type %s: %s", belief_type, e)
@@ -316,7 +402,9 @@ class BeliefStore:
         """Persist an updated belief."""
         belief.last_updated = time.time()
         self._persist_belief(belief)
-        self._cache[belief.belief_id] = belief
+        tenant_id = self.current_tenant()
+        cache_key = f"{tenant_id}:{belief.belief_id}" if tenant_id else belief.belief_id
+        self._cache[cache_key] = belief
 
     def get_contested_beliefs(self) -> list[Belief]:
         """Get all beliefs with active contradictions."""
@@ -325,12 +413,22 @@ class BeliefStore:
     def get_beliefs_by_status(self, status: BeliefStatus) -> list[Belief]:
         """Get all beliefs with a specific status."""
         self._lookups += 1
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE status = ? ORDER BY confidence DESC",
-                    (status.value,),
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE status = ? AND tenant_id = ? ORDER BY confidence DESC",
+                        (status.value, tenant_id),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE status = ? ORDER BY confidence DESC",
+                        (status.value,),
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:
             logger.debug("Failed to get beliefs by status %s: %s", status, e)
@@ -339,13 +437,24 @@ class BeliefStore:
     def get_strongest(self, n: int = 10) -> list[Belief]:
         """Get the highest-confidence active beliefs."""
         self._lookups += 1
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE status = 'active' "
-                    "ORDER BY confidence DESC LIMIT ?",
-                    (n,),
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE status = 'active' AND tenant_id = ? "
+                        "ORDER BY confidence DESC LIMIT ?",
+                        (tenant_id, n),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE status = 'active' "
+                        "ORDER BY confidence DESC LIMIT ?",
+                        (n,),
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 return [Belief.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:
             logger.debug("Failed to get strongest beliefs: %s", e)
@@ -357,11 +466,21 @@ class BeliefStore:
         Returns number of beliefs decayed below threshold.
         """
         decayed = 0
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM beliefs WHERE status = 'active'",
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE status = 'active' AND tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM beliefs WHERE status = 'active'",
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 for row in rows:
                     belief = Belief.from_dict(json.loads(row[0]))
                     belief.confidence = max(0.0, belief.confidence - rate)
@@ -389,6 +508,7 @@ class BeliefStore:
         """
         ctr_id = f"ctr_{uuid.uuid4().hex[:10]}"
         now = time.time()
+        tenant_id = self.current_tenant() or "__legacy__"
         data = {
             "contradiction_id": ctr_id,
             "concept": concept,
@@ -401,12 +521,14 @@ class BeliefStore:
         }
         try:
             with sqlite3.connect(self._db_path) as conn:
-                conn.execute(
+                self.execute_tenant(
+                    conn,
                     """INSERT INTO persistent_contradictions
-                       (contradiction_id, concept, claim_a, claim_b,
+                       (contradiction_id, tenant_id, concept, claim_a, claim_b,
                         severity, resolved, data, detected_at)
-                       VALUES (?, ?, ?, ?, ?, 0, ?, ?)""",
-                    (ctr_id, concept, claim_a, claim_b, severity, json.dumps(data), now),
+                       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                    (ctr_id, tenant_id, concept, claim_a, claim_b, severity, json.dumps(data), now),
+                    required_capability="belief_maintenance",
                 )
             self._contradictions_stored += 1
 
@@ -424,35 +546,53 @@ class BeliefStore:
 
     def resolve_contradiction(self, contradiction_id: str, resolution: str) -> None:
         """Mark a contradiction as resolved."""
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                conn.execute(
-                    "UPDATE persistent_contradictions SET resolved = 1, "
-                    "resolution = ?, resolved_at = ? WHERE contradiction_id = ?",
-                    (resolution, time.time(), contradiction_id),
-                )
+                if tenant_id:
+                    self.execute_tenant(
+                        conn,
+                        "UPDATE persistent_contradictions SET resolved = 1, "
+                        "resolution = ?, resolved_at = ? WHERE contradiction_id = ? AND tenant_id = ?",
+                        (resolution, time.time(), contradiction_id, tenant_id),
+                    )
+                else:
+                    self.execute_tenant(
+                        conn,
+                        "UPDATE persistent_contradictions SET resolved = 1, "
+                        "resolution = ?, resolved_at = ? WHERE contradiction_id = ?",
+                        (resolution, time.time(), contradiction_id),
+                        required_capability="belief_maintenance",
+                    )
         except Exception as e:
             logger.warning("Failed to resolve contradiction: %s", e)
 
     def get_unresolved_contradictions(self) -> list[dict[str, Any]]:
         """Get all unresolved contradictions."""
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM persistent_contradictions WHERE resolved = 0 "
-                    "ORDER BY severity DESC",
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM persistent_contradictions WHERE resolved = 0 AND tenant_id = ? "
+                        "ORDER BY severity DESC",
+                        (tenant_id,),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT data FROM persistent_contradictions WHERE resolved = 0 "
+                        "ORDER BY severity DESC",
+                        required_capability="belief_maintenance",
+                    ).fetchall()
                 return [json.loads(r[0]) for r in rows]
         except Exception as e:
             logger.debug("Failed to get unresolved contradictions: %s", e)
             return []
 
     def get_contradictions_by_priority(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Get contradictions ordered by severity × age (priority).
-
-        Older, more severe contradictions bubble up — same anti-starvation
-        principle as CognitivePriorityScheduler.
-        """
+        """Get contradictions ordered by severity × age (priority)."""
         contradictions = self.get_unresolved_contradictions()
         now = time.time()
         for c in contradictions:
@@ -464,21 +604,59 @@ class BeliefStore:
     # ── Stats ────────────────────────────────────────────────────────────
 
     def stats(self) -> dict[str, Any]:
+        tenant_id = self.current_tenant()
         try:
             with sqlite3.connect(self._db_path) as conn:
-                total_beliefs = conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0]
-                active_beliefs = conn.execute(
-                    "SELECT COUNT(*) FROM beliefs WHERE status = 'active'"
-                ).fetchone()[0]
-                contested_beliefs = conn.execute(
-                    "SELECT COUNT(*) FROM beliefs WHERE status = 'contested'"
-                ).fetchone()[0]
-                total_contradictions = conn.execute(
-                    "SELECT COUNT(*) FROM persistent_contradictions"
-                ).fetchone()[0]
-                unresolved = conn.execute(
-                    "SELECT COUNT(*) FROM persistent_contradictions WHERE resolved = 0"
-                ).fetchone()[0]
+                if tenant_id:
+                    total_beliefs = self.execute_tenant(
+                        conn, "SELECT COUNT(*) FROM beliefs WHERE tenant_id = ?", (tenant_id,)
+                    ).fetchone()[0]
+                    active_beliefs = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM beliefs WHERE status = 'active' AND tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchone()[0]
+                    contested_beliefs = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM beliefs WHERE status = 'contested' AND tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchone()[0]
+                    total_contradictions = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM persistent_contradictions WHERE tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchone()[0]
+                    unresolved = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM persistent_contradictions WHERE resolved = 0 AND tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchone()[0]
+                else:
+                    total_beliefs = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM beliefs",
+                        required_capability="belief_maintenance",
+                    ).fetchone()[0]
+                    active_beliefs = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM beliefs WHERE status = 'active'",
+                        required_capability="belief_maintenance",
+                    ).fetchone()[0]
+                    contested_beliefs = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM beliefs WHERE status = 'contested'",
+                        required_capability="belief_maintenance",
+                    ).fetchone()[0]
+                    total_contradictions = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM persistent_contradictions",
+                        required_capability="belief_maintenance",
+                    ).fetchone()[0]
+                    unresolved = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM persistent_contradictions WHERE resolved = 0",
+                        required_capability="belief_maintenance",
+                    ).fetchone()[0]
         except Exception:
             total_beliefs = active_beliefs = contested_beliefs = 0
             total_contradictions = unresolved = 0
@@ -497,15 +675,18 @@ class BeliefStore:
     # ── Internal Helpers ─────────────────────────────────────────────────
 
     def _persist_belief(self, belief: Belief) -> None:
+        tenant_id = self.current_tenant() or "__legacy__"
         try:
             with sqlite3.connect(self._db_path) as conn:
-                conn.execute(
+                self.execute_tenant(
+                    conn,
                     """INSERT OR REPLACE INTO beliefs
-                       (belief_id, concept, claim, belief_type, confidence,
+                       (belief_id, tenant_id, concept, claim, belief_type, confidence,
                         status, domain, data, created_at, last_updated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         belief.belief_id,
+                        tenant_id,
                         belief.concept.lower(),
                         belief.claim,
                         belief.belief_type.value,
@@ -516,6 +697,7 @@ class BeliefStore:
                         belief.created_at,
                         belief.last_updated,
                     ),
+                    required_capability="belief_maintenance",
                 )
         except Exception as e:
             logger.warning("Failed to persist belief: %s", e)

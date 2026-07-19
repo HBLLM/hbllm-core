@@ -34,7 +34,16 @@ class TrustInterceptor:
         source = message.source_node_id
 
         # Well-known system sources bypass all checks
-        if source in ("system", "api_server", "pipeline", "studio", "audio_ws", "registry"):
+        if source in (
+            "system",
+            "api_server",
+            "pipeline",
+            "studio",
+            "audio_ws",
+            "registry",
+            "autonomy",
+            "autonomy_core",
+        ):
             return message
 
         # 1. Replay Protection

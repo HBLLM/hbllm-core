@@ -32,6 +32,7 @@ from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+from hbllm.security import SystemContext, TenantSQLiteRepository
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class EvaluationReport:
         }
 
 
-class EvaluationNode(Node):
+class EvaluationNode(Node, TenantSQLiteRepository):
     """
     Post-decision evaluation node. Closes the intelligence feedback loop.
 
@@ -122,12 +123,15 @@ class EvaluationNode(Node):
         self._total_flagged = 0
 
         self._db_path = Path(db_path) if db_path else None
+        if self._db_path:
+            TenantSQLiteRepository.__init__(self, self._db_path)
 
     async def on_start(self) -> None:
         logger.info("Starting EvaluationNode (Intelligence Feedback Loop)")
         if self._db_path:
-            await asyncio.to_thread(self._init_db)
-            await asyncio.to_thread(self._restore_from_db)
+            with SystemContext(capabilities={"db_migration", "evaluation_maintenance"}):
+                await asyncio.to_thread(self._init_db)
+                await asyncio.to_thread(self._restore_from_db)
         await self.bus.subscribe("system.experience", self._handle_experience)
         await self.bus.subscribe("sensory.output", self._handle_output)
         await self.bus.subscribe("system.feedback", self._handle_feedback)
@@ -138,36 +142,77 @@ class EvaluationNode(Node):
         if not self._db_path:
             return
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(str(self._db_path)) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS evaluations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    correlation_id TEXT UNIQUE NOT NULL,
-                    timestamp REAL NOT NULL,
-                    task_success REAL NOT NULL,
-                    plan_validity REAL NOT NULL,
-                    tool_accuracy REAL NOT NULL,
-                    memory_usage REAL NOT NULL,
-                    confidence_error REAL NOT NULL,
-                    overall_score REAL NOT NULL,
-                    flags TEXT NOT NULL
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_timestamp ON evaluations(timestamp)")
+        with sqlite3.connect(self._db_path) as conn:
+            cur = conn.execute("PRAGMA user_version")
+            version = cur.fetchone()[0]
+
+            if version == 0:
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS evaluations (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            correlation_id TEXT UNIQUE NOT NULL,
+                            tenant_id TEXT DEFAULT '__legacy__',
+                            timestamp REAL NOT NULL,
+                            task_success REAL NOT NULL,
+                            plan_validity REAL NOT NULL,
+                            tool_accuracy REAL NOT NULL,
+                            memory_usage REAL NOT NULL,
+                            confidence_error REAL NOT NULL,
+                            overall_score REAL NOT NULL,
+                            flags TEXT NOT NULL
+                        )
+                    """)
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_eval_tenant_time ON evaluations(tenant_id, timestamp DESC)"
+                    )
+                    conn.execute("PRAGMA user_version = 2")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+            elif version == 1:
+                # Upgrade path: v1 -> v2
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    conn.execute(
+                        "ALTER TABLE evaluations ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                    )
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_eval_tenant_time ON evaluations(tenant_id, timestamp DESC)"
+                    )
+                    conn.execute("PRAGMA user_version = 2")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
 
     def _restore_from_db(self) -> None:
         """Restore in-memory history and stats counters from SQLite on startup."""
         if not self._db_path:
             return
+        tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with sqlite3.connect(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT correlation_id, timestamp, task_success, plan_validity, "
-                    "tool_accuracy, memory_usage, confidence_error, overall_score, flags "
-                    "FROM evaluations ORDER BY timestamp DESC LIMIT ?",
-                    (self.evaluation_window,),
-                ).fetchall()
+                if tenant_id:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT correlation_id, timestamp, task_success, plan_validity, "
+                        "tool_accuracy, memory_usage, confidence_error, overall_score, flags "
+                        "FROM evaluations WHERE tenant_id = ? ORDER BY timestamp DESC LIMIT ?",
+                        (tenant_id, self.evaluation_window),
+                    ).fetchall()
+                else:
+                    rows = self.execute_tenant(
+                        conn,
+                        "SELECT correlation_id, timestamp, task_success, plan_validity, "
+                        "tool_accuracy, memory_usage, confidence_error, overall_score, flags "
+                        "FROM evaluations ORDER BY timestamp DESC LIMIT ?",
+                        (self.evaluation_window,),
+                        required_capability="evaluation_maintenance",
+                    ).fetchall()
 
                 restored = []
                 for row in reversed(rows):
@@ -190,13 +235,32 @@ class EvaluationNode(Node):
                     )
                 self._evaluations = restored
 
-                total_evaluated_row = conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()
-                self._total_evaluated = total_evaluated_row[0] if total_evaluated_row else 0
+                if tenant_id:
+                    total_evaluated_row = self.execute_tenant(
+                        conn, "SELECT COUNT(*) FROM evaluations WHERE tenant_id = ?", (tenant_id,)
+                    ).fetchone()
+                    self._total_evaluated = total_evaluated_row[0] if total_evaluated_row else 0
 
-                total_flagged_row = conn.execute(
-                    "SELECT COUNT(*) FROM evaluations WHERE flags != '[]'"
-                ).fetchone()
-                self._total_flagged = total_flagged_row[0] if total_flagged_row else 0
+                    total_flagged_row = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM evaluations WHERE flags != '[]' AND tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchone()
+                    self._total_flagged = total_flagged_row[0] if total_flagged_row else 0
+                else:
+                    total_evaluated_row = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM evaluations",
+                        required_capability="evaluation_maintenance",
+                    ).fetchone()
+                    self._total_evaluated = total_evaluated_row[0] if total_evaluated_row else 0
+
+                    total_flagged_row = self.execute_tenant(
+                        conn,
+                        "SELECT COUNT(*) FROM evaluations WHERE flags != '[]'",
+                        required_capability="evaluation_maintenance",
+                    ).fetchone()
+                    self._total_flagged = total_flagged_row[0] if total_flagged_row else 0
 
                 logger.info(
                     "Restored %d evaluations from DB (total_evaluated=%d, total_flagged=%d)",
@@ -211,15 +275,18 @@ class EvaluationNode(Node):
         """Write a single evaluation report to SQLite."""
         if not self._db_path:
             return
+        tenant_id = self.current_tenant() or "__legacy__"
         try:
-            with sqlite3.connect(str(self._db_path)) as conn:
-                conn.execute(
+            with sqlite3.connect(self._db_path) as conn:
+                self.execute_tenant(
+                    conn,
                     "INSERT OR REPLACE INTO evaluations ("
-                    "correlation_id, timestamp, task_success, plan_validity, "
+                    "correlation_id, tenant_id, timestamp, task_success, plan_validity, "
                     "tool_accuracy, memory_usage, confidence_error, overall_score, flags"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         report.correlation_id,
+                        tenant_id,
                         report.timestamp,
                         report.task_success,
                         report.plan_validity,
@@ -229,6 +296,7 @@ class EvaluationNode(Node):
                         report.overall_score,
                         json.dumps(report.flags),
                     ),
+                    required_capability="evaluation_maintenance",
                 )
         except Exception as e:
             logger.exception("Failed to persist evaluation report to SQLite: %s", e)
