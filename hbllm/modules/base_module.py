@@ -56,19 +56,27 @@ class DomainModuleNode(Node):
             LoRAManager.add_adapter(self.model, self.domain_name, lora_state_dict)
 
         self.topic_sub = "module.evaluate"
+        self._subscriptions = []
 
     async def on_start(self) -> None:
         """Subscribe to domain query messages."""
         logger.info("Starting DomainModuleNode for domain '%s'", self.domain_name)
-        await self.bus.subscribe(self.topic_sub, self.handle_message)
+        self._subscriptions.append(await self.bus.subscribe("module.evaluate", self.handle_message))
+        self._subscriptions.append(
+            await self.bus.subscribe(f"domain.{self.domain_name}.query", self.handle_message)
+        )
 
     async def on_stop(self) -> None:
         """Clean up."""
         logger.info("Stopping DomainModuleNode '%s'", self.domain_name)
+        for sub in self._subscriptions:
+            await self.bus.unsubscribe(sub)
+        self._subscriptions.clear()
 
     async def handle_message(self, message: Message) -> Message | None:
-        """Process incoming evaluation requests from the Workspace Blackboard."""
-        if message.topic != self.topic_sub:
+        """Process incoming evaluation requests or direct domain queries."""
+        is_direct_query = message.topic == f"domain.{self.domain_name}.query"
+        if message.topic != "module.evaluate" and not is_direct_query:
             return None
 
         # Parse payload
@@ -151,6 +159,18 @@ class DomainModuleNode(Node):
                     latency_ms,
                 )
 
+                if is_direct_query:
+                    return Message(
+                        type=MessageType.RESPONSE,
+                        source_node_id=self.node_id,
+                        target_node_id=message.source_node_id,
+                        tenant_id=message.tenant_id,
+                        session_id=message.session_id,
+                        topic=f"{message.topic}.response",
+                        payload={"text": response_text},
+                        correlation_id=message.id,
+                    )
+
                 thought_msg = Message(
                     type=MessageType.EVENT,
                     source_node_id=self.node_id,
@@ -175,6 +195,8 @@ class DomainModuleNode(Node):
                 logger.error(
                     "External LLM generation failed for domain '%s': %s", self.domain_name, e
                 )
+                if is_direct_query:
+                    return message.create_error(f"LLM Error on domain '{self.domain_name}': {e}")
                 try:
                     thought_msg = Message(
                         type=MessageType.EVENT,
@@ -264,6 +286,18 @@ class DomainModuleNode(Node):
             latency_ms = int((time.monotonic() - start_time) * 1000)
             logger.info("Domain '%s' finished generating in %d ms.", self.domain_name, latency_ms)
 
+            if is_direct_query:
+                return Message(
+                    type=MessageType.RESPONSE,
+                    source_node_id=self.node_id,
+                    target_node_id=message.source_node_id,
+                    tenant_id=message.tenant_id,
+                    session_id=message.session_id,
+                    topic=f"{message.topic}.response",
+                    payload={"text": response_text},
+                    correlation_id=message.id,
+                )
+
             # 3. Propose thought to Blackboard instead of creating a synchronous response
             thought_msg = Message(
                 type=MessageType.EVENT,
@@ -291,6 +325,10 @@ class DomainModuleNode(Node):
             ValueError,
         ) as e:
             logger.error("Domain generation failed: %s", e)
+            if is_direct_query:
+                return message.create_error(
+                    f"Generation failed on domain '{self.domain_name}': {e}"
+                )
             return None
 
         finally:
