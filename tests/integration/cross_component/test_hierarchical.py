@@ -79,7 +79,7 @@ async def test_uplink_node_tool_routing(bus):
     # Create a local responder for the tool
     async def mock_tool_handler(msg: Message):
         return Message(
-            type=MessageType.EVENT,
+            type=MessageType.RESPONSE,
             source_node_id="local_tool_1",
             tenant_id=msg.tenant_id,
             topic="action.tool.local_tool_1.response",
