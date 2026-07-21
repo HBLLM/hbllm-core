@@ -97,3 +97,21 @@ class InstructionStream(BaseModel):
 
     def append(self, instruction: Instruction) -> None:
         self.instructions.append(instruction)
+
+    def compute_hash(self) -> str:
+        """Compute SHA256 checksum of the instruction stream for audit verification."""
+        import hashlib
+        import json
+        payload = json.dumps(
+            {
+                "id": self.id,
+                "author": self.author,
+                "instructions": [
+                    {"opcode": ins.opcode.value, "params": ins.params}
+                    for ins in self.instructions
+                ],
+            },
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
