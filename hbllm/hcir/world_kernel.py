@@ -134,7 +134,9 @@ class WorldKernel:
         return pred_node
 
     @staticmethod
-    def compare_outcomes(candidates: list[tuple[ActionNode, PredictionNode]]) -> tuple[ActionNode, PredictionNode]:
+    def compare_outcomes(
+        candidates: list[tuple[ActionNode, PredictionNode]],
+    ) -> tuple[ActionNode, PredictionNode]:
         """Rank candidate (Action, Prediction) pairs and return the optimal candidate."""
         if not candidates:
             raise ValueError("No candidates provided for comparison")
@@ -142,6 +144,8 @@ class WorldKernel:
         # Utility score = prediction confidence * (1.0 - cost_factor)
         best_candidate = max(
             candidates,
-            key=lambda item: item[1].uncertainty.confidence * (1.0 / (1.0 + item[0].estimated_cost * 0.01)),
+            key=lambda item: (
+                item[1].uncertainty.confidence * (1.0 / (1.0 + item[0].estimated_cost * 0.01))
+            ),
         )
         return best_candidate

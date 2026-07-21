@@ -3,7 +3,7 @@
 import pytest
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.delta_transport import DeltaPacket, DeltaTransportProtocol
+from hbllm.hcir.delta_transport import DeltaTransportProtocol
 from hbllm.hcir.graph import GoalNode, PredictionErrorNode
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import CognitiveScheduler
@@ -14,7 +14,6 @@ from hbllm.hcir.replay_debugger import ReplayDebugger
 from hbllm.hcir.transactions import HCIRDelta
 from hbllm.hcir.types import BranchMode
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Branch Isolation Tests
@@ -82,7 +81,9 @@ class TestReplayDebugger:
                 Instruction(
                     opcode=Opcode.ASSERT,
                     params={
-                        "node_data": GoalNode(id="g_replay", description="replay test").model_dump(),
+                        "node_data": GoalNode(
+                            id="g_replay", description="replay test"
+                        ).model_dump(),
                         "author": "tester",
                     },
                 ),

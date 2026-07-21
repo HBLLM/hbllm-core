@@ -24,16 +24,15 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.graph import ActionNode, GoalNode
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.receipt import ExecutionReceipt
-from hbllm.hcir.world_kernel import WorldKernel
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.world_kernel import WorldKernel
 
 logger = logging.getLogger(__name__)
 

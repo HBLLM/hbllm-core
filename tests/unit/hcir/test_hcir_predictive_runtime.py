@@ -16,9 +16,8 @@ from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import CognitiveScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
-from hbllm.hcir.world_kernel import WorldKernel
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
+from hbllm.hcir.world_kernel import WorldKernel
 
 # ═══════════════════════════════════════════════════════════════════════════
 # World Model Graph Node Tests
@@ -67,15 +66,11 @@ class TestWorldModelNodes:
 class TestWorldKernel:
     def test_get_current_world_state(self):
         ws = HCIRWorkspaceState()
-        ws.add_node(EnvironmentStateNode(
-            id="env_1", environment_name="Lab", overall_status="optimal"
-        ))
-        ws.add_node(WorldVariableNode(
-            id="wv_1", variable_name="co2", value=420
-        ))
-        ws.add_node(PhysicalEntityNode(
-            id="pe_1", entity_name="pump_01", status="active"
-        ))
+        ws.add_node(
+            EnvironmentStateNode(id="env_1", environment_name="Lab", overall_status="optimal")
+        )
+        ws.add_node(WorldVariableNode(id="wv_1", variable_name="co2", value=420))
+        ws.add_node(PhysicalEntityNode(id="pe_1", entity_name="pump_01", status="active"))
 
         world_kernel = WorldKernel(ws)
         state = world_kernel.get_current_world_state()
@@ -104,10 +99,12 @@ class TestWorldKernel:
         pred2 = PredictionNode(id="p2", claim="c2")
         pred2.uncertainty.confidence = 0.5
 
-        best_action, best_pred = WorldKernel.compare_outcomes([
-            (act1, pred1),
-            (act2, pred2),
-        ])
+        best_action, best_pred = WorldKernel.compare_outcomes(
+            [
+                (act1, pred1),
+                (act2, pred2),
+            ]
+        )
         assert best_action.id == "a1"
 
 

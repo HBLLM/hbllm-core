@@ -14,7 +14,7 @@ Features:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream
@@ -22,7 +22,6 @@ from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.receipt import ExecutionReceipt
 from hbllm.hcir.types import BranchMode
-from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +37,38 @@ class ReplayStepResult:
     node_count: int
 
 
+@dataclass
+class CognitiveBreakpoint:
+    """A cognitive breakpoint for pausing or inspecting replay streams."""
+
+    opcode: str | None = None
+    node_type: str | None = None
+    min_cost: int | None = None
+    hit_count: int = 0
+
+    def matches(self, instruction: Instruction) -> bool:
+        if self.opcode and instruction.opcode.value != self.opcode:
+            return False
+        if self.min_cost and instruction.cost_estimate < self.min_cost:
+            return False
+        if self.node_type and instruction.params.get("node_type") != self.node_type:
+            return False
+        return True
+
+
 class ReplayDebugger:
     """Deterministic step-by-step debugger for HCIR instruction streams.
 
-    Usage::
-
-        debugger = ReplayDebugger(services)
-        results = await debugger.replay_stream(
-            stream=instruction_stream,
-            expected_receipt=receipt,
-        )
+    Supports cognitive breakpoints based on opcodes, node types, and costs.
     """
 
     def __init__(self, services: KernelServices) -> None:
         self._services = services
+        self._breakpoints: list[CognitiveBreakpoint] = []
+
+    def add_breakpoint(self, bp: CognitiveBreakpoint) -> None:
+        """Register a cognitive breakpoint."""
+        self._breakpoints.append(bp)
 
     async def replay_stream(
         self,
@@ -63,6 +80,7 @@ class ReplayDebugger:
         # Fork an isolated replay workspace branch
         replay_ws = self._services.workspace.fork(branch_name, mode=BranchMode.REPLAY)
         from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
         replay_tx_mgr = TransactionManager(replay_ws)
         replay_services = KernelServices(
             workspace=replay_ws,
@@ -75,9 +93,7 @@ class ReplayDebugger:
         steps: list[ReplayStepResult] = []
 
         for i, instruction in enumerate(stream.instructions):
-            result = await interpreter._dispatcher.dispatch(
-                instruction, replay_ws, replay_services
-            )
+            result = await interpreter._dispatcher.dispatch(instruction, replay_ws, replay_services)
             step_res = ReplayStepResult(
                 step_index=i,
                 instruction=instruction,
@@ -86,12 +102,19 @@ class ReplayDebugger:
                 node_count=replay_ws.graph.node_count,
             )
             steps.append(step_res)
-            logger.debug("Replay step %d (%s) -> version %d", i, instruction.opcode, step_res.snapshot_version)
+            logger.debug(
+                "Replay step %d (%s) -> version %d",
+                i,
+                instruction.opcode,
+                step_res.snapshot_version,
+            )
 
         # Cleanup replay branch
         self._services.workspace.drop_branch(branch_name)
 
         if expected_receipt and expected_receipt.success:
-            logger.info("Replay completed successfully. Matched receipt %s", expected_receipt.execution_id)
+            logger.info(
+                "Replay completed successfully. Matched receipt %s", expected_receipt.execution_id
+            )
 
         return steps
