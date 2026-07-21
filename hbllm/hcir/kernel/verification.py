@@ -464,6 +464,38 @@ class PolicyVerifier:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Branch Mode Verifier — Mode-level mutation isolation
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class BranchModeVerifier:
+    """Enforces BranchMode mutation rules (LIVE, SIMULATION, REPLAY, TRAINING)."""
+
+    def verify(
+        self,
+        transaction: HCIRTransaction,
+        workspace: HCIRWorkspaceState,
+    ) -> bool:
+        from hbllm.hcir.types import BranchMode
+
+        mode = workspace.branch_mode
+
+        if mode == BranchMode.REPLAY:
+            # Replay mode is strictly read-only for persistent workspace state
+            transaction.annotations.append(
+                TransactionAnnotation(
+                    author="BranchModeVerifier",
+                    assertion="Transaction rejected: workspace branch is in REPLAY mode (read-only)",
+                    severity="error",
+                )
+            )
+            logger.warning("HCIR_BRANCH_MODE_REJECTED: REPLAY mode (tx=%s)", transaction.id)
+            return False
+
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Pipeline Factory
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -471,15 +503,16 @@ class PolicyVerifier:
 def create_default_pipeline(
     default_scope: Scope | None = None,
     check_resources: list[str] | None = None,
-) -> list[ScopeVerifier | SchemaVerifier | ResourceVerifier | PolicyVerifier]:
+) -> list[Any]:
     """Create the default HCIR verification pipeline.
 
-    Order matters: Scope → Schema → Resource → Policy.
+    Order matters: BranchMode → Scope → Schema → Resource → Policy.
 
     Returns:
         Ordered list of verification stages.
     """
     return [
+        BranchModeVerifier(),
         ScopeVerifier(default_scope=default_scope),
         SchemaVerifier(),
         ResourceVerifier(check_resources=check_resources),

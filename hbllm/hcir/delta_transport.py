@@ -15,14 +15,13 @@ Provides network transport and merge validation for distributed HCIR nodes:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from hbllm.hcir.identity import HCIRObjectID
-from hbllm.hcir.transactions import HCIRDelta, TransactionOp, TransactionOperation
+from hbllm.hcir.transactions import HCIRDelta
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
@@ -53,9 +52,13 @@ class DeltaPacket:
             "target_device_id": self.target_device_id,
             "tenant_id": self.tenant_id,
             "delta": {
-                "add_nodes": [n if isinstance(n, dict) else n.model_dump() for n in self.delta.add_nodes],
+                "add_nodes": [
+                    n if isinstance(n, dict) else n.model_dump() for n in self.delta.add_nodes
+                ],
                 "remove_node_ids": self.delta.remove_node_ids,
-                "add_edges": [e if isinstance(e, dict) else e.model_dump() for e in self.delta.add_edges],
+                "add_edges": [
+                    e if isinstance(e, dict) else e.model_dump() for e in self.delta.add_edges
+                ],
                 "remove_edge_ids": self.delta.remove_edge_ids,
             },
             "timestamp": self.timestamp,
@@ -66,7 +69,9 @@ class DeltaPacket:
 class DeltaTransportProtocol:
     """Protocol for sending and receiving distributed HCIR deltas across swarm nodes."""
 
-    def __init__(self, device_id: str = "local_node", secret_key: str = "hcir_swarm_secret") -> None:
+    def __init__(
+        self, device_id: str = "local_node", secret_key: str = "hcir_swarm_secret"
+    ) -> None:
         self._device_id = device_id
         self._secret_key = secret_key
 
@@ -100,7 +105,12 @@ class DeltaTransportProtocol:
             delta_raw = packet_dict.get("delta", {})
 
             # Compute expected signature
-            ops_count = len(delta_raw.get("add_nodes", [])) + len(delta_raw.get("add_edges", [])) + len(delta_raw.get("remove_node_ids", [])) + len(delta_raw.get("remove_edge_ids", []))
+            ops_count = (
+                len(delta_raw.get("add_nodes", []))
+                + len(delta_raw.get("add_edges", []))
+                + len(delta_raw.get("remove_node_ids", []))
+                + len(delta_raw.get("remove_edge_ids", []))
+            )
             payload = f"{pkt_id}:{src_dev}:{tenant_id}:{ops_count}:{self._secret_key}"
             expected_sig = hashlib.sha256(payload.encode()).hexdigest()[:16]
 
@@ -115,7 +125,11 @@ class DeltaTransportProtocol:
             tx_mgr = TransactionManager(target_workspace)
             ops = []
             for node_data in delta_raw.get("add_nodes", []):
-                ops.append(TransactionOperation(op=TransactionOp.ADD_NODE, node_id=node_data.get("id"), node_data=node_data))
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_NODE, node_id=node_data.get("id"), node_data=node_data
+                    )
+                )
 
             if ops:
                 tx = HCIRTransaction(author=src_dev, operations=ops)
