@@ -55,6 +55,15 @@ class ReliabilitySource(StrEnum):
     REPORTED = "reported"  # Asserted by external source
 
 
+class BranchMode(StrEnum):
+    """Execution mode isolation for workspace branches."""
+
+    LIVE = "live"
+    SIMULATION = "simulation"
+    REPLAY = "replay"
+    TRAINING = "training"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Uncertainty Vector
 # ═══════════════════════════════════════════════════════════════════════════

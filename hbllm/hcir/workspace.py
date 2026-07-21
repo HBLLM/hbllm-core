@@ -29,7 +29,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.query import GraphQuery, InMemoryQueryEngine, QueryResult
 from hbllm.hcir.snapshot import Snapshot, SnapshotManager
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
-from hbllm.hcir.types import Attention
+from hbllm.hcir.types import Attention, BranchMode
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +87,13 @@ class HCIRWorkspaceState:
     def __init__(
         self,
         event_store: IEventStore | None = None,
+        branch_mode: BranchMode = BranchMode.LIVE,
     ) -> None:
         self._graph = CognitiveGraph()
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
         self._query_engine = InMemoryQueryEngine(self._graph)
+        self._branch_mode = branch_mode
 
         # Runtime context
         self._global_attention = Attention()
@@ -104,6 +106,10 @@ class HCIRWorkspaceState:
         self._snapshot_manager.create_snapshot(self._graph)
 
     # ── Properties ───────────────────────────────────────────────────
+
+    @property
+    def branch_mode(self) -> BranchMode:
+        return self._branch_mode
 
     @property
     def graph(self) -> CognitiveGraph:
@@ -198,8 +204,12 @@ class HCIRWorkspaceState:
         """Create a version snapshot at the current state."""
         return self._snapshot_manager.create_snapshot(self._graph, branch)
 
-    def fork(self, branch_name: str) -> HCIRWorkspaceState:
-        """Fork the workspace into a simulation branch.
+    def fork(
+        self,
+        branch_name: str,
+        mode: BranchMode = BranchMode.SIMULATION,
+    ) -> HCIRWorkspaceState:
+        """Fork the workspace into an isolated branch (simulation, replay, training).
 
         Returns a deep-copied workspace that can be mutated
         independently.  Changes are NOT reflected in the parent
@@ -208,8 +218,8 @@ class HCIRWorkspaceState:
         if branch_name in self._branches:
             raise ValueError(f"Branch '{branch_name}' already exists")
 
-        # Deep copy the graph and create a new workspace
-        forked = HCIRWorkspaceState()
+        # Deep copy the graph and create a new workspace with specified branch mode
+        forked = HCIRWorkspaceState(branch_mode=mode)
         for node in self._graph.all_nodes():
             forked._graph.add_node(node.model_copy(deep=True))
         for edge in self._graph.all_edges():

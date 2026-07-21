@@ -62,6 +62,7 @@ class HCIRNodeType(StrEnum):
     BELIEF = "belief"
     HYPOTHESIS = "hypothesis"
     PREDICTION = "prediction"
+    PREDICTION_ERROR = "prediction_error"
 
     # --- Execution ---
     ACTION = "action"
@@ -258,6 +259,19 @@ class PredictionNode(HCIRNode):
     time_horizon_ms: TimeDuration = 0
 
 
+class PredictionErrorNode(HCIRNode):
+    """Measures the discrepancy between expected and observed outcomes."""
+
+    node_type: HCIRNodeType = HCIRNodeType.PREDICTION_ERROR
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    prediction_id: str = ""
+    predicted_value: Any = None
+    observed_value: Any = None
+    delta: float = 0.0
+    error_magnitude: float = 0.0
+    suspected_cause: str = ""
+
+
 # ── Execution Nodes ──────────────────────────────────────────────────────
 
 
@@ -427,6 +441,7 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.BELIEF: BeliefNode,
     HCIRNodeType.HYPOTHESIS: HypothesisNode,
     HCIRNodeType.PREDICTION: PredictionNode,
+    HCIRNodeType.PREDICTION_ERROR: PredictionErrorNode,
     HCIRNodeType.ACTION: ActionNode,
     HCIRNodeType.EVENT: EventNode,
     HCIRNodeType.RESOURCE: ResourceNode,
