@@ -1,13 +1,9 @@
 """Unit tests for HCIR Verification Pipeline."""
 
-import pytest
-
 from hbllm.hcir.graph import (
-    BeliefNode,
     GoalNode,
     HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
 )
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.kernel.verification import (
@@ -21,11 +17,9 @@ from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionOp,
     TransactionOperation,
-    TransactionStatus,
 )
 from hbllm.hcir.types import Scope, SecurityLevel
 from hbllm.hcir.workspace import HCIRWorkspaceState, ResourceBudget
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ScopeVerifier Tests
@@ -44,9 +38,13 @@ class TestScopeVerifier:
         node = GoalNode(id="g1", description="test", scope=Scope(tenant_id="acme"))
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data=node.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data=node.model_dump(),
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is True
 
@@ -55,9 +53,13 @@ class TestScopeVerifier:
         node = GoalNode(id="g1", description="test", scope=Scope(tenant_id="evil_corp"))
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data=node.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data=node.model_dump(),
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -67,10 +69,13 @@ class TestScopeVerifier:
         ws.add_node(GoalNode(id="g1", description="x", scope=Scope(tenant_id="other")))
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.MODIFY_NODE, node_id="g1",
-                changes={"description": "hacked"},
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.MODIFY_NODE,
+                    node_id="g1",
+                    changes={"description": "hacked"},
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -85,24 +90,29 @@ class TestScopeVerifier:
 
     def test_system_scoped_author_bypasses(self):
         ws, verifier = self._make_system("acme")
-        verifier.register_author_scope(
-            "kernel", Scope(security_level=SecurityLevel.SYSTEM)
-        )
+        verifier.register_author_scope("kernel", Scope(security_level=SecurityLevel.SYSTEM))
         node = GoalNode(id="g1", description="test", scope=Scope(tenant_id="any_tenant"))
         tx = HCIRTransaction(
             author="kernel",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data=node.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data=node.model_dump(),
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is True
 
     def test_system_node_not_removable_by_tenant(self):
         ws, verifier = self._make_system("acme")
-        ws.add_node(GoalNode(
-            id="g1", description="system node",
-            scope=Scope(security_level=SecurityLevel.SYSTEM),
-        ))
+        ws.add_node(
+            GoalNode(
+                id="g1",
+                description="system node",
+                scope=Scope(security_level=SecurityLevel.SYSTEM),
+            )
+        )
         tx = HCIRTransaction(
             author="planner",
             operations=[TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id="g1")],
@@ -116,9 +126,13 @@ class TestScopeVerifier:
         edge = HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["g1"], targets=["g2"])
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_EDGE, edge_id="e1", edge_data=edge.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_EDGE,
+                    edge_id="e1",
+                    edge_data=edge.model_dump(),
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -135,9 +149,13 @@ class TestSchemaVerifier:
         node = GoalNode(id="g1", description="test")
         tx = HCIRTransaction(
             author="test",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data=node.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data=node.model_dump(),
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is True
 
@@ -155,9 +173,13 @@ class TestSchemaVerifier:
         verifier = SchemaVerifier()
         tx = HCIRTransaction(
             author="test",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data={"id": "g1"},
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data={"id": "g1"},
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -166,10 +188,13 @@ class TestSchemaVerifier:
         verifier = SchemaVerifier()
         tx = HCIRTransaction(
             author="test",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1",
-                node_data={"id": "g1", "node_type": "nonexistent_type"},
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data={"id": "g1", "node_type": "nonexistent_type"},
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -178,9 +203,12 @@ class TestSchemaVerifier:
         verifier = SchemaVerifier()
         tx = HCIRTransaction(
             author="test",
-            operations=[TransactionOperation(
-                op=TransactionOp.MODIFY_NODE, changes={"x": 1},
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.MODIFY_NODE,
+                    changes={"x": 1},
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -189,10 +217,13 @@ class TestSchemaVerifier:
         verifier = SchemaVerifier()
         tx = HCIRTransaction(
             author="test",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_EDGE, edge_id="e1",
-                edge_data={"id": "e1", "edge_type": "supports", "targets": ["g1"]},
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_EDGE,
+                    edge_id="e1",
+                    edge_data={"id": "e1", "edge_type": "supports", "targets": ["g1"]},
+                )
+            ],
         )
         assert verifier.verify(tx, ws) is False
 
@@ -282,9 +313,13 @@ class TestFullPipeline:
         node = GoalNode(id="g1", description="test", scope=Scope(tenant_id="acme"))
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data=node.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data=node.model_dump(),
+                )
+            ],
         )
         result = mgr.commit(tx)
         assert result.is_committed
@@ -301,9 +336,13 @@ class TestFullPipeline:
         node = GoalNode(id="g1", description="test", scope=Scope(tenant_id="evil_corp"))
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1", node_data=node.model_dump(),
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data=node.model_dump(),
+                )
+            ],
         )
         result = mgr.commit(tx)
         assert result.is_rejected
@@ -319,10 +358,13 @@ class TestFullPipeline:
 
         tx = HCIRTransaction(
             author="planner",
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE, node_id="g1",
-                node_data={"id": "g1"},  # Missing node_type
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id="g1",
+                    node_data={"id": "g1"},  # Missing node_type
+                )
+            ],
         )
         result = mgr.commit(tx)
         assert result.is_rejected

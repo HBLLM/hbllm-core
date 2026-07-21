@@ -100,7 +100,9 @@ class CapabilityResolver:
         impls.sort(key=lambda x: x.priority, reverse=True)
         logger.info(
             "Registered capability '%s' implementation '%s' (priority=%d)",
-            impl.capability_name, impl.implementation_id, impl.priority,
+            impl.capability_name,
+            impl.implementation_id,
+            impl.priority,
         )
 
     def unregister(self, capability_name: str, implementation_id: str) -> bool:
@@ -123,7 +125,8 @@ class CapabilityResolver:
             if impl.executor.is_available:
                 logger.debug(
                     "Resolved capability '%s' → '%s'",
-                    capability_name, impl.implementation_id,
+                    capability_name,
+                    impl.implementation_id,
                 )
                 return impl.executor
 

@@ -3,6 +3,7 @@
 import pytest
 
 from hbllm.hcir.graph import (
+    NODE_TYPE_REGISTRY,
     ActionNode,
     BeliefNode,
     CapabilityNode,
@@ -11,27 +12,19 @@ from hbllm.hcir.graph import (
     ConceptNode,
     ConstraintNode,
     EpisodeNode,
-    EventNode,
-    ExternalKnowledgeNode,
     FactNode,
     GoalLifecycle,
     GoalNode,
     HCIREdge,
     HCIREdgeType,
     HCIRNodeType,
-    HypothesisNode,
     IntentNode,
-    NODE_TYPE_REGISTRY,
     NodeLifecycle,
-    ObservationNode,
-    PredictionNode,
     ProcedureNode,
     ResourceNode,
     SkillNode,
     ValueNode,
 )
-from hbllm.hcir.types import Scope, SecurityLevel, UncertaintyVector
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Typed Node Subclasses
@@ -170,14 +163,18 @@ class TestCognitiveGraphEdges:
     def test_add_edge_dangling_source_raises(self):
         graph = CognitiveGraph()
         graph.add_node(GoalNode(id="g1", description="a"))
-        edge = HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["missing"], targets=["g1"])
+        edge = HCIREdge(
+            id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["missing"], targets=["g1"]
+        )
         with pytest.raises(ValueError, match="Dangling edge reference"):
             graph.add_edge(edge)
 
     def test_add_edge_dangling_target_raises(self):
         graph = CognitiveGraph()
         graph.add_node(GoalNode(id="g1", description="a"))
-        edge = HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["g1"], targets=["missing"])
+        edge = HCIREdge(
+            id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["g1"], targets=["missing"]
+        )
         with pytest.raises(ValueError, match="Dangling edge reference"):
             graph.add_edge(edge)
 
@@ -195,7 +192,9 @@ class TestCognitiveGraphEdges:
         graph = CognitiveGraph()
         graph.add_node(GoalNode(id="g1", description="a"))
         graph.add_node(FactNode(id="f1", claim="b"))
-        graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["f1"], targets=["g1"]))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["f1"], targets=["g1"])
+        )
         removed = graph.remove_edge("e1")
         assert removed is not None
         assert graph.edge_count == 0

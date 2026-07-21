@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field
 
 from hbllm.hcir.types import CostMetric
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Opcode Enumeration
 # ═══════════════════════════════════════════════════════════════════════════
@@ -102,13 +101,13 @@ class InstructionStream(BaseModel):
         """Compute SHA256 checksum of the instruction stream for audit verification."""
         import hashlib
         import json
+
         payload = json.dumps(
             {
                 "id": self.id,
                 "author": self.author,
                 "instructions": [
-                    {"opcode": ins.opcode.value, "params": ins.params}
-                    for ins in self.instructions
+                    {"opcode": ins.opcode.value, "params": ins.params} for ins in self.instructions
                 ],
             },
             sort_keys=True,

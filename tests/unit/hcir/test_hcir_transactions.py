@@ -1,25 +1,20 @@
 """Unit tests for HCIR Transactions and TransactionManager."""
 
-import pytest
-
 from hbllm.hcir.graph import (
     BeliefNode,
     GoalNode,
     HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
 )
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.transactions import (
     HCIRDelta,
     HCIRTransaction,
-    TransactionAnnotation,
     TransactionOp,
     TransactionOperation,
     TransactionStatus,
 )
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Transaction Model Tests

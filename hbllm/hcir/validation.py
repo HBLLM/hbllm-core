@@ -17,7 +17,6 @@ Checks:
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -122,65 +121,67 @@ class GraphValidator:
                         has_truth_tgt = True
 
                 if has_decision_src and has_truth_tgt:
-                    report.add(ValidationIssue(
-                        severity=ValidationSeverity.ERROR,
-                        code="TRUTH_UTILITY_CORRUPTION",
-                        message=(
-                            f"Edge '{edge.id}' allows Decision/Value node to directly "
-                            f"drive Truth node via {edge.edge_type}."
-                        ),
-                        edge_id=edge.id,
-                    ))
+                    report.add(
+                        ValidationIssue(
+                            severity=ValidationSeverity.ERROR,
+                            code="TRUTH_UTILITY_CORRUPTION",
+                            message=(
+                                f"Edge '{edge.id}' allows Decision/Value node to directly "
+                                f"drive Truth node via {edge.edge_type}."
+                            ),
+                            edge_id=edge.id,
+                        )
+                    )
 
-
-    def _check_dangling_edges(
-        self, graph: CognitiveGraph, report: ValidationReport
-    ) -> None:
+    def _check_dangling_edges(self, graph: CognitiveGraph, report: ValidationReport) -> None:
         """Verify all edge endpoints reference existing nodes."""
         for edge in graph.all_edges():
             for src in edge.sources:
                 if not graph.has_node(src):
-                    report.add(ValidationIssue(
-                        severity=ValidationSeverity.ERROR,
-                        code="DANGLING_EDGE_SOURCE",
-                        message=f"Edge '{edge.id}' source '{src}' not found in graph.",
-                        edge_id=edge.id,
-                    ))
+                    report.add(
+                        ValidationIssue(
+                            severity=ValidationSeverity.ERROR,
+                            code="DANGLING_EDGE_SOURCE",
+                            message=f"Edge '{edge.id}' source '{src}' not found in graph.",
+                            edge_id=edge.id,
+                        )
+                    )
             for tgt in edge.targets:
                 if not graph.has_node(tgt):
-                    report.add(ValidationIssue(
-                        severity=ValidationSeverity.ERROR,
-                        code="DANGLING_EDGE_TARGET",
-                        message=f"Edge '{edge.id}' target '{tgt}' not found in graph.",
-                        edge_id=edge.id,
-                    ))
+                    report.add(
+                        ValidationIssue(
+                            severity=ValidationSeverity.ERROR,
+                            code="DANGLING_EDGE_TARGET",
+                            message=f"Edge '{edge.id}' target '{tgt}' not found in graph.",
+                            edge_id=edge.id,
+                        )
+                    )
 
-    def _check_lifecycle_consistency(
-        self, graph: CognitiveGraph, report: ValidationReport
-    ) -> None:
+    def _check_lifecycle_consistency(self, graph: CognitiveGraph, report: ValidationReport) -> None:
         """Warn about nodes in terminal lifecycle states that still have active edges."""
         terminal_states = {NodeLifecycle.ARCHIVED, NodeLifecycle.FORGOTTEN}
         for node in graph.all_nodes():
             if node.lifecycle in terminal_states:
                 outgoing = graph.edges_from(node.id)
                 active_outgoing = [
-                    e for e in outgoing
+                    e
+                    for e in outgoing
                     if e.edge_type in (HCIREdgeType.DEPENDS_ON, HCIREdgeType.REQUIRES)
                 ]
                 if active_outgoing:
-                    report.add(ValidationIssue(
-                        severity=ValidationSeverity.WARNING,
-                        code="TERMINAL_NODE_ACTIVE_EDGES",
-                        message=(
-                            f"Node '{node.id}' is {node.lifecycle} but has "
-                            f"{len(active_outgoing)} active dependency/requirement edges."
-                        ),
-                        node_id=node.id,
-                    ))
+                    report.add(
+                        ValidationIssue(
+                            severity=ValidationSeverity.WARNING,
+                            code="TERMINAL_NODE_ACTIVE_EDGES",
+                            message=(
+                                f"Node '{node.id}' is {node.lifecycle} but has "
+                                f"{len(active_outgoing)} active dependency/requirement edges."
+                            ),
+                            node_id=node.id,
+                        )
+                    )
 
-    def _check_scope_isolation(
-        self, graph: CognitiveGraph, report: ValidationReport
-    ) -> None:
+    def _check_scope_isolation(self, graph: CognitiveGraph, report: ValidationReport) -> None:
         """Verify edges don't cross tenant boundaries (except system-scoped nodes)."""
         from hbllm.hcir.types import SecurityLevel
 
@@ -194,18 +195,16 @@ class GraphValidator:
                     continue  # System nodes can cross boundaries
                 scopes.add(node.scope.tenant_id)
             if len(scopes) > 1:
-                report.add(ValidationIssue(
-                    severity=ValidationSeverity.ERROR,
-                    code="CROSS_TENANT_EDGE",
-                    message=(
-                        f"Edge '{edge.id}' crosses tenant boundaries: {scopes}."
-                    ),
-                    edge_id=edge.id,
-                ))
+                report.add(
+                    ValidationIssue(
+                        severity=ValidationSeverity.ERROR,
+                        code="CROSS_TENANT_EDGE",
+                        message=(f"Edge '{edge.id}' crosses tenant boundaries: {scopes}."),
+                        edge_id=edge.id,
+                    )
+                )
 
-    def _check_dependency_cycles(
-        self, graph: CognitiveGraph, report: ValidationReport
-    ) -> None:
+    def _check_dependency_cycles(self, graph: CognitiveGraph, report: ValidationReport) -> None:
         """Detect cycles in the ``depends_on`` subgraph using iterative DFS."""
         # Build adjacency list for depends_on edges only
         adj: dict[str, list[str]] = {}
@@ -238,11 +237,13 @@ class GraphValidator:
                     # Cycle detected
                     cycle_start = path.index(node) if node in path else -1
                     cycle = path[cycle_start:] + [node] if cycle_start >= 0 else [node]
-                    report.add(ValidationIssue(
-                        severity=ValidationSeverity.ERROR,
-                        code="DEPENDENCY_CYCLE",
-                        message=f"Cycle detected in depends_on subgraph: {' → '.join(cycle)}.",
-                    ))
+                    report.add(
+                        ValidationIssue(
+                            severity=ValidationSeverity.ERROR,
+                            code="DEPENDENCY_CYCLE",
+                            message=f"Cycle detected in depends_on subgraph: {' → '.join(cycle)}.",
+                        )
+                    )
                     continue
 
                 if node in visited:

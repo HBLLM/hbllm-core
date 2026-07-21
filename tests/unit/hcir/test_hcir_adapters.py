@@ -1,7 +1,10 @@
 """Unit tests for HCIR Integration Adapters."""
 
-import pytest
-
+# Import existing cognitive state types
+from hbllm.brain.core.cognitive_state import (
+    CognitiveStateDelta,
+    CognitiveStateSnapshot,
+)
 from hbllm.hcir.adapters.cognitive_state_adapter import CognitiveStateAdapter
 from hbllm.hcir.adapters.memory_adapter import MemoryAdapter
 from hbllm.hcir.graph import (
@@ -14,15 +17,7 @@ from hbllm.hcir.graph import (
     SkillNode,
     ValueNode,
 )
-from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
-# Import existing cognitive state types
-from hbllm.brain.core.cognitive_state import (
-    CognitiveStateDelta,
-    CognitiveStateSnapshot,
-)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CognitiveStateAdapter Tests

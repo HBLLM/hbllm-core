@@ -15,13 +15,11 @@ ABI Contract:
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
 from hbllm.hcir.transactions import HCIRDelta, TransactionAnnotation
-from hbllm.hcir.types import Timestamp
 
 # Current stable HCIR version
 HCIR_VERSION = "1.0.0"

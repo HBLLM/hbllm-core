@@ -42,9 +42,7 @@ class StructuredIntentPayload(BaseModel):
     )
     subject: str = Field(..., description="Primary subject of the request")
     action: str = Field(default="", description="Specific action or goal target")
-    slots: dict[str, Any] = Field(
-        default_factory=dict, description="Extracted key-value slots"
-    )
+    slots: dict[str, Any] = Field(default_factory=dict, description="Extracted key-value slots")
     constraints: list[str] = Field(
         default_factory=list, description="Resource or policy constraints"
     )
@@ -82,9 +80,7 @@ class LLMCompilerFrontend:
             logger.warning("Unknown intent '%s', falling back to QUERY", intent_str)
             intent_enum = IntentType.QUERY
 
-        slot_objs = [
-            SemanticSlot(name=k, value=v) for k, v in payload.slots.items()
-        ]
+        slot_objs = [SemanticSlot(name=k, value=v) for k, v in payload.slots.items()]
 
         return SemanticAST(
             intent=intent_enum,

@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Iterator
 from enum import StrEnum
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -41,7 +42,6 @@ from hbllm.hcir.types import (
     TimeDuration,
     UncertaintyVector,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Enumerations
@@ -76,6 +76,11 @@ class HCIRNodeType(StrEnum):
     PROCEDURE = "procedure"
     VALUE = "value"
     EXTERNAL_KNOWLEDGE = "external_knowledge"
+
+    # --- World Model & Predictive Cognitive Runtime ---
+    WORLD_VARIABLE = "world_variable"
+    PHYSICAL_ENTITY = "physical_entity"
+    ENVIRONMENT_STATE = "environment_state"
 
 
 class HCIREdgeType(StrEnum):
@@ -372,6 +377,42 @@ class ExternalKnowledgeNode(HCIRNode):
     summary: str = ""
 
 
+# ── World Model & Predictive Nodes ───────────────────────────────────────
+
+
+class WorldVariableNode(HCIRNode):
+    """An environmental parameter in the world model (e.g. temperature, humidity, market demand)."""
+
+    node_type: HCIRNodeType = HCIRNodeType.WORLD_VARIABLE
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    variable_name: str = ""
+    value: Any = None
+    unit: str = ""
+    min_value: float | None = None
+    max_value: float | None = None
+
+
+class PhysicalEntityNode(HCIRNode):
+    """A physical asset, component, or system in the physical world."""
+
+    node_type: HCIRNodeType = HCIRNodeType.PHYSICAL_ENTITY
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    entity_name: str = ""
+    entity_type: str = ""
+    status: str = "operational"
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class EnvironmentStateNode(HCIRNode):
+    """A macro snapshot of environmental state."""
+
+    node_type: HCIRNodeType = HCIRNodeType.ENVIRONMENT_STATE
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    environment_name: str = ""
+    active_variables: list[str] = Field(default_factory=list)
+    overall_status: str = "nominal"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Node Type Registry — for deserialization & validation
 # ═══════════════════════════════════════════════════════════════════════════
@@ -396,6 +437,9 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.PROCEDURE: ProcedureNode,
     HCIRNodeType.VALUE: ValueNode,
     HCIRNodeType.EXTERNAL_KNOWLEDGE: ExternalKnowledgeNode,
+    HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
+    HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,
+    HCIRNodeType.ENVIRONMENT_STATE: EnvironmentStateNode,
 }
 
 
@@ -551,44 +595,64 @@ class CognitiveGraph:
 
     def edges_from(self, node_id: str) -> list[HCIREdge]:
         """All edges where ``node_id`` is a source."""
-        return [self._edges[eid] for eid in self._edges_by_source.get(node_id, set())
-                if eid in self._edges]
+        return [
+            self._edges[eid]
+            for eid in self._edges_by_source.get(node_id, set())
+            if eid in self._edges
+        ]
 
     def edges_to(self, node_id: str) -> list[HCIREdge]:
         """All edges where ``node_id`` is a target."""
-        return [self._edges[eid] for eid in self._edges_by_target.get(node_id, set())
-                if eid in self._edges]
+        return [
+            self._edges[eid]
+            for eid in self._edges_by_target.get(node_id, set())
+            if eid in self._edges
+        ]
 
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
         """O(k) where k is the number of nodes of that type."""
-        return [self._nodes[nid] for nid in self._idx_by_type.get(node_type, set())
-                if nid in self._nodes]
+        return [
+            self._nodes[nid]
+            for nid in self._idx_by_type.get(node_type, set())
+            if nid in self._nodes
+        ]
 
     def nodes_by_category(self, category: CognitiveCategory) -> list[HCIRNode]:
-        return [self._nodes[nid] for nid in self._idx_by_category.get(category, set())
-                if nid in self._nodes]
+        return [
+            self._nodes[nid]
+            for nid in self._idx_by_category.get(category, set())
+            if nid in self._nodes
+        ]
 
     def nodes_by_lifecycle(self, lifecycle: NodeLifecycle) -> list[HCIRNode]:
-        return [self._nodes[nid] for nid in self._idx_by_lifecycle.get(lifecycle, set())
-                if nid in self._nodes]
+        return [
+            self._nodes[nid]
+            for nid in self._idx_by_lifecycle.get(lifecycle, set())
+            if nid in self._nodes
+        ]
 
     def nodes_by_scope(self, tenant_id: str) -> list[HCIRNode]:
-        return [self._nodes[nid] for nid in self._idx_by_scope.get(tenant_id, set())
-                if nid in self._nodes]
+        return [
+            self._nodes[nid]
+            for nid in self._idx_by_scope.get(tenant_id, set())
+            if nid in self._nodes
+        ]
 
     def nodes_by_tag(self, tag: str) -> list[HCIRNode]:
-        return [self._nodes[nid] for nid in self._idx_by_tag.get(tag, set())
-                if nid in self._nodes]
+        return [self._nodes[nid] for nid in self._idx_by_tag.get(tag, set()) if nid in self._nodes]
 
     # ── Views ────────────────────────────────────────────────────────
 
     def knowledge_view(self) -> list[HCIRNode]:
         """Facts, Beliefs, Concepts, Procedures — slowly changing knowledge."""
         knowledge_types = {
-            HCIRNodeType.FACT, HCIRNodeType.BELIEF, HCIRNodeType.CONCEPT,
-            HCIRNodeType.PROCEDURE, HCIRNodeType.EXTERNAL_KNOWLEDGE,
+            HCIRNodeType.FACT,
+            HCIRNodeType.BELIEF,
+            HCIRNodeType.CONCEPT,
+            HCIRNodeType.PROCEDURE,
+            HCIRNodeType.EXTERNAL_KNOWLEDGE,
         }
         result: list[HCIRNode] = []
         for t in knowledge_types:
@@ -598,8 +662,11 @@ class CognitiveGraph:
     def execution_view(self) -> list[HCIRNode]:
         """Goals, Actions, Resources — rapidly changing execution state."""
         exec_types = {
-            HCIRNodeType.GOAL, HCIRNodeType.INTENT, HCIRNodeType.ACTION,
-            HCIRNodeType.RESOURCE, HCIRNodeType.CONSTRAINT,
+            HCIRNodeType.GOAL,
+            HCIRNodeType.INTENT,
+            HCIRNodeType.ACTION,
+            HCIRNodeType.RESOURCE,
+            HCIRNodeType.CONSTRAINT,
         }
         result: list[HCIRNode] = []
         for t in exec_types:
@@ -609,7 +676,9 @@ class CognitiveGraph:
     def memory_view(self) -> list[HCIRNode]:
         """Episodes, Skills, Values — episodic and procedural memory."""
         mem_types = {
-            HCIRNodeType.EPISODE, HCIRNodeType.SKILL, HCIRNodeType.VALUE,
+            HCIRNodeType.EPISODE,
+            HCIRNodeType.SKILL,
+            HCIRNodeType.VALUE,
         }
         result: list[HCIRNode] = []
         for t in mem_types:

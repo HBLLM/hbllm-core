@@ -17,7 +17,6 @@ Direction:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from hbllm.hcir.graph import (
     BeliefNode,

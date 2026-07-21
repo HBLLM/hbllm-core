@@ -1,24 +1,20 @@
 """Unit tests for SQLite Event Store, Compiler, Stdlib, Event Bus, and Capability Registry."""
 
-import os
-import tempfile
 import time
 
 import pytest
 
-from hbllm.hcir.stores import EventType, GraphEvent
-from hbllm.hcir.stores.sqlite_event_store import SQLiteEventStore
 from hbllm.hcir.compiler import HCIRCompiler, IntentType, SemanticAST, SemanticSlot
-from hbllm.hcir.stdlib import stdlib
-from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus, KernelEventType
 from hbllm.hcir.kernel.capability_registry import (
     CapabilityRegistry,
     CapabilitySpec,
     PerformanceProfile,
-    ResourceRequirements,
 )
 from hbllm.hcir.kernel.capability_resolver import ICapabilityExecutor
-
+from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus
+from hbllm.hcir.stdlib import stdlib
+from hbllm.hcir.stores import EventType, GraphEvent
+from hbllm.hcir.stores.sqlite_event_store import SQLiteEventStore
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SQLite Event Store Tests
@@ -49,72 +45,100 @@ class TestSQLiteEventStore:
 
     def test_sequence_order(self, store):
         for i in range(1, 6):
-            store.append(GraphEvent(
-                sequence=i,
-                event_type=EventType.NODE_ADDED,
-                timestamp=time.time(),
-                author="test",
-                data={"seq": i},
-            ))
+            store.append(
+                GraphEvent(
+                    sequence=i,
+                    event_type=EventType.NODE_ADDED,
+                    timestamp=time.time(),
+                    author="test",
+                    data={"seq": i},
+                )
+            )
         events = store.get_events(from_sequence=3)
         assert len(events) == 3
         assert events[0].data["seq"] == 3
 
     def test_filter_by_event_type(self, store):
-        store.append(GraphEvent(
-            sequence=1, event_type=EventType.NODE_ADDED,
-            timestamp=time.time(), author="t",
-        ))
-        store.append(GraphEvent(
-            sequence=2, event_type=EventType.EDGE_ADDED,
-            timestamp=time.time(), author="t",
-        ))
+        store.append(
+            GraphEvent(
+                sequence=1,
+                event_type=EventType.NODE_ADDED,
+                timestamp=time.time(),
+                author="t",
+            )
+        )
+        store.append(
+            GraphEvent(
+                sequence=2,
+                event_type=EventType.EDGE_ADDED,
+                timestamp=time.time(),
+                author="t",
+            )
+        )
         events = store.get_events(event_types=[EventType.EDGE_ADDED])
         assert len(events) == 1
 
     def test_hash_chain_integrity(self, store):
         for i in range(1, 11):
-            store.append(GraphEvent(
-                sequence=i,
-                event_type=EventType.NODE_ADDED,
-                timestamp=time.time(),
-                author="test",
-                data={"i": i},
-            ))
+            store.append(
+                GraphEvent(
+                    sequence=i,
+                    event_type=EventType.NODE_ADDED,
+                    timestamp=time.time(),
+                    author="test",
+                    data={"i": i},
+                )
+            )
         assert store.verify_chain_integrity() is True
 
     def test_latest_sequence(self, store):
         assert store.latest_sequence() == 0
-        store.append(GraphEvent(
-            sequence=42, event_type=EventType.NODE_ADDED,
-            timestamp=time.time(), author="t",
-        ))
+        store.append(
+            GraphEvent(
+                sequence=42,
+                event_type=EventType.NODE_ADDED,
+                timestamp=time.time(),
+                author="t",
+            )
+        )
         assert store.latest_sequence() == 42
 
     def test_event_count(self, store):
         assert store.event_count == 0
         for i in range(1, 4):
-            store.append(GraphEvent(
-                sequence=i, event_type=EventType.NODE_ADDED,
-                timestamp=time.time(), author="t",
-            ))
+            store.append(
+                GraphEvent(
+                    sequence=i,
+                    event_type=EventType.NODE_ADDED,
+                    timestamp=time.time(),
+                    author="t",
+                )
+            )
         assert store.event_count == 3
 
     def test_clear(self, store):
-        store.append(GraphEvent(
-            sequence=1, event_type=EventType.NODE_ADDED,
-            timestamp=time.time(), author="t",
-        ))
+        store.append(
+            GraphEvent(
+                sequence=1,
+                event_type=EventType.NODE_ADDED,
+                timestamp=time.time(),
+                author="t",
+            )
+        )
         store.clear()
         assert store.event_count == 0
         assert store.latest_sequence() == 0
 
     def test_snapshot_bookmark(self, store):
         for i in range(1, 4):
-            store.append(GraphEvent(
-                sequence=i, event_type=EventType.NODE_ADDED,
-                timestamp=time.time(), author="t",
-            ))
+            store.append(
+                GraphEvent(
+                    sequence=i,
+                    event_type=EventType.NODE_ADDED,
+                    timestamp=time.time(),
+                    author="t",
+                )
+            )
         store.save_snapshot(version=1, node_count=3)
         assert store.get_latest_snapshot_version() == 1
 
@@ -127,10 +151,15 @@ class TestSQLiteEventStore:
     def test_persistence_across_reopen(self, tmp_path):
         db = tmp_path / "persist.db"
         s1 = SQLiteEventStore(db)
-        s1.append(GraphEvent(
-            sequence=1, event_type=EventType.NODE_ADDED,
-            timestamp=time.time(), author="t", data={"persist": True},
-        ))
+        s1.append(
+            GraphEvent(
+                sequence=1,
+                event_type=EventType.NODE_ADDED,
+                timestamp=time.time(),
+                author="t",
+                data={"persist": True},
+            )
+        )
         s1.close()
 
         s2 = SQLiteEventStore(db)
@@ -275,10 +304,12 @@ class TestKernelEventBus:
         bus = KernelEventBus()
         received = []
         bus.subscribe("transaction.committed", lambda e: received.append(e))
-        bus.publish(KernelEvent(
-            event_type="transaction.committed",
-            source="tx_mgr",
-        ))
+        bus.publish(
+            KernelEvent(
+                event_type="transaction.committed",
+                source="tx_mgr",
+            )
+        )
         assert len(received) == 1
 
     def test_wildcard_subscription(self):
@@ -369,147 +400,179 @@ class _MockExecutor(ICapabilityExecutor):
 class TestCapabilityRegistry:
     def test_register_and_list(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="image_understanding",
-            provider_id="qwen-vl",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(cost_per_call=0.03, accuracy=0.92),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="image_understanding",
+                provider_id="qwen-vl",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(cost_per_call=0.03, accuracy=0.92),
+            )
+        )
         assert reg.has_capability("image_understanding")
         assert "image_understanding" in reg.list_capabilities()
 
     def test_find_best_by_priority(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="llm",
-            provider_id="gpt-4",
-            executor=_MockExecutor(),
-            priority=10,
-            performance=PerformanceProfile(cost_per_call=0.10),
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="llm",
-            provider_id="qwen-3",
-            executor=_MockExecutor(),
-            priority=20,
-            performance=PerformanceProfile(cost_per_call=0.01),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="llm",
+                provider_id="gpt-4",
+                executor=_MockExecutor(),
+                priority=10,
+                performance=PerformanceProfile(cost_per_call=0.10),
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="llm",
+                provider_id="qwen-3",
+                executor=_MockExecutor(),
+                priority=20,
+                performance=PerformanceProfile(cost_per_call=0.01),
+            )
+        )
         best = reg.find_best("llm", strategy="priority")
         assert best is not None
         assert best.provider_id == "qwen-3"
 
     def test_find_cheapest(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="embed",
-            provider_id="openai",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(cost_per_call=0.05),
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="embed",
-            provider_id="local",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(cost_per_call=0.00),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="embed",
+                provider_id="openai",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(cost_per_call=0.05),
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="embed",
+                provider_id="local",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(cost_per_call=0.00),
+            )
+        )
         best = reg.find_best("embed", strategy="cheapest")
         assert best is not None
         assert best.provider_id == "local"
 
     def test_find_fastest(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="ocr",
-            provider_id="cloud",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(avg_latency_ms=2000),
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="ocr",
-            provider_id="local",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(avg_latency_ms=100),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="ocr",
+                provider_id="cloud",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(avg_latency_ms=2000),
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="ocr",
+                provider_id="local",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(avg_latency_ms=100),
+            )
+        )
         best = reg.find_best("ocr", strategy="fastest")
         assert best is not None
         assert best.provider_id == "local"
 
     def test_find_most_accurate(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="classify",
-            provider_id="small",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(accuracy=0.7),
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="classify",
-            provider_id="large",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(accuracy=0.95),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="classify",
+                provider_id="small",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(accuracy=0.7),
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="classify",
+                provider_id="large",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(accuracy=0.95),
+            )
+        )
         best = reg.find_best("classify", strategy="accurate")
         assert best is not None
         assert best.provider_id == "large"
 
     def test_filter_by_cost(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="gen",
-            provider_id="expensive",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(cost_per_call=1.0),
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="gen",
-            provider_id="cheap",
-            executor=_MockExecutor(),
-            performance=PerformanceProfile(cost_per_call=0.01),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="gen",
+                provider_id="expensive",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(cost_per_call=1.0),
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="gen",
+                provider_id="cheap",
+                executor=_MockExecutor(),
+                performance=PerformanceProfile(cost_per_call=0.01),
+            )
+        )
         best = reg.find_best("gen", max_cost=0.05)
         assert best is not None
         assert best.provider_id == "cheap"
 
     def test_unavailable_provider_excluded(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="gpu_task",
-            provider_id="offline",
-            executor=_MockExecutor(available=False),
-            priority=100,
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="gpu_task",
-            provider_id="online",
-            executor=_MockExecutor(available=True),
-            priority=1,
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="gpu_task",
+                provider_id="offline",
+                executor=_MockExecutor(available=False),
+                priority=100,
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="gpu_task",
+                provider_id="online",
+                executor=_MockExecutor(available=True),
+                priority=1,
+            )
+        )
         best = reg.find_best("gpu_task")
         assert best is not None
         assert best.provider_id == "online"
 
     def test_unregister(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="task",
-            provider_id="p1",
-            executor=_MockExecutor(),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="task",
+                provider_id="p1",
+                executor=_MockExecutor(),
+            )
+        )
         assert reg.unregister("task", "p1") is True
         assert len(reg.list_providers("task")) == 0
 
     def test_stats(self):
         reg = CapabilityRegistry()
-        reg.register(CapabilitySpec(
-            capability_name="a",
-            provider_id="p1",
-            executor=_MockExecutor(),
-        ))
-        reg.register(CapabilitySpec(
-            capability_name="a",
-            provider_id="p2",
-            executor=_MockExecutor(),
-        ))
+        reg.register(
+            CapabilitySpec(
+                capability_name="a",
+                provider_id="p1",
+                executor=_MockExecutor(),
+            )
+        )
+        reg.register(
+            CapabilitySpec(
+                capability_name="a",
+                provider_id="p2",
+                executor=_MockExecutor(),
+            )
+        )
         stats = reg.stats()
         assert stats["total_capabilities"] == 1
         assert stats["total_providers"] == 2

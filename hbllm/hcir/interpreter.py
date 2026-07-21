@@ -16,16 +16,15 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from hbllm.hcir.abi import ExecutionMetrics, ExecutionResult
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.graph import HCIREdge, HCIRNode, NODE_TYPE_REGISTRY, HCIRNodeType
 from hbllm.hcir.kernel.services import KernelServices
-from hbllm.hcir.query import GraphQuery, EdgeQuery
+from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import (
-    HCIRDelta,
     HCIRTransaction,
     TransactionAnnotation,
     TransactionOp,
@@ -113,11 +112,13 @@ async def sys_assert(
     if node_data:
         tx = HCIRTransaction(
             author=ins.params.get("author", "interpreter"),
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_NODE,
-                node_id=node_data.get("id"),
-                node_data=node_data,
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id=node_data.get("id"),
+                    node_data=node_data,
+                )
+            ],
         )
         result = services.transaction_manager.commit(tx)
         return {"committed": result.is_committed, "tx_id": result.id}
@@ -125,11 +126,13 @@ async def sys_assert(
     if edge_data:
         tx = HCIRTransaction(
             author=ins.params.get("author", "interpreter"),
-            operations=[TransactionOperation(
-                op=TransactionOp.ADD_EDGE,
-                edge_id=edge_data.get("id"),
-                edge_data=edge_data,
-            )],
+            operations=[
+                TransactionOperation(
+                    op=TransactionOp.ADD_EDGE,
+                    edge_id=edge_data.get("id"),
+                    edge_data=edge_data,
+                )
+            ],
         )
         result = services.transaction_manager.commit(tx)
         return {"committed": result.is_committed, "tx_id": result.id}
@@ -358,19 +361,23 @@ class HCIRInterpreter:
                 total_tokens += instruction.cost_estimate
 
                 if "error" in result:
-                    annotations.append(TransactionAnnotation(
-                        author="interpreter",
-                        assertion=f"Instruction {i} ({instruction.opcode}) error: {result['error']}",
-                        severity="error",
-                    ))
+                    annotations.append(
+                        TransactionAnnotation(
+                            author="interpreter",
+                            assertion=f"Instruction {i} ({instruction.opcode}) error: {result['error']}",
+                            severity="error",
+                        )
+                    )
 
             except Exception as exc:
                 logger.error("Instruction %d (%s) failed: %s", i, instruction.opcode, exc)
-                annotations.append(TransactionAnnotation(
-                    author="interpreter",
-                    assertion=f"Instruction {i} ({instruction.opcode}) exception: {exc}",
-                    severity="error",
-                ))
+                annotations.append(
+                    TransactionAnnotation(
+                        author="interpreter",
+                        assertion=f"Instruction {i} ({instruction.opcode}) exception: {exc}",
+                        severity="error",
+                    )
+                )
                 return ExecutionResult(
                     success=False,
                     error=str(exc),
@@ -403,7 +410,7 @@ class HCIRInterpreter:
         Returns:
             (ExecutionResult, ExecutionReceipt)
         """
-        from hbllm.hcir.receipt import ExecutionReceipt, VerificationStageSummary
+        from hbllm.hcir.receipt import ExecutionReceipt
 
         input_ver = self._workspace.snapshot_manager.current_version
         committed_before = len(self._services.transaction_manager.committed_log)
@@ -440,4 +447,3 @@ class HCIRInterpreter:
         )
 
         return res, receipt
-

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode
 from hbllm.hcir.stores import EventType, GraphEvent, IEventStore
@@ -68,76 +68,88 @@ class SnapshotManager:
     def record_node_added(self, node: HCIRNode, author: str = "system") -> None:
         """Record a node addition event."""
         seq = self._event_store.latest_sequence() + 1
-        self._event_store.append(GraphEvent(
-            sequence=seq,
-            event_type=EventType.NODE_ADDED,
-            timestamp=time.time(),
-            author=author,
-            data={"node_id": node.id, "node_type": node.node_type, "node_data": node.model_dump()},
-        ))
+        self._event_store.append(
+            GraphEvent(
+                sequence=seq,
+                event_type=EventType.NODE_ADDED,
+                timestamp=time.time(),
+                author=author,
+                data={
+                    "node_id": node.id,
+                    "node_type": node.node_type,
+                    "node_data": node.model_dump(),
+                },
+            )
+        )
 
-    def record_node_modified(
-        self, node_id: str, changes: dict, author: str = "system"
-    ) -> None:
+    def record_node_modified(self, node_id: str, changes: dict, author: str = "system") -> None:
         """Record a node modification event."""
         seq = self._event_store.latest_sequence() + 1
-        self._event_store.append(GraphEvent(
-            sequence=seq,
-            event_type=EventType.NODE_MODIFIED,
-            timestamp=time.time(),
-            author=author,
-            data={"node_id": node_id, "changes": changes},
-        ))
+        self._event_store.append(
+            GraphEvent(
+                sequence=seq,
+                event_type=EventType.NODE_MODIFIED,
+                timestamp=time.time(),
+                author=author,
+                data={"node_id": node_id, "changes": changes},
+            )
+        )
 
     def record_node_removed(self, node_id: str, author: str = "system") -> None:
         """Record a node removal event."""
         seq = self._event_store.latest_sequence() + 1
-        self._event_store.append(GraphEvent(
-            sequence=seq,
-            event_type=EventType.NODE_REMOVED,
-            timestamp=time.time(),
-            author=author,
-            data={"node_id": node_id},
-        ))
+        self._event_store.append(
+            GraphEvent(
+                sequence=seq,
+                event_type=EventType.NODE_REMOVED,
+                timestamp=time.time(),
+                author=author,
+                data={"node_id": node_id},
+            )
+        )
 
     def record_edge_added(self, edge: HCIREdge, author: str = "system") -> None:
         """Record an edge addition event."""
         seq = self._event_store.latest_sequence() + 1
-        self._event_store.append(GraphEvent(
-            sequence=seq,
-            event_type=EventType.EDGE_ADDED,
-            timestamp=time.time(),
-            author=author,
-            data={"edge_id": edge.id, "edge_data": edge.model_dump()},
-        ))
+        self._event_store.append(
+            GraphEvent(
+                sequence=seq,
+                event_type=EventType.EDGE_ADDED,
+                timestamp=time.time(),
+                author=author,
+                data={"edge_id": edge.id, "edge_data": edge.model_dump()},
+            )
+        )
 
     def record_edge_removed(self, edge_id: str, author: str = "system") -> None:
         """Record an edge removal event."""
         seq = self._event_store.latest_sequence() + 1
-        self._event_store.append(GraphEvent(
-            sequence=seq,
-            event_type=EventType.EDGE_REMOVED,
-            timestamp=time.time(),
-            author=author,
-            data={"edge_id": edge_id},
-        ))
+        self._event_store.append(
+            GraphEvent(
+                sequence=seq,
+                event_type=EventType.EDGE_REMOVED,
+                timestamp=time.time(),
+                author=author,
+                data={"edge_id": edge_id},
+            )
+        )
 
     def record_kernel_event(
         self, event_type: EventType, data: dict, author: str = "kernel"
     ) -> None:
         """Record a kernel telemetry event."""
         seq = self._event_store.latest_sequence() + 1
-        self._event_store.append(GraphEvent(
-            sequence=seq,
-            event_type=event_type,
-            timestamp=time.time(),
-            author=author,
-            data=data,
-        ))
+        self._event_store.append(
+            GraphEvent(
+                sequence=seq,
+                event_type=event_type,
+                timestamp=time.time(),
+                author=author,
+                data=data,
+            )
+        )
 
-    def create_snapshot(
-        self, graph: CognitiveGraph, branch: str = "main"
-    ) -> Snapshot:
+    def create_snapshot(self, graph: CognitiveGraph, branch: str = "main") -> Snapshot:
         """Create a snapshot bookmark at the current event log position."""
         self._current_version += 1
         content_hash = self._hash_graph(graph)

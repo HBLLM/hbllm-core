@@ -72,8 +72,7 @@ class IOptimizerPass(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @abstractmethod
     def run(self, stream: InstructionStream) -> InstructionStream:
@@ -97,11 +96,19 @@ class DeadInstructionEliminationPass(IOptimizerPass):
         optimized: list[Instruction] = []
         for ins in stream.instructions:
             # Eliminate ASSERT with empty node_data and edge_data
-            if ins.opcode == Opcode.ASSERT and not ins.params.get("node_data") and not ins.params.get("edge_data"):
+            if (
+                ins.opcode == Opcode.ASSERT
+                and not ins.params.get("node_data")
+                and not ins.params.get("edge_data")
+            ):
                 logger.debug("Pruned empty ASSERT instruction")
                 continue
             # Eliminate RETRACT with missing node_id and edge_id
-            if ins.opcode == Opcode.RETRACT and not ins.params.get("node_id") and not ins.params.get("edge_id"):
+            if (
+                ins.opcode == Opcode.RETRACT
+                and not ins.params.get("node_id")
+                and not ins.params.get("edge_id")
+            ):
                 logger.debug("Pruned empty RETRACT instruction")
                 continue
             optimized.append(ins)
@@ -161,7 +168,10 @@ class CostPruningPass(IOptimizerPass):
             if accumulated_cost + ins.cost_estimate > self._max_cost_budget:
                 logger.warning(
                     "CostPruningPass: Pruned instruction %s due to budget (%d + %d > %d)",
-                    ins.opcode, accumulated_cost, ins.cost_estimate, self._max_cost_budget,
+                    ins.opcode,
+                    accumulated_cost,
+                    ins.cost_estimate,
+                    self._max_cost_budget,
                 )
                 break
             accumulated_cost += ins.cost_estimate

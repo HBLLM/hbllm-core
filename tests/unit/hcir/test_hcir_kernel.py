@@ -13,7 +13,6 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.kernel.capability_resolver import (
     CapabilityImplementation,
     CapabilityResolver,
-    ICapabilityExecutor,
 )
 from hbllm.hcir.kernel.scheduler import (
     CognitiveProcess,
@@ -27,7 +26,6 @@ from hbllm.hcir.validation import (
     ValidationSeverity,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Graph Validator Tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -38,7 +36,9 @@ class TestGraphValidator:
         graph = CognitiveGraph()
         graph.add_node(GoalNode(id="g1", description="a"))
         graph.add_node(BeliefNode(id="b1", claim="b"))
-        graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"]))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"])
+        )
         validator = GraphValidator()
         report = validator.validate(graph)
         assert report.is_valid
@@ -47,7 +47,9 @@ class TestGraphValidator:
         graph = CognitiveGraph()
         graph.add_node(GoalNode(id="g1", description="a", scope=Scope(tenant_id="tenant_a")))
         graph.add_node(BeliefNode(id="b1", claim="b", scope=Scope(tenant_id="tenant_b")))
-        graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"]))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"])
+        )
         validator = GraphValidator()
         report = validator.validate(graph)
         assert not report.is_valid
@@ -57,12 +59,17 @@ class TestGraphValidator:
 
     def test_system_scoped_nodes_bypass_tenant_check(self):
         graph = CognitiveGraph()
-        graph.add_node(GoalNode(
-            id="g1", description="a",
-            scope=Scope(tenant_id="tenant_a", security_level=SecurityLevel.SYSTEM),
-        ))
+        graph.add_node(
+            GoalNode(
+                id="g1",
+                description="a",
+                scope=Scope(tenant_id="tenant_a", security_level=SecurityLevel.SYSTEM),
+            )
+        )
         graph.add_node(BeliefNode(id="b1", claim="b", scope=Scope(tenant_id="tenant_b")))
-        graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"]))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"])
+        )
         validator = GraphValidator()
         report = validator.validate(graph)
         # g1 is system-scoped, so it can cross boundaries
@@ -73,7 +80,9 @@ class TestGraphValidator:
         graph = CognitiveGraph()
         graph.add_node(GoalNode(id="g1", description="a", lifecycle=NodeLifecycle.ARCHIVED))
         graph.add_node(BeliefNode(id="b1", claim="b"))
-        graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.DEPENDS_ON, sources=["g1"], targets=["b1"]))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.DEPENDS_ON, sources=["g1"], targets=["b1"])
+        )
         validator = GraphValidator()
         report = validator.validate(graph)
         warnings = [i for i in report.issues if i.severity == ValidationSeverity.WARNING]
@@ -117,12 +126,14 @@ class TestCapabilityResolver:
     async def test_resolve_returns_available(self):
         resolver = CapabilityResolver()
         executor = MockExecutor(available=True)
-        resolver.register(CapabilityImplementation(
-            capability_name="search",
-            implementation_id="local",
-            executor=executor,
-            priority=10,
-        ))
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="search",
+                implementation_id="local",
+                executor=executor,
+                priority=10,
+            )
+        )
         resolved = await resolver.resolve("search")
         assert resolved is executor
 
@@ -131,18 +142,22 @@ class TestCapabilityResolver:
         resolver = CapabilityResolver()
         unavailable = MockExecutor(available=False)
         available = MockExecutor(available=True)
-        resolver.register(CapabilityImplementation(
-            capability_name="search",
-            implementation_id="docker",
-            executor=unavailable,
-            priority=20,  # Higher priority but unavailable
-        ))
-        resolver.register(CapabilityImplementation(
-            capability_name="search",
-            implementation_id="local",
-            executor=available,
-            priority=10,
-        ))
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="search",
+                implementation_id="docker",
+                executor=unavailable,
+                priority=20,  # Higher priority but unavailable
+            )
+        )
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="search",
+                implementation_id="local",
+                executor=available,
+                priority=10,
+            )
+        )
         resolved = await resolver.resolve("search")
         assert resolved is available
 
@@ -154,21 +169,33 @@ class TestCapabilityResolver:
 
     def test_list_capabilities(self):
         resolver = CapabilityResolver()
-        resolver.register(CapabilityImplementation(
-            capability_name="search", implementation_id="a", executor=MockExecutor(),
-        ))
-        resolver.register(CapabilityImplementation(
-            capability_name="execute_python", implementation_id="b", executor=MockExecutor(),
-        ))
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="search",
+                implementation_id="a",
+                executor=MockExecutor(),
+            )
+        )
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="execute_python",
+                implementation_id="b",
+                executor=MockExecutor(),
+            )
+        )
         caps = resolver.list_capabilities()
         assert "search" in caps
         assert "execute_python" in caps
 
     def test_unregister(self):
         resolver = CapabilityResolver()
-        resolver.register(CapabilityImplementation(
-            capability_name="search", implementation_id="local", executor=MockExecutor(),
-        ))
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="search",
+                implementation_id="local",
+                executor=MockExecutor(),
+            )
+        )
         assert resolver.unregister("search", "local") is True
         assert resolver.unregister("search", "local") is False
 

@@ -18,14 +18,13 @@ audit, reflection, and skill induction.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import (
+    NODE_TYPE_REGISTRY,
     HCIREdge,
     HCIRNode,
     HCIRNodeType,
-    NODE_TYPE_REGISTRY,
 )
 from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import (
@@ -33,10 +32,9 @@ from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionAnnotation,
     TransactionOp,
-    TransactionOperation,
     TransactionStatus,
 )
-from hbllm.hcir.validation import GraphValidator, ValidationSeverity
+from hbllm.hcir.validation import GraphValidator
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
@@ -134,8 +132,7 @@ class TransactionManager:
                     EventType.TRANSACTION_REJECTED,
                     {"tx_id": transaction.id, "author": transaction.author},
                 )
-                logger.info("Transaction %s rejected by %s",
-                            transaction.id, type(stage).__name__)
+                logger.info("Transaction %s rejected by %s", transaction.id, type(stage).__name__)
                 return transaction
 
         transaction.status = TransactionStatus.VALIDATED
@@ -145,11 +142,13 @@ class TransactionManager:
             self._apply_operations(transaction)
         except Exception as exc:
             transaction.status = TransactionStatus.REJECTED
-            transaction.annotations.append(TransactionAnnotation(
-                author="TransactionManager",
-                assertion=f"Apply failed: {exc}",
-                severity="error",
-            ))
+            transaction.annotations.append(
+                TransactionAnnotation(
+                    author="TransactionManager",
+                    assertion=f"Apply failed: {exc}",
+                    severity="error",
+                )
+            )
             self._rejected_log.append(transaction)
             logger.error("Transaction %s apply failed: %s", transaction.id, exc)
             return transaction
@@ -171,8 +170,9 @@ class TransactionManager:
             },
         )
 
-        logger.debug("Transaction %s committed (%d ops)",
-                      transaction.id, transaction.operation_count)
+        logger.debug(
+            "Transaction %s committed (%d ops)", transaction.id, transaction.operation_count
+        )
         return transaction
 
     def commit_delta(self, delta: HCIRDelta, author: str) -> HCIRTransaction:
