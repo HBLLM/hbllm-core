@@ -113,7 +113,11 @@ class TransactionManager:
         """Add a verification stage to the pipeline."""
         self._verification_stages.append(stage)
 
-    def commit(self, transaction: HCIRTransaction) -> HCIRTransaction:
+    def commit(
+        self,
+        transaction: HCIRTransaction,
+        context: Any = None,
+    ) -> HCIRTransaction:
         """Process a transaction through the verification pipeline and commit.
 
         Returns the transaction with updated status.
@@ -122,6 +126,15 @@ class TransactionManager:
         if transaction.status in (TransactionStatus.COMMITTED, TransactionStatus.REJECTED):
             logger.warning("Transaction %s already %s", transaction.id, transaction.status)
             return transaction
+
+        if context is not None:
+            transaction.annotations.append(
+                TransactionAnnotation(
+                    author="IdentityBridge",
+                    assertion=f"Enforced context: {getattr(context, 'metadata', context)}",
+                    severity="info",
+                )
+            )
 
         # Run verification pipeline
         for stage in self._verification_stages:

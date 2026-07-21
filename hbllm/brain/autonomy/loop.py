@@ -164,6 +164,7 @@ class AutonomyCore:
 
         # MessageBus reference
         self._bus: Any = None
+        self.executive_runtime: Any = None
 
         # Event loop control
         self._running = False

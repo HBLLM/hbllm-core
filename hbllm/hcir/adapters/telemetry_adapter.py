@@ -64,7 +64,9 @@ class TelemetryStreamAdapter:
         if len(self._buffer) >= self._window_size:
             self.flush_window()
 
-    def flush_window(self, author: str = "telemetry_adapter", tenant_id: str = "default") -> HCIRTransaction | None:
+    def flush_window(
+        self, author: str = "telemetry_adapter", tenant_id: str = "default"
+    ) -> HCIRTransaction | None:
         """Compute aggregated window statistics and commit EnvironmentStateNode."""
         if not self._buffer:
             return None
@@ -110,6 +112,10 @@ class TelemetryStreamAdapter:
         self._buffer.clear()
 
         if res.is_committed:
-            logger.info("Flushed telemetry window for environment '%s' (%d variables)", self._environment_name, len(summaries))
+            logger.info(
+                "Flushed telemetry window for environment '%s' (%d variables)",
+                self._environment_name,
+                len(summaries),
+            )
             return tx
         return None

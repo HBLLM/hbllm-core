@@ -137,7 +137,11 @@ class SNNCapabilityExecutor(ICognitiveNodeABI):
         delta.add_nodes.append(snn_belief.model_dump())
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
-        logger.info("SNN capability execution completed in %d ms (avg rate=%.3f)", elapsed_ms, avg_firing_rate)
+        logger.info(
+            "SNN capability execution completed in %d ms (avg rate=%.3f)",
+            elapsed_ms,
+            avg_firing_rate,
+        )
 
         return ExecutionResult(
             delta=delta,

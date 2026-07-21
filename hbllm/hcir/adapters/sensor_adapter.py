@@ -122,7 +122,12 @@ class SensorCapabilityAdapter:
 
         res = self._services.transaction_manager.commit(tx)
         if res.is_committed:
-            logger.info("Ingested sensor reading '%s' = %s %s", reading.variable_name, reading.value, reading.unit)
+            logger.info(
+                "Ingested sensor reading '%s' = %s %s",
+                reading.variable_name,
+                reading.value,
+                reading.unit,
+            )
             return tx
 
         logger.warning("Sensor reading ingestion rejected for sensor '%s'", reading.sensor_id)
