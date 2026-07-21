@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from hbllm.hcir.graph import HCIRNodeType, PredictionErrorNode
 from hbllm.hcir.types import Attention

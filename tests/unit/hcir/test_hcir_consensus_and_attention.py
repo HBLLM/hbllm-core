@@ -1,22 +1,16 @@
 """Unit tests for BranchModeVerifier, Cognitive Breakpoints, Consensus Engine, and Attention Graph."""
 
-import pytest
 
-from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
+from hbllm.hcir.bytecode import Instruction, Opcode
 from hbllm.hcir.graph import BeliefNode, GoalNode, PredictionErrorNode
 from hbllm.hcir.kernel.attention_graph import AttentionManager
-from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.consensus_engine import CandidateBelief, CognitiveConsensusEngine
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
-from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.kernel.verification import BranchModeVerifier
-from hbllm.hcir.receipt import ExecutionReceipt
-from hbllm.hcir.replay_debugger import CognitiveBreakpoint, ReplayDebugger
-from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
+from hbllm.hcir.replay_debugger import CognitiveBreakpoint
+from hbllm.hcir.transactions import HCIRTransaction
 from hbllm.hcir.types import BranchMode
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BranchModeVerifier Tests

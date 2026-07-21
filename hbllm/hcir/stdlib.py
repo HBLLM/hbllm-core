@@ -422,7 +422,7 @@ class SimulationOps:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class stdlib:
+class stdlib:  # noqa: N801
     """HCIR Standard Library — ``hcir.stdlib.*`` namespace.
 
     Usage::

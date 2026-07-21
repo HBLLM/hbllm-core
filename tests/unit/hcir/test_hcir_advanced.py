@@ -332,7 +332,10 @@ class TestKernelEventBus:
     def test_no_duplicate_delivery(self):
         bus = KernelEventBus()
         received = []
-        handler = lambda e: received.append(e)
+
+        def handler(e):
+            received.append(e)
+
         bus.subscribe("transaction.committed", handler)
         bus.subscribe("transaction.*", handler)
         bus.publish(KernelEvent(event_type="transaction.committed", source="test"))
@@ -359,7 +362,10 @@ class TestKernelEventBus:
     def test_unsubscribe(self):
         bus = KernelEventBus()
         received = []
-        handler = lambda e: received.append(e)
+
+        def handler(e):
+            received.append(e)
+
         bus.subscribe("test", handler)
         bus.publish(KernelEvent(event_type="test", source="t"))
         bus.unsubscribe("test", handler)
