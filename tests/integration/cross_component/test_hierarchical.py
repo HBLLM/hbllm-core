@@ -138,13 +138,12 @@ def test_sync_endpoints():
     import jwt
 
     # We dynamically extract the actual secret key used by JWTAuthMiddleware
-    secret_key = None
+    secret_key: str | bytes = "test_secret_key_for_jwt_testing_32ch"
     for middleware in core_app.user_middleware:
         if middleware.cls.__name__ == "JWTAuthMiddleware":
-            secret_key = middleware.kwargs.get("secret_key")
-
-    if not secret_key:
-        secret_key = "test_secret_key_for_jwt_testing_32ch"
+            val = middleware.kwargs.get("secret_key")
+            if isinstance(val, (str, bytes)) and val:
+                secret_key = val
 
     token = jwt.encode(
         {"tenant_id": "tenant1", "user_id": "user1", "device_id": "device1"},
