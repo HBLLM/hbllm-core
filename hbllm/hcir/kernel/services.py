@@ -14,7 +14,6 @@ from typing import Any
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import CognitiveScheduler
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
-from hbllm.hcir.snapshot import SnapshotManager
 from hbllm.hcir.stores import IEventStore
 from hbllm.hcir.workspace import HCIRWorkspaceState
 

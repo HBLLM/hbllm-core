@@ -18,7 +18,6 @@ import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
 from heapq import heappop, heappush
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

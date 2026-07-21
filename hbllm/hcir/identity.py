@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Object Namespace
 # ═══════════════════════════════════════════════════════════════════════════
@@ -87,7 +86,9 @@ class HCIRObjectID:
         return cls(
             tenant_id=parts[0],
             device_id=parts[1],
-            namespace=HCIRNamespace(parts[2]) if parts[2] in HCIRNamespace.__members__.values() else HCIRNamespace.KNOWLEDGE,
+            namespace=HCIRNamespace(parts[2])
+            if parts[2] in HCIRNamespace.__members__.values()
+            else HCIRNamespace.KNOWLEDGE,
             object_type=parts[3],
             uuid=parts[4],
             version=int(parts[5]),
@@ -239,6 +240,7 @@ class CausalEvent:
     def compute_hash(self) -> str:
         """Compute a deterministic content hash for tamper detection."""
         import json
+
         payload = json.dumps(
             {
                 "event_id": self.event_id,

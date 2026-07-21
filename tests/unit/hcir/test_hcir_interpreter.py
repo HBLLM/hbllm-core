@@ -3,17 +3,15 @@
 import pytest
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.graph import GoalNode, HCIREdge, HCIREdgeType, HCIRNodeType
+from hbllm.hcir.graph import GoalNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.interpreter import HCIRInterpreter, SyscallDispatcher
 from hbllm.hcir.kernel.capability_resolver import (
-    CapabilityImplementation,
     CapabilityResolver,
 )
 from hbllm.hcir.kernel.scheduler import CognitiveScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Bytecode Model Tests
@@ -99,12 +97,14 @@ class TestInterpreterAssert:
     async def test_assert_node(self):
         ws, services, interpreter = _make_system()
         node = GoalNode(id="g1", description="Test goal")
-        stream = InstructionStream(instructions=[
-            Instruction(
-                opcode=Opcode.ASSERT,
-                params={"node_data": node.model_dump(), "author": "test"},
-            ),
-        ])
+        stream = InstructionStream(
+            instructions=[
+                Instruction(
+                    opcode=Opcode.ASSERT,
+                    params={"node_data": node.model_dump(), "author": "test"},
+                ),
+            ]
+        )
         result = await interpreter.execute(stream)
         assert result.success
         assert ws.get_node("g1") is not None
@@ -115,12 +115,14 @@ class TestInterpreterAssert:
         ws.add_node(GoalNode(id="g1", description="a"))
         ws.add_node(GoalNode(id="g2", description="b"))
         edge = HCIREdge(id="e1", edge_type=HCIREdgeType.DEPENDS_ON, sources=["g1"], targets=["g2"])
-        stream = InstructionStream(instructions=[
-            Instruction(
-                opcode=Opcode.ASSERT,
-                params={"edge_data": edge.model_dump()},
-            ),
-        ])
+        stream = InstructionStream(
+            instructions=[
+                Instruction(
+                    opcode=Opcode.ASSERT,
+                    params={"edge_data": edge.model_dump()},
+                ),
+            ]
+        )
         result = await interpreter.execute(stream)
         assert result.success
         assert ws.get_edge("e1") is not None
@@ -131,9 +133,11 @@ class TestInterpreterRetract:
     async def test_retract_node(self):
         ws, services, interpreter = _make_system()
         ws.add_node(GoalNode(id="g1", description="to remove"))
-        stream = InstructionStream(instructions=[
-            Instruction(opcode=Opcode.RETRACT, params={"node_id": "g1"}),
-        ])
+        stream = InstructionStream(
+            instructions=[
+                Instruction(opcode=Opcode.RETRACT, params={"node_id": "g1"}),
+            ]
+        )
         result = await interpreter.execute(stream)
         assert result.success
         assert ws.get_node("g1") is None
@@ -145,12 +149,14 @@ class TestInterpreterQuery:
         ws, services, interpreter = _make_system()
         ws.add_node(GoalNode(id="g1", description="a"))
         ws.add_node(GoalNode(id="g2", description="b"))
-        stream = InstructionStream(instructions=[
-            Instruction(
-                opcode=Opcode.QUERY,
-                params={"node_type": "goal"},
-            ),
-        ])
+        stream = InstructionStream(
+            instructions=[
+                Instruction(
+                    opcode=Opcode.QUERY,
+                    params={"node_type": "goal"},
+                ),
+            ]
+        )
         result = await interpreter.execute(stream)
         assert result.success
         event_data = result.events[0]["results"][0]
@@ -164,9 +170,11 @@ class TestInterpreterForkMerge:
         ws.add_node(GoalNode(id="g1", description="main"))
 
         # Fork
-        fork_stream = InstructionStream(instructions=[
-            Instruction(opcode=Opcode.FORK, params={"branch_name": "sim_1"}),
-        ])
+        fork_stream = InstructionStream(
+            instructions=[
+                Instruction(opcode=Opcode.FORK, params={"branch_name": "sim_1"}),
+            ]
+        )
         result = await interpreter.execute(fork_stream)
         assert result.success
 
@@ -176,9 +184,11 @@ class TestInterpreterForkMerge:
         branch.add_node(GoalNode(id="g2", description="sim goal"))
 
         # Merge
-        merge_stream = InstructionStream(instructions=[
-            Instruction(opcode=Opcode.MERGE, params={"branch_name": "sim_1"}),
-        ])
+        merge_stream = InstructionStream(
+            instructions=[
+                Instruction(opcode=Opcode.MERGE, params={"branch_name": "sim_1"}),
+            ]
+        )
         result = await interpreter.execute(merge_stream)
         assert result.success
         assert ws.get_node("g2") is not None
@@ -191,23 +201,25 @@ class TestInterpreterMultiInstruction:
         """Test a complete cognitive cycle: ASSERT → QUERY → RETRACT."""
         ws, services, interpreter = _make_system()
         node = GoalNode(id="g1", description="Multi-step test")
-        stream = InstructionStream(instructions=[
-            Instruction(
-                opcode=Opcode.ASSERT,
-                params={"node_data": node.model_dump()},
-                cost_estimate=10,
-            ),
-            Instruction(
-                opcode=Opcode.QUERY,
-                params={"node_type": "goal"},
-                cost_estimate=5,
-            ),
-            Instruction(
-                opcode=Opcode.RETRACT,
-                params={"node_id": "g1"},
-                cost_estimate=5,
-            ),
-        ])
+        stream = InstructionStream(
+            instructions=[
+                Instruction(
+                    opcode=Opcode.ASSERT,
+                    params={"node_data": node.model_dump()},
+                    cost_estimate=10,
+                ),
+                Instruction(
+                    opcode=Opcode.QUERY,
+                    params={"node_type": "goal"},
+                    cost_estimate=5,
+                ),
+                Instruction(
+                    opcode=Opcode.RETRACT,
+                    params={"node_id": "g1"},
+                    cost_estimate=5,
+                ),
+            ]
+        )
         result = await interpreter.execute(stream)
         assert result.success
         assert result.metrics.tokens_consumed == 20

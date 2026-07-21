@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +66,7 @@ class SandboxedCapabilityPolicy:
     trust_level: TrustLevel = TrustLevel.VERIFIED
     isolation_mode: IsolationMode = IsolationMode.IN_PROCESS
     permissions: CapabilityPermissions = field(default_factory=CapabilityPermissions)
-    resource_limits: CapabilityResourceLimits = field(
-        default_factory=CapabilityResourceLimits
-    )
+    resource_limits: CapabilityResourceLimits = field(default_factory=CapabilityResourceLimits)
 
     def validate_execution(self, requested_permissions: set[str]) -> bool:
         """Validate if requested operations exceed granted permissions."""

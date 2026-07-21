@@ -5,12 +5,10 @@ import pytest
 from hbllm.hcir.identity import (
     CausalEvent,
     CausalGraph,
-    CauseRelation,
     HCIRNamespace,
     HCIRObjectID,
     IDFactory,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # HCIRObjectID Tests
@@ -29,18 +27,24 @@ class TestHCIRObjectID:
 
     def test_to_string(self):
         oid = HCIRObjectID(
-            tenant_id="acme", device_id="robot_12",
-            namespace=HCIRNamespace.MEMORY, object_type="belief",
-            uuid="83fa1e2b3c4d", version=3,
+            tenant_id="acme",
+            device_id="robot_12",
+            namespace=HCIRNamespace.MEMORY,
+            object_type="belief",
+            uuid="83fa1e2b3c4d",
+            version=3,
         )
         s = oid.to_string()
         assert s == "acme:robot_12:memory:belief:83fa1e2b3c4d:3"
 
     def test_from_string_roundtrip(self):
         original = HCIRObjectID(
-            tenant_id="acme", device_id="laptop_01",
-            namespace=HCIRNamespace.EXECUTION, object_type="event",
-            uuid="abc123def456", version=7,
+            tenant_id="acme",
+            device_id="laptop_01",
+            namespace=HCIRNamespace.EXECUTION,
+            object_type="event",
+            uuid="abc123def456",
+            version=7,
         )
         s = original.to_string()
         restored = HCIRObjectID.from_string(s)

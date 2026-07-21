@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
 
 from hbllm.hcir.graph import (
     CognitiveCategory,
@@ -37,7 +36,6 @@ from hbllm.hcir.graph import (
     HCIRNodeType,
     NodeLifecycle,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Query Specification
@@ -168,9 +166,7 @@ class InMemoryQueryEngine(IQueryEngine):
             candidate_nodes = list(self._graph.all_nodes())
         else:
             candidate_nodes = [
-                self._graph.get_node(nid)
-                for nid in candidates
-                if self._graph.has_node(nid)
+                self._graph.get_node(nid) for nid in candidates if self._graph.has_node(nid)
             ]
             candidate_nodes = [n for n in candidate_nodes if n is not None]
 
@@ -187,9 +183,18 @@ class InMemoryQueryEngine(IQueryEngine):
                 text_lower = query.text_contains.lower()
                 # Search common text fields based on node attributes
                 found = False
-                for attr_name in ("claim", "description", "label", "summary",
-                                  "skill_name", "procedure_name", "intent",
-                                  "capability_name", "name", "expression"):
+                for attr_name in (
+                    "claim",
+                    "description",
+                    "label",
+                    "summary",
+                    "skill_name",
+                    "procedure_name",
+                    "intent",
+                    "capability_name",
+                    "name",
+                    "expression",
+                ):
                     val = getattr(node, attr_name, None)
                     if val and isinstance(val, str) and text_lower in val.lower():
                         found = True

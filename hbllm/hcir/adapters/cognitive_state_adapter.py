@@ -18,7 +18,6 @@ import logging
 from typing import Any
 
 from hbllm.hcir.graph import (
-    HCIRNodeType,
     NodeLifecycle,
     ObservationNode,
 )
@@ -37,7 +36,6 @@ from hbllm.brain.core.cognitive_state import (
     CognitiveStateDelta,
     CognitiveStateSnapshot,
 )
-
 
 # Stable ID prefix for cognitive state observation nodes
 _CS_NODE_PREFIX = "cs_"
@@ -66,9 +64,17 @@ class CognitiveStateAdapter:
 
     #: Cognitive variable names and their HCIR observation IDs.
     COGNITIVE_FIELDS = [
-        "confidence", "uncertainty", "relevance", "novelty",
-        "motivation", "valence", "arousal", "intention_strength",
-        "fatigue", "curiosity", "stress",
+        "confidence",
+        "uncertainty",
+        "relevance",
+        "novelty",
+        "motivation",
+        "valence",
+        "arousal",
+        "intention_strength",
+        "fatigue",
+        "curiosity",
+        "stress",
     ]
 
     def snapshot_to_nodes(
@@ -106,15 +112,17 @@ class CognitiveStateAdapter:
 
         # Focus target as a separate node
         if snapshot.focus_target:
-            nodes.append(ObservationNode(
-                id=f"{_CS_NODE_PREFIX}focus_target",
-                lifecycle=NodeLifecycle.ACTIVE,
-                payload={"variable": "focus_target", "value": snapshot.focus_target},
-                sensor_source="cognitive_state",
-                provenance=Provenance(created_by=author),
-                scope=Scope(tenant_id=tenant_id),
-                tags=["cognitive_state", "focus_target"],
-            ))
+            nodes.append(
+                ObservationNode(
+                    id=f"{_CS_NODE_PREFIX}focus_target",
+                    lifecycle=NodeLifecycle.ACTIVE,
+                    payload={"variable": "focus_target", "value": snapshot.focus_target},
+                    sensor_source="cognitive_state",
+                    provenance=Provenance(created_by=author),
+                    scope=Scope(tenant_id=tenant_id),
+                    tags=["cognitive_state", "focus_target"],
+                )
+            )
 
         return nodes
 
@@ -154,21 +162,23 @@ class CognitiveStateAdapter:
             else:
                 payload = {"variable": field_name, "value": float(value)}
 
-            operations.append(TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=node_id,
-                node_data=ObservationNode(
-                    id=node_id,
-                    lifecycle=NodeLifecycle.ACTIVE,
-                    payload=payload,
-                    sensor_source="cognitive_state",
-                    provenance=Provenance(
-                        created_by=delta.source_node,
-                    ),
-                    scope=Scope(tenant_id=tenant_id),
-                    tags=["cognitive_state", field_name],
-                ).model_dump(),
-            ))
+            operations.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=ObservationNode(
+                        id=node_id,
+                        lifecycle=NodeLifecycle.ACTIVE,
+                        payload=payload,
+                        sensor_source="cognitive_state",
+                        provenance=Provenance(
+                            created_by=delta.source_node,
+                        ),
+                        scope=Scope(tenant_id=tenant_id),
+                        tags=["cognitive_state", field_name],
+                    ).model_dump(),
+                )
+            )
 
         return HCIRTransaction(
             author=delta.source_node,

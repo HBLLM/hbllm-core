@@ -124,19 +124,21 @@ class CapabilityRegistry:
         specs.sort(key=lambda s: s.priority, reverse=True)
 
         # Also register with the underlying resolver
-        self._resolver.register(CapabilityImplementation(
-            capability_name=spec.capability_name,
-            implementation_id=spec.provider_id,
-            executor=spec.executor,
-            priority=spec.priority,
-            description=spec.description,
-            tags=spec.tags,
-        ))
+        self._resolver.register(
+            CapabilityImplementation(
+                capability_name=spec.capability_name,
+                implementation_id=spec.provider_id,
+                executor=spec.executor,
+                priority=spec.priority,
+                description=spec.description,
+                tags=spec.tags,
+            )
+        )
 
         logger.info(
-            "Registered capability '%s' provider '%s' "
-            "(cost=%.3f, latency=%dms, accuracy=%.2f)",
-            spec.capability_name, spec.provider_id,
+            "Registered capability '%s' provider '%s' (cost=%.3f, latency=%dms, accuracy=%.2f)",
+            spec.capability_name,
+            spec.provider_id,
             spec.performance.cost_per_call,
             spec.performance.avg_latency_ms,
             spec.performance.accuracy,
@@ -230,7 +232,5 @@ class CapabilityRegistry:
         return {
             "total_capabilities": len(self._specs),
             "total_providers": sum(len(s) for s in self._specs.values()),
-            "capabilities": {
-                name: len(specs) for name, specs in self._specs.items()
-            },
+            "capabilities": {name: len(specs) for name, specs in self._specs.items()},
         }

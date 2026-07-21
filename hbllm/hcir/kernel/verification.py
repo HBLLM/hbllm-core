@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hbllm.hcir.graph import HCIRNode, HCIRNodeType, NODE_TYPE_REGISTRY
+from hbllm.hcir.graph import NODE_TYPE_REGISTRY, HCIRNodeType
 from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionAnnotation,
@@ -100,9 +100,7 @@ class ScopeVerifier:
         workspace: HCIRWorkspaceState,
     ) -> bool:
         """Verify all operations in the transaction respect scope isolation."""
-        author_scope = self._author_scopes.get(
-            transaction.author, self._default_scope
-        )
+        author_scope = self._author_scopes.get(transaction.author, self._default_scope)
 
         # System-scoped authors bypass tenant checks
         if author_scope.security_level == SecurityLevel.SYSTEM:
@@ -263,11 +261,13 @@ class ScopeVerifier:
     @staticmethod
     def _reject(transaction: HCIRTransaction, message: str) -> None:
         """Annotate a transaction with a scope violation."""
-        transaction.annotations.append(TransactionAnnotation(
-            author="ScopeVerifier",
-            assertion=message,
-            severity="error",
-        ))
+        transaction.annotations.append(
+            TransactionAnnotation(
+                author="ScopeVerifier",
+                assertion=message,
+                severity="error",
+            )
+        )
         logger.warning("HCIR_SCOPE_VIOLATION: %s (tx=%s)", message, transaction.id)
 
 
@@ -355,11 +355,13 @@ class SchemaVerifier:
 
     @staticmethod
     def _reject(transaction: HCIRTransaction, message: str) -> None:
-        transaction.annotations.append(TransactionAnnotation(
-            author="SchemaVerifier",
-            assertion=message,
-            severity="error",
-        ))
+        transaction.annotations.append(
+            TransactionAnnotation(
+                author="SchemaVerifier",
+                assertion=message,
+                severity="error",
+            )
+        )
         logger.warning("HCIR_SCHEMA_VIOLATION: %s (tx=%s)", message, transaction.id)
 
 
@@ -388,17 +390,17 @@ class ResourceVerifier:
             if budget is None:
                 continue  # Unconstrained
             if budget.is_exceeded:
-                transaction.annotations.append(TransactionAnnotation(
-                    author="ResourceVerifier",
-                    assertion=(
-                        f"Resource '{resource_name}' exceeded: "
-                        f"consumed={budget.consumed}, limit={budget.limit}"
-                    ),
-                    severity="error",
-                ))
-                logger.warning(
-                    "HCIR_RESOURCE_EXCEEDED: %s (tx=%s)", resource_name, transaction.id
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="ResourceVerifier",
+                        assertion=(
+                            f"Resource '{resource_name}' exceeded: "
+                            f"consumed={budget.consumed}, limit={budget.limit}"
+                        ),
+                        severity="error",
+                    )
                 )
+                logger.warning("HCIR_RESOURCE_EXCEEDED: %s (tx=%s)", resource_name, transaction.id)
                 return False
         return True
 
@@ -439,22 +441,24 @@ class PolicyVerifier:
         for name, rule_fn in self._rules:
             try:
                 if not rule_fn(transaction, workspace):
-                    transaction.annotations.append(TransactionAnnotation(
-                        author="PolicyVerifier",
-                        assertion=f"Policy '{name}' rejected transaction",
-                        severity="error",
-                    ))
-                    logger.warning(
-                        "HCIR_POLICY_VIOLATION: rule '%s' (tx=%s)", name, transaction.id
+                    transaction.annotations.append(
+                        TransactionAnnotation(
+                            author="PolicyVerifier",
+                            assertion=f"Policy '{name}' rejected transaction",
+                            severity="error",
+                        )
                     )
+                    logger.warning("HCIR_POLICY_VIOLATION: rule '%s' (tx=%s)", name, transaction.id)
                     return False
             except Exception as exc:
                 logger.error("Policy rule '%s' raised exception: %s", name, exc)
-                transaction.annotations.append(TransactionAnnotation(
-                    author="PolicyVerifier",
-                    assertion=f"Policy '{name}' error: {exc}",
-                    severity="error",
-                ))
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="PolicyVerifier",
+                        assertion=f"Policy '{name}' error: {exc}",
+                        severity="error",
+                    )
+                )
                 return False
         return True
 

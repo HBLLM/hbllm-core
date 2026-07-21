@@ -21,7 +21,6 @@ from typing import Any
 
 from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Event Store
 # ═══════════════════════════════════════════════════════════════════════════

@@ -2,7 +2,6 @@
 
 import pytest
 
-from hbllm.hcir.abi import ExecutionMetrics
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.graph import (
     BeliefNode,
@@ -26,9 +25,8 @@ from hbllm.hcir.optimizer import (
     QueryMergingPass,
 )
 from hbllm.hcir.receipt import ExecutionReceipt, ReceiptStore
-from hbllm.hcir.validation import GraphValidator, ValidationSeverity
+from hbllm.hcir.validation import GraphValidator
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ExecutionReceipt Tests
@@ -86,7 +84,9 @@ class TestExecutionReceipt:
             ],
         )
 
-        res, receipt = await interpreter.execute_with_receipt(stream, process_id="p1", thread_id="t1")
+        res, receipt = await interpreter.execute_with_receipt(
+            stream, process_id="p1", thread_id="t1"
+        )
         assert res.success is True
         assert receipt.process_id == "p1"
         assert receipt.thread_id == "t1"
@@ -115,8 +115,11 @@ class TestSchedulerPolicy:
 
     def test_calculator_helper(self):
         score = CognitiveScoreCalculator.score_task(
-            expected_value=1.0, urgency=1.0, confidence=1.0,
-            resource_cost=1.0, interruption_cost=1.0
+            expected_value=1.0,
+            urgency=1.0,
+            confidence=1.0,
+            resource_cost=1.0,
+            interruption_cost=1.0,
         )
         assert score == 1.0
 
@@ -213,10 +216,12 @@ class TestHCIROptimizer:
         assert opt_stream.length == 2
 
     def test_full_optimizer_pipeline(self):
-        optimizer = HCIROptimizer([
-            DeadInstructionEliminationPass(),
-            QueryMergingPass(),
-        ])
+        optimizer = HCIROptimizer(
+            [
+                DeadInstructionEliminationPass(),
+                QueryMergingPass(),
+            ]
+        )
         stream = InstructionStream(
             author="test",
             instructions=[

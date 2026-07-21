@@ -23,7 +23,6 @@ from typing import Any
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.graph import GoalNode
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Memory Operations
 # ═══════════════════════════════════════════════════════════════════════════

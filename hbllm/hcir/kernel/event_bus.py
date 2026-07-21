@@ -30,9 +30,10 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,11 @@ class KernelEvent:
 
     @property
     def is_error(self) -> bool:
-        return "failed" in self.event_type or "violation" in self.event_type or "exceeded" in self.event_type
+        return (
+            "failed" in self.event_type
+            or "violation" in self.event_type
+            or "exceeded" in self.event_type
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -155,7 +160,7 @@ class KernelEventBus:
         # Store in history
         self._history.append(event)
         if len(self._history) > self._history_size:
-            self._history = self._history[-self._history_size:]
+            self._history = self._history[-self._history_size :]
 
         # Dispatch to handlers
         matched = set()
@@ -190,7 +195,8 @@ class KernelEventBus:
         except Exception as exc:
             logger.error(
                 "Kernel event handler error for %s: %s",
-                event.event_type, exc,
+                event.event_type,
+                exc,
             )
 
     def get_history(
@@ -212,8 +218,5 @@ class KernelEventBus:
         return {
             "total_events": self._event_count,
             "history_size": len(self._history),
-            "subscriptions": {
-                topic: len(handlers)
-                for topic, handlers in self._handlers.items()
-            },
+            "subscriptions": {topic: len(handlers) for topic, handlers in self._handlers.items()},
         }

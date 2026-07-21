@@ -32,9 +32,7 @@ from typing import Any
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.graph import (
-    ActionNode,
     GoalNode,
-    HCIRNodeType,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,7 +151,8 @@ class HCIRCompiler:
         stream = strategy(ast, author)
         logger.debug(
             "Compiled '%s' intent → %d instructions",
-            ast.intent, stream.length,
+            ast.intent,
+            stream.length,
         )
         return stream
 
@@ -167,107 +166,127 @@ class HCIRCompiler:
             description=f"Investigate: {ast.subject}",
         )
         # 1. Assert investigation goal
-        stream.append(Instruction(
-            opcode=Opcode.ASSERT,
-            params={
-                "node_data": GoalNode(
-                    id=goal_id,
-                    description=f"Investigate: {ast.subject} ({ast.action})",
-                    priority=ast.priority,
-                ).model_dump(),
-                "author": author,
-            },
-            cost_estimate=5,
-        ))
-        # 2. Query relevant observations
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params={
-                "node_type": "observation",
-                "text_contains": ast.subject,
-            },
-            cost_estimate=10,
-        ))
-        # 3. Query relevant procedures
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params={
-                "node_type": "procedure",
-                "text_contains": ast.action or ast.subject,
-            },
-            cost_estimate=10,
-        ))
-        # 4. Execute analysis capability
-        stream.append(Instruction(
-            opcode=Opcode.EXECUTE,
-            params={
-                "capability": "causal_analysis",
-                "params": {
-                    "subject": ast.subject,
-                    "action": ast.action,
-                    "goal_id": goal_id,
+        stream.append(
+            Instruction(
+                opcode=Opcode.ASSERT,
+                params={
+                    "node_data": GoalNode(
+                        id=goal_id,
+                        description=f"Investigate: {ast.subject} ({ast.action})",
+                        priority=ast.priority,
+                    ).model_dump(),
+                    "author": author,
                 },
-            },
-            cost_estimate=100,
-        ))
+                cost_estimate=5,
+            )
+        )
+        # 2. Query relevant observations
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params={
+                    "node_type": "observation",
+                    "text_contains": ast.subject,
+                },
+                cost_estimate=10,
+            )
+        )
+        # 3. Query relevant procedures
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params={
+                    "node_type": "procedure",
+                    "text_contains": ast.action or ast.subject,
+                },
+                cost_estimate=10,
+            )
+        )
+        # 4. Execute analysis capability
+        stream.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": "causal_analysis",
+                    "params": {
+                        "subject": ast.subject,
+                        "action": ast.action,
+                        "goal_id": goal_id,
+                    },
+                },
+                cost_estimate=100,
+            )
+        )
         return stream
 
     def _compile_create(self, ast: SemanticAST, author: str) -> InstructionStream:
         """CREATE: ASSERT goal → EXECUTE creation → ASSERT result."""
         stream = InstructionStream(author=author, description=f"Create: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.ASSERT,
-            params={
-                "node_data": GoalNode(
-                    id=f"goal_{uuid.uuid4().hex[:8]}",
-                    description=f"Create: {ast.subject}",
-                    priority=ast.priority,
-                ).model_dump(),
-                "author": author,
-            },
-            cost_estimate=5,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.EXECUTE,
-            params={
-                "capability": "content_generation",
-                "params": {"subject": ast.subject, "action": ast.action},
-            },
-            cost_estimate=200,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.ASSERT,
+                params={
+                    "node_data": GoalNode(
+                        id=f"goal_{uuid.uuid4().hex[:8]}",
+                        description=f"Create: {ast.subject}",
+                        priority=ast.priority,
+                    ).model_dump(),
+                    "author": author,
+                },
+                cost_estimate=5,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": "content_generation",
+                    "params": {"subject": ast.subject, "action": ast.action},
+                },
+                cost_estimate=200,
+            )
+        )
         return stream
 
     def _compile_modify(self, ast: SemanticAST, author: str) -> InstructionStream:
         """MODIFY: QUERY target → EXECUTE modification."""
         stream = InstructionStream(author=author, description=f"Modify: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params={"text_contains": ast.subject},
-            cost_estimate=10,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.EXECUTE,
-            params={
-                "capability": "content_modification",
-                "params": {"subject": ast.subject, "action": ast.action},
-            },
-            cost_estimate=100,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params={"text_contains": ast.subject},
+                cost_estimate=10,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": "content_modification",
+                    "params": {"subject": ast.subject, "action": ast.action},
+                },
+                cost_estimate=100,
+            )
+        )
         return stream
 
     def _compile_delete(self, ast: SemanticAST, author: str) -> InstructionStream:
         """DELETE: QUERY target → RETRACT."""
         stream = InstructionStream(author=author, description=f"Delete: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params={"text_contains": ast.subject},
-            cost_estimate=10,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.RETRACT,
-            params={"node_id": ast.subject},
-            cost_estimate=5,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params={"text_contains": ast.subject},
+                cost_estimate=10,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.RETRACT,
+                params={"node_id": ast.subject},
+                cost_estimate=5,
+            )
+        )
         return stream
 
     def _compile_query(self, ast: SemanticAST, author: str) -> InstructionStream:
@@ -279,117 +298,141 @@ class HCIRCompiler:
         node_type = ast.get_slot("node_type")
         if node_type:
             params["node_type"] = node_type
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params=params,
-            cost_estimate=10,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params=params,
+                cost_estimate=10,
+            )
+        )
         return stream
 
     def _compile_plan(self, ast: SemanticAST, author: str) -> InstructionStream:
         """PLAN: ASSERT goal → QUERY constraints → EXECUTE planner."""
         goal_id = f"goal_{uuid.uuid4().hex[:8]}"
         stream = InstructionStream(author=author, description=f"Plan: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.ASSERT,
-            params={
-                "node_data": GoalNode(
-                    id=goal_id,
-                    description=f"Plan: {ast.subject}",
-                    priority=ast.priority,
-                ).model_dump(),
-                "author": author,
-            },
-            cost_estimate=5,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params={"node_type": "constraint"},
-            cost_estimate=10,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.EXECUTE,
-            params={
-                "capability": "planning",
-                "params": {"goal_id": goal_id, "subject": ast.subject},
-            },
-            cost_estimate=150,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.ASSERT,
+                params={
+                    "node_data": GoalNode(
+                        id=goal_id,
+                        description=f"Plan: {ast.subject}",
+                        priority=ast.priority,
+                    ).model_dump(),
+                    "author": author,
+                },
+                cost_estimate=5,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params={"node_type": "constraint"},
+                cost_estimate=10,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": "planning",
+                    "params": {"goal_id": goal_id, "subject": ast.subject},
+                },
+                cost_estimate=150,
+            )
+        )
         return stream
 
     def _compile_learn(self, ast: SemanticAST, author: str) -> InstructionStream:
         """LEARN: QUERY existing → ASSERT new knowledge → EXECUTE skill extraction."""
         stream = InstructionStream(author=author, description=f"Learn: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.QUERY,
-            params={"text_contains": ast.subject},
-            cost_estimate=10,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.ASSERT,
-            params={
-                "node_data": {
-                    "id": f"belief_{uuid.uuid4().hex[:8]}",
-                    "node_type": "belief",
-                    "claim": ast.subject,
-                    "belief_type": "learned",
+        stream.append(
+            Instruction(
+                opcode=Opcode.QUERY,
+                params={"text_contains": ast.subject},
+                cost_estimate=10,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.ASSERT,
+                params={
+                    "node_data": {
+                        "id": f"belief_{uuid.uuid4().hex[:8]}",
+                        "node_type": "belief",
+                        "claim": ast.subject,
+                        "belief_type": "learned",
+                    },
+                    "author": author,
                 },
-                "author": author,
-            },
-            cost_estimate=5,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.EXECUTE,
-            params={
-                "capability": "skill_extraction",
-                "params": {"subject": ast.subject},
-            },
-            cost_estimate=50,
-        ))
+                cost_estimate=5,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": "skill_extraction",
+                    "params": {"subject": ast.subject},
+                },
+                cost_estimate=50,
+            )
+        )
         return stream
 
     def _compile_simulate(self, ast: SemanticAST, author: str) -> InstructionStream:
         """SIMULATE: FORK → EXECUTE scenario → MERGE or ROLLBACK."""
         branch_name = f"sim_{uuid.uuid4().hex[:6]}"
         stream = InstructionStream(author=author, description=f"Simulate: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.FORK,
-            params={"branch_name": branch_name},
-            cost_estimate=20,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.EXECUTE,
-            params={
-                "capability": "simulation",
-                "params": {"scenario": ast.subject, "branch": branch_name},
-            },
-            cost_estimate=200,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.MERGE,
-            params={"branch_name": branch_name},
-            cost_estimate=20,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.FORK,
+                params={"branch_name": branch_name},
+                cost_estimate=20,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": "simulation",
+                    "params": {"scenario": ast.subject, "branch": branch_name},
+                },
+                cost_estimate=200,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.MERGE,
+                params={"branch_name": branch_name},
+                cost_estimate=20,
+            )
+        )
         return stream
 
     def _compile_monitor(self, ast: SemanticAST, author: str) -> InstructionStream:
         """MONITOR: ASSERT goal → WAIT for condition."""
         stream = InstructionStream(author=author, description=f"Monitor: {ast.subject}")
-        stream.append(Instruction(
-            opcode=Opcode.ASSERT,
-            params={
-                "node_data": GoalNode(
-                    id=f"goal_{uuid.uuid4().hex[:8]}",
-                    description=f"Monitor: {ast.subject}",
-                    priority=ast.priority,
-                ).model_dump(),
-                "author": author,
-            },
-            cost_estimate=5,
-        ))
-        stream.append(Instruction(
-            opcode=Opcode.WAIT,
-            params={"condition": ast.subject, "timeout_ms": 60000},
-            cost_estimate=5,
-        ))
+        stream.append(
+            Instruction(
+                opcode=Opcode.ASSERT,
+                params={
+                    "node_data": GoalNode(
+                        id=f"goal_{uuid.uuid4().hex[:8]}",
+                        description=f"Monitor: {ast.subject}",
+                        priority=ast.priority,
+                    ).model_dump(),
+                    "author": author,
+                },
+                cost_estimate=5,
+            )
+        )
+        stream.append(
+            Instruction(
+                opcode=Opcode.WAIT,
+                params={"condition": ast.subject, "timeout_ms": 60000},
+                cost_estimate=5,
+            )
+        )
         return stream

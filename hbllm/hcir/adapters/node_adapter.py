@@ -20,7 +20,6 @@ from typing import Any
 
 from hbllm.hcir.abi import ExecutionResult, ICognitiveNodeABI
 from hbllm.hcir.graph import CapabilityNode, EventNode
-from hbllm.hcir.transactions import HCIRDelta
 from hbllm.hcir.types import Provenance, Scope
 
 logger = logging.getLogger(__name__)
@@ -133,9 +132,11 @@ class NodeAdapter(ICognitiveNodeABI):
         return ExecutionResult(
             success=True,
             annotations=[],
-            events=[{
-                "type": "adapter_passthrough",
-                "node_id": self.node_id,
-                "node_type": self.node_type,
-            }],
+            events=[
+                {
+                    "type": "adapter_passthrough",
+                    "node_id": self.node_id,
+                    "node_type": self.node_type,
+                }
+            ],
         )

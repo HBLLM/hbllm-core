@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field
 
 from hbllm.hcir.types import Provenance, Timestamp
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Transaction Operations
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,31 +149,41 @@ class HCIRDelta(BaseModel):
         """Convert this delta into a list of transaction operations."""
         ops: list[TransactionOperation] = []
         for node_data in self.add_nodes:
-            ops.append(TransactionOperation(
-                op=TransactionOp.ADD_NODE,
-                node_id=node_data.get("id"),
-                node_data=node_data,
-            ))
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id=node_data.get("id"),
+                    node_data=node_data,
+                )
+            )
         for mod in self.modify_nodes:
-            ops.append(TransactionOperation(
-                op=TransactionOp.MODIFY_NODE,
-                node_id=mod.get("id") or mod.get("node_id"),
-                changes=mod.get("changes", mod),
-            ))
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.MODIFY_NODE,
+                    node_id=mod.get("id") or mod.get("node_id"),
+                    changes=mod.get("changes", mod),
+                )
+            )
         for node_id in self.remove_node_ids:
-            ops.append(TransactionOperation(
-                op=TransactionOp.REMOVE_NODE,
-                node_id=node_id,
-            ))
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.REMOVE_NODE,
+                    node_id=node_id,
+                )
+            )
         for edge_data in self.add_edges:
-            ops.append(TransactionOperation(
-                op=TransactionOp.ADD_EDGE,
-                edge_id=edge_data.get("id"),
-                edge_data=edge_data,
-            ))
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.ADD_EDGE,
+                    edge_id=edge_data.get("id"),
+                    edge_data=edge_data,
+                )
+            )
         for edge_id in self.remove_edge_ids:
-            ops.append(TransactionOperation(
-                op=TransactionOp.REMOVE_EDGE,
-                edge_id=edge_id,
-            ))
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.REMOVE_EDGE,
+                    edge_id=edge_id,
+                )
+            )
         return ops

@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from hbllm.hcir.graph import NodeLifecycle, ProcedureNode, SkillNode
+from hbllm.hcir.graph import NodeLifecycle, SkillNode
 from hbllm.hcir.receipt import ExecutionReceipt
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope
@@ -134,7 +134,11 @@ class LearningLoopEngine:
         outcome = self.evaluate_receipt(receipt, user_reward=user_reward)
 
         if not outcome.should_extract_skill:
-            logger.debug("Receipt %s utility score %.2f insufficient for skill extraction", receipt.execution_id, outcome.utility_score)
+            logger.debug(
+                "Receipt %s utility score %.2f insufficient for skill extraction",
+                receipt.execution_id,
+                outcome.utility_score,
+            )
             return None
 
         skill_node = self._skill_compiler.compile_receipt_to_skill(

@@ -15,10 +15,8 @@ resource budgets, and simulation branches.  It does NOT own persistence
 
 from __future__ import annotations
 
-import copy
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
@@ -143,9 +141,7 @@ class HCIRWorkspaceState:
         existing = self._graph.get_node(node.id)
         self._graph.upsert_node(node)
         if existing:
-            self._snapshot_manager.record_node_modified(
-                node.id, {"replaced": True}, author
-            )
+            self._snapshot_manager.record_node_modified(node.id, {"replaced": True}, author)
         else:
             self._snapshot_manager.record_node_added(node, author)
 
@@ -221,20 +217,43 @@ class HCIRWorkspaceState:
         forked._global_attention = self._global_attention.model_copy(deep=True)
         forked._resources = {
             k: ResourceBudget(
-                name=v.name, allocated=v.allocated,
-                consumed=v.consumed, limit=v.limit, is_hard=v.is_hard,
+                name=v.name,
+                allocated=v.allocated,
+                consumed=v.consumed,
+                limit=v.limit,
+                is_hard=v.is_hard,
             )
             for k, v in self._resources.items()
         }
 
         self._branches[branch_name] = forked
-        logger.info("Forked workspace branch '%s' (nodes=%d, edges=%d)",
-                     branch_name, forked._graph.node_count, forked._graph.edge_count)
+        logger.info(
+            "Forked workspace branch '%s' (nodes=%d, edges=%d)",
+            branch_name,
+            forked._graph.node_count,
+            forked._graph.edge_count,
+        )
         return forked
 
     def get_branch(self, branch_name: str) -> HCIRWorkspaceState | None:
         """Get a forked branch workspace."""
         return self._branches.get(branch_name)
+
+    def fork_branch(self, branch_name: str) -> HCIRWorkspaceState:
+        """Convenience alias for fork()."""
+        return self.fork(branch_name)
+
+    def merge_branch(self, branch_name: str) -> bool:
+        """Merge a forked branch into the main workspace state."""
+        branch_ws = self._branches.pop(branch_name, None)
+        if branch_ws is None:
+            return False
+        # Copy newly created nodes/edges from branch to main workspace
+        for node in branch_ws._graph.all_nodes():
+            self.upsert_node(node)
+        for edge in branch_ws._graph.all_edges():
+            self.add_edge(edge)
+        return True
 
     def drop_branch(self, branch_name: str) -> bool:
         """Discard a simulation branch without merging."""
@@ -250,7 +269,8 @@ class HCIRWorkspaceState:
         """Return all goal nodes in non-terminal lifecycle states."""
         goals = self._graph.nodes_by_type(HCIRNodeType.GOAL)
         return [
-            g for g in goals
+            g
+            for g in goals
             if isinstance(g, GoalNode)
             and g.lifecycle not in (NodeLifecycle.ARCHIVED, NodeLifecycle.FORGOTTEN)
         ]

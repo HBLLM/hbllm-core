@@ -1,25 +1,18 @@
 """Unit tests for HCIR Runtime Intelligence: Context, Sandboxing, LLM Compiler, and Learning Loop."""
 
-import pytest
-
 from hbllm.hcir.abi import ExecutionMetrics
 from hbllm.hcir.compiler import IntentType
-from hbllm.hcir.compiler_llm import LLMCompilerFrontend, StructuredIntentPayload
+from hbllm.hcir.compiler_llm import LLMCompilerFrontend
 from hbllm.hcir.context import HCIRExecutionContext
-from hbllm.hcir.identity import HCIRObjectID
 from hbllm.hcir.kernel.capability_sandboxing import (
     CapabilityPermissions,
-    CapabilityResourceLimits,
     CapabilitySandboxManager,
-    IsolationMode,
     SandboxedCapabilityPolicy,
     TrustLevel,
 )
-from hbllm.hcir.learning_loop import LearningLoopEngine, SkillCompiler
+from hbllm.hcir.learning_loop import LearningLoopEngine
 from hbllm.hcir.receipt import ExecutionReceipt
-from hbllm.hcir.types import Scope
 from hbllm.hcir.workspace import HCIRWorkspaceState
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # HCIRExecutionContext Tests

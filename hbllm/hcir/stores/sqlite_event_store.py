@@ -225,13 +225,15 @@ class SQLiteEventStore(IEventStore):
 
         events = []
         for row in cursor:
-            events.append(GraphEvent(
-                sequence=row["sequence"],
-                event_type=row["event_type"],
-                timestamp=row["timestamp"],
-                author=row["author"],
-                data=json.loads(row["data_json"]),
-            ))
+            events.append(
+                GraphEvent(
+                    sequence=row["sequence"],
+                    event_type=row["event_type"],
+                    timestamp=row["timestamp"],
+                    author=row["author"],
+                    data=json.loads(row["data_json"]),
+                )
+            )
         return events
 
     def latest_sequence(self) -> int:
@@ -270,9 +272,7 @@ class SQLiteEventStore(IEventStore):
 
     def get_latest_snapshot_version(self) -> int:
         """Return the latest snapshot version, or 0 if none."""
-        row = self._conn.execute(
-            "SELECT MAX(version) as v FROM hcir_snapshots"
-        ).fetchone()
+        row = self._conn.execute("SELECT MAX(version) as v FROM hcir_snapshots").fetchone()
         return row["v"] if row and row["v"] is not None else 0
 
     # ── Node/Edge Index (materialized cache) ─────────────────────────
@@ -296,8 +296,13 @@ class SQLiteEventStore(IEventStore):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                node_id, node_type, category, tenant_id, lifecycle,
-                now, now,
+                node_id,
+                node_type,
+                category,
+                tenant_id,
+                lifecycle,
+                now,
+                now,
                 json.dumps(data or {}, default=str),
             ),
         )
@@ -325,8 +330,11 @@ class SQLiteEventStore(IEventStore):
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                edge_id, edge_type, tenant_id,
-                json.dumps(sources), json.dumps(targets),
+                edge_id,
+                edge_type,
+                tenant_id,
+                json.dumps(sources),
+                json.dumps(targets),
                 time.time(),
                 json.dumps(data or {}, default=str),
             ),
@@ -351,19 +359,21 @@ class SQLiteEventStore(IEventStore):
         prev_hash = ""
         for row in cursor:
             expected = _compute_event_hash(
-                row["sequence"], row["event_type"],
-                row["data_json"], row["previous_hash"],
+                row["sequence"],
+                row["event_type"],
+                row["data_json"],
+                row["previous_hash"],
             )
             if expected != row["content_hash"]:
                 logger.error(
                     "Hash chain broken at sequence %d: expected %s, got %s",
-                    row["sequence"], expected, row["content_hash"],
+                    row["sequence"],
+                    expected,
+                    row["content_hash"],
                 )
                 return False
             if row["previous_hash"] != prev_hash:
-                logger.error(
-                    "Previous hash mismatch at sequence %d", row["sequence"]
-                )
+                logger.error("Previous hash mismatch at sequence %d", row["sequence"])
                 return False
             prev_hash = row["content_hash"]
         return True

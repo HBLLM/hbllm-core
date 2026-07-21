@@ -3,9 +3,9 @@
 import pytest
 
 from hbllm.hcir.graph import (
-    GoalNode,
     BeliefNode,
     FactNode,
+    GoalNode,
     HCIREdge,
     HCIREdgeType,
     HCIRNodeType,
@@ -58,7 +58,9 @@ class TestWorkspaceEventLogging:
         ws = HCIRWorkspaceState()
         ws.add_node(GoalNode(id="g1", description="a"))
         ws.add_node(FactNode(id="f1", claim="b"))
-        ws.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["f1"], targets=["g1"]))
+        ws.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["f1"], targets=["g1"])
+        )
         ws.remove_node("g1")
         # Should have: snapshot_created(bootstrap) + node_added + node_added + edge_added + node_removed
         events = ws.event_store.get_events()
