@@ -100,6 +100,14 @@ class TransactionManager:
         return len(self._committed_log)
 
     @property
+    def committed_log(self) -> list[HCIRTransaction]:
+        return list(self._committed_log)
+
+    @property
+    def rejected_log(self) -> list[HCIRTransaction]:
+        return list(self._rejected_log)
+
+    @property
     def rejected_count(self) -> int:
         return len(self._rejected_log)
 

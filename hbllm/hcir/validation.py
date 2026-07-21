@@ -90,7 +90,48 @@ class GraphValidator:
         self._check_lifecycle_consistency(graph, report)
         self._check_scope_isolation(graph, report)
         self._check_dependency_cycles(graph, report)
+        self._check_truth_utility_separation(graph, report)
         return report
+
+    def _check_truth_utility_separation(
+        self, graph: CognitiveGraph, report: ValidationReport
+    ) -> None:
+        """Enforce strict separation between Truth graph and Decision graph.
+
+        Truth graph nodes (BeliefNode, FactNode, ObservationNode) cannot
+        be directly targeted by ValueNode/UtilityNode via CAUSES or DERIVED_FROM edges.
+        This prevents goal bias from corrupting factual knowledge.
+        """
+        truth_types = {HCIRNodeType.BELIEF, HCIRNodeType.FACT, HCIRNodeType.OBSERVATION}
+        decision_types = {HCIRNodeType.VALUE, HCIRNodeType.GOAL}
+
+        for edge in graph.all_edges():
+            if edge.edge_type in (HCIREdgeType.CAUSES, HCIREdgeType.DERIVED_FROM):
+                # Check if sources contain decision nodes and targets contain truth nodes
+                has_decision_src = False
+                has_truth_tgt = False
+
+                for src_id in edge.sources:
+                    node = graph.get_node(src_id)
+                    if node and node.node_type in decision_types:
+                        has_decision_src = True
+
+                for tgt_id in edge.targets:
+                    node = graph.get_node(tgt_id)
+                    if node and node.node_type in truth_types:
+                        has_truth_tgt = True
+
+                if has_decision_src and has_truth_tgt:
+                    report.add(ValidationIssue(
+                        severity=ValidationSeverity.ERROR,
+                        code="TRUTH_UTILITY_CORRUPTION",
+                        message=(
+                            f"Edge '{edge.id}' allows Decision/Value node to directly "
+                            f"drive Truth node via {edge.edge_type}."
+                        ),
+                        edge_id=edge.id,
+                    ))
+
 
     def _check_dangling_edges(
         self, graph: CognitiveGraph, report: ValidationReport

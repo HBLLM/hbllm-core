@@ -391,3 +391,53 @@ class HCIRInterpreter:
                 tokens_consumed=total_tokens,
             ),
         )
+
+    async def execute_with_receipt(
+        self,
+        stream: InstructionStream,
+        process_id: str = "",
+        thread_id: str = "",
+    ) -> tuple[ExecutionResult, Any]:
+        """Execute an instruction stream and return an ExecutionReceipt.
+
+        Returns:
+            (ExecutionResult, ExecutionReceipt)
+        """
+        from hbllm.hcir.receipt import ExecutionReceipt, VerificationStageSummary
+
+        input_ver = self._workspace.snapshot_manager.current_version
+        committed_before = len(self._services.transaction_manager.committed_log)
+
+        res = await self.execute(stream)
+
+        committed_after = self._services.transaction_manager.committed_log[committed_before:]
+        tx_committed_ids = [tx.id for tx in committed_after]
+
+        rejected_txs = [
+            {"id": tx.id, "reason": getattr(tx, "error_message", "rejected")}
+            for tx in getattr(self._services.transaction_manager, "_rejected_log", [])
+        ]
+
+        capabilities_used = []
+        for ins in stream.instructions:
+            if ins.opcode.value == "EXECUTE" and "capability" in ins.params:
+                capabilities_used.append(ins.params["capability"])
+
+        receipt = ExecutionReceipt(
+            process_id=process_id,
+            thread_id=thread_id,
+            author=stream.author,
+            instruction_stream_hash=stream.compute_hash(),
+            input_snapshot_version=input_ver,
+            final_snapshot_version=self._workspace.snapshot_manager.current_version,
+            transactions_committed=tx_committed_ids,
+            transactions_rejected=rejected_txs,
+            capabilities_used=capabilities_used,
+            metrics=res.metrics,
+            outputs={"results": res.events[0].get("results", [])} if res.events else {},
+            success=res.success,
+            error=res.error,
+        )
+
+        return res, receipt
+
