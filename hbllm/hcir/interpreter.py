@@ -250,7 +250,7 @@ async def sys_fork(
     """
     branch_name = ins.params.get("branch_name", "simulation")
     try:
-        forked = workspace.fork(branch_name)
+        workspace.fork(branch_name)
         workspace.snapshot_manager.record_kernel_event(
             EventType.SIMULATION_STARTED,
             {"branch": branch_name},
