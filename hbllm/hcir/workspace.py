@@ -88,12 +88,14 @@ class HCIRWorkspaceState:
         self,
         event_store: IEventStore | None = None,
         branch_mode: BranchMode = BranchMode.LIVE,
+        branch_name: str = "main",
     ) -> None:
         self._graph = CognitiveGraph()
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
         self._query_engine = InMemoryQueryEngine(self._graph)
         self._branch_mode = branch_mode
+        self._branch_name = branch_name
 
         # Runtime context
         self._global_attention = Attention()
@@ -106,6 +108,10 @@ class HCIRWorkspaceState:
         self._snapshot_manager.create_snapshot(self._graph)
 
     # ── Properties ───────────────────────────────────────────────────
+
+    @property
+    def branch_name(self) -> str:
+        return self._branch_name
 
     @property
     def branch_mode(self) -> BranchMode:
@@ -219,7 +225,7 @@ class HCIRWorkspaceState:
             raise ValueError(f"Branch '{branch_name}' already exists")
 
         # Deep copy the graph and create a new workspace with specified branch mode
-        forked = HCIRWorkspaceState(branch_mode=mode)
+        forked = HCIRWorkspaceState(branch_mode=mode, branch_name=branch_name)
         for node in self._graph.all_nodes():
             forked._graph.add_node(node.model_copy(deep=True))
         for edge in self._graph.all_edges():
