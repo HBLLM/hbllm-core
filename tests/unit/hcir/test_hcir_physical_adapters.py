@@ -1,6 +1,5 @@
 """Unit tests for Physical & Sensor Capability Adapters."""
 
-
 from hbllm.hcir.adapters.actuator_adapter import ActuatorCapabilityAdapter, ActuatorCommand
 from hbllm.hcir.adapters.sensor_adapter import SensorCapabilityAdapter, SensorReading
 from hbllm.hcir.adapters.telemetry_adapter import TelemetryStreamAdapter
@@ -92,7 +91,9 @@ class TestActuatorCapabilityAdapter:
 
         adapter.register_hardware_handler("relay_01", handle_relay)
 
-        cmd = ActuatorCommand(actuator_id="relay_01", command_name="turn_on", parameters={"voltage": 12})
+        cmd = ActuatorCommand(
+            actuator_id="relay_01", command_name="turn_on", parameters={"voltage": 12}
+        )
         success = adapter.dispatch_command_sync(cmd, ws)
 
         assert success is True
@@ -115,15 +116,19 @@ class TestTelemetryStreamAdapter:
             scheduler=CognitiveScheduler(),
         )
 
-        adapter = TelemetryStreamAdapter(services, environment_name="Greenhouse_Alpha", window_size=3)
+        adapter = TelemetryStreamAdapter(
+            services, environment_name="Greenhouse_Alpha", window_size=3
+        )
 
         for val in [20.0, 22.0, 24.0]:
-            adapter.push_reading(SensorReading(
-                sensor_id="s1",
-                sensor_type="temp",
-                variable_name="temperature",
-                value=val,
-            ))
+            adapter.push_reading(
+                SensorReading(
+                    sensor_id="s1",
+                    sensor_type="temp",
+                    variable_name="temperature",
+                    value=val,
+                )
+            )
 
         # Window automatically flushes when size 3 is reached
         env_node = ws.get_node("env_state_Greenhouse_Alpha")

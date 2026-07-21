@@ -1,6 +1,5 @@
 """Unit tests for BranchModeVerifier, Cognitive Breakpoints, Consensus Engine, and Attention Graph."""
 
-
 from hbllm.hcir.bytecode import Instruction, Opcode
 from hbllm.hcir.graph import BeliefNode, GoalNode, PredictionErrorNode
 from hbllm.hcir.kernel.attention_graph import AttentionManager
@@ -87,9 +86,11 @@ class TestAttentionManager:
     def test_recompute_attention_allocates_goals_and_surprise(self):
         ws = HCIRWorkspaceState()
         ws.add_node(GoalNode(id="g1", description="Yield optimization", priority=0.9))
-        ws.add_node(PredictionErrorNode(
-            id="pe1", prediction_id="pred1", error_magnitude=0.8, suspected_cause="sensor_drift"
-        ))
+        ws.add_node(
+            PredictionErrorNode(
+                id="pe1", prediction_id="pred1", error_magnitude=0.8, suspected_cause="sensor_drift"
+            )
+        )
 
         attn_mgr = AttentionManager(ws)
         attn_graph = attn_mgr.recompute_attention()

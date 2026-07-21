@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 
+from hbllm.hcir.adapters.memory_consistency import MemoryConsistencyChecker
 from hbllm.hcir.graph import (
     BeliefNode,
     ConceptNode,
@@ -35,23 +36,14 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryAdapter:
-    """Bidirectional adapter between HBLLM memory systems and HCIR graph.
+    """Bidirectional adapter between HBLLM memory systems and HCIR graph."""
 
-    Provides import methods for each memory type.  Imported entities
-    become first-class graph nodes with full HCIR semantics (uncertainty,
-    attention, provenance, scope).
+    def __init__(self, consistency_checker: MemoryConsistencyChecker | None = None) -> None:
+        self._consistency_checker = consistency_checker or MemoryConsistencyChecker()
 
-    Usage::
-
-        adapter = MemoryAdapter()
-        adapter.import_episode(
-            workspace=ws,
-            session_id="session_42",
-            summary="User asked about solar dehydrators",
-            outcome="Provided design specifications",
-            reward=0.8,
-        )
-    """
+    @property
+    def consistency_checker(self) -> MemoryConsistencyChecker:
+        return self._consistency_checker
 
     def import_episode(
         self,
@@ -75,6 +67,7 @@ class MemoryAdapter:
             tags=["episodic", "imported"],
         )
         workspace.upsert_node(node, author=author)
+        self._consistency_checker.record_migration(f"ep_{session_id}", node.id, summary)
         logger.debug("Imported episode: %s", node.id)
         return node
 

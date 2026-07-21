@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
+from hbllm.hcir.kernel.runtime_state import RuntimeState
 from hbllm.hcir.kernel.scheduler import CognitiveScheduler
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.stores import IEventStore
@@ -41,6 +43,8 @@ class KernelServices:
     capability_resolver: CapabilityResolver
     scheduler: CognitiveScheduler
     event_store: IEventStore | None = None
+    governance: GovernanceEngine | None = None
+    runtime_state: RuntimeState | None = None
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)

@@ -89,7 +89,11 @@ class ExecutiveController:
 
         # Phase 4 & 5: SIMULATE & DECIDE — Evaluate candidate actions via counterfactual simulation
         active_goals = self._workspace.active_goals()
-        primary_goal = active_goals[0] if active_goals else GoalNode(id="goal_default", description="Maintain baseline stability")
+        primary_goal = (
+            active_goals[0]
+            if active_goals
+            else GoalNode(id="goal_default", description="Maintain baseline stability")
+        )
 
         selected_action_id = None
         if candidate_actions:
@@ -97,10 +101,12 @@ class ExecutiveController:
             selected_action_id = decision.action.id
 
         # Phase 6: EXECUTE — Compile & run instruction stream via VM Interpreter
-        stream = InstructionStream(instructions=[
-            Instruction(opcode=Opcode.QUERY, params={"node_type": "goal"}),
-            Instruction(opcode=Opcode.ASSERT, params={"condition": "system_healthy"}),
-        ])
+        stream = InstructionStream(
+            instructions=[
+                Instruction(opcode=Opcode.QUERY, params={"node_type": "goal"}),
+                Instruction(opcode=Opcode.ASSERT, params={"condition": "system_healthy"}),
+            ]
+        )
         exec_res, receipt = await self._interpreter.execute_with_receipt(
             stream, process_id=process_id, thread_id=f"thr_cycle_{self._cycle_count}"
         )
