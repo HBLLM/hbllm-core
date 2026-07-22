@@ -200,9 +200,9 @@ class KnowledgeBase:
                 else:
                     self._memory = SemanticMemory()
                 logger.info("Knowledge base vector store initialized (%d docs)", self._memory.count)
-            except ImportError:
-                logger.warning("HBLLM SemanticMemory not available, using stub")
-                self._memory = _StubMemory()
+            except Exception:
+                logger.warning("HBLLM SemanticMemory not available, using fallback keyword memory")
+                self._memory = _FallbackKeywordMemory()
         return self._memory
 
     # ── Source Management ────────────────────────────────────────────────────
@@ -684,11 +684,11 @@ class KnowledgeBase:
             logger.warning("Failed to save vectors: %s", e)
 
 
-# ── Stub Memory (when HBLLM SemanticMemory is not available) ─────────────────
+# ── Fallback Keyword Memory (when vector SemanticMemory is absent) ───────────
 
 
-class _StubMemory:
-    """Minimal stub when SemanticMemory is not importable."""
+class _FallbackKeywordMemory:
+    """Lightweight in-memory keyword search fallback when heavy vector extensions are not installed."""
 
     def __init__(self):
         self.count = 0
