@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from hbllm.core.constants import SKIP_DIRS
@@ -43,8 +44,8 @@ class StructuralResult:
         self.relations.extend(other.relations)
 
 
-class BaseExtractor:
-    """Base class for format-specific structural extractors."""
+class BaseExtractor(ABC):
+    """Abstract base class for all file and structure extractors."""
 
     def __init__(self, root_path: str):
         self.root_path = os.path.abspath(root_path)
@@ -57,9 +58,10 @@ class BaseExtractor:
             rel = os.path.basename(file_path)
         return rel.replace("\\", "/")
 
+    @abstractmethod
     def extract(self, file_path: str) -> StructuralResult:
         """Extract entities and relations from a specific file path."""
-        raise NotImplementedError
+        pass
 
 
 class FolderExtractor:

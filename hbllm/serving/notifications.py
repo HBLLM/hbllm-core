@@ -80,12 +80,16 @@ class Notification:
 # ── Delivery backends ────────────────────────────────────────────────────────
 
 
-class DeliveryBackend:
+from abc import ABC, abstractmethod
+
+
+class DeliveryBackend(ABC):
     """Base class for notification delivery backends."""
 
+    @abstractmethod
     async def deliver(self, notification: Notification) -> bool:
         """Deliver a notification. Returns True on success."""
-        raise NotImplementedError
+        pass
 
 
 class InMemoryBackend(DeliveryBackend):

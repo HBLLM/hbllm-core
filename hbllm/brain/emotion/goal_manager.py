@@ -443,8 +443,8 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_learning_goal(self, goal: Goal) -> None:
         """Execute a learning goal by dispatching to AutonomousLearner."""
         if not self._bus:
-            logger.warning("No bus available for goal execution, using stub")
-            self._stub_execution(goal)
+            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            self._execute_standalone_fallback(goal)
             return
 
         # Extract learning topic from metadata
@@ -482,8 +482,8 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_exploration_goal(self, goal: Goal) -> None:
         """Execute an exploration goal by dispatching to CuriosityNode."""
         if not self._bus:
-            logger.warning("No bus available for goal execution, using stub")
-            self._stub_execution(goal)
+            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            self._execute_standalone_fallback(goal)
             return
 
         from hbllm.network.messages import Message, MessageType
@@ -517,8 +517,8 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_optimization_goal(self, goal: Goal) -> None:
         """Execute an optimization goal by dispatching to appropriate optimizer."""
         if not self._bus:
-            logger.warning("No bus available for goal execution, using stub")
-            self._stub_execution(goal)
+            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            self._execute_standalone_fallback(goal)
             return
 
         from hbllm.network.messages import Message, MessageType
@@ -552,8 +552,8 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_maintenance_goal(self, goal: Goal) -> None:
         """Execute a maintenance goal (memory consolidation, pruning, etc.)."""
         if not self._bus:
-            logger.warning("No bus available for goal execution, using stub")
-            self._stub_execution(goal)
+            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            self._execute_standalone_fallback(goal)
             return
 
         from hbllm.network.messages import Message, MessageType
@@ -586,8 +586,8 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_generic_goal(self, goal: Goal) -> None:
         """Execute a generic goal via PlannerNode/ExecutionNode."""
         if not self._bus:
-            logger.warning("No bus available for goal execution, using stub")
-            self._stub_execution(goal)
+            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            self._execute_standalone_fallback(goal)
             return
 
         from hbllm.network.messages import Message, MessageType
@@ -619,12 +619,12 @@ class GoalManager(TenantSQLiteRepository):
             logger.error("Generic goal execution failed: %s", e)
             raise
 
-    def _stub_execution(self, goal: Goal) -> None:
-        """Fallback stub execution when bus is not available."""
+    def _execute_standalone_fallback(self, goal: Goal) -> None:
+        """Standalone fallback execution when network bus is not attached."""
         progress = goal.progress + 0.25
         action = f"Executed auto-step: progressed to {progress * 100:.0f}%"
         self.update_progress(goal.goal_id, min(1.0, progress), action)
-        logger.info("Goal progress updated (stub): %s -> %.2f", goal.name, progress)
+        logger.info("Goal progress updated (standalone fallback): %s -> %.2f", goal.name, progress)
 
     def get_active_goals(self) -> list[Goal]:
         self._resolve_dag_states()

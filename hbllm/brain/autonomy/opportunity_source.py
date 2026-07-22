@@ -8,18 +8,20 @@ from __future__ import annotations
 
 import time
 import uuid
+from abc import ABC, abstractmethod
 from typing import Any
 
 from hbllm.brain.autonomy.opportunity import Opportunity
 from hbllm.brain.autonomy.presence_state import PresenceState
 
 
-class OpportunitySource:
+class OpportunitySource(ABC):
     """Base interface for proactive opportunity detection sources."""
 
     def __init__(self, source_name: str) -> None:
         self.source_name = source_name
 
+    @abstractmethod
     def detect(self, presence_state: PresenceState, cognitive_state: Any) -> list[Opportunity]:
         """Scan state to identify potential proactive opportunities.
 
@@ -30,7 +32,7 @@ class OpportunitySource:
         Returns:
             A list of candidate Opportunity objects.
         """
-        raise NotImplementedError
+        pass
 
 
 class SilenceSource(OpportunitySource):
