@@ -88,6 +88,11 @@ class WorkspaceNode(Node, IWorkspace):
         # Max concurrent blackboards to prevent unbounded memory growth
         self._max_concurrent_boards = max_concurrent_boards
 
+        # Native HCIR Workspace State container
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+
+        self.hcir_workspace = HCIRWorkspaceState()
+
     @property
     def max_board_age(self) -> float:
         return self._max_board_age
@@ -223,6 +228,21 @@ class WorkspaceNode(Node, IWorkspace):
 
         self.blackboards[correlation_id] = episode
 
+        # Sync GoalNode into HCIR hypergraph
+        try:
+            from hbllm.hcir.graph import GoalNode, Provenance, Scope
+
+            goal_node = GoalNode(
+                id=f"goal_{correlation_id}",
+                description=str(payload.get("text", ""))[:200],
+                priority=1.0 if is_fast_path else 0.5,
+                provenance=Provenance(created_by=message.source_node_id or "user"),
+                scope=Scope(tenant_id=message.tenant_id or "default"),
+            )
+            self.hcir_workspace.upsert_node(goal_node)
+        except Exception as _ex:
+            logger.debug("Failed to sync GoalNode to HCIR workspace: %s", _ex)
+
         if is_fast_path:
             logger.info(
                 "Workspace fast-path mode: deadline=%.1fs for '%s...'",
@@ -323,6 +343,31 @@ class WorkspaceNode(Node, IWorkspace):
                 "content": proposal.get("content"),
             }
         )
+
+        # Sync thought into HCIR hypergraph as FactNode or BeliefNode
+        try:
+            from hbllm.hcir.graph import BeliefNode, FactNode, Provenance, Scope
+
+            content_str = str(proposal.get("content", ""))[:200]
+            if thought_type == "symbolic_logic":
+                node_item = FactNode(
+                    id=f"fact_{message.id}",
+                    statement=content_str,
+                    certainty=confidence,
+                    provenance=Provenance(created_by=message.source_node_id),
+                    scope=Scope(tenant_id=message.tenant_id or "default"),
+                )
+            else:
+                node_item = BeliefNode(
+                    id=f"belief_{message.id}",
+                    statement=content_str,
+                    epistemic_confidence=confidence,
+                    provenance=Provenance(created_by=message.source_node_id),
+                    scope=Scope(tenant_id=message.tenant_id or "default"),
+                )
+            self.hcir_workspace.upsert_node(node_item)
+        except Exception as _ex:
+            logger.debug("Failed to sync thought node to HCIR workspace: %s", _ex)
 
         # Phase 9: The Internal Monologue Loop
         if thought_type == "symbolic_logic" and confidence == 1.0:

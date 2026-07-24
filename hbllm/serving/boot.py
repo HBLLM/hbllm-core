@@ -105,6 +105,8 @@ class BootContext:
     identity: Any = None  # IdentityStateManager
     workspace_manager: Any = None  # WorkspaceManager
     autonomy: Any = None  # AutonomyCore
+    kernel_services: Any = None  # HCIR KernelServices
+    executive_runtime: Any = None  # HCIR ExecutiveRuntime
     boot_time_ms: float = 0.0
 
 
@@ -187,6 +189,45 @@ class BootOrchestrator:
             )
 
         logger.info("Brain created with %d nodes", len(ctx.brain.nodes))
+
+        # ── 2.5 Initialize HCIR Kernel & Executive Runtime ───────────
+        try:
+            from hbllm.hcir.adapters.node_adapter import NodeAdapter
+            from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+            from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
+            from hbllm.hcir.kernel.scheduler import CognitiveScheduler as HCIRScheduler
+            from hbllm.hcir.kernel.services import KernelServices
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            hcir_ws = (
+                ctx.brain.workspace_node.hcir_workspace
+                if hasattr(ctx.brain, "workspace_node") and ctx.brain.workspace_node
+                else HCIRWorkspaceState()
+            )
+            tx_mgr = TransactionManager(hcir_ws)
+            resolver = CapabilityResolver()
+            hcir_sched = HCIRScheduler()
+
+            ctx.kernel_services = KernelServices(
+                workspace=hcir_ws,
+                transaction_manager=tx_mgr,
+                capability_resolver=resolver,
+                scheduler=hcir_sched,
+            )
+            ctx.executive_runtime = ExecutiveRuntime(ctx.kernel_services)
+            await ctx.executive_runtime.start()
+
+            # Export brain nodes capabilities to HCIR workspace
+            if hasattr(ctx.brain, "nodes"):
+                for node_obj in ctx.brain.nodes.values():
+                    adapter = NodeAdapter(node_obj)
+                    for cap_node in adapter.export_capabilities(tenant_id="default"):
+                        hcir_ws.upsert_node(cap_node)
+
+            logger.info("HCIR Kernel & Executive Runtime online (Native Cognitive ISA)")
+        except Exception as _ex:
+            logger.warning("HCIR Kernel initialization warning: %s", _ex)
 
         # ── 3. Initialize Gateway ────────────────────────────────────
         if cfg.enable_gateway:
@@ -300,6 +341,10 @@ class BootOrchestrator:
         # Stop autonomy
         if ctx.autonomy:
             await ctx.autonomy.stop()
+
+        # Stop executive runtime
+        if ctx.executive_runtime:
+            await ctx.executive_runtime.stop()
 
         # Shutdown brain
         if ctx.brain:
