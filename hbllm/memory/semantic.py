@@ -327,7 +327,20 @@ class SemanticMemory(MemoryRepository):
         if not self._vector_list:
             return None
         if self._vectors_dirty:
-            self._vectors_cache = np.vstack(self._vector_list)
+            try:
+                self._vectors_cache = np.vstack(self._vector_list)
+            except ValueError:
+                all_texts = [
+                    self.documents[doc_id]["content"]
+                    for doc_id in self.ids
+                    if doc_id in self.documents
+                ]
+                if all_texts:
+                    all_dense = self._encode(all_texts)
+                    self._vector_list = [all_dense[i : i + 1] for i in range(len(all_dense))]
+                    self._vectors_cache = np.vstack(self._vector_list)
+                else:
+                    return None
             self._norms_cache = None  # Invalidate norms cache
             self._vectors_dirty = False
         return self._vectors_cache
@@ -339,7 +352,20 @@ class SemanticMemory(MemoryRepository):
         if not self._sparse_list:
             return None
         if self._sparse_dirty:
-            self._sparse_cache = np.vstack(self._sparse_list)
+            try:
+                self._sparse_cache = np.vstack(self._sparse_list)
+            except ValueError:
+                all_texts = [
+                    self.documents[doc_id]["content"]
+                    for doc_id in self.ids
+                    if doc_id in self.documents
+                ]
+                if all_texts:
+                    all_sparse = self._tfidf.encode(all_texts)
+                    self._sparse_list = [all_sparse[i : i + 1] for i in range(len(all_sparse))]
+                    self._sparse_cache = np.vstack(self._sparse_list)
+                else:
+                    return None
             self._sparse_dirty = False
         return self._sparse_cache
 

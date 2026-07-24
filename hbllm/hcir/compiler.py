@@ -161,7 +161,9 @@ class HCIRCompiler:
         text_lower = text.lower().strip()
 
         # Heuristic intent parser
-        if any(w in text_lower for w in ["find why", "investigate", "analyze", "why did", "diagnose"]):
+        if any(
+            w in text_lower for w in ["find why", "investigate", "analyze", "why did", "diagnose"]
+        ):
             intent = IntentType.INVESTIGATE
         elif any(w in text_lower for w in ["plan", "how to", "design", "steps for"]):
             intent = IntentType.PLAN

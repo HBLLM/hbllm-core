@@ -66,11 +66,19 @@ class GatewayConfig:
         session_max_history: int = 200,
         enable_session_persistence: bool = True,
         max_concurrent_sessions: int = 1000,
+        max_sessions: int | None = None,
     ) -> None:
         self.session_idle_timeout_s = session_idle_timeout_s
         self.session_max_history = session_max_history
         self.enable_session_persistence = enable_session_persistence
+        if max_sessions is not None:
+            max_concurrent_sessions = max_sessions
         self.max_concurrent_sessions = max_concurrent_sessions
+
+    @property
+    def max_sessions(self) -> int:
+        """Alias for max_concurrent_sessions."""
+        return self.max_concurrent_sessions
 
 
 # ═══════════════════════════════════════════════════════════════════════════

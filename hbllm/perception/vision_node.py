@@ -140,9 +140,14 @@ class VisionNode(Node):
             return message.create_error(f"Vision failure: {e}")
 
     def _get_image_bytes(self, path_or_hex: str) -> bytes:
-        if len(path_or_hex) > 512:  # Likely hex
+        import os
+
+        if os.path.exists(path_or_hex):
+            with open(path_or_hex, "rb") as f:
+                return f.read()
+        try:
             return bytes.fromhex(path_or_hex)
-        else:
+        except ValueError:
             with open(path_or_hex, "rb") as f:
                 return f.read()
 
@@ -155,17 +160,17 @@ class VisionNode(Node):
                 logger.error("Rust captioning failed: %s. Falling back...", e)
 
         import io
+        import os
 
         from PIL import Image  # type: ignore
 
         # Handle hex encoded data or path
         try:
-            if len(path_or_hex) > 512:  # Likely hex
-                image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex))).convert("RGB")
-            else:
+            if os.path.exists(path_or_hex):
                 image = Image.open(path_or_hex).convert("RGB")
-        except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError):
-            # Fallback to path
+            else:
+                image = Image.open(io.BytesIO(bytes.fromhex(path_or_hex))).convert("RGB")
+        except Exception:
             image = Image.open(path_or_hex).convert("RGB")
 
         if self.pipeline:

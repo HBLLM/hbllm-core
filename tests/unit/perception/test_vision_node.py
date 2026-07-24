@@ -30,8 +30,11 @@ skip_no_rust = pytest.mark.skipif(
 
 
 def make_test_image(color: tuple[int, int, int] = (100, 100, 100)) -> str:
-    """Helper to generate a solid color test image in hex format."""
-    img = Image.new("RGB", (64, 64), color)
+    """Helper to generate a patterned test image in hex format."""
+    img = Image.new("RGB", (64, 64), (0, 0, 0))
+    for y in range(32):
+        for x in range(64):
+            img.putpixel((x, y), color)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue().hex()
@@ -65,7 +68,7 @@ async def test_vision_node_rust_caching_and_embedding() -> None:
     )
     res1 = await node.handle_message(msg1)
     assert res1 is not None
-    assert res1.error is False
+    assert res1.type != MessageType.ERROR
     assert res1.payload["cached"] is False
     assert len(res1.payload["embedding"]) == 768
 

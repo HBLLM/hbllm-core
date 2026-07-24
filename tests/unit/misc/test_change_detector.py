@@ -16,7 +16,10 @@ def make_test_image(
     color: tuple[int, int, int] = (255, 0, 0), size: tuple[int, int] = (64, 64)
 ) -> bytes:
     """Helper to generate PNG image bytes."""
-    img = Image.new("RGB", size, color)
+    img = Image.new("RGB", size, (0, 0, 0))
+    for y in range(size[1] // 2):
+        for x in range(size[0]):
+            img.putpixel((x, y), color)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

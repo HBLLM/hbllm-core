@@ -87,7 +87,7 @@ def restore_tenant_context(message: Message) -> Generator[None, None, None]:
             response = await handler(message)
             # get_current_tenant() == message.tenant_id here
     """
-    tenant_id = message.tenant_id if message.tenant_id != "default" else None
+    tenant_id = message.tenant_id if message.tenant_id else None
     user_id = message.user_id if message.user_id != "default" else None
     device_id = message.device_id if message.device_id != "default" else None
 
