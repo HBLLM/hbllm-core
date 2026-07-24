@@ -29,6 +29,7 @@ class MessageType(StrEnum):
     ROUTE_DECISION = "route_decision"
 
     # Task planning
+    TASK = "task"
     TASK_DECOMPOSE = "task_decompose"
     TASK_ASSIGNMENT = "task_assignment"
     TASK_RESULT = "task_result"
