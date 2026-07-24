@@ -443,7 +443,10 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_learning_goal(self, goal: Goal) -> None:
         """Execute a learning goal by dispatching to AutonomousLearner."""
         if not self._bus:
-            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            logger.info(
+                "No network bus available for goal execution, running standalone fallback: %s",
+                goal.name,
+            )
             self._execute_standalone_fallback(goal)
             return
 
@@ -482,7 +485,10 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_exploration_goal(self, goal: Goal) -> None:
         """Execute an exploration goal by dispatching to CuriosityNode."""
         if not self._bus:
-            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            logger.info(
+                "No network bus available for goal execution, running standalone fallback: %s",
+                goal.name,
+            )
             self._execute_standalone_fallback(goal)
             return
 
@@ -517,7 +523,10 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_optimization_goal(self, goal: Goal) -> None:
         """Execute an optimization goal by dispatching to appropriate optimizer."""
         if not self._bus:
-            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            logger.info(
+                "No network bus available for goal execution, running standalone fallback: %s",
+                goal.name,
+            )
             self._execute_standalone_fallback(goal)
             return
 
@@ -552,7 +561,10 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_maintenance_goal(self, goal: Goal) -> None:
         """Execute a maintenance goal (memory consolidation, pruning, etc.)."""
         if not self._bus:
-            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            logger.info(
+                "No network bus available for goal execution, running standalone fallback: %s",
+                goal.name,
+            )
             self._execute_standalone_fallback(goal)
             return
 
@@ -586,7 +598,10 @@ class GoalManager(TenantSQLiteRepository):
     async def _execute_generic_goal(self, goal: Goal) -> None:
         """Execute a generic goal via PlannerNode/ExecutionNode."""
         if not self._bus:
-            logger.info("No network bus available for goal execution, running standalone fallback: %s", goal.name)
+            logger.info(
+                "No network bus available for goal execution, running standalone fallback: %s",
+                goal.name,
+            )
             self._execute_standalone_fallback(goal)
             return
 

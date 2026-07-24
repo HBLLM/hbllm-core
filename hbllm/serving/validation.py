@@ -24,7 +24,7 @@ class RequestSizeLimiter(BaseHTTPMiddleware):
             try:
                 if int(content_length) > self.max_upload_size:
                     return JSONResponse(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413),
                         content={
                             "detail": f"Payload too large. Max size is {self.max_upload_size} bytes."
                         },

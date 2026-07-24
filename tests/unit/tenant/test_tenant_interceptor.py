@@ -105,8 +105,8 @@ def test_restore_tenant_context_sets_ambient():
     assert get_current_tenant() is None
 
 
-def test_restore_tenant_context_noop_for_default():
-    """No TenantContext is set when message has default tenant_id."""
+def test_restore_tenant_context_sets_default():
+    """TenantContext is set to default when message has default tenant_id."""
     msg = Message(
         type=MessageType.EVENT,
         source_node_id="test",
@@ -114,8 +114,7 @@ def test_restore_tenant_context_noop_for_default():
     )
 
     with restore_tenant_context(msg):
-        # Should remain None since message has "default" tenant_id
-        assert get_current_tenant() is None
+        assert get_current_tenant() == "default"
 
 
 # ── End-to-End Bus Integration Test ─────────────────────────────────────
