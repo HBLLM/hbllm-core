@@ -298,6 +298,10 @@ class Brain:
         self.nodes = nodes
         self.provider = provider
 
+        # ── HCIR Subsystems ──────────────────────────────────────────
+        self.hcir_services: Any = None
+        self.hcir_runtime: Any = None
+
         # ── v4: Composite nodes ────────────────────────────────────
         self.reasoning_core: Any = None  # ReasoningCore
         self.memory_system: Any = None  # MemorySystem
@@ -1018,6 +1022,41 @@ class BrainFactory:
             llm=llm,
         )
         await wire_late_subsystems(brain, cfg, nodes, registry, message_bus)
+
+        # Wire HCIR Services & Export Capabilities via NodeAdapter
+        try:
+            from hbllm.hcir.adapters.node_adapter import NodeAdapter
+            from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+            from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
+            from hbllm.hcir.kernel.scheduler import CognitiveScheduler as HCIRScheduler
+            from hbllm.hcir.kernel.services import KernelServices
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            hcir_ws = (
+                brain.workspace_node.hcir_workspace
+                if hasattr(brain, "workspace_node") and brain.workspace_node
+                else HCIRWorkspaceState()
+            )
+            tx_mgr = TransactionManager(hcir_ws)
+            resolver = CapabilityResolver()
+            hcir_sched = HCIRScheduler()
+
+            brain.hcir_services = KernelServices(
+                workspace=hcir_ws,
+                transaction_manager=tx_mgr,
+                capability_resolver=resolver,
+                scheduler=hcir_sched,
+            )
+            brain.hcir_runtime = ExecutiveRuntime(brain.hcir_services)
+
+            # Export capability nodes for all brain nodes
+            for node_obj in nodes:
+                adapter = NodeAdapter(node_obj)
+                for cap_node in adapter.export_capabilities(tenant_id="default"):
+                    hcir_ws.upsert_node(cap_node)
+        except Exception as _ex:
+            logger.debug("[Factory] HCIR registration: %s", _ex)
 
         return brain
 
