@@ -156,6 +156,34 @@ class HCIRCompiler:
         )
         return stream
 
+    def compile_text(self, text: str, author: str = "user") -> InstructionStream:
+        """Parse natural language prompt into a SemanticAST and compile to InstructionStream."""
+        text_lower = text.lower().strip()
+
+        # Heuristic intent parser
+        if any(w in text_lower for w in ["find why", "investigate", "analyze", "why did", "diagnose"]):
+            intent = IntentType.INVESTIGATE
+        elif any(w in text_lower for w in ["plan", "how to", "design", "steps for"]):
+            intent = IntentType.PLAN
+        elif any(w in text_lower for w in ["create", "build", "generate", "write", "make"]):
+            intent = IntentType.CREATE
+        elif any(w in text_lower for w in ["modify", "change", "update", "fix"]):
+            intent = IntentType.MODIFY
+        elif any(w in text_lower for w in ["simulate", "what if", "imagine", "try"]):
+            intent = IntentType.SIMULATE
+        elif any(w in text_lower for w in ["remember", "learn", "note"]):
+            intent = IntentType.LEARN
+        else:
+            intent = IntentType.QUERY
+
+        ast = SemanticAST(
+            intent=intent,
+            subject=text[:100],
+            action="evaluate_prompt",
+            raw_text=text,
+        )
+        return self.compile(ast, author=author)
+
     # ── Compilation Strategies ───────────────────────────────────────
 
     def _compile_investigate(self, ast: SemanticAST, author: str) -> InstructionStream:
