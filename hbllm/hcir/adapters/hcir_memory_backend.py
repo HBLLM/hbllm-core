@@ -100,10 +100,21 @@ class HCIRMemoryBackend:
 
     def __init__(
         self,
-        tiered_workspace: TieredWorkspace,
+        tiered_workspace: TieredWorkspace | None = None,
         migration_phase: MigrationPhase = MigrationPhase.READ_THROUGH,
+        *,
+        workspace: Any | None = None,
     ) -> None:
-        self._workspace = tiered_workspace
+        # Accept either TieredWorkspace directly or an HCIRWorkspaceState
+        if tiered_workspace is not None:
+            self._workspace = tiered_workspace
+        elif workspace is not None:
+            # Wrap bare HCIRWorkspaceState → TieredWorkspace
+            tw = TieredWorkspace()
+            tw._persistent = workspace
+            self._workspace = tw
+        else:
+            self._workspace = TieredWorkspace()
         self._migration_phase = migration_phase
         self._divergence_count: int = 0
 
