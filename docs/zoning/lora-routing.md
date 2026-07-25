@@ -90,23 +90,23 @@ from hbllm.modules.adapter_registry import (
 config = AdapterRegistryConfig(
     enabled=True,
     cache_dir="./checkpoints/adapters",
-    auto_download=True,          # Automatically fetch from HuggingFace
-    require_sha256=True,         # Enforce integrity verification
-    max_adapter_size_mb=100,     # Reject adapters larger than 100MB
+    auto_download=True,  # Automatically fetch from HuggingFace
+    require_sha256=True,  # Enforce integrity verification
+    max_adapter_size_mb=100,  # Reject adapters larger than 100MB
     sources=[
         AdapterSource(
             domain="coding",
             repo_id="hbllm/coding-lora-v2",
-            revision="v2.1.0",   # Pinned to Git tag for reproducibility
-            sha256="abc123...",   # SHA-256 of the adapter file
-            rank=8,              # LoRA rank
-            peft_format=False,   # Native HBLLM format
+            revision="v2.1.0",  # Pinned to Git tag for reproducibility
+            sha256="abc123...",  # SHA-256 of the adapter file
+            rank=8,  # LoRA rank
+            peft_format=False,  # Native HBLLM format
         ),
         AdapterSource(
             domain="math",
             repo_id="hbllm/math-lora-v1",
             revision="main",
-            peft_format=True,    # Auto-converted from PEFT
+            peft_format=True,  # Auto-converted from PEFT
         ),
         AdapterSource(
             domain="medical",

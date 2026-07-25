@@ -404,19 +404,17 @@ class IzhikevichNeuron(BaseNeuron):
     def to_dict(self) -> dict[str, Any]:
         """Serialize dynamic state for persistence."""
         base = super().to_dict()
-        base.update(
-            {
-                "u": self.u,
-                "config": {
-                    "a": self.config.a,
-                    "b": self.config.b,
-                    "c": self.config.c,
-                    "d": self.config.d,
-                    "v_peak": self.config.v_peak,
-                    "is_inhibitory": self.config.is_inhibitory,
-                },
-            }
-        )
+        base.update({
+            "u": self.u,
+            "config": {
+                "a": self.config.a,
+                "b": self.config.b,
+                "c": self.config.c,
+                "d": self.config.d,
+                "v_peak": self.config.v_peak,
+                "is_inhibitory": self.config.is_inhibitory,
+            },
+        })
         return base
 
     @classmethod

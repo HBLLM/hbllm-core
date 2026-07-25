@@ -87,15 +87,13 @@ class CognitiveLoadEstimator:
 
     def record_message(self, content: str, role: str = "user") -> None:
         """Record a message for cognitive load analysis."""
-        self._messages.append(
-            {
-                "content": content,
-                "role": role,
-                "timestamp": time.time(),
-                "length": len(content),
-                "word_count": len(content.split()),
-            }
-        )
+        self._messages.append({
+            "content": content,
+            "role": role,
+            "timestamp": time.time(),
+            "length": len(content),
+            "word_count": len(content.split()),
+        })
 
         if len(self._messages) > self._max_messages:
             self._messages = self._messages[-self._max_messages :]

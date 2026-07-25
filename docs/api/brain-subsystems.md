@@ -87,13 +87,13 @@ ctx = BrainContainer.build()
 ctx = BrainContainer.build(config=BrainConfig(enable_simulation=False))
 
 # Access services
-sim = ctx.services.simulation        # SimulationEngine | None
-clock = ctx.services.clock           # OscillationManager
-traces = ctx.services.traces         # TraceCollector
+sim = ctx.services.simulation  # SimulationEngine | None
+clock = ctx.services.clock  # OscillationManager
+traces = ctx.services.traces  # TraceCollector
 
 # Access state
-goals = ctx.state.goals              # GoalMemory
-neuromod = ctx.state.neuromodulation # NeuromodulationEngine
+goals = ctx.state.goals  # GoalMemory
+neuromod = ctx.state.neuromodulation  # NeuromodulationEngine
 
 # Stats
 ctx.stats()
@@ -108,19 +108,19 @@ Separates `BrainServices` (stateless infrastructure) from `BrainState` (serializ
 
 ```python
 # BrainServices — infrastructure that lives forever
-ctx.services.clock              # BrainClock (OscillationManager)
-ctx.services.capability_registry # CapabilityRegistry
-ctx.services.traces             # TraceCollector
-ctx.services.simulation         # SimulationEngine
+ctx.services.clock  # BrainClock (OscillationManager)
+ctx.services.capability_registry  # CapabilityRegistry
+ctx.services.traces  # TraceCollector
+ctx.services.simulation  # SimulationEngine
 
 # BrainState — serializable, can snapshot/restore
-ctx.state.cognitive_state       # Current cognitive state
-ctx.state.goals                 # GoalMemory
-ctx.state.neuromodulation       # NeuromodulationEngine
-ctx.state.working_memory        # dict — transient working memory
-ctx.state.attention_focus       # str — current focus
+ctx.state.cognitive_state  # Current cognitive state
+ctx.state.goals  # GoalMemory
+ctx.state.neuromodulation  # NeuromodulationEngine
+ctx.state.working_memory  # dict — transient working memory
+ctx.state.attention_focus  # str — current focus
 
-snap = ctx.state.snapshot()     # Serializable dict
+snap = ctx.state.snapshot()  # Serializable dict
 ```
 
 ### CapabilityRegistry — Dynamic Service Discovery
@@ -136,10 +136,10 @@ reg = CapabilityRegistry()
 reg.register("simulation_engine", engine, ["simulation", "deliberation"])
 
 # Discover by capability
-sims = reg.find("simulation")       # [SimulationEngine]
-clock = reg.find_one("timing")      # OscillationManager
-all_svcs = reg.all_services         # ["simulation_engine", "brain_clock", ...]
-all_caps = reg.all_capabilities     # ["simulation", "timing", ...]
+sims = reg.find("simulation")  # [SimulationEngine]
+clock = reg.find_one("timing")  # OscillationManager
+all_svcs = reg.all_services  # ["simulation_engine", "brain_clock", ...]
+all_caps = reg.all_capabilities  # ["simulation", "timing", ...]
 
 # Unregister
 reg.unregister("simulation_engine")
@@ -171,8 +171,8 @@ collector.finish_trace(trace)
 
 # Inspect
 trace.component_path  # ["saliency", "competition", "workspace", ...]
-trace.duration        # 0.042 (seconds)
-trace.events          # [TraceEvent(...), ...]
+trace.duration  # 0.042 (seconds)
+trace.events  # [TraceEvent(...), ...]
 ```
 
 ### BrainTick — Oscillation Heartbeat
@@ -192,11 +192,11 @@ tick = mgr.generate_tick(
     fatigue=0.1,
 )
 
-tick.cycle           # 1 (monotonic counter)
-tick.dominant_band   # "gamma"
-tick.phase           # {"gamma": 0.42, "beta": 0.81, ...}
-tick.gate            # {"gamma": 0.95, "beta": 0.12, ...}
-tick.to_dict()       # Serializable
+tick.cycle  # 1 (monotonic counter)
+tick.dominant_band  # "gamma"
+tick.phase  # {"gamma": 0.42, "beta": 0.81, ...}
+tick.gate  # {"gamma": 0.95, "beta": 0.12, ...}
+tick.to_dict()  # Serializable
 ```
 
 ### DeliberationBudget — Adaptive Computation
@@ -209,15 +209,15 @@ Brains don't deliberate over every action. Budget determines how much simulation
 from hbllm.brain.world.simulation_engine import DeliberationBudget, DeliberationLevel
 
 budget = DeliberationBudget(
-    uncertainty=0.8,    # How uncertain
-    importance=0.7,     # How important
-    novelty=0.7,        # How novel
+    uncertainty=0.8,  # How uncertain
+    importance=0.7,  # How important
+    novelty=0.7,  # How novel
     goal_priority=0.8,  # Goal priority
 )
 
-budget.score                  # 0.3136
-budget.level                  # "multiple"
-budget.recommended_candidates # 3
+budget.score  # 0.3136
+budget.level  # "multiple"
+budget.recommended_candidates  # 3
 
 # Levels: SKIP(0) → SINGLE(1) → MULTIPLE(3) → BEAM(5)
 ```
@@ -241,8 +241,8 @@ packet = EvidencePacket(
     freshness=0.9,
     importance=0.6,
 )
-packet.is_contested      # True
-packet.reliability_score # 0.383
+packet.is_contested  # True
+packet.reliability_score  # 0.383
 
 # From raw input
 packet = EvidenceBuilder.from_raw("Tool succeeded", confidence=0.95, source="executor")
@@ -267,8 +267,11 @@ await store.initialize()
 
 # Append events
 event = MemoryEvent.create(
-    memory_id="mem_001", content="User prefers Rust",
-    memory_type="semantic", source_node="perception", tenant_id="default",
+    memory_id="mem_001",
+    content="User prefers Rust",
+    memory_type="semantic",
+    source_node="perception",
+    tenant_id="default",
 )
 await store.append(event)
 
@@ -295,13 +298,13 @@ class Skill:
     skill_id: str
     name: str
     description: str
-    category: str          # coding | research | analysis | writing | reasoning
-    steps: list[str]       # Ordered execution steps
+    category: str  # coding | research | analysis | writing | reasoning
+    steps: list[str]  # Ordered execution steps
     tools_used: list[str]  # Which tools the skill invokes
     success_criteria: str
     examples: list[dict]
-    success_rate: float    # Rolling average
-    invocations: int       # Total times executed
+    success_rate: float  # Rolling average
+    invocations: int  # Total times executed
     avg_latency_ms: float
 ```
 
@@ -530,14 +533,10 @@ Enhanced with calibration tracking in v2:
 
 ```python
 # Record feedback for calibration
-brain.confidence_estimator.record_outcome(
-    predicted=0.9, actual=0.6, domain="coding"
-)
+brain.confidence_estimator.record_outcome(predicted=0.9, actual=0.6, domain="coding")
 
 # Get calibration-adjusted score
-score = brain.confidence_estimator.calibrated_score(
-    query, response, domain="coding"
-)
+score = brain.confidence_estimator.calibrated_score(query, response, domain="coding")
 ```
 
 ### Micro-Learning (LearnerNode v2)
@@ -663,10 +662,10 @@ Maintains a robust SQLite background database for asynchronous scheduling. The L
     "parameters": {
         "delay_seconds": 3600,
         "route_topic": "robot.move",
-        "payload": {"location": "living_room"}
-    }
+        "payload": {"location": "living_room"},
+    },
 }
-# The SchedulerNode automatically writes this to SQLite and emits to the 
+# The SchedulerNode automatically writes this to SQLite and emits to the
 # MessageBus when the delay elapses.
 ```
 
@@ -718,9 +717,9 @@ engine.register_source("emotion", emotion_provider, priority=0.5)
 result = await engine.fuse(query="What's the temperature?", tenant_id="user1")
 system_prompt = result.to_system_prompt()
 
-print(result.total_tokens)     # 2847
+print(result.total_tokens)  # 2847
 print(result.budget_used_pct)  # 69.5%
-print(len(result.sections))    # 3
+print(len(result.sections))  # 3
 ```
 
 ### Pre-built Providers
@@ -820,9 +819,9 @@ Continuously learns about the user from every interaction — expertise, prefere
 
 # Get the user model for a tenant
 model = brain.user_model.get_model("tenant-001")
-print(model.expertise)        # {"python": UserExpertise(level=0.85), ...}
-print(model.current_focus)    # LearnedAttribute(value="authentication", confidence=0.72)
-print(model.stress_level)     # 0.3
+print(model.expertise)  # {"python": UserExpertise(level=0.85), ...}
+print(model.current_focus)  # LearnedAttribute(value="authentication", confidence=0.72)
+print(model.stress_level)  # 0.3
 
 # Explicitly teach a preference
 brain.user_model.learn_preference(
@@ -899,7 +898,7 @@ await controller.start(bus)
 message = Message(
     type=MessageType.EVENT,
     topic="workspace.cognition.goal",
-    payload={"name": "Ship v3", "priority": "high", "domain": "development"}
+    payload={"name": "Ship v3", "priority": "high", "domain": "development"},
 )
 await bus.publish("workspace.cognition.goal", message)
 ```
@@ -912,10 +911,7 @@ beliefs = state.beliefs
 current_policy = state.effective_policy
 
 # Derive a new state version (bumps version and links parent_state_id)
-new_state = state.derive_state(
-    active_skills=["db_query"],
-    working_memory={"temp_result": 42}
-)
+new_state = state.derive_state(active_skills=["db_query"], working_memory={"temp_result": 42})
 ```
 
 #### 3. IntentionalWorkspace (Goal Agendas)
@@ -1060,7 +1056,7 @@ opp1 = Opportunity(
     confidence=0.9,
     created_at=time.time(),
     resource_cost=0.3,
-    interruption_cost=0.1
+    interruption_cost=0.1,
 )
 
 # Ranks and filters candidates based on budget, requires, blocks, and conflicts
@@ -1078,11 +1074,7 @@ Enforces resource allocation limits for proactive execution tasks, preventing ov
 from hbllm.brain.autonomy.cognitive_budget import CognitiveBudget
 
 # Standard budget allocation
-budget = CognitiveBudget(
-    available_cpu=0.6,
-    available_gpu_time=0.5,
-    interruption_capacity=0.3
-)
+budget = CognitiveBudget(available_cpu=0.6, available_gpu_time=0.5, interruption_capacity=0.3)
 
 # Check if an opportunity can be afforded
 if budget.can_afford(opp):

@@ -160,9 +160,9 @@ IDLE → (wake word) → LISTENING → (transcription) → PROCESSING → (respo
 from hbllm.perception.conversation_turn import ConversationTurnManager, TurnState
 
 mgr = ConversationTurnManager(
-    silence_timeout_s=3.0,      # Max silence before end-of-turn
+    silence_timeout_s=3.0,  # Max silence before end-of-turn
     processing_timeout_s=30.0,  # Max time waiting for LLM response
-    continuous_listen=True,     # Auto-resume listening after speaking
+    continuous_listen=True,  # Auto-resume listening after speaking
 )
 
 # Query current state

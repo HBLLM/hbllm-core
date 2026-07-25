@@ -54,28 +54,26 @@ Controls which cognitive subsystems are injected:
 from hbllm.brain.core.factory import BrainConfig
 
 config = BrainConfig(
-    inject_memory=True,          # Memory systems
-    inject_identity=True,        # Ethics/personality
-    inject_curiosity=True,       # Exploratory goals
-    inject_perception=False,     # Audio/Vision (requires ML models)
-    inject_revision=True,        # Self-critique loop
-    inject_goals=True,           # Autonomous goal system
-    inject_self_model=True,      # Capability tracking
-    inject_metrics=True,         # Live cognitive metrics
+    inject_memory=True,  # Memory systems
+    inject_identity=True,  # Ethics/personality
+    inject_curiosity=True,  # Exploratory goals
+    inject_perception=False,  # Audio/Vision (requires ML models)
+    inject_revision=True,  # Self-critique loop
+    inject_goals=True,  # Autonomous goal system
+    inject_self_model=True,  # Capability tracking
+    inject_metrics=True,  # Live cognitive metrics
     inject_cost_optimizer=True,  # Token optimization
-    inject_policy_engine=True,   # Governance enforcement
-    inject_owner_rules=True,     # Owner behavioral rules
-    inject_sentinel=True,        # Proactive monitoring
-    inject_fuzzy_logic=False,    # Fuzzy reasoning
-    inject_symbolic_logic=False, # Z3 theorem prover
-
+    inject_policy_engine=True,  # Governance enforcement
+    inject_owner_rules=True,  # Owner behavioral rules
+    inject_sentinel=True,  # Proactive monitoring
+    inject_fuzzy_logic=False,  # Fuzzy reasoning
+    inject_symbolic_logic=False,  # Z3 theorem prover
     # Cognitive Subsystems (Human Modeling)
-    inject_user_model=True,          # Predictive user model (expertise, preferences, trust)
-    inject_project_graph=True,       # Graph-based project state tracking
-    inject_executive_cortex=True,    # Goal arbitration and focus management
-    inject_relationship_memory=True, # Social graph and interaction history
-    inject_reality_graph=True,       # Unified world state facade
-
+    inject_user_model=True,  # Predictive user model (expertise, preferences, trust)
+    inject_project_graph=True,  # Graph-based project state tracking
+    inject_executive_cortex=True,  # Goal arbitration and focus management
+    inject_relationship_memory=True,  # Social graph and interaction history
+    inject_reality_graph=True,  # Unified world state facade
     total_timeout=60.0,
     system_prompt="You are a helpful AI assistant.",
 )
@@ -147,31 +145,33 @@ Returns stats from all cognitive subsystems: metrics, self-model, skills, goals,
 import asyncio
 from hbllm.brain.core.factory import BrainFactory, BrainConfig
 
+
 async def main():
     config = BrainConfig(
         inject_perception=False,  # Skip heavy ML models
         inject_metrics=True,
     )
-    
+
     brain = await BrainFactory.create(
         provider="openai/gpt-4o",
         config=config,
     )
-    
+
     result = await brain.process(
         text="Analyze our server logs and design a firewall rule.",
         tenant_id="tenant-001",
     )
-    
+
     print(f"Decision: {result.text}")
     print(f"Confidence: {result.confidence:.2f}")
     print(f"Stages: {result.stages_completed}")
     print(f"Latency: {result.latency_ms:.0f}ms")
-    
+
     # Get cognitive subsystem stats
     stats = brain.cognitive_stats()
-    
+
     await brain.shutdown()
+
 
 asyncio.run(main())
 ```

@@ -170,9 +170,11 @@ class SpeakerIdNode(Node):
             # Get audio data
             audio = self._payload_to_audio(payload)
             if audio is None or len(audio) < 1600:
-                return message.create_response(
-                    {"speaker_id": "unknown", "speaker_name": "", "confidence": 0.0}
-                )
+                return message.create_response({
+                    "speaker_id": "unknown",
+                    "speaker_name": "",
+                    "confidence": 0.0,
+                })
 
             sample_rate = int(payload.get("sample_rate", 16000))
 
@@ -209,19 +211,19 @@ class SpeakerIdNode(Node):
                 tenant_id,
             )
 
-            return message.create_response(
-                {
-                    "speaker_id": speaker_id,
-                    "speaker_name": speaker_name,
-                    "confidence": confidence,
-                }
-            )
+            return message.create_response({
+                "speaker_id": speaker_id,
+                "speaker_name": speaker_name,
+                "confidence": confidence,
+            })
 
         except Exception as e:
             logger.warning("Speaker identification failed: %s", e)
-            return message.create_response(
-                {"speaker_id": "unknown", "speaker_name": "", "confidence": 0.0}
-            )
+            return message.create_response({
+                "speaker_id": "unknown",
+                "speaker_name": "",
+                "confidence": 0.0,
+            })
 
     async def handle_enroll(self, message: Message) -> Message | None:
         """
@@ -299,15 +301,13 @@ class SpeakerIdNode(Node):
                 tenant_id, speaker_id, speaker_name, avg_embedding
             )
 
-            return message.create_response(
-                {
-                    "success": True,
-                    "speaker_id": speaker_id,
-                    "speaker_name": speaker_name,
-                    "enrollment_samples": len(embeddings),
-                    "retroactive_matches": retro_matches,
-                }
-            )
+            return message.create_response({
+                "success": True,
+                "speaker_id": speaker_id,
+                "speaker_name": speaker_name,
+                "enrollment_samples": len(embeddings),
+                "retroactive_matches": retro_matches,
+            })
 
         except Exception as e:
             logger.exception("Speaker enrollment failed: %s", e)

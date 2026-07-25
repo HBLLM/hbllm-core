@@ -51,24 +51,24 @@ model = HBLLMForCausalLM(config)
 
 ```python
 output = model(
-    input_ids=tokens,          # [batch, seq_len]
-    labels=labels,             # Optional: for computing CE loss
-    attention_mask=mask,       # Optional: causal mask
+    input_ids=tokens,  # [batch, seq_len]
+    labels=labels,  # Optional: for computing CE loss
+    attention_mask=mask,  # Optional: causal mask
     past_key_values=kv_cache,  # Optional: KV cache
-    use_cache=True,            # Return updated cache
+    use_cache=True,  # Return updated cache
 )
 
-logits = output["logits"]       # [batch, seq_len, vocab_size]
-loss = output.get("loss")       # Cross-entropy + MoE aux loss
-ce_loss = output.get("ce_loss") # Pure cross-entropy
-lb_loss = output.get("lb_loss") # MoE load balancing loss
+logits = output["logits"]  # [batch, seq_len, vocab_size]
+loss = output.get("loss")  # Cross-entropy + MoE aux loss
+ce_loss = output.get("ce_loss")  # Pure cross-entropy
+lb_loss = output.get("lb_loss")  # MoE load balancing loss
 ```
 
 ### Text Generation
 
 ```python
 generated = model.generate(
-    input_ids=prompt_ids,      # [batch, prompt_len]
+    input_ids=prompt_ids,  # [batch, prompt_len]
     max_new_tokens=100,
     temperature=0.8,
     top_k=50,
@@ -89,8 +89,8 @@ draft_model = HBLLMForCausalLM(draft_config)
 output = model.generate_speculative(
     input_ids=prompt_ids,
     draft_model=draft_model,
-    gamma=4,                   # Draft tokens per step
-    adaptive_gamma=True,       # EWMA-based dynamic adjustment
+    gamma=4,  # Draft tokens per step
+    adaptive_gamma=True,  # EWMA-based dynamic adjustment
     max_new_tokens=200,
 )
 ```
@@ -99,6 +99,7 @@ output = model.generate_speculative(
 
 ```python
 import torch
+
 state_dict = torch.load("adapter.pt", weights_only=True)
 model.load_lora_adapter(state_dict, r=8, lora_alpha=16.0)
 model.set_lora_active(True)

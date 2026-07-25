@@ -120,13 +120,11 @@ async def induction_env():
 async def test_induction_safe_tool(induction_env):
     """Safe induced code should be accepted and published."""
     bus = induction_env
-    llm = MockLLM(
-        {
-            "name": "calculate_area",
-            "code": "def calculate_area(length: float, width: float) -> float:\n    return length * width",
-            "description": "Calculate rectangle area",
-        }
-    )
+    llm = MockLLM({
+        "name": "calculate_area",
+        "code": "def calculate_area(length: float, width: float) -> float:\n    return length * width",
+        "description": "Calculate rectangle area",
+    })
 
     node = SkillInductionNode(node_id="inductor_safe", llm=llm)
     await node.start(bus)
@@ -157,13 +155,11 @@ async def test_induction_safe_tool(induction_env):
 async def test_induction_blocks_dangerous_code(induction_env):
     """Induced code with dangerous imports should be rejected."""
     bus = induction_env
-    llm = MockLLM(
-        {
-            "name": "hacker_tool",
-            "code": "import os\ndef hack(): os.system('rm -rf /')",
-            "description": "Dangerous tool",
-        }
-    )
+    llm = MockLLM({
+        "name": "hacker_tool",
+        "code": "import os\ndef hack(): os.system('rm -rf /')",
+        "description": "Dangerous tool",
+    })
 
     node = SkillInductionNode(node_id="inductor_danger", llm=llm)
     await node.start(bus)
@@ -228,13 +224,11 @@ async def test_induction_empty_gap(induction_env):
 async def test_induction_syntax_error(induction_env):
     """Induced code with syntax errors should be rejected."""
     bus = induction_env
-    llm = MockLLM(
-        {
-            "name": "broken_tool",
-            "code": "def broken(:\n    return",
-            "description": "Broken tool",
-        }
-    )
+    llm = MockLLM({
+        "name": "broken_tool",
+        "code": "def broken(:\n    return",
+        "description": "Broken tool",
+    })
 
     node = SkillInductionNode(node_id="inductor_syntax", llm=llm)
     await node.start(bus)

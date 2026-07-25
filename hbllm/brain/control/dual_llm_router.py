@@ -76,46 +76,42 @@ class RoutingDecision:
 # ── Complexity Heuristics ────────────────────────────────────────────────────
 
 # Keywords that suggest complex reasoning requiring a powerful model
-_COMPLEX_KEYWORDS = frozenset(
-    {
-        "analyze",
-        "architect",
-        "compare",
-        "contrast",
-        "debug",
-        "decompose",
-        "design",
-        "evaluate",
-        "explain why",
-        "implement",
-        "optimize",
-        "prove",
-        "reason",
-        "refactor",
-        "trade-off",
-        "tradeoff",
-    }
-)
+_COMPLEX_KEYWORDS = frozenset({
+    "analyze",
+    "architect",
+    "compare",
+    "contrast",
+    "debug",
+    "decompose",
+    "design",
+    "evaluate",
+    "explain why",
+    "implement",
+    "optimize",
+    "prove",
+    "reason",
+    "refactor",
+    "trade-off",
+    "tradeoff",
+})
 
 # Keywords that suggest simple tasks fine for a local model
-_SIMPLE_KEYWORDS = frozenset(
-    {
-        "define",
-        "greet",
-        "hello",
-        "help",
-        "hi",
-        "list",
-        "name",
-        "repeat",
-        "say",
-        "summarize",
-        "thanks",
-        "translate",
-        "what is",
-        "what's",
-    }
-)
+_SIMPLE_KEYWORDS = frozenset({
+    "define",
+    "greet",
+    "hello",
+    "help",
+    "hi",
+    "list",
+    "name",
+    "repeat",
+    "say",
+    "summarize",
+    "thanks",
+    "translate",
+    "what is",
+    "what's",
+})
 
 # Patterns that suggest code generation (→ external)
 _CODE_PATTERNS = re.compile(

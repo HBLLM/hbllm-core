@@ -330,20 +330,22 @@ hbllm data --dataset fineweb       # Run data preparation pipeline
 import asyncio
 from hbllm.brain.core.factory import BrainFactory
 
+
 async def main():
     brain = await BrainFactory.create("openai/gpt-4o")
-    
+
     result = await brain.process(
         "Analyze our server logs and design a firewall rule.",
         tenant_id="tenant-001",
     )
-    
+
     print(f"Decision: {result.text}")
     print(f"Stages: {result.stages_completed}")
     print(f"Confidence: {result.confidence:.2f}")
     print(f"Latency: {result.latency_ms:.0f}ms")
-    
+
     await brain.shutdown()
+
 
 asyncio.run(main())
 ```
@@ -447,25 +449,26 @@ Nodes are highly decoupled. Inject a custom sensor or API into the cognitive loo
 from hbllm.network.node import Node, NodeType
 from hbllm.network.messages import Message, MessageType
 
+
 class TemperatureSensorNode(Node):
     """Custom perception node reading from hardware."""
 
     def __init__(self, node_id: str, i2c_address: str):
-        super().__init__(
-            node_id, NodeType.DETECTOR,
-            capabilities=["temperature"]
-        )
+        super().__init__(node_id, NodeType.DETECTOR, capabilities=["temperature"])
         self.i2c = i2c_address
 
     async def poll_hardware(self):
         temp = read_sensor(self.i2c)
-        
-        await self.publish("perception.temperature", Message(
-            type=MessageType.EVENT,
-            source_node_id=self.node_id,
-            topic="perception.temperature",
-            payload={"celsius": temp},
-        ))
+
+        await self.publish(
+            "perception.temperature",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                topic="perception.temperature",
+                payload={"celsius": temp},
+            ),
+        )
 ```
 
 ---

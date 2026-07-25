@@ -76,8 +76,8 @@ from hbllm.network.routing import RoutingIntelligenceLayer
 ril = RoutingIntelligenceLayer(node_id="homeserver")
 ril.register_transport(inprocess_transport)
 ril.register_transport(websocket_transport)
-ril.set_node_state(node_state_engine)        # Optional: load-aware scoring
-ril.set_capability_registry(cap_registry)     # Optional: capability routing
+ril.set_node_state(node_state_engine)  # Optional: load-aware scoring
+ril.set_capability_registry(cap_registry)  # Optional: capability routing
 
 await ril.start()
 
@@ -111,10 +111,10 @@ ctx = ExecutionContext(origin_node="server", max_hops=5)
 ctx.add_hop("ipc", "inprocess", "server", latency_ms=0.1)
 ctx.add_hop("ws", "websocket", "mobile", latency_ms=45.0)
 
-ctx.hop_count          # 2
-ctx.total_latency_ms   # 45.1
+ctx.hop_count  # 2
+ctx.total_latency_ms  # 45.1
 ctx.visited_node("server")  # True (loop detection)
-ctx.has_exceeded_max_hops   # False
+ctx.has_exceeded_max_hops  # False
 ```
 
 ## NodeState Engine
@@ -185,10 +185,10 @@ discovery = MDNSDiscovery(
     capabilities=["llm_inference"],
     api_port=8000,
 )
-discovery.on_peer_found = handle_new_peer   # async callback
+discovery.on_peer_found = handle_new_peer  # async callback
 discovery.on_peer_lost = handle_lost_peer
 
-await discovery.start()   # Broadcasts _hbllm._tcp.local.
+await discovery.start()  # Broadcasts _hbllm._tcp.local.
 ```
 
 ### Gossip Sync
@@ -201,7 +201,7 @@ from hbllm.network.discovery import GossipSync
 gossip = GossipSync(node_id="homeserver", max_hops=3, gossip_interval=10.0)
 gossip.set_node_state(node_state_engine)
 gossip.set_capability_registry(registry)
-gossip.set_send_fn(send_to_peer)   # Your transport send function
+gossip.set_send_fn(send_to_peer)  # Your transport send function
 
 await gossip.start()
 ```

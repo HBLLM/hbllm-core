@@ -223,9 +223,9 @@ class EmbeddingTrainer:
                     continue  # Need at least 2 for contrastive learning
 
                 # Pad and stack
-                anchor_ids, positive_ids, anchor_mask, positive_mask = self._collate(
-                    [train_pairs[int(i)] for i in batch_indices]
-                )
+                anchor_ids, positive_ids, anchor_mask, positive_mask = self._collate([
+                    train_pairs[int(i)] for i in batch_indices
+                ])
 
                 anchor_emb = self.model(anchor_ids.to(self.device), anchor_mask.to(self.device))
                 positive_emb = self.model(

@@ -102,12 +102,10 @@ class RecallHandler:
                 tenant_id=payload.tenant_id or (message.tenant_id or "default"),
             )
 
-            return message.create_response(
-                {
-                    "session_id": session_id,
-                    "turns": turns,
-                }
-            )
+            return message.create_response({
+                "session_id": session_id,
+                "turns": turns,
+            })
 
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory retrieval failed: %s", e)
@@ -138,11 +136,9 @@ class RecallHandler:
                 primer=self.node.primer,
             )
 
-            return message.create_response(
-                {
-                    "results": results,
-                }
-            )
+            return message.create_response({
+                "results": results,
+            })
 
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Semantic search failed: %s", e)

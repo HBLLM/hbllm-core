@@ -262,13 +262,11 @@ class TestPluginManagerIntegration:
         v1_dir = plugins_dir / "v1-plugin"
         v1_dir.mkdir()
         (v1_dir / "plugin.json").write_text(
-            json.dumps(
-                {
-                    "name": "v1-plugin",
-                    "version": "1.0.0",
-                    "manifest_version": 1,
-                }
-            )
+            json.dumps({
+                "name": "v1-plugin",
+                "version": "1.0.0",
+                "manifest_version": 1,
+            })
         )
 
         manager = PluginManager(plugin_dirs=[str(plugins_dir)])

@@ -113,12 +113,10 @@ Any node or CLI can publish to `system.sleep.force` to trigger an immediate cons
 
 ```python
 # Programmatic trigger (equivalent to Claude's /dream)
-await bus.publish("system.sleep.force", Message(
-    type=MessageType.QUERY,
-    source_node_id="cli",
-    topic="system.sleep.force",
-    payload={}
-))
+await bus.publish(
+    "system.sleep.force",
+    Message(type=MessageType.QUERY, source_node_id="cli", topic="system.sleep.force", payload={}),
+)
 ```
 
 ### 3. REST API Trigger

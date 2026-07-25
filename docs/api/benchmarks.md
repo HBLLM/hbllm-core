@@ -68,17 +68,18 @@ report.save("benchmark_results.json")
 ```python
 @dataclass
 class BenchmarkResult:
-    name: str          # Human-readable metric name
-    metric: str        # Machine-readable metric key
-    value: float       # Measured value
-    unit: str          # Unit (ms, MB, msg/s, %, etc.)
-    metadata: dict     # Extra context
+    name: str  # Human-readable metric name
+    metric: str  # Machine-readable metric key
+    value: float  # Measured value
+    unit: str  # Unit (ms, MB, msg/s, %, etc.)
+    metadata: dict  # Extra context
+
 
 @dataclass
 class BenchmarkReport:
-    suite: str                          # Suite name
-    results: list[BenchmarkResult]      # All measurements
-    comparisons: list[dict]             # HBLLM vs baseline comparisons
+    suite: str  # Suite name
+    results: list[BenchmarkResult]  # All measurements
+    comparisons: list[dict]  # HBLLM vs baseline comparisons
 ```
 
 ---

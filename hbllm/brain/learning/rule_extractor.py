@@ -197,14 +197,12 @@ class RuleExtractorNode(Node):
         if not payload.get("is_priority", False):
             return None
 
-        self._priority_buffer.append(
-            {
-                "content": payload.get("content", ""),
-                "score": payload.get("score", 0),
-                "message_id": payload.get("message_id", ""),
-                "timestamp": time.time(),
-            }
-        )
+        self._priority_buffer.append({
+            "content": payload.get("content", ""),
+            "score": payload.get("score", 0),
+            "message_id": payload.get("message_id", ""),
+            "timestamp": time.time(),
+        })
         logger.debug(
             "[RuleExtractor] Buffered priority event (total=%d)",
             len(self._priority_buffer),

@@ -161,28 +161,24 @@ class SentinelNode(Node):
         action = message.payload.get("action", "status")
 
         if action == "status":
-            return message.create_response(
-                {
-                    "context": self._current_context,
-                    "alert_count": len(self._alert_history),
-                    "triggered_rules": list(self._triggered_rules),
-                }
-            )
+            return message.create_response({
+                "context": self._current_context,
+                "alert_count": len(self._alert_history),
+                "triggered_rules": list(self._triggered_rules),
+            })
         elif action == "alerts":
             limit = message.payload.get("limit", 10)
-            return message.create_response(
-                {
-                    "alerts": [
-                        {
-                            "rule": a.rule_name,
-                            "violation": a.violation,
-                            "action_taken": a.action_taken,
-                            "timestamp": a.timestamp,
-                        }
-                        for a in self._alert_history[-limit:]
-                    ],
-                }
-            )
+            return message.create_response({
+                "alerts": [
+                    {
+                        "rule": a.rule_name,
+                        "violation": a.violation,
+                        "action_taken": a.action_taken,
+                        "timestamp": a.timestamp,
+                    }
+                    for a in self._alert_history[-limit:]
+                ],
+            })
         elif action == "clear_alerts":
             self._alert_history.clear()
             self._triggered_rules.clear()

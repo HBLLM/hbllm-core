@@ -438,14 +438,12 @@ class LearnerNode(Node):
         # Path 1: Low-scoring → queue for micro-correction
         if overall_score < self.micro_learn_threshold:
             if len(self._micro_learn_queue) < self._max_micro_queue:
-                self._micro_learn_queue.append(
-                    {
-                        "query": query,
-                        "bad_response": response,
-                        "score": overall_score,
-                        "dimensions": payload.get("dimensions", {}),
-                    }
-                )
+                self._micro_learn_queue.append({
+                    "query": query,
+                    "bad_response": response,
+                    "score": overall_score,
+                    "dimensions": payload.get("dimensions", {}),
+                })
                 logger.debug(
                     "[LearnerNode] Queued low-score interaction for micro-learning "
                     "(score=%.2f, queue=%d)",
@@ -484,12 +482,10 @@ class LearnerNode(Node):
                 ]
             else:
                 if len(self._distillation_bank) < self._max_distillation_bank:
-                    self._distillation_bank.append(
-                        {
-                            "query": query,
-                            "response": response,
-                        }
-                    )
+                    self._distillation_bank.append({
+                        "query": query,
+                        "response": response,
+                    })
                     self._distillation_count += 1
                     logger.debug(
                         "[LearnerNode] Banked high-confidence response for distillation "
@@ -534,13 +530,11 @@ class LearnerNode(Node):
         else:
             # No correction yet — queue the bad response for future pairing
             if len(self._micro_learn_queue) < self._max_micro_queue:
-                self._micro_learn_queue.append(
-                    {
-                        "query": query,
-                        "bad_response": bad_response,
-                        "score": payload.get("score", 0.0),
-                    }
-                )
+                self._micro_learn_queue.append({
+                    "query": query,
+                    "bad_response": bad_response,
+                    "score": payload.get("score", 0.0),
+                })
                 logger.debug(
                     "[LearnerNode] Queued bad response for future correction pairing (queue=%d)",
                     len(self._micro_learn_queue),

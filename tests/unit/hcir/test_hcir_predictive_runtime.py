@@ -99,12 +99,10 @@ class TestWorldKernel:
         pred2 = PredictionNode(id="p2", claim="c2")
         pred2.uncertainty.confidence = 0.5
 
-        best_action, best_pred = WorldKernel.compare_outcomes(
-            [
-                (act1, pred1),
-                (act2, pred2),
-            ]
-        )
+        best_action, best_pred = WorldKernel.compare_outcomes([
+            (act1, pred1),
+            (act2, pred2),
+        ])
         assert best_action.id == "a1"
 
 

@@ -18,52 +18,48 @@ from hbllm.network.node import Node, NodeType
 logger = logging.getLogger(__name__)
 
 # Domain complexity tiers for automatic LoRA rank selection
-_HEAVY_DOMAINS: frozenset[str] = frozenset(
-    {
-        "medical",
-        "medicine",
-        "healthcare",
-        "clinical",
-        "diagnosis",
-        "legal",
-        "law",
-        "compliance",
-        "regulatory",
-        "coding",
-        "programming",
-        "software",
-        "engineering",
-        "mathematics",
-        "math",
-        "statistics",
-        "calculus",
-        "science",
-        "physics",
-        "chemistry",
-        "biology",
-        "finance",
-        "accounting",
-        "trading",
-        "economics",
-    }
-)
+_HEAVY_DOMAINS: frozenset[str] = frozenset({
+    "medical",
+    "medicine",
+    "healthcare",
+    "clinical",
+    "diagnosis",
+    "legal",
+    "law",
+    "compliance",
+    "regulatory",
+    "coding",
+    "programming",
+    "software",
+    "engineering",
+    "mathematics",
+    "math",
+    "statistics",
+    "calculus",
+    "science",
+    "physics",
+    "chemistry",
+    "biology",
+    "finance",
+    "accounting",
+    "trading",
+    "economics",
+})
 
-_MEDIUM_DOMAINS: frozenset[str] = frozenset(
-    {
-        "writing",
-        "creative",
-        "marketing",
-        "education",
-        "history",
-        "geography",
-        "philosophy",
-        "psychology",
-        "cooking",
-        "nutrition",
-        "fitness",
-        "sports",
-    }
-)
+_MEDIUM_DOMAINS: frozenset[str] = frozenset({
+    "writing",
+    "creative",
+    "marketing",
+    "education",
+    "history",
+    "geography",
+    "philosophy",
+    "psychology",
+    "cooking",
+    "nutrition",
+    "fitness",
+    "sports",
+})
 
 
 def _classify_domain_rank(domain: str, default_rank: int = 8) -> int:

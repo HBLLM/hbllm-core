@@ -211,13 +211,11 @@ async def test_dry_run_simulation_blocks_on_failure(skill_registry):
 
     # Mock simulate to return FAILURE
     async def mock_simulate_fail(msg: Message) -> Message:
-        return msg.create_response(
-            {
-                "status": "FAILURE",
-                "prediction": "FAILURE",
-                "content": "Detected unsafe import in step",
-            }
-        )
+        return msg.create_response({
+            "status": "FAILURE",
+            "prediction": "FAILURE",
+            "content": "Detected unsafe import in step",
+        })
 
     await bus.subscribe("workspace.simulate", mock_simulate_fail)
 

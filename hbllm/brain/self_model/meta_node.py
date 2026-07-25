@@ -105,14 +105,12 @@ class MetaReasoningNode(Node):
                 "SELECT domain, instruction, response FROM negative_feedback"
             ).fetchall()
             for row in rows:
-                self.negative_feedback_buffer[row["domain"]].append(
-                    {
-                        "instruction": row["instruction"],
-                        "response": row["response"],
-                        "rejected": True,
-                        "domain": row["domain"],
-                    }
-                )
+                self.negative_feedback_buffer[row["domain"]].append({
+                    "instruction": row["instruction"],
+                    "response": row["response"],
+                    "rejected": True,
+                    "domain": row["domain"],
+                })
 
     async def on_start(self) -> None:
         """Subscribe to feedback and salience broadcasts."""

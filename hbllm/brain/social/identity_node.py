@@ -205,21 +205,17 @@ class IdentityNode(Node):
             profile = self.store.get(tenant_id)
 
             if profile is None:
-                return message.create_response(
-                    {
-                        "found": False,
-                        "profile": None,
-                        "context_string": "",
-                    }
-                )
+                return message.create_response({
+                    "found": False,
+                    "profile": None,
+                    "context_string": "",
+                })
 
-            return message.create_response(
-                {
-                    "found": True,
-                    "profile": profile.to_dict(),
-                    "context_string": profile.to_context_string(),
-                }
-            )
+            return message.create_response({
+                "found": True,
+                "profile": profile.to_dict(),
+                "context_string": profile.to_context_string(),
+            })
 
         except (sqlite3.Error, OSError, ValueError, KeyError) as e:
             logger.exception("Identity query failed: %s", e)

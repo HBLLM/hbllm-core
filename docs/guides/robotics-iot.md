@@ -141,12 +141,15 @@ robot = ros2.register_robot(
 )
 
 # Register a multi-step behavior
-ros2.register_behavior("patrol", [
-    {"command": "navigate", "params": {"x": 1.0, "y": 0.0, "yaw": 0.0}},
-    {"command": "navigate", "params": {"x": 1.0, "y": 1.0, "yaw": 1.57}},
-    {"command": "navigate", "params": {"x": 0.0, "y": 1.0, "yaw": 3.14}},
-    {"command": "navigate", "params": {"x": 0.0, "y": 0.0, "yaw": 0.0}},
-])
+ros2.register_behavior(
+    "patrol",
+    [
+        {"command": "navigate", "params": {"x": 1.0, "y": 0.0, "yaw": 0.0}},
+        {"command": "navigate", "params": {"x": 1.0, "y": 1.0, "yaw": 1.57}},
+        {"command": "navigate", "params": {"x": 0.0, "y": 1.0, "yaw": 3.14}},
+        {"command": "navigate", "params": {"x": 0.0, "y": 0.0, "yaw": 0.0}},
+    ],
+)
 ```
 
 ### Message Bus Topics
@@ -172,12 +175,12 @@ Each registered robot has tracked state:
 class RobotState:
     id: str
     name: str
-    type: str = "mobile"    # mobile, arm, drone, humanoid
-    status: str = "idle"    # idle, moving, executing, error
-    position: dict          # {"x": 0.0, "y": 0.0, "z": 0.0}
-    orientation: dict       # {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+    type: str = "mobile"  # mobile, arm, drone, humanoid
+    status: str = "idle"  # idle, moving, executing, error
+    position: dict  # {"x": 0.0, "y": 0.0, "z": 0.0}
+    orientation: dict  # {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
     battery: float = 100.0
-    sensors: dict           # Sensor readings
+    sensors: dict  # Sensor readings
 ```
 
 ---
@@ -226,11 +229,14 @@ iot = MqttIoTNode(
 )
 
 # Register a scene
-iot.register_scene("movie_night", [
-    {"device_id": "living_room_light", "action": "brightness", "params": {"level": 20}},
-    {"device_id": "tv_plug", "action": "on"},
-    {"device_id": "blinds_1", "action": "close"},
-])
+iot.register_scene(
+    "movie_night",
+    [
+        {"device_id": "living_room_light", "action": "brightness", "params": {"level": 20}},
+        {"device_id": "tv_plug", "action": "on"},
+        {"device_id": "blinds_1", "action": "close"},
+    ],
+)
 ```
 
 ### Why HBLLM for Smart Homes?

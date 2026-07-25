@@ -115,14 +115,12 @@ class CompilerVerification(HBLLMPlugin):
                 )
                 await self.bus.publish("workspace.thought", thought_msg)
 
-            return message.create_response(
-                {
-                    "status": status,
-                    "exit_code": exit_code,
-                    "output": out_str,
-                    "error": err_str,
-                }
-            )
+            return message.create_response({
+                "status": status,
+                "exit_code": exit_code,
+                "output": out_str,
+                "error": err_str,
+            })
 
         except Exception as e:
             logger.exception("Verification process error")

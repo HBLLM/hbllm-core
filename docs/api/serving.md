@@ -102,7 +102,7 @@ Request → APIVersionMiddleware → PrometheusMiddleware → HTTPRateLimitMiddl
 
 ```python
 request.state.tenant_id  # Organization
-request.state.user_id    # User within tenant
+request.state.user_id  # User within tenant
 request.state.device_id  # Device (edge/IoT)
 ```
 
@@ -205,8 +205,9 @@ Endpoints are organized into modular routers:
 ```python
 from hbllm.serving.deps import get_brain, get_bus
 
+
 @router.get("/my-endpoint")
-async def my_endpoint(brain = Depends(get_brain)):
+async def my_endpoint(brain=Depends(get_brain)):
     return brain.stats()
 ```
 
@@ -315,11 +316,13 @@ from hbllm.serving.proactive import SSEChannel, ProactiveEvent
 channel = SSEChannel(max_queue_size=100)
 
 # Push an event
-await channel.push(ProactiveEvent(
-    tenant_id="user1",
-    title="Goal Complete",
-    body="Your research task finished",
-))
+await channel.push(
+    ProactiveEvent(
+        tenant_id="user1",
+        title="Goal Complete",
+        body="Your research task finished",
+    )
+)
 
 # Stream events (used by API endpoint)
 async for event in channel.stream("user1"):
@@ -345,13 +348,15 @@ bridge = DeviceBridge(bus=message_bus)
 await bridge.start()
 
 # Register a device
-bridge.register_device(DeviceInfo(
-    device_id="iphone-1",
-    tenant_id="user1",
-    device_type="mobile",
-    capabilities=["audio", "display"],
-    push_token="fcm:abc123",
-))
+bridge.register_device(
+    DeviceInfo(
+        device_id="iphone-1",
+        tenant_id="user1",
+        device_type="mobile",
+        capabilities=["audio", "display"],
+        push_token="fcm:abc123",
+    )
+)
 
 # Find best device for notification
 best = bridge.get_best_device("user1", required_capabilities=["display"])

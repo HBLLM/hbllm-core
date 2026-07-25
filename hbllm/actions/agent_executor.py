@@ -298,12 +298,10 @@ class AgentExecutor:
             {"role": "system", "content": "You are a helpful AI assistant."}
         ]
         if kb_context:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": f"Relevant context from knowledge base:\n{kb_context}",
-                }
-            )
+            messages.append({
+                "role": "system",
+                "content": f"Relevant context from knowledge base:\n{kb_context}",
+            })
         if history:
             messages.extend(history[-10:])
         messages.append({"role": "user", "content": message})

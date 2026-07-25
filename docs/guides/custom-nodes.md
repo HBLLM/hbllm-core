@@ -18,6 +18,7 @@ Every node inherits from `hbllm.network.node.Node` and communicates via the mess
 from hbllm.network.node import Node, NodeType
 from hbllm.network.messages import Message, MessageType
 
+
 class WeatherNode(Node):
     """Fetches weather data and publishes to the cognitive stream."""
 
@@ -25,7 +26,7 @@ class WeatherNode(Node):
         super().__init__(
             node_id="weather-sensor",
             node_type=NodeType.DETECTOR,
-            capabilities=["weather", "temperature", "forecast"]
+            capabilities=["weather", "temperature", "forecast"],
         )
         self.api_key = api_key
 
@@ -47,7 +48,7 @@ class WeatherNode(Node):
         """Respond to weather queries from the bus."""
         city = message.payload.get("city", "London")
         weather = await self._fetch_weather(city)
-        
+
         # Create a correlated response
         response = message.create_response(payload=weather)
         await self.publish("response.weather", response)
@@ -97,11 +98,12 @@ While you can still use the legacy `async def register()` hook (see below), we r
 from hbllm.plugin.sdk import HBLLMPlugin, subscribe
 from my_weather import WeatherNode
 
+
 class WeatherPlugin(HBLLMPlugin):
     @subscribe("query.weather")
     async def on_query(self, message):
-         # ... handle weather logic ...
-         pass
+        # ... handle weather logic ...
+        pass
 ```
 
 #### Legacy Registration Hook

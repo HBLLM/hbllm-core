@@ -73,17 +73,17 @@ The UserModel continuously learns about the human operator from every interactio
 
 ```python
 class UserModel:
-    expertise: dict[str, UserExpertise]       # Domain → skill level
-    preferences: dict[str, UserPreference]    # Key → value (e.g. verbosity: concise)
-    beliefs: list[UserBelief]                 # Stances on topics (capped at 50)
-    trust: dict[str, TrustDimension]          # Per-domain delegation/override ratio
-    current_focus: LearnedAttribute           # What they're working on right now
-    stress_level: float                       # 0.0 (calm) → 1.0 (overwhelmed)
-    engagement_level: float                   # 0.0 (disengaged) → 1.0 (flow state)
-    likely_next_actions: list[str]            # Predicted from temporal patterns
-    active_interests: list[str]              # Recently active topics
-    active_hours: dict[int, float]           # Hour → activity weight
-    active_days: dict[int, float]            # Weekday → activity weight
+    expertise: dict[str, UserExpertise]  # Domain → skill level
+    preferences: dict[str, UserPreference]  # Key → value (e.g. verbosity: concise)
+    beliefs: list[UserBelief]  # Stances on topics (capped at 50)
+    trust: dict[str, TrustDimension]  # Per-domain delegation/override ratio
+    current_focus: LearnedAttribute  # What they're working on right now
+    stress_level: float  # 0.0 (calm) → 1.0 (overwhelmed)
+    engagement_level: float  # 0.0 (disengaged) → 1.0 (flow state)
+    likely_next_actions: list[str]  # Predicted from temporal patterns
+    active_interests: list[str]  # Recently active topics
+    active_hours: dict[int, float]  # Hour → activity weight
+    active_days: dict[int, float]  # Weekday → activity weight
 ```
 
 ### How Learning Works
@@ -204,10 +204,7 @@ Persistent storage layer managing high-priority and deferred tasks, security thr
 #### 3. CognitiveState (Blackboard Memory)
 A completely immutable, versioned snapshot of working memory. It is derived using:
 ```python
-new_state = state.derive_state(
-    active_skills=["db_query"],
-    working_memory={"temp_result": 42}
-)
+new_state = state.derive_state(active_skills=["db_query"], working_memory={"temp_result": 42})
 # Automatically increments version, sets parent_state_id, and generates unique state_id
 ```
 Contains first-class evidence ledgers:
@@ -244,24 +241,26 @@ Social graph that tracks people mentioned in conversations — their roles, sent
 ```python
 class Person:
     name: str
-    role: str              # "colleague", "manager", "friend", etc.
+    role: str  # "colleague", "manager", "friend", etc.
     organization: str
     mention_count: int
-    sentiment: float       # -1.0 (negative) → 1.0 (positive)
-    importance: float      # 0.0 → 1.0
-    topics: list[str]      # What topics they're associated with
+    sentiment: float  # -1.0 (negative) → 1.0 (positive)
+    importance: float  # 0.0 → 1.0
+    topics: list[str]  # What topics they're associated with
     first_seen: float
     last_seen: float
 
+
 class RelationshipEvent:
-    event_type: str        # "mention", "collaboration", "conflict", "feedback"
+    event_type: str  # "mention", "collaboration", "conflict", "feedback"
     context: str
     sentiment_delta: float
     timestamp: float
 
+
 class RelationshipHistory:
     events: list[RelationshipEvent]
-    trend: str             # "improving", "stable", "declining"
+    trend: str  # "improving", "stable", "declining"
 ```
 
 ### Key Functions
@@ -310,12 +309,12 @@ graph TB
 ```python
 class RealityEntity:
     entity_id: str
-    entity_type: str     # "concept", "device", "state", "person", "location"
+    entity_type: str  # "concept", "device", "state", "person", "location"
     label: str
     attributes: dict
-    confidence: float    # 0.0 → 1.0
-    source: str          # Which backend provided this
-    ttl: float           # Time-to-live (seconds)
+    confidence: float  # 0.0 → 1.0
+    source: str  # Which backend provided this
+    ttl: float  # Time-to-live (seconds)
     last_updated: float
 ```
 
@@ -353,11 +352,11 @@ All subsystems are wired by `BrainFactory.create()` via 5 config flags:
 
 ```python
 config = BrainConfig(
-    inject_user_model=True,         # UserModelEngine + UserModelNode
-    inject_project_graph=True,      # ProjectGraph + ProjectNode
-    inject_executive_cortex=True,   # ExecutiveCortex
-    inject_relationship_memory=True, # RelationshipMemory + RelationshipNode
-    inject_reality_graph=True,      # RealityGraph
+    inject_user_model=True,  # UserModelEngine + UserModelNode
+    inject_project_graph=True,  # ProjectGraph + ProjectNode
+    inject_executive_cortex=True,  # ExecutiveCortex
+    inject_relationship_memory=True,  # RelationshipMemory + RelationshipNode
+    inject_reality_graph=True,  # RealityGraph
 )
 ```
 

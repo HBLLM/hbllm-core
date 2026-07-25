@@ -85,21 +85,23 @@ The server starts on `http://localhost:8000` with auto-generated OpenAPI docs at
 import asyncio
 from hbllm.brain.core.factory import BrainFactory
 
+
 async def main():
     # Create a brain with OpenAI backend
     brain = await BrainFactory.create("openai/gpt-4o")
-    
+
     # Process a complex query
     result = await brain.process(
         "Analyze our server logs and design a firewall rule.",
         tenant_id="tenant-001",
     )
-    
+
     print(f"Decision: {result.text}")
     print(f"Confidence: {result.confidence:.2f}")
     print(f"Latency: {result.latency_ms:.0f}ms")
-    
+
     await brain.shutdown()
+
 
 asyncio.run(main())
 ```

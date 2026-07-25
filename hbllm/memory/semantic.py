@@ -789,30 +789,23 @@ class SemanticMemory(MemoryRepository):
 
         # --- Security: Hard Partition Masking ---
         if tenant_id and tenant_id != "system":
-            tenant_mask = np.array(
-                [
-                    self.documents[doc_id]["metadata"].get("tenant_id") == tenant_id
-                    for doc_id in self.ids
-                ]
-            )
+            tenant_mask = np.array([
+                self.documents[doc_id]["metadata"].get("tenant_id") == tenant_id
+                for doc_id in self.ids
+            ])
             final_scores[~tenant_mask] = -1.0  # Erase non-tenant similarity completely
 
         if user_id:
-            user_mask = np.array(
-                [
-                    self.documents[doc_id]["metadata"].get("user_id") == user_id
-                    for doc_id in self.ids
-                ]
-            )
+            user_mask = np.array([
+                self.documents[doc_id]["metadata"].get("user_id") == user_id for doc_id in self.ids
+            ])
             final_scores[~user_mask] = -1.0
 
         if device_id:
-            device_mask = np.array(
-                [
-                    self.documents[doc_id]["metadata"].get("device_id") == device_id
-                    for doc_id in self.ids
-                ]
-            )
+            device_mask = np.array([
+                self.documents[doc_id]["metadata"].get("device_id") == device_id
+                for doc_id in self.ids
+            ])
             final_scores[~device_mask] = -1.0
 
         # Get top-k indices
@@ -1055,20 +1048,18 @@ class SemanticMemory(MemoryRepository):
                             stats["activation_count"] += 1
                             stats["last_used"] = time.time()
 
-                    results.append(
-                        {
-                            "id": doc_id,
-                            "content": row["content"],
-                            "metadata": row["metadata"],
-                            "score": score,
-                            "score_breakdown": {
-                                "similarity": base_similarity,
-                                "usefulness_boost": float(u_boost),
-                                "reward_boost": float(r_boost),
-                                "priming_boost": float(p_boost),
-                            },
-                        }
-                    )
+                    results.append({
+                        "id": doc_id,
+                        "content": row["content"],
+                        "metadata": row["metadata"],
+                        "score": score,
+                        "score_breakdown": {
+                            "similarity": base_similarity,
+                            "usefulness_boost": float(u_boost),
+                            "reward_boost": float(r_boost),
+                            "priming_boost": float(p_boost),
+                        },
+                    })
 
             # Sort again if rewards/priming changed the order
             if reward_scores or priming_boosts:
@@ -1182,22 +1173,20 @@ class SemanticMemory(MemoryRepository):
             else:
                 explanation_str += "Minimal overall score difference."
 
-            differentials.append(
-                {
-                    "rank_a": i + 1,
-                    "rank_b": i + 2,
-                    "doc_a_id": doc_a_id,
-                    "doc_b_id": doc_b_id,
-                    "deltas": {
-                        "total": float(total_delta),
-                        "similarity": float(sim_delta),
-                        "usefulness": float(usefulness_delta),
-                        "reward": float(reward_delta),
-                        "priming": float(priming_delta),
-                    },
-                    "explanation": explanation_str,
-                }
-            )
+            differentials.append({
+                "rank_a": i + 1,
+                "rank_b": i + 2,
+                "doc_a_id": doc_a_id,
+                "doc_b_id": doc_b_id,
+                "deltas": {
+                    "total": float(total_delta),
+                    "similarity": float(sim_delta),
+                    "usefulness": float(usefulness_delta),
+                    "reward": float(reward_delta),
+                    "priming": float(priming_delta),
+                },
+                "explanation": explanation_str,
+            })
         return differentials
 
     def delete(self, doc_id: str) -> bool:
@@ -1421,12 +1410,10 @@ class SemanticMemory(MemoryRepository):
             dense_scores = np.dot(self.vectors, query_vec) / (norms * query_norm + 1e-9)
 
         if tenant_id and tenant_id != "system":
-            tenant_mask = np.array(
-                [
-                    self.documents[doc_id]["metadata"].get("tenant_id") == tenant_id
-                    for doc_id in self.ids
-                ]
-            )
+            tenant_mask = np.array([
+                self.documents[doc_id]["metadata"].get("tenant_id") == tenant_id
+                for doc_id in self.ids
+            ])
             dense_scores[~tenant_mask] = -1.0
 
         best_idx = int(np.argmax(dense_scores))

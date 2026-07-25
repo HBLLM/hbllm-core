@@ -90,14 +90,14 @@ graph TB
   ```python
   @dataclass(frozen=True)
   class ProvenanceMetadata:
-      event_id: str           # Immutable UUID4 for the event
-      parent_event_id: str | None # Causal parent event UUID
-      correlation_id: str     # Conversation/session trace ID
-      source: str             # Subsystem or node ID (e.g., "perception.audio_in")
-      timestamp: float        # Monotonic ISO Unix timestamp
-      confidence: float       # Confidence score [0.0 - 1.0]
-      expiry: float | None    # Expiration TTL timestamp
-      verification_state: str # VERIFIED | UNVERIFIED | HYPOTHETICAL | STALE
+      event_id: str  # Immutable UUID4 for the event
+      parent_event_id: str | None  # Causal parent event UUID
+      correlation_id: str  # Conversation/session trace ID
+      source: str  # Subsystem or node ID (e.g., "perception.audio_in")
+      timestamp: float  # Monotonic ISO Unix timestamp
+      confidence: float  # Confidence score [0.0 - 1.0]
+      expiry: float | None  # Expiration TTL timestamp
+      verification_state: str  # VERIFIED | UNVERIFIED | HYPOTHETICAL | STALE
   ```
 
 ### 3. Lightweight Language-Independent Intent Abstraction

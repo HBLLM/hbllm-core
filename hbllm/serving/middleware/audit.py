@@ -25,15 +25,13 @@ from hbllm.security.audit_log import AuditAction, AuditLog, AuditSeverity
 logger = logging.getLogger(__name__)
 
 # Paths that should NOT be audit-logged (high-frequency, low-value)
-SKIP_PATHS = frozenset(
-    {
-        "/health",
-        "/health/live",
-        "/health/ready",
-        "/metrics",
-        "/favicon.ico",
-    }
-)
+SKIP_PATHS = frozenset({
+    "/health",
+    "/health/live",
+    "/health/ready",
+    "/metrics",
+    "/favicon.ico",
+})
 
 # Map path prefixes to audit actions for richer classification
 PATH_ACTION_MAP: list[tuple[str, str, AuditAction]] = [

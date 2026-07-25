@@ -121,14 +121,12 @@ class RedisRegistry(ServiceRegistry):
                 # Announce join
                 await self._redis.publish(
                     _CHANNEL,
-                    json.dumps(
-                        {
-                            "event": "join",
-                            "node_id": node_info.node_id,
-                            "node_type": node_info.node_type.value,
-                            "capabilities": node_info.capabilities,
-                        }
-                    ),
+                    json.dumps({
+                        "event": "join",
+                        "node_id": node_info.node_id,
+                        "node_type": node_info.node_type.value,
+                        "capabilities": node_info.capabilities,
+                    }),
                 )
                 logger.info("Registered '%s' in Redis", node_info.node_id)
             except Exception as e:
@@ -146,12 +144,10 @@ class RedisRegistry(ServiceRegistry):
 
                 await self._redis.publish(
                     _CHANNEL,
-                    json.dumps(
-                        {
-                            "event": "leave",
-                            "node_id": node_id,
-                        }
-                    ),
+                    json.dumps({
+                        "event": "leave",
+                        "node_id": node_id,
+                    }),
                 )
                 logger.info("Deregistered '%s' from Redis", node_id)
             except Exception as e:

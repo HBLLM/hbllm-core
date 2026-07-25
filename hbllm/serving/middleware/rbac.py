@@ -52,17 +52,15 @@ ROUTE_PERMISSIONS: list[tuple[str, str, Permission]] = [
 ]
 
 # Paths that skip RBAC entirely
-UNPROTECTED_PATHS = frozenset(
-    {
-        "/health",
-        "/health/live",
-        "/health/ready",
-        "/metrics",
-        "/docs",
-        "/openapi.json",
-        "/",
-    }
-)
+UNPROTECTED_PATHS = frozenset({
+    "/health",
+    "/health/live",
+    "/health/ready",
+    "/metrics",
+    "/docs",
+    "/openapi.json",
+    "/",
+})
 
 
 class RBACMiddleware(BaseHTTPMiddleware):

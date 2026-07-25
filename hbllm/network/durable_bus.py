@@ -192,19 +192,15 @@ class DurableBus(MessageBus):
             return
 
         try:
-            payload = json.dumps(
-                {
-                    "type": message.type.value
-                    if hasattr(message.type, "value")
-                    else str(message.type),
-                    "source_node_id": message.source_node_id,
-                    "topic": topic,
-                    "tenant_id": message.tenant_id,
-                    "session_id": message.session_id,
-                    "correlation_id": message.correlation_id,
-                    "payload": message.payload,
-                }
-            )
+            payload = json.dumps({
+                "type": message.type.value if hasattr(message.type, "value") else str(message.type),
+                "source_node_id": message.source_node_id,
+                "topic": topic,
+                "tenant_id": message.tenant_id,
+                "session_id": message.session_id,
+                "correlation_id": message.correlation_id,
+                "payload": message.payload,
+            })
 
             self._conn.execute(
                 """INSERT OR IGNORE INTO messages

@@ -52,14 +52,12 @@ class FailureAnalyzerNode(Node):
         failure_type = self._classify_failure(error_msg)
 
         if not self.llm:
-            return message.create_response(
-                {
-                    "failure_type": failure_type,
-                    "repaired": False,
-                    "reason": "No LLM available for repair",
-                    "new_steps": steps,
-                }
-            )
+            return message.create_response({
+                "failure_type": failure_type,
+                "repaired": False,
+                "reason": "No LLM available for repair",
+                "new_steps": steps,
+            })
 
         # Ask LLM to generate a fixed step list
         prompt = (
@@ -78,16 +76,14 @@ class FailureAnalyzerNode(Node):
 
             repaired = new_steps != steps
 
-            return message.create_response(
-                {
-                    "failure_type": failure_type,
-                    "repaired": repaired,
-                    "new_steps": new_steps,
-                    "reason": "Automated LLM repair strategy applied."
-                    if repaired
-                    else "Could not find a differing repair strategy.",
-                }
-            )
+            return message.create_response({
+                "failure_type": failure_type,
+                "repaired": repaired,
+                "new_steps": new_steps,
+                "reason": "Automated LLM repair strategy applied."
+                if repaired
+                else "Could not find a differing repair strategy.",
+            })
         except Exception as e:
             logger.error("Failed to generate repair strategy: %s", e)
             return message.create_error(f"Repair generation failed: {e}")

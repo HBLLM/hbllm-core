@@ -74,14 +74,12 @@ class EnvironmentSimulator:
         self, detected_objects: list[str] | None = None, confidence: float = 0.95
     ) -> PerceptionEvent:
         """Inject a synthetic vision frame perception event."""
-        objects = detected_objects or random.choice(
-            [
-                ["user_face", "keyboard"],
-                ["coding_editor", "terminal_output"],
-                ["coffee_mug", "user_hands"],
-                ["documents", "pen"],
-            ]
-        )
+        objects = detected_objects or random.choice([
+            ["user_face", "keyboard"],
+            ["coding_editor", "terminal_output"],
+            ["coffee_mug", "user_hands"],
+            ["documents", "pen"],
+        ])
         event = PerceptionEvent(
             entity_id="camera_0",
             event_type="vision_frame",
@@ -104,14 +102,12 @@ class EnvironmentSimulator:
         self, transcription: str | None = None, duration: float = 2.5
     ) -> PerceptionEvent:
         """Inject a synthetic audio waveform/activity perception event."""
-        text = transcription or random.choice(
-            [
-                "hbllm please run tests",
-                "optimize thought budget for next step",
-                "are the causal nodes aligned",
-                "hello system",
-            ]
-        )
+        text = transcription or random.choice([
+            "hbllm please run tests",
+            "optimize thought budget for next step",
+            "are the causal nodes aligned",
+            "hello system",
+        ])
         event = PerceptionEvent(
             entity_id="microphone_0",
             event_type="audio_waveform",
