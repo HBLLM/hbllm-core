@@ -1,7 +1,7 @@
 """Tests for MemorySystem composite node.
 
 Validates lifecycle management, sub-node wiring, health aggregation,
-proactive cache warming, and direct property access.
+HCIR migration proxy, and direct property access.
 """
 
 from __future__ import annotations
@@ -44,9 +44,11 @@ async def memory_system(bus):
 class TestMemorySystemLifecycle:
     """Test composite lifecycle: start, stop, sub-node creation."""
 
-    async def test_on_start_creates_memory_node(self, memory_system: MemorySystem):
-        """MemoryNode should be created after start."""
-        assert memory_system.memory is not None
+    async def test_on_start_creates_hcir_backend(self, memory_system: MemorySystem):
+        """HCIR backend and migration proxy should be created after start (Phase 5)."""
+        assert memory_system.hcir_backend is not None
+        assert memory_system.migration_proxy is not None
+        assert memory_system.memory is None  # Legacy MemoryNode retired in Phase 5
 
     async def test_on_start_creates_experience_node(self, memory_system: MemorySystem):
         """ExperienceNode should be created after start."""
@@ -57,18 +59,18 @@ class TestMemorySystemLifecycle:
         assert memory_system.sleep is not None
 
     async def test_node_ids_prefixed(self, memory_system: MemorySystem):
-        """Sub-nodes should have composite-prefixed IDs."""
-        assert memory_system.memory.node_id == "test_memory.memory"
+        """Cognitive sub-nodes should have composite-prefixed IDs."""
         assert memory_system.experience.node_id == "test_memory.experience"
         assert memory_system.sleep.node_id == "test_memory.sleep"
 
     async def test_capabilities_registered(self, memory_system: MemorySystem):
-        """Composite should declare memory capabilities."""
+        """Composite should declare memory and HCIR capabilities."""
         caps = memory_system.capabilities
         assert "memory" in caps
         assert "episodic_memory" in caps
         assert "sleep_cycle" in caps
         assert "salience_detection" in caps
+        assert "hcir_native" in caps
 
     async def test_handle_message_returns_none(self, memory_system: MemorySystem):
         """The composite itself passes messages through."""
@@ -87,6 +89,15 @@ class TestMemorySystemLifecycle:
         await node.start(bus)
         await node.stop()
 
+    async def test_legacy_fallback_mode(self, bus):
+        """Test fallback initialization when HCIR fails."""
+        node = MemorySystem(node_id="fallback_test")
+        node._bus = bus
+        await node._start_legacy_fallback()
+        assert node.memory is not None
+        assert node.memory.node_id == "fallback_test.memory"
+        await node.stop()
+
 
 # ── Health Check Tests ───────────────────────────────────────────────────
 
@@ -100,10 +111,11 @@ class TestMemorySystemHealth:
         assert health.status == HealthStatus.HEALTHY
         assert health.node_id == "test_memory"
 
-    async def test_health_check_message_shows_sub_count(self, memory_system: MemorySystem):
-        """Health message should report sub-node count."""
+    async def test_health_check_message_shows_hcir_status(self, memory_system: MemorySystem):
+        """Health message should report HCIR native status."""
         health = await memory_system.health_check()
-        assert "Composite: 3" in health.message
+        assert "HCIR-native" in health.message
+        assert "hcir=active" in health.message
 
     async def test_health_check_reports_uptime(self, memory_system: MemorySystem):
         """Uptime should be non-negative after start."""
@@ -116,11 +128,10 @@ class TestMemorySystemHealth:
 
 
 class TestMemorySystemBusWiring:
-    """Test that sub-nodes are properly wired to the bus."""
+    """Test that cognitive sub-nodes are properly wired to the bus."""
 
     async def test_all_sub_nodes_share_bus(self, memory_system: MemorySystem, bus):
-        """All sub-nodes should share the composite's bus."""
-        assert memory_system.memory.bus is bus
+        """All active sub-nodes should share the composite's bus."""
         assert memory_system.experience.bus is bus
         assert memory_system.sleep.bus is bus
 
@@ -144,6 +155,4 @@ class TestMemorySystemWarmCache:
 
     async def test_warm_cache_runs_silently(self, memory_system: MemorySystem):
         """_warm_memory_cache should complete without raising."""
-        # It was already kicked off in on_start; just wait a bit
         await asyncio.sleep(0.1)
-        # No assertion needed — we just confirm no crash
