@@ -445,6 +445,17 @@ class Brain:
 
         _elapsed = (_time.monotonic() - _start) * 1000
 
+        # ── HCIR cognitive cycle ──────────────────────────────────
+        if self.hcir_runtime is not None:
+            try:
+                # Ensure session is started
+                if self.hcir_runtime.session_id != session_id:
+                    await self.hcir_runtime.start_session(session_id)
+                # Run a workspace-driven cognitive cycle
+                await self.hcir_runtime.run_cycle()
+            except Exception as _hcir_ex:
+                logger.debug("[Brain] HCIR cycle error: %s", _hcir_ex)
+
         # Post-process: record cognitive metrics
         if self.cognitive_metrics:
             self.cognitive_metrics.record_latency(_elapsed, "pipeline")
@@ -578,6 +589,14 @@ class Brain:
                 await node.stop()
             except Exception:
                 logger.debug("Error stopping node %s during shutdown", node.node_id, exc_info=True)
+        # End HCIR session and stop runtime
+        if self.hcir_runtime is not None:
+            try:
+                archived = await self.hcir_runtime.end_session()
+                await self.hcir_runtime.stop()
+                logger.info("[Brain] HCIR session ended, archived %d nodes", archived)
+            except Exception:
+                logger.debug("Error stopping HCIR runtime during shutdown", exc_info=True)
         await self.registry.stop()
         await self.bus.stop()
         logger.info("Brain shutdown complete")
@@ -612,6 +631,26 @@ class Brain:
             stats["compaction"] = self.compaction_engine.stats()
         if self.causal_graph and hasattr(self.causal_graph, "stats"):
             stats["causality"] = self.causal_graph.stats()
+
+        # HCIR Cognitive OS stats
+        if self.hcir_services is not None:
+            hcir_stats: dict[str, Any] = {}
+            try:
+                ws = self.hcir_services.workspace
+                hcir_stats["workspace_nodes"] = ws.node_count
+                hcir_stats["workspace_edges"] = ws.edge_count
+                sched = self.hcir_services.scheduler
+                if sched.budget is not None:
+                    hcir_stats["budget_remaining"] = sched.budget.remaining
+                    hcir_stats["budget_utilization"] = round(sched.budget.utilization, 3)
+                if self.hcir_runtime is not None:
+                    hcir_stats["cycle_count"] = self.hcir_runtime.state.cycle_count
+                journal = self.hcir_services.cognitive_journal
+                if journal is not None:
+                    hcir_stats["journal_entries"] = len(journal)
+            except Exception:
+                pass
+            stats["hcir"] = hcir_stats
 
         return stats
 
@@ -1023,42 +1062,136 @@ class BrainFactory:
         )
         await wire_late_subsystems(brain, cfg, nodes, registry, message_bus)
 
-        # Wire HCIR Services & Export Capabilities via NodeAdapter
+        # Wire HCIR Cognitive OS — event-sourced cognitive substrate
+        await BrainFactory._wire_hcir_cognitive_os(brain, cfg, message_bus, nodes)
+
+        return brain
+
+    @staticmethod
+    async def _wire_hcir_cognitive_os(
+        brain: Brain,
+        cfg: BrainConfig,
+        message_bus: MessageBus,
+        nodes: list[Node],
+    ) -> None:
+        """Wire the full HCIR Cognitive OS into a Brain instance.
+
+        Creates and wires:
+        - TieredWorkspace (4-tier state hierarchy)
+        - CognitiveJournal + CognitiveEventLog (event sourcing)
+        - ConstitutionalVerifier (governance-before-commit)
+        - CognitiveBudget + market-based scheduling
+        - HCIRBusBridge (MessageBus → HCIR projection)
+        - ExecutiveRuntime (workspace-driven cycles)
+        """
         try:
+            from hbllm.hcir.adapters.hcir_bus_bridge import HCIRBusBridge
             from hbllm.hcir.adapters.node_adapter import NodeAdapter
+            from hbllm.hcir.cognitive_event_log import CognitiveEventLog
+            from hbllm.hcir.cognitive_journal import CognitiveJournal
             from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
             from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.scheduler import CognitiveScheduler as HCIRScheduler
+            from hbllm.hcir.kernel.governance.constitutional_verifier import (
+                ConstitutionalVerifier,
+            )
+            from hbllm.hcir.kernel.scheduler import (
+                CognitiveBudget,
+            )
+            from hbllm.hcir.kernel.scheduler import (
+                CognitiveScheduler as HCIRScheduler,
+            )
             from hbllm.hcir.kernel.services import KernelServices
             from hbllm.hcir.kernel.transaction_manager import TransactionManager
+            from hbllm.hcir.semantic_normalizer import SemanticNormalizer
+            from hbllm.hcir.stores import InMemoryEventStore
             from hbllm.hcir.workspace import HCIRWorkspaceState
+            from hbllm.hcir.workspace_tiers import TieredWorkspace
 
+            # 1. Core workspace — reuse existing if available
             hcir_ws = (
                 brain.workspace_node.hcir_workspace
                 if hasattr(brain, "workspace_node") and brain.workspace_node
                 else HCIRWorkspaceState()
             )
-            tx_mgr = TransactionManager(hcir_ws)
-            resolver = CapabilityResolver()
-            hcir_sched = HCIRScheduler()
 
+            # 2. Transaction manager + constitutional governance
+            tx_mgr = TransactionManager(hcir_ws)
+            verifier = ConstitutionalVerifier()
+            tx_mgr.add_verification_stage(verifier)
+
+            # 3. Capability resolver + budget-aware scheduler
+            resolver = CapabilityResolver()
+            budget = CognitiveBudget(total_tokens=getattr(cfg, "hcir_token_budget", 100_000))
+            hcir_sched = HCIRScheduler(budget=budget)
+
+            # 4. Event sourcing pipeline
+            event_store = InMemoryEventStore()
+            normalizer = SemanticNormalizer()
+            journal = CognitiveJournal(store=event_store)
+            event_log = CognitiveEventLog(journal=journal, normalizer=normalizer)
+
+            # 5. Tiered workspace
+            tiered = TieredWorkspace()
+
+            # 6. Bus bridge — projects MessageBus events → HCIR workspace
+            bus_bridge = HCIRBusBridge(
+                bus=message_bus,
+                workspace=hcir_ws,
+                transaction_manager=tx_mgr,
+                normalizer=normalizer,
+                journal=journal,
+            )
+
+            # 7. Assemble KernelServices
             brain.hcir_services = KernelServices(
                 workspace=hcir_ws,
                 transaction_manager=tx_mgr,
                 capability_resolver=resolver,
                 scheduler=hcir_sched,
+                event_store=event_store,
+                tiered_workspace=tiered,
+                cognitive_journal=journal,
+                cognitive_event_log=event_log,
+                semantic_normalizer=normalizer,
+                constitutional_verifier=verifier,
+                bus_bridge=bus_bridge,
             )
+
+            # 8. Executive runtime
             brain.hcir_runtime = ExecutiveRuntime(brain.hcir_services)
 
-            # Export capability nodes for all brain nodes
+            # 9. Export capability nodes for all brain nodes
             for node_obj in nodes:
                 adapter = NodeAdapter(node_obj)
                 for cap_node in adapter.export_capabilities(tenant_id="default"):
                     hcir_ws.upsert_node(cap_node)
+
+            # 10. Inject HCIR workspace into MemorySystem for dual-write
+            if hasattr(brain, "memory_system") and brain.memory_system is not None:
+                brain.memory_system._hcir_workspace = hcir_ws
+                if (
+                    hasattr(brain.memory_system, "_hcir_backend")
+                    and brain.memory_system._hcir_backend is not None
+                ):
+                    brain.memory_system._hcir_backend._workspace = hcir_ws
+                    logger.info("[Factory] HCIR workspace injected into MemorySystem")
+
+            # 11. Inject TransactionSyncProtocol into SwarmNode for federation
+            if hasattr(brain, "swarm") and brain.swarm is not None:
+                from hbllm.hcir.transaction_sync import TransactionSyncProtocol
+
+                sync_protocol = TransactionSyncProtocol(device_id="local")
+                brain.swarm._transaction_sync = sync_protocol
+                brain.swarm._hcir_workspace = hcir_ws
+                logger.info("[Factory] TransactionSyncProtocol injected into SwarmNode")
+
+            logger.info(
+                "[Factory] HCIR Cognitive OS wired: %d capabilities, budget=%d tokens",
+                len(resolver.list_capabilities()) if resolver.list_capabilities() else 0,
+                budget.total_tokens,
+            )
         except Exception as _ex:
             logger.debug("[Factory] HCIR registration: %s", _ex)
-
-        return brain
 
     @staticmethod
     async def _build_composite_brain(
@@ -1950,5 +2083,8 @@ class BrainFactory:
             "v4 composite brain ready: %d top-level nodes, autonomy=ACTIVE",
             len(nodes),
         )
+
+        # Wire HCIR Cognitive OS — shared with legacy path
+        await BrainFactory._wire_hcir_cognitive_os(brain, cfg, message_bus, nodes)
 
         return brain

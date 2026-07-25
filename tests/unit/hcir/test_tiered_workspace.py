@@ -107,7 +107,7 @@ class TestWorkingWorkspace:
 
     def test_get_node_across_frames(self) -> None:
         ww = WorkingWorkspace()
-        f1 = ww.create_frame("goal_1")
+        _f1 = ww.create_frame("goal_1")
         f2 = ww.create_frame("goal_2")
         node = GoalNode(id="g_target", description="Find me")
         f2.workspace.add_node(node)
