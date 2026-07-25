@@ -53,74 +53,76 @@ _RELATION_PATTERNS: list[tuple[str, str]] = [
 ]
 
 # Stopwords to filter out from entity extraction
-_STOPWORDS = frozenset({
-    "the",
-    "a",
-    "an",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "will",
-    "would",
-    "could",
-    "should",
-    "may",
-    "might",
-    "shall",
-    "can",
-    "it",
-    "its",
-    "this",
-    "that",
-    "these",
-    "those",
-    "i",
-    "you",
-    "he",
-    "she",
-    "we",
-    "they",
-    "me",
-    "him",
-    "her",
-    "us",
-    "them",
-    "my",
-    "your",
-    "his",
-    "our",
-    "their",
-    "and",
-    "or",
-    "but",
-    "if",
-    "then",
-    "else",
-    "when",
-    "where",
-    "how",
-    "what",
-    "which",
-    "who",
-    "whom",
-    "not",
-    "no",
-    "so",
-    "very",
-    "just",
-    "also",
-    "too",
-})
+_STOPWORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "our",
+        "their",
+        "and",
+        "or",
+        "but",
+        "if",
+        "then",
+        "else",
+        "when",
+        "where",
+        "how",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "not",
+        "no",
+        "so",
+        "very",
+        "just",
+        "also",
+        "too",
+    }
+)
 
 
 def _entity_id(label: str) -> str:
@@ -497,14 +499,16 @@ class KnowledgeGraph:
                     continue
                 target = self._entities.get(rel.target_id)
                 if target:
-                    results.append({
-                        "entity": target.attributes.get("name", target.label),
-                        "entity_id": target.id,
-                        "entity_type": target.entity_type,
-                        "relation": rel.relation_type,
-                        "direction": "out",
-                        "weight": rel.weight,
-                    })
+                    results.append(
+                        {
+                            "entity": target.attributes.get("name", target.label),
+                            "entity_id": target.id,
+                            "entity_type": target.entity_type,
+                            "relation": rel.relation_type,
+                            "direction": "out",
+                            "weight": rel.weight,
+                        }
+                    )
 
         if direction in ("in", "both"):
             for rk in self._incoming.get(eid, []):
@@ -513,14 +517,16 @@ class KnowledgeGraph:
                     continue
                 source = self._entities.get(rel.source_id)
                 if source:
-                    results.append({
-                        "entity": source.attributes.get("name", source.label),
-                        "entity_id": source.id,
-                        "entity_type": source.entity_type,
-                        "relation": rel.relation_type,
-                        "direction": "in",
-                        "weight": rel.weight,
-                    })
+                    results.append(
+                        {
+                            "entity": source.attributes.get("name", source.label),
+                            "entity_id": source.id,
+                            "entity_type": source.entity_type,
+                            "relation": rel.relation_type,
+                            "direction": "in",
+                            "weight": rel.weight,
+                        }
+                    )
 
         return results
 
@@ -547,9 +553,9 @@ class KnowledgeGraph:
 
         # BFS using deque for O(1) popleft
         visited = {start}
-        queue = deque([
-            (start, [self._entities[start].attributes.get("name", self._entities[start].label)])
-        ])
+        queue = deque(
+            [(start, [self._entities[start].attributes.get("name", self._entities[start].label)])]
+        )
 
         while queue:
             current, path = queue.popleft()

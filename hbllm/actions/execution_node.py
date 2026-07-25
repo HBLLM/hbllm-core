@@ -26,54 +26,58 @@ logger = logging.getLogger(__name__)
 # ── Security policy ──────────────────────────────────────────────────────────
 
 # Modules that grant filesystem, network, or process control access
-BLOCKED_MODULES: frozenset[str] = frozenset({
-    "os",
-    "sys",
-    "subprocess",
-    "shutil",
-    "pathlib",
-    "socket",
-    "http",
-    "urllib",
-    "requests",
-    "httpx",
-    "ctypes",
-    "signal",
-    "multiprocessing",
-    "threading",
-    "importlib",
-    "runpy",
-    "code",
-    "codeop",
-    "pickle",
-    "shelve",
-    "marshal",
-    "webbrowser",
-    "ftplib",
-    "smtplib",
-    "telnetlib",
-})
+BLOCKED_MODULES: frozenset[str] = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "pathlib",
+        "socket",
+        "http",
+        "urllib",
+        "requests",
+        "httpx",
+        "ctypes",
+        "signal",
+        "multiprocessing",
+        "threading",
+        "importlib",
+        "runpy",
+        "code",
+        "codeop",
+        "pickle",
+        "shelve",
+        "marshal",
+        "webbrowser",
+        "ftplib",
+        "smtplib",
+        "telnetlib",
+    }
+)
 
 # Built-in functions / names that can escape the sandbox
-BLOCKED_BUILTINS: frozenset[str] = frozenset({
-    "eval",
-    "exec",
-    "compile",
-    "__import__",
-    "globals",
-    "locals",
-    "vars",
-    "dir",
-    "getattr",
-    "setattr",
-    "delattr",
-    "open",
-    "input",
-    "breakpoint",
-    "exit",
-    "quit",
-    "__builtins__",
-})
+BLOCKED_BUILTINS: frozenset[str] = frozenset(
+    {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "getattr",
+        "setattr",
+        "delattr",
+        "open",
+        "input",
+        "breakpoint",
+        "exit",
+        "quit",
+        "__builtins__",
+    }
+)
 
 
 class CodeSecurityError(Exception):

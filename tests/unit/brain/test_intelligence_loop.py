@@ -376,12 +376,14 @@ class TestReflectionNode:
         evals = []
         for i in range(20):
             score = 0.8 - (i * 0.03)  # declining
-            evals.append({
-                "task_success": score,
-                "plan_validity": 0.7,
-                "tool_accuracy": 0.7,
-                "memory_usage": 0.6,
-            })
+            evals.append(
+                {
+                    "task_success": score,
+                    "plan_validity": 0.7,
+                    "tool_accuracy": 0.7,
+                    "memory_usage": 0.6,
+                }
+            )
 
         insights = reflection._analyze_performance_trends(evals)
         # Should detect declining task_success

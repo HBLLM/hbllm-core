@@ -25,15 +25,17 @@ from starlette.responses import JSONResponse, Response
 logger = logging.getLogger(__name__)
 
 # Paths exempt from rate limiting
-_EXEMPT_PATHS = frozenset({
-    "/health",
-    "/health/live",
-    "/health/ready",
-    "/metrics",
-    "/routing/stats",
-    "/docs",
-    "/openapi.json",
-})
+_EXEMPT_PATHS = frozenset(
+    {
+        "/health",
+        "/health/live",
+        "/health/ready",
+        "/metrics",
+        "/routing/stats",
+        "/docs",
+        "/openapi.json",
+    }
+)
 
 _EXEMPT_PREFIXES = (
     "/admin/static",

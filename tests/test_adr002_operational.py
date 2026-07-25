@@ -552,10 +552,12 @@ class TestWorldStateForecasting:
     @pytest.mark.asyncio
     async def test_simulate(self) -> None:
         engine = WorldStateEngine()
-        outcome = await engine.simulate([
-            {"type": "query", "target": "weather"},
-            {"type": "execute", "target": "script.py"},
-        ])
+        outcome = await engine.simulate(
+            [
+                {"type": "query", "target": "weather"},
+                {"type": "execute", "target": "script.py"},
+            ]
+        )
         assert outcome.action_count == 2
         assert outcome.risk_score > 0  # "execute" is risky
         assert len(outcome.projected_changes) == 2

@@ -168,9 +168,13 @@ class MetaLearner:
                 conn.row_factory = sqlite3.Row
                 for row in conn.execute("SELECT * FROM strategies"):
                     data = json.loads(row["data"])
-                    strategy = LearningStrategy(**{
-                        k: v for k, v in data.items() if k in LearningStrategy.__dataclass_fields__
-                    })
+                    strategy = LearningStrategy(
+                        **{
+                            k: v
+                            for k, v in data.items()
+                            if k in LearningStrategy.__dataclass_fields__
+                        }
+                    )
                     self._strategies[strategy.domain] = strategy
         except Exception as e:
             logger.debug("Failed to load strategies: %s", e)

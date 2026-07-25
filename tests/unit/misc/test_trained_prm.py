@@ -34,14 +34,16 @@ class TestRewardNetwork:
 
     def test_score_returns_valid_keys(self) -> None:
         net = RewardNetwork()
-        result = net.score({
-            "heuristic_relevance": 0.8,
-            "heuristic_coherence": 0.7,
-            "heuristic_completeness": 0.6,
-            "heuristic_conciseness": 0.5,
-            "goal_salience": 0.9,
-            "text_length_ratio": 0.5,
-        })
+        result = net.score(
+            {
+                "heuristic_relevance": 0.8,
+                "heuristic_coherence": 0.7,
+                "heuristic_completeness": 0.6,
+                "heuristic_conciseness": 0.5,
+                "goal_salience": 0.9,
+                "text_length_ratio": 0.5,
+            }
+        )
 
         assert "accept_score" in result
         assert "revise_score" in result
@@ -50,14 +52,16 @@ class TestRewardNetwork:
 
     def test_high_features_produce_reward(self) -> None:
         net = RewardNetwork()
-        result = net.score({
-            "heuristic_relevance": 1.0,
-            "heuristic_coherence": 1.0,
-            "heuristic_completeness": 1.0,
-            "heuristic_conciseness": 1.0,
-            "goal_salience": 1.0,
-            "text_length_ratio": 0.5,
-        })
+        result = net.score(
+            {
+                "heuristic_relevance": 1.0,
+                "heuristic_coherence": 1.0,
+                "heuristic_completeness": 1.0,
+                "heuristic_conciseness": 1.0,
+                "goal_salience": 1.0,
+                "text_length_ratio": 0.5,
+            }
+        )
         assert result["reward"] > 0.3
 
     def test_empty_features_valid(self) -> None:

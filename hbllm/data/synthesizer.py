@@ -140,13 +140,15 @@ class DataSynthesizer:
                 logger.warning("LLM generation failed for sample %d: %s — using template", i, e)
                 question, answer = self._template_pair(topic, i)
 
-            dataset.append({
-                "instruction": question,
-                "context": "",
-                "response": answer,
-                "topic": topic,
-                "source": "llm_generated",
-            })
+            dataset.append(
+                {
+                    "instruction": question,
+                    "context": "",
+                    "response": answer,
+                    "topic": topic,
+                    "source": "llm_generated",
+                }
+            )
 
         return dataset
 
@@ -212,13 +214,15 @@ class DataSynthesizer:
         dataset = []
         for i in range(num_samples):
             question, answer = self._template_pair(topic, i)
-            dataset.append({
-                "instruction": question,
-                "context": "",
-                "response": answer,
-                "topic": topic,
-                "source": "template",
-            })
+            dataset.append(
+                {
+                    "instruction": question,
+                    "context": "",
+                    "response": answer,
+                    "topic": topic,
+                    "source": "template",
+                }
+            )
         return dataset
 
     @staticmethod

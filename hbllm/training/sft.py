@@ -67,10 +67,12 @@ class InstructionDataset(Dataset[dict[str, torch.Tensor]]):
             if len(full_ids) > self.max_length:
                 full_ids = full_ids[: self.max_length]
 
-            examples.append({
-                "input_ids": full_ids,
-                "prompt_len": prompt_len,
-            })
+            examples.append(
+                {
+                    "input_ids": full_ids,
+                    "prompt_len": prompt_len,
+                }
+            )
 
         logger.info("Prepared %d SFT examples (from %d raw)", len(examples), len(data))
         return examples

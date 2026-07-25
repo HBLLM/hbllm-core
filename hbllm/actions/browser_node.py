@@ -96,10 +96,12 @@ class BrowserNode(Node):
                     if (
                         not href
                         or href in seen
-                        or href.startswith((
-                            "http://www.google.com/search?q=",
-                            "https://duckduckgo.com/y.js?ad_domain",
-                        ))
+                        or href.startswith(
+                            (
+                                "http://www.google.com/search?q=",
+                                "https://duckduckgo.com/y.js?ad_domain",
+                            )
+                        )
                     ):
                         continue
                     seen.add(href)
@@ -187,11 +189,13 @@ class BrowserNode(Node):
             for r in search_results_data:
                 formatted_text += f"---\n🌐 **{r['title']}**\nURL: {r['url']}\nSummary: {r['search_snippet']}\n\nContent:\n{r['page_content']}\n\n"
 
-            return message.create_response({
-                "results": search_results_data,
-                "text": formatted_text,
-                "domain": "browser",
-            })
+            return message.create_response(
+                {
+                    "results": search_results_data,
+                    "text": formatted_text,
+                    "domain": "browser",
+                }
+            )
 
         except ImportError as ie:
             logger.error("Missing dependency: %s", ie)

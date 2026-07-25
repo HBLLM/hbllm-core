@@ -216,10 +216,12 @@ class TestHCIROptimizer:
         assert opt_stream.length == 2
 
     def test_full_optimizer_pipeline(self):
-        optimizer = HCIROptimizer([
-            DeadInstructionEliminationPass(),
-            QueryMergingPass(),
-        ])
+        optimizer = HCIROptimizer(
+            [
+                DeadInstructionEliminationPass(),
+                QueryMergingPass(),
+            ]
+        )
         stream = InstructionStream(
             author="test",
             instructions=[

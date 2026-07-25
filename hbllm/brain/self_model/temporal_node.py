@@ -384,12 +384,14 @@ class TemporalNode(Node):
         patterns = []
         for domain, count in sorted(domain_counts.items(), key=lambda x: x[1], reverse=True):
             if count >= 3:
-                patterns.append({
-                    "domain": domain,
-                    "count": count,
-                    "frequency_per_day": round(count / max(window_days, 1), 2),
-                    "window_days": window_days,
-                })
+                patterns.append(
+                    {
+                        "domain": domain,
+                        "count": count,
+                        "frequency_per_day": round(count / max(window_days, 1), 2),
+                        "window_days": window_days,
+                    }
+                )
         return patterns
 
     def _find_relevant_events(
@@ -407,10 +409,12 @@ class TemporalNode(Node):
 
             matching = self.find_events_between(start, end, max_results=5)
             for event in matching:
-                context.append({
-                    "reference": keyword,
-                    "event": event.to_dict(),
-                })
+                context.append(
+                    {
+                        "reference": keyword,
+                        "event": event.to_dict(),
+                    }
+                )
         return context
 
     async def _publish_context(

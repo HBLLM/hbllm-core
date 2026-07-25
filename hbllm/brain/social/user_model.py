@@ -789,11 +789,13 @@ class UserModelEngine:
                         model.tenant_id,
                         "trust",
                         domain,
-                        json.dumps({
-                            "trust_level": trust.trust_level.value,
-                            "delegations": trust.delegations_count,
-                            "overrides": trust.overrides_count,
-                        }),
+                        json.dumps(
+                            {
+                                "trust_level": trust.trust_level.value,
+                                "delegations": trust.delegations_count,
+                                "overrides": trust.overrides_count,
+                            }
+                        ),
                         trust.trust_level.confidence,
                         trust.trust_level.evidence_count,
                         trust.trust_level.source,

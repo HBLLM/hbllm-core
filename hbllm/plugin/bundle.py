@@ -146,18 +146,20 @@ class PluginManifest:
         try:
             from hbllm.hbpkg.manifest import HBPkgManifest
 
-            return HBPkgManifest.from_dict({
-                "name": self.name,
-                "version": self.version,
-                "description": self.description,
-                "author": self.author,
-                "license": self.license,
-                "manifest_version": self.manifest_version,
-                "capabilities": self.capability_descriptors,
-                "permissions": self.permissions,
-                "compatible_profiles": self.compatible_profiles,
-                "tags": self.tags,
-            })
+            return HBPkgManifest.from_dict(
+                {
+                    "name": self.name,
+                    "version": self.version,
+                    "description": self.description,
+                    "author": self.author,
+                    "license": self.license,
+                    "manifest_version": self.manifest_version,
+                    "capabilities": self.capability_descriptors,
+                    "permissions": self.permissions,
+                    "compatible_profiles": self.compatible_profiles,
+                    "tags": self.tags,
+                }
+            )
         except ImportError:
             return None
 
@@ -260,13 +262,15 @@ class PluginAssets:
     @property
     def is_empty(self) -> bool:
         """Check if no assets were discovered."""
-        return not any([
-            self.has_knowledge,
-            self.has_skills,
-            self.has_policies,
-            self.has_prompts,
-            self.has_config,
-        ])
+        return not any(
+            [
+                self.has_knowledge,
+                self.has_skills,
+                self.has_policies,
+                self.has_prompts,
+                self.has_config,
+            ]
+        )
 
     def summary(self) -> dict[str, int]:
         """Summarize asset counts."""

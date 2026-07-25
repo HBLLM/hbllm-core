@@ -127,12 +127,14 @@ class TestRuleExtractorNode:
         bus, node = extractor_system
 
         # Buffer a priority event with rule-like content
-        node._priority_buffer.append({
-            "content": "When authentication fails repeatedly, then the account should be locked automatically.",
-            "score": 0.9,
-            "message_id": "msg_002",
-            "timestamp": 1234567890,
-        })
+        node._priority_buffer.append(
+            {
+                "content": "When authentication fails repeatedly, then the account should be locked automatically.",
+                "score": 0.9,
+                "message_id": "msg_002",
+                "timestamp": 1234567890,
+            }
+        )
 
         # Run extraction
         new_rules = await node._run_extraction()
@@ -152,12 +154,14 @@ class TestRuleExtractorNode:
         content = "When the server crashes unexpectedly, then restart the service immediately."
 
         for _ in range(3):
-            node._priority_buffer.append({
-                "content": content,
-                "score": 0.9,
-                "message_id": "msg_003",
-                "timestamp": 1234567890,
-            })
+            node._priority_buffer.append(
+                {
+                    "content": content,
+                    "score": 0.9,
+                    "message_id": "msg_003",
+                    "timestamp": 1234567890,
+                }
+            )
             await node._run_extraction()
 
         # Should have 1 rule with occurrences >= 2
@@ -176,12 +180,14 @@ class TestRuleExtractorNode:
 
         await bus.subscribe("system.rules.new", capture)
 
-        node._priority_buffer.append({
-            "content": "If the request queue depth exceeds the limit, then enable load shedding to protect the system.",
-            "score": 0.85,
-            "message_id": "msg_004",
-            "timestamp": 1234567890,
-        })
+        node._priority_buffer.append(
+            {
+                "content": "If the request queue depth exceeds the limit, then enable load shedding to protect the system.",
+                "score": 0.85,
+                "message_id": "msg_004",
+                "timestamp": 1234567890,
+            }
+        )
 
         await node._run_extraction()
         await asyncio.sleep(0.1)

@@ -139,8 +139,7 @@ class GoogleCalendarProvider(CalendarProvider):
             time_max = (datetime.utcnow() + timedelta(hours=lookahead_hours)).isoformat() + "Z"
 
             events_result = (
-                self._service
-                .events()
+                self._service.events()
                 .list(
                     calendarId=self.calendar_id,
                     timeMin=now,
@@ -165,8 +164,7 @@ class GoogleCalendarProvider(CalendarProvider):
 
         try:
             events_result = (
-                self._service
-                .events()
+                self._service.events()
                 .list(
                     calendarId=self.calendar_id,
                     timeMin=start.isoformat() + "Z",

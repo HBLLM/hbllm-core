@@ -182,16 +182,20 @@ class TestExecutiveCortex:
     def test_deadline_boost(self):
         cortex = ExecutiveCortex()
         # Goal with imminent deadline
-        urgent = cortex._goal_priority_score({
-            "name": "deploy",
-            "priority": "medium",
-            "deadline": time.time() + 1800,  # 30 min
-        })
+        urgent = cortex._goal_priority_score(
+            {
+                "name": "deploy",
+                "priority": "medium",
+                "deadline": time.time() + 1800,  # 30 min
+            }
+        )
         # Same goal no deadline
-        normal = cortex._goal_priority_score({
-            "name": "deploy",
-            "priority": "medium",
-        })
+        normal = cortex._goal_priority_score(
+            {
+                "name": "deploy",
+                "priority": "medium",
+            }
+        )
         assert urgent > normal
 
     # ── Resource Allocation ──────────────────────────────────────────
@@ -245,12 +249,16 @@ class TestExecutiveCortex:
             cortex = ExecutiveCortex(user_model=um)
 
             # Goal matching user focus should get alignment bonus
-            aligned_score = cortex._goal_priority_score({
-                "name": "HBLLM upgrade",
-                "priority": "medium",
-            })
-            unaligned_score = cortex._goal_priority_score({
-                "name": "Grocery shopping",
-                "priority": "medium",
-            })
+            aligned_score = cortex._goal_priority_score(
+                {
+                    "name": "HBLLM upgrade",
+                    "priority": "medium",
+                }
+            )
+            unaligned_score = cortex._goal_priority_score(
+                {
+                    "name": "Grocery shopping",
+                    "priority": "medium",
+                }
+            )
             assert aligned_score >= unaligned_score

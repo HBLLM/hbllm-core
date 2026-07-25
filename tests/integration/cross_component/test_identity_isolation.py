@@ -282,10 +282,12 @@ class TestSynapseGateway:
 
     @pytest.mark.asyncio
     async def test_capability_registration(self, gateway):
-        msg_data = json.dumps({
-            "type": "register_capabilities",
-            "tools": ["read_gps", "vibrate", "camera"],
-        })
+        msg_data = json.dumps(
+            {
+                "type": "register_capabilities",
+                "tools": ["read_gps", "vibrate", "camera"],
+            }
+        )
 
         await gateway.handle_inbound_message("t1", "alice", "phone_1", msg_data)
 
@@ -344,13 +346,15 @@ class TestSynapseGateway:
     @pytest.mark.asyncio
     async def test_tool_result_forwarding(self, gateway):
         """Tool results from edge should be parsed correctly."""
-        msg_data = json.dumps({
-            "type": "tool_result",
-            "correlation_id": "corr-123",
-            "tool_name": "read_gps",
-            "result": {"lat": 6.9271, "lng": 79.8612},
-            "error": None,
-        })
+        msg_data = json.dumps(
+            {
+                "type": "tool_result",
+                "correlation_id": "corr-123",
+                "tool_name": "read_gps",
+                "result": {"lat": 6.9271, "lng": 79.8612},
+                "error": None,
+            }
+        )
 
         # Should not raise even without a bus
         await gateway.handle_inbound_message("t1", "alice", "phone_1", msg_data)

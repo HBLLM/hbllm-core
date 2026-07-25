@@ -62,14 +62,16 @@ class SystemHealthWatcher:
                 used_pct = (usage.used / usage.total) * 100 if usage.total > 0 else 0
 
                 if free_gb < self.thresholds.disk_free_min_gb:
-                    alerts.append({
-                        "type": "disk_low",
-                        "path": path,
-                        "free_gb": round(free_gb, 2),
-                        "total_gb": round(total_gb, 2),
-                        "used_pct": round(used_pct, 1),
-                        "severity": "critical" if free_gb < 1.0 else "warning",
-                    })
+                    alerts.append(
+                        {
+                            "type": "disk_low",
+                            "path": path,
+                            "free_gb": round(free_gb, 2),
+                            "total_gb": round(total_gb, 2),
+                            "used_pct": round(used_pct, 1),
+                            "severity": "critical" if free_gb < 1.0 else "warning",
+                        }
+                    )
             except OSError as e:
                 logger.debug("[SystemHealthWatcher] Cannot check disk at %s: %s", path, e)
         return alerts
@@ -83,15 +85,17 @@ class SystemHealthWatcher:
         try:
             load1, load5, load15 = os.getloadavg()
             if load1 > self.thresholds.load_avg_max:
-                alerts.append({
-                    "type": "cpu_high",
-                    "load_1min": round(load1, 2),
-                    "load_5min": round(load5, 2),
-                    "load_15min": round(load15, 2),
-                    "severity": "critical"
-                    if load1 > self.thresholds.load_avg_max * 1.5
-                    else "warning",
-                })
+                alerts.append(
+                    {
+                        "type": "cpu_high",
+                        "load_1min": round(load1, 2),
+                        "load_5min": round(load5, 2),
+                        "load_15min": round(load15, 2),
+                        "severity": "critical"
+                        if load1 > self.thresholds.load_avg_max * 1.5
+                        else "warning",
+                    }
+                )
         except OSError:
             pass
         return alerts

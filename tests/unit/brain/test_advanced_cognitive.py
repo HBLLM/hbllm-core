@@ -97,10 +97,12 @@ class TestGoalManager:
         assert stats["completed"] == 1
 
     def test_auto_generate_from_performance(self, gm):
-        goals = gm.generate_from_performance({
-            "hallucination_rate": 0.2,
-            "avg_latency_ms": 6000,
-        })
+        goals = gm.generate_from_performance(
+            {
+                "hallucination_rate": 0.2,
+                "avg_latency_ms": 6000,
+            }
+        )
         assert len(goals) >= 2  # hallucination + latency
 
 

@@ -273,25 +273,27 @@ async def test_routes_web_search_with_vague_query_resolution():
 
     # 1. Mock memory node retrieve_recent response
     async def mock_memory_handler(msg):
-        return msg.create_response({
-            "session_id": "session_123",
-            "turns": [
-                {"role": "user", "content": "who is the current president of sri lanka?"},
-                {
-                    "role": "assistant",
-                    "content": "I don't have the latest information. I can search for it.",
-                },
-            ],
-        })
+        return msg.create_response(
+            {
+                "session_id": "session_123",
+                "turns": [
+                    {"role": "user", "content": "who is the current president of sri lanka?"},
+                    {
+                        "role": "assistant",
+                        "content": "I don't have the latest information. I can search for it.",
+                    },
+                ],
+            }
+        )
 
     await bus.subscribe("memory.retrieve_recent", mock_memory_handler)
 
     # 2. Mock browser node search response
     async def mock_search_handler(msg):
         await collector.collect(msg)
-        return msg.create_response({
-            "text": "The current president of Sri Lanka is Anura Kumara Dissanayake."
-        })
+        return msg.create_response(
+            {"text": "The current president of Sri Lanka is Anura Kumara Dissanayake."}
+        )
 
     await bus.subscribe("task.execute.search", mock_search_handler)
 

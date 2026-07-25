@@ -131,12 +131,14 @@ class TestDecisionNodeShellExecution:
         # Mock HostShellNode receiver/handler
         async def mock_shell_handler(msg: Message) -> Message:
             assert msg.payload["command"] == "echo 'hello'"
-            return msg.create_response({
-                "status": "SUCCESS",
-                "output": "hello\n",
-                "error": "",
-                "exit_code": 0,
-            })
+            return msg.create_response(
+                {
+                    "status": "SUCCESS",
+                    "output": "hello\n",
+                    "error": "",
+                    "exit_code": 0,
+                }
+            )
 
         await bus.subscribe("action.execute_shell", mock_shell_handler)
 
@@ -195,12 +197,14 @@ class TestDecisionNodeShellExecution:
 
         # Mock HostShellNode failure responder
         async def mock_shell_handler(msg: Message) -> Message:
-            return msg.create_response({
-                "status": "FAILURE",
-                "output": "",
-                "error": "some_error",
-                "exit_code": 1,
-            })
+            return msg.create_response(
+                {
+                    "status": "FAILURE",
+                    "output": "",
+                    "error": "some_error",
+                    "exit_code": 1,
+                }
+            )
 
         await bus.subscribe("action.execute_shell", mock_shell_handler)
 

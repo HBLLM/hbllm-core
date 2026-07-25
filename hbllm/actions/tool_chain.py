@@ -246,16 +246,18 @@ class ReActLoop:
             if not tool_actions:
                 # LLM didn't output a valid action — nudge it
                 messages.append({"role": "assistant", "content": llm_output})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Observation: You did not specify a valid Action. "
-                        "Please use the format:\n"
-                        "Thought: [reasoning]\n"
-                        "Action: [tool_name or FINISH]\n"
-                        "Action Input: [input]"
-                    ),
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Observation: You did not specify a valid Action. "
+                            "Please use the format:\n"
+                            "Thought: [reasoning]\n"
+                            "Action: [tool_name or FINISH]\n"
+                            "Action Input: [input]"
+                        ),
+                    }
+                )
                 step.duration_ms = (time.monotonic() - step_start) * 1000
                 steps.append(step)
                 continue

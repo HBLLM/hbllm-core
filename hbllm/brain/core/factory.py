@@ -784,11 +784,13 @@ class BrainFactory:
                 search_paths.append(Path(checkpoint_path))
             else:
                 # Search default locations
-                search_paths.extend([
-                    Path("./checkpoints/sft"),
-                    Path("./checkpoints/self_improve"),
-                    Path("./checkpoints"),
-                ])
+                search_paths.extend(
+                    [
+                        Path("./checkpoints/sft"),
+                        Path("./checkpoints/self_improve"),
+                        Path("./checkpoints"),
+                    ]
+                )
 
             for ckpt_dir in search_paths:
                 if ckpt_dir.is_file() and ckpt_dir.suffix == ".pt":

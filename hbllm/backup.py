@@ -146,11 +146,13 @@ class BackupManager:
             for path in self.data_dir.glob(pattern):
                 if path.is_file():
                     file_paths.append(path)
-                    files_info.append({
-                        "name": path.name,
-                        "size": path.stat().st_size,
-                        "checksum": self._file_checksum(path),
-                    })
+                    files_info.append(
+                        {
+                            "name": path.name,
+                            "size": path.stat().st_size,
+                            "checksum": self._file_checksum(path),
+                        }
+                    )
 
         # Also backup training subdirectory if it exists
         training_dir = self.data_dir / "training"
@@ -159,11 +161,13 @@ class BackupManager:
                 if path.is_file():
                     rel = path.relative_to(self.data_dir)
                     file_paths.append(path)
-                    files_info.append({
-                        "name": str(rel),
-                        "size": path.stat().st_size,
-                        "checksum": self._file_checksum(path),
-                    })
+                    files_info.append(
+                        {
+                            "name": str(rel),
+                            "size": path.stat().st_size,
+                            "checksum": self._file_checksum(path),
+                        }
+                    )
 
         if not file_paths:
             logger.warning("No files found to backup in %s", self.data_dir)
@@ -272,19 +276,23 @@ class BackupManager:
                 stat = path.stat()
                 # Try to read manifest from archive
                 manifest = self._read_manifest(path)
-                backups.append({
-                    "path": str(path),
-                    "name": path.name,
-                    "size": stat.st_size,
-                    "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "files": len(manifest.files) if manifest else "?",
-                })
+                backups.append(
+                    {
+                        "path": str(path),
+                        "name": path.name,
+                        "size": stat.st_size,
+                        "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "files": len(manifest.files) if manifest else "?",
+                    }
+                )
             except Exception:
-                backups.append({
-                    "path": str(path),
-                    "name": path.name,
-                    "size": path.stat().st_size,
-                })
+                backups.append(
+                    {
+                        "path": str(path),
+                        "name": path.name,
+                        "size": path.stat().st_size,
+                    }
+                )
         return backups
 
     def verify_backup(self, backup_path: str | Path) -> dict[str, Any]:
