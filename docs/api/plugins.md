@@ -75,8 +75,8 @@ Load a specific plugin at runtime without restart:
 
 ```python
 loaded = await manager.load_bundle(Path("~/.hbllm/plugins/my-plugin"))
-print(loaded.name)                    # "my-plugin"
-print(loaded.to_dict()["ingested"])   # {"knowledge_sources": 2, "skills": 3, ...}
+print(loaded.name)  # "my-plugin"
+print(loaded.to_dict()["ingested"])  # {"knowledge_sources": 2, "skills": 3, ...}
 ```
 
 If a plugin with the same name is already loaded, it is **unloaded first** (idempotent).
@@ -137,10 +137,10 @@ Represents a loaded plugin directory. Handles manifest parsing and asset discove
 from hbllm.plugin.bundle import PluginBundle
 
 bundle = PluginBundle(Path("plugins/sentinel-shield"))
-print(bundle.manifest.name)       # "sentinel-shield"
-print(bundle.manifest.version)    # "1.0.0"
-print(bundle.assets.has_skills)   # True
-print(bundle.assets.summary())    # {"knowledge_files": 2, "skills": 5, ...}
+print(bundle.manifest.name)  # "sentinel-shield"
+print(bundle.manifest.version)  # "1.0.0"
+print(bundle.assets.has_skills)  # True
+print(bundle.assets.summary())  # {"knowledge_files": 2, "skills": 5, ...}
 ```
 
 ---
@@ -254,6 +254,7 @@ For writing third-party plugins that integrate with the MessageBus:
 
 ```python
 from hbllm.plugin.sdk import HBLLMPlugin, subscribe
+
 
 class MyPlugin(HBLLMPlugin):
     def __init__(self):

@@ -290,14 +290,12 @@ class AutonomousLearner(Node):
             return message.create_response(self._goals[goal_id].to_dict())
 
         # Return all goals
-        return message.create_response(
-            {
-                "active": self._active_goal.to_dict() if self._active_goal else None,
-                "total_goals": len(self._goals),
-                "completed": self._total_goals_completed,
-                "goals": {gid: g.to_dict() for gid, g in self._goals.items()},
-            }
-        )
+        return message.create_response({
+            "active": self._active_goal.to_dict() if self._active_goal else None,
+            "total_goals": len(self._goals),
+            "completed": self._total_goals_completed,
+            "goals": {gid: g.to_dict() for gid, g in self._goals.items()},
+        })
 
     # ── Core Learning Loop ───────────────────────────────────────────────
 

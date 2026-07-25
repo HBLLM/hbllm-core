@@ -52,13 +52,11 @@ def _convert_to_sft_format(samples: list[dict[str, Any]]) -> list[dict[str, Any]
         context = s.get("context", "")
 
         if instruction and response:
-            sft_data.append(
-                {
-                    "instruction": instruction,
-                    "input": context,
-                    "output": response,
-                }
-            )
+            sft_data.append({
+                "instruction": instruction,
+                "input": context,
+                "output": response,
+            })
     return sft_data
 
 

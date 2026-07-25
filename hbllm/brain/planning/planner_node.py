@@ -340,9 +340,11 @@ class PlannerNode(Node):
                     self._cache_hits,
                     self._cache_misses,
                 )
-                return message.create_response(
-                    {"text": cached, "domain": "planner", "cached": True}
-                )
+                return message.create_response({
+                    "text": cached,
+                    "domain": "planner",
+                    "cached": True,
+                })
             else:
                 # Evict expired entry
                 self._response_cache.pop(cache_key, None)
@@ -365,12 +367,10 @@ class PlannerNode(Node):
         # ── Step 1: Root Node & Initial Plausible Branches ────────────────
         root_node = graph.add_root("Root Query: " + text[:50], score=0.5)
 
-        initial_thoughts = await asyncio.gather(
-            *[
-                self._generate_thought(text, i + 1, domain_hint, budget)
-                for i in range(self.branch_factor)
-            ]
-        )
+        initial_thoughts = await asyncio.gather(*[
+            self._generate_thought(text, i + 1, domain_hint, budget)
+            for i in range(self.branch_factor)
+        ])
 
         branch_nodes = []
         for i, res_tuple in enumerate(initial_thoughts):
@@ -407,9 +407,9 @@ class PlannerNode(Node):
         # Score the initial unblocked roots
         unblocked_branches = [n for n in branch_nodes if not n.metadata.get("policy_blocked")]
         if unblocked_branches:
-            await asyncio.gather(
-                *[self._score_thought(graph, node, budget) for node in unblocked_branches]
-            )
+            await asyncio.gather(*[
+                self._score_thought(graph, node, budget) for node in unblocked_branches
+            ])
             # Backpropagate initial scores
             for node in unblocked_branches:
                 graph.backpropagate(node.id, node.score)
@@ -551,15 +551,13 @@ class PlannerNode(Node):
         # Cache the result
         self._cache_response(cache_key, final_text)
 
-        return message.create_response(
-            {
-                "text": final_text,
-                "domain": "planner",
-                "thought_budget_status": budget.to_dict(),
-                "best_path_utility": [n.metadata.get("utility_breakdown") for n in best_path],
-                "total_nodes_explored": graph_stats["total_nodes"],
-            }
-        )
+        return message.create_response({
+            "text": final_text,
+            "domain": "planner",
+            "thought_budget_status": budget.to_dict(),
+            "best_path_utility": [n.metadata.get("utility_breakdown") for n in best_path],
+            "total_nodes_explored": graph_stats["total_nodes"],
+        })
 
     # ── Cache helpers ─────────────────────────────────────────────────────
 
@@ -833,9 +831,9 @@ class PlannerNode(Node):
             tail_steps = compressed_traj[-(MAX_CONTEXT_STEPS - 1) :]
             start_num = len(compressed_traj) - (MAX_CONTEXT_STEPS - 1) + 1
 
-            tail_text = "\n\n".join(
-                [f"Step {start_num + i}: {txt}" for i, txt in enumerate(tail_steps)]
-            )
+            tail_text = "\n\n".join([
+                f"Step {start_num + i}: {txt}" for i, txt in enumerate(tail_steps)
+            ])
 
             history_text = (
                 f"{head_step}\n\n"
@@ -843,9 +841,9 @@ class PlannerNode(Node):
                 f"{tail_text}"
             )
         else:
-            history_text = "\n\n".join(
-                [f"Step {i + 1}: {txt}" for i, txt in enumerate(compressed_traj)]
-            )
+            history_text = "\n\n".join([
+                f"Step {i + 1}: {txt}" for i, txt in enumerate(compressed_traj)
+            ])
 
         prompt = (
             f"Solve the original query based on the following trajectory of thoughts and tool observations.\n"

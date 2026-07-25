@@ -81,9 +81,10 @@ class GitWorkflow(HBLLMPlugin):
             or "nothing to commit" in out_commit
             or "no changes added to commit" in out_commit
         ):
-            return message.create_response(
-                {"status": "SUCCESS", "output": out_commit or "Nothing to commit"}
-            )
+            return message.create_response({
+                "status": "SUCCESS",
+                "output": out_commit or "Nothing to commit",
+            })
         return message.create_error(f"Git commit failed: {err_commit}")
 
     @subscribe("git.branch")

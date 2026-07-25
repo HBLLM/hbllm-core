@@ -28,17 +28,15 @@ class WorkspaceEpisode(dict):
     def __init__(
         self, corr_id: str, tenant_id: str, session_id: str, original_query: dict[str, Any]
     ) -> None:
-        super().__init__(
-            {
-                "tenant_id": tenant_id,
-                "session_id": session_id,
-                "original_query": original_query,
-                "thoughts": [],
-                "start_time": time.monotonic(),
-                "status": "Created",
-                "resolved": False,
-            }
-        )
+        super().__init__({
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "original_query": original_query,
+            "thoughts": [],
+            "start_time": time.monotonic(),
+            "status": "Created",
+            "resolved": False,
+        })
         self.corr_id = corr_id
 
     @property
@@ -335,14 +333,12 @@ class WorkspaceNode(Node, IWorkspace):
             message.source_node_id,
         )
 
-        board["thoughts"].append(
-            {
-                "node": message.source_node_id,
-                "type": thought_type,
-                "confidence": confidence,
-                "content": proposal.get("content"),
-            }
-        )
+        board["thoughts"].append({
+            "node": message.source_node_id,
+            "type": thought_type,
+            "confidence": confidence,
+            "content": proposal.get("content"),
+        })
 
         # Sync thought into HCIR hypergraph as FactNode or BeliefNode
         try:
@@ -835,14 +831,12 @@ class WorkspaceNode(Node, IWorkspace):
                     memory_context = "\n".join(
                         f"- {str(r.get('text', r.get('content', '')))[:200]}" for r in results[:3]
                     )
-                    board["thoughts"].append(
-                        {
-                            "node": "memory_retrieval",
-                            "type": "memory_context",
-                            "confidence": 0.3,
-                            "content": f"Relevant past context:\n{memory_context}",
-                        }
-                    )
+                    board["thoughts"].append({
+                        "node": "memory_retrieval",
+                        "type": "memory_context",
+                        "confidence": 0.3,
+                        "content": f"Relevant past context:\n{memory_context}",
+                    })
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
@@ -870,14 +864,12 @@ class WorkspaceNode(Node, IWorkspace):
                         f"- {str(s.get('name', 'unknown'))}: {', '.join(list(s.get('steps', []))[:3])}"
                         for s in skills[:2]
                     )
-                    board["thoughts"].append(
-                        {
-                            "node": "procedural_memory",
-                            "type": "skill_context",
-                            "confidence": 0.25,
-                            "content": f"Applicable learned skills:\n{skill_text}",
-                        }
-                    )
+                    board["thoughts"].append({
+                        "node": "procedural_memory",
+                        "type": "skill_context",
+                        "confidence": 0.25,
+                        "content": f"Applicable learned skills:\n{skill_text}",
+                    })
             except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
                 pass
             except Exception:
@@ -1101,14 +1093,12 @@ class WorkspaceNode(Node, IWorkspace):
                 )
                 # Weight by average mechanism confidence
                 avg_conf = sum(m.get("confidence", 0.5) for m in mechanisms) / len(mechanisms)
-                board["thoughts"].append(
-                    {
-                        "node": "causal_reasoning",
-                        "type": "causal_context",
-                        "confidence": min(0.6, avg_conf),
-                        "content": f"Relevant causal mechanisms:\n{mech_text}",
-                    }
-                )
+                board["thoughts"].append({
+                    "node": "causal_reasoning",
+                    "type": "causal_context",
+                    "confidence": min(0.6, avg_conf),
+                    "content": f"Relevant causal mechanisms:\n{mech_text}",
+                })
         except (TimeoutError, asyncio.TimeoutError, asyncio.CancelledError):
             pass
         except Exception:

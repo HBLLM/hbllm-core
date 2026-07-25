@@ -14,12 +14,11 @@ All nodes inherit from `hbllm.network.node.Node`:
 ```python
 from hbllm.network.node import Node, NodeType
 
+
 class MyNode(Node):
     def __init__(self):
         super().__init__(
-            node_id="my-node",
-            node_type=NodeType.CORE,
-            capabilities=["custom-processing"]
+            node_id="my-node", node_type=NodeType.CORE, capabilities=["custom-processing"]
         )
 
     async def on_start(self) -> None:

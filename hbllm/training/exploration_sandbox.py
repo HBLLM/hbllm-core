@@ -138,14 +138,12 @@ class ExplorationSandbox:
             result = self.simulate_action(action, params)
             step_ok = result.get("success", True)
 
-            results.append(
-                {
-                    "step": i + 1,
-                    "action": action,
-                    "success": step_ok,
-                    "result": result,
-                }
-            )
+            results.append({
+                "step": i + 1,
+                "action": action,
+                "success": step_ok,
+                "result": result,
+            })
 
             if not step_ok:
                 all_ok = False

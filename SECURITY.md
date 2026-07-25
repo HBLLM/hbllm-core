@@ -55,6 +55,7 @@ All data-access methods are protected with the `@require_tenant` decorator, whic
 ```python
 from hbllm.security.tenant_guard import require_tenant
 
+
 @require_tenant
 async def store(self, content: str, metadata: dict, *, tenant_id: str, **kwargs):
     # tenant_id is validated before this code runs

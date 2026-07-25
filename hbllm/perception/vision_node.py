@@ -121,9 +121,12 @@ class VisionNode(Node):
                 logger.info("Frame unchanged for %s. Returning cached result.", cache_key)
                 caption = self._last_caption_cache[cache_key]
                 embedding = self._last_embedding_cache.get(cache_key, [])
-                return message.create_response(
-                    {"text": caption, "domain": "vision", "embedding": embedding, "cached": True}
-                )
+                return message.create_response({
+                    "text": caption,
+                    "domain": "vision",
+                    "embedding": embedding,
+                    "cached": True,
+                })
 
             # If changed (or first run), process image and get embedding
             caption = await asyncio.to_thread(self._process_image, str(image_data))
@@ -132,9 +135,12 @@ class VisionNode(Node):
             self._last_caption_cache[cache_key] = caption
             self._last_embedding_cache[cache_key] = embedding
 
-            return message.create_response(
-                {"text": caption, "domain": "vision", "embedding": embedding, "cached": False}
-            )
+            return message.create_response({
+                "text": caption,
+                "domain": "vision",
+                "embedding": embedding,
+                "cached": False,
+            })
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Vision processing error: %s", e)
             return message.create_error(f"Vision failure: {e}")
@@ -281,14 +287,12 @@ class VisionNode(Node):
             if ocr_text:
                 combined = f"{caption}\n\n[Extracted Text]:\n{ocr_text}" if caption else ocr_text
 
-            return message.create_response(
-                {
-                    "caption": caption,
-                    "ocr_text": ocr_text,
-                    "combined": combined,
-                    "domain": "vision",
-                }
-            )
+            return message.create_response({
+                "caption": caption,
+                "ocr_text": ocr_text,
+                "combined": combined,
+                "domain": "vision",
+            })
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("OCR processing error: %s", e)
             return message.create_error(f"OCR failure: {e}")

@@ -282,13 +282,11 @@ class LoadManager(Node):
         if len(self._task_queue) >= self._max_queue:
             return False
 
-        self._task_queue.append(
-            {
-                "task_id": task_id,
-                "priority": priority,
-                "queued_at": time.time(),
-            }
-        )
+        self._task_queue.append({
+            "task_id": task_id,
+            "priority": priority,
+            "queued_at": time.time(),
+        })
         self._task_queue.sort(key=lambda t: t["priority"])
         self._tasks_queued += 1
         return True

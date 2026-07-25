@@ -167,13 +167,11 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_direct_answer(self):
         """LLM answers immediately without tools."""
-        llm = MockLLM(
-            [
-                "Thought: This is a simple question.\n"
-                "Action: FINISH\n"
-                "Action Input: The capital of France is Paris."
-            ]
-        )
+        llm = MockLLM([
+            "Thought: This is a simple question.\n"
+            "Action: FINISH\n"
+            "Action Input: The capital of France is Paris."
+        ])
         tools = ToolRegistry()
         loop = ReActLoop(llm=llm, tools=tools)
         result = await loop.run("What is the capital of France?")
@@ -185,12 +183,10 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_single_tool_call(self):
         """LLM uses one tool then answers."""
-        llm = MockLLM(
-            [
-                "Thought: I need to calculate this.\nAction: calculator\nAction Input: 2 + 2",
-                "Thought: I got the result.\nAction: FINISH\nAction Input: 2 + 2 = 4",
-            ]
-        )
+        llm = MockLLM([
+            "Thought: I need to calculate this.\nAction: calculator\nAction Input: 2 + 2",
+            "Thought: I got the result.\nAction: FINISH\nAction Input: 2 + 2 = 4",
+        ])
         tools = ToolRegistry()
 
         async def calc(expression: str) -> ToolResult:
@@ -228,14 +224,12 @@ class TestReActLoop:
     @pytest.mark.asyncio
     async def test_tool_failure_handling(self):
         """Loop handles tool failures gracefully."""
-        llm = MockLLM(
-            [
-                "Thought: Let me try.\nAction: broken_tool\nAction Input: test",
-                "Thought: The tool failed, let me answer directly.\n"
-                "Action: FINISH\n"
-                "Action Input: Could not retrieve the information.",
-            ]
-        )
+        llm = MockLLM([
+            "Thought: Let me try.\nAction: broken_tool\nAction Input: test",
+            "Thought: The tool failed, let me answer directly.\n"
+            "Action: FINISH\n"
+            "Action Input: Could not retrieve the information.",
+        ])
         tools = ToolRegistry()
 
         async def broken(x: str) -> ToolResult:

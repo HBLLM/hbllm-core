@@ -189,14 +189,12 @@ class CognitionRouter:
     def get_cluster_status(self) -> dict[str, Any]:
         workers = []
         for w in self._workers.values():
-            workers.append(
-                {
-                    "id": w.worker_id,
-                    "specializations": w.specializations,
-                    "load": f"{w.current_load}/{w.capacity}",
-                    "healthy": w.is_healthy,
-                }
-            )
+            workers.append({
+                "id": w.worker_id,
+                "specializations": w.specializations,
+                "load": f"{w.current_load}/{w.capacity}",
+                "healthy": w.is_healthy,
+            })
         return {
             "total_workers": len(self._workers),
             "total_tasks_routed": len(self._task_history),

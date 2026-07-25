@@ -56,9 +56,11 @@ from hbllm.actions.tool_registry import ToolRegistry, ToolResult
 
 registry = ToolRegistry()
 
+
 # Register a custom tool
 async def my_tool(query: str = "") -> ToolResult:
     return ToolResult(tool="my_tool", success=True, output=f"Result: {query}")
+
 
 registry.register("my_tool", "Does something useful", my_tool, {"query": "string"})
 
@@ -125,10 +127,10 @@ Every tool invocation returns a `ToolResult`:
 ```python
 @dataclass
 class ToolResult:
-    tool: str           # Tool name
-    success: bool       # Did the tool succeed?
-    output: str         # Output text (on success)
-    error: str = ""     # Error message (on failure)
+    tool: str  # Tool name
+    success: bool  # Did the tool succeed?
+    output: str  # Output text (on success)
+    error: str = ""  # Error message (on failure)
     duration_ms: float = 0.0  # Execution time
 ```
 
@@ -186,13 +188,15 @@ from hbllm.actions.tool_memory import ToolMemory, ToolUsageRecord
 
 memory = ToolMemory(data_dir="~/.hbllm")
 
-memory.record(ToolUsageRecord(
-    tool_name="web_search",
-    query_type="factual",
-    success=True,
-    latency_ms=230.0,
-    result_quality=0.9,
-))
+memory.record(
+    ToolUsageRecord(
+        tool_name="web_search",
+        query_type="factual",
+        success=True,
+        latency_ms=230.0,
+        result_quality=0.9,
+    )
+)
 ```
 
 ### Availability-Aware Recommendations
@@ -235,7 +239,7 @@ response = await executor.execute(
     agent_mode=True,  # Enable tool use
 )
 print(response.content)
-print(response.steps)      # Execution trace
+print(response.steps)  # Execution trace
 print(response.confidence)  # 0.0–1.0
 ```
 
@@ -256,20 +260,20 @@ tool reasoning instead of single-pass extraction. The loop follows the
 from hbllm.actions.tool_chain import ReActLoop, ReActConfig
 
 config = ReActConfig(
-    max_iterations=8,       # Max reasoning steps
+    max_iterations=8,  # Max reasoning steps
     max_wall_time_seconds=60.0,
-    max_parallel_tools=3,   # Concurrent tool calls
+    max_parallel_tools=3,  # Concurrent tool calls
     allow_parallel=True,
-    include_scratchpad=True, # Keep chain-of-thought trace
+    include_scratchpad=True,  # Keep chain-of-thought trace
 )
 
 loop = ReActLoop(llm=my_llm, tools=tool_registry, config=config)
 result = await loop.run("Research quantum computing and summarize key concepts")
 
-print(result.answer)           # Final answer
-print(result.total_tool_calls) # Number of tools invoked
-print(result.steps)            # Full reasoning trace
-print(result.scratchpad)       # Raw chain-of-thought
+print(result.answer)  # Final answer
+print(result.total_tool_calls)  # Number of tools invoked
+print(result.steps)  # Full reasoning trace
+print(result.scratchpad)  # Raw chain-of-thought
 ```
 
 ### Budget Controls
@@ -287,13 +291,13 @@ The loop respects three budget limits to prevent runaway execution:
 ```python
 @dataclass
 class ReActResult:
-    answer: str              # Final synthesized answer
-    steps: list[ThoughtStep] # Full reasoning trace
+    answer: str  # Final synthesized answer
+    steps: list[ThoughtStep]  # Full reasoning trace
     total_iterations: int
     total_tool_calls: int
     total_duration_ms: float
-    finished_reason: str     # "answer" | "max_iterations" | "timeout" | "error"
-    scratchpad: str          # Raw chain-of-thought text
+    finished_reason: str  # "answer" | "max_iterations" | "timeout" | "error"
+    scratchpad: str  # Raw chain-of-thought text
 ```
 
 ---
@@ -321,9 +325,11 @@ Register functions as tools using the decorator pattern:
 ```python
 from hbllm.actions.tool_registry import tool, get_tool_registry
 
+
 @tool(name="calculator", description="Evaluate math expressions")
 def calculator(expression: str) -> float:
     return eval(expression)  # simplified example
+
 
 # Automatically registered in the global registry
 registry = get_tool_registry()
@@ -339,10 +345,10 @@ Dynamically create tools from code strings at runtime:
 ```python
 from hbllm.actions.tool_registry import create_tool_from_code
 
-code = '''
+code = """
 def multiply(a, b):
     return a * b
-'''
+"""
 func = create_tool_from_code(code, "multiply")
 assert func(3, 4) == 12
 ```

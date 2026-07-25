@@ -210,27 +210,25 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             kg_entities = kg.entity_count
             kg_relations = kg.relation_count
 
-            return message.create_response(
-                {
-                    "episodic": {
-                        "turns": episodic_turns,
-                        "sessions": episodic_sessions,
-                    },
-                    "semantic": {
-                        "documents": semantic_count,
-                    },
-                    "procedural": {
-                        "skills": procedural_count,
-                    },
-                    "value": {
-                        "rewards": value_count,
-                    },
-                    "knowledge_graph": {
-                        "entities": kg_entities,
-                        "relations": kg_relations,
-                    },
-                }
-            )
+            return message.create_response({
+                "episodic": {
+                    "turns": episodic_turns,
+                    "sessions": episodic_sessions,
+                },
+                "semantic": {
+                    "documents": semantic_count,
+                },
+                "procedural": {
+                    "skills": procedural_count,
+                },
+                "value": {
+                    "rewards": value_count,
+                },
+                "knowledge_graph": {
+                    "entities": kg_entities,
+                    "relations": kg_relations,
+                },
+            })
 
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("Memory stats failed: %s", e)
@@ -252,9 +250,11 @@ class MemoryNode(Node, UnifiedMemoryInterface):
             if new_usefulness is None:
                 return message.create_error(f"Memory with ID {note_id} not found", code="NOT_FOUND")
 
-            return message.create_response(
-                {"status": "updated", "note_id": note_id, "usefulness": new_usefulness}
-            )
+            return message.create_response({
+                "status": "updated",
+                "note_id": note_id,
+                "usefulness": new_usefulness,
+            })
         except Exception as e:
             logger.error("Memory feedback failed: %s", e)
             return message.create_error(str(e))

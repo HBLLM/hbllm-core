@@ -107,14 +107,12 @@ class TestInstructionDataset:
 
     def test_to_messages_sharegpt(self, mock_tokenizer):
         ds = InstructionDataset([], mock_tokenizer)
-        msgs = ds._to_messages(
-            {
-                "conversations": [
-                    {"from": "human", "value": "Q"},
-                    {"from": "gpt", "value": "A"},
-                ]
-            }
-        )
+        msgs = ds._to_messages({
+            "conversations": [
+                {"from": "human", "value": "Q"},
+                {"from": "gpt", "value": "A"},
+            ]
+        })
         assert len(msgs) == 2
 
     def test_to_messages_direct(self, mock_tokenizer):

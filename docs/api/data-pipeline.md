@@ -35,11 +35,11 @@ from hbllm.data.pipeline import DataPipeline
 
 pipeline = DataPipeline(work_dir="./data/training")
 pipeline.run_all(
-    dataset_name="fineweb",       # or "fineweb+starcoderdata+openwebmath"
+    dataset_name="fineweb",  # or "fineweb+starcoderdata+openwebmath"
     max_samples=100_000,
     vocab_size=32768,
     sequence_length=2048,
-    data_weights=[0.6, 0.2, 0.2], # Per-dataset weights (with multi-dataset)
+    data_weights=[0.6, 0.2, 0.2],  # Per-dataset weights (with multi-dataset)
 )
 ```
 

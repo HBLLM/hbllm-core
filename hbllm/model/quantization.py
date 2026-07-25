@@ -128,7 +128,8 @@ class QuantizedLinear(nn.Module):
                 self.group_size,
             )
             w_float = (
-                torch.from_numpy(w_flat)
+                torch
+                .from_numpy(w_flat)
                 .reshape(self.out_features, self.in_features)
                 .to(x.device, x.dtype)
             )

@@ -171,9 +171,9 @@ class ConceptExtractor:
                     for k in concept.keywords
                 )
             ]
-            answer_keywords = self._count_keywords(
-                [p.get("answer", p.get("response", "")) for p in relevant_pairs]
-            )
+            answer_keywords = self._count_keywords([
+                p.get("answer", p.get("response", "")) for p in relevant_pairs
+            ])
             if answer_keywords:
                 top_answer_terms = [k for k, _ in answer_keywords.most_common(5)]
                 concept.rules.append(f"Common answer themes: {', '.join(top_answer_terms)}")

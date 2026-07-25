@@ -37,9 +37,12 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_handle_initialize(self, server):
-        resp = await server.handle_request(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {},
+        })
         assert resp["result"]["protocolVersion"] == "2024-11-05"
         assert "tools" in resp["result"]["capabilities"]
 
@@ -51,9 +54,12 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_handle_tools_list(self, server):
-        resp = await server.handle_request(
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        })
         tools = resp["result"]["tools"]
         assert len(tools) > 0
         names = [t["name"] for t in tools]
@@ -62,16 +68,22 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_handle_resources_list(self, server):
-        resp = await server.handle_request(
-            {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}}
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "resources/list",
+            "params": {},
+        })
         assert resp["result"]["resources"] == []
 
     @pytest.mark.asyncio
     async def test_handle_prompts_list(self, server):
-        resp = await server.handle_request(
-            {"jsonrpc": "2.0", "id": 4, "method": "prompts/list", "params": {}}
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "prompts/list",
+            "params": {},
+        })
         assert resp["result"]["prompts"] == []
 
     @pytest.mark.asyncio
@@ -92,14 +104,12 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_tools_call_health(self, server):
-        resp = await server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 7,
-                "method": "tools/call",
-                "params": {"name": "hbllm_health", "arguments": {}},
-            }
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "hbllm_health", "arguments": {}},
+        })
         content = resp["result"]["content"]
         assert content[0]["type"] == "text"
         result = json.loads(content[0]["text"])
@@ -107,31 +117,27 @@ class TestMcpServer:
 
     @pytest.mark.asyncio
     async def test_tools_call_unknown_tool(self, server):
-        resp = await server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 8,
-                "method": "tools/call",
-                "params": {"name": "nonexistent_tool", "arguments": {}},
-            }
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {"name": "nonexistent_tool", "arguments": {}},
+        })
         assert resp["result"]["isError"] is True
 
     @pytest.mark.asyncio
     async def test_tools_call_memory_store(self, server):
         mock_bus = AsyncMock()
         server.bus = mock_bus
-        resp = await server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 9,
-                "method": "tools/call",
-                "params": {
-                    "name": "hbllm_memory_store",
-                    "arguments": {"content": "Test fact", "memory_type": "semantic"},
-                },
-            }
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "hbllm_memory_store",
+                "arguments": {"content": "Test fact", "memory_type": "semantic"},
+            },
+        })
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["stored"] is True
 
@@ -139,17 +145,15 @@ class TestMcpServer:
     async def test_tools_call_identity_set(self, server):
         mock_bus = AsyncMock()
         server.bus = mock_bus
-        resp = await server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 10,
-                "method": "tools/call",
-                "params": {
-                    "name": "hbllm_identity_set",
-                    "arguments": {"tenant_id": "t1", "persona_name": "TestBot"},
-                },
-            }
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "hbllm_identity_set",
+                "arguments": {"tenant_id": "t1", "persona_name": "TestBot"},
+            },
+        })
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["updated"] is True
 
@@ -157,17 +161,15 @@ class TestMcpServer:
     async def test_tools_call_feedback(self, server):
         mock_bus = AsyncMock()
         server.bus = mock_bus
-        resp = await server.handle_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 11,
-                "method": "tools/call",
-                "params": {
-                    "name": "hbllm_feedback",
-                    "arguments": {"message_id": "msg-123", "rating": 1, "comment": "Great!"},
-                },
-            }
-        )
+        resp = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "hbllm_feedback",
+                "arguments": {"message_id": "msg-123", "rating": 1, "comment": "Great!"},
+            },
+        })
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["recorded"] is True
 

@@ -63,7 +63,7 @@ uplink = UplinkNode(
     tenant_id="tenant-001",
     user_id="user-001",
     device_id="laptop",
-    local_tools=["local_file_system", "mcp.vscode"]
+    local_tools=["local_file_system", "mcp.vscode"],
 )
 
 # Start the node (it will auto-reconnect if dropped)
@@ -152,15 +152,10 @@ Messages provide helper methods for creating correlated responses:
 
 ```python
 # Create a response linked to the original message
-response = original_msg.create_response(
-    payload={"answer": "4"}
-)
+response = original_msg.create_response(payload={"answer": "4"})
 
 # Create an error response
-error = original_msg.create_error(
-    error="Division by zero",
-    code="MATH_ERROR"
-)
+error = original_msg.create_error(error="Division by zero", code="MATH_ERROR")
 ```
 
 ## Topic Patterns

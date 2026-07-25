@@ -59,13 +59,11 @@ async def test_multimodal_image_caption_injected() -> None:
     # Create a mock router that echoes the input text
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
-        response = msg.create_response(
-            {
-                "text": f"I see: {text}",
-                "source_node": "router",
-                "confidence": 0.9,
-            }
-        )
+        response = msg.create_response({
+            "text": f"I see: {text}",
+            "source_node": "router",
+            "confidence": 0.9,
+        })
         await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
@@ -105,12 +103,10 @@ async def test_multimodal_audio_transcript_injected():
     # Register mock router
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
-        response = msg.create_response(
-            {
-                "text": f"Processed: {text}",
-                "source_node": "router",
-            }
-        )
+        response = msg.create_response({
+            "text": f"Processed: {text}",
+            "source_node": "router",
+        })
         await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)
@@ -150,12 +146,10 @@ async def test_multimodal_combined_image_audio_text():
 
     async def mock_router(msg: Message):
         text = msg.payload.get("text", "")
-        response = msg.create_response(
-            {
-                "text": text,
-                "source_node": "router",
-            }
-        )
+        response = msg.create_response({
+            "text": text,
+            "source_node": "router",
+        })
         await bus.publish("decision.output", response)
 
     await bus.subscribe("router.query", mock_router)

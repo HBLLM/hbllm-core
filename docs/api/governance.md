@@ -66,23 +66,27 @@ from hbllm.brain.governance.policy_engine import PolicyEngine, Policy, PolicyTyp
 engine = PolicyEngine()
 
 # Add a deny policy
-engine.add_policy(Policy(
-    name="no-harmful-instructions",
-    type=PolicyType.DENY,
-    action=PolicyAction.BLOCK,
-    pattern=r"how to (hack|exploit|attack)",
-    description="Block requests for harmful activities",
-    severity="critical",
-))
+engine.add_policy(
+    Policy(
+        name="no-harmful-instructions",
+        type=PolicyType.DENY,
+        action=PolicyAction.BLOCK,
+        pattern=r"how to (hack|exploit|attack)",
+        description="Block requests for harmful activities",
+        severity="critical",
+    )
+)
 
 # Add a transform policy (auto-append disclaimer)
-engine.add_policy(Policy(
-    name="medical-disclaimer",
-    type=PolicyType.TRANSFORM,
-    action=PolicyAction.APPEND,
-    content="⚠️ This is not medical advice. Consult a healthcare professional.",
-    domains=["health"],
-))
+engine.add_policy(
+    Policy(
+        name="medical-disclaimer",
+        type=PolicyType.TRANSFORM,
+        action=PolicyAction.APPEND,
+        content="⚠️ This is not medical advice. Consult a healthcare professional.",
+        domains=["health"],
+    )
+)
 
 # Evaluate a response
 result = engine.evaluate(
@@ -149,11 +153,11 @@ Supported operators: `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `in`, `not_in`.
 ```python
 @dataclass
 class PolicyResult:
-    passed: bool              # Did all policies pass?
-    original_text: str        # Unmodified response
-    modified_text: str        # After transformations
-    violations: list[str]     # Blocking violations
-    warnings: list[str]       # Non-blocking warnings
+    passed: bool  # Did all policies pass?
+    original_text: str  # Unmodified response
+    modified_text: str  # After transformations
+    violations: list[str]  # Blocking violations
+    warnings: list[str]  # Non-blocking warnings
     applied_policies: list[str]  # Names of policies that fired
 ```
 

@@ -43,13 +43,11 @@ async def studio_notifications_status(request: Request):
     channels = []
     channel_registry = getattr(node, "_channels", {})
     for name, ch in channel_registry.items():
-        channels.append(
-            {
-                "name": name,
-                "enabled": getattr(ch, "enabled", True),
-                "type": type(ch).__name__,
-            }
-        )
+        channels.append({
+            "name": name,
+            "enabled": getattr(ch, "enabled", True),
+            "type": type(ch).__name__,
+        })
 
     return {
         "status": "active",
@@ -114,15 +112,13 @@ async def studio_habits_status(request: Request):
     for tenant_habits in habit_registry.values():
         if isinstance(tenant_habits, dict):
             for habit_id, habit in tenant_habits.items():
-                habits.append(
-                    {
-                        "id": habit_id,
-                        "name": getattr(habit, "name", habit_id),
-                        "frequency": getattr(habit, "frequency", "unknown"),
-                        "streak": getattr(habit, "streak", 0),
-                        "last_triggered": getattr(habit, "last_triggered", 0),
-                    }
-                )
+                habits.append({
+                    "id": habit_id,
+                    "name": getattr(habit, "name", habit_id),
+                    "frequency": getattr(habit, "frequency", "unknown"),
+                    "streak": getattr(habit, "streak", 0),
+                    "last_triggered": getattr(habit, "last_triggered", 0),
+                })
 
     return {
         "status": "active",
@@ -232,13 +228,11 @@ async def studio_threads_status(request: Request):
     thread_registry = getattr(node, "_threads", {})
     for tid, thread in thread_registry.items():
         messages = getattr(thread, "messages", [])
-        threads.append(
-            {
-                "thread_id": tid,
-                "message_count": len(messages) if isinstance(messages, list) else 0,
-                "last_activity": getattr(thread, "last_activity", 0),
-            }
-        )
+        threads.append({
+            "thread_id": tid,
+            "message_count": len(messages) if isinstance(messages, list) else 0,
+            "last_activity": getattr(thread, "last_activity", 0),
+        })
 
     return {
         "status": "active",
@@ -307,15 +301,13 @@ async def get_studio_topology(request: Request):
     edges: list[dict[str, Any]] = []
 
     # SNN Group Node
-    nodes.append(
-        {
-            "id": "snn_layer",
-            "label": "SNN Priming Layer",
-            "type": "layer",
-            "group": "snn",
-            "details": {"description": "Spiking Neural Network category-priming layer"},
-        }
-    )
+    nodes.append({
+        "id": "snn_layer",
+        "label": "SNN Priming Layer",
+        "type": "layer",
+        "group": "snn",
+        "details": {"description": "Spiking Neural Network category-priming layer"},
+    })
 
     # Add SNN category nodes
     for cat in all_cats:
@@ -337,50 +329,42 @@ async def get_studio_topology(request: Request):
                 pot = acc.get_potential()
                 threshold = acc.neuron.config.threshold
 
-        nodes.append(
-            {
-                "id": f"snn_{cat}",
-                "label": f"SNN: {label}",
-                "type": "neuron",
-                "group": "snn",
-                "details": {
-                    "potential": round(pot, 3),
-                    "threshold": threshold,
-                    "is_active": pot >= threshold,
-                },
-            }
-        )
-        # Link category neurons to the main layer
-        edges.append(
-            {
-                "source": "snn_layer",
-                "target": f"snn_{cat}",
-                "relation": "contains",
-            }
-        )
-
-    # Attention Fatigue
-    attn_pot = collector._mem_gauges.get("snn_potential:human_attention_fatigue", 0.0)
-    nodes.append(
-        {
-            "id": "snn_attention_fatigue",
-            "label": "Attention Fatigue",
+        nodes.append({
+            "id": f"snn_{cat}",
+            "label": f"SNN: {label}",
             "type": "neuron",
             "group": "snn",
             "details": {
-                "potential": round(attn_pot, 3),
-                "threshold": 0.8,
-                "is_refractory": attn_pot >= 0.8,
+                "potential": round(pot, 3),
+                "threshold": threshold,
+                "is_active": pot >= threshold,
             },
-        }
-    )
-    edges.append(
-        {
+        })
+        # Link category neurons to the main layer
+        edges.append({
             "source": "snn_layer",
-            "target": "snn_attention_fatigue",
+            "target": f"snn_{cat}",
             "relation": "contains",
-        }
-    )
+        })
+
+    # Attention Fatigue
+    attn_pot = collector._mem_gauges.get("snn_potential:human_attention_fatigue", 0.0)
+    nodes.append({
+        "id": "snn_attention_fatigue",
+        "label": "Attention Fatigue",
+        "type": "neuron",
+        "group": "snn",
+        "details": {
+            "potential": round(attn_pot, 3),
+            "threshold": 0.8,
+            "is_refractory": attn_pot >= 0.8,
+        },
+    })
+    edges.append({
+        "source": "snn_layer",
+        "target": "snn_attention_fatigue",
+        "relation": "contains",
+    })
 
     # 2. Gather LoRA Data
     import glob
@@ -389,15 +373,13 @@ async def get_studio_topology(request: Request):
     data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
     lora_dir = os.path.join(data_dir, "lora")
 
-    nodes.append(
-        {
-            "id": "lora_layer",
-            "label": "LoRA Adapter Registry",
-            "type": "layer",
-            "group": "lora",
-            "details": {"description": "Domain-specific LoRA adapters"},
-        }
-    )
+    nodes.append({
+        "id": "lora_layer",
+        "label": "LoRA Adapter Registry",
+        "type": "layer",
+        "group": "lora",
+        "details": {"description": "Domain-specific LoRA adapters"},
+    })
 
     active_adapters = []
     if os.path.exists(lora_dir):
@@ -409,48 +391,40 @@ async def get_studio_topology(request: Request):
 
     for name, path, size in active_adapters:
         adapter_id = f"lora_{name.replace('.pt', '')}"
-        nodes.append(
-            {
-                "id": adapter_id,
-                "label": f"LoRA: {name}",
-                "type": "adapter",
-                "group": "lora",
-                "details": {
-                    "size_mb": round(size, 2),
-                    "path": path,
-                },
-            }
-        )
-        edges.append(
-            {
-                "source": "lora_layer",
-                "target": adapter_id,
-                "relation": "contains",
-            }
-        )
+        nodes.append({
+            "id": adapter_id,
+            "label": f"LoRA: {name}",
+            "type": "adapter",
+            "group": "lora",
+            "details": {
+                "size_mb": round(size, 2),
+                "path": path,
+            },
+        })
+        edges.append({
+            "source": "lora_layer",
+            "target": adapter_id,
+            "relation": "contains",
+        })
 
         # Dynamically link primed SNN categories to matching LoRA adapters
         for cat in all_cats:
             if cat in name.lower():
-                edges.append(
-                    {
-                        "source": f"snn_{cat}",
-                        "target": adapter_id,
-                        "relation": "primes",
-                        "weight": 1.0,
-                    }
-                )
+                edges.append({
+                    "source": f"snn_{cat}",
+                    "target": adapter_id,
+                    "relation": "primes",
+                    "weight": 1.0,
+                })
 
     # 3. Gather Dual LLM Router Data
-    nodes.append(
-        {
-            "id": "llm_router",
-            "label": "Dual LLM Router",
-            "type": "router",
-            "group": "llm",
-            "details": {"description": "Decides whether to route to local or external LLM"},
-        }
-    )
+    nodes.append({
+        "id": "llm_router",
+        "label": "Dual LLM Router",
+        "type": "router",
+        "group": "llm",
+        "details": {"description": "Decides whether to route to local or external LLM"},
+    })
 
     router_node = get_node("DualLLMRouter")
     router_stats = {}
@@ -469,78 +443,64 @@ async def get_studio_topology(request: Request):
             complexity_threshold = router_node.complexity_threshold
 
     # Local LLM Node
-    nodes.append(
-        {
-            "id": "llm_local",
-            "label": f"Local LLM ({local_model})",
-            "type": "llm",
-            "group": "llm",
-            "details": {
-                "model_name": local_model,
-                "tier": "local",
-            },
-        }
-    )
-    edges.append(
-        {
-            "source": "llm_router",
-            "target": "llm_local",
-            "relation": "routes_to",
-        }
-    )
+    nodes.append({
+        "id": "llm_local",
+        "label": f"Local LLM ({local_model})",
+        "type": "llm",
+        "group": "llm",
+        "details": {
+            "model_name": local_model,
+            "tier": "local",
+        },
+    })
+    edges.append({
+        "source": "llm_router",
+        "target": "llm_local",
+        "relation": "routes_to",
+    })
 
     # External LLM Node
-    nodes.append(
-        {
-            "id": "llm_external",
-            "label": f"External LLM ({external_model})",
-            "type": "llm",
-            "group": "llm",
-            "details": {
-                "model_name": external_model,
-                "tier": "external",
-            },
-        }
-    )
-    edges.append(
-        {
-            "source": "llm_router",
-            "target": "llm_external",
-            "relation": "routes_to",
-        }
-    )
+    nodes.append({
+        "id": "llm_external",
+        "label": f"External LLM ({external_model})",
+        "type": "llm",
+        "group": "llm",
+        "details": {
+            "model_name": external_model,
+            "tier": "external",
+        },
+    })
+    edges.append({
+        "source": "llm_router",
+        "target": "llm_external",
+        "relation": "routes_to",
+    })
 
     # Link all active LoRA adapters to Local LLM (where they are applied)
     for name, _, _ in active_adapters:
         adapter_id = f"lora_{name.replace('.pt', '')}"
-        edges.append(
-            {
-                "source": adapter_id,
-                "target": "llm_local",
-                "relation": "extends",
-            }
-        )
+        edges.append({
+            "source": adapter_id,
+            "target": "llm_local",
+            "relation": "extends",
+        })
 
     # Link SNN Attention fatigue to router
-    edges.append(
-        {
-            "source": "snn_attention_fatigue",
-            "target": "llm_router",
-            "relation": "biases",
-        }
-    )
+    edges.append({
+        "source": "snn_attention_fatigue",
+        "target": "llm_router",
+        "relation": "biases",
+    })
 
     # Update LLM router node details
     for node in nodes:
         if node["id"] == "llm_router":
-            node["details"].update(
-                {
-                    "stats": router_stats,
-                    "complexity_threshold": complexity_threshold,
-                    "local_model": local_model,
-                    "external_model": external_model,
-                }
-            )
+            node["details"].update({
+                "stats": router_stats,
+                "complexity_threshold": complexity_threshold,
+                "local_model": local_model,
+                "external_model": external_model,
+            })
 
     return {
         "status": "success",

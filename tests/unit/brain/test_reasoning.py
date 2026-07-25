@@ -29,14 +29,12 @@ class TestReasoningNetwork:
     def test_high_confidence_for_strong_chain(self) -> None:
         """Strong, short, recent chain → high confidence."""
         net = ReasoningNetwork()
-        score = net.evaluate(
-            {
-                "chain_probability": 0.95,
-                "chain_length": 1.0,  # 1 hop
-                "recency": 0.99,
-                "diversity": 0.8,
-            }
-        )
+        score = net.evaluate({
+            "chain_probability": 0.95,
+            "chain_length": 1.0,  # 1 hop
+            "recency": 0.99,
+            "diversity": 0.8,
+        })
         assert 0.0 <= score <= 1.0
         # Strong features should produce reasonable confidence
         assert score > 0.3
@@ -44,36 +42,30 @@ class TestReasoningNetwork:
     def test_low_confidence_for_weak_chain(self) -> None:
         """Weak, long chain → lower confidence."""
         net = ReasoningNetwork()
-        strong = net.evaluate(
-            {
-                "chain_probability": 0.9,
-                "chain_length": 1.0,
-                "recency": 0.9,
-                "diversity": 0.8,
-            }
-        )
-        weak = net.evaluate(
-            {
-                "chain_probability": 0.1,
-                "chain_length": 0.33,  # 3 hops
-                "recency": 0.2,
-                "diversity": 0.3,
-            }
-        )
+        strong = net.evaluate({
+            "chain_probability": 0.9,
+            "chain_length": 1.0,
+            "recency": 0.9,
+            "diversity": 0.8,
+        })
+        weak = net.evaluate({
+            "chain_probability": 0.1,
+            "chain_length": 0.33,  # 3 hops
+            "recency": 0.2,
+            "diversity": 0.3,
+        })
         # Strong should outrank weak
         assert strong >= weak
 
     def test_zero_features_returns_valid(self) -> None:
         """All zero features → valid confidence."""
         net = ReasoningNetwork()
-        score = net.evaluate(
-            {
-                "chain_probability": 0.0,
-                "chain_length": 0.0,
-                "recency": 0.0,
-                "diversity": 0.0,
-            }
-        )
+        score = net.evaluate({
+            "chain_probability": 0.0,
+            "chain_length": 0.0,
+            "recency": 0.0,
+            "diversity": 0.0,
+        })
         assert 0.0 <= score <= 1.0
 
     def test_missing_features_handled(self) -> None:

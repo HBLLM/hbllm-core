@@ -286,6 +286,7 @@ if _HAS_GRPC:
             except Exception as e:
                 logger.exception("Failed to handle gRPC delivery: %s", e)
                 return b"ERROR"
+
 else:
 
     class _BusServiceHandler:  # type: ignore[no-redef]

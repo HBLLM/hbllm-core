@@ -162,6 +162,7 @@ HBLLM Core is a **fully platform-independent cognitive library** with zero depen
 # Extend the core with platform-specific tools
 from hbllm.actions.agent_executor import AgentExecutor
 
+
 class MyPlatformExecutor(AgentExecutor):
     def _register_platform_tools(self):
         self.tools.register("my_tool", ..., my_tool_fn, {})
@@ -201,6 +202,7 @@ export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics (requires rclpy)
 import asyncio
 from hbllm.brain.core.factory import BrainFactory, BrainConfig
 
+
 async def main():
     # Cloud-backed (easy start)
     brain = await BrainFactory.create("openai/gpt-4o")
@@ -229,6 +231,7 @@ async def main():
     print(f"Latency: {result.latency_ms:.0f}ms")
 
     await brain.shutdown()
+
 
 asyncio.run(main())
 ```

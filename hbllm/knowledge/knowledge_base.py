@@ -528,16 +528,14 @@ class KnowledgeBase:
             meta = r.get("metadata", {})
             source_id = meta.get("source_id", "")
             source = self._sources.get(source_id)
-            enriched.append(
-                {
-                    "content": r.get("content", ""),
-                    "score": r.get("score", 0),
-                    "file_name": meta.get("file_name", "unknown"),
-                    "file_path": meta.get("file_path", ""),
-                    "source_name": source.name if source else "unknown",
-                    "source_id": source_id,
-                }
-            )
+            enriched.append({
+                "content": r.get("content", ""),
+                "score": r.get("score", 0),
+                "file_name": meta.get("file_name", "unknown"),
+                "file_path": meta.get("file_path", ""),
+                "source_name": source.name if source else "unknown",
+                "source_id": source_id,
+            })
 
         return enriched
 
@@ -623,13 +621,11 @@ class KnowledgeBase:
 
                 if status == "active" and ingested_at < cutoff:
                     age_days = (time.time() - ingested_at) / 86400
-                    stale.append(
-                        {
-                            "doc_id": doc_id,
-                            "metadata": meta,
-                            "age_days": round(age_days, 1),
-                        }
-                    )
+                    stale.append({
+                        "doc_id": doc_id,
+                        "metadata": meta,
+                        "age_days": round(age_days, 1),
+                    })
 
         return stale
 
@@ -710,9 +706,11 @@ class _FallbackKeywordMemory:
                 len(query_lower.split()), 1
             )
             if score > 0:
-                results.append(
-                    {"content": doc["content"], "score": score, "metadata": doc["metadata"]}
-                )
+                results.append({
+                    "content": doc["content"],
+                    "score": score,
+                    "metadata": doc["metadata"],
+                })
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
 

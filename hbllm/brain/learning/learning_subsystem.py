@@ -610,13 +610,11 @@ class CognitiveGraph:
         if self.goals.available:
             for g in self.goals.active():
                 if domain.lower() in g.name.lower() or domain.lower() in g.description.lower():
-                    result["goals"].append(
-                        {
-                            "name": g.name,
-                            "progress": g.progress,
-                            "priority": str(g.priority),
-                        }
-                    )
+                    result["goals"].append({
+                        "name": g.name,
+                        "progress": g.progress,
+                        "priority": str(g.priority),
+                    })
 
         # Layer 3: Synthesis (deep mode only)
         if mode == "deep":
@@ -645,17 +643,15 @@ class CognitiveGraph:
             for ctr in unresolved:
                 concept = ctr.get("concept", "")
                 if topic.lower() in concept.lower() or not topic:
-                    conflicts.append(
-                        {
-                            "type": "belief_contradiction",
-                            "source_a": "beliefs",
-                            "source_b": "beliefs",
-                            "claim_a": ctr.get("claim_a", ""),
-                            "claim_b": ctr.get("claim_b", ""),
-                            "severity": ctr.get("severity", 0.5),
-                            "concept": concept,
-                        }
-                    )
+                    conflicts.append({
+                        "type": "belief_contradiction",
+                        "source_a": "beliefs",
+                        "source_b": "beliefs",
+                        "claim_a": ctr.get("claim_a", ""),
+                        "claim_b": ctr.get("claim_b", ""),
+                        "severity": ctr.get("severity", 0.5),
+                        "concept": concept,
+                    })
 
         # 2. Mechanism vs belief conflicts
         if self.mechanism_store is not None and self.belief_store is not None:
@@ -670,17 +666,15 @@ class CognitiveGraph:
                         and belief.confidence > 0.7
                         and _text_overlap(mech.description, belief.claim) > 0.2
                     ):
-                        conflicts.append(
-                            {
-                                "type": "mechanism_belief_tension",
-                                "source_a": "mechanisms",
-                                "source_b": "beliefs",
-                                "claim_a": mech.description,
-                                "claim_b": belief.claim,
-                                "severity": belief.confidence - mech.confidence,
-                                "concept": topic,
-                            }
-                        )
+                        conflicts.append({
+                            "type": "mechanism_belief_tension",
+                            "source_a": "mechanisms",
+                            "source_b": "beliefs",
+                            "claim_a": mech.description,
+                            "claim_b": belief.claim,
+                            "severity": belief.confidence - mech.confidence,
+                            "concept": topic,
+                        })
 
         return conflicts
 

@@ -66,14 +66,12 @@ async def test_uplink_node_tool_routing(bus):
 
     # Simulate receiving a tool call from upstream
     mock_ws.__aiter__.return_value = [
-        json.dumps(
-            {
-                "type": "tool_call",
-                "correlation_id": "test_corr_123",
-                "tool_name": "local_tool_1",
-                "args": {"param": "value"},
-            }
-        )
+        json.dumps({
+            "type": "tool_call",
+            "correlation_id": "test_corr_123",
+            "tool_name": "local_tool_1",
+            "args": {"param": "value"},
+        })
     ]
 
     # Create a local responder for the tool

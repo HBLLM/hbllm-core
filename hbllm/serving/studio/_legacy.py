@@ -35,13 +35,11 @@ async def get_swarm_status():
     agents = []
     for name, node in sorted(node_map.items()):
         if hasattr(node, "_running") or hasattr(node, "get_info"):
-            agents.append(
-                {
-                    "name": name.replace("Node", "").replace("Manager", " Mgr"),
-                    "tenant_id": getattr(node, "tenant_id", "default"),
-                    "status": "healthy" if getattr(node, "_running", True) else "unhealthy",
-                }
-            )
+            agents.append({
+                "name": name.replace("Node", "").replace("Manager", " Mgr"),
+                "tenant_id": getattr(node, "tenant_id", "default"),
+                "status": "healthy" if getattr(node, "_running", True) else "unhealthy",
+            })
     cn = node_map.get("CollectiveNode")
     active_dels = (
         list(cn.active_delegations.values()) if cn and hasattr(cn, "active_delegations") else []
@@ -77,16 +75,14 @@ async def get_temporal_timeline():
                 except Exception:
                     pass
 
-                rows.append(
-                    {
-                        "id": r["task_id"],
-                        "execute_at": r["trigger_time"],
-                        "task_prompt": task_prompt,
-                        "status": r["status"],
-                        "is_overdue": r["trigger_time"] < now and r["status"] == "pending",
-                        "seconds_until": max(0.0, r["trigger_time"] - now),
-                    }
-                )
+                rows.append({
+                    "id": r["task_id"],
+                    "execute_at": r["trigger_time"],
+                    "task_prompt": task_prompt,
+                    "status": r["status"],
+                    "is_overdue": r["trigger_time"] < now and r["status"] == "pending",
+                    "seconds_until": max(0.0, r["trigger_time"] - now),
+                })
             return {"timeline": rows, "count": len(rows)}
     except Exception as e:
         logger.error("Failed to query scheduler.db: %s", e)
@@ -434,29 +430,21 @@ async def get_snn_expression_status():
         if planner:
             last_plans = getattr(planner, "_last_plans", [])
             for plan in last_plans[-5:]:
-                result["content_plans"].append(
-                    {
-                        "content_type": getattr(plan, "content_type", "unknown"),
-                        "key_points": getattr(plan, "key_points", []),
-                        "emphasis": getattr(plan, "emphasis", 0.5),
-                    }
-                )
+                result["content_plans"].append({
+                    "content_type": getattr(plan, "content_type", "unknown"),
+                    "key_points": getattr(plan, "key_points", []),
+                    "emphasis": getattr(plan, "emphasis", 0.5),
+                })
 
         # Extract PRM reward history
         prm = getattr(expression_stream, "_trained_prm", None)
         if prm:
             history = getattr(prm, "_score_history", [])
             for entry in history[-20:]:
-                result["prm_scores"].append(
-                    {
-                        "score": entry.get("score", 0.0)
-                        if isinstance(entry, dict)
-                        else float(entry),
-                        "timestamp": entry.get("timestamp", 0.0)
-                        if isinstance(entry, dict)
-                        else 0.0,
-                    }
-                )
+                result["prm_scores"].append({
+                    "score": entry.get("score", 0.0) if isinstance(entry, dict) else float(entry),
+                    "timestamp": entry.get("timestamp", 0.0) if isinstance(entry, dict) else 0.0,
+                })
 
     return result
 
@@ -493,30 +481,24 @@ async def get_snn_comprehension_status():
         last_state = getattr(comp_stream, "_last_state", None)
         if last_state:
             for concept in getattr(last_state, "concepts", [])[:10]:
-                result["last_concepts"].append(
-                    {
-                        "text": getattr(concept, "text", ""),
-                        "domain_activation": getattr(concept, "domain_activation", {}),
-                        "channel_metadata": getattr(concept, "channel_metadata", {}),
-                    }
-                )
+                result["last_concepts"].append({
+                    "text": getattr(concept, "text", ""),
+                    "domain_activation": getattr(concept, "domain_activation", {}),
+                    "channel_metadata": getattr(concept, "channel_metadata", {}),
+                })
             for assoc in getattr(last_state, "associations", [])[:10]:
-                result["last_associations"].append(
-                    {
-                        "type": getattr(assoc, "association_type", ""),
-                        "source_idx": getattr(assoc, "source_idx", 0),
-                        "target_idx": getattr(assoc, "target_idx", 0),
-                        "confidence": getattr(assoc, "confidence", 0.0),
-                    }
-                )
+                result["last_associations"].append({
+                    "type": getattr(assoc, "association_type", ""),
+                    "source_idx": getattr(assoc, "source_idx", 0),
+                    "target_idx": getattr(assoc, "target_idx", 0),
+                    "confidence": getattr(assoc, "confidence", 0.0),
+                })
             for chain in getattr(last_state, "causal_chains", [])[:5]:
-                result["last_causal_chains"].append(
-                    {
-                        "depth": getattr(chain, "depth", 0),
-                        "probability": getattr(chain, "combined_probability", 0.0),
-                        "snn_confidence": getattr(chain, "snn_confidence", 0.0),
-                    }
-                )
+                result["last_causal_chains"].append({
+                    "depth": getattr(chain, "depth", 0),
+                    "probability": getattr(chain, "combined_probability", 0.0),
+                    "snn_confidence": getattr(chain, "snn_confidence", 0.0),
+                })
 
     return result
 
@@ -550,14 +532,12 @@ async def get_snn_plasticity_status():
         prm_net = getattr(trained_prm, "_network", None)
         if prm_net:
             layers = getattr(prm_net, "layer_names", [])
-            result["networks"].append(
-                {
-                    "name": "TrainedPRM",
-                    "architecture": "6→8→4→2",
-                    "layers": list(layers),
-                    "step_count": getattr(prm_net, "step_count", 0),
-                }
-            )
+            result["networks"].append({
+                "name": "TrainedPRM",
+                "architecture": "6→8→4→2",
+                "layers": list(layers),
+                "step_count": getattr(prm_net, "step_count", 0),
+            })
 
         # Training collector stats
         collector = getattr(trained_prm, "_collector", None)
@@ -579,14 +559,12 @@ async def get_snn_plasticity_status():
             if content_planner:
                 cp_net = getattr(content_planner, "_network", None)
                 if cp_net:
-                    result["networks"].append(
-                        {
-                            "name": "ContentPlanner",
-                            "architecture": "8→12→6→3",
-                            "layers": list(getattr(cp_net, "layer_names", [])),
-                            "step_count": getattr(cp_net, "step_count", 0),
-                        }
-                    )
+                    result["networks"].append({
+                        "name": "ContentPlanner",
+                        "architecture": "8→12→6→3",
+                        "layers": list(getattr(cp_net, "layer_names", [])),
+                        "step_count": getattr(cp_net, "step_count", 0),
+                    })
 
     return result
 
@@ -791,14 +769,12 @@ async def get_knowledge_graph_neighbors(request: Request):
 
     mapped_neighbors = []
     for n in reply.payload.get("neighbors", []):
-        mapped_neighbors.append(
-            {
-                "label": n.get("entity"),
-                "relation_type": n.get("relation"),
-                "weight": n.get("weight"),
-                "direction": n.get("direction"),
-            }
-        )
+        mapped_neighbors.append({
+            "label": n.get("entity"),
+            "relation_type": n.get("relation"),
+            "weight": n.get("weight"),
+            "direction": n.get("direction"),
+        })
     return {"neighbors": mapped_neighbors}
 
 
@@ -835,16 +811,14 @@ async def studio_stats() -> Any:
         else:
             status = "healthy" if getattr(node, "_running", True) else "unhealthy"
 
-        node_health.append(
-            {
-                "id": info.node_id,
-                "name": name.replace("Node", "").replace("Manager", " Mgr"),
-                "status": status,
-                "type": info.node_type.value
-                if hasattr(info.node_type, "value")
-                else str(info.node_type),
-            }
-        )
+        node_health.append({
+            "id": info.node_id,
+            "name": name.replace("Node", "").replace("Manager", " Mgr"),
+            "status": status,
+            "type": info.node_type.value
+            if hasattr(info.node_type, "value")
+            else str(info.node_type),
+        })
     result["nodes"] = node_health
 
     # ── Cognitive metrics ──
@@ -1350,17 +1324,15 @@ async def list_plugins():
     raw_plugins = pm.list_plugins()
     mapped = []
     for p in raw_plugins:
-        mapped.append(
-            {
-                "name": p["name"],
-                "enabled": p["loaded"],
-                "loaded": p["loaded"],
-                "description": p["description"] or "No description available",
-                "version": p["version"] or "0.1.0",
-                "path": p["path"],
-                "error": p["error"],
-            }
-        )
+        mapped.append({
+            "name": p["name"],
+            "enabled": p["loaded"],
+            "loaded": p["loaded"],
+            "description": p["description"] or "No description available",
+            "version": p["version"] or "0.1.0",
+            "path": p["path"],
+            "error": p["error"],
+        })
     return {"plugins": mapped}
 
 

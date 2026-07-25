@@ -152,16 +152,14 @@ class CognitiveLocalityEngine:
 
             # Log data sharing for audit
             if matched_rule and not should_include:
-                self._audit_log.append(
-                    {
-                        "key": key,
-                        "rule": rule.pattern,
-                        "sensitivity": rule.sensitivity.value,
-                        "target": target_node,
-                        "target_type": target_type.value,
-                        "action": "removed",
-                    }
-                )
+                self._audit_log.append({
+                    "key": key,
+                    "rule": rule.pattern,
+                    "sensitivity": rule.sensitivity.value,
+                    "target": target_node,
+                    "target_type": target_type.value,
+                    "action": "removed",
+                })
                 logger.debug(
                     "Removed sensitive data: %s (sensitivity=%s) from %s",
                     key,
@@ -169,16 +167,14 @@ class CognitiveLocalityEngine:
                     target_node,
                 )
             elif matched_rule and filtered_value != value:
-                self._audit_log.append(
-                    {
-                        "key": key,
-                        "rule": rule.pattern,
-                        "sensitivity": rule.sensitivity.value,
-                        "target": target_node,
-                        "target_type": target_type.value,
-                        "action": matched_rule.redaction_strategy,
-                    }
-                )
+                self._audit_log.append({
+                    "key": key,
+                    "rule": rule.pattern,
+                    "sensitivity": rule.sensitivity.value,
+                    "target": target_node,
+                    "target_type": target_type.value,
+                    "action": matched_rule.redaction_strategy,
+                })
                 logger.debug(
                     "Redacted data: %s (sensitivity=%s) to %s using %s",
                     key,

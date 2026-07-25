@@ -57,13 +57,11 @@ def read_dpo_queue(queue_path: str | Path) -> list[dict[str, str]]:
     pairs: list[dict[str, str]] = []
     for item in raw:
         if isinstance(item, (list, tuple)) and len(item) >= 3:
-            pairs.append(
-                {
-                    "prompt": str(item[0]),
-                    "chosen": str(item[1]),
-                    "rejected": str(item[2]),
-                }
-            )
+            pairs.append({
+                "prompt": str(item[0]),
+                "chosen": str(item[1]),
+                "rejected": str(item[2]),
+            })
         elif isinstance(item, dict):
             prompt = item.get("prompt") or item.get("instruction", "")
             chosen = item.get("chosen") or item.get("response", "")
@@ -102,15 +100,13 @@ def read_reflection_logs(reflection_dir: str | Path) -> list[dict[str, str]]:
                     domain = record.get("domain", "unknown")
 
                     if instruction and rejected:
-                        pairs.append(
-                            {
-                                "prompt": instruction,
-                                "chosen": "",  # to be filled by trainer with model output
-                                "rejected": rejected,
-                                "domain": domain,
-                                "source": "reflection",
-                            }
-                        )
+                        pairs.append({
+                            "prompt": instruction,
+                            "chosen": "",  # to be filled by trainer with model output
+                            "rejected": rejected,
+                            "domain": domain,
+                            "source": "reflection",
+                        })
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Skipping corrupt reflection file %s: %s", jsonl_file, e)
 
@@ -140,14 +136,12 @@ def read_mined_pairs(
 
     pairs: list[dict[str, str]] = []
     for p in raw_pairs:
-        pairs.append(
-            {
-                "prompt": p.get("query", ""),
-                "chosen": p.get("chosen", ""),
-                "rejected": p.get("rejected", ""),
-                "source": "mined",
-            }
-        )
+        pairs.append({
+            "prompt": p.get("query", ""),
+            "chosen": p.get("chosen", ""),
+            "rejected": p.get("rejected", ""),
+            "source": "mined",
+        })
 
     logger.info("Mined %d preference pairs (min_reward=%.2f)", len(pairs), min_reward)
     return pairs

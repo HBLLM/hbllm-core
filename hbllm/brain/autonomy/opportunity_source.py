@@ -173,13 +173,11 @@ class ReflectionSource(OpportunitySource):
 
     def add_trigger(self, trigger_type: str, payload: dict[str, Any] | None = None) -> None:
         """Register a new trigger event from the system."""
-        self.active_triggers.append(
-            {
-                "type": trigger_type,
-                "payload": payload or {},
-                "timestamp": time.time(),
-            }
-        )
+        self.active_triggers.append({
+            "type": trigger_type,
+            "payload": payload or {},
+            "timestamp": time.time(),
+        })
 
     def detect(self, presence_state: PresenceState, cognitive_state: Any) -> list[Opportunity]:
         now = time.time()

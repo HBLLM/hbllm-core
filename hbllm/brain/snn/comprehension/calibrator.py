@@ -65,13 +65,11 @@ class SNNCalibrator:
         if domain not in self._param_history:
             self._param_history[domain] = []
 
-        self._param_history[domain].append(
-            {
-                "params": params_used,
-                "concepts": num_concepts,
-                "success": success,
-            }
-        )
+        self._param_history[domain].append({
+            "params": params_used,
+            "concepts": num_concepts,
+            "success": success,
+        })
 
         # Keep last 100 entries
         if len(self._param_history[domain]) > 100:

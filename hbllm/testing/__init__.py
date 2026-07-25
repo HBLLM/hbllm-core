@@ -47,14 +47,12 @@ class MockProvider(LLMProvider):
         top_p: float = 0.9,
         **kwargs: Any,
     ) -> LLMResponse:
-        self.calls.append(
-            {
-                "method": "generate",
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
-        )
+        self.calls.append({
+            "method": "generate",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        })
         return LLMResponse(
             content=self._default_response,
             model=self._model,
@@ -72,12 +70,10 @@ class MockProvider(LLMProvider):
         temperature: float = 0.7,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        self.calls.append(
-            {
-                "method": "stream",
-                "messages": messages,
-            }
-        )
+        self.calls.append({
+            "method": "stream",
+            "messages": messages,
+        })
         for word in self._default_response.split():
             yield word + " "
 

@@ -109,9 +109,7 @@ em = EpisodicMemory(db_path="memory.db", tenant_id="user-01")
 await em.init_db()
 
 await em.store_turn(
-    role="user",
-    content="Tell me about quantum computing",
-    metadata={"topic": "physics"}
+    role="user", content="Tell me about quantum computing", metadata={"topic": "physics"}
 )
 
 recent = await em.get_recent_turns(limit=10)
@@ -154,9 +152,7 @@ pm = ProceduralMemory(db_path="skills.db", tenant_id="user-01")
 await pm.init_db()
 
 await pm.store_skill(
-    name="deploy-docker",
-    steps=["docker build", "docker push", "kubectl apply"],
-    domain="devops"
+    name="deploy-docker", steps=["docker build", "docker push", "kubectl apply"], domain="devops"
 )
 
 skill = await pm.find_skill("how to deploy a container")

@@ -119,13 +119,11 @@ class VideoStreamNode(Node):
             frame = await self._capture_frame()
             if frame is not None:
                 description = await self._describe_scene(frame)
-                return message.create_response(
-                    {
-                        "description": description,
-                        "frame_shape": list(frame.shape),
-                        "timestamp": time.time(),
-                    }
-                )
+                return message.create_response({
+                    "description": description,
+                    "frame_shape": list(frame.shape),
+                    "timestamp": time.time(),
+                })
         return None
 
     def _init_camera(self) -> None:

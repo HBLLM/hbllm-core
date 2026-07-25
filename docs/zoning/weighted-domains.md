@@ -60,8 +60,8 @@ The Router outputs a **probability distribution** over domains using temperature
 ```python
 # Example output for "Write a Python script to solve quadratic equations"
 domain_weights = {
-    "coding": 0.72,   # Primary domain
-    "math":   0.28,   # Secondary domain
+    "coding": 0.72,  # Primary domain
+    "math": 0.28,  # Secondary domain
 }
 # → Both coding and math LoRA adapters are blended at inference time
 ```
@@ -74,9 +74,9 @@ from hbllm.brain.control.router_node import RouterNode
 router = RouterNode(
     node_id="router",
     # Weighted routing parameters
-    _softmax_temperature=0.1,   # Lower = sharper distribution
-    _max_blend_domains=3,       # Maximum domains in blend
-    _min_blend_weight=0.05,     # Minimum weight to include (5%)
+    _softmax_temperature=0.1,  # Lower = sharper distribution
+    _max_blend_domains=3,  # Maximum domains in blend
+    _min_blend_weight=0.05,  # Minimum weight to include (5%)
 )
 ```
 
@@ -91,11 +91,13 @@ from hbllm.modules.domain_registry import DomainRegistry, DomainSpec
 registry = DomainRegistry()
 
 # Register a sub-domain
-registry.register(DomainSpec(
-    name="coding.python",
-    centroid_text="Python programming, Django, Flask, pandas, numpy",
-    adapter_name="coding.python",  # defaults to name if not set
-))
+registry.register(
+    DomainSpec(
+        name="coding.python",
+        centroid_text="Python programming, Django, Flask, pandas, numpy",
+        adapter_name="coding.python",  # defaults to name if not set
+    )
+)
 
 # Adapter resolution with fallback
 registry.resolve_adapter("coding.python.django")
@@ -112,9 +114,9 @@ registry.resolve_weighted({"coding.python": 0.7, "math": 0.3})
 # → {"coding": 0.7, "math": 0.3}  (falls back to parent)
 
 # Hierarchy queries
-registry.children("coding")     # ["coding.python", "coding.rust", ...]
-registry.root_domains           # ["coding", "general", "math", ...]
-registry.leaf_domains()         # ["coding.python", "math.calculus", ...]
+registry.children("coding")  # ["coding.python", "coding.rust", ...]
+registry.root_domains  # ["coding", "general", "math", ...]
+registry.leaf_domains()  # ["coding.python", "math.calculus", ...]
 ```
 
 ---
@@ -244,14 +246,17 @@ This is more effective than the previous one-directional approach.
 
 ```python
 # Feedback payload for contrastive correction
-await bus.publish("system.feedback", Message(
-    payload={
-        "rating": -1,
-        "domain": "math",              # Domain that was incorrectly chosen
-        "correct_domain": "coding",     # Where it should have gone
-        "prompt": "Fix this Python bug",
-    }
-))
+await bus.publish(
+    "system.feedback",
+    Message(
+        payload={
+            "rating": -1,
+            "domain": "math",  # Domain that was incorrectly chosen
+            "correct_domain": "coding",  # Where it should have gone
+            "prompt": "Fix this Python bug",
+        }
+    ),
+)
 ```
 
 ### Persistent Centroids

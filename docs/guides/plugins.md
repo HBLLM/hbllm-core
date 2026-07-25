@@ -33,8 +33,9 @@ from hbllm.plugin.sdk import HBLLMPlugin, subscribe
 __plugin__ = {
     "name": "my_logger",
     "version": "0.1.0",
-    "description": "Logs every query seen on the bus."
+    "description": "Logs every query seen on the bus.",
 }
+
 
 class MyLoggerPlugin(HBLLMPlugin):
     """A simple plugin that prints bus traffic."""
@@ -144,6 +145,7 @@ Tracks emotional valence across conversations using a VAD (Valence-Arousal-Domin
 from hbllm.plugin.sdk import HBLLMPlugin, subscribe
 from hbllm.network.messages import Message
 
+
 class EmotionEngine(HBLLMPlugin):
     @subscribe("system.experience")
     async def on_experience(self, message: Message) -> None:
@@ -195,6 +197,7 @@ Tests import the engine directly via `sys.path` manipulation (since plugin direc
 ```python
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from emotion_engine import EmotionEngine

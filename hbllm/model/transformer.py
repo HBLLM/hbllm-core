@@ -119,9 +119,9 @@ class HBLLMModel(nn.Module):
         )
 
         # Transformer layers
-        self.layers = nn.ModuleList(
-            [TransformerBlock(config, layer_idx=i) for i in range(config.num_layers)]
-        )
+        self.layers = nn.ModuleList([
+            TransformerBlock(config, layer_idx=i) for i in range(config.num_layers)
+        ])
 
         # Automatic Hybrid Quantization Injection (Phase 4)
         if getattr(config, "quantization_level", 16) in [4, 8]:
@@ -173,7 +173,8 @@ class HBLLMModel(nn.Module):
                 past_len = 0
 
             position_ids = (
-                torch.arange(past_len, past_len + seq_len, device=input_ids.device)
+                torch
+                .arange(past_len, past_len + seq_len, device=input_ids.device)
                 .unsqueeze(0)
                 .expand(batch_size, -1)
             )

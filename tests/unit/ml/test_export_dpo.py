@@ -212,17 +212,15 @@ class TestBuildStats:
 class TestCLI:
     def test_main_exports_successfully(self, tmp_workspace, tmp_path):
         output = str(tmp_path / "cli_output.jsonl")
-        exit_code = main(
-            [
-                "--output",
-                output,
-                "--workspace",
-                str(tmp_workspace / "workspace"),
-                "--source",
-                "queue",
-                "reflection",
-            ]
-        )
+        exit_code = main([
+            "--output",
+            output,
+            "--workspace",
+            str(tmp_workspace / "workspace"),
+            "--source",
+            "queue",
+            "reflection",
+        ])
         assert exit_code == 0
         assert Path(output).exists()
         with open(output) as f:
@@ -231,29 +229,25 @@ class TestCLI:
 
     def test_main_empty_workspace(self, tmp_path):
         output = str(tmp_path / "empty.jsonl")
-        exit_code = main(
-            [
-                "--output",
-                output,
-                "--workspace",
-                str(tmp_path / "nonexistent"),
-            ]
-        )
+        exit_code = main([
+            "--output",
+            output,
+            "--workspace",
+            str(tmp_path / "nonexistent"),
+        ])
         assert exit_code == 1  # No pairs found
 
     def test_main_with_stats(self, tmp_workspace, tmp_path, capsys):
         output = str(tmp_path / "stats_output.jsonl")
-        exit_code = main(
-            [
-                "--output",
-                output,
-                "--workspace",
-                str(tmp_workspace / "workspace"),
-                "--source",
-                "queue",
-                "--stats",
-            ]
-        )
+        exit_code = main([
+            "--output",
+            output,
+            "--workspace",
+            str(tmp_workspace / "workspace"),
+            "--source",
+            "queue",
+            "--stats",
+        ])
         assert exit_code == 0
         captured = capsys.readouterr()
         # Stats JSON is printed with indent=2, followed by the success message

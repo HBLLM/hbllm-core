@@ -69,7 +69,7 @@ from hbllm.model.transformer import HBLLMForCausalLM
 
 model = HBLLMForCausalLM.from_pretrained(
     "hbllm/base-500m",
-    quantize="int4",       # Enable 4-bit base
-    lora_precision="fp16", # Keep LoRA at 16-bit
+    quantize="int4",  # Enable 4-bit base
+    lora_precision="fp16",  # Keep LoRA at 16-bit
 )
 ```

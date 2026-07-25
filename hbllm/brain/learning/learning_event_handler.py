@@ -149,13 +149,11 @@ class LearningEventHandler(Node):
     async def handle_message(self, message: Message) -> Message | None:
         """Direct message handling — returns stats."""
         if message.payload.get("action") == "stats":
-            return message.create_response(
-                {
-                    "stats": self._stats,
-                    "model_build_queue_size": len(self._model_build_queue),
-                    "subsystem": self._subsystem.summary(),
-                }
-            )
+            return message.create_response({
+                "stats": self._stats,
+                "model_build_queue_size": len(self._model_build_queue),
+                "subsystem": self._subsystem.summary(),
+            })
         return None
 
     # ─── Experience: Success (full belief pipeline) ──────────────────
@@ -208,15 +206,13 @@ class LearningEventHandler(Node):
         # 4. Queue causal model building for background/sleep (NO LLM during queries)
         trace = payload.get("execution_trace", [])
         if trace:
-            self._model_build_queue.append(
-                {
-                    "domain": payload.get("domain", "general"),
-                    "trace": trace,
-                    "query": payload.get("query", ""),
-                    "skill_id": payload.get("skill_id"),
-                    "mechanism_ids": mechanism_ids,
-                }
-            )
+            self._model_build_queue.append({
+                "domain": payload.get("domain", "general"),
+                "trace": trace,
+                "query": payload.get("query", ""),
+                "skill_id": payload.get("skill_id"),
+                "mechanism_ids": mechanism_ids,
+            })
             self._stats["models_queued"] += 1
             logger.info(
                 "Queued causal model building for domain '%s' (queue=%d)",
@@ -389,14 +385,12 @@ class LearningEventHandler(Node):
         # Queue model building with research findings
         findings = payload.get("findings", [])
         if findings:
-            self._model_build_queue.append(
-                {
-                    "domain": payload.get("domain", "general"),
-                    "trace": findings,
-                    "query": payload.get("source_goal", ""),
-                    "source": "curiosity_research",
-                }
-            )
+            self._model_build_queue.append({
+                "domain": payload.get("domain", "general"),
+                "trace": findings,
+                "query": payload.get("source_goal", ""),
+                "source": "curiosity_research",
+            })
             self._stats["models_queued"] += 1
 
         return None

@@ -152,16 +152,14 @@ class ToolMemory:
             # Skip tools that are not in the available set
             if available_tools is not None and r[0] not in available_tools:
                 continue
-            results.append(
-                {
-                    "tool": r[0],
-                    "uses": r[1],
-                    "success_rate": round(r[2], 3),
-                    "avg_quality": round(r[3], 3),
-                    "avg_latency_ms": round(r[4], 1),
-                    "score": round(r[2] * 0.4 + r[3] * 0.4 - r[4] / 10000 * 0.2, 3),
-                }
-            )
+            results.append({
+                "tool": r[0],
+                "uses": r[1],
+                "success_rate": round(r[2], 3),
+                "avg_quality": round(r[3], 3),
+                "avg_latency_ms": round(r[4], 1),
+                "score": round(r[2] * 0.4 + r[3] * 0.4 - r[4] / 10000 * 0.2, 3),
+            })
             if len(results) >= top_n:
                 break
 
