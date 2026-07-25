@@ -95,25 +95,30 @@ class MemorySystem(Node):
         for sub in [self._memory, self._experience, self._sleep]:
             await sub.start(bus)
 
-        # ── HCIR Memory Backend (dual-write migration) ────────────
+        # ── HCIR Memory Migration Proxy (5-phase migration) ─────────
         self._hcir_backend: Any = None
+        self._migration_proxy: Any = None
         try:
             from hbllm.hcir.adapters.hcir_memory_backend import HCIRMemoryBackend
-            from hbllm.hcir.workspace import HCIRWorkspaceState
+            from hbllm.hcir.adapters.memory_migration_proxy import MemoryMigrationProxy
 
-            # Look for HCIR workspace on the brain instance via bus context
+            # Look for HCIR workspace injected by factory
             hcir_ws = getattr(self, "_hcir_workspace", None)
-            if hcir_ws is None:
-                # Fallback: create a standalone workspace for now
-                hcir_ws = HCIRWorkspaceState()
+            if hcir_ws is not None:
+                self._hcir_backend = HCIRMemoryBackend(workspace=hcir_ws)
+            else:
+                self._hcir_backend = HCIRMemoryBackend()
 
-            self._hcir_backend = HCIRMemoryBackend(workspace=hcir_ws)
+            self._migration_proxy = MemoryMigrationProxy(
+                legacy=self._memory,
+                hcir=self._hcir_backend,
+            )
             logger.info(
-                "[MemorySystem] HCIR memory backend initialized (mode=%s)",
-                self._hcir_backend.migration_phase,
+                "[MemorySystem] Migration proxy initialized (phase=%s)",
+                self._migration_proxy.phase,
             )
         except Exception as exc:
-            logger.debug("[MemorySystem] HCIR backend not available: %s", exc)
+            logger.debug("[MemorySystem] HCIR migration proxy not available: %s", exc)
 
         logger.info("MemorySystem started with sub-nodes: memory, experience, sleep")
 
@@ -203,3 +208,13 @@ class MemorySystem(Node):
     @property
     def sleep(self):
         return self._sleep
+
+    @property
+    def migration_proxy(self):
+        """Access the 5-phase memory migration proxy (if available)."""
+        return self._migration_proxy
+
+    @property
+    def hcir_backend(self):
+        """Access the HCIR memory backend directly."""
+        return self._hcir_backend
