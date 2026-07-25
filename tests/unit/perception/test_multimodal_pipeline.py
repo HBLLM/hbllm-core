@@ -20,11 +20,11 @@ class MockBusWithRequest(InProcessBus):
         super().__init__()
         self._request_handlers: dict[str, list] = {}
 
-    async def request(self, topic: str, msg: Message, timeout: float = 10.0) -> Message:
+    async def request(self, topic: str, message: Message, timeout: float = 90.0) -> Message:
         """Simulate request-response by calling registered handlers."""
         handlers = self._request_handlers.get(topic, [])
         for handler in handlers:
-            result = await handler(msg)
+            result = await handler(message)
             if result is not None:
                 return result
         raise TimeoutError(f"No handler responded for topic: {topic}")

@@ -131,8 +131,8 @@ class DecisionTraceLedger:
         try:
             import orjson
 
-            json_bytes = orjson.dumps(trace_dict)
-        except ImportError:
+            json_bytes = orjson.dumps(trace_dict, option=orjson.OPT_SERIALIZE_DATACLASS)
+        except Exception:
             json_bytes = json.dumps(trace_dict).encode("utf-8")
 
         compressed_data = zlib.compress(json_bytes)
@@ -171,8 +171,8 @@ class DecisionTraceLedger:
                 import orjson
 
                 with open(dump_file, "wb") as f:
-                    f.write(orjson.dumps(trace_dict, option=orjson.OPT_INDENT_2))
-            except ImportError:
+                    f.write(orjson.dumps(trace_dict, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_DATACLASS))
+            except Exception:
                 with open(dump_file, "w", encoding="utf-8") as f:
                     json.dump(trace_dict, f, indent=2)
             logger.info("Tier C Dump created: %s", dump_file)

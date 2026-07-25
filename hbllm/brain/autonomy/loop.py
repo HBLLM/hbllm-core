@@ -479,7 +479,7 @@ class AutonomyCore:
         can be woken early by fast-path events.
         """
         while self._running:
-            tick_interval = self.state_machine.tick_interval
+            tick_interval = self.state_machine.effective_tick_interval
 
             # Hybrid wait: sleep OR wake on fast-path event
             self._fast_path_event.clear()
