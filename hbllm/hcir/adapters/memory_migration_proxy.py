@@ -53,7 +53,7 @@ class MemoryMigrationProxy:
 
     def __init__(
         self,
-        legacy: Any,
+        legacy: Any | None,
         hcir: HCIRMemoryBackend,
         phase: MigrationPhase = MigrationPhase.READ_THROUGH,
     ) -> None:
@@ -241,12 +241,16 @@ class MemoryMigrationProxy:
 
     async def _store_legacy(self, memory_type: MemoryType, data: Any, **kwargs: Any) -> str:
         """Delegate store to legacy MemoryNode."""
+        if self._legacy is None:
+            return ""
         return await self._legacy.store(memory_type, data, **kwargs)
 
     async def _recall_legacy(
         self, memory_type: MemoryType, query: str = "", **kwargs: Any
     ) -> list[Any]:
         """Delegate recall to legacy MemoryNode."""
+        if self._legacy is None:
+            return []
         return await self._legacy.retrieve(memory_type, query, **kwargs)
 
     # ── Private: HCIR Store/Recall ────────────────────────────────────
