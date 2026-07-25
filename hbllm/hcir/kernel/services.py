@@ -54,5 +54,13 @@ class KernelServices:
     persistence: PersistenceService | None = None
     telemetry: KernelTelemetry | None = None
 
+    # ── HCIR Cognitive OS extensions ──
+    tiered_workspace: Any = None  # TieredWorkspace (lazy import to avoid circular)
+    cognitive_journal: Any = None  # CognitiveJournal
+    cognitive_event_log: Any = None  # CognitiveEventLog
+    semantic_normalizer: Any = None  # SemanticNormalizer
+    constitutional_verifier: Any = None  # ConstitutionalVerifier
+    bus_bridge: Any = None  # HCIRBusBridge
+
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)

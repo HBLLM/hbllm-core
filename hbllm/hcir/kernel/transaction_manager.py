@@ -32,6 +32,7 @@ from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionAnnotation,
     TransactionOp,
+    TransactionOperation,
     TransactionStatus,
 )
 from hbllm.hcir.validation import GraphValidator
@@ -210,7 +211,120 @@ class TransactionManager:
             txs = [t for t in txs if t.author == author]
         return txs[-limit:]
 
-    # ── Internal ─────────────────────────────────────────────────────
+    def compensate(
+        self,
+        original_tx_id: str,
+        reason: str = "downstream_failure",
+    ) -> HCIRTransaction | None:
+        """Generate and commit a compensating transaction that reverses
+        the effects of the original.
+
+        Used when downstream execution fails (hardware, robotics,
+        distributed execution) and the graph state must be rolled back
+        to maintain consistency.
+
+        Args:
+            original_tx_id: ID of the committed transaction to reverse.
+            reason: Human-readable reason for compensation.
+
+        Returns:
+            The committed compensating transaction, or ``None`` if the
+            original transaction was not found.
+        """
+        # Find the original committed transaction
+        original = self._find_committed(original_tx_id)
+        if original is None:
+            logger.warning("compensate: transaction %s not found", original_tx_id)
+            return None
+
+        # Generate inverse operations
+        reverse_ops = self._invert_operations(original.operations)
+        if not reverse_ops:
+            logger.info("compensate: no invertible operations in %s", original_tx_id)
+            return None
+
+        from hbllm.hcir.types import Provenance
+
+        compensating_tx = HCIRTransaction(
+            author="transaction_manager",
+            operations=reverse_ops,
+            provenance=Provenance(
+                created_by="transaction_manager",
+                reason=f"Compensating tx {original_tx_id}: {reason}",
+            ),
+            annotations=[
+                TransactionAnnotation(
+                    author="TransactionManager",
+                    assertion=f"Compensating transaction for {original_tx_id}: {reason}",
+                    severity="warning",
+                )
+            ],
+        )
+        result = self.commit(compensating_tx)
+
+        if result.is_committed:
+            # Record the compensation event
+            self._workspace.snapshot_manager.record_kernel_event(
+                EventType.TRANSACTION_COMPENSATED,
+                {
+                    "original_tx_id": original_tx_id,
+                    "compensating_tx_id": result.id,
+                    "reason": reason,
+                },
+            )
+            logger.info(
+                "Compensated transaction %s → %s: %s",
+                original_tx_id,
+                result.id,
+                reason,
+            )
+
+        return result
+
+    def _find_committed(self, tx_id: str) -> HCIRTransaction | None:
+        """Find a committed transaction by ID."""
+        for tx in self._committed_log:
+            if tx.id == tx_id:
+                return tx
+        return None
+
+    def _invert_operations(
+        self,
+        operations: list[TransactionOperation],
+    ) -> list[TransactionOperation]:
+        """Generate inverse operations for a list of transaction operations.
+
+        Inversion rules:
+            ADD_NODE / UPSERT_NODE → REMOVE_NODE
+            REMOVE_NODE → (no inverse — data is lost)
+            ADD_EDGE → REMOVE_EDGE
+            REMOVE_EDGE → (no inverse — data is lost)
+            MODIFY_NODE → (no inverse — original values unknown)
+        """
+        inverse: list[TransactionOperation] = []
+        # Process in reverse order
+        for op in reversed(operations):
+            if op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
+                node_id = (op.node_data or {}).get("id") or op.node_id
+                if node_id:
+                    inverse.append(
+                        TransactionOperation(
+                            op=TransactionOp.REMOVE_NODE,
+                            node_id=node_id,
+                        )
+                    )
+            elif op.op == TransactionOp.ADD_EDGE:
+                edge_id = (op.edge_data or {}).get("id") or op.edge_id
+                if edge_id:
+                    inverse.append(
+                        TransactionOperation(
+                            op=TransactionOp.REMOVE_EDGE,
+                            edge_id=edge_id,
+                        )
+                    )
+            # REMOVE_NODE, REMOVE_EDGE, MODIFY_NODE cannot be inverted
+            # without storing the original state, which is a future enhancement
+        return inverse
 
     def _apply_operations(self, transaction: HCIRTransaction) -> None:
         """Apply transaction operations to the workspace graph."""

@@ -140,6 +140,18 @@ class Provenance(BaseModel):
         prompt_hash: SHA-256 hash of the originating prompt (if LLM-generated).
         reasoning_step: Step index in the reasoning chain.
         simulation_branch: Branch ID if created during simulation.
+        session_id: Conversation/session trace ID.
+        goal_id: Parent goal that caused this object.
+        parent_goal_id: Causal parent goal.
+        trace_id: End-to-end request trace ID.
+        model_used: LLM model that generated this (e.g., ``"gemini-2.5-flash"``).
+        reason: Human-readable justification for this object's existence.
+        source_node: Originating node ID.
+        source_type: How this was produced (``"observed"``, ``"inferred"``, ``"reported"``).
+        logical_time: Monotonically increasing logical clock (Lamport-style).
+        generation: Reasoning generation / depth.
+        attention_epoch: Attention recomputation epoch index.
+        reflection_cycle: Reflection cycle index.
     """
 
     created_by: str = ""
@@ -148,6 +160,22 @@ class Provenance(BaseModel):
     prompt_hash: str = ""
     reasoning_step: int = 0
     simulation_branch: str = "main"
+
+    # ── Traceability ─────────────────────────────────────────────────
+    session_id: str = ""
+    goal_id: str = ""
+    parent_goal_id: str = ""
+    trace_id: str = ""
+    model_used: str = ""
+    reason: str = ""
+    source_node: str = ""
+    source_type: str = ""  # "observed", "inferred", "reported"
+
+    # ── Cognitive Time ───────────────────────────────────────────────
+    logical_time: int = 0
+    generation: int = 0
+    attention_epoch: int = 0
+    reflection_cycle: int = 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
