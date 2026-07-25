@@ -99,19 +99,28 @@ class MemorySystem(Node):
         self._hcir_backend: Any = None
         self._migration_proxy: Any = None
         try:
-            from hbllm.hcir.adapters.hcir_memory_backend import HCIRMemoryBackend
+            from hbllm.hcir.adapters.hcir_memory_backend import (
+                HCIRMemoryBackend,
+                MigrationPhase,
+            )
             from hbllm.hcir.adapters.memory_migration_proxy import MemoryMigrationProxy
 
             # Look for HCIR workspace injected by factory
             hcir_ws = getattr(self, "_hcir_workspace", None)
             if hcir_ws is not None:
-                self._hcir_backend = HCIRMemoryBackend(workspace=hcir_ws)
+                self._hcir_backend = HCIRMemoryBackend(
+                    workspace=hcir_ws,
+                    migration_phase=MigrationPhase.HCIR_PRIMARY,
+                )
             else:
-                self._hcir_backend = HCIRMemoryBackend()
+                self._hcir_backend = HCIRMemoryBackend(
+                    migration_phase=MigrationPhase.HCIR_PRIMARY,
+                )
 
             self._migration_proxy = MemoryMigrationProxy(
                 legacy=self._memory,
                 hcir=self._hcir_backend,
+                phase=MigrationPhase.HCIR_PRIMARY,
             )
             logger.info(
                 "[MemorySystem] Migration proxy initialized (phase=%s)",
