@@ -1,16 +1,17 @@
 """
 MemorySystem — unified memory lifecycle node.
 
-Consolidates: MemoryNode + ExperienceNode + SleepCycleNode
+Consolidates: HCIRMemoryBackend + ExperienceNode + SleepCycleNode
 
-These three are tightly coupled: ExperienceNode records into Memory,
-SleepCycleNode consolidates Memory state. Combining them eliminates
-cross-node memory coordination overhead.
+Memory storage is handled entirely by the HCIR workspace (Phase 5:
+LEGACY_REMOVED). The legacy MemoryNode and its SQLite/vector stores
+have been retired. ExperienceNode records interactions and
+SleepCycleNode consolidates memory state — both now operate against
+the HCIR backend.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,9 +30,11 @@ class MemorySystem(Node):
     """
     Composite node that unifies the memory lifecycle.
 
-    Wraps MemoryNode (episodic/semantic/procedural/value/KG),
-    ExperienceNode (interaction recording + salience detection),
-    and SleepCycleNode (offline memory consolidation).
+    Phase 5 (LEGACY_REMOVED): All memory operations route through
+    HCIRMemoryBackend. The legacy MemoryNode (SQLite/vector) is
+    no longer instantiated. ExperienceNode and SleepCycleNode
+    continue to provide cognitive processing (interaction recording,
+    salience detection, offline consolidation).
     """
 
     def __init__(
@@ -56,30 +59,57 @@ class MemorySystem(Node):
                 "salience_detection",
                 "memory_consolidation",
                 "sleep_cycle",
+                "hcir_native",
             ],
         )
-        self.description = "Unified memory lifecycle (store → experience → consolidate)"
+        self.description = "HCIR-native memory lifecycle (store → experience → consolidate)"
         self._llm = llm
         self._registry = registry
         self._db_path = db_path
 
-        # Sub-nodes
-        self._memory: Any = None
+        # Sub-nodes (cognitive processing, not storage)
+        self._memory: Any = None  # Legacy — None in Phase 5
         self._experience: Any = None
         self._sleep: Any = None
 
     async def on_start(self) -> None:
-        """Create and start all memory sub-nodes."""
+        """Create and start HCIR backend + cognitive sub-nodes."""
         from hbllm.brain.emotion.sleep_node import SleepCycleNode
         from hbllm.brain.learning.experience_node import ExperienceNode
-        from hbllm.memory.memory_node import MemoryNode
 
-        self._memory = MemoryNode(
-            node_id=f"{self.node_id}.memory",
-            db_path=self._db_path or "working_memory.db",
-            registry=self._registry,
-        )
-        self._memory.node_identity = self.node_identity
+        # ── HCIR Memory Backend (Phase 5: sole backend) ───────────
+        self._hcir_backend: Any = None
+        self._migration_proxy: Any = None
+        try:
+            from hbllm.hcir.adapters.hcir_memory_backend import (
+                HCIRMemoryBackend,
+                MigrationPhase,
+            )
+            from hbllm.hcir.adapters.memory_migration_proxy import MemoryMigrationProxy
+
+            # Look for HCIR workspace injected by factory
+            hcir_ws = getattr(self, "_hcir_workspace", None)
+            self._hcir_backend = HCIRMemoryBackend(
+                workspace=hcir_ws,
+                migration_phase=MigrationPhase.LEGACY_REMOVED,
+            )
+
+            # Proxy with no legacy backend — HCIR only
+            self._migration_proxy = MemoryMigrationProxy(
+                legacy=None,
+                hcir=self._hcir_backend,
+                phase=MigrationPhase.LEGACY_REMOVED,
+            )
+            logger.info(
+                "[MemorySystem] HCIR memory backend active (phase=%s)",
+                self._migration_proxy.phase,
+            )
+        except Exception as exc:
+            logger.warning("[MemorySystem] HCIR backend failed, falling back to legacy: %s", exc)
+            # Fallback: create legacy MemoryNode if HCIR is unavailable
+            await self._start_legacy_fallback()
+
+        # ── Cognitive processing nodes (not storage) ──────────────
         self._experience = ExperienceNode(
             node_id=f"{self.node_id}.experience",
             llm=self._llm,
@@ -92,85 +122,27 @@ class MemorySystem(Node):
         self._sleep.node_identity = self.node_identity
 
         bus = self.bus
-        for sub in [self._memory, self._experience, self._sleep]:
+        for sub in [self._experience, self._sleep]:
             await sub.start(bus)
 
-        # ── HCIR Memory Migration Proxy (5-phase migration) ─────────
-        self._hcir_backend: Any = None
-        self._migration_proxy: Any = None
-        try:
-            from hbllm.hcir.adapters.hcir_memory_backend import (
-                HCIRMemoryBackend,
-                MigrationPhase,
-            )
-            from hbllm.hcir.adapters.memory_migration_proxy import MemoryMigrationProxy
-
-            # Look for HCIR workspace injected by factory
-            hcir_ws = getattr(self, "_hcir_workspace", None)
-            if hcir_ws is not None:
-                self._hcir_backend = HCIRMemoryBackend(
-                    workspace=hcir_ws,
-                    migration_phase=MigrationPhase.HCIR_PRIMARY,
-                )
-            else:
-                self._hcir_backend = HCIRMemoryBackend(
-                    migration_phase=MigrationPhase.HCIR_PRIMARY,
-                )
-
-            self._migration_proxy = MemoryMigrationProxy(
-                legacy=self._memory,
-                hcir=self._hcir_backend,
-                phase=MigrationPhase.HCIR_PRIMARY,
-            )
-            logger.info(
-                "[MemorySystem] Migration proxy initialized (phase=%s)",
-                self._migration_proxy.phase,
-            )
-        except Exception as exc:
-            logger.debug("[MemorySystem] HCIR migration proxy not available: %s", exc)
-
-        logger.info("MemorySystem started with sub-nodes: memory, experience, sleep")
-
-        # Trigger proactive memory warming (non-blocking)
-        _warm_task = asyncio.create_task(self._warm_memory_cache())
-        _warm_task.add_done_callback(
-            lambda t: (
-                logger.error("[MemorySystem] _warm_memory_cache raised: %s", t.exception())
-                if not t.cancelled() and t.exception()
-                else None
-            )
+        logger.info(
+            "[MemorySystem] Started (hcir=%s, legacy=%s)",
+            self._hcir_backend is not None,
+            self._memory is not None,
         )
 
-    async def _warm_memory_cache(self) -> None:
-        """Proactively warm the semantic cache with recent high-salience concepts."""
-        try:
-            # Short delay to let the rest of the system boot
-            import asyncio
+    async def _start_legacy_fallback(self) -> None:
+        """Start legacy MemoryNode as fallback when HCIR is unavailable."""
+        from hbllm.memory.memory_node import MemoryNode
 
-            await asyncio.sleep(2.0)
-
-            if self._memory and hasattr(self._memory, "knowledge_graph"):
-                kg = self._memory.knowledge_graph
-                # Get the last 5 entities added to the KG
-                entities = list(kg._entities.values())[-5:]
-                if not entities:
-                    logger.debug("[MemorySystem] No entities in KG to warm cache.")
-                    return
-
-                from hbllm.security.tenant_guard import get_current_tenant
-
-                current_tenant = get_current_tenant() or "default"
-                for entity in entities:
-                    logger.debug("[MemorySystem] Warming cache for concept: %s", entity.label)
-                    await asyncio.to_thread(
-                        self._memory.semantic_db.search,
-                        entity.label,
-                        top_k=5,
-                        tenant_id=current_tenant,
-                    )
-            logger.info("[MemorySystem] Proactive memory warming complete.")
-        except Exception as e:
-            logger.warning("[MemorySystem] Failed to warm memory cache: %s", e)
+        logger.warning("[MemorySystem] Starting legacy MemoryNode as fallback")
+        self._memory = MemoryNode(
+            node_id=f"{self.node_id}.memory",
+            db_path=self._db_path or "working_memory.db",
+            registry=self._registry,
+        )
+        self._memory.node_identity = self.node_identity
+        await self._memory.start(self.bus)
 
     async def on_stop(self) -> None:
         for sub in [self._memory, self._experience, self._sleep]:
@@ -184,12 +156,17 @@ class MemorySystem(Node):
         from hbllm.network.node import HealthStatus, NodeHealth
 
         sub_healths = []
-        for sub in [self._memory, self._experience, self._sleep]:
+        for sub in [self._experience, self._sleep]:
             if sub is not None:
                 sub_healths.append(await sub.health_check())
 
+        # HCIR backend health
+        hcir_healthy = self._hcir_backend is not None
+
         statuses = [h.status for h in sub_healths]
-        if HealthStatus.UNHEALTHY in statuses:
+        if not hcir_healthy:
+            overall = HealthStatus.DEGRADED
+        elif HealthStatus.UNHEALTHY in statuses:
             overall = HealthStatus.UNHEALTHY
         elif HealthStatus.DEGRADED in statuses:
             overall = HealthStatus.DEGRADED
@@ -201,13 +178,14 @@ class MemorySystem(Node):
             status=overall,
             uptime_seconds=self.uptime,
             capabilities_available=self.capabilities,
-            message=f"Composite: {len(sub_healths)} sub-nodes",
+            message=f"HCIR-native: {len(sub_healths)} cognitive nodes, hcir={'active' if hcir_healthy else 'fallback'}",
         )
 
     # ── Direct access ────────────────────────────────────────────────
 
     @property
     def memory(self):
+        """Legacy MemoryNode (None in Phase 5 unless fallback)."""
         return self._memory
 
     @property
@@ -220,7 +198,7 @@ class MemorySystem(Node):
 
     @property
     def migration_proxy(self):
-        """Access the 5-phase memory migration proxy (if available)."""
+        """Access the memory migration proxy."""
         return self._migration_proxy
 
     @property
