@@ -95,6 +95,26 @@ class MemorySystem(Node):
         for sub in [self._memory, self._experience, self._sleep]:
             await sub.start(bus)
 
+        # ── HCIR Memory Backend (dual-write migration) ────────────
+        self._hcir_backend: Any = None
+        try:
+            from hbllm.hcir.adapters.hcir_memory_backend import HCIRMemoryBackend
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            # Look for HCIR workspace on the brain instance via bus context
+            hcir_ws = getattr(self, "_hcir_workspace", None)
+            if hcir_ws is None:
+                # Fallback: create a standalone workspace for now
+                hcir_ws = HCIRWorkspaceState()
+
+            self._hcir_backend = HCIRMemoryBackend(workspace=hcir_ws)
+            logger.info(
+                "[MemorySystem] HCIR memory backend initialized (mode=%s)",
+                self._hcir_backend.migration_phase,
+            )
+        except Exception as exc:
+            logger.debug("[MemorySystem] HCIR backend not available: %s", exc)
+
         logger.info("MemorySystem started with sub-nodes: memory, experience, sleep")
 
         # Trigger proactive memory warming (non-blocking)
