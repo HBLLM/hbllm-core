@@ -17,7 +17,7 @@ import uuid
 import zlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +128,19 @@ class DecisionTraceLedger:
     def _persist_tier_b(self, trace: DecisionTrace) -> None:
         """Compress and save to SQLite."""
         trace_dict = asdict(trace)
-        json_str = json.dumps(trace_dict)
-        compressed_data = zlib.compress(json_str.encode("utf-8"))
+        try:
+            import orjson
+
+            json_bytes = orjson.dumps(trace_dict)
+        except ImportError:
+            json_bytes = json.dumps(trace_dict).encode("utf-8")
+
+        compressed_data = zlib.compress(json_bytes)
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            from hbllm.persistence.sqlite_profiles import open_connection
+
+            with open_connection(self.db_path, profile="event_log") as conn:
                 conn.execute(
                     """
                     INSERT INTO compressed_traces
@@ -158,8 +166,15 @@ class DecisionTraceLedger:
 
         dump_file = dump_dir / f"trace_{trace.trace_id}.json"
         try:
-            with open(dump_file, "w", encoding="utf-8") as f:
-                json.dump(asdict(trace), f, indent=2)
+            trace_dict = asdict(trace)
+            try:
+                import orjson
+
+                with open(dump_file, "wb") as f:
+                    f.write(orjson.dumps(trace_dict, option=orjson.OPT_INDENT_2))
+            except ImportError:
+                with open(dump_file, "w", encoding="utf-8") as f:
+                    json.dump(trace_dict, f, indent=2)
             logger.info("Tier C Dump created: %s", dump_file)
         except Exception:
             logger.exception("Failed to write Tier C crash dump.")
@@ -171,15 +186,22 @@ class DecisionTraceLedger:
     def read_tier_b_trace(self, trace_id: str) -> dict[str, Any] | None:
         """Decompress and read a specific trace from SQLite."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            from hbllm.persistence.sqlite_profiles import open_connection
+
+            with open_connection(self.db_path, profile="event_log") as conn:
                 cursor = conn.execute(
                     "SELECT compressed_data FROM compressed_traces WHERE trace_id = ?", (trace_id,)
                 )
                 row = cursor.fetchone()
                 if row:
                     compressed_data = row[0]
-                    json_str = zlib.decompress(compressed_data).decode("utf-8")
-                    return json.loads(json_str)
+                    decompressed = zlib.decompress(compressed_data)
+                    try:
+                        import orjson
+
+                        return cast(dict[str, Any], orjson.loads(decompressed))
+                    except ImportError:
+                        return cast(dict[str, Any], json.loads(decompressed.decode("utf-8")))
         except Exception:
             logger.exception("Failed to read Tier B observability log.")
         return None

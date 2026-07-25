@@ -9,15 +9,20 @@ this container through the ABI ``execute()`` contract.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.executor import KernelExecutor
 from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
 from hbllm.hcir.kernel.runtime_state import RuntimeState
 from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.telemetry import KernelTelemetry
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.stores import IEventStore
 from hbllm.hcir.workspace import HCIRWorkspaceState
+
+if TYPE_CHECKING:
+    from hbllm.persistence.service import PersistenceService
 
 
 @dataclass
@@ -45,6 +50,9 @@ class KernelServices:
     event_store: IEventStore | None = None
     governance: GovernanceEngine | None = None
     runtime_state: RuntimeState | None = None
+    executor: KernelExecutor | None = None
+    persistence: PersistenceService | None = None
+    telemetry: KernelTelemetry | None = None
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
