@@ -171,7 +171,11 @@ class DecisionTraceLedger:
                 import orjson
 
                 with open(dump_file, "wb") as f:
-                    f.write(orjson.dumps(trace_dict, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_DATACLASS))
+                    f.write(
+                        orjson.dumps(
+                            trace_dict, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_DATACLASS
+                        )
+                    )
             except Exception:
                 with open(dump_file, "w", encoding="utf-8") as f:
                     json.dump(trace_dict, f, indent=2)
