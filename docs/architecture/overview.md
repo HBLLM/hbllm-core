@@ -1,6 +1,6 @@
 ---
 title: "Architecture Overview — HBLLM Cognitive Architecture"
-description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 50+ cognitive nodes, async message bus, 9 memory subsystems, 5 cognitive subsystems for human modeling, autonomous goal pursuit, and the edge-optimized zoning model."
+description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 50+ cognitive nodes, async message bus, HCIR-native memory architecture, 5 cognitive subsystems for human modeling, autonomous goal pursuit, and the edge-optimized zoning model."
 ---
 
 # Architecture Overview
@@ -125,16 +125,16 @@ graph TB
         RG["🌍 RealityGraph\n(unified world state)"]
     end
 
-    subgraph MEMORY["💾 Memory Systems (9 Subsystems)"]
-        EPISODIC["📖 Episodic"]
-        SEMANTIC["📚 Semantic (RAG)"]
-        PROCEDURAL["🔧 Procedural (Skills)"]
-        KG["🔗 Knowledge Graph"]
-        VALUE["❤️ Value / Prefs"]
-        WORKING["📋 Working Context"]
-        SPATIAL["📍 Spatial Memory"]
-        TEMPORAL["⏰ Temporal Patterns"]
-        IMPORTANCE["⭐ Importance Scorer"]
+    subgraph MEMORY["💾 HCIR Memory System (Tiered Graph Workspace)"]
+        EPISODIC["📖 EpisodeNode"]
+        SEMANTIC["📚 ConceptNode"]
+        PROCEDURAL["🔧 SkillNode"]
+        KG["🔗 BeliefNode (Graph)"]
+        VALUE["❤️ ValueNode"]
+        WORKING["📋 Working Tier"]
+        SPATIAL["📍 Brain Tier"]
+        TEMPORAL["⏰ Persistent Tier"]
+        IMPORTANCE["📊 Meta Tier"]
     end
 
     subgraph ACTIONS["⚡ Action & Embodiment Layer"]
@@ -327,7 +327,7 @@ All nodes communicate via the **MessageBus**, which has been hardened for distri
 
 ### Layer 5: Memory Systems
 
-See [Memory Systems](memory-systems.md) for the full deep-dive. Now includes 9 subsystems: Working, Episodic, Semantic, Procedural, Knowledge Graph, Value, **Spatial Memory**, **Temporal Patterns**, and **Importance Scorer**.
+See [Memory Systems](memory-systems.md) for the full deep-dive. Memory is fully unified as an **HCIR-native Cognitive OS graph backend** operating across a 4-tier workspace (Working, Brain, Persistent, Meta). All memory types (`EpisodeNode`, `ConceptNode`, `SkillNode`, `ValueNode`, `BeliefNode`) are managed as event-sourced typed nodes, with legacy SQLite/vector stores retired in Phase 5 (`LEGACY_REMOVED`).
 
 ### Layer 6: Action & Embodiment
 
