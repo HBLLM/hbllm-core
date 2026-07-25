@@ -33,10 +33,12 @@ async def test_fuser_to_world_state():
 
     # Feed fused events into world state
     for seq in sequences:
-        world._fused_events.append({
-            "narrative": seq.narrative,
-            "timestamp": seq.timestamp,
-        })
+        world._fused_events.append(
+            {
+                "narrative": seq.narrative,
+                "timestamp": seq.timestamp,
+            }
+        )
         world._timestamps["fused"] = time.time()
 
     # World state should reflect the fused events

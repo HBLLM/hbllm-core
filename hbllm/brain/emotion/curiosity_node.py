@@ -277,11 +277,13 @@ class CuriosityNode(Node):
 
     async def _handle_query(self, message: Message) -> Message | None:
         """Return curiosity engine stats."""
-        return message.create_response({
-            "event_count": len(self.events),
-            "goal_queue": self.goal_queue.summary(),
-            "top_gaps": self._get_top_gaps(5),
-        })
+        return message.create_response(
+            {
+                "event_count": len(self.events),
+                "goal_queue": self.goal_queue.summary(),
+                "top_gaps": self._get_top_gaps(5),
+            }
+        )
 
     async def _record_event(self, event: UncertaintyEvent) -> None:
         """Record an uncertainty event and check if a goal should be generated."""

@@ -214,19 +214,23 @@ class DeliberativeController:
         try:
             # Step 1: Extract goal description
             goal_desc = self._extract_goal(intent)
-            trace.append({
-                "step": "extract_goal",
-                "result": goal_desc,
-                "timestamp": time.time(),
-            })
+            trace.append(
+                {
+                    "step": "extract_goal",
+                    "result": goal_desc,
+                    "timestamp": time.time(),
+                }
+            )
 
             # Step 2: Decompose into sub-steps
             steps = self._decompose_goal(goal_desc, intent, context)
-            trace.append({
-                "step": "decompose_goal",
-                "step_count": len(steps),
-                "timestamp": time.time(),
-            })
+            trace.append(
+                {
+                    "step": "decompose_goal",
+                    "step_count": len(steps),
+                    "timestamp": time.time(),
+                }
+            )
 
             # Step 3: Build plan
             plan = Plan(
@@ -237,19 +241,23 @@ class DeliberativeController:
                 confidence=intent.confidence,
                 provenance=prov,
             )
-            trace.append({
-                "step": "build_plan",
-                "plan_id": plan.plan_id,
-                "timestamp": time.time(),
-            })
+            trace.append(
+                {
+                    "step": "build_plan",
+                    "plan_id": plan.plan_id,
+                    "timestamp": time.time(),
+                }
+            )
 
             # Step 4: Validate plan
             plan.validate()
-            trace.append({
-                "step": "validate_plan",
-                "status": plan.status.value,
-                "timestamp": time.time(),
-            })
+            trace.append(
+                {
+                    "step": "validate_plan",
+                    "status": plan.status.value,
+                    "timestamp": time.time(),
+                }
+            )
 
             latency_ms = (time.monotonic() - start) * 1000.0
             self._total_successes += 1
@@ -268,11 +276,13 @@ class DeliberativeController:
             latency_ms = (time.monotonic() - start) * 1000.0
             self._total_failures += 1
             self._total_latency_ms += latency_ms
-            trace.append({
-                "step": "error",
-                "error": str(exc),
-                "timestamp": time.time(),
-            })
+            trace.append(
+                {
+                    "step": "error",
+                    "error": str(exc),
+                    "timestamp": time.time(),
+                }
+            )
             logger.error("Deliberation failed for intent %s: %s", intent.intent_id[:8], exc)
             return DeliberationResult(
                 intent=intent,

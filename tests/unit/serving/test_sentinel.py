@@ -201,11 +201,13 @@ class TestSentinelNode:
     @pytest.mark.asyncio
     async def test_context_to_text(self, sentinel):
         """Should generate readable text from context dict."""
-        text = sentinel._context_to_text({
-            "time_hour": 22,
-            "door_state": "open",
-            "baby_state": "sleeping",
-        })
+        text = sentinel._context_to_text(
+            {
+                "time_hour": 22,
+                "door_state": "open",
+                "baby_state": "sleeping",
+            }
+        )
         assert "door" in text.lower()
         assert "baby" in text.lower()
 

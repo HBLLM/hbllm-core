@@ -83,14 +83,16 @@ class ActuatorCapabilityAdapter(ICognitiveNodeABI):
                         parameters=node_data.get("params", {}),
                     )
                     dispatch_res = self.dispatch_command_sync(cmd, workspace)
-                    delta.add_nodes.append({
-                        "id": f"evt_actuation_{cmd.actuator_id}",
-                        "node_type": "event",
-                        "event_kind": "actuation_executed"
-                        if dispatch_res
-                        else "actuation_simulated",
-                        "event_data": {"cmd": cmd.command_name, "success": dispatch_res},
-                    })
+                    delta.add_nodes.append(
+                        {
+                            "id": f"evt_actuation_{cmd.actuator_id}",
+                            "node_type": "event",
+                            "event_kind": "actuation_executed"
+                            if dispatch_res
+                            else "actuation_simulated",
+                            "event_data": {"cmd": cmd.command_name, "success": dispatch_res},
+                        }
+                    )
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         return ExecutionResult(

@@ -154,10 +154,12 @@ class ReflectionHandler:
             return message.create_response({"subgraph": sg, "entity": label})
 
         elif action == "stats":
-            return message.create_response({
-                "entity_count": kg.entity_count,
-                "relation_count": kg.relation_count,
-            })
+            return message.create_response(
+                {
+                    "entity_count": kg.entity_count,
+                    "relation_count": kg.relation_count,
+                }
+            )
 
         elif action == "all_entities":
             limit = payload.get("limit", 100)

@@ -22,32 +22,34 @@ logger = logging.getLogger(__name__)
 
 # ── Safe Shell Commands ────────────────────────────────────────────────────────
 
-SAFE_SHELL_COMMANDS: frozenset[str] = frozenset({
-    "ls",
-    "cat",
-    "head",
-    "tail",
-    "wc",
-    "grep",
-    "find",
-    "echo",
-    "pwd",
-    "date",
-    "whoami",
-    "uname",
-    "df",
-    "du",
-    "sort",
-    "uniq",
-    "tr",
-    "cut",
-    "awk",
-    "sed",
-    "diff",
-    "tree",
-    "file",
-    "which",
-})
+SAFE_SHELL_COMMANDS: frozenset[str] = frozenset(
+    {
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "find",
+        "echo",
+        "pwd",
+        "date",
+        "whoami",
+        "uname",
+        "df",
+        "du",
+        "sort",
+        "uniq",
+        "tr",
+        "cut",
+        "awk",
+        "sed",
+        "diff",
+        "tree",
+        "file",
+        "which",
+    }
+)
 
 
 # ── Python Execution ──────────────────────────────────────────────────────────
@@ -266,10 +268,12 @@ async def tool_web_search(query: str) -> ToolResult:
             if (
                 not href
                 or href in cache
-                or href.startswith((
-                    "http://www.google.com/search?q=",
-                    "https://duckduckgo.com/y.js?ad_domain",
-                ))
+                or href.startswith(
+                    (
+                        "http://www.google.com/search?q=",
+                        "https://duckduckgo.com/y.js?ad_domain",
+                    )
+                )
             ):
                 continue
             cache.add(href)

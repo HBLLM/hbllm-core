@@ -140,12 +140,14 @@ def create_legacy_nodes(
         from hbllm.perception.speaker_id_node import SpeakerIdNode
         from hbllm.perception.vision_node import VisionNode
 
-        nodes.extend([
-            AudioInputNode(node_id="audio_in", model_size="tiny"),
-            AudioOutputNode(node_id="audio_out"),
-            VisionNode(node_id="vision"),
-            SpeakerIdNode(node_id="speaker_id"),  # type: ignore[abstract]
-        ])
+        nodes.extend(
+            [
+                AudioInputNode(node_id="audio_in", model_size="tiny"),
+                AudioOutputNode(node_id="audio_out"),
+                VisionNode(node_id="vision"),
+                SpeakerIdNode(node_id="speaker_id"),  # type: ignore[abstract]
+            ]
+        )
 
     # Reasoning nodes
     if cfg.inject_fuzzy_logic:

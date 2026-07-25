@@ -212,14 +212,16 @@ class OSAdapter:
             try:
                 batt = self._psutil.sensors_battery()
                 if batt is not None:
-                    return self._cache_battery.set({
-                        "level": batt.percent / 100.0,
-                        "charging": batt.power_plugged is True,
-                        "ac_powered": batt.power_plugged is True,
-                        "time_remaining_minutes": int(batt.secsleft / 60)
-                        if batt.secsleft > 0
-                        else None,
-                    })
+                    return self._cache_battery.set(
+                        {
+                            "level": batt.percent / 100.0,
+                            "charging": batt.power_plugged is True,
+                            "ac_powered": batt.power_plugged is True,
+                            "time_remaining_minutes": int(batt.secsleft / 60)
+                            if batt.secsleft > 0
+                            else None,
+                        }
+                    )
                 return self._cache_battery.set(None)
             except Exception as e:
                 logger.debug("psutil battery read failed: %s", e)
@@ -264,21 +266,25 @@ class OSAdapter:
         if self._psutil:
             try:
                 mem = self._psutil.virtual_memory()
-                return self._cache_memory.set({
-                    "total_gb": round(mem.total / (1024**3), 2),
-                    "available_gb": round(mem.available / (1024**3), 2),
-                    "used_gb": round(mem.used / (1024**3), 2),
-                    "percent": mem.percent / 100.0,
-                })
+                return self._cache_memory.set(
+                    {
+                        "total_gb": round(mem.total / (1024**3), 2),
+                        "available_gb": round(mem.available / (1024**3), 2),
+                        "used_gb": round(mem.used / (1024**3), 2),
+                        "percent": mem.percent / 100.0,
+                    }
+                )
             except Exception as e:
                 logger.debug("psutil memory read failed: %s", e)
 
-        return self._cache_memory.set({
-            "total_gb": 0,
-            "available_gb": 0,
-            "used_gb": 0,
-            "percent": 0.0,
-        })
+        return self._cache_memory.set(
+            {
+                "total_gb": 0,
+                "available_gb": 0,
+                "used_gb": 0,
+                "percent": 0.0,
+            }
+        )
 
     def read_disk_usage(self, path: str = "/") -> dict[str, Any]:
         """Read disk usage for a given path.
@@ -296,12 +302,14 @@ class OSAdapter:
         if self._psutil:
             try:
                 usage = self._psutil.disk_usage(path)
-                return cache.set({
-                    "total_gb": round(usage.total / (1024**3), 2),
-                    "free_gb": round(usage.free / (1024**3), 2),
-                    "used_gb": round(usage.used / (1024**3), 2),
-                    "percent": usage.percent / 100.0,
-                })
+                return cache.set(
+                    {
+                        "total_gb": round(usage.total / (1024**3), 2),
+                        "free_gb": round(usage.free / (1024**3), 2),
+                        "used_gb": round(usage.used / (1024**3), 2),
+                        "percent": usage.percent / 100.0,
+                    }
+                )
             except Exception as e:
                 logger.debug("psutil disk read failed: %s", e)
 
@@ -310,12 +318,14 @@ class OSAdapter:
 
         try:
             usage = shutil.disk_usage(path)
-            return cache.set({
-                "total_gb": round(usage.total / (1024**3), 2),
-                "free_gb": round(usage.free / (1024**3), 2),
-                "used_gb": round(usage.used / (1024**3), 2),
-                "percent": round(usage.used / usage.total, 2) if usage.total > 0 else 0.0,
-            })
+            return cache.set(
+                {
+                    "total_gb": round(usage.total / (1024**3), 2),
+                    "free_gb": round(usage.free / (1024**3), 2),
+                    "used_gb": round(usage.used / (1024**3), 2),
+                    "percent": round(usage.used / usage.total, 2) if usage.total > 0 else 0.0,
+                }
+            )
         except OSError:
             return cache.set({"total_gb": 0, "free_gb": 0, "used_gb": 0, "percent": 0.0})
 
@@ -342,16 +352,18 @@ class OSAdapter:
                 interfaces = []
                 for name, stat in stats.items():
                     if stat.isup and name != "lo" and not name.startswith("lo"):
-                        interfaces.append({
-                            "name": name,
-                            "speed_mbps": stat.speed,
-                            "mtu": stat.mtu,
-                            "addresses": [
-                                addr.address
-                                for addr in addrs.get(name, [])
-                                if addr.family.name in ("AF_INET", "AF_INET6")
-                            ],
-                        })
+                        interfaces.append(
+                            {
+                                "name": name,
+                                "speed_mbps": stat.speed,
+                                "mtu": stat.mtu,
+                                "addresses": [
+                                    addr.address
+                                    for addr in addrs.get(name, [])
+                                    if addr.family.name in ("AF_INET", "AF_INET6")
+                                ],
+                            }
+                        )
 
                 result["interfaces"] = interfaces
                 result["connected"] = len(interfaces) > 0
@@ -437,12 +449,14 @@ class OSAdapter:
                 try:
                     info = proc.info
                     if info.get("cpu_percent", 0) > 0:
-                        procs.append({
-                            "pid": info["pid"],
-                            "name": info["name"],
-                            "cpu_percent": info["cpu_percent"],
-                            "memory_percent": round(info.get("memory_percent", 0), 2),
-                        })
+                        procs.append(
+                            {
+                                "pid": info["pid"],
+                                "name": info["name"],
+                                "cpu_percent": info["cpu_percent"],
+                                "memory_percent": round(info.get("memory_percent", 0), 2),
+                            }
+                        )
                 except (self._psutil.NoSuchProcess, self._psutil.AccessDenied):
                     continue
 

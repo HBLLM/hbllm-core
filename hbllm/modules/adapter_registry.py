@@ -188,13 +188,15 @@ class AdapterRegistry:
         result = []
         cached_domains = set(self.list_cached())
         for source in self._sources.values():
-            result.append({
-                "domain": source.domain,
-                "repo_id": source.repo_id,
-                "revision": source.revision or "main",
-                "cached": source.domain.lower() in cached_domains,
-                "has_sha256": bool(source.sha256),
-            })
+            result.append(
+                {
+                    "domain": source.domain,
+                    "repo_id": source.repo_id,
+                    "revision": source.revision or "main",
+                    "cached": source.domain.lower() in cached_domains,
+                    "has_sha256": bool(source.sha256),
+                }
+            )
         return result
 
     def evict(self, domain: str) -> bool:

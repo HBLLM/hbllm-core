@@ -177,11 +177,13 @@ class WebSocketTransport(Transport):
                     # Advertise capabilities
                     if self.local_capabilities:
                         await self._ws.send(
-                            json.dumps({
-                                "type": "register_capabilities",
-                                "tools": self.local_capabilities,
-                                "device_tier": self.device_tier,
-                            })
+                            json.dumps(
+                                {
+                                    "type": "register_capabilities",
+                                    "tools": self.local_capabilities,
+                                    "device_tier": self.device_tier,
+                                }
+                            )
                         )
 
                     await self._read_loop()

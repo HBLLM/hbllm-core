@@ -139,11 +139,13 @@ class WorldModelNode(Node):
             else:
                 reason = f"Skill Simulation Failed: {reasons[0]}"
 
-            return message.create_response({
-                "status": "simulation_result",
-                "prediction": overall_status,
-                "content": reason,
-            })
+            return message.create_response(
+                {
+                    "status": "simulation_result",
+                    "prediction": overall_status,
+                    "content": reason,
+                }
+            )
 
         elif action_type == "repository_mutation":
             file_path = payload.get("file_path", "")
@@ -154,19 +156,23 @@ class WorldModelNode(Node):
                 self._virtual_files[file_path] = content
                 self.simulate_parse_imports(file_path, content)
                 comp_result = self.simulate_compilation(file_path)
-                return message.create_response({
-                    "status": "simulation_result",
-                    "prediction": comp_result["status"],
-                    "content": f"Simulated write to {file_path}. " + comp_result["reason"],
-                })
+                return message.create_response(
+                    {
+                        "status": "simulation_result",
+                        "prediction": comp_result["status"],
+                        "content": f"Simulated write to {file_path}. " + comp_result["reason"],
+                    }
+                )
             elif mutation_type == "delete":
                 self._virtual_files.pop(file_path, None)
                 self._virtual_dependencies.pop(file_path, None)
-                return message.create_response({
-                    "status": "simulation_result",
-                    "prediction": "SUCCESS",
-                    "content": f"Simulated deletion of {file_path} succeeded.",
-                })
+                return message.create_response(
+                    {
+                        "status": "simulation_result",
+                        "prediction": "SUCCESS",
+                        "content": f"Simulated deletion of {file_path} succeeded.",
+                    }
+                )
 
         return None
 

@@ -1032,22 +1032,24 @@ async def _prepare_chat_context(
         if provider:
             original_recalled = ctx.recalled_context
             try:
-                compress_resp = await provider.generate([
-                    {
-                        "role": "system",
-                        "content": (
-                            "Compress the following recalled memories into a concise "
-                            "bullet-point list of key facts relevant to the user's query. "
-                            "Keep only essential information. Be extremely concise."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"User query: {user_text}\n\nRecalled memories:\n{ctx.recalled_context}"
-                        ),
-                    },
-                ])
+                compress_resp = await provider.generate(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Compress the following recalled memories into a concise "
+                                "bullet-point list of key facts relevant to the user's query. "
+                                "Keep only essential information. Be extremely concise."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"User query: {user_text}\n\nRecalled memories:\n{ctx.recalled_context}"
+                            ),
+                        },
+                    ]
+                )
                 ctx.recalled_context = compress_resp.content
                 logger.debug(
                     "[ContextLayer] Compressed recalled context: %d → %d chars",
@@ -1693,13 +1695,15 @@ async def audio_websocket(ws: WebSocket) -> None:
                 msg.payload.get("sample_rate"),
                 msg.payload.get("is_final"),
             )
-            await audio_queue.put({
-                "type": "audio_chunk",
-                "audio": msg.payload.get("audio", ""),
-                "sample_rate": msg.payload.get("sample_rate", 24000),
-                "is_final": msg.payload.get("is_final", False),
-                "text": msg.payload.get("text", ""),
-            })
+            await audio_queue.put(
+                {
+                    "type": "audio_chunk",
+                    "audio": msg.payload.get("audio", ""),
+                    "sample_rate": msg.payload.get("sample_rate", 24000),
+                    "is_final": msg.payload.get("is_final", False),
+                    "text": msg.payload.get("text", ""),
+                }
+            )
 
     async def _on_output(msg: Message) -> None:
         logger.info(
@@ -1710,10 +1714,12 @@ async def audio_websocket(ws: WebSocket) -> None:
         )
         if msg.session_id == session_id:
             text = msg.payload.get("text", "")
-            await audio_queue.put({
-                "type": "response_text",
-                "text": text,
-            })
+            await audio_queue.put(
+                {
+                    "type": "response_text",
+                    "text": text,
+                }
+            )
             # Auto-trigger TTS for voice chat responses
             if text.strip():
                 logger.info(
@@ -1731,13 +1737,15 @@ async def audio_websocket(ws: WebSocket) -> None:
 
     async def _on_transcription(msg: Message) -> None:
         if msg.session_id == session_id:
-            await audio_queue.put({
-                "type": "transcription",
-                "text": msg.payload.get("text", ""),
-                "speaker_id": msg.payload.get("speaker_id", "unknown"),
-                "speaker_name": msg.payload.get("speaker_name", ""),
-                "speaker_confidence": msg.payload.get("speaker_confidence", 0.0),
-            })
+            await audio_queue.put(
+                {
+                    "type": "transcription",
+                    "text": msg.payload.get("text", ""),
+                    "speaker_id": msg.payload.get("speaker_id", "unknown"),
+                    "speaker_name": msg.payload.get("speaker_name", ""),
+                    "speaker_confidence": msg.payload.get("speaker_confidence", 0.0),
+                }
+            )
 
     sub_chunk = await bus.subscribe("sensory.audio.chunk", _on_audio_chunk)
     sub_output = await bus.subscribe("sensory.output", _on_output)
@@ -1906,33 +1914,37 @@ async def get_cognitive_telemetry():
         goals = goal_manager.get_active_goals()
         goals_data = []
         for g in goals:
-            goals_data.append({
-                "goal_id": g.goal_id,
-                "name": g.name,
-                "description": g.description,
-                "goal_type": g.goal_type,
-                "priority": g.priority.value,
-                "status": g.status.value,
-                "progress": g.progress,
-                "dependencies": g.dependencies,
-                "block_reason": g.block_reason,
-                "execution_journal": g.execution_journal,
-            })
+            goals_data.append(
+                {
+                    "goal_id": g.goal_id,
+                    "name": g.name,
+                    "description": g.description,
+                    "goal_type": g.goal_type,
+                    "priority": g.priority.value,
+                    "status": g.status.value,
+                    "progress": g.progress,
+                    "dependencies": g.dependencies,
+                    "block_reason": g.block_reason,
+                    "execution_journal": g.execution_journal,
+                }
+            )
 
         # 2. Fetch Decision/Calibration Traces
         calibrator = UtilityCalibrator(data_dir=data_dir)
         traces = calibrator.get_traces(limit=20)
         traces_data = []
         for t in traces:
-            traces_data.append({
-                "trace_id": t.trace_id,
-                "decision_point": t.decision_point,
-                "predicted_utility": t.predicted_utility,
-                "actual_outcome": t.actual_outcome,
-                "prediction_error": t.prediction_error,
-                "timestamp": t.timestamp,
-                "metadata": t.metadata,
-            })
+            traces_data.append(
+                {
+                    "trace_id": t.trace_id,
+                    "decision_point": t.decision_point,
+                    "predicted_utility": t.predicted_utility,
+                    "actual_outcome": t.actual_outcome,
+                    "prediction_error": t.prediction_error,
+                    "timestamp": t.timestamp,
+                    "metadata": t.metadata,
+                }
+            )
 
         # 3. Active budget defaults (or mock values if no active runs)
         budget_data = {
@@ -2470,11 +2482,13 @@ async def chat_websocket(ws: WebSocket) -> None:
                         piece = token if i == 0 else " " + token
                         await ws.send_json({"token": piece, "done": False})
 
-                    await ws.send_json({
-                        "token": "",
-                        "done": True,
-                        "correlation_id": correlation_id,
-                    })
+                    await ws.send_json(
+                        {
+                            "token": "",
+                            "done": True,
+                            "correlation_id": correlation_id,
+                        }
+                    )
 
                     # Store assistant response
                     store_msg = Message(

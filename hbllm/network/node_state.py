@@ -202,12 +202,14 @@ class NodeStateEngine:
             return
 
         self._role = new_role
-        self._role_history.append({
-            "from": old_role.value,
-            "to": new_role.value,
-            "reason": reason,
-            "timestamp": time.monotonic(),
-        })
+        self._role_history.append(
+            {
+                "from": old_role.value,
+                "to": new_role.value,
+                "reason": reason,
+                "timestamp": time.monotonic(),
+            }
+        )
         # Cap role history to prevent unbounded growth
         if len(self._role_history) > 100:
             self._role_history = self._role_history[-100:]

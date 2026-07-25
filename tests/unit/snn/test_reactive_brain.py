@@ -257,10 +257,12 @@ class TestWTA:
         mem_winners = hwta.compete_local("memory", mem_spikes)
         goal_winners = hwta.compete_local("goals", goal_spikes)
 
-        exec_winners = hwta.compete_executive({
-            "memory": mem_winners,
-            "goals": goal_winners,
-        })
+        exec_winners = hwta.compete_executive(
+            {
+                "memory": mem_winners,
+                "goals": goal_winners,
+            }
+        )
 
         assert len(exec_winners) >= 1
 

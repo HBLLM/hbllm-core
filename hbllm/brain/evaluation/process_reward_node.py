@@ -99,11 +99,13 @@ class ProcessRewardNode(Node):
         logger.debug(
             "[ProcessRewardNode] Scored thought: %.3f (confidence: %.2f)", score, confidence
         )
-        return message.create_response({
-            "score": score,
-            "confidence": confidence,
-            "source": "prm_network" if self.prm_is_trained else "fallback",
-        })
+        return message.create_response(
+            {
+                "score": score,
+                "confidence": confidence,
+                "source": "prm_network" if self.prm_is_trained else "fallback",
+            }
+        )
 
     async def score_thought(self, content: str) -> tuple[float, float]:
         """Run the PRM model or fallback on the thought content.

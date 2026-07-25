@@ -195,31 +195,35 @@ class MockKnowledgeNode:
         action = msg.payload.get("action", "")
 
         if action == "all_entities":
-            return msg.create_response({
-                "entities": [
-                    {"label": "user", "type": "person", "id": "e1"},
-                    {"label": "dark mode", "type": "preference", "id": "e2"},
-                    {"label": "light mode", "type": "preference", "id": "e3"},
-                ]
-            })
+            return msg.create_response(
+                {
+                    "entities": [
+                        {"label": "user", "type": "person", "id": "e1"},
+                        {"label": "dark mode", "type": "preference", "id": "e2"},
+                        {"label": "light mode", "type": "preference", "id": "e3"},
+                    ]
+                }
+            )
 
         if action == "all_relations":
-            return msg.create_response({
-                "relations": [
-                    {
-                        "source_id": "e1",
-                        "target_id": "e2",
-                        "relation_type": "prefers",
-                        "created_at": 1000.0,
-                    },
-                    {
-                        "source_id": "e1",
-                        "target_id": "e3",
-                        "relation_type": "prefers",
-                        "created_at": 2000.0,  # Newer — should be kept
-                    },
-                ]
-            })
+            return msg.create_response(
+                {
+                    "relations": [
+                        {
+                            "source_id": "e1",
+                            "target_id": "e2",
+                            "relation_type": "prefers",
+                            "created_at": 1000.0,
+                        },
+                        {
+                            "source_id": "e1",
+                            "target_id": "e3",
+                            "relation_type": "prefers",
+                            "created_at": 2000.0,  # Newer — should be kept
+                        },
+                    ]
+                }
+            )
 
         if action == "remove_relation":
             self.prune_calls.append(msg.payload)

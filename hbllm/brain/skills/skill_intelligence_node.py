@@ -152,11 +152,13 @@ class SkillIntelligenceNode(Node):
                     ),
                 )
 
-            return message.create_response({
-                "status": "SUCCESS",
-                "skill": best_skill.name,
-                "execution_trace": trace,
-            })
+            return message.create_response(
+                {
+                    "status": "SUCCESS",
+                    "skill": best_skill.name,
+                    "execution_trace": trace,
+                }
+            )
         else:
             logger.warning("SIL failed executing skill '%s': %s", best_skill.name, error_msg)
             # Route to Failure Analyzer
@@ -267,24 +269,30 @@ class SkillIntelligenceNode(Node):
             try:
                 resp = await self.request(topic, req, timeout=30.0)
                 if resp.type == MessageType.ERROR:
-                    trace.append({
-                        "step": step,
-                        "status": "failed",
-                        "error": str(resp.payload.get("error")),
-                    })
+                    trace.append(
+                        {
+                            "step": step,
+                            "status": "failed",
+                            "error": str(resp.payload.get("error")),
+                        }
+                    )
                     return False, str(resp.payload.get("error", "Execution error")), trace
                 elif resp.payload.get("status") != "SUCCESS":
-                    trace.append({
-                        "step": step,
-                        "status": "failed",
-                        "error": str(resp.payload.get("error")),
-                    })
+                    trace.append(
+                        {
+                            "step": step,
+                            "status": "failed",
+                            "error": str(resp.payload.get("error")),
+                        }
+                    )
                     return False, str(resp.payload.get("error", "Sub-process failed")), trace
-                trace.append({
-                    "step": step,
-                    "status": "success",
-                    "output": resp.payload.get("output"),
-                })
+                trace.append(
+                    {
+                        "step": step,
+                        "status": "success",
+                        "output": resp.payload.get("output"),
+                    }
+                )
             except Exception as e:
                 trace.append({"step": step, "status": "failed", "error": str(e)})
                 return False, str(e), trace
@@ -293,11 +301,13 @@ class SkillIntelligenceNode(Node):
     async def _fallback_raw_execution(self, message: Message, query: str) -> Message | None:
         """Fallback to raw planner logic if we had no skill."""
         logger.info("SIL fallback: No matched skill found. Delegating back to raw reasoning tools.")
-        return message.create_response({
-            "status": "NO_SKILL",
-            "reason": "No high confidence skill available for this task. Fallback requested.",
-            "execution_trace": [],
-        })
+        return message.create_response(
+            {
+                "status": "NO_SKILL",
+                "reason": "No high confidence skill available for this task. Fallback requested.",
+                "execution_trace": [],
+            }
+        )
 
     def _adjusted_confidence(self, skill: Any) -> float:
         """Compute belief-weighted confidence for a skill.

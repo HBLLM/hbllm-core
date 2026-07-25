@@ -1229,10 +1229,12 @@ class SleepCycleNode(Node):
         if self.is_sleeping:
             logger.info("[SleepNode] Manual trigger ignored — already sleeping.")
             return (
-                message.create_response({
-                    "status": "already_sleeping",
-                    "phase": self.current_phase.value,
-                })
+                message.create_response(
+                    {
+                        "status": "already_sleeping",
+                        "phase": self.current_phase.value,
+                    }
+                )
                 if message.type == MessageType.QUERY
                 else None
             )
@@ -1249,10 +1251,12 @@ class SleepCycleNode(Node):
         )
 
         if message.type == MessageType.QUERY:
-            return message.create_response({
-                "status": "consolidation_started",
-                "message": "Dream cycle initiated.",
-            })
+            return message.create_response(
+                {
+                    "status": "consolidation_started",
+                    "message": "Dream cycle initiated.",
+                }
+            )
         return None
 
     # ── Autonomous Learning Sleep Operations ─────────────────────────────

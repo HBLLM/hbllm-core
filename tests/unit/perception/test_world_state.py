@@ -91,10 +91,12 @@ def test_summary_suppresses_silence(engine):
 
 def test_fused_events_tracked(engine):
     """Fused events are stored and shown in state."""
-    engine._fused_events.append({
-        "narrative": "Someone entered the front door",
-        "timestamp": time.time(),
-    })
+    engine._fused_events.append(
+        {
+            "narrative": "Someone entered the front door",
+            "timestamp": time.time(),
+        }
+    )
     engine._timestamps["fused"] = time.time()
     state = engine.get_state()
     assert len(state["recent_events"]) == 1

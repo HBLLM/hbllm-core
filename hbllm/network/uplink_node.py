@@ -156,11 +156,13 @@ class UplinkNode(Node):
                     # Register local tools upstream
                     if self.local_tools:
                         await self._ws.send(
-                            json.dumps({
-                                "type": "register_capabilities",
-                                "tools": self.local_tools,
-                                "device_tier": self.device_tier,
-                            })
+                            json.dumps(
+                                {
+                                    "type": "register_capabilities",
+                                    "tools": self.local_tools,
+                                    "device_tier": self.device_tier,
+                                }
+                            )
                         )
                         logger.info(
                             "UplinkNode advertised %d tools upstream", len(self.local_tools)

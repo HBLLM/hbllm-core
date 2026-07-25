@@ -241,10 +241,12 @@ def speculate_step(
         for layer_kv in curr_draft_kv:
             if isinstance(layer_kv, (tuple, list)) and len(layer_kv) == 2:
                 k, v = layer_kv
-                trimmed_draft_kv.append((
-                    k[:, :, :-trim_amount, :],
-                    v[:, :, :-trim_amount, :],
-                ))
+                trimmed_draft_kv.append(
+                    (
+                        k[:, :, :-trim_amount, :],
+                        v[:, :, :-trim_amount, :],
+                    )
+                )
             else:
                 trimmed_draft_kv.append(layer_kv)
         curr_draft_kv = trimmed_draft_kv
@@ -256,10 +258,12 @@ def speculate_step(
         for layer_kv in updated_main_kv:
             if isinstance(layer_kv, (tuple, list)) and len(layer_kv) == 2:
                 k, v = layer_kv
-                trimmed_main_kv.append((
-                    k[:, :, :-trim_amount, :],
-                    v[:, :, :-trim_amount, :],
-                ))
+                trimmed_main_kv.append(
+                    (
+                        k[:, :, :-trim_amount, :],
+                        v[:, :, :-trim_amount, :],
+                    )
+                )
             else:
                 trimmed_main_kv.append(layer_kv)
         updated_main_kv = trimmed_main_kv

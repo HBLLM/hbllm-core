@@ -574,10 +574,12 @@ class RouterNode(Node):
 
                 self.unknown_counts["general_unknown"] = 0
 
-                return message.create_response({
-                    "text": f"I don't know much about this topic yet. I am spawning a new '{topic_guess}' module to learn about it. Please try asking again in a few moments!",
-                    "domain": "system",
-                })
+                return message.create_response(
+                    {
+                        "text": f"I don't know much about this topic yet. I am spawning a new '{topic_guess}' module to learn about it. Please try asking again in a few moments!",
+                        "domain": "system",
+                    }
+                )
         else:
             if self.unknown_counts["general_unknown"] > 0:
                 self.unknown_counts["general_unknown"] -= 1
@@ -821,10 +823,12 @@ class RouterNode(Node):
         workspace_payload["swarm_history"] = history
 
         # Inject context directly into the text for the next agent to read
-        history_text = "\n".join([
-            f"- [{h.get('node', 'unknown')}]: {h.get('type', 'event')} (confidence: {h.get('confidence', 0.0)})"
-            for h in history
-        ])
+        history_text = "\n".join(
+            [
+                f"- [{h.get('node', 'unknown')}]: {h.get('type', 'event')} (confidence: {h.get('confidence', 0.0)})"
+                for h in history
+            ]
+        )
         workspace_payload["text"] = (
             f"[SWARM TRANSFER] The previous agent transferred this to you ({target_domain}).\n\nPrevious Agent Work:\n{history_text}\n\nOriginal Request:\n{original_query.get('text', '')}"
         )

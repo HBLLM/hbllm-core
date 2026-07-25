@@ -221,10 +221,12 @@ class WebRTCTransport(Transport):
 
     async def send(self, topic: str, message: Message) -> None:
         """Send a message to all connected peers via data channels."""
-        wire = json.dumps({
-            "topic": topic,
-            "message": message.model_dump(mode="json"),
-        })
+        wire = json.dumps(
+            {
+                "topic": topic,
+                "message": message.model_dump(mode="json"),
+            }
+        )
 
         sent = False
         for peer in self._peers.values():
@@ -249,10 +251,12 @@ class WebRTCTransport(Transport):
             self.metrics.record_drop()
             return
 
-        wire = json.dumps({
-            "topic": topic,
-            "message": message.model_dump(mode="json"),
-        })
+        wire = json.dumps(
+            {
+                "topic": topic,
+                "message": message.model_dump(mode="json"),
+            }
+        )
         try:
             peer.channel.send(wire)
             peer.messages_sent += 1

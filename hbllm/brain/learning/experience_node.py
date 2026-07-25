@@ -731,13 +731,15 @@ class ExperienceNode(Node):
 
                 rule_id = hashlib.md5(f"{condition}|{action}".encode()).hexdigest()[:12]
 
-                rules.append({
-                    "rule_id": rule_id,
-                    "condition": condition[:200],
-                    "action": action[:200],
-                    "confidence": round(min(confidence, 0.95), 2),
-                    "category": category,
-                })
+                rules.append(
+                    {
+                        "rule_id": rule_id,
+                        "condition": condition[:200],
+                        "action": action[:200],
+                        "confidence": round(min(confidence, 0.95), 2),
+                        "category": category,
+                    }
+                )
 
         return rules[:10]  # Cap at 10 rules per reflection
 

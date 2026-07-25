@@ -161,24 +161,26 @@ async def research_env():
 
     # Mock BrowserNode: responds to task.execute.search
     async def mock_browser(msg: Message) -> Message | None:
-        return msg.create_response({
-            "results": [
-                {
-                    "title": "Python Tutorial",
-                    "url": "https://docs.python.org/3/tutorial/",
-                    "search_snippet": "The Python tutorial covers basics in 2026",
-                    "page_content": "Python is a powerful programming language. "
-                    "Updated 2026. It supports multiple paradigms.",
-                },
-                {
-                    "title": "Python - Wikipedia",
-                    "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
-                    "search_snippet": "Python is a high-level language",
-                    "page_content": "Python is a high-level, general-purpose programming "
-                    "language. Created by Guido van Rossum. Updated 2026.",
-                },
-            ],
-        })
+        return msg.create_response(
+            {
+                "results": [
+                    {
+                        "title": "Python Tutorial",
+                        "url": "https://docs.python.org/3/tutorial/",
+                        "search_snippet": "The Python tutorial covers basics in 2026",
+                        "page_content": "Python is a powerful programming language. "
+                        "Updated 2026. It supports multiple paradigms.",
+                    },
+                    {
+                        "title": "Python - Wikipedia",
+                        "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+                        "search_snippet": "Python is a high-level language",
+                        "page_content": "Python is a high-level, general-purpose programming "
+                        "language. Created by Guido van Rossum. Updated 2026.",
+                    },
+                ],
+            }
+        )
 
     await bus.subscribe("task.execute.search", mock_browser)
 

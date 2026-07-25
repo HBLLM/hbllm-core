@@ -305,11 +305,13 @@ class CollectiveNode(Node):
         self.broadcast_log.append(digest)
         self._stats["broadcasts_sent"] += 1
 
-        self.recent_activity.append({
-            "type": "skill",
-            "text": f"Broadcast knowledge digest for domain: {digest.domain}",
-            "time": time.strftime("%H:%M:%S"),
-        })
+        self.recent_activity.append(
+            {
+                "type": "skill",
+                "text": f"Broadcast knowledge digest for domain: {digest.domain}",
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
         if len(self.recent_activity) > 20:
             self.recent_activity.pop(0)
 
@@ -518,11 +520,13 @@ class CollectiveNode(Node):
                 return
 
             self._stats["digests_integrated"] += 1
-            self.recent_activity.append({
-                "type": "skill",
-                "text": f"Integrated {artifact_type} digest from peer {digest.source_instance_id}",
-                "time": time.strftime("%H:%M:%S"),
-            })
+            self.recent_activity.append(
+                {
+                    "type": "skill",
+                    "text": f"Integrated {artifact_type} digest from peer {digest.source_instance_id}",
+                    "time": time.strftime("%H:%M:%S"),
+                }
+            )
             if len(self.recent_activity) > 20:
                 self.recent_activity.pop(0)
             logger.info(
@@ -547,13 +551,15 @@ class CollectiveNode(Node):
         recent_received = [d.to_dict() for d in self.received_log[-limit:]]
         recent_broadcast = [d.to_dict() for d in self.broadcast_log[-limit:]]
 
-        return message.create_response({
-            "instance_id": self.instance_id,
-            "stats": self._stats,
-            "recent_received": recent_received,
-            "recent_broadcast": recent_broadcast,
-            "peers": {pid: p.to_dict() for pid, p in self.peer_profiles.items()},
-        })
+        return message.create_response(
+            {
+                "instance_id": self.instance_id,
+                "stats": self._stats,
+                "recent_received": recent_received,
+                "recent_broadcast": recent_broadcast,
+                "peers": {pid: p.to_dict() for pid, p in self.peer_profiles.items()},
+            }
+        )
 
     # ── Agent Specialization ─────────────────────────────────────────
 
@@ -692,12 +698,14 @@ class CollectiveNode(Node):
         )
         self._stats["votes_requested"] += 1
 
-        self.recent_activity.append({
-            "type": "vote",
-            "text": f"Requested consensus votes for query: '{query}'",
-            "strategy": vote_strategy.value,
-            "time": time.strftime("%H:%M:%S"),
-        })
+        self.recent_activity.append(
+            {
+                "type": "vote",
+                "text": f"Requested consensus votes for query: '{query}'",
+                "strategy": vote_strategy.value,
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
         if len(self.recent_activity) > 20:
             self.recent_activity.pop(0)
 
@@ -781,11 +789,13 @@ class CollectiveNode(Node):
         )
         self._stats["votes_cast"] += 1
 
-        self.recent_activity.append({
-            "type": "vote",
-            "text": f"Voted on query from peer {requester}",
-            "time": time.strftime("%H:%M:%S"),
-        })
+        self.recent_activity.append(
+            {
+                "type": "vote",
+                "text": f"Voted on query from peer {requester}",
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
         if len(self.recent_activity) > 20:
             self.recent_activity.pop(0)
 
@@ -964,11 +974,13 @@ class CollectiveNode(Node):
             "timestamp": time.time(),
         }
 
-        self.recent_activity.append({
-            "type": "delegate",
-            "text": f"Delegating task to peer {best_peer.instance_id} (domain: {domain})",
-            "time": time.strftime("%H:%M:%S"),
-        })
+        self.recent_activity.append(
+            {
+                "type": "delegate",
+                "text": f"Delegating task to peer {best_peer.instance_id} (domain: {domain})",
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
         if len(self.recent_activity) > 20:
             self.recent_activity.pop(0)
 

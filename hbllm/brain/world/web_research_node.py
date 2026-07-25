@@ -262,19 +262,21 @@ class WebResearchNode(Node):
         )
 
         if message.type == MessageType.QUERY:
-            return message.create_response({
-                "status": "completed",
-                "findings_count": len(findings),
-                "findings": [
-                    {
-                        "title": f.title,
-                        "tier": f.tier.value,
-                        "trust_score": f.trust_score,
-                        "url": f.url,
-                    }
-                    for f in findings
-                ],
-            })
+            return message.create_response(
+                {
+                    "status": "completed",
+                    "findings_count": len(findings),
+                    "findings": [
+                        {
+                            "title": f.title,
+                            "tier": f.tier.value,
+                            "trust_score": f.trust_score,
+                            "url": f.url,
+                        }
+                        for f in findings
+                    ],
+                }
+            )
         return None
 
     async def _handle_query(self, message: Message) -> Message | None:
