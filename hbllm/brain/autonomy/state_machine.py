@@ -286,7 +286,12 @@ class CognitiveStateMachine:
 
     @property
     def tick_interval(self) -> float:
-        """Current adaptive tick interval in seconds, dynamically throttled under CPU load."""
+        """Current unthrottled state machine tick interval in seconds."""
+        return self.current_profile.tick_interval_s
+
+    @property
+    def effective_tick_interval(self) -> float:
+        """Current adaptive tick interval in seconds, dynamically throttled under host CPU load."""
         base_interval = self.current_profile.tick_interval_s
         try:
             import os
