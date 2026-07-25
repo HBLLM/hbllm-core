@@ -286,8 +286,21 @@ class CognitiveStateMachine:
 
     @property
     def tick_interval(self) -> float:
-        """Current adaptive tick interval in seconds."""
-        return self.current_profile.tick_interval_s
+        """Current adaptive tick interval in seconds, dynamically throttled under CPU load."""
+        base_interval = self.current_profile.tick_interval_s
+        try:
+            import os
+
+            load1, _, _ = os.getloadavg()
+            cpu_count = os.cpu_count() or 1
+            normalized_load = load1 / cpu_count
+            if normalized_load > 0.8:
+                return base_interval * 2.5
+            elif normalized_load > 0.6:
+                return base_interval * 1.5
+        except (AttributeError, OSError):
+            pass
+        return base_interval
 
     @property
     def state_duration(self) -> float:

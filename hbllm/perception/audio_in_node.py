@@ -741,8 +741,8 @@ class _StreamBuffer:
             speech_prob = vad_model(samples, self.sample_rate).item()
 
             # Log every Nth check to avoid spam (log every 4th = ~1 per second)
-            if len(self.chunks) % 4 == 0:
-                logger.info(
+            if logger.isEnabledFor(logging.DEBUG) and len(self.chunks) % 4 == 0:
+                logger.debug(
                     "VAD prob=%.3f, threshold=%.2f, speech_detected=%s, chunks=%d",
                     speech_prob,
                     self.vad_threshold,

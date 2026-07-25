@@ -44,6 +44,15 @@ class SleepPhase(str, Enum):
     OFFLINE = "offline"  # Days — LoRA fine-tuning, DPO, curriculum replay
 
 
+_PROFILE_IDLE_TIMEOUTS: dict[str, float] = {
+    "full": 10.0,
+    "lite": 30.0,
+    "edge": 60.0,
+    "research": 5.0,
+    "robot": 15.0,
+}
+
+
 class SleepCycleNode(Node):
     """
     Orchestrates Memory Consolidation and Synaptic Strengthening when idle.
@@ -52,7 +61,8 @@ class SleepCycleNode(Node):
     def __init__(
         self,
         node_id: str,
-        idle_timeout_seconds: float = 10.0,
+        idle_timeout_seconds: float | None = None,
+        profile_name: str | None = None,
         llm: Any = None,
         self_model: Any = None,
         # M2: Integration with event-sourced memory and belief systems
@@ -66,7 +76,12 @@ class SleepCycleNode(Node):
             node_type=NodeType.DOMAIN_MODULE,
             capabilities=["sleep_cycle", "memory_consolidation"],
         )
-        self.idle_timeout_seconds = idle_timeout_seconds
+        if idle_timeout_seconds is not None:
+            self.idle_timeout_seconds = idle_timeout_seconds
+        elif profile_name is not None and profile_name in _PROFILE_IDLE_TIMEOUTS:
+            self.idle_timeout_seconds = _PROFILE_IDLE_TIMEOUTS[profile_name]
+        else:
+            self.idle_timeout_seconds = 10.0
         self.current_phase = SleepPhase.AWAKE
         self._last_system_activity = time.time()
         self._monitor_task: asyncio.Task[None] | None = None

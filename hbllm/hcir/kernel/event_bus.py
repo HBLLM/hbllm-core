@@ -130,9 +130,18 @@ class KernelEventBus:
 
     def __init__(self, history_size: int = 1000) -> None:
         self._handlers: dict[str, list[KernelEventHandler]] = defaultdict(list)
+        self._prefix_handlers: dict[str, list[KernelEventHandler]] = defaultdict(list)
         self._history: list[KernelEvent] = []
         self._history_size = history_size
         self._event_count = 0
+
+    def _rebuild_prefix_cache(self) -> None:
+        """Rebuild the prefix topic cache for O(1) prefix lookup."""
+        self._prefix_handlers.clear()
+        for topic, handlers in self._handlers.items():
+            if topic.endswith(".*"):
+                prefix = topic[:-2]
+                self._prefix_handlers[prefix].extend(handlers)
 
     def subscribe(self, topic: str, handler: KernelEventHandler) -> None:
         """Subscribe a handler to a topic.
@@ -143,12 +152,18 @@ class KernelEventBus:
             "*"                     — all events
         """
         self._handlers[topic].append(handler)
+        if topic.endswith(".*"):
+            self._rebuild_prefix_cache()
 
     def unsubscribe(self, topic: str, handler: KernelEventHandler) -> bool:
         """Remove a handler from a topic."""
         handlers = self._handlers.get(topic, [])
         try:
             handlers.remove(handler)
+            if not handlers:
+                del self._handlers[topic]
+            if topic.endswith(".*"):
+                self._rebuild_prefix_cache()
             return True
         except ValueError:
             return False
@@ -171,21 +186,24 @@ class KernelEventBus:
                 matched.add(id(handler))
                 self._safe_call(handler, event)
 
-        # 2. Prefix match (e.g., "transaction.*")
-        for topic, handlers in self._handlers.items():
-            if topic.endswith(".*"):
-                prefix = topic[:-2]
-                if event.event_type.startswith(prefix + "."):
-                    for handler in handlers:
-                        if id(handler) not in matched:
-                            matched.add(id(handler))
-                            self._safe_call(handler, event)
+        # 2. Prefix match (e.g., "transaction.*") via pre-cached index
+        for prefix, handlers in self._prefix_handlers.items():
+            if event.event_type.startswith(prefix + "."):
+                for handler in handlers:
+                    if id(handler) not in matched:
+                        matched.add(id(handler))
+                        self._safe_call(handler, event)
 
         # 3. Wildcard
         for handler in self._handlers.get("*", []):
             if id(handler) not in matched:
                 matched.add(id(handler))
                 self._safe_call(handler, event)
+
+    def publish_many(self, events: list[KernelEvent]) -> None:
+        """Publish a batch of events efficiently."""
+        for event in events:
+            self.publish(event)
 
     @staticmethod
     def _safe_call(handler: KernelEventHandler, event: KernelEvent) -> None:

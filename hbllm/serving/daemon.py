@@ -445,6 +445,14 @@ def main() -> None:
         format=log_format,
     )
 
+    try:
+        import uvloop
+
+        uvloop.install()
+        logger.info("uvloop installed for CognitiveDaemon")
+    except ImportError:
+        logger.debug("uvloop not installed, using standard asyncio loop")
+
     daemon = CognitiveDaemon(
         provider=args.provider,
         local=args.local,

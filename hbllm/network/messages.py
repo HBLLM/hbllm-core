@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MessageType(StrEnum):
@@ -90,6 +90,8 @@ class Priority(int, Enum):
 class Message(BaseModel):
     """Base message for all inter-node communication."""
 
+    model_config = ConfigDict(validate_assignment=False)
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: MessageType
     source_node_id: str
@@ -114,7 +116,8 @@ class Message(BaseModel):
         msg_type: MessageType = MessageType.RESPONSE,
     ) -> Message:
         """Create a response message correlated to this message."""
-        return Message(
+        return Message.model_construct(
+            id=str(uuid.uuid4()),
             type=msg_type,
             source_node_id=self.target_node_id or self.source_node_id,
             target_node_id=self.source_node_id,
@@ -124,7 +127,13 @@ class Message(BaseModel):
             session_id=self.session_id,
             topic=f"{self.topic}.response",
             payload=payload,
+            priority=Priority.NORMAL,
+            timestamp=datetime.now(timezone.utc),
             correlation_id=self.id,
+            ttl_seconds=None,
+            is_security_cleared=False,
+            signature=None,
+            vector_clock=None,
         )
 
     @property
@@ -133,15 +142,22 @@ class Message(BaseModel):
         Deterministic string for signing/verification.
         Combines ID, Type, Source, and sorted Payload JSON.
         """
-        import json
+        try:
+            import orjson
 
-        payload_str = json.dumps(self.payload, sort_keys=True)
+            payload_str = orjson.dumps(self.payload, option=orjson.OPT_SORT_KEYS).decode("utf-8")
+        except ImportError:
+            import json
+
+            payload_str = json.dumps(self.payload, sort_keys=True)
+
         data = f"{self.id}|{self.type}|{self.source_node_id}|{payload_str}"
         return data.encode("utf-8")
 
     def create_error(self, error: str, code: str = "UNKNOWN") -> Message:
         """Create an error response."""
-        return Message(
+        return Message.model_construct(
+            id=str(uuid.uuid4()),
             type=MessageType.ERROR,
             source_node_id=self.target_node_id or "system",
             target_node_id=self.source_node_id,
@@ -151,7 +167,13 @@ class Message(BaseModel):
             session_id=self.session_id,
             topic=f"{self.topic}.error",
             payload={"error": error, "code": code},
+            priority=Priority.NORMAL,
+            timestamp=datetime.now(timezone.utc),
             correlation_id=self.id,
+            ttl_seconds=None,
+            is_security_cleared=False,
+            signature=None,
+            vector_clock=None,
         )
 
 

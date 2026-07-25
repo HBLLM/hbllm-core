@@ -172,6 +172,16 @@ class ProviderLLM:
             yield token
 
     @staticmethod
+    def _parse_json_str(raw: str) -> dict[str, Any]:
+        """Parse JSON string using orjson with stdlib json fallback."""
+        try:
+            import orjson
+
+            return cast(dict[str, Any], orjson.loads(raw))
+        except (ImportError, Exception):
+            return cast(dict[str, Any], json.loads(raw))
+
+    @staticmethod
     def _extract_json(text: str) -> dict[str, Any]:
         """
         Extract the first valid JSON object from LLM output.
@@ -182,29 +192,29 @@ class ProviderLLM:
         fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
         if fence_match:
             try:
-                return cast(dict[str, Any], json.loads(fence_match.group(1)))
-            except json.JSONDecodeError:
+                return ProviderLLM._parse_json_str(fence_match.group(1))
+            except (json.JSONDecodeError, Exception):
                 pass
 
         # Try full/nested JSON (greedy — handles objects within objects)
         deep_match = re.search(r"\{.*\}", text, re.DOTALL)
         if deep_match:
             try:
-                return cast(dict[str, Any], json.loads(deep_match.group(0)))
-            except json.JSONDecodeError:
+                return ProviderLLM._parse_json_str(deep_match.group(0))
+            except (json.JSONDecodeError, Exception):
                 pass
 
         # Try shallow JSON (non-greedy — handles simple objects)
         brace_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if brace_match:
             try:
-                return cast(dict[str, Any], json.loads(brace_match.group(0)))
-            except json.JSONDecodeError:
+                return ProviderLLM._parse_json_str(brace_match.group(0))
+            except (json.JSONDecodeError, Exception):
                 pass
 
         # Try the entire text
         try:
-            return cast(dict[str, Any], json.loads(text.strip()))
-        except json.JSONDecodeError:
+            return ProviderLLM._parse_json_str(text.strip())
+        except (json.JSONDecodeError, Exception):
             logger.warning("[ProviderLLM] Failed to extract JSON from: %s", text[:100])
             return {"error": "Failed to parse structured output", "raw": text[:200]}

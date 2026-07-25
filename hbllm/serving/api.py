@@ -2538,6 +2538,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        loop="uvloop",
     )
 
 
