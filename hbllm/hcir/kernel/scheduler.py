@@ -97,15 +97,52 @@ class SchedulerEntry:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class CognitiveBudget:
+    """Token budget for scheduling constraints.
+
+    Tracks estimated and actual token consumption.  The scheduler
+    refuses to dispatch processes that would exceed the budget.
+    """
+
+    def __init__(self, total_tokens: int = 100_000) -> None:
+        self.total_tokens = total_tokens
+        self.consumed_tokens: int = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.total_tokens - self.consumed_tokens)
+
+    @property
+    def utilization(self) -> float:
+        if self.total_tokens == 0:
+            return 1.0
+        return self.consumed_tokens / self.total_tokens
+
+    def can_afford(self, cost: int) -> bool:
+        return self.consumed_tokens + cost <= self.total_tokens
+
+    def consume(self, cost: int) -> bool:
+        """Consume tokens. Returns False if budget exceeded."""
+        if not self.can_afford(cost):
+            return False
+        self.consumed_tokens += cost
+        return True
+
+    def reset(self) -> None:
+        self.consumed_tokens = 0
+
+
 class CognitiveScheduler:
-    """Attention-driven instruction scheduler.
+    """Attention-driven instruction scheduler with budget awareness.
 
     Dispatches cognitive instruction streams based on attention
-    salience, resource availability, and process priority.
+    salience, resource availability, process priority, and
+    token budget constraints.
 
     Usage::
 
-        scheduler = CognitiveScheduler()
+        budget = CognitiveBudget(total_tokens=50000)
+        scheduler = CognitiveScheduler(budget=budget)
         proc = CognitiveProcess(conversation_id="conv_123")
         thread = CognitiveThread(instruction_stream_ref="stream_42")
         proc.add_thread(thread)
@@ -115,11 +152,16 @@ class CognitiveScheduler:
         entry = scheduler.dispatch()  # Returns highest priority entry
     """
 
-    def __init__(self, max_concurrent: int = 10) -> None:
+    def __init__(
+        self,
+        max_concurrent: int = 10,
+        budget: CognitiveBudget | None = None,
+    ) -> None:
         self._processes: dict[str, CognitiveProcess] = {}
         self._queue: list[SchedulerEntry] = []  # Min-heap
         self._max_concurrent = max_concurrent
         self._running_count = 0
+        self._budget = budget
 
     def register_process(self, process: CognitiveProcess) -> None:
         """Register a cognitive process."""
@@ -211,3 +253,33 @@ class CognitiveScheduler:
     @property
     def process_count(self) -> int:
         return len(self._processes)
+
+    @property
+    def budget(self) -> CognitiveBudget | None:
+        return self._budget
+
+    def enqueue_with_cost(
+        self,
+        process_id: str,
+        thread_id: str,
+        salience: float = 0.5,
+        activation: float = 0.5,
+        estimated_cost: int = 0,
+    ) -> bool:
+        """Enqueue a thread with budget checking.
+
+        Returns False if the budget would be exceeded.
+        """
+        if self._budget is not None and estimated_cost > 0:
+            if not self._budget.can_afford(estimated_cost):
+                logger.warning(
+                    "Budget exceeded: cannot enqueue thread %s (cost=%d, remaining=%d)",
+                    thread_id,
+                    estimated_cost,
+                    self._budget.remaining,
+                )
+                return False
+            self._budget.consume(estimated_cost)
+
+        self.enqueue(process_id, thread_id, salience, activation)
+        return True

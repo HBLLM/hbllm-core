@@ -317,7 +317,12 @@ class ResourceNode(HCIRNode):
 
 
 class CapabilityNode(HCIRNode):
-    """Declares what the system or a plugin can do."""
+    """Declares what the system or a plugin can do.
+
+    Declarative metadata enables market-based capability selection:
+    the resolver picks the cheapest available implementation that
+    meets the required constraints.
+    """
 
     node_type: HCIRNodeType = HCIRNodeType.CAPABILITY
     category: CognitiveCategory = CognitiveCategory.EXECUTION
@@ -325,6 +330,15 @@ class CapabilityNode(HCIRNode):
     description: str = ""
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
+
+    # ── Declarative metadata for market-based selection ──
+    estimated_cost: int = 0  # Token cost estimate
+    latency_ms: int = 0  # Expected latency in ms
+    cooldown_seconds: float = 0.0  # Minimum interval between invocations
+    requires_approval: bool = False  # Needs governance approval
+    max_concurrent: int = 0  # 0 = unlimited
+    provider: str = ""  # e.g., "local", "mcp", "api", "docker"
+    version: str = "1.0.0"
 
 
 # ── Memory Class Nodes ───────────────────────────────────────────────────

@@ -62,6 +62,7 @@ class CapabilityImplementation:
     executor: ICapabilityExecutor
     priority: int = 0  # Higher = preferred
     estimated_cost: int = 0  # Tokens
+    estimated_latency_ms: int = 0  # Expected latency
     description: str = ""
     tags: list[str] = field(default_factory=list)
 
@@ -91,6 +92,7 @@ class CapabilityResolver:
     def __init__(self) -> None:
         # capability_name → list of implementations (sorted by priority desc)
         self._registry: dict[str, list[CapabilityImplementation]] = {}
+        self._total_cost: int = 0
 
     def register(self, impl: CapabilityImplementation) -> None:
         """Register a capability implementation."""
@@ -133,6 +135,67 @@ class CapabilityResolver:
         logger.warning("No available executor for capability '%s'", capability_name)
         return None
 
+    async def resolve_cheapest(
+        self,
+        capability_name: str,
+        max_cost: int | None = None,
+        max_latency_ms: int | None = None,
+    ) -> CapabilityImplementation | None:
+        """Resolve to the cheapest available implementation within constraints.
+
+        Market-based selection: sort by estimated_cost (ascending),
+        filter by max_cost and max_latency_ms if provided.
+        """
+        impls = self._registry.get(capability_name, [])
+        candidates = [
+            impl
+            for impl in impls
+            if impl.executor.is_available
+            and (max_cost is None or impl.estimated_cost <= max_cost)
+            and (max_latency_ms is None or impl.estimated_latency_ms <= max_latency_ms)
+        ]
+        if not candidates:
+            return None
+        # Sort by cost ascending (cheapest first)
+        candidates.sort(key=lambda x: x.estimated_cost)
+        return candidates[0]
+
+    async def resolve_and_execute(
+        self,
+        capability_name: str,
+        params: dict[str, Any],
+        budget: int | None = None,
+    ) -> dict[str, Any]:
+        """Resolve and execute a capability in a single call.
+
+        Combines resolution + execution for convenience.
+        Tracks budget consumption if a budget is provided.
+
+        Returns:
+            The executor result dict, or {"error": ...} on failure.
+        """
+        if budget is not None:
+            impl = await self.resolve_cheapest(capability_name, max_cost=budget)
+            if impl is None:
+                return {
+                    "error": f"No implementation for '{capability_name}' within budget {budget}"
+                }
+            try:
+                result = await impl.executor.execute(params)
+                self._total_cost += impl.estimated_cost
+                return result
+            except Exception as exc:
+                return {"error": f"Execution failed: {exc}"}
+        else:
+            executor = await self.resolve(capability_name)
+            if executor is None:
+                return {"error": f"No available executor for '{capability_name}'"}
+            try:
+                result = await executor.execute(params)
+                return result
+            except Exception as exc:
+                return {"error": f"Execution failed: {exc}"}
+
     def list_capabilities(self) -> list[str]:
         """Return all registered capability names."""
         return list(self._registry.keys())
@@ -144,3 +207,8 @@ class CapabilityResolver:
     def has_capability(self, capability_name: str) -> bool:
         """Check if any implementation is registered for a capability."""
         return bool(self._registry.get(capability_name))
+
+    @property
+    def total_cost(self) -> int:
+        """Total estimated cost consumed across all executions."""
+        return self._total_cost

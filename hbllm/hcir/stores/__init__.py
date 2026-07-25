@@ -39,12 +39,54 @@ class EventType(StrEnum):
     # Kernel telemetry events
     TRANSACTION_COMMITTED = "transaction_committed"
     TRANSACTION_REJECTED = "transaction_rejected"
+    TRANSACTION_COMPENSATED = "transaction_compensated"
     CAPABILITY_BOUND = "capability_bound"
     BUDGET_EXCEEDED = "budget_exceeded"
     SIMULATION_STARTED = "simulation_started"
     SIMULATION_FINISHED = "simulation_finished"
     ROLLBACK = "rollback"
     POLICY_VIOLATION = "policy_violation"
+
+    # ── Cognitive Domain Events (Phase 1) ────────────────────────────
+    # Perception
+    PERCEPTION_RECEIVED = "perception_received"
+
+    # Memory
+    MEMORY_STORED = "memory_stored"
+    MEMORY_RECALLED = "memory_recalled"
+    MEMORY_CONSOLIDATED = "memory_consolidated"
+
+    # Planning / Directives
+    GOAL_CREATED = "goal_created"
+    GOAL_COMPLETED = "goal_completed"
+    GOAL_ABANDONED = "goal_abandoned"
+    GOAL_BLOCKED = "goal_blocked"
+
+    # Execution
+    DECISION_MADE = "decision_made"
+    ACTION_PLANNED = "action_planned"
+    ACTION_EXECUTED = "action_executed"
+    ACTION_RESULT = "action_result"
+    CAPABILITY_INVOKED = "capability_invoked"
+
+    # Epistemology
+    BELIEF_UPDATED = "belief_updated"
+    BELIEF_REVISED = "belief_revised"
+    PREDICTION_MADE = "prediction_made"
+    PREDICTION_VERIFIED = "prediction_verified"
+    PREDICTION_ERROR = "prediction_error"
+
+    # Governance
+    GOVERNANCE_EVALUATED = "governance_evaluated"
+    GOVERNANCE_BLOCKED = "governance_blocked"
+
+    # Learning
+    SKILL_LEARNED = "skill_learned"
+    LEARNING_EVENT = "learning_event"
+
+    # Cognitive state
+    COGNITIVE_STATE_CHANGED = "cognitive_state_changed"
+    ATTENTION_SHIFTED = "attention_shifted"
 
 
 @dataclass(frozen=True)
@@ -62,6 +104,13 @@ class GraphEvent:
     data: dict[str, Any] = field(default_factory=dict)
     # For graph mutations, data contains serialized node/edge payloads
     # For kernel events, data contains event-specific metadata
+
+    # ── Optional traceability (Phase 1) ──────────────────────────────
+    session_id: str = ""
+    goal_id: str = ""
+    trace_id: str = ""
+    logical_time: int = 0
+    generation: int = 0
 
 
 class IEventStore(ABC):
