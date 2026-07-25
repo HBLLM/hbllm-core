@@ -18,11 +18,11 @@ Human brains use sleep to move information from short-term hippocampus storage t
 ### Stage 1: Memory Replay & Consolidation (NREM)
 **Code:** `_consolidate_memory()`
 
-During the day, the **Episodic Memory** (System 2) records raw interaction logs. During sleep:
-1.  **Selective Replay:** The system re-reads the most salient dialogue turns from the session.
-2.  **Semantic Synthesis:** The 1.5B backbone synthesizes these into high-level **Semantic Summaries**.
-3.  **GraphRAG Clustering:** Entities and relations are extracted and clustered into thematic **Communities** in the Knowledge Graph.
-4.  **Synaptic Pruning:** Low-salience or redundant logs are archived, keeping the live vector space efficient.
+During the day, raw interaction logs are stored as **EpisodeNode** entries in the HCIR Working Workspace Tier. During sleep:
+1.  **Selective Replay:** The system re-reads the most salient dialogue turns (`EpisodeNode`) from the active session.
+2.  **Semantic Synthesis:** The backbone synthesizes these into high-level **ConceptNode** entries in the HCIR Persistent Tier.
+3.  **GraphRAG Clustering:** Entities and relations are extracted and clustered into thematic **BeliefNode** communities in the HCIR graph workspace.
+4.  **Synaptic Pruning:** Low-salience or redundant nodes are archived, keeping the live graph space efficient.
 
 ### Stage 1.6: Temporal Normalization
 **Code:** `_normalize_temporal_references()`

@@ -1,320 +1,236 @@
 ---
-title: "Memory Systems — Multi-Tier Cognitive Memory"
-description: "Deep-dive into HBLLM's 9 memory subsystems: Working, Episodic, Semantic, Procedural, Value, Knowledge Graph, Spatial, Temporal Patterns, and Importance Scoring."
+title: "Memory Systems — HCIR-Native Cognitive Memory"
+description: "Deep-dive into HBLLM's HCIR-native memory architecture: typed graph nodes, tiered workspace, cross-memory search, and the 5-phase migration from legacy stores."
 ---
 
 # Memory Systems
 
-HBLLM implements **9 distinct memory subsystems** mirroring human cognitive psychology. Each memory system operates independently with its own storage backend and query interface.
+HBLLM implements a **unified HCIR-native memory architecture** where all memory types are stored as typed graph nodes in a tiered workspace. This replaces the previous system of independent SQLite and vector stores with a single graph-based backend.
 
-## Overview
+> **Architectural Invariant:** Nodes emit intent. HCIR owns state.
 
-```mermaid
-graph LR
-    EM["📖 Episodic Memory<br/>(event timelines)"]
-    SM["📚 Semantic Memory<br/>(facts & patterns)"]
-    PM["🔧 Procedural Memory<br/>(learned skills)"]
-    VM["❤️ Value Memory<br/>(preferences)"]
-    KG["🔗 Knowledge Graph<br/>(entity relations)"]
-    WM["📋 Working Memory<br/>(context window)"]
-    SPM["📍 Spatial Memory<br/>(locations & maps)"]
-    TPM["⏰ Temporal Patterns<br/>(recurring patterns)"]
-    IS["⭐ Importance Scorer<br/>(salience ranking)"]
-    
-    EM --> SM
-    SM --> KG
-    PM --> SM
-    VM --> SM
-    WM --> SM
-    SPM --> SM
-    TPM --> SM
-    IS --> EM
-    IS --> SM
-```
-
-## Memory Module Structure
-
-All memory classes live in `hbllm/memory/`:
-
-| File | Class | Purpose |
-|---|---|---|
-| `episodic.py` | `EpisodicMemory` | Event-based timelines per session |
-| `semantic.py` | `SemanticMemory` | Hybrid dense/sparse vector search |
-| `procedural.py` | `ProceduralMemory` | Learned tool patterns and skills |
-| `value_memory.py` | `ValueMemory` | Per-tenant preference/reward signals |
-| `knowledge_graph.py` | `KnowledgeGraph` | LRU-bounded entity-relation graphs |
-| `spatial_memory.py` | `SpatialMemory` | Location-aware memory with proximity search |
-| `temporal_patterns.py` | `TemporalPatternTracker` | Recurring pattern detection across time |
-| `importance_scorer.py` | `ImportanceScorer` | Multi-factor salience scoring for prioritization |
-| `memory_node.py` | `MemoryNode` | Bus-connected node wrapping all systems |
-| `concept_extractor.py` | — | Concept extraction utilities |
-
-### v3: Event-Sourced Architecture
-
-| File | Class | Purpose |
-|---|---|---|
-| `memcube.py` | `MemoryEventStore` | Append-only event log; state = `fold(events)` |
-| `memcube.py` | `MemCube` | Immutable memory state (version, content, source) |
-| `repository.py` | `MemoryRepository` | Abstract base for all memory repositories |
-| `repository.py` | `MemoryProjection` | Folds event streams into `MemCube` state |
-| `belief_graph.py` | `BeliefGraph` | Provenance graph: who believed what, why, contradictions |
-| `goal_memory.py` | `GoalMemory` | Goal lifecycle: pending → active → completed/failed |
-| `predictive_loader.py` | `PredictiveMemoryLoader` | Markov-based prefetch of anticipated memories |
+## Architecture Overview
 
 ```mermaid
 graph TB
-    subgraph "v3 Event-Sourced Memory"
-        MN["MemoryNode"] --> REPO["MemoryRepository (ABC)"]
-        REPO --> PROJ["MemoryProjection"]
-        PROJ --> MES["MemoryEventStore"]
-        MES --> |"fold()"| MC["MemCube (state)"]
-
-        subgraph "Repositories"
-            EM2["EpisodicMemory"]
-            SM2["SemanticMemory"]
-            PM2["ProceduralMemory"]
-            VM2["ValueMemory"]
-        end
-
-        REPO --- EM2
-        REPO --- SM2
-        REPO --- PM2
-        REPO --- VM2
+    subgraph "Memory Types (Graph Nodes)"
+        EP["📖 EpisodeNode<br/>(event timelines)"]
+        CN["📚 ConceptNode<br/>(facts & patterns)"]
+        SK["🔧 SkillNode<br/>(learned procedures)"]
+        VN["❤️ ValueNode<br/>(preferences)"]
+        BN["🔗 BeliefNode<br/>(knowledge graph)"]
     end
 
-    subgraph "Belief & Evidence"
-        BG["BeliefGraph"] --> |"construct"| EP["EvidencePacket"]
-        EP --> |"inject"| REASON["Reasoner"]
+    subgraph "HCIR Workspace (Tiered)"
+        WORKING["📋 Working Tier<br/>(task frames, transient)"]
+        BRAIN["🧠 Brain Tier<br/>(session-scoped)"]
+        PERSISTENT["💾 Persistent Tier<br/>(forever, all memory)"]
+        META["📊 Meta Tier<br/>(self-model stats)"]
     end
+
+    subgraph "Query Engine"
+        GQ["GraphQuery<br/>(type, tenant, text, limit)"]
+        XS["Cross-Memory Search<br/>(single query, all types)"]
+    end
+
+    EP --> PERSISTENT
+    CN --> PERSISTENT
+    SK --> PERSISTENT
+    VN --> PERSISTENT
+    BN --> PERSISTENT
+    WORKING --> BRAIN --> PERSISTENT
+    PERSISTENT --> META
+    GQ --> PERSISTENT
+    XS --> GQ
 ```
 
-**Key Design Decisions:**
+## Memory Node Types
 
-- **State = fold(events)**: Memory state is never stored directly. The current state of any memory is computed by folding its event stream (`create → reinforce → correct → decay`).
-- **Repository Pattern**: `EpisodicMemory`, `SemanticMemory`, etc. are thin semantic wrappers. They handle domain-specific logic (search ranking, skill matching) while delegating persistence to `MemoryEventStore` via `MemoryProjection`.
-- **Projection Layer**: `MemoryProjection` owns the `fold()` operation. Neither `MemoryNode` nor individual repositories expose fold directly.
-- **EvidencePacket**: Reasoners never import `BeliefGraph` directly — they receive `EvidencePacket` instances with confidence, support, contradictions, and lineage.
+All memory is stored as typed HCIR graph nodes in the persistent workspace tier. Each node carries `Scope` (tenant isolation) and `Provenance` (creation metadata).
 
----
+| Node Type | Class | Replaces | Key Fields |
+|-----------|-------|----------|------------|
+| `EPISODE` | `EpisodeNode` | `EpisodicMemory` (SQLite) | `summary`, `outcome`, `reward` |
+| `CONCEPT` | `ConceptNode` | `SemanticMemory` (vectors) | `label`, `definition`, `domain` |
+| `SKILL` | `SkillNode` | `ProceduralMemory` (SQLite) | `skill_name`, `description`, `success_rate` |
+| `VALUE` | `ValueNode` | `ValueMemory` (SQLite) | `dimension`, `weight` |
+| `BELIEF` | `BeliefNode` | `KnowledgeGraph` (JSON) | `claim`, `belief_type`, `evidence_sources` |
 
-## 1. Episodic Memory
-
-**Class:** `hbllm.memory.episodic.EpisodicMemory`  
-**Storage:** SQLite with per-tenant isolation.
-
-```python
-from hbllm.memory.episodic import EpisodicMemory
-
-em = EpisodicMemory(db_path="memory.db", tenant_id="user-01")
-await em.init_db()
-
-await em.store_turn(
-    role="user", content="Tell me about quantum computing", metadata={"topic": "physics"}
-)
-
-recent = await em.get_recent_turns(limit=10)
-```
-
----
-
-## 2. Semantic Memory
-
-**Class:** `hbllm.memory.semantic.SemanticMemory`  
-**Features:**
-
-- Dense embeddings via SentenceTransformer (when available)
-- Sparse TF-IDF fallback for edge deployments
-- Deterministic UUID stability for consistent retrieval
-- Cosine similarity search with configurable thresholds
+### Storage Example
 
 ```python
-from hbllm.memory.semantic import SemanticMemory
+from hbllm.hcir.adapters.hcir_memory_backend import HCIRMemoryBackend
 
-sm = SemanticMemory(tenant_id="user-01")
-sm.store("quantum_01", "Quantum computers use qubits instead of bits")
+backend = HCIRMemoryBackend(tiered_workspace)
 
-results = sm.search("How do quantum computers work?", top_k=5)
-```
-
----
-
-## 3. Procedural Memory
-
-**Class:** `hbllm.memory.procedural.ProceduralMemory`  
-**Storage:** SQLite-backed skill registry.
-
-Skills are automatically extracted from successful multi-step interactions.
-
-```python
-from hbllm.memory.procedural import ProceduralMemory
-
-pm = ProceduralMemory(db_path="skills.db", tenant_id="user-01")
-await pm.init_db()
-
-await pm.store_skill(
-    name="deploy-docker", steps=["docker build", "docker push", "kubectl apply"], domain="devops"
-)
-
-skill = await pm.find_skill("how to deploy a container")
-```
-
----
-
-## 4. Value Memory
-
-**Class:** `hbllm.memory.value_memory.ValueMemory`  
-**Storage:** SQLite-backed preference/reward signals with exponential decay.
-
-Tracks per-tenant reward signals keyed by topic and action, using exponential decay so recent preferences carry more weight.
-
-```python
-from hbllm.memory.value_memory import ValueMemory
-
-vm = ValueMemory(db_path="value_memory.db")
-await vm.init_db()
-
-# Record a preference signal
-await vm.record_reward(
+# Store an episode
+episode_id = await backend.store_episode(
+    summary="User asked about quantum computing",
+    outcome="Provided overview of qubits and superposition",
+    reward=0.85,
     tenant_id="user-01",
-    topic="response_style",
-    action="formal_tone",
-    reward=0.8,
+    session_id="sess_42",
 )
 
-# Get aggregated preferences (weighted by recency)
-prefs = await vm.get_preference("user-01", "response_style")
-# {"formal_tone": 0.72, "casual_tone": 0.3}
-
-# Get top preferences across all topics
-top = await vm.get_top_preferences("user-01", top_k=5)
-```
-
----
-
-## 5. Knowledge Graph
-
-**Class:** `hbllm.memory.knowledge_graph.KnowledgeGraph`  
-**Storage:** In-memory graph with `Entity` and `Relation` dataclasses. LRU-bounded to prevent unbounded growth.
-
-```python
-from hbllm.memory.knowledge_graph import KnowledgeGraph
-
-kg = KnowledgeGraph(max_nodes=10000)
-kg.add_entity("python", label="Python", entity_type="language")
-kg.add_entity("pytorch", label="PyTorch", entity_type="framework")
-kg.add_relation("pytorch", "python", "built_with")
-
-neighbors = kg.get_neighbors("python")
-```
-
----
-
-## 6. Spatial Memory
-
-**Class:** `hbllm.memory.spatial_memory.SpatialMemory`  
-**Storage:** In-memory spatial index with optional SQLite persistence.
-
-Maintains a mental map of locations, rooms, devices, and spatial relationships. Supports proximity-based queries and spatial reasoning.
-
-```python
-from hbllm.memory.spatial_memory import SpatialMemory
-
-sm = SpatialMemory()
-sm.register_location("living_room", x=0.0, y=0.0, floor=1)
-sm.register_location("kitchen", x=5.0, y=0.0, floor=1)
-sm.register_device("speaker_01", location="living_room")
-
-nearby = sm.find_nearby("living_room", radius=10.0)
-```
-
----
-
-## 7. Temporal Patterns
-
-**Class:** `hbllm.memory.temporal_patterns.TemporalPatternTracker`  
-**Storage:** SQLite-backed pattern database.
-
-Detects recurring patterns across time windows (hourly, daily, weekly, seasonal). Used by the autonomy system for proactive scheduling and anticipatory actions.
-
-```python
-from hbllm.memory.temporal_patterns import TemporalPatternTracker
-
-tp = TemporalPatternTracker(db_path="patterns.db")
-tp.record_event("user_wakes", hour=7, day_of_week=1)
-tp.record_event("user_wakes", hour=7, day_of_week=2)
-
-patterns = tp.detect_patterns("user_wakes", min_occurrences=5)
-# [{"pattern": "daily", "time": "07:00", "confidence": 0.85}]
-```
-
----
-
-## 8. Importance Scorer
-
-**Class:** `hbllm.memory.importance_scorer.ImportanceScorer`  
-**Role:** Multi-factor salience scoring for memory prioritization.
-
-Scores memories across multiple dimensions to determine which should be retained, consolidated, or pruned during sleep cycles.
-
-**Scoring factors:**
-
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| Recency | 0.25 | How recently the memory was accessed |
-| Frequency | 0.20 | How often the memory has been retrieved |
-| Emotional valence | 0.15 | Strength of associated reward/penalty signals |
-| Goal relevance | 0.20 | Alignment with active goals and tasks |
-| Uniqueness | 0.10 | Information entropy relative to existing knowledge |
-| User reference | 0.10 | Whether the user explicitly referenced this information |
-
-```python
-from hbllm.memory.importance_scorer import ImportanceScorer
-
-scorer = ImportanceScorer()
-score = scorer.score(
-    recency_hours=2.0,
-    access_count=5,
-    emotional_valence=0.8,
-    goal_alignment=0.6,
+# Store a concept
+concept_id = await backend.store_concept(
+    label="Quantum Computing",
+    definition="Computing using quantum-mechanical phenomena",
+    domain="physics",
+    tenant_id="user-01",
 )
-# score: 0.72 (retain during consolidation)
+
+# Store a skill
+skill_id = await backend.store_skill(
+    skill_name="web_search",
+    description="Search the web for information",
+    success_rate=0.92,
+    tenant_id="user-01",
+)
 ```
 
 ---
 
-## Working Memory (Context Windows)
+## Tiered Workspace
 
-Working memory is managed at the pipeline level rather than as a standalone class. The cognitive pipeline implements adaptive context windows with **middle-out truncation** — preserving the first N and last M tokens while summarizing the middle to prevent OOM errors.
+Memory is organized into four tiers with different lifetimes and scopes:
+
+| Tier | Lifetime | Purpose | Contents |
+|------|----------|---------|----------|
+| **Working** | Task duration | Active reasoning frames | Task-specific nodes, scratchpad |
+| **Brain** | Session duration | Session context | Promoted working nodes, session state |
+| **Persistent** | Forever | Long-term memory | All memory types, knowledge graph |
+| **Meta** | Forever | Self-model | Performance stats, capability metrics |
+
+### Promotion Flow
+
+Nodes flow upward through tiers based on salience and consolidation:
+
+```
+Working (transient) → Brain (session) → Persistent (permanent) → Meta (self-reflection)
+```
+
+The `TieredWorkspace` provides `promote_to_brain()` and `archive_to_persistent()` methods for explicit promotion. The `SleepCycleNode` handles automatic consolidation during idle periods.
+
+---
+
+## Cross-Memory Search
+
+One of the primary advantages of HCIR-native memory is **unified cross-memory search**. A single `GraphQuery` can search across all memory types simultaneously:
+
+```python
+# Search across all memory types
+results = await backend.search_across_memory_types(
+    query="weather",
+    tenant_id="user-01",
+    limit=20,
+)
+
+# Returns results from episodes, concepts, skills, beliefs, values
+for result in results:
+    print(f"{result['memory_type']}: {result['content']}")
+```
+
+This replaces the previous approach of querying each memory subsystem independently and merging results.
+
+---
+
+## MemorySystem Composite
+
+The `MemorySystem` composite node manages the memory lifecycle:
+
+```python
+from hbllm.brain.composites.memory_system import MemorySystem
+
+memory = MemorySystem(
+    node_id="memory_system",
+    llm=llm_provider,
+    registry=service_registry,
+)
+```
+
+### Components
+
+| Component | Role | Status |
+|-----------|------|--------|
+| `HCIRMemoryBackend` | All memory storage/recall | **Active** (sole backend) |
+| `MemoryMigrationProxy` | Phase-aware routing | **Active** (Phase 5: LEGACY_REMOVED) |
+| `ExperienceNode` | Interaction recording, salience detection | **Active** |
+| `SleepCycleNode` | Offline memory consolidation | **Active** |
+| `MemoryNode` (legacy) | SQLite/vector stores | **Retired** (fallback only) |
+
+---
+
+## Multi-Tenant Isolation
+
+All HCIR nodes carry a `Scope` with `tenant_id`. Queries filter by tenant automatically:
+
+```python
+# Tenant A's data is isolated from Tenant B
+alice_episodes = await backend.recall_episodes(
+    query="secret", tenant_id="alice"
+)
+bob_episodes = await backend.recall_episodes(
+    query="secret", tenant_id="bob"
+)
+# alice_episodes and bob_episodes are completely separate
+```
 
 ---
 
 ## Memory Consolidation (Sleep Cycle)
 
-During idle periods, the `SleepCycleNode` runs a 3-stage consolidation:
+During idle periods, the `SleepCycleNode` runs consolidation:
 
-1. **Replay** — High-salience episodic memories are replayed.
-2. **Prune** — Low-value entries are removed to prevent unbounded growth.
-3. **Strengthen** — Frequently accessed patterns are promoted to semantic memory.
-
-This mirrors the biological process of memory consolidation during sleep.
+1. **Replay** — High-salience episodic memories are replayed from the working tier
+2. **Promote** — Salient nodes are promoted from working → brain → persistent
+3. **Prune** — Low-value entries are removed to prevent unbounded growth
+4. **Strengthen** — Frequently accessed patterns are linked via `HCIREdge`
 
 ---
 
 ## Memory Topology (Scopes)
 
-To prevent synchronization chaos and protect sensitive data in distributed environments, HBLLM enforces a 4-tier memory topology:
+| Scope | Tier | Sync Level | Description |
+|-------|------|------------|-------------|
+| **WORKING** | Working | Local-only | Per-task ephemeral state, never synced |
+| **EPISODIC** | Persistent | Swarm-wide | User interaction history |
+| **SEMANTIC** | Persistent | Global/Tenant | Shared domain knowledge |
+| **SENSITIVE** | Persistent | Local-only | PII, credentials (encrypted) |
 
-| Scope | Persistence | Sync Level | Description |
-| :--- | :--- | :--- | :--- |
-| **WORKING** | Transient | Local-only | Per-node ephemeral state, never synced. |
-| **EPISODIC** | Persistent | Swarm-wide | User interaction history, synced across trusted devices. |
-| **SEMANTIC** | Persistent | Global/Tenant | Shared domain knowledge and facts. |
-| **SENSITIVE** | Encrypted | Local-only | PII, credentials, and restricted data. Strictly blocked from sync. |
-
-Access to these scopes is enforced via **CapBAC** (Capability-Based Access Control) at the node registration level.
+Access is enforced via Constitutional Governance (`ConstitutionalVerifier`) at the transaction level.
 
 ---
 
-## MemoryNode
+## Migration History
 
-The `MemoryNode` (`hbllm.memory.memory_node.MemoryNode`) is the bus-connected wrapper that subscribes to memory-related topics (`MEMORY_STORE`, `MEMORY_SEARCH`) and dispatches operations to the appropriate underlying memory system.
+The transition from legacy stores to HCIR was executed via a 5-phase migration:
+
+| Phase | Mode | Description |
+|-------|------|-------------|
+| 1 | READ_THROUGH | Legacy authoritative, HCIR warmed from legacy recalls |
+| 2 | DUAL_WRITE | Both written, legacy authoritative for reads |
+| 3 | SHADOW_READ | Both read in parallel, divergence tracked |
+| 4 | HCIR_PRIMARY | HCIR authoritative, legacy for rollback |
+| **5** | **LEGACY_REMOVED** | **HCIR only (current default)** |
+
+The `MemoryMigrationProxy` class manages phase transitions and can be rolled back if needed.
+
+---
+
+## Appendix: Legacy Memory Module Structure
+
+> [!NOTE]
+> These files remain in the codebase for reference but are no longer instantiated by `MemorySystem`. They are only used as a fallback if HCIR initialization fails.
+
+| File | Class | Storage | Status |
+|------|-------|---------|--------|
+| `episodic.py` | `EpisodicMemory` | SQLite | Retired |
+| `semantic.py` | `SemanticMemory` | In-memory vectors | Retired |
+| `procedural.py` | `ProceduralMemory` | SQLite | Retired |
+| `value_memory.py` | `ValueMemory` | SQLite | Retired |
+| `knowledge_graph.py` | `KnowledgeGraph` | JSON | Retired |
+| `spatial_memory.py` | `SpatialMemory` | In-memory | Retired |
+| `temporal_patterns.py` | `TemporalPatternTracker` | SQLite | Retired |
+| `importance_scorer.py` | `ImportanceScorer` | In-memory | Retired |
+| `memory_node.py` | `MemoryNode` | Composite wrapper | Retired (fallback) |
