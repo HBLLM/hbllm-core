@@ -167,12 +167,8 @@ All HCIR nodes carry a `Scope` with `tenant_id`. Queries filter by tenant automa
 
 ```python
 # Tenant A's data is isolated from Tenant B
-alice_episodes = await backend.recall_episodes(
-    query="secret", tenant_id="alice"
-)
-bob_episodes = await backend.recall_episodes(
-    query="secret", tenant_id="bob"
-)
+alice_episodes = await backend.recall_episodes(query="secret", tenant_id="alice")
+bob_episodes = await backend.recall_episodes(query="secret", tenant_id="bob")
 # alice_episodes and bob_episodes are completely separate
 ```
 
