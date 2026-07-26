@@ -21,7 +21,7 @@ graph TB
     end
 
     subgraph KERNEL["🧠 State-centric Cognitive Operating System Kernel"]
-        IWS[💾 IntentionalWorkspace<br/>SQLite Goal Agenda]
+        IWS[💾 IntentionalWorkspace<br/>Goal Agenda]
         CEC[🧠 CognitiveExecutiveController<br/>Node orchestrator]
         COGS[❄️ CognitiveState<br/>Immutable versioned blackboard]
         HCP[⚙️ HierarchicalCognitivePolicy<br/>Task → Global overrides]

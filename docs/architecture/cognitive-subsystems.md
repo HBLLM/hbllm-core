@@ -108,12 +108,10 @@ Every interaction flows through `update_from_interaction()`:
 | Subscribe | `habit.detected` | Incorporate temporal patterns as preferences |
 | Publish | `user.model.updated` | Notify when model changes significantly |
 
-### Persistence
+HCIR Workspace (migrating from legacy SQLite `data/user_model.db`). User attributes and beliefs are stored as typed graph nodes:
 
-SQLite (`data/user_model.db`) with two tables:
-
-- `user_attributes` — JSON blob per tenant for expertise, preferences, trust, focus, interests, temporal
-- `user_beliefs` — topic, stance, confidence per tenant (capped at 50)
+- `ConceptNode` per user attribute — expertise, preferences, trust, focus, interests, temporal patterns (tenant-scoped)
+- `ValueNode` per user belief — topic, stance, confidence per tenant (capped at 50)
 
 ---
 
@@ -167,14 +165,14 @@ Relation types: `has_goal`, `has_blocker`, `has_question`, `depends_on`, `blocks
 
 ### Persistence
 
-SQLite (`data/project_graph.db`) — tables: `entities`, `relations`.
+HCIR Workspace (migrating from legacy SQLite `data/project_graph.db`). Project entities and relations are stored as `ConceptNode` and `BeliefNode` typed graph nodes.
 
 ---
 
 ## 3. Cognitive Executive Kernel & ExecutiveCortex
 
 **Engine:** `hbllm.brain.control.executive_cortex.CognitiveExecutiveController` (Node) & `ExecutiveCortex` (Compatibility Facade)
-**Database:** `data/intentional_workspace.db` (SQLite Goal Agenda)
+**Database:** `data/intentional_workspace.db` (SQLite Goal Agenda — retained as persistent goal store, not yet migrated to HCIR)
 **State Model:** `hbllm.brain.core.cognitive_state.CognitiveState` (Immutable Snapshot)
 
 The executive layer has transitioned from a reactive, ephemeral state machine to a **State-Centric Cognitive Operating System Kernel**. It enforces persistent agendas, immutable branching context states, and hierarchical policy cascade governance.
@@ -183,7 +181,7 @@ The executive layer has transitioned from a reactive, ephemeral state machine to
 
 ```mermaid
 graph TD
-    GoalArrival[📩 Goal Message Received] --> IWS[💾 IntentionalWorkspace SQLite]
+    GoalArrival[📩 Goal Message Received] --> IWS[💾 IntentionalWorkspace<br/>Goal Agenda]
     IWS --> CEC[🧠 CognitiveExecutiveController]
     CEC --> SelfModel[📊 SelfModel Bayesian Lookup]
     SelfModel --> Policy[⚙️ Hierarchical Policy Resolution]
@@ -278,7 +276,7 @@ class RelationshipHistory:
 
 ### Persistence
 
-SQLite (`data/relationship_memory.db`) — tables: `people`, `events`, `relationships`.
+HCIR Workspace (migrating from legacy SQLite `data/relationship_memory.db`). People, events, and relationships are stored as typed graph nodes with edges.
 
 ---
 
