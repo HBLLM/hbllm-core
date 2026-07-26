@@ -33,10 +33,10 @@ test-%: ## Run a specific test file (e.g., make test-brain_factory)
 ## ── Code Quality ─────────────────────────────────────────────────────────
 
 lint: ## Run ruff linter
-	$(PYTHON) -m ruff check hbllm/ tests/
+	$(PYTHON) -m ruff check .
 
-format: ## Auto-format code
-	$(PYTHON) -m ruff format hbllm/ tests/
+format: ## Auto-format code and docs
+	$(PYTHON) -m ruff format .
 
 typecheck: ## Run mypy type checking
 	$(PYTHON) -m mypy hbllm/
