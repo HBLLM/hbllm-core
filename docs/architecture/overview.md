@@ -177,7 +177,7 @@ graph TB
     AUTONOMY --> ACTIONS
 
     SLEEP -->|"compact"| MEMORY
-    SPAWN -->|"spawn LoRAs"| CORE
+    SPAWN -->|"skill acquisition"| CORE
     IMPORTANCE -->|"score"| MEMORY
     UM -->|"user context"| CORE
     PG -->|"project context"| CORE
@@ -298,7 +298,7 @@ Nodes that monitor, improve, and expand the brain itself:
 
 - **LearnerNode** — Continuous DPO training from feedback.
 - **CuriosityNode** — Generates exploratory goals for unknown domains.
-- **SpawnerNode** — Creates new domain LoRA adapters at runtime.
+- **SpawnerNode** — Acquires new domain skills and procedural knowledge at runtime via HCIR `SkillNode` creation.
 - **SleepCycleNode** — 3-stage memory consolidation (Replay → Prune → Strengthen).
 - **IdentityNode** — Ethical constraints and personality persistence.
 - **WorldModelNode** — Sandboxed AST simulation for "what-if" reasoning.
@@ -308,9 +308,9 @@ Nodes that monitor, improve, and expand the brain itself:
 
 The human modeling layer that makes HBLLM feel persistent and personal. See [Cognitive Subsystems](cognitive-subsystems.md) for the full deep-dive.
 
-- **UserModel** — Continuously learns expertise, preferences, beliefs, trust, stress, engagement, and temporal work patterns from every interaction. SQLite-backed.
+- **UserModel** — Continuously learns expertise, preferences, beliefs, trust, stress, engagement, and temporal work patterns from every interaction. HCIR-backed (migrating from legacy SQLite).
 - **ProjectGraph** — Graph-based project state tracker with goals, blockers, open questions, decisions, and milestones. Auto-detects which project the user is talking about.
-- **CognitiveExecutiveController / ExecutiveCortex** — Unified cognitive control operating over a state-centric, versioned-immutable kernel. Goal agendas are maintained in the persistent `IntentionalWorkspace` SQLite database, and policies cascade via a hierarchical priority system (Task → Global) managed in the Bayesian `SelfModel`.
+- **CognitiveExecutiveController / ExecutiveCortex** — Unified cognitive control operating over a state-centric, versioned-immutable kernel. Goal agendas are maintained in the persistent `IntentionalWorkspace`, and policies cascade via a hierarchical priority system (Task → Global) managed in the Bayesian `SelfModel`.
 - **RelationshipMemory** — Social graph of people mentioned in conversations with roles, sentiment trends, interaction history, and notification prioritization.
 - **RealityGraph** — Read-only unified facade over KnowledgeGraph, BrainWorldState, and PerceptionWorldState. Merges entities by confidence.
 
@@ -419,7 +419,7 @@ sequenceDiagram
 - [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
 - [Cognitive Subsystems](cognitive-subsystems.md) — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph.
 - [Message Bus](message-bus.md) — How Pub/Sub routing works.
-- [Memory Systems](memory-systems.md) — The 9 memory types and event-sourced repository layer.
+- [Memory Systems](memory-systems.md) — HCIR-native memory architecture with tiered workspace and cross-memory search.
 - [Embodiment](embodiment.md) — Actuator safety and verification.
 - [Human Control](human-control.md) — Safety boundaries and intent integrity.
 - [Causality & Compaction](causality-and-compaction.md) — Decision trace graphs and memory folding.

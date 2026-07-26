@@ -53,7 +53,7 @@ The `NodeType` enum defines the categories of nodes:
 | --------------- | ------------------------ | -------------------------------------------- |
 | `router`        | `NodeType.ROUTER`        | Intent classification and domain routing     |
 | `core`          | `NodeType.CORE`          | Core reasoning (Critic, Decision, Workspace) |
-| `domain_module` | `NodeType.DOMAIN_MODULE` | Domain-specific LoRA modules                 |
+| `domain_module` | `NodeType.DOMAIN_MODULE` | Domain-specific skill modules                |
 | `memory`        | `NodeType.MEMORY`        | Memory storage and retrieval                 |
 | `planner`       | `NodeType.PLANNER`       | Task decomposition and GoT planning          |
 | `learner`       | `NodeType.LEARNER`       | Continuous learning and DPO training         |
@@ -121,7 +121,7 @@ The `NodeType` enum defines the categories of nodes:
 
 - **Type:** `NodeType.LEARNER`
 - **File:** `hbllm/brain/learner_node.py`
-- **Purpose:** Implements contrastive DPO using a persistent atomic JSON queue. Consolidates feedback into permanent LoRA weight updates during sleep cycles.
+- **Purpose:** Implements contrastive DPO using a persistent atomic JSON queue. Consolidates feedback into permanent HCIR `SkillNode` updates during sleep cycles.
 
 ### CuriosityNode
 
@@ -133,7 +133,7 @@ The `NodeType` enum defines the categories of nodes:
 
 - **Type:** `NodeType.SPAWNER`
 - **File:** `hbllm/brain/spawner_node.py`
-- **Purpose:** Artificial neurogenesis — creates new domain-specific LoRA adapters at runtime when the system encounters unfamiliar domains.
+- **Purpose:** Artificial neurogenesis — acquires new domain-specific skills at runtime via HCIR `SkillNode` creation when the system encounters unfamiliar domains.
 
 ### SleepCycleNode
 
