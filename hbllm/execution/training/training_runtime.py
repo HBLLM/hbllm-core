@@ -29,6 +29,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from hbllm.execution.capability import RuntimeCapabilities
 from hbllm.execution.plan import ExecutionPlan, TaskType
 from hbllm.execution.result import ExecutionMetrics, ExecutionResult, TokenUsage
 
@@ -133,6 +134,12 @@ class TrainingRuntime:
     @property
     def runtime_type(self) -> str:
         return "training"
+
+    @property
+    def capabilities(self) -> RuntimeCapabilities:
+        return RuntimeCapabilities(
+            supports_lora=True,
+        )
 
     def supported_task_types(self) -> list[TaskType]:
         return [TaskType.LORA_TRAINING, TaskType.DPO_TRAINING]
