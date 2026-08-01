@@ -178,3 +178,24 @@ class TestTrainingSubscriber:
             }
         )
         assert subscriber.jobs_dispatched == 1
+
+    @pytest.mark.asyncio()
+    async def test_handle_feedback_with_execution_bus(self) -> None:
+        """Should emit completion event to execution bus when present."""
+        from unittest.mock import AsyncMock
+
+        from hbllm.execution.training.subscriber import TrainingSubscriber
+
+        runtime = TrainingRuntime(model=MagicMock(), tokenizer=MagicMock())
+        mock_bus = MagicMock()
+        mock_bus._emit = AsyncMock()
+        subscriber = TrainingSubscriber(runtime, execution_bus=mock_bus)
+
+        await subscriber.handle_feedback_queued(
+            {
+                "pairs": [("prompt", "good", "bad")],
+                "adapter_name": "personalization",
+            }
+        )
+        assert subscriber.jobs_dispatched == 1
+        mock_bus._emit.assert_called_once()

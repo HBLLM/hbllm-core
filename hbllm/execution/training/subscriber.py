@@ -49,8 +49,10 @@ class TrainingSubscriber:
 
         Translates the cognitive event into an SFT training plan.
         """
-        domain = event_payload.get("domain", "")
-        topic = event_payload.get("topic", domain)
+        domain_val = event_payload.get("domain")
+        domain = domain_val if isinstance(domain_val, str) else ""
+        topic_val = event_payload.get("topic")
+        topic = topic_val if isinstance(topic_val, str) and topic_val else domain
         suggested_rank = event_payload.get("suggested_rank", self._config.rank)
 
         if not domain:
@@ -92,19 +94,16 @@ class TrainingSubscriber:
 
         # Emit completion event on ExecutionBus
         if self._bus:
-            from hbllm.execution.events import ExecutionEvent
+            from hbllm.execution.events import ExecutionEventData
 
-            event = ExecutionEvent(
-                event_type="training.completed",
+            event = ExecutionEventData.completed(
                 plan_id=plan.plan_id,
-                data={
-                    "domain": domain,
-                    "status": result.status,
-                    "adapter_name": domain,
-                    "metadata": result.metadata,
-                },
+                domain=domain,
+                status=result.status,
+                adapter_name=domain,
+                metadata=result.metadata,
             )
-            self._bus._emit(event)
+            await self._bus._emit(event)
 
     async def handle_feedback_queued(self, event_payload: dict[str, Any]) -> None:
         """
@@ -142,6 +141,16 @@ class TrainingSubscriber:
             adapter_name,
             result.status,
         )
+
+        if self._bus:
+            from hbllm.execution.events import ExecutionEventData
+
+            event = ExecutionEventData.completed(
+                plan_id=plan.plan_id,
+                adapter_name=adapter_name,
+                status=result.status,
+            )
+            await self._bus._emit(event)
 
     async def _generate_dataset(self, topic: str) -> str:
         """Generate synthetic training data for a topic.

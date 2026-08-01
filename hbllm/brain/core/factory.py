@@ -1129,7 +1129,7 @@ class BrainFactory:
             event_store = InMemoryEventStore()
             normalizer = SemanticNormalizer()
             journal = CognitiveJournal(store=event_store)
-            event_log = CognitiveEventLog(journal=journal, normalizer=normalizer)
+            event_log = CognitiveEventLog(store=event_store)
 
             # 5. Tiered workspace
             tiered = TieredWorkspace()
@@ -1137,10 +1137,11 @@ class BrainFactory:
             # 6. Bus bridge — projects MessageBus events → HCIR workspace
             bus_bridge = HCIRBusBridge(
                 bus=message_bus,
-                workspace=hcir_ws,
-                transaction_manager=tx_mgr,
                 normalizer=normalizer,
                 journal=journal,
+                event_log=event_log,
+                tiered_workspace=tiered,
+                tx_manager=tx_mgr,
             )
 
             # 7. Assemble KernelServices
@@ -1640,13 +1641,19 @@ class BrainFactory:
         if use_execution_os:
             # New path: Execution OS — GenerationNode + ExecutionOrchestrator
             from hbllm.brain.execution.generation_node import GenerationNode
+            from hbllm.execution.bus import ExecutionBus
+            from hbllm.execution.capability import CapabilityResolver
             from hbllm.execution.orchestrator import ExecutionOrchestrator
+            from hbllm.execution.policy import GenerationPolicy
             from hbllm.execution.registry import ProviderRegistry, RuntimeRegistry
             from hbllm.execution.text.text_runtime import TextRuntime
 
             # Build execution infrastructure
             provider_registry = ProviderRegistry()
             runtime_registry = RuntimeRegistry()
+            policy = GenerationPolicy.default()
+            capability_resolver = CapabilityResolver()
+            execution_bus = ExecutionBus()
 
             # Register text runtime with the LLM provider
             text_runtime = TextRuntime()
@@ -1666,8 +1673,11 @@ class BrainFactory:
                 runtime_registry.register(training_runtime)
 
             orchestrator = ExecutionOrchestrator(
+                policy=policy,
+                capability_resolver=capability_resolver,
                 runtime_registry=runtime_registry,
                 provider_registry=provider_registry,
+                execution_bus=execution_bus,
             )
 
             gen_node = GenerationNode(
