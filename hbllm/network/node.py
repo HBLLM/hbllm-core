@@ -155,6 +155,11 @@ class Node(ABC):
             raise RuntimeError(f"Node {self.node_id} has not been started yet.")
         return self._bus
 
+    @bus.setter
+    def bus(self, value: MessageBus) -> None:
+        """Set the message bus."""
+        self._bus = value
+
     @property
     def uptime(self) -> float:
         """Seconds since the node started."""

@@ -56,7 +56,7 @@ def spawner_with_exec_os():
         use_execution_os=True,
     )
     bus = FakeBus()
-    node.bus = bus  # type: ignore[assignment]
+    node._bus = bus  # type: ignore[assignment]
     return node, bus
 
 
