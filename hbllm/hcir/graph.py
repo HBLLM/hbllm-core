@@ -34,8 +34,13 @@ from pydantic import BaseModel, Field
 
 from hbllm.hcir.types import (
     Attention,
+    CognitiveMode,
     Confidence,
     CostMetric,
+    EvidenceStrength,
+    ExperimentRealityLevel,
+    ExperimentStatus,
+    FalsificationStatus,
     Priority,
     Provenance,
     Scope,
@@ -63,6 +68,14 @@ class HCIRNodeType(StrEnum):
     HYPOTHESIS = "hypothesis"
     PREDICTION = "prediction"
     PREDICTION_ERROR = "prediction_error"
+
+    # --- Discovery & Epistemic ---
+    EVIDENCE = "evidence"                # Structured evidence unit with provenance
+    CLAIM = "claim"                      # A testable assertion from any source
+    EXPERIMENT = "experiment"            # A designed experiment to test hypotheses
+    CONTRADICTION = "contradiction"      # An identified contradiction between claims
+    UNKNOWN = "unknown"                  # A knowledge gap — discovery starts here
+    RESEARCH_PROGRAM = "research_program"  # A long-lived research program
 
     # --- Execution ---
     ACTION = "action"
@@ -108,6 +121,16 @@ class HCIREdgeType(StrEnum):
     OWNED_BY = "owned_by"
     PART_OF = "part_of"
 
+    # Epistemic relations — scientific reasoning edges
+    FALSIFIES = "falsifies"          # Evidence that disproves a hypothesis
+    PREDICTS = "predicts"            # Hypothesis predicts an outcome
+    TESTS = "tests"                  # Experiment tests a hypothesis
+    REPLICATES = "replicates"        # Experiment reproduces another
+    ANALOGOUS_TO = "analogous_to"    # Structural similarity across domains
+    STRENGTHENS = "strengthens"      # Evidence that increases confidence
+    WEAKENS = "weakens"              # Evidence that decreases confidence
+    REFINES = "refines"              # Hypothesis refines another
+
 
 class CognitiveCategory(StrEnum):
     """High-level cognitive function classification.
@@ -124,6 +147,7 @@ class CognitiveCategory(StrEnum):
     REFLECTION = "reflection"
     VALUE = "value"
     COMMUNICATION = "communication"
+    DISCOVERY = "discovery"  # Scientific cognition & hypothesis testing
 
 
 class NodeLifecycle(StrEnum):
@@ -146,6 +170,26 @@ class GoalLifecycle(StrEnum):
     BLOCKED = "blocked"
     COMPLETED = "completed"
     CONSOLIDATED = "consolidated"
+
+
+class HypothesisLifecycle(StrEnum):
+    """Lifecycle of a scientific hypothesis.
+
+    Tracks how hypotheses evolve through the discovery process::
+
+        GENERATED → EVALUATED → TESTED → SUPPORTED | FALSIFIED → ARCHIVED
+                                       → STRENGTHENED ↗
+    """
+
+    GENERATED = "generated"        # Just created, not yet evaluated
+    EVALUATED = "evaluated"        # Assessed for plausibility and testability
+    TESTED = "tested"              # At least one experiment has been run
+    SUPPORTED = "supported"        # Evidence supports, not yet conclusive
+    STRENGTHENED = "strengthened"  # Multiple lines of evidence confirm
+    WEAKENED = "weakened"          # Some counter-evidence found
+    FALSIFIED = "falsified"        # Critical prediction failed
+    SUPERSEDED = "superseded"      # Replaced by a better hypothesis
+    ARCHIVED = "archived"          # No longer actively investigated
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -230,7 +274,16 @@ class FactNode(HCIRNode):
 
 
 class BeliefNode(HCIRNode):
-    """An integrated assertion held by the system."""
+    """An integrated assertion held by the system.
+
+    Beliefs are the atomic units of knowledge in HBLLM's epistemic
+    architecture.  Unlike raw facts, every belief carries confidence,
+    evidence provenance, falsification status, and revision history.
+
+    In the epistemic OS, there are no absolute truths — only beliefs
+    with varying confidence.  A ``FactNode`` is simply a ``BeliefNode``
+    with confidence >= threshold and strong evidence.
+    """
 
     node_type: HCIRNodeType = HCIRNodeType.BELIEF
     category: CognitiveCategory = CognitiveCategory.REASONING
@@ -238,9 +291,29 @@ class BeliefNode(HCIRNode):
     belief_type: str = "factual"  # factual, causal, procedural, strategic
     evidence_sources: list[str] = Field(default_factory=list)
 
+    # ── Epistemic extensions ────────────────────────────────────────
+    counter_evidence: list[str] = Field(default_factory=list)
+    falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
+    prediction_score: float = 0.0  # Track record of predictions made from this belief
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+    # Each entry: {"timestamp": float, "old_confidence": float,
+    #              "new_confidence": float, "reason": str, "evidence_id": str}
+
 
 class HypothesisNode(HCIRNode):
-    """A candidate claim under evaluation."""
+    """A candidate claim under evaluation — first-class cognitive entity.
+
+    Hypotheses are the central objects of scientific reasoning.
+    They generate predictions, are tested by experiments, and evolve
+    through a full lifecycle from generation to falsification.
+
+    Lifecycle::
+
+        GENERATED → EVALUATED → TESTED → SUPPORTED → STRENGTHENED
+                                       → WEAKENED  → FALSIFIED
+                                                   → SUPERSEDED
+                                                   → ARCHIVED
+    """
 
     node_type: HCIRNodeType = HCIRNodeType.HYPOTHESIS
     category: CognitiveCategory = CognitiveCategory.REASONING
@@ -248,15 +321,41 @@ class HypothesisNode(HCIRNode):
     supporting_evidence: list[str] = Field(default_factory=list)
     counter_evidence: list[str] = Field(default_factory=list)
 
+    # ── Scientific lifecycle ────────────────────────────────────────
+    hypothesis_lifecycle: HypothesisLifecycle = HypothesisLifecycle.GENERATED
+    falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
+    novelty: Confidence = 0.5          # How novel is this hypothesis?
+    plausibility: Confidence = 0.5     # How plausible given current evidence?
+    predicted_impact: Confidence = 0.5  # Expected impact if confirmed
+    testability: Confidence = 0.5      # How easily can this be tested?
+    linked_predictions: list[str] = Field(default_factory=list)   # PredictionNode IDs
+    linked_experiments: list[str] = Field(default_factory=list)   # ExperimentNode IDs
+    origin: str = ""  # How was this hypothesis generated? (e.g., "analogy", "contradiction", "literature")
+    research_program_id: str = ""  # Parent research program, if any
+
 
 class PredictionNode(HCIRNode):
-    """A simulated or predicted future state."""
+    """A testable prediction derived from a hypothesis.
+
+    Every hypothesis must generate at least one prediction.
+    Predictions are tracked against observations.  Success strengthens
+    the parent hypothesis; failure weakens or falsifies it.
+
+    This is Popperian science: hypotheses that don't predict are unfalsifiable.
+    """
 
     node_type: HCIRNodeType = HCIRNodeType.PREDICTION
     category: CognitiveCategory = CognitiveCategory.REASONING
     claim: str = ""
     predicted_outcome: str = ""
     time_horizon_ms: TimeDuration = 0
+
+    # ── Verification ────────────────────────────────────────────────
+    hypothesis_id: str = ""            # Which hypothesis generated this prediction?
+    observed_outcome: str = ""         # What actually happened?
+    verified: bool = False             # Has this prediction been checked?
+    verification_timestamp: float = 0.0
+    prediction_correct: bool | None = None  # None = unverified, True/False = result
 
 
 class PredictionErrorNode(HCIRNode):
@@ -405,6 +504,168 @@ class ExternalKnowledgeNode(HCIRNode):
     summary: str = ""
 
 
+# ── Discovery & Epistemic Nodes ──────────────────────────────────────────
+
+
+class EvidenceNode(HCIRNode):
+    """A structured unit of evidence with full provenance.
+
+    Evidence is not just a reference — it's a first-class cognitive entity
+    that carries its own confidence, methodology, limitations, and
+    reproducibility status.  The discovery engine uses evidence strength
+    to weight contributions during belief revision.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.EVIDENCE
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    claim_id: str = ""                # Which claim does this evidence support/refute?
+    evidence_type: EvidenceStrength = EvidenceStrength.OBSERVATIONAL
+    strength: Confidence = 0.5        # Quantitative strength [0.0, 1.0]
+    source_uri: str = ""              # Paper DOI, dataset URL, experiment ID, etc.
+    methodology: str = ""             # How was this evidence produced?
+    limitations: list[str] = Field(default_factory=list)
+    dataset_refs: list[str] = Field(default_factory=list)
+    reproducible: bool = False        # Has this been independently reproduced?
+    sample_size: int | None = None    # Statistical sample size, if applicable
+    effect_size: float | None = None  # Measured effect size, if applicable
+
+
+class ClaimNode(HCIRNode):
+    """A testable assertion extracted from any source.
+
+    Claims are the bridge between unstructured knowledge (papers,
+    observations, conversations) and structured epistemic reasoning.
+    Every claim can be supported or contradicted by evidence.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.CLAIM
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    statement: str = ""               # The claim text
+    source_uri: str = ""              # Where this claim came from
+    source_type: str = ""             # "paper", "observation", "simulation", "expert", "inference"
+    extracted_at: float = 0.0
+    supporting_evidence_ids: list[str] = Field(default_factory=list)
+    contradicting_evidence_ids: list[str] = Field(default_factory=list)
+    domain: str = ""                  # Knowledge domain
+
+
+class ExperimentNode(HCIRNode):
+    """A designed experiment to test one or more hypotheses.
+
+    Experiments are the mechanism through which hypotheses are tested
+    and beliefs are revised.  Each experiment has a reality level
+    (from simulation to physical) that determines its evidential weight
+    and safety requirements.
+
+    The key capability is **discriminative power**: an experiment should
+    ideally distinguish between competing hypotheses, not just confirm one.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.EXPERIMENT
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    hypothesis_ids: list[str] = Field(default_factory=list)  # Hypotheses being tested
+    design: str = ""                  # Experiment protocol description
+    variables: dict[str, Any] = Field(default_factory=dict)   # Independent/dependent vars
+    controls: list[str] = Field(default_factory=list)         # Control conditions
+    expected_outcomes: dict[str, str] = Field(default_factory=dict)  # hypothesis_id → predicted outcome
+    actual_outcome: str = ""          # What actually happened
+    reality_level: ExperimentRealityLevel = ExperimentRealityLevel.SIMULATION
+    experiment_status: ExperimentStatus = ExperimentStatus.DESIGNED
+    discriminating_power: Confidence = 0.5   # How well does this distinguish hypotheses?
+    resource_cost: float = 0.0        # Estimated resource cost
+    research_program_id: str = ""     # Parent research program
+
+
+class ContradictionNode(HCIRNode):
+    """An identified contradiction between claims, evidence, or beliefs.
+
+    Contradictions are not errors — they are **opportunities**.
+    Every contradiction potentially reveals a hidden variable,
+    a context dependency, or a flawed assumption.
+
+    The contradiction engine actively searches for these rather
+    than treating them as problems to resolve.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.CONTRADICTION
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    claim_a_id: str = ""              # First conflicting claim/evidence
+    claim_b_id: str = ""              # Second conflicting claim/evidence
+    contradiction_type: str = ""      # "direct", "statistical", "methodological", "contextual"
+    possible_explanations: list[str] = Field(default_factory=list)
+    resolution_status: str = "unresolved"  # "unresolved", "explained", "resolved", "accepted"
+    investigation_priority: Confidence = 0.5
+    discovered_variables: list[str] = Field(default_factory=list)  # Hidden variables found
+
+
+class UnknownNode(HCIRNode):
+    """A knowledge gap — discovery starts here.
+
+    Discovery does not start from facts.  It starts from gaps.
+    Unknowns represent what the system knows it doesn't know.
+    They drive the research agenda by generating hypotheses
+    and prioritizing experiments.
+
+    Example::
+
+        Observation: Patients with X recover faster.
+        Known: Age, Medication, Genetics
+        Unknown: Why? Missing mechanism.
+
+    The discovery loop::
+
+        Observation → Unknown → Hypothesis → Prediction →
+        Experiment → Knowledge
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.UNKNOWN
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    question: str = ""                # What don't we know?
+    context: str = ""                 # What do we know around this gap?
+    domain: str = ""                  # Knowledge domain
+    related_observations: list[str] = Field(default_factory=list)  # ObservationNode IDs
+    related_hypotheses: list[str] = Field(default_factory=list)    # HypothesisNode IDs
+    importance: Confidence = 0.5      # How important is filling this gap?
+    estimated_difficulty: Confidence = 0.5  # How hard is this to resolve?
+    research_program_id: str = ""     # Parent research program
+
+
+class ResearchProgramNode(HCIRNode):
+    """A long-lived research program — the cognitive object for sustained inquiry.
+
+    Unlike a TaskFrame (ephemeral, per-goal), a ResearchProgram may persist
+    for months or years.  It owns the full research lifecycle for a single
+    research question and tracks all hypotheses, evidence, experiments,
+    and findings.
+
+    Example::
+
+        ResearchProgram: "Understanding Alzheimer's progression"
+        Contains:
+            Questions (UnknownNodes)
+            Hypotheses (HypothesisNodes)
+            Evidence (EvidenceNodes)
+            Experiments (ExperimentNodes)
+            Findings (BeliefNodes)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.RESEARCH_PROGRAM
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    title: str = ""
+    research_question: str = ""       # The central question
+    description: str = ""
+    status: str = "active"            # "active", "paused", "completed", "abandoned"
+    hypothesis_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    experiment_ids: list[str] = Field(default_factory=list)
+    unknown_ids: list[str] = Field(default_factory=list)
+    finding_ids: list[str] = Field(default_factory=list)   # Concluded BeliefNode IDs
+    contradiction_ids: list[str] = Field(default_factory=list)
+    overall_confidence: Confidence = 0.0  # How confident are we in conclusions?
+    started_at: float = Field(default_factory=time.time)
+    cognitive_mode: CognitiveMode = CognitiveMode.DISCOVERY
+
+
 # ── World Model & Predictive Nodes ───────────────────────────────────────
 
 
@@ -447,25 +708,37 @@ class EnvironmentStateNode(HCIRNode):
 
 #: Maps ``HCIRNodeType`` enum values to their typed subclass.
 NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
+    # --- Directives ---
     HCIRNodeType.INTENT: IntentNode,
     HCIRNodeType.GOAL: GoalNode,
     HCIRNodeType.CONSTRAINT: ConstraintNode,
+    # --- Epistemology hierarchy ---
     HCIRNodeType.OBSERVATION: ObservationNode,
     HCIRNodeType.FACT: FactNode,
     HCIRNodeType.BELIEF: BeliefNode,
     HCIRNodeType.HYPOTHESIS: HypothesisNode,
     HCIRNodeType.PREDICTION: PredictionNode,
     HCIRNodeType.PREDICTION_ERROR: PredictionErrorNode,
+    # --- Discovery & Epistemic ---
+    HCIRNodeType.EVIDENCE: EvidenceNode,
+    HCIRNodeType.CLAIM: ClaimNode,
+    HCIRNodeType.EXPERIMENT: ExperimentNode,
+    HCIRNodeType.CONTRADICTION: ContradictionNode,
+    HCIRNodeType.UNKNOWN: UnknownNode,
+    HCIRNodeType.RESEARCH_PROGRAM: ResearchProgramNode,
+    # --- Execution ---
     HCIRNodeType.ACTION: ActionNode,
     HCIRNodeType.EVENT: EventNode,
     HCIRNodeType.RESOURCE: ResourceNode,
     HCIRNodeType.CAPABILITY: CapabilityNode,
+    # --- Memory classes ---
     HCIRNodeType.EPISODE: EpisodeNode,
     HCIRNodeType.CONCEPT: ConceptNode,
     HCIRNodeType.SKILL: SkillNode,
     HCIRNodeType.PROCEDURE: ProcedureNode,
     HCIRNodeType.VALUE: ValueNode,
     HCIRNodeType.EXTERNAL_KNOWLEDGE: ExternalKnowledgeNode,
+    # --- World Model ---
     HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
     HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,
     HCIRNodeType.ENVIRONMENT_STATE: EnvironmentStateNode,
@@ -711,6 +984,24 @@ class CognitiveGraph:
         }
         result: list[HCIRNode] = []
         for t in mem_types:
+            result.extend(self.nodes_by_type(t))
+        return result
+
+    def discovery_view(self) -> list[HCIRNode]:
+        """Hypotheses, Evidence, Experiments, Claims, Contradictions, Unknowns — epistemic state."""
+        discovery_types = {
+            HCIRNodeType.HYPOTHESIS,
+            HCIRNodeType.EVIDENCE,
+            HCIRNodeType.EXPERIMENT,
+            HCIRNodeType.CLAIM,
+            HCIRNodeType.CONTRADICTION,
+            HCIRNodeType.UNKNOWN,
+            HCIRNodeType.RESEARCH_PROGRAM,
+            HCIRNodeType.PREDICTION,
+            HCIRNodeType.PREDICTION_ERROR,
+        }
+        result: list[HCIRNode] = []
+        for t in discovery_types:
             result.extend(self.nodes_by_type(t))
         return result
 

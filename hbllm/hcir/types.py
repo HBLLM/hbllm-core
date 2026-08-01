@@ -213,3 +213,115 @@ class Scope(BaseModel):
     cluster_id: str = "local"
     simulation_id: str = ""
     security_level: SecurityLevel = SecurityLevel.TENANT
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Cognitive Mode — runtime reasoning context
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class CognitiveMode(StrEnum):
+    """Runtime reasoning mode that changes how components behave.
+
+    The same planner, memory, and critic operate differently depending
+    on the active cognitive mode.  Discovery mode optimizes for
+    uncertainty reduction rather than answer production.
+
+    Examples::
+
+        STANDARD:   "What is X?"  → Goal: produce answer
+        DISCOVERY:  "Why does X happen?"  → Goal: reduce uncertainty
+        DIAGNOSTIC: "What went wrong?"  → Goal: isolate root cause
+    """
+
+    STANDARD = "standard"        # Normal reasoning — produce answers
+    DISCOVERY = "discovery"      # Scientific cognition — reduce uncertainty
+    DIAGNOSTIC = "diagnostic"    # Root-cause analysis — isolate failures
+    CREATIVE = "creative"        # Divergent thinking — maximize novelty
+    CRITICAL = "critical"        # Adversarial review — maximize rigor
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Epistemic Types — scientific reasoning primitives
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class FalsificationStatus(StrEnum):
+    """Popperian falsification status for beliefs and hypotheses.
+
+    Every belief and hypothesis must be falsifiable.  This enum tracks
+    where each stands in the scientific lifecycle::
+
+        UNTESTED → CORROBORATED → (WEAKENED → FALSIFIED | SUPERSEDED)
+
+    A belief that cannot be falsified is not scientific — it's dogma.
+    """
+
+    UNTESTED = "untested"            # No prediction has been tested
+    CORROBORATED = "corroborated"    # Predictions confirmed, not yet falsified
+    WEAKENED = "weakened"            # Some predictions failed
+    FALSIFIED = "falsified"          # Critical prediction failed
+    SUPERSEDED = "superseded"        # Replaced by a better hypothesis
+
+
+class EvidenceStrength(StrEnum):
+    """Qualitative evidence strength classification.
+
+    Ordered from weakest to strongest.  This is the epistemic
+    hierarchy — not all evidence is created equal::
+
+        ANECDOTAL < OBSERVATIONAL < CORRELATIONAL <
+        EXPERIMENTAL < META_ANALYTIC < REPLICATED
+
+    The discovery engine uses this to weight evidence during
+    belief revision and hypothesis evaluation.
+    """
+
+    ANECDOTAL = "anecdotal"            # Single observation, no controls
+    OBSERVATIONAL = "observational"    # Systematic observation, no intervention
+    CORRELATIONAL = "correlational"    # Statistical relationship identified
+    EXPERIMENTAL = "experimental"      # Controlled experiment
+    META_ANALYTIC = "meta_analytic"    # Aggregation across multiple studies
+    REPLICATED = "replicated"          # Independently reproduced results
+
+
+class ExperimentStatus(StrEnum):
+    """Lifecycle of an experiment from design to completion.
+
+    Tracks the full experiment lifecycle::
+
+        DESIGNED → APPROVED → RUNNING → COMPLETED | FAILED | CANCELLED
+    """
+
+    DESIGNED = "designed"      # Experiment plan created
+    APPROVED = "approved"      # Safety/governance review passed
+    RUNNING = "running"        # Currently executing
+    COMPLETED = "completed"    # Finished with results
+    FAILED = "failed"          # Execution failed (not the same as negative result)
+    CANCELLED = "cancelled"    # Abandoned before completion
+
+
+class ExperimentRealityLevel(StrEnum):
+    """Reality level of an experiment — safety boundary.
+
+    Determines the fidelity and risk of an experiment.  Higher levels
+    require more approval and carry more evidential weight::
+
+        SIMULATION → DIGITAL → OBSERVATIONAL → CONTROLLED → PHYSICAL
+
+    Each level has different confidence weights (set by ExperimentEngine):
+        SIMULATION:     0.2  (pure logic/heuristic)
+        DIGITAL:        0.4  (software-based experiment)
+        OBSERVATIONAL:  0.6  (passive real-world observation)
+        CONTROLLED:     0.8  (controlled real-world experiment)
+        PHYSICAL:       1.0  (direct physical manipulation)
+
+    A robot might simulate motor control before trying it physically.
+    A medical researcher might run computational models before clinical trials.
+    """
+
+    SIMULATION = "simulation"          # Pure computational simulation
+    DIGITAL = "digital"                # Software-based experiment (A/B test, etc.)
+    OBSERVATIONAL = "observational"    # Passive real-world observation
+    CONTROLLED = "controlled"          # Controlled real-world experiment
+    PHYSICAL = "physical"              # Direct physical manipulation
