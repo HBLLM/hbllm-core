@@ -70,3 +70,4 @@ class ExecutionResult:
     status: str = "completed"
     plan_id: str | None = None
     provider_metadata: ProviderMetadata | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)

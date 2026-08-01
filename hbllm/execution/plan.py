@@ -147,6 +147,9 @@ class ExecutionPlan:
     # ── Cache ─────────────────────────────────────────────────
     cache_key: str | None = None
 
+    # ── Extensible metadata (runtime-specific key-value) ──────
+    metadata: dict[str, Any] = field(default_factory=dict)
+
     def with_retry(self) -> ExecutionPlan:
         """Create a retry of this plan (same plan_id, incremented version)."""
         # We need to create a new instance since frozen
@@ -168,6 +171,7 @@ class ExecutionPlan:
             modifiers=self.modifiers,
             capabilities_used=self.capabilities_used,
             cache_key=self.cache_key,
+            metadata=dict(self.metadata),
         )
 
     def with_fork(self, **overrides: Any) -> ExecutionPlan:
