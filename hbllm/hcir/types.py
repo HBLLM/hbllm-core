@@ -246,6 +246,175 @@ class CognitiveMode(StrEnum):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class BeliefConfidence(BaseModel):
+    """Multi-dimensional belief confidence decomposition.
+
+    Instead of ``Confidence = 0.84`` (a single opaque number), decompose
+    confidence into independent, auditable dimensions.  The derived score
+    is a weighted combination, but each dimension can be inspected and
+    updated independently.
+
+    This prevents pathological behaviors such as:
+    - A single weak source inflating overall confidence
+    - High prediction accuracy masking low reproducibility
+    - Publication bias in evidence quality
+
+    Dimensions::
+
+        evidence_quality     — Methodology strength of supporting evidence
+        evidence_quantity    — Amount of supporting evidence (normalized)
+        reproducibility      — Has the evidence been independently reproduced?
+        prediction_accuracy  — Track record of predictions from this belief
+        model_agreement      — Agreement with the system's causal models
+        source_trust         — Weighted reputation of evidence sources
+
+    Usage::
+
+        bc = BeliefConfidence(evidence_quality=0.9, reproducibility=0.8)
+        bc.derived_confidence  # → weighted combination
+    """
+
+    evidence_quality: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Methodology strength of supporting evidence",
+    )
+    evidence_quantity: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Amount of supporting evidence (normalized 0=none, 1=extensive)",
+    )
+    reproducibility: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Has the evidence been independently reproduced?",
+    )
+    prediction_accuracy: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Track record of predictions derived from this belief",
+    )
+    model_agreement: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Agreement with the system's causal models",
+    )
+    source_trust: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Weighted reputation of evidence sources",
+    )
+
+    # Configurable weights for the derived score
+    _weights: tuple[float, ...] = (0.25, 0.15, 0.20, 0.20, 0.10, 0.10)
+
+    @property
+    def derived_confidence(self) -> float:
+        """Weighted combination of all dimensions → single confidence score.
+
+        Default weights prioritize evidence quality and reproducibility,
+        reflecting the epistemic hierarchy.
+        """
+        components = (
+            self.evidence_quality,
+            self.evidence_quantity,
+            self.reproducibility,
+            self.prediction_accuracy,
+            self.model_agreement,
+            self.source_trust,
+        )
+        return min(1.0, max(0.0, sum(w * c for w, c in zip(self._weights, components))))
+
+    def to_dict(self) -> dict[str, float]:
+        """Return all dimensions plus derived score as a dict."""
+        return {
+            "evidence_quality": self.evidence_quality,
+            "evidence_quantity": self.evidence_quantity,
+            "reproducibility": self.reproducibility,
+            "prediction_accuracy": self.prediction_accuracy,
+            "model_agreement": self.model_agreement,
+            "source_trust": self.source_trust,
+            "derived_confidence": self.derived_confidence,
+        }
+
+
+class KnowledgeValue(BaseModel):
+    """Multi-dimensional value assessment for epistemic objects.
+
+    Every belief, hypothesis, and unknown should answer: *why do I care?*
+    Curiosity uses uncertainty, but sometimes low-uncertainty + huge-impact
+    should still be investigated.
+
+    This model separates "how uncertain is this?" (handled by
+    ``BeliefConfidence``) from "how valuable is knowing this?"
+    (handled here).
+
+    Dimensions::
+
+        novelty              — How new is this knowledge?
+        impact               — Potential impact if confirmed/falsified
+        risk                 — Risk of NOT knowing this
+        cost                 — Cost to investigate further (lower = cheaper)
+        urgency              — Time sensitivity
+        strategic_relevance  — Alignment with active goals/programs
+
+    Usage::
+
+        kv = KnowledgeValue(impact=0.9, urgency=0.8, cost=0.2)
+        kv.derived_value  # → weighted combination (higher = more valuable)
+    """
+
+    novelty: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="How new or surprising is this knowledge?",
+    )
+    impact: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Potential impact if confirmed or falsified",
+    )
+    risk: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Risk of NOT knowing this (higher = riskier to ignore)",
+    )
+    cost: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Cost to investigate further (0=free, 1=prohibitive)",
+    )
+    urgency: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Time sensitivity (0=no deadline, 1=critical)",
+    )
+    strategic_relevance: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="Alignment with active goals and research programs",
+    )
+
+    @property
+    def derived_value(self) -> float:
+        """Weighted value score optimized for investigation prioritization.
+
+        High value = high benefit, low cost.
+        The formula reflects discovery economics:
+        ``(impact × novelty × strategic_relevance) / (1 + cost)``,
+        boosted by urgency and risk.
+        """
+        benefit = (
+            0.35 * self.impact
+            + 0.25 * self.novelty
+            + 0.20 * self.strategic_relevance
+            + 0.10 * self.risk
+            + 0.10 * self.urgency
+        )
+        cost_penalty = 1.0 + self.cost  # range [1.0, 2.0]
+        return min(1.0, max(0.0, benefit / cost_penalty))
+
+    def to_dict(self) -> dict[str, float]:
+        """Return all dimensions plus derived value as a dict."""
+        return {
+            "novelty": self.novelty,
+            "impact": self.impact,
+            "risk": self.risk,
+            "cost": self.cost,
+            "urgency": self.urgency,
+            "strategic_relevance": self.strategic_relevance,
+            "derived_value": self.derived_value,
+        }
+
+
 class FalsificationStatus(StrEnum):
     """Popperian falsification status for beliefs and hypotheses.
 
@@ -325,3 +494,87 @@ class ExperimentRealityLevel(StrEnum):
     OBSERVATIONAL = "observational"    # Passive real-world observation
     CONTROLLED = "controlled"          # Controlled real-world experiment
     PHYSICAL = "physical"              # Direct physical manipulation
+
+
+class EpistemicLifecycle(StrEnum):
+    """Formal state machine for the epistemic lifecycle.
+
+    Every hypothesis (and the unknowns that spawn them) follows this
+    lifecycle.  The states enforce a disciplined progression from
+    gap identification through to established knowledge or falsification::
+
+        UNKNOWN → QUESTIONING → HYPOTHESIZED → UNDER_REVIEW →
+        PREDICTING → EXPERIMENTING → SUPPORTED → REPLICATING →
+        ESTABLISHED | FALSIFIED | ARCHIVED
+
+    Unlike ``HypothesisLifecycle`` (which tracks only hypothesis states),
+    this enum covers the **full epistemic journey** from gap to knowledge.
+    """
+
+    UNKNOWN = "unknown"                # Knowledge gap identified
+    QUESTIONING = "questioning"        # Formalized as a research question
+    HYPOTHESIZED = "hypothesized"      # Hypothesis generated for this gap
+    UNDER_REVIEW = "under_review"      # Plausibility and novelty being assessed
+    PREDICTING = "predicting"          # Testable predictions registered
+    EXPERIMENTING = "experimenting"    # Experiments in progress
+    SUPPORTED = "supported"            # Evidence supports, not yet conclusive
+    REPLICATING = "replicating"        # Independent replication underway
+    ESTABLISHED = "established"        # Multiple independent lines of evidence confirm
+    FALSIFIED = "falsified"            # Critical prediction failed
+    ARCHIVED = "archived"              # No longer actively investigated
+
+
+class ResearchStrategyType(StrEnum):
+    """Pluggable research strategies that control how the epistemic
+    loop behaves.
+
+    The same runtime can pursue different cognitive strategies depending
+    on the research program's current needs::
+
+        EXPLORATION:           Maximize coverage of unknowns
+        VERIFICATION:          Focus on testing existing hypotheses
+        REPLICATION:           Independent reproduction of findings
+        OPTIMIZATION:          Improve known solutions
+        COUNTEREXAMPLE_SEARCH: Actively try to falsify the dominant hypothesis
+        LITERATURE_REVIEW:     Survey existing knowledge
+        BENCHMARKING:          Comparative evaluation against baselines
+    """
+
+    EXPLORATION = "exploration"
+    VERIFICATION = "verification"
+    REPLICATION = "replication"
+    OPTIMIZATION = "optimization"
+    COUNTEREXAMPLE_SEARCH = "counterexample_search"
+    LITERATURE_REVIEW = "literature_review"
+    BENCHMARKING = "benchmarking"
+    SYNTHESIS = "synthesis"
+    ABDUCTIVE = "abductive"
+    SYSTEMATIC = "systematic"
+
+
+class DiscoveryTrigger(StrEnum):
+    """Sources of epistemic investigation.
+
+    Many breakthroughs begin with anomalies, not contradictions.
+    Discovery triggers classify **why** an investigation was started,
+    enabling the curiosity engine to learn which trigger types yield
+    the highest-value discoveries::
+
+        CONTRADICTION:       Two claims conflict
+        ANOMALY:             Observation doesn't fit existing models
+        NOVEL_OBSERVATION:   Something genuinely new was observed
+        KNOWLEDGE_GAP:       Known unknown — we know what we don't know
+        UNEXPECTED_SUCCESS:  Something worked better than predicted
+        UNEXPECTED_FAILURE:  Something failed that should have succeeded
+        ANALOGY:             Cross-domain structural similarity detected
+        CURIOSITY:           Self-directed investigation (no external trigger)
+    """
+
+    CONTRADICTION = "contradiction"
+    ANOMALY = "anomaly"
+    NOVEL_OBSERVATION = "novel_observation"
+    KNOWLEDGE_GAP = "knowledge_gap"
+    UNEXPECTED_SUCCESS = "unexpected_success"
+    UNEXPECTED_FAILURE = "unexpected_failure"
+    ANALOGY = "analogy"
+    CURIOSITY = "curiosity"

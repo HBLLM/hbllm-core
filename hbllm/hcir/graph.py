@@ -34,15 +34,20 @@ from pydantic import BaseModel, Field
 
 from hbllm.hcir.types import (
     Attention,
+    BeliefConfidence,
     CognitiveMode,
     Confidence,
     CostMetric,
+    DiscoveryTrigger,
+    EpistemicLifecycle,
     EvidenceStrength,
     ExperimentRealityLevel,
     ExperimentStatus,
     FalsificationStatus,
+    KnowledgeValue,
     Priority,
     Provenance,
+    ResearchStrategyType,
     Scope,
     TimeDuration,
     UncertaintyVector,
@@ -76,6 +81,7 @@ class HCIRNodeType(StrEnum):
     CONTRADICTION = "contradiction"      # An identified contradiction between claims
     UNKNOWN = "unknown"                  # A knowledge gap — discovery starts here
     RESEARCH_PROGRAM = "research_program"  # A long-lived research program
+    RESEARCH_OBJECTIVE = "research_objective"  # A measurable objective under a program
 
     # --- Execution ---
     ACTION = "action"
@@ -299,6 +305,10 @@ class BeliefNode(HCIRNode):
     # Each entry: {"timestamp": float, "old_confidence": float,
     #              "new_confidence": float, "reason": str, "evidence_id": str}
 
+    # ── Multi-dimensional confidence & value ────────────────────────
+    belief_confidence: BeliefConfidence = Field(default_factory=BeliefConfidence)
+    knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
+
 
 class HypothesisNode(HCIRNode):
     """A candidate claim under evaluation — first-class cognitive entity.
@@ -323,6 +333,7 @@ class HypothesisNode(HCIRNode):
 
     # ── Scientific lifecycle ────────────────────────────────────────
     hypothesis_lifecycle: HypothesisLifecycle = HypothesisLifecycle.GENERATED
+    epistemic_lifecycle: EpistemicLifecycle = EpistemicLifecycle.HYPOTHESIZED
     falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
     novelty: Confidence = 0.5          # How novel is this hypothesis?
     plausibility: Confidence = 0.5     # How plausible given current evidence?
@@ -331,7 +342,9 @@ class HypothesisNode(HCIRNode):
     linked_predictions: list[str] = Field(default_factory=list)   # PredictionNode IDs
     linked_experiments: list[str] = Field(default_factory=list)   # ExperimentNode IDs
     origin: str = ""  # How was this hypothesis generated? (e.g., "analogy", "contradiction", "literature")
+    trigger: DiscoveryTrigger = DiscoveryTrigger.KNOWLEDGE_GAP  # What triggered this investigation?
     research_program_id: str = ""  # Parent research program, if any
+    knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
 
 
 class PredictionNode(HCIRNode):
@@ -623,11 +636,14 @@ class UnknownNode(HCIRNode):
     question: str = ""                # What don't we know?
     context: str = ""                 # What do we know around this gap?
     domain: str = ""                  # Knowledge domain
+    trigger: DiscoveryTrigger = DiscoveryTrigger.KNOWLEDGE_GAP  # What triggered this unknown?
     related_observations: list[str] = Field(default_factory=list)  # ObservationNode IDs
     related_hypotheses: list[str] = Field(default_factory=list)    # HypothesisNode IDs
     importance: Confidence = 0.5      # How important is filling this gap?
     estimated_difficulty: Confidence = 0.5  # How hard is this to resolve?
     research_program_id: str = ""     # Parent research program
+    objective_id: str = ""            # Parent research objective, if any
+    knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
 
 
 class ResearchProgramNode(HCIRNode):
@@ -661,9 +677,40 @@ class ResearchProgramNode(HCIRNode):
     unknown_ids: list[str] = Field(default_factory=list)
     finding_ids: list[str] = Field(default_factory=list)   # Concluded BeliefNode IDs
     contradiction_ids: list[str] = Field(default_factory=list)
+    objective_ids: list[str] = Field(default_factory=list)  # Research objectives
     overall_confidence: Confidence = 0.0  # How confident are we in conclusions?
+    current_strategy: ResearchStrategyType = ResearchStrategyType.EXPLORATION
     started_at: float = Field(default_factory=time.time)
     cognitive_mode: CognitiveMode = CognitiveMode.DISCOVERY
+
+
+class ResearchObjectiveNode(HCIRNode):
+    """A measurable research objective under a research program.
+
+    Research programs decompose into objectives, which decompose into
+    questions, which produce unknowns.  This hierarchy scales much
+    better than flat research questions::
+
+        ResearchProgram: "Reduce battery degradation"
+            │
+            ├── Objective: "Find dominant degradation mechanism"
+            │       ├── Question: "Why does degradation accelerate after 800 cycles?"
+            │       │       └── Unknown: "Electrolyte reaction?"
+            │       └── Question: "What role does temperature play?"
+            │               └── Unknown: "Non-linear thermal effects?"
+            │
+            └── Objective: "Develop mitigation strategy"
+                    └── Question: "Can charging profiles reduce degradation?"
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.RESEARCH_OBJECTIVE
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    objective: str = ""               # The measurable objective statement
+    program_id: str = ""              # Parent research program
+    question_ids: list[str] = Field(default_factory=list)  # Questions under this objective
+    success_criteria: str = ""        # How to determine if objective is met
+    progress: Confidence = 0.0        # [0.0, 1.0] progress toward success criteria
+    priority: Priority = 0.5          # Relative priority within program
 
 
 # ── World Model & Predictive Nodes ───────────────────────────────────────
@@ -726,6 +773,7 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.CONTRADICTION: ContradictionNode,
     HCIRNodeType.UNKNOWN: UnknownNode,
     HCIRNodeType.RESEARCH_PROGRAM: ResearchProgramNode,
+    HCIRNodeType.RESEARCH_OBJECTIVE: ResearchObjectiveNode,
     # --- Execution ---
     HCIRNodeType.ACTION: ActionNode,
     HCIRNodeType.EVENT: EventNode,

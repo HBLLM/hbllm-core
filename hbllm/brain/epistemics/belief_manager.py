@@ -39,7 +39,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.brain.discovery.interfaces import BeliefRevision, PredictionOutcome
+from hbllm.brain.epistemics.interfaces import BeliefRevision, PredictionOutcome
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
