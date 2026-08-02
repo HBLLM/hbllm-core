@@ -1,4 +1,4 @@
-"""Discovery Workspace — runtime container for long-lived research programs.
+"""Epistemic Workspace — runtime container for long-lived research programs.
 
 Provides the ``ResearchProgram`` (the cognitive object) and
 ``DiscoveryWorkspace`` (the runtime container that manages its lifecycle).
@@ -32,7 +32,7 @@ or memory system — it uses HCIR nodes in the shared graph.
 
 Usage::
 
-    from hbllm.brain.discovery.workspace import DiscoveryWorkspace
+    from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
 
     workspace = DiscoveryWorkspace(data_dir=Path("./research"))
     program = workspace.create_program(
@@ -67,10 +67,11 @@ from hbllm.hcir.graph import (
     HypothesisLifecycle,
     HypothesisNode,
     PredictionNode,
+    ResearchObjectiveNode,
     ResearchProgramNode,
     UnknownNode,
 )
-from hbllm.hcir.types import CognitiveMode, FalsificationStatus
+from hbllm.hcir.types import CognitiveMode, FalsificationStatus, ResearchStrategyType
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,10 @@ class ResearchProgram:
     finding_ids: list[str] = field(default_factory=list)
     contradiction_ids: list[str] = field(default_factory=list)
     prediction_ids: list[str] = field(default_factory=list)
+    objective_ids: list[str] = field(default_factory=list)
+
+    # Strategy
+    current_strategy: ResearchStrategyType = ResearchStrategyType.EXPLORATION
 
     # Timeline
     confidence_timeline: list[ConfidenceSnapshot] = field(default_factory=list)
@@ -184,6 +189,8 @@ class ResearchProgram:
             "finding_ids": self.finding_ids,
             "contradiction_ids": self.contradiction_ids,
             "prediction_ids": self.prediction_ids,
+            "objective_ids": self.objective_ids,
+            "current_strategy": self.current_strategy.value,
             "confidence_timeline": [
                 {
                     "timestamp": s.timestamp,
@@ -224,6 +231,10 @@ class ResearchProgram:
             finding_ids=d.get("finding_ids", []),
             contradiction_ids=d.get("contradiction_ids", []),
             prediction_ids=d.get("prediction_ids", []),
+            objective_ids=d.get("objective_ids", []),
+            current_strategy=ResearchStrategyType(
+                d.get("current_strategy", "exploration")
+            ),
             confidence_timeline=timeline,
             journal=journal,
             cognitive_mode=CognitiveMode(d.get("cognitive_mode", "discovery")),
@@ -335,6 +346,99 @@ class DiscoveryWorkspace:
         ))
         self._persist_program(program)
 
+    # ── Research Objectives ────────────────────────────────────────────
+
+    def add_objective(
+        self,
+        program_id: str,
+        objective: str,
+        success_criteria: str = "",
+        priority: float = 0.5,
+    ) -> str:
+        """Add a research objective to a program.
+
+        Research programs decompose into objectives, which decompose
+        into questions, which produce unknowns::
+
+            Program → Objectives → Questions → Unknowns → Hypotheses
+
+        Args:
+            program_id: The research program.
+            objective: The measurable objective statement.
+            success_criteria: How to determine if objective is met.
+            priority: Relative priority within program [0.0, 1.0].
+
+        Returns:
+            The ResearchObjectiveNode ID.
+        """
+        program = self._programs.get(program_id)
+        if program is None:
+            raise ValueError(f"Program not found: {program_id}")
+
+        obj_node = ResearchObjectiveNode(
+            objective=objective,
+            program_id=program_id,
+            success_criteria=success_criteria,
+            priority=priority,
+        )
+        self._graph.upsert_node(obj_node)
+        program.objective_ids.append(obj_node.id)
+        program.updated_at = time.time()
+
+        # Link program → objective in graph
+        self._graph.add_edge(HCIREdge(
+            sources=[program_id],
+            targets=[obj_node.id],
+            edge_type=HCIREdgeType.PART_OF,
+        ))
+
+        program.journal.append(JournalEntry(
+            event_type="objective_added",
+            description=f"Research objective added: {objective}",
+            related_node_ids=[obj_node.id],
+        ))
+
+        self._persist_program(program)
+        logger.info(
+            "Added objective to program %s: %s",
+            program_id, objective[:80],
+        )
+        return obj_node.id
+
+    def add_question(
+        self,
+        program_id: str,
+        objective_id: str,
+        question: str,
+        context: str = "",
+        domain: str = "",
+        importance: float = 0.5,
+    ) -> str:
+        """Add a research question under an objective.
+
+        This is a convenience method that creates an UnknownNode
+        linked to the specified objective.
+
+        Args:
+            program_id: The research program.
+            objective_id: The parent research objective.
+            question: The research question.
+            context: What we know around this gap.
+            domain: Knowledge domain.
+            importance: How important is this question? [0.0, 1.0]
+
+        Returns:
+            The UnknownNode ID.
+        """
+        return self.add_unknown(
+            program_id=program_id,
+            question=question,
+            context=context,
+            domain=domain,
+            importance=importance,
+            objective_id=objective_id,
+        )
+
     # ── Hypothesis Management ─────────────────────────────────────────
 
     def add_hypothesis(
@@ -414,8 +518,18 @@ class DiscoveryWorkspace:
         context: str = "",
         domain: str = "",
         importance: float = 0.5,
+        objective_id: str = "",
     ) -> str:
-        """Register a knowledge gap in a research program."""
+        """Register a knowledge gap in a research program.
+
+        Args:
+            program_id: The research program to add the unknown to.
+            question: What don't we know?
+            context: What do we know around this gap?
+            domain: Knowledge domain.
+            importance: How important is filling this gap? [0.0, 1.0]
+            objective_id: Optional parent research objective.
+        """
         program = self._programs.get(program_id)
         if program is None:
             raise ValueError(f"Program not found: {program_id}")
@@ -426,10 +540,18 @@ class DiscoveryWorkspace:
             domain=domain,
             importance=importance,
             research_program_id=program_id,
+            objective_id=objective_id,
         )
         self._graph.upsert_node(unknown)
         program.unknown_ids.append(unknown.id)
         program.updated_at = time.time()
+
+        # Link to objective if specified
+        if objective_id:
+            obj_node = self._graph.get_node(objective_id)
+            if isinstance(obj_node, ResearchObjectiveNode):
+                obj_node.question_ids.append(unknown.id)
+                self._graph.upsert_node(obj_node)
 
         program.journal.append(JournalEntry(
             event_type="unknown_registered",
