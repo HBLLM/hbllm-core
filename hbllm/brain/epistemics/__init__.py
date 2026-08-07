@@ -39,8 +39,6 @@ Design principles:
 
 # ── Wave 1: Epistemic Foundations ──────────────────────────────────────
 from hbllm.brain.epistemics.belief_manager import DiscoveryBeliefManager
-from hbllm.brain.epistemics.reputation import SourceReputation, SourceReputationTracker
-from hbllm.brain.epistemics.workspace import DiscoveryWorkspace, ResearchProgram
 
 # ── Wave 2: Epistemic Engines ─────────────────────────────────────────
 from hbllm.brain.epistemics.contradiction_engine import ContradictionEngine
@@ -51,25 +49,9 @@ from hbllm.brain.epistemics.experiment_planner import ExperimentPlanner
 from hbllm.brain.epistemics.explanation import ExplanationEngine
 from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
 from hbllm.brain.epistemics.idea_generator import IdeaGenerator
-from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
-from hbllm.brain.epistemics.research_strategy import (
-    ResearchStrategyManager,
-    StrategyConfig,
-)
 
 # ── Protocols ──────────────────────────────────────────────────────────
 from hbllm.brain.epistemics.interfaces import (
-    # Protocols
-    IBeliefReviser,
-    IContradictionSeeker,
-    ICuriosityEngine,
-    IEvidenceEvaluator,
-    IExperimentDesigner,
-    IExplanationEngine,
-    IHypothesisBuilder,
-    IIdeaGenerator,
-    IPredictionTracker,
-    ISourceReputationTracker,
     # Data types
     BeliefRevision,
     ContradictionReport,
@@ -80,10 +62,28 @@ from hbllm.brain.epistemics.interfaces import (
     ExplanationChain,
     ExplanationStep,
     HypothesisCandidate,
+    # Protocols
+    IBeliefReviser,
+    IContradictionSeeker,
+    ICuriosityEngine,
+    IEvidenceEvaluator,
+    IExperimentDesigner,
+    IExplanationEngine,
+    IHypothesisBuilder,
+    IIdeaGenerator,
     InvestigationBudget,
+    IPredictionTracker,
+    ISourceReputationTracker,
     PredictionOutcome,
     RawIdea,
 )
+from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
+from hbllm.brain.epistemics.reputation import SourceReputation, SourceReputationTracker
+from hbllm.brain.epistemics.research_strategy import (
+    ResearchStrategyManager,
+    StrategyConfig,
+)
+from hbllm.brain.epistemics.workspace import DiscoveryWorkspace, ResearchProgram
 
 __all__ = [
     # ── Wave 1: Foundations ────────────────────────────────────────

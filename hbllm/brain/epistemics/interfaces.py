@@ -35,7 +35,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Shared Data Types
 # ═══════════════════════════════════════════════════════════════════════════
@@ -62,12 +61,12 @@ class RawIdea:
     never promoted directly to HCIR nodes.
     """
 
-    claim: str = ""                    # The proposed explanation or mechanism
-    plausibility: float = 0.5          # Self-assessed plausibility (LLM estimate)
-    origin_trigger: str = ""           # DiscoveryTrigger value that spawned this
-    origin_id: str = ""                # ID of the node that triggered generation
-    reasoning: str = ""                # LLM's reasoning for this idea
-    domain: str = ""                   # Knowledge domain (if identifiable)
+    claim: str = ""  # The proposed explanation or mechanism
+    plausibility: float = 0.5  # Self-assessed plausibility (LLM estimate)
+    origin_trigger: str = ""  # DiscoveryTrigger value that spawned this
+    origin_id: str = ""  # ID of the node that triggered generation
+    reasoning: str = ""  # LLM's reasoning for this idea
+    domain: str = ""  # Knowledge domain (if identifiable)
 
 
 @dataclass
@@ -99,7 +98,7 @@ class ExperimentDesign:
     expected_outcomes: dict[str, str] = field(default_factory=dict)
     discriminating_power: float = 0.5
     estimated_cost: float = 0.0
-    expected_information_gain: float = 0.0   # Bayesian info gain estimate
+    expected_information_gain: float = 0.0  # Bayesian info gain estimate
     reality_level: str = "simulation"
     reasoning: str = ""  # Why this experiment was designed
 
@@ -139,13 +138,13 @@ class EvidenceAssessment:
     """
 
     evidence_id: str = ""
-    quality_score: float = 0.5         # Methodology + sample size + reproducibility
-    weight: float = 0.5                # Final weight for belief revision [0.0, 1.0]
+    quality_score: float = 0.5  # Methodology + sample size + reproducibility
+    weight: float = 0.5  # Final weight for belief revision [0.0, 1.0]
     bias_flags: list[str] = field(default_factory=list)  # e.g. "confirmation", "selection"
-    trust_adjustment: float = 1.0      # Source reputation multiplier
+    trust_adjustment: float = 1.0  # Source reputation multiplier
     reality_level_weight: float = 0.5  # Weight from experiment reality level
-    reproducibility_status: str = ""   # "not_attempted", "reproduced", "failed_replication"
-    reasoning: str = ""                # LLM explanation of assessment
+    reproducibility_status: str = ""  # "not_attempted", "reproduced", "failed_replication"
+    reasoning: str = ""  # LLM explanation of assessment
 
 
 @dataclass
@@ -157,14 +156,14 @@ class CuriositySignal:
     unexpected outcomes, or spontaneous scanning.
     """
 
-    unknown_id: str = ""               # Target UnknownNode (or "" if not yet created)
-    trigger: str = ""                  # DiscoveryTrigger value
-    source_engine: str = ""            # Which engine produced this signal
-    source_id: str = ""                # Source node ID (observation, contradiction, etc.)
-    estimated_info_gain: float = 0.5   # Expected information gain if investigated
-    estimated_impact: float = 0.5      # Potential impact of findings
-    estimated_cost: float = 0.0        # Expected investigation cost
-    description: str = ""              # Human-readable description of the signal
+    unknown_id: str = ""  # Target UnknownNode (or "" if not yet created)
+    trigger: str = ""  # DiscoveryTrigger value
+    source_engine: str = ""  # Which engine produced this signal
+    source_id: str = ""  # Source node ID (observation, contradiction, etc.)
+    estimated_info_gain: float = 0.5  # Expected information gain if investigated
+    estimated_impact: float = 0.5  # Potential impact of findings
+    estimated_cost: float = 0.0  # Expected investigation cost
+    description: str = ""  # Human-readable description of the signal
 
 
 @dataclass
@@ -175,12 +174,12 @@ class EpistemicTask:
     They are Message-based, enabling future swarm execution.
     """
 
-    task_type: str = ""                # "generate_ideas", "build_hypothesis", etc.
-    program_id: str = ""               # Research program context
+    task_type: str = ""  # "generate_ideas", "build_hypothesis", etc.
+    program_id: str = ""  # Research program context
     target_ids: list[str] = field(default_factory=list)  # Node IDs to operate on
     priority: float = 0.5
-    strategy: str = ""                 # ResearchStrategyType value
-    budget: float = 0.0                # Resource budget for this task
+    strategy: str = ""  # ResearchStrategyType value
+    budget: float = 0.0  # Resource budget for this task
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -205,11 +204,11 @@ class ExplanationStep:
     """A single step in an explanation chain."""
 
     node_id: str = ""
-    node_type: str = ""                # HCIRNodeType value
-    edge_type: str = ""                # HCIREdgeType value (from parent)
-    label: str = ""                    # Human-readable label
+    node_type: str = ""  # HCIRNodeType value
+    edge_type: str = ""  # HCIREdgeType value (from parent)
+    label: str = ""  # Human-readable label
     confidence_contribution: float = 0.0
-    source_uri: str = ""               # Provenance URI if available
+    source_uri: str = ""  # Provenance URI if available
 
 
 @dataclass
@@ -220,12 +219,12 @@ class InvestigationBudget:
     optimize Expected Value / Expected Cost, not just Information Gain.
     """
 
-    max_cpu_seconds: float = 60.0      # CPU time budget
-    max_llm_calls: int = 10            # LLM API call budget
+    max_cpu_seconds: float = 60.0  # CPU time budget
+    max_llm_calls: int = 10  # LLM API call budget
     max_wall_time_seconds: float = 300.0  # Wall-clock time budget
-    max_experiments: int = 5           # Maximum experiments to run
-    attention_cost: float = 0.1        # Human attention required [0=none, 1=full]
-    risk_tolerance: float = 0.5        # Acceptable risk level [0=none, 1=any]
+    max_experiments: int = 5  # Maximum experiments to run
+    attention_cost: float = 0.1  # Human attention required [0=none, 1=full]
+    risk_tolerance: float = 0.5  # Acceptable risk level [0=none, 1=any]
 
 
 # ═══════════════════════════════════════════════════════════════════════════

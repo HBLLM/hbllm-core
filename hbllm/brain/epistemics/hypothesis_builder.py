@@ -32,11 +32,7 @@ from typing import Any
 from hbllm.brain.epistemics.interfaces import HypothesisCandidate, RawIdea
 from hbllm.hcir.graph import (
     CognitiveGraph,
-    HCIREdge,
-    HCIREdgeType,
-    HCIRNodeType,
     HypothesisNode,
-    UnknownNode,
 )
 from hbllm.hcir.types import (
     DiscoveryTrigger,
@@ -118,26 +114,32 @@ class HypothesisBuilder:
             if plausibility < self._min_plausibility:
                 logger.debug(
                     "Idea rejected (low plausibility=%.2f): %s",
-                    plausibility, idea.claim[:60],
+                    plausibility,
+                    idea.claim[:60],
                 )
                 continue
 
             if testability < self._min_testability:
                 logger.debug(
                     "Idea rejected (low testability=%.2f): %s",
-                    testability, idea.claim[:60],
+                    testability,
+                    idea.claim[:60],
                 )
                 continue
 
-            candidates.append(HypothesisCandidate(
-                claim=idea.claim,
-                novelty=novelty,
-                plausibility=plausibility,
-                predicted_impact=impact,
-                testability=testability,
-                origin=idea.origin_trigger if isinstance(idea.origin_trigger, str) else str(idea.origin_trigger),
-                reasoning=idea.reasoning or scores.get("reasoning", ""),
-            ))
+            candidates.append(
+                HypothesisCandidate(
+                    claim=idea.claim,
+                    novelty=novelty,
+                    plausibility=plausibility,
+                    predicted_impact=impact,
+                    testability=testability,
+                    origin=idea.origin_trigger
+                    if isinstance(idea.origin_trigger, str)
+                    else str(idea.origin_trigger),
+                    reasoning=idea.reasoning or scores.get("reasoning", ""),
+                )
+            )
 
         # Sort by composite score (plausibility + novelty + impact)
         candidates.sort(
@@ -147,7 +149,8 @@ class HypothesisBuilder:
 
         logger.info(
             "Validated %d/%d ideas into candidates",
-            len(candidates), len(ideas),
+            len(candidates),
+            len(ideas),
         )
         return candidates
 
@@ -189,7 +192,9 @@ class HypothesisBuilder:
 
         logger.info(
             "Deduplicated %d/%d candidates (novel: %d)",
-            len(candidates) - len(novel), len(candidates), len(novel),
+            len(candidates) - len(novel),
+            len(candidates),
+            len(novel),
         )
         return novel
 
@@ -237,7 +242,9 @@ class HypothesisBuilder:
 
         logger.info(
             "Promoted hypothesis to graph: %s (id=%s, program=%s)",
-            candidate.claim[:60], node.id, program_id or "none",
+            candidate.claim[:60],
+            node.id,
+            program_id or "none",
         )
         return node.id
 
@@ -301,7 +308,9 @@ class HypothesisBuilder:
             return self._structural_score(idea)
 
     def _parse_scores(
-        self, text: str, idea: RawIdea,
+        self,
+        text: str,
+        idea: RawIdea,
     ) -> dict[str, Any]:
         """Parse LLM scoring response."""
         scores: dict[str, Any] = {
@@ -327,7 +336,8 @@ class HypothesisBuilder:
     # ── Deduplication ──────────────────────────────────────────────────
 
     def _get_existing_claims(
-        self, hypothesis_ids: list[str] | None,
+        self,
+        hypothesis_ids: list[str] | None,
     ) -> list[str]:
         """Collect existing hypothesis claims for deduplication."""
         claims: list[str] = []
@@ -346,7 +356,9 @@ class HypothesisBuilder:
         return claims
 
     async def _is_duplicate(
-        self, claim: str, existing: list[str],
+        self,
+        claim: str,
+        existing: list[str],
     ) -> bool:
         """Check if a claim is semantically similar to any existing claim."""
         if self._llm is not None:
@@ -365,7 +377,9 @@ class HypothesisBuilder:
         return False
 
     async def _llm_similarity_check(
-        self, claim: str, existing: list[str],
+        self,
+        claim: str,
+        existing: list[str],
     ) -> bool:
         """Use LLM to check semantic similarity."""
         existing_str = "\n".join(f"- {c}" for c in existing[:10])

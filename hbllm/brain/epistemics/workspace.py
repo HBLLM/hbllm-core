@@ -55,15 +55,12 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.hcir.graph import (
-    BeliefNode,
-    ClaimNode,
     CognitiveGraph,
     ContradictionNode,
     EvidenceNode,
     ExperimentNode,
     HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
     HypothesisLifecycle,
     HypothesisNode,
     PredictionNode,
@@ -232,9 +229,7 @@ class ResearchProgram:
             contradiction_ids=d.get("contradiction_ids", []),
             prediction_ids=d.get("prediction_ids", []),
             objective_ids=d.get("objective_ids", []),
-            current_strategy=ResearchStrategyType(
-                d.get("current_strategy", "exploration")
-            ),
+            current_strategy=ResearchStrategyType(d.get("current_strategy", "exploration")),
             confidence_timeline=timeline,
             journal=journal,
             cognitive_mode=CognitiveMode(d.get("cognitive_mode", "discovery")),
@@ -313,10 +308,12 @@ class DiscoveryWorkspace:
         self._graph.upsert_node(node)
 
         # Journal entry
-        program.journal.append(JournalEntry(
-            event_type="program_created",
-            description=f"Research program created: {title}",
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="program_created",
+                description=f"Research program created: {title}",
+            )
+        )
 
         self._persist_program(program)
         logger.info("Created research program: %s (%s)", title, program.program_id)
@@ -340,10 +337,12 @@ class DiscoveryWorkspace:
         old_status = program.status
         program.status = status
         program.updated_at = time.time()
-        program.journal.append(JournalEntry(
-            event_type="status_changed",
-            description=f"Status changed: {old_status} → {status}",
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="status_changed",
+                description=f"Status changed: {old_status} → {status}",
+            )
+        )
         self._persist_program(program)
 
     # ── Research Objectives ────────────────────────────────────────────
@@ -386,22 +385,27 @@ class DiscoveryWorkspace:
         program.updated_at = time.time()
 
         # Link program → objective in graph
-        self._graph.add_edge(HCIREdge(
-            sources=[program_id],
-            targets=[obj_node.id],
-            edge_type=HCIREdgeType.PART_OF,
-        ))
+        self._graph.add_edge(
+            HCIREdge(
+                sources=[program_id],
+                targets=[obj_node.id],
+                edge_type=HCIREdgeType.PART_OF,
+            )
+        )
 
-        program.journal.append(JournalEntry(
-            event_type="objective_added",
-            description=f"Research objective added: {objective}",
-            related_node_ids=[obj_node.id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="objective_added",
+                description=f"Research objective added: {objective}",
+                related_node_ids=[obj_node.id],
+            )
+        )
 
         self._persist_program(program)
         logger.info(
             "Added objective to program %s: %s",
-            program_id, objective[:80],
+            program_id,
+            objective[:80],
         )
         return obj_node.id
 
@@ -457,11 +461,13 @@ class DiscoveryWorkspace:
         program.updated_at = time.time()
 
         # Journal entry
-        program.journal.append(JournalEntry(
-            event_type="hypothesis_generated",
-            description=f"Hypothesis added: {hypothesis.claim}",
-            related_node_ids=[hypothesis.id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="hypothesis_generated",
+                description=f"Hypothesis added: {hypothesis.claim}",
+                related_node_ids=[hypothesis.id],
+            )
+        )
 
         self._persist_program(program)
         logger.info(
@@ -502,11 +508,13 @@ class DiscoveryWorkspace:
 
         self._graph.upsert_node(node)
 
-        program.journal.append(JournalEntry(
-            event_type="hypothesis_lifecycle_changed",
-            description=f"Hypothesis lifecycle: {old_lifecycle} → {new_lifecycle}. {reason}",
-            related_node_ids=[hypothesis_id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="hypothesis_lifecycle_changed",
+                description=f"Hypothesis lifecycle: {old_lifecycle} → {new_lifecycle}. {reason}",
+                related_node_ids=[hypothesis_id],
+            )
+        )
         self._persist_program(program)
 
     # ── Unknown Management ────────────────────────────────────────────
@@ -553,11 +561,13 @@ class DiscoveryWorkspace:
                 obj_node.question_ids.append(unknown.id)
                 self._graph.upsert_node(obj_node)
 
-        program.journal.append(JournalEntry(
-            event_type="unknown_registered",
-            description=f"Knowledge gap identified: {question}",
-            related_node_ids=[unknown.id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="unknown_registered",
+                description=f"Knowledge gap identified: {question}",
+                related_node_ids=[unknown.id],
+            )
+        )
 
         self._persist_program(program)
         logger.info("Registered unknown in program %s: %s", program_id, question[:80])
@@ -575,11 +585,13 @@ class DiscoveryWorkspace:
         if program is None:
             return
 
-        program.journal.append(JournalEntry(
-            event_type="unknown_resolved",
-            description=f"Knowledge gap resolved: {resolution}",
-            related_node_ids=[unknown_id, finding_id] if finding_id else [unknown_id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="unknown_resolved",
+                description=f"Knowledge gap resolved: {resolution}",
+                related_node_ids=[unknown_id, finding_id] if finding_id else [unknown_id],
+            )
+        )
         self._persist_program(program)
 
     # ── Evidence Management ───────────────────────────────────────────
@@ -598,11 +610,13 @@ class DiscoveryWorkspace:
         program.evidence_ids.append(evidence.id)
         program.updated_at = time.time()
 
-        program.journal.append(JournalEntry(
-            event_type="evidence_added",
-            description=f"Evidence added (strength={evidence.strength:.2f})",
-            related_node_ids=[evidence.id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="evidence_added",
+                description=f"Evidence added (strength={evidence.strength:.2f})",
+                related_node_ids=[evidence.id],
+            )
+        )
 
         self._persist_program(program)
         return evidence.id
@@ -624,11 +638,13 @@ class DiscoveryWorkspace:
         program.experiment_ids.append(experiment.id)
         program.updated_at = time.time()
 
-        program.journal.append(JournalEntry(
-            event_type="experiment_designed",
-            description=f"Experiment designed: {experiment.design[:80]}",
-            related_node_ids=[experiment.id] + experiment.hypothesis_ids,
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="experiment_designed",
+                description=f"Experiment designed: {experiment.design[:80]}",
+                related_node_ids=[experiment.id] + experiment.hypothesis_ids,
+            )
+        )
 
         self._persist_program(program)
         return experiment.id
@@ -649,11 +665,17 @@ class DiscoveryWorkspace:
         program.contradiction_ids.append(contradiction.id)
         program.updated_at = time.time()
 
-        program.journal.append(JournalEntry(
-            event_type="contradiction_found",
-            description=f"Contradiction discovered ({contradiction.contradiction_type})",
-            related_node_ids=[contradiction.id, contradiction.claim_a_id, contradiction.claim_b_id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="contradiction_found",
+                description=f"Contradiction discovered ({contradiction.contradiction_type})",
+                related_node_ids=[
+                    contradiction.id,
+                    contradiction.claim_a_id,
+                    contradiction.claim_b_id,
+                ],
+            )
+        )
 
         self._persist_program(program)
         logger.info("Contradiction found in program %s", program_id)
@@ -693,11 +715,13 @@ class DiscoveryWorkspace:
             except ValueError:
                 pass  # Edge already exists or dangling ref
 
-        program.journal.append(JournalEntry(
-            event_type="prediction_made",
-            description=f"Prediction: {prediction.predicted_outcome[:80]}",
-            related_node_ids=[prediction.id, prediction.hypothesis_id],
-        ))
+        program.journal.append(
+            JournalEntry(
+                event_type="prediction_made",
+                description=f"Prediction: {prediction.predicted_outcome[:80]}",
+                related_node_ids=[prediction.id, prediction.hypothesis_id],
+            )
+        )
 
         self._persist_program(program)
         return prediction.id
@@ -720,11 +744,7 @@ class DiscoveryWorkspace:
             if isinstance(node, HypothesisNode):
                 hyp_confidences[hid] = node.uncertainty.confidence
 
-        overall = (
-            sum(hyp_confidences.values()) / len(hyp_confidences)
-            if hyp_confidences
-            else 0.0
-        )
+        overall = sum(hyp_confidences.values()) / len(hyp_confidences) if hyp_confidences else 0.0
 
         snapshot = ConfidenceSnapshot(
             overall_confidence=overall,
@@ -769,11 +789,11 @@ class DiscoveryWorkspace:
 
         lines = [
             f"# Research Program: {program.title}",
-            f"",
+            "",
             f"**Question:** {program.research_question}",
             f"**Status:** {program.status}",
             f"**Created:** {time.strftime('%Y-%m-%d', time.localtime(program.created_at))}",
-            f"",
+            "",
             f"## Hypotheses ({len(program.hypothesis_ids)})",
         ]
 
@@ -785,20 +805,20 @@ class DiscoveryWorkspace:
                     f"(confidence={node.uncertainty.confidence:.2f})"
                 )
 
-        lines.append(f"")
+        lines.append("")
         lines.append(f"## Unknowns ({len(program.unknown_ids)})")
         for uid in program.unknown_ids:
             node = self._graph.get_node(uid)
             if isinstance(node, UnknownNode):
                 lines.append(f"- {node.question}")
 
-        lines.append(f"")
+        lines.append("")
         lines.append(f"## Evidence ({len(program.evidence_ids)})")
         lines.append(f"## Experiments ({len(program.experiment_ids)})")
         lines.append(f"## Contradictions ({len(program.contradiction_ids)})")
 
-        lines.append(f"")
-        lines.append(f"## Journal (last 10 entries)")
+        lines.append("")
+        lines.append("## Journal (last 10 entries)")
         for entry in program.journal[-10:]:
             ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(entry.timestamp))
             lines.append(f"- [{ts}] {entry.event_type}: {entry.description}")
@@ -835,9 +855,7 @@ class DiscoveryWorkspace:
     def _load_programs(self) -> None:
         try:
             with sqlite3.connect(self.db_path) as conn:
-                rows = conn.execute(
-                    "SELECT data FROM research_programs"
-                ).fetchall()
+                rows = conn.execute("SELECT data FROM research_programs").fetchall()
             for (data_json,) in rows:
                 d = json.loads(data_json)
                 program = ResearchProgram.from_dict(d)

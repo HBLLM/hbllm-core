@@ -11,7 +11,7 @@ Architecture::
 
     Claim from Source A → confirmed    → reputation ↑
     Claim from Source A → contradicted → reputation ↓
-    
+
     New claim from Source A:
         "Source A has 0.87 reputation → weight this claim higher"
 
@@ -21,15 +21,15 @@ Architecture::
 Usage::
 
     tracker = SourceReputationTracker(data_dir=Path("./research"))
-    
+
     # Record outcomes
     await tracker.record_outcome("arxiv:2301.12345", "claim_001", confirmed=True)
     await tracker.record_outcome("arxiv:2301.12345", "claim_002", confirmed=True)
     await tracker.record_outcome("blog:random", "claim_003", confirmed=False)
-    
+
     # Query reputation
     score = await tracker.get_reputation("arxiv:2301.12345")  # → 0.85
-    
+
     # Get top sources
     tops = await tracker.get_top_sources(domain="neuroscience")
 """
@@ -40,7 +40,6 @@ import json
 import logging
 import sqlite3
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,7 +68,7 @@ class SourceReputation:
 
     # Computed scores
     confirmation_rate: float = 0.5  # confirmed / total (smoothed)
-    reputation_score: float = 0.5   # Weighted reputation [0.0, 1.0]
+    reputation_score: float = 0.5  # Weighted reputation [0.0, 1.0]
 
     # History
     first_seen: float = field(default_factory=time.time)
@@ -183,9 +182,7 @@ class SourceReputationTracker:
         # Bayesian-smoothed confirmation rate
         alpha = self._config.smoothing_alpha
         beta = self._config.smoothing_beta
-        rep.confirmation_rate = (rep.confirmed_claims + alpha) / (
-            rep.total_claims + alpha + beta
-        )
+        rep.confirmation_rate = (rep.confirmed_claims + alpha) / (rep.total_claims + alpha + beta)
 
         # Reputation score — confirmation rate weighted by claim count confidence
         claim_confidence = min(
@@ -199,22 +196,26 @@ class SourceReputationTracker:
         )
 
         # Record history
-        rep.score_history.append({
-            "timestamp": time.time(),
-            "score": rep.reputation_score,
-            "reason": f"claim {claim_id} {'confirmed' if confirmed else 'refuted'}",
-        })
+        rep.score_history.append(
+            {
+                "timestamp": time.time(),
+                "score": rep.reputation_score,
+                "reason": f"claim {claim_id} {'confirmed' if confirmed else 'refuted'}",
+            }
+        )
         # Trim history
         if len(rep.score_history) > self._config.max_history_entries:
-            rep.score_history = rep.score_history[-self._config.max_history_entries:]
+            rep.score_history = rep.score_history[-self._config.max_history_entries :]
 
         self._cache[source_id] = rep
         self._persist(rep)
 
         logger.debug(
             "Source %s reputation: %.3f (confirmed=%d, refuted=%d)",
-            source_id, rep.reputation_score,
-            rep.confirmed_claims, rep.refuted_claims,
+            source_id,
+            rep.reputation_score,
+            rep.confirmed_claims,
+            rep.refuted_claims,
         )
         return rep
 
@@ -250,15 +251,11 @@ class SourceReputationTracker:
 
         # Only include sources with enough data
         qualified = [
-            r for r in all_reps
-            if r.total_claims >= self._config.min_claims_for_confidence
+            r for r in all_reps if r.total_claims >= self._config.min_claims_for_confidence
         ]
 
         qualified.sort(key=lambda r: r.reputation_score, reverse=True)
-        return [
-            (r.source_id, r.reputation_score)
-            for r in qualified[:limit]
-        ]
+        return [(r.source_id, r.reputation_score) for r in qualified[:limit]]
 
     async def get_unreliable_sources(
         self,
@@ -272,7 +269,8 @@ class SourceReputationTracker:
             all_reps = [r for r in all_reps if r.domain == domain]
 
         unreliable = [
-            r for r in all_reps
+            r
+            for r in all_reps
             if r.reputation_score < threshold
             and r.total_claims >= self._config.min_claims_for_confidence
         ]

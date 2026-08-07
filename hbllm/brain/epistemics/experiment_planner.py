@@ -32,15 +32,7 @@ from hbllm.brain.epistemics.interfaces import (
 )
 from hbllm.hcir.graph import (
     CognitiveGraph,
-    ExperimentNode,
-    HCIREdge,
-    HCIREdgeType,
-    HCIRNodeType,
     HypothesisNode,
-)
-from hbllm.hcir.types import (
-    ExperimentRealityLevel,
-    ExperimentStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,7 +98,8 @@ class ExperimentPlanner:
 
         # Estimate information gain
         design.expected_information_gain = self._estimate_info_gain(
-            hypotheses, design.discriminating_power,
+            hypotheses,
+            design.discriminating_power,
         )
 
         return design
@@ -120,6 +113,7 @@ class ExperimentPlanner:
         Integrates discovery economics — high-cost experiments with
         marginal info gain are ranked below cheaper alternatives.
         """
+
         def score(d: ExperimentDesign) -> float:
             info_gain = d.expected_information_gain or d.discriminating_power
             cost = max(0.01, d.estimated_cost)  # Prevent division by zero
@@ -134,13 +128,15 @@ class ExperimentPlanner:
         """Estimate the expected entropy reduction from an experiment."""
         hypotheses = self._load_hypotheses(design.hypothesis_ids)
         return self._estimate_info_gain(
-            hypotheses, design.discriminating_power,
+            hypotheses,
+            design.discriminating_power,
         )
 
     # ── Internal Methods ───────────────────────────────────────────────
 
     def _load_hypotheses(
-        self, hypothesis_ids: list[str],
+        self,
+        hypothesis_ids: list[str],
     ) -> list[HypothesisNode]:
         """Load hypothesis nodes from graph."""
         hypotheses: list[HypothesisNode] = []
@@ -170,9 +166,7 @@ class ExperimentPlanner:
         probs = [c / total for c in confidences]
 
         # Shannon entropy
-        entropy = -sum(
-            p * math.log2(p) if p > 0 else 0 for p in probs
-        )
+        entropy = -sum(p * math.log2(p) if p > 0 else 0 for p in probs)
         max_entropy = math.log2(len(hypotheses))
 
         if max_entropy == 0:
@@ -190,7 +184,7 @@ class ExperimentPlanner:
     ) -> ExperimentDesign:
         """Use LLM to design a discriminative experiment."""
         hyp_descriptions = "\n".join(
-            f"H{i+1} (confidence={h.uncertainty.confidence:.2f}): {h.claim}"
+            f"H{i + 1} (confidence={h.uncertainty.confidence:.2f}): {h.claim}"
             for i, h in enumerate(hypotheses)
         )
 
@@ -268,10 +262,7 @@ class ExperimentPlanner:
     ) -> ExperimentDesign:
         """Design a basic discriminative experiment template."""
         if len(hypotheses) == 1:
-            design = (
-                f"Test hypothesis by observing predicted outcomes: "
-                f"{hypotheses[0].claim[:100]}"
-            )
+            design = f"Test hypothesis by observing predicted outcomes: {hypotheses[0].claim[:100]}"
             disc_power = 0.4
         else:
             claims = " vs ".join(h.claim[:50] for h in hypotheses[:3])
@@ -281,10 +272,7 @@ class ExperimentPlanner:
             )
             disc_power = 0.5
 
-        expected_outcomes = {
-            h.id: f"Outcome consistent with: {h.claim[:50]}"
-            for h in hypotheses
-        }
+        expected_outcomes = {h.id: f"Outcome consistent with: {h.claim[:50]}" for h in hypotheses}
 
         return ExperimentDesign(
             hypothesis_ids=[h.id for h in hypotheses],

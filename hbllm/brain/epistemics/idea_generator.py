@@ -37,7 +37,6 @@ from hbllm.brain.epistemics.interfaces import RawIdea
 from hbllm.hcir.graph import (
     CognitiveGraph,
     ContradictionNode,
-    HCIRNodeType,
     ObservationNode,
     UnknownNode,
 )
@@ -142,13 +141,15 @@ class IdeaGenerator:
         """
         if self._llm is not None:
             return await self._llm_generate_from_analogy(
-                source_domain, target_domain, structural_pattern,
+                source_domain,
+                target_domain,
+                structural_pattern,
             )
 
         return [
             RawIdea(
                 claim=f"The pattern '{structural_pattern}' from "
-                      f"{source_domain} may apply to {target_domain}",
+                f"{source_domain} may apply to {target_domain}",
                 plausibility=0.4,
                 origin_trigger=DiscoveryTrigger.ANALOGY,
                 reasoning="Cross-domain structural transfer (template)",
@@ -207,7 +208,9 @@ class IdeaGenerator:
         )
 
         return await self._parse_llm_response(
-            prompt, DiscoveryTrigger.KNOWLEDGE_GAP, node.id,
+            prompt,
+            DiscoveryTrigger.KNOWLEDGE_GAP,
+            node.id,
         )
 
     async def _llm_generate_from_contradiction(
@@ -235,7 +238,9 @@ class IdeaGenerator:
         )
 
         return await self._parse_llm_response(
-            prompt, DiscoveryTrigger.CONTRADICTION, node.id,
+            prompt,
+            DiscoveryTrigger.CONTRADICTION,
+            node.id,
         )
 
     async def _llm_generate_from_analogy(
@@ -257,7 +262,9 @@ class IdeaGenerator:
         )
 
         return await self._parse_llm_response(
-            prompt, DiscoveryTrigger.ANALOGY, "",
+            prompt,
+            DiscoveryTrigger.ANALOGY,
+            "",
         )
 
     async def _llm_generate_from_anomaly(
@@ -279,7 +286,9 @@ class IdeaGenerator:
         )
 
         return await self._parse_llm_response(
-            prompt, DiscoveryTrigger.ANOMALY, node.id,
+            prompt,
+            DiscoveryTrigger.ANOMALY,
+            node.id,
         )
 
     async def _parse_llm_response(
@@ -323,22 +332,25 @@ class IdeaGenerator:
                         reasoning = part[10:].strip()
 
                 if claim:
-                    ideas.append(RawIdea(
-                        claim=claim,
-                        plausibility=plausibility,
-                        origin_trigger=trigger,
-                        origin_id=origin_id,
-                        reasoning=reasoning,
-                    ))
+                    ideas.append(
+                        RawIdea(
+                            claim=claim,
+                            plausibility=plausibility,
+                            origin_trigger=trigger,
+                            origin_id=origin_id,
+                            reasoning=reasoning,
+                        )
+                    )
             except Exception:
                 continue
 
-        return ideas[:self._max_ideas]
+        return ideas[: self._max_ideas]
 
     # ── Template-Based Fallback ────────────────────────────────────────
 
     def _template_generate_from_unknown(
-        self, node: UnknownNode,
+        self,
+        node: UnknownNode,
     ) -> list[RawIdea]:
         """Generate structural ideas without LLM."""
         ideas = []
@@ -347,34 +359,38 @@ class IdeaGenerator:
         for obs_id in node.related_observations[:3]:
             obs = self._graph.get_node(obs_id)
             if obs is not None:
-                ideas.append(RawIdea(
-                    claim=f"The observation '{obs_id}' may directly "
-                          f"explain: {node.question}",
-                    plausibility=0.3,
-                    origin_trigger=DiscoveryTrigger.KNOWLEDGE_GAP,
-                    origin_id=node.id,
-                    reasoning="Direct observation-to-question link (template)",
-                ))
+                ideas.append(
+                    RawIdea(
+                        claim=f"The observation '{obs_id}' may directly explain: {node.question}",
+                        plausibility=0.3,
+                        origin_trigger=DiscoveryTrigger.KNOWLEDGE_GAP,
+                        origin_id=node.id,
+                        reasoning="Direct observation-to-question link (template)",
+                    )
+                )
 
         # Default structural ideas
-        ideas.append(RawIdea(
-            claim=f"An unknown mechanism may explain: {node.question}",
-            plausibility=0.3,
-            origin_trigger=DiscoveryTrigger.KNOWLEDGE_GAP,
-            origin_id=node.id,
-            reasoning="Default gap-filling hypothesis (template)",
-        ))
+        ideas.append(
+            RawIdea(
+                claim=f"An unknown mechanism may explain: {node.question}",
+                plausibility=0.3,
+                origin_trigger=DiscoveryTrigger.KNOWLEDGE_GAP,
+                origin_id=node.id,
+                reasoning="Default gap-filling hypothesis (template)",
+            )
+        )
 
         return ideas
 
     def _template_generate_from_contradiction(
-        self, node: ContradictionNode,
+        self,
+        node: ContradictionNode,
     ) -> list[RawIdea]:
         """Generate structural ideas from contradiction topology."""
         return [
             RawIdea(
                 claim="A hidden variable may explain the contradiction "
-                      f"between {node.claim_a_id} and {node.claim_b_id}",
+                f"between {node.claim_a_id} and {node.claim_b_id}",
                 plausibility=0.4,
                 origin_trigger=DiscoveryTrigger.CONTRADICTION,
                 origin_id=node.id,
@@ -382,7 +398,7 @@ class IdeaGenerator:
             ),
             RawIdea(
                 claim="The contradiction may be context-dependent — "
-                      "both claims could be true under different conditions",
+                "both claims could be true under different conditions",
                 plausibility=0.4,
                 origin_trigger=DiscoveryTrigger.CONTRADICTION,
                 origin_id=node.id,
@@ -391,7 +407,8 @@ class IdeaGenerator:
         ]
 
     def _template_generate_from_anomaly(
-        self, node: ObservationNode,
+        self,
+        node: ObservationNode,
     ) -> list[RawIdea]:
         """Generate structural ideas from anomalous observation."""
         return [
@@ -404,7 +421,7 @@ class IdeaGenerator:
             ),
             RawIdea(
                 claim=f"The anomaly in {node.id} may indicate a genuinely "
-                      "novel mechanism not captured by existing models",
+                "novel mechanism not captured by existing models",
                 plausibility=0.3,
                 origin_trigger=DiscoveryTrigger.ANOMALY,
                 origin_id=node.id,

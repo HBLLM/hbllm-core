@@ -34,7 +34,6 @@ Design principle: "Evolve existing cognition, don't build a second brain."
 from __future__ import annotations
 
 import logging
-import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,8 +45,6 @@ from hbllm.hcir.graph import (
     HCIREdge,
     HCIREdgeType,
     HCIRNodeType,
-    HypothesisNode,
-    PredictionNode,
 )
 from hbllm.hcir.types import FalsificationStatus
 
@@ -86,14 +83,16 @@ class BayesianConfig:
     corroboration_threshold: float = 0.7
 
     # Evidence strength weights (maps EvidenceStrength to multiplier)
-    strength_weights: dict[str, float] = field(default_factory=lambda: {
-        "anecdotal": 0.3,
-        "observational": 0.5,
-        "correlational": 0.7,
-        "experimental": 0.9,
-        "meta_analytic": 0.95,
-        "replicated": 1.0,
-    })
+    strength_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "anecdotal": 0.3,
+            "observational": 0.5,
+            "correlational": 0.7,
+            "experimental": 0.9,
+            "meta_analytic": 0.95,
+            "replicated": 1.0,
+        }
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -224,13 +223,16 @@ class DiscoveryBeliefManager:
             old_confidence=old_confidence,
             new_confidence=new_confidence,
             reason=f"{direction} evidence ({evidence_strength}), "
-                   f"δ={new_confidence - old_confidence:+.4f}",
+            f"δ={new_confidence - old_confidence:+.4f}",
             evidence_id=evidence_id,
         )
 
         logger.debug(
             "Belief %s revised: %.3f → %.3f (%s)",
-            belief_id, old_confidence, new_confidence, direction,
+            belief_id,
+            old_confidence,
+            new_confidence,
+            direction,
         )
         return revision
 
@@ -281,13 +283,15 @@ class DiscoveryBeliefManager:
             node.falsification_status = FalsificationStatus.CORROBORATED
 
         # Record revision
-        node.revision_history.append({
-            "timestamp": time.time(),
-            "old_confidence": old_confidence,
-            "new_confidence": new_confidence,
-            "reason": reason,
-            "evidence_id": prediction_outcome.prediction_id,
-        })
+        node.revision_history.append(
+            {
+                "timestamp": time.time(),
+                "old_confidence": old_confidence,
+                "new_confidence": new_confidence,
+                "reason": reason,
+                "evidence_id": prediction_outcome.prediction_id,
+            }
+        )
 
         self._graph.upsert_node(node)
 
