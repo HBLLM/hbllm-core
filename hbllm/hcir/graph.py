@@ -75,11 +75,11 @@ class HCIRNodeType(StrEnum):
     PREDICTION_ERROR = "prediction_error"
 
     # --- Discovery & Epistemic ---
-    EVIDENCE = "evidence"                # Structured evidence unit with provenance
-    CLAIM = "claim"                      # A testable assertion from any source
-    EXPERIMENT = "experiment"            # A designed experiment to test hypotheses
-    CONTRADICTION = "contradiction"      # An identified contradiction between claims
-    UNKNOWN = "unknown"                  # A knowledge gap — discovery starts here
+    EVIDENCE = "evidence"  # Structured evidence unit with provenance
+    CLAIM = "claim"  # A testable assertion from any source
+    EXPERIMENT = "experiment"  # A designed experiment to test hypotheses
+    CONTRADICTION = "contradiction"  # An identified contradiction between claims
+    UNKNOWN = "unknown"  # A knowledge gap — discovery starts here
     RESEARCH_PROGRAM = "research_program"  # A long-lived research program
     RESEARCH_OBJECTIVE = "research_objective"  # A measurable objective under a program
 
@@ -128,14 +128,14 @@ class HCIREdgeType(StrEnum):
     PART_OF = "part_of"
 
     # Epistemic relations — scientific reasoning edges
-    FALSIFIES = "falsifies"          # Evidence that disproves a hypothesis
-    PREDICTS = "predicts"            # Hypothesis predicts an outcome
-    TESTS = "tests"                  # Experiment tests a hypothesis
-    REPLICATES = "replicates"        # Experiment reproduces another
-    ANALOGOUS_TO = "analogous_to"    # Structural similarity across domains
-    STRENGTHENS = "strengthens"      # Evidence that increases confidence
-    WEAKENS = "weakens"              # Evidence that decreases confidence
-    REFINES = "refines"              # Hypothesis refines another
+    FALSIFIES = "falsifies"  # Evidence that disproves a hypothesis
+    PREDICTS = "predicts"  # Hypothesis predicts an outcome
+    TESTS = "tests"  # Experiment tests a hypothesis
+    REPLICATES = "replicates"  # Experiment reproduces another
+    ANALOGOUS_TO = "analogous_to"  # Structural similarity across domains
+    STRENGTHENS = "strengthens"  # Evidence that increases confidence
+    WEAKENS = "weakens"  # Evidence that decreases confidence
+    REFINES = "refines"  # Hypothesis refines another
 
 
 class CognitiveCategory(StrEnum):
@@ -187,15 +187,15 @@ class HypothesisLifecycle(StrEnum):
                                        → STRENGTHENED ↗
     """
 
-    GENERATED = "generated"        # Just created, not yet evaluated
-    EVALUATED = "evaluated"        # Assessed for plausibility and testability
-    TESTED = "tested"              # At least one experiment has been run
-    SUPPORTED = "supported"        # Evidence supports, not yet conclusive
+    GENERATED = "generated"  # Just created, not yet evaluated
+    EVALUATED = "evaluated"  # Assessed for plausibility and testability
+    TESTED = "tested"  # At least one experiment has been run
+    SUPPORTED = "supported"  # Evidence supports, not yet conclusive
     STRENGTHENED = "strengthened"  # Multiple lines of evidence confirm
-    WEAKENED = "weakened"          # Some counter-evidence found
-    FALSIFIED = "falsified"        # Critical prediction failed
-    SUPERSEDED = "superseded"      # Replaced by a better hypothesis
-    ARCHIVED = "archived"          # No longer actively investigated
+    WEAKENED = "weakened"  # Some counter-evidence found
+    FALSIFIED = "falsified"  # Critical prediction failed
+    SUPERSEDED = "superseded"  # Replaced by a better hypothesis
+    ARCHIVED = "archived"  # No longer actively investigated
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -335,13 +335,15 @@ class HypothesisNode(HCIRNode):
     hypothesis_lifecycle: HypothesisLifecycle = HypothesisLifecycle.GENERATED
     epistemic_lifecycle: EpistemicLifecycle = EpistemicLifecycle.HYPOTHESIZED
     falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
-    novelty: Confidence = 0.5          # How novel is this hypothesis?
-    plausibility: Confidence = 0.5     # How plausible given current evidence?
+    novelty: Confidence = 0.5  # How novel is this hypothesis?
+    plausibility: Confidence = 0.5  # How plausible given current evidence?
     predicted_impact: Confidence = 0.5  # Expected impact if confirmed
-    testability: Confidence = 0.5      # How easily can this be tested?
-    linked_predictions: list[str] = Field(default_factory=list)   # PredictionNode IDs
-    linked_experiments: list[str] = Field(default_factory=list)   # ExperimentNode IDs
-    origin: str = ""  # How was this hypothesis generated? (e.g., "analogy", "contradiction", "literature")
+    testability: Confidence = 0.5  # How easily can this be tested?
+    linked_predictions: list[str] = Field(default_factory=list)  # PredictionNode IDs
+    linked_experiments: list[str] = Field(default_factory=list)  # ExperimentNode IDs
+    origin: str = (
+        ""  # How was this hypothesis generated? (e.g., "analogy", "contradiction", "literature")
+    )
     trigger: DiscoveryTrigger = DiscoveryTrigger.KNOWLEDGE_GAP  # What triggered this investigation?
     research_program_id: str = ""  # Parent research program, if any
     knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
@@ -364,9 +366,9 @@ class PredictionNode(HCIRNode):
     time_horizon_ms: TimeDuration = 0
 
     # ── Verification ────────────────────────────────────────────────
-    hypothesis_id: str = ""            # Which hypothesis generated this prediction?
-    observed_outcome: str = ""         # What actually happened?
-    verified: bool = False             # Has this prediction been checked?
+    hypothesis_id: str = ""  # Which hypothesis generated this prediction?
+    observed_outcome: str = ""  # What actually happened?
+    verified: bool = False  # Has this prediction been checked?
     verification_timestamp: float = 0.0
     prediction_correct: bool | None = None  # None = unverified, True/False = result
 
@@ -531,15 +533,15 @@ class EvidenceNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.EVIDENCE
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    claim_id: str = ""                # Which claim does this evidence support/refute?
+    claim_id: str = ""  # Which claim does this evidence support/refute?
     evidence_type: EvidenceStrength = EvidenceStrength.OBSERVATIONAL
-    strength: Confidence = 0.5        # Quantitative strength [0.0, 1.0]
-    source_uri: str = ""              # Paper DOI, dataset URL, experiment ID, etc.
-    methodology: str = ""             # How was this evidence produced?
+    strength: Confidence = 0.5  # Quantitative strength [0.0, 1.0]
+    source_uri: str = ""  # Paper DOI, dataset URL, experiment ID, etc.
+    methodology: str = ""  # How was this evidence produced?
     limitations: list[str] = Field(default_factory=list)
     dataset_refs: list[str] = Field(default_factory=list)
-    reproducible: bool = False        # Has this been independently reproduced?
-    sample_size: int | None = None    # Statistical sample size, if applicable
+    reproducible: bool = False  # Has this been independently reproduced?
+    sample_size: int | None = None  # Statistical sample size, if applicable
     effect_size: float | None = None  # Measured effect size, if applicable
 
 
@@ -553,13 +555,13 @@ class ClaimNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.CLAIM
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    statement: str = ""               # The claim text
-    source_uri: str = ""              # Where this claim came from
-    source_type: str = ""             # "paper", "observation", "simulation", "expert", "inference"
+    statement: str = ""  # The claim text
+    source_uri: str = ""  # Where this claim came from
+    source_type: str = ""  # "paper", "observation", "simulation", "expert", "inference"
     extracted_at: float = 0.0
     supporting_evidence_ids: list[str] = Field(default_factory=list)
     contradicting_evidence_ids: list[str] = Field(default_factory=list)
-    domain: str = ""                  # Knowledge domain
+    domain: str = ""  # Knowledge domain
 
 
 class ExperimentNode(HCIRNode):
@@ -577,16 +579,18 @@ class ExperimentNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.EXPERIMENT
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
     hypothesis_ids: list[str] = Field(default_factory=list)  # Hypotheses being tested
-    design: str = ""                  # Experiment protocol description
-    variables: dict[str, Any] = Field(default_factory=dict)   # Independent/dependent vars
-    controls: list[str] = Field(default_factory=list)         # Control conditions
-    expected_outcomes: dict[str, str] = Field(default_factory=dict)  # hypothesis_id → predicted outcome
-    actual_outcome: str = ""          # What actually happened
+    design: str = ""  # Experiment protocol description
+    variables: dict[str, Any] = Field(default_factory=dict)  # Independent/dependent vars
+    controls: list[str] = Field(default_factory=list)  # Control conditions
+    expected_outcomes: dict[str, str] = Field(
+        default_factory=dict
+    )  # hypothesis_id → predicted outcome
+    actual_outcome: str = ""  # What actually happened
     reality_level: ExperimentRealityLevel = ExperimentRealityLevel.SIMULATION
     experiment_status: ExperimentStatus = ExperimentStatus.DESIGNED
-    discriminating_power: Confidence = 0.5   # How well does this distinguish hypotheses?
-    resource_cost: float = 0.0        # Estimated resource cost
-    research_program_id: str = ""     # Parent research program
+    discriminating_power: Confidence = 0.5  # How well does this distinguish hypotheses?
+    resource_cost: float = 0.0  # Estimated resource cost
+    research_program_id: str = ""  # Parent research program
 
 
 class ContradictionNode(HCIRNode):
@@ -602,9 +606,9 @@ class ContradictionNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.CONTRADICTION
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    claim_a_id: str = ""              # First conflicting claim/evidence
-    claim_b_id: str = ""              # Second conflicting claim/evidence
-    contradiction_type: str = ""      # "direct", "statistical", "methodological", "contextual"
+    claim_a_id: str = ""  # First conflicting claim/evidence
+    claim_b_id: str = ""  # Second conflicting claim/evidence
+    contradiction_type: str = ""  # "direct", "statistical", "methodological", "contextual"
     possible_explanations: list[str] = Field(default_factory=list)
     resolution_status: str = "unresolved"  # "unresolved", "explained", "resolved", "accepted"
     investigation_priority: Confidence = 0.5
@@ -633,16 +637,16 @@ class UnknownNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.UNKNOWN
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    question: str = ""                # What don't we know?
-    context: str = ""                 # What do we know around this gap?
-    domain: str = ""                  # Knowledge domain
+    question: str = ""  # What don't we know?
+    context: str = ""  # What do we know around this gap?
+    domain: str = ""  # Knowledge domain
     trigger: DiscoveryTrigger = DiscoveryTrigger.KNOWLEDGE_GAP  # What triggered this unknown?
     related_observations: list[str] = Field(default_factory=list)  # ObservationNode IDs
-    related_hypotheses: list[str] = Field(default_factory=list)    # HypothesisNode IDs
-    importance: Confidence = 0.5      # How important is filling this gap?
+    related_hypotheses: list[str] = Field(default_factory=list)  # HypothesisNode IDs
+    importance: Confidence = 0.5  # How important is filling this gap?
     estimated_difficulty: Confidence = 0.5  # How hard is this to resolve?
-    research_program_id: str = ""     # Parent research program
-    objective_id: str = ""            # Parent research objective, if any
+    research_program_id: str = ""  # Parent research program
+    objective_id: str = ""  # Parent research objective, if any
     knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
 
 
@@ -668,14 +672,14 @@ class ResearchProgramNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.RESEARCH_PROGRAM
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
     title: str = ""
-    research_question: str = ""       # The central question
+    research_question: str = ""  # The central question
     description: str = ""
-    status: str = "active"            # "active", "paused", "completed", "abandoned"
+    status: str = "active"  # "active", "paused", "completed", "abandoned"
     hypothesis_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     experiment_ids: list[str] = Field(default_factory=list)
     unknown_ids: list[str] = Field(default_factory=list)
-    finding_ids: list[str] = Field(default_factory=list)   # Concluded BeliefNode IDs
+    finding_ids: list[str] = Field(default_factory=list)  # Concluded BeliefNode IDs
     contradiction_ids: list[str] = Field(default_factory=list)
     objective_ids: list[str] = Field(default_factory=list)  # Research objectives
     overall_confidence: Confidence = 0.0  # How confident are we in conclusions?
@@ -705,12 +709,12 @@ class ResearchObjectiveNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.RESEARCH_OBJECTIVE
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    objective: str = ""               # The measurable objective statement
-    program_id: str = ""              # Parent research program
+    objective: str = ""  # The measurable objective statement
+    program_id: str = ""  # Parent research program
     question_ids: list[str] = Field(default_factory=list)  # Questions under this objective
-    success_criteria: str = ""        # How to determine if objective is met
-    progress: Confidence = 0.0        # [0.0, 1.0] progress toward success criteria
-    priority: Priority = 0.5          # Relative priority within program
+    success_criteria: str = ""  # How to determine if objective is met
+    progress: Confidence = 0.0  # [0.0, 1.0] progress toward success criteria
+    priority: Priority = 0.5  # Relative priority within program
 
 
 # ── World Model & Predictive Nodes ───────────────────────────────────────

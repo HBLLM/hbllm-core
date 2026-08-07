@@ -62,17 +62,15 @@ from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
 from hbllm.brain.epistemics.idea_generator import IdeaGenerator
 from hbllm.brain.epistemics.interfaces import (
     CuriositySignal,
-    EpistemicTask,
     InvestigationBudget,
 )
 from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
 from hbllm.brain.epistemics.research_strategy import (
     ResearchStrategyManager,
-    StrategyConfig,
 )
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
 from hbllm.hcir.graph import CognitiveGraph
-from hbllm.hcir.types import DiscoveryTrigger, ResearchStrategyType
+from hbllm.hcir.types import DiscoveryTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -194,9 +192,7 @@ class EpistemicLoop:
             # Step 1: Check expired predictions
             expired = await self._prediction_tracker.check_expired_predictions()
             if expired:
-                results.append(
-                    f"Checked {len(expired)} expired predictions"
-                )
+                results.append(f"Checked {len(expired)} expired predictions")
 
             # Step 2: Scan for curiosity signals
             signals = await self._curiosity.prioritize_investigations(
@@ -210,7 +206,7 @@ class EpistemicLoop:
 
             # Step 3: Investigate top signals
             investigated = 0
-            for signal in signals[:self._max_investigations]:
+            for signal in signals[: self._max_investigations]:
                 try:
                     result = await self._investigate_signal(signal)
                     if result:
@@ -219,23 +215,21 @@ class EpistemicLoop:
                 except Exception as exc:
                     logger.warning(
                         "Investigation failed for %s: %s",
-                        signal.source_id, exc,
+                        signal.source_id,
+                        exc,
                     )
 
             # Step 4: Generate spontaneous unknowns
             new_unknowns = await self._curiosity.generate_spontaneous_unknowns()
             if new_unknowns:
                 results.append(
-                    f"Generated {len(new_unknowns)} spontaneous unknowns "
-                    f"from uncertainty hotspots"
+                    f"Generated {len(new_unknowns)} spontaneous unknowns from uncertainty hotspots"
                 )
 
             # Step 5: Scan for contradictions
             contradictions = await self._contradiction_engine.scan_for_contradictions()
             if contradictions:
-                results.append(
-                    f"Found {len(contradictions)} potential contradictions"
-                )
+                results.append(f"Found {len(contradictions)} potential contradictions")
 
         except Exception as exc:
             logger.error("Epistemic cycle #%d failed: %s", self._cycle_count, exc)
@@ -244,7 +238,9 @@ class EpistemicLoop:
         self._last_cycle_time = time.time() - cycle_start
         logger.info(
             "Epistemic cycle #%d completed in %.2fs (%d results)",
-            self._cycle_count, self._last_cycle_time, len(results),
+            self._cycle_count,
+            self._last_cycle_time,
+            len(results),
         )
 
         if not results:
@@ -255,8 +251,10 @@ class EpistemicLoop:
             messages = []
             for result in results:
                 msg = Message(
+                    type=MessageType.EVENT,
+                    source_node_id="epistemic_loop",
+                    topic="epistemic_cycle",
                     content=result,
-                    msg_type=MessageType.INTERNAL,
                     metadata={"source": "epistemic_loop", "cycle": self._cycle_count},
                 )
                 messages.append(msg)
@@ -279,7 +277,8 @@ class EpistemicLoop:
         source_id = signal.source_id or signal.unknown_id
         logger.debug(
             "Investigating: %s (trigger=%s)",
-            signal.description[:60], signal.trigger,
+            signal.description[:60],
+            signal.trigger,
         )
 
         # Step 1: Generate ideas
@@ -292,8 +291,7 @@ class EpistemicLoop:
         novel = await self._hypothesis_builder.deduplicate(candidates)
 
         if not novel:
-            return f"Investigated {signal.description[:60]}: " \
-                   f"{len(ideas)} ideas, none novel"
+            return f"Investigated {signal.description[:60]}: {len(ideas)} ideas, none novel"
 
         # Step 3: Promote to graph nodes
         promoted_ids: list[str] = []
@@ -302,7 +300,8 @@ class EpistemicLoop:
         for candidate in novel[:3]:  # Max 3 hypotheses per signal
             try:
                 node_id = await self._hypothesis_builder.promote_to_node(
-                    candidate, program_id,
+                    candidate,
+                    program_id,
                 )
                 promoted_ids.append(node_id)
             except Exception as exc:
@@ -351,17 +350,25 @@ class EpistemicLoop:
                     signal.unknown_id,
                 )
             # If source is a hypothesis, generate from its uncertainty
-            return await self._idea_generator.generate_from_unknown(
-                source_id,
-            ) if source_id else []
+            return (
+                await self._idea_generator.generate_from_unknown(
+                    source_id,
+                )
+                if source_id
+                else []
+            )
 
         elif trigger in (
             "contradiction",
             str(DiscoveryTrigger.CONTRADICTION),
         ):
-            return await self._idea_generator.generate_from_contradiction(
-                source_id,
-            ) if source_id else []
+            return (
+                await self._idea_generator.generate_from_contradiction(
+                    source_id,
+                )
+                if source_id
+                else []
+            )
 
         elif trigger in (
             "anomaly",
@@ -371,9 +378,13 @@ class EpistemicLoop:
             "unexpected_success",
             str(DiscoveryTrigger.UNEXPECTED_SUCCESS),
         ):
-            return await self._idea_generator.generate_from_anomaly(
-                source_id,
-            ) if source_id else []
+            return (
+                await self._idea_generator.generate_from_anomaly(
+                    source_id,
+                )
+                if source_id
+                else []
+            )
 
         else:
             # Default: try to generate from unknown

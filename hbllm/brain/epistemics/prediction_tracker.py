@@ -36,11 +36,9 @@ from typing import Any
 
 from hbllm.brain.epistemics.interfaces import PredictionOutcome
 from hbllm.hcir.graph import (
-    BeliefNode,
     CognitiveGraph,
     HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
     HypothesisNode,
     PredictionNode,
 )
@@ -106,11 +104,13 @@ class PredictionTracker:
         self._graph.upsert_node(node)
 
         # Link hypothesis → prediction
-        self._graph.add_edge(HCIREdge(
-            sources=[hypothesis_id],
-            targets=[node.id],
-            edge_type=HCIREdgeType.PREDICTS,
-        ))
+        self._graph.add_edge(
+            HCIREdge(
+                sources=[hypothesis_id],
+                targets=[node.id],
+                edge_type=HCIREdgeType.PREDICTS,
+            )
+        )
 
         # Also link to hypothesis node's linked_predictions
         hyp_node = self._graph.get_node(hypothesis_id)
@@ -120,7 +120,8 @@ class PredictionTracker:
 
         logger.info(
             "Registered prediction for hypothesis %s: %s",
-            hypothesis_id, prediction_claim[:60],
+            hypothesis_id,
+            prediction_claim[:60],
         )
         return node.id
 
@@ -191,7 +192,9 @@ class PredictionTracker:
         # Update hypothesis confidence
         if hypothesis_id:
             await self._update_hypothesis_confidence(
-                hypothesis_id, correct, confidence_delta,
+                hypothesis_id,
+                correct,
+                confidence_delta,
             )
 
         outcome = PredictionOutcome(
@@ -205,7 +208,9 @@ class PredictionTracker:
 
         logger.info(
             "Prediction %s: correct=%s, delta=%.3f",
-            prediction_id, correct, confidence_delta,
+            prediction_id,
+            correct,
+            confidence_delta,
         )
         return outcome
 
@@ -321,7 +326,9 @@ class PredictionTracker:
     # ── Internal Methods ───────────────────────────────────────────────
 
     async def _evaluate_correctness(
-        self, predicted: str, observed: str,
+        self,
+        predicted: str,
+        observed: str,
     ) -> bool | None:
         """Compare predicted vs observed outcomes."""
         if not predicted or not observed:
@@ -336,10 +343,14 @@ class PredictionTracker:
 
         # Check for obvious contradictions
         opposites = {
-            ("increase", "decrease"), ("decrease", "increase"),
-            ("yes", "no"), ("no", "yes"),
-            ("true", "false"), ("false", "true"),
-            ("positive", "negative"), ("negative", "positive"),
+            ("increase", "decrease"),
+            ("decrease", "increase"),
+            ("yes", "no"),
+            ("no", "yes"),
+            ("true", "false"),
+            ("false", "true"),
+            ("positive", "negative"),
+            ("negative", "positive"),
         }
         for a, b in opposites:
             if a in pred_lower and b in obs_lower:
@@ -356,7 +367,9 @@ class PredictionTracker:
         return None  # Can't determine
 
     async def _llm_compare(
-        self, predicted: str, observed: str,
+        self,
+        predicted: str,
+        observed: str,
     ) -> bool | None:
         """Use LLM to compare predicted vs observed outcomes."""
         prompt = (
@@ -404,7 +417,9 @@ class PredictionTracker:
 
         logger.debug(
             "Hypothesis %s confidence: %.3f → %.3f (prediction %s)",
-            hypothesis_id, old_conf, new_conf,
+            hypothesis_id,
+            old_conf,
+            new_conf,
             "confirmed" if correct else "falsified" if correct is False else "inconclusive",
         )
 

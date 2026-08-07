@@ -26,12 +26,10 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
-    HCIRNodeType,
     HypothesisNode,
     UnknownNode,
 )
@@ -189,7 +187,8 @@ class ResearchStrategyManager:
         self._graph = graph
 
     def get_strategy_config(
-        self, strategy: ResearchStrategyType,
+        self,
+        strategy: ResearchStrategyType,
     ) -> StrategyConfig:
         """Get the configuration for a specific strategy."""
         return _STRATEGY_CONFIGS.get(strategy, _STRATEGY_CONFIGS[ResearchStrategyType.EXPLORATION])

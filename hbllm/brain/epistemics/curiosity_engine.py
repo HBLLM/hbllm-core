@@ -40,7 +40,6 @@ from typing import Any
 from hbllm.brain.epistemics.interfaces import CuriositySignal, InvestigationBudget
 from hbllm.hcir.graph import (
     CognitiveGraph,
-    HCIRNodeType,
     HypothesisNode,
     UnknownNode,
 )
@@ -138,7 +137,9 @@ class CuriosityEngine:
         result = [signal for _, signal in scored]
         logger.info(
             "Prioritized %d investigations (%d candidates, %d filtered)",
-            len(result), len(signals), len(signals) - len(result),
+            len(result),
+            len(signals),
+            len(signals) - len(result),
         )
         return result
 
@@ -183,10 +184,10 @@ class CuriosityEngine:
             ):
                 unknown = UnknownNode(
                     question=f"Why is '{node.claim[:80]}' uncertain? "
-                             f"What evidence would resolve it?",
+                    f"What evidence would resolve it?",
                     context=f"Hypothesis {node.id} has confidence "
-                            f"{node.uncertainty.confidence:.2f} but no "
-                            f"experiments or predictions.",
+                    f"{node.uncertainty.confidence:.2f} but no "
+                    f"experiments or predictions.",
                     importance=0.6,
                     research_program_id=node.research_program_id,
                     trigger=DiscoveryTrigger.CURIOSITY,
@@ -220,16 +221,18 @@ class CuriosityEngine:
                 continue
 
             kv = node.knowledge_value
-            signals.append(CuriositySignal(
-                unknown_id=node.id,
-                trigger=node.trigger,
-                source_engine="curiosity_engine",
-                source_id=node.id,
-                estimated_info_gain=1.0 - node.estimated_difficulty,
-                estimated_impact=kv.impact,
-                estimated_cost=kv.cost,
-                description=f"Knowledge gap: {node.question[:80]}",
-            ))
+            signals.append(
+                CuriositySignal(
+                    unknown_id=node.id,
+                    trigger=node.trigger,
+                    source_engine="curiosity_engine",
+                    source_id=node.id,
+                    estimated_info_gain=1.0 - node.estimated_difficulty,
+                    estimated_impact=kv.impact,
+                    estimated_cost=kv.cost,
+                    description=f"Knowledge gap: {node.question[:80]}",
+                )
+            )
 
         return signals
 
@@ -248,15 +251,17 @@ class CuriosityEngine:
                 continue
 
             kv = node.knowledge_value
-            signals.append(CuriositySignal(
-                trigger=DiscoveryTrigger.KNOWLEDGE_GAP,
-                source_engine="curiosity_engine",
-                source_id=node.id,
-                estimated_info_gain=node.testability,
-                estimated_impact=kv.impact,
-                estimated_cost=1.0 - node.testability,  # Hard to test = expensive
-                description=f"Untested hypothesis: {node.claim[:80]}",
-            ))
+            signals.append(
+                CuriositySignal(
+                    trigger=DiscoveryTrigger.KNOWLEDGE_GAP,
+                    source_engine="curiosity_engine",
+                    source_id=node.id,
+                    estimated_info_gain=node.testability,
+                    estimated_impact=kv.impact,
+                    estimated_cost=1.0 - node.testability,  # Hard to test = expensive
+                    description=f"Untested hypothesis: {node.claim[:80]}",
+                )
+            )
 
         return signals
 

@@ -28,7 +28,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from hbllm.brain.epistemics.interfaces import ExplanationChain, ExplanationStep
 from hbllm.hcir.graph import (
@@ -40,7 +39,6 @@ from hbllm.hcir.graph import (
     HCIREdge,
     HCIREdgeType,
     HCIRNode,
-    HCIRNodeType,
     HypothesisNode,
     ObservationNode,
     PredictionNode,
@@ -50,20 +48,24 @@ logger = logging.getLogger(__name__)
 
 
 # Edge types that carry evidential weight in explanation chains.
-_SUPPORTING_EDGES = frozenset({
-    HCIREdgeType.SUPPORTS,
-    HCIREdgeType.STRENGTHENS,
-    HCIREdgeType.DERIVED_FROM,
-    HCIREdgeType.TESTS,
-    HCIREdgeType.PREDICTS,
-    HCIREdgeType.REPLICATES,
-})
+_SUPPORTING_EDGES = frozenset(
+    {
+        HCIREdgeType.SUPPORTS,
+        HCIREdgeType.STRENGTHENS,
+        HCIREdgeType.DERIVED_FROM,
+        HCIREdgeType.TESTS,
+        HCIREdgeType.PREDICTS,
+        HCIREdgeType.REPLICATES,
+    }
+)
 
-_COUNTER_EDGES = frozenset({
-    HCIREdgeType.CONTRADICTS,
-    HCIREdgeType.WEAKENS,
-    HCIREdgeType.FALSIFIES,
-})
+_COUNTER_EDGES = frozenset(
+    {
+        HCIREdgeType.CONTRADICTS,
+        HCIREdgeType.WEAKENS,
+        HCIREdgeType.FALSIFIES,
+    }
+)
 
 
 class ExplanationEngine:
@@ -131,7 +133,8 @@ class ExplanationEngine:
         )
 
     async def explain_confidence(
-        self, belief_id: str,
+        self,
+        belief_id: str,
     ) -> dict[str, float]:
         """Return the confidence decomposition for a belief.
 
@@ -149,7 +152,8 @@ class ExplanationEngine:
         return node.belief_confidence.to_dict()
 
     async def trace_to_observations(
-        self, belief_id: str,
+        self,
+        belief_id: str,
     ) -> list[str]:
         """Follow the full provenance chain to original observations.
 
@@ -198,7 +202,8 @@ class ExplanationEngine:
                     continue
 
                 step = self._node_to_step(
-                    source_node, edge.edge_type,
+                    source_node,
+                    edge.edge_type,
                 )
                 steps.append(step)
 
@@ -232,7 +237,8 @@ class ExplanationEngine:
                     continue
 
                 step = self._node_to_step(
-                    source_node, edge.edge_type,
+                    source_node,
+                    edge.edge_type,
                 )
                 steps.append(step)
 
@@ -263,11 +269,16 @@ class ExplanationEngine:
                     continue
                 visited.add(source_id)
                 self._find_observations(
-                    source_id, observations, visited, depth + 1,
+                    source_id,
+                    observations,
+                    visited,
+                    depth + 1,
                 )
 
     def _get_supporting_sources(
-        self, edge: HCIREdge, target_id: str,
+        self,
+        edge: HCIREdge,
+        target_id: str,
     ) -> list[str]:
         """Get source node IDs that support/affect the target."""
         # For edges like SUPPORTS, sources support the targets

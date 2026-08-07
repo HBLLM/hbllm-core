@@ -40,7 +40,6 @@ from hbllm.hcir.graph import (
     EvidenceNode,
     ExperimentNode,
     HCIREdgeType,
-    HCIRNodeType,
 )
 from hbllm.hcir.types import EvidenceStrength, ExperimentRealityLevel
 
@@ -146,7 +145,11 @@ class EvidenceEvaluator:
             reality_level_weight=reality_weight,
             reproducibility_status=reproducibility,
             reasoning=self._build_reasoning(
-                node, quality, reality_weight, trust, bias_flags,
+                node,
+                quality,
+                reality_weight,
+                trust,
+                bias_flags,
             ),
         )
 
@@ -194,12 +197,14 @@ class EvidenceEvaluator:
 
         # Check if evidence only has supporting links (no counter)
         edges = self._graph.edges_from(evidence_id) + self._graph.edges_to(evidence_id)
-        support_count = sum(
-            1 for e in edges if e.edge_type == HCIREdgeType.SUPPORTS
-        )
+        support_count = sum(1 for e in edges if e.edge_type == HCIREdgeType.SUPPORTS)
         contradict_count = sum(
-            1 for e in edges if e.edge_type in (
-                HCIREdgeType.CONTRADICTS, HCIREdgeType.WEAKENS,
+            1
+            for e in edges
+            if e.edge_type
+            in (
+                HCIREdgeType.CONTRADICTS,
+                HCIREdgeType.WEAKENS,
             )
         )
         if support_count > 0 and contradict_count == 0:
@@ -213,7 +218,8 @@ class EvidenceEvaluator:
             except Exception as exc:
                 logger.warning(
                     "LLM bias analysis failed for %s: %s",
-                    evidence_id, exc,
+                    evidence_id,
+                    exc,
                 )
 
         return flags
@@ -223,7 +229,8 @@ class EvidenceEvaluator:
     def _compute_quality(self, node: EvidenceNode) -> float:
         """Compute evidence quality from methodology metadata."""
         base = EVIDENCE_STRENGTH_WEIGHTS.get(
-            node.evidence_type, 0.3,
+            node.evidence_type,
+            0.3,
         )
 
         # Boost for large sample sizes
@@ -255,7 +262,8 @@ class EvidenceEvaluator:
                     exp_node = self._graph.get_node(target_id)
                     if isinstance(exp_node, ExperimentNode):
                         return REALITY_LEVEL_WEIGHTS.get(
-                            exp_node.reality_level, 0.5,
+                            exp_node.reality_level,
+                            0.5,
                         )
 
         # Default: use evidence strength as proxy
@@ -274,9 +282,7 @@ class EvidenceEvaluator:
 
         # Check for replication edges in graph
         edges = self._graph.edges_from(node.id) + self._graph.edges_to(node.id)
-        has_replication = any(
-            e.edge_type == HCIREdgeType.REPLICATES for e in edges
-        )
+        has_replication = any(e.edge_type == HCIREdgeType.REPLICATES for e in edges)
         if has_replication:
             return "replication_attempted"
 
@@ -315,9 +321,14 @@ class EvidenceEvaluator:
 
         # Parse bias flags from LLM response
         valid_biases = {
-            "confirmation_bias", "selection_bias", "publication_bias",
-            "survivorship_bias", "experimenter_bias", "funding_bias",
-            "recency_bias", "authority_bias",
+            "confirmation_bias",
+            "selection_bias",
+            "publication_bias",
+            "survivorship_bias",
+            "experimenter_bias",
+            "funding_bias",
+            "recency_bias",
+            "authority_bias",
         }
         found = []
         for line in text.strip().split("\n"):
@@ -336,8 +347,7 @@ class EvidenceEvaluator:
     ) -> str:
         """Build a human-readable reasoning string for the assessment."""
         parts = [
-            f"Evidence type: {node.evidence_type.value} "
-            f"(base quality={quality:.2f})",
+            f"Evidence type: {node.evidence_type.value} (base quality={quality:.2f})",
             f"Reality level weight: {reality_weight:.2f}",
             f"Source trust: {trust:.2f}",
         ]

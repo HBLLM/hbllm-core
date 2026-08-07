@@ -234,11 +234,11 @@ class CognitiveMode(StrEnum):
         DIAGNOSTIC: "What went wrong?"  → Goal: isolate root cause
     """
 
-    STANDARD = "standard"        # Normal reasoning — produce answers
-    DISCOVERY = "discovery"      # Scientific cognition — reduce uncertainty
-    DIAGNOSTIC = "diagnostic"    # Root-cause analysis — isolate failures
-    CREATIVE = "creative"        # Divergent thinking — maximize novelty
-    CRITICAL = "critical"        # Adversarial review — maximize rigor
+    STANDARD = "standard"  # Normal reasoning — produce answers
+    DISCOVERY = "discovery"  # Scientific cognition — reduce uncertainty
+    DIAGNOSTIC = "diagnostic"  # Root-cause analysis — isolate failures
+    CREATIVE = "creative"  # Divergent thinking — maximize novelty
+    CRITICAL = "critical"  # Adversarial review — maximize rigor
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -275,27 +275,39 @@ class BeliefConfidence(BaseModel):
     """
 
     evidence_quality: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Methodology strength of supporting evidence",
     )
     evidence_quantity: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Amount of supporting evidence (normalized 0=none, 1=extensive)",
     )
     reproducibility: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Has the evidence been independently reproduced?",
     )
     prediction_accuracy: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Track record of predictions derived from this belief",
     )
     model_agreement: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Agreement with the system's causal models",
     )
     source_trust: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Weighted reputation of evidence sources",
     )
 
@@ -359,27 +371,39 @@ class KnowledgeValue(BaseModel):
     """
 
     novelty: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="How new or surprising is this knowledge?",
     )
     impact: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Potential impact if confirmed or falsified",
     )
     risk: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Risk of NOT knowing this (higher = riskier to ignore)",
     )
     cost: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Cost to investigate further (0=free, 1=prohibitive)",
     )
     urgency: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Time sensitivity (0=no deadline, 1=critical)",
     )
     strategic_relevance: float = Field(
-        default=0.5, ge=0.0, le=1.0,
+        default=0.5,
+        ge=0.0,
+        le=1.0,
         description="Alignment with active goals and research programs",
     )
 
@@ -426,11 +450,11 @@ class FalsificationStatus(StrEnum):
     A belief that cannot be falsified is not scientific — it's dogma.
     """
 
-    UNTESTED = "untested"            # No prediction has been tested
-    CORROBORATED = "corroborated"    # Predictions confirmed, not yet falsified
-    WEAKENED = "weakened"            # Some predictions failed
-    FALSIFIED = "falsified"          # Critical prediction failed
-    SUPERSEDED = "superseded"        # Replaced by a better hypothesis
+    UNTESTED = "untested"  # No prediction has been tested
+    CORROBORATED = "corroborated"  # Predictions confirmed, not yet falsified
+    WEAKENED = "weakened"  # Some predictions failed
+    FALSIFIED = "falsified"  # Critical prediction failed
+    SUPERSEDED = "superseded"  # Replaced by a better hypothesis
 
 
 class EvidenceStrength(StrEnum):
@@ -446,12 +470,12 @@ class EvidenceStrength(StrEnum):
     belief revision and hypothesis evaluation.
     """
 
-    ANECDOTAL = "anecdotal"            # Single observation, no controls
-    OBSERVATIONAL = "observational"    # Systematic observation, no intervention
-    CORRELATIONAL = "correlational"    # Statistical relationship identified
-    EXPERIMENTAL = "experimental"      # Controlled experiment
-    META_ANALYTIC = "meta_analytic"    # Aggregation across multiple studies
-    REPLICATED = "replicated"          # Independently reproduced results
+    ANECDOTAL = "anecdotal"  # Single observation, no controls
+    OBSERVATIONAL = "observational"  # Systematic observation, no intervention
+    CORRELATIONAL = "correlational"  # Statistical relationship identified
+    EXPERIMENTAL = "experimental"  # Controlled experiment
+    META_ANALYTIC = "meta_analytic"  # Aggregation across multiple studies
+    REPLICATED = "replicated"  # Independently reproduced results
 
 
 class ExperimentStatus(StrEnum):
@@ -462,12 +486,12 @@ class ExperimentStatus(StrEnum):
         DESIGNED → APPROVED → RUNNING → COMPLETED | FAILED | CANCELLED
     """
 
-    DESIGNED = "designed"      # Experiment plan created
-    APPROVED = "approved"      # Safety/governance review passed
-    RUNNING = "running"        # Currently executing
-    COMPLETED = "completed"    # Finished with results
-    FAILED = "failed"          # Execution failed (not the same as negative result)
-    CANCELLED = "cancelled"    # Abandoned before completion
+    DESIGNED = "designed"  # Experiment plan created
+    APPROVED = "approved"  # Safety/governance review passed
+    RUNNING = "running"  # Currently executing
+    COMPLETED = "completed"  # Finished with results
+    FAILED = "failed"  # Execution failed (not the same as negative result)
+    CANCELLED = "cancelled"  # Abandoned before completion
 
 
 class ExperimentRealityLevel(StrEnum):
@@ -489,11 +513,11 @@ class ExperimentRealityLevel(StrEnum):
     A medical researcher might run computational models before clinical trials.
     """
 
-    SIMULATION = "simulation"          # Pure computational simulation
-    DIGITAL = "digital"                # Software-based experiment (A/B test, etc.)
-    OBSERVATIONAL = "observational"    # Passive real-world observation
-    CONTROLLED = "controlled"          # Controlled real-world experiment
-    PHYSICAL = "physical"              # Direct physical manipulation
+    SIMULATION = "simulation"  # Pure computational simulation
+    DIGITAL = "digital"  # Software-based experiment (A/B test, etc.)
+    OBSERVATIONAL = "observational"  # Passive real-world observation
+    CONTROLLED = "controlled"  # Controlled real-world experiment
+    PHYSICAL = "physical"  # Direct physical manipulation
 
 
 class EpistemicLifecycle(StrEnum):
@@ -511,17 +535,17 @@ class EpistemicLifecycle(StrEnum):
     this enum covers the **full epistemic journey** from gap to knowledge.
     """
 
-    UNKNOWN = "unknown"                # Knowledge gap identified
-    QUESTIONING = "questioning"        # Formalized as a research question
-    HYPOTHESIZED = "hypothesized"      # Hypothesis generated for this gap
-    UNDER_REVIEW = "under_review"      # Plausibility and novelty being assessed
-    PREDICTING = "predicting"          # Testable predictions registered
-    EXPERIMENTING = "experimenting"    # Experiments in progress
-    SUPPORTED = "supported"            # Evidence supports, not yet conclusive
-    REPLICATING = "replicating"        # Independent replication underway
-    ESTABLISHED = "established"        # Multiple independent lines of evidence confirm
-    FALSIFIED = "falsified"            # Critical prediction failed
-    ARCHIVED = "archived"              # No longer actively investigated
+    UNKNOWN = "unknown"  # Knowledge gap identified
+    QUESTIONING = "questioning"  # Formalized as a research question
+    HYPOTHESIZED = "hypothesized"  # Hypothesis generated for this gap
+    UNDER_REVIEW = "under_review"  # Plausibility and novelty being assessed
+    PREDICTING = "predicting"  # Testable predictions registered
+    EXPERIMENTING = "experimenting"  # Experiments in progress
+    SUPPORTED = "supported"  # Evidence supports, not yet conclusive
+    REPLICATING = "replicating"  # Independent replication underway
+    ESTABLISHED = "established"  # Multiple independent lines of evidence confirm
+    FALSIFIED = "falsified"  # Critical prediction failed
+    ARCHIVED = "archived"  # No longer actively investigated
 
 
 class ResearchStrategyType(StrEnum):

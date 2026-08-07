@@ -27,14 +27,10 @@ from hbllm.brain.epistemics.interfaces import (
 )
 from hbllm.hcir.graph import (
     BeliefNode,
-    ClaimNode,
     CognitiveGraph,
     ContradictionNode,
     ExperimentNode,
-    HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
-    HypothesisNode,
     ObservationNode,
 )
 from hbllm.hcir.types import DiscoveryTrigger, ExperimentStatus
@@ -115,19 +111,20 @@ class ContradictionEngine:
             # Check if observation has any supporting hypothesis
             edges = self._graph.edges_from(node_id) + self._graph.edges_to(node_id)
             has_explanation = any(
-                e.edge_type in (HCIREdgeType.SUPPORTS, HCIREdgeType.DERIVED_FROM)
-                for e in edges
+                e.edge_type in (HCIREdgeType.SUPPORTS, HCIREdgeType.DERIVED_FROM) for e in edges
             )
 
             if not has_explanation:
-                signals.append(CuriositySignal(
-                    trigger=DiscoveryTrigger.ANOMALY,
-                    source_engine="contradiction_engine",
-                    source_id=node_id,
-                    estimated_info_gain=0.6,
-                    estimated_impact=0.5,
-                    description=f"Unexplained observation: {node_id}",
-                ))
+                signals.append(
+                    CuriositySignal(
+                        trigger=DiscoveryTrigger.ANOMALY,
+                        source_engine="contradiction_engine",
+                        source_id=node_id,
+                        estimated_info_gain=0.6,
+                        estimated_impact=0.5,
+                        description=f"Unexplained observation: {node_id}",
+                    )
+                )
 
         return signals
 
@@ -158,9 +155,13 @@ class ContradictionEngine:
         analysis["claim_b_description"] = claim_b_desc
 
         if self._llm is not None:
-            analysis.update(await self._llm_analyze(
-                claim_a_desc, claim_b_desc, node.contradiction_type,
-            ))
+            analysis.update(
+                await self._llm_analyze(
+                    claim_a_desc,
+                    claim_b_desc,
+                    node.contradiction_type,
+                )
+            )
 
         return analysis
 
@@ -186,14 +187,16 @@ class ContradictionEngine:
                 continue
 
             if node.status == ExperimentStatus.FAILED:
-                signals.append(CuriositySignal(
-                    trigger=DiscoveryTrigger.UNEXPECTED_FAILURE,
-                    source_engine="contradiction_engine",
-                    source_id=node_id,
-                    estimated_info_gain=0.7,
-                    estimated_impact=0.6,
-                    description=f"Experiment failed unexpectedly: {node.design[:60]}",
-                ))
+                signals.append(
+                    CuriositySignal(
+                        trigger=DiscoveryTrigger.UNEXPECTED_FAILURE,
+                        source_engine="contradiction_engine",
+                        source_id=node_id,
+                        estimated_info_gain=0.7,
+                        estimated_impact=0.6,
+                        description=f"Experiment failed unexpectedly: {node.design[:60]}",
+                    )
+                )
 
         return signals
 
@@ -218,18 +221,21 @@ class ContradictionEngine:
                             continue
                         seen.add(pair)
 
-                        reports.append(ContradictionReport(
-                            claim_a_id=src,
-                            claim_b_id=tgt,
-                            contradiction_type="edge_contradiction",
-                            investigation_priority=0.6,
-                            context="Found via CONTRADICTS edge scan",
-                        ))
+                        reports.append(
+                            ContradictionReport(
+                                claim_a_id=src,
+                                claim_b_id=tgt,
+                                contradiction_type="edge_contradiction",
+                                investigation_priority=0.6,
+                                context="Found via CONTRADICTS edge scan",
+                            )
+                        )
 
         return reports
 
     async def _scan_belief_conflicts(
-        self, domain: str,
+        self,
+        domain: str,
     ) -> list[ContradictionReport]:
         """Scan beliefs for potential conflicts."""
         beliefs: list[BeliefNode] = []
@@ -244,27 +250,32 @@ class ContradictionEngine:
         reports: list[ContradictionReport] = []
         if self._llm is not None and len(beliefs) >= 2:
             # Only compare high-confidence beliefs (expensive operation)
-            strong_beliefs = [
-                b for b in beliefs if b.uncertainty.confidence >= 0.5
-            ][:20]  # Limit to prevent O(n²) explosion
+            strong_beliefs = [b for b in beliefs if b.uncertainty.confidence >= 0.5][
+                :20
+            ]  # Limit to prevent O(n²) explosion
 
             for i in range(len(strong_beliefs)):
                 for j in range(i + 1, len(strong_beliefs)):
                     if await self._beliefs_conflict(
-                        strong_beliefs[i], strong_beliefs[j],
+                        strong_beliefs[i],
+                        strong_beliefs[j],
                     ):
-                        reports.append(ContradictionReport(
-                            claim_a_id=strong_beliefs[i].id,
-                            claim_b_id=strong_beliefs[j].id,
-                            contradiction_type="belief_conflict",
-                            investigation_priority=0.7,
-                            context="LLM-detected belief conflict",
-                        ))
+                        reports.append(
+                            ContradictionReport(
+                                claim_a_id=strong_beliefs[i].id,
+                                claim_b_id=strong_beliefs[j].id,
+                                contradiction_type="belief_conflict",
+                                investigation_priority=0.7,
+                                context="LLM-detected belief conflict",
+                            )
+                        )
 
         return reports
 
     async def _beliefs_conflict(
-        self, a: BeliefNode, b: BeliefNode,
+        self,
+        a: BeliefNode,
+        b: BeliefNode,
     ) -> bool:
         """Use LLM to check if two beliefs conflict."""
         prompt = (
