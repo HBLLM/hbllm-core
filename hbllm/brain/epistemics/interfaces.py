@@ -607,3 +607,209 @@ class ISourceReputationTracker(Protocol):
     ) -> list[tuple[str, float]]:
         """Return the most reliable sources for a domain."""
         ...
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Wave 3 — Meta-Cognition Data Types
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class ConfidenceSnapshot:
+    """A point-in-time snapshot of a belief's multi-dimensional confidence.
+
+    Used by EpistemicMemory to track confidence trajectories over time.
+    """
+
+    belief_id: str = ""
+    derived_confidence: float = 0.0
+    evidence_quality: float = 0.0
+    evidence_quantity: float = 0.0
+    reproducibility: float = 0.0
+    prediction_accuracy: float = 0.0
+    model_agreement: float = 0.0
+    source_trust: float = 0.0
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class CalibrationReport:
+    """Full epistemic calibration assessment.
+
+    Answers: "How good am I at knowing things?"
+
+    This is meta-level assessment of the system's overall epistemic
+    performance, not per-belief confidence.
+    """
+
+    overall_calibration: float = 0.0  # 0=perfect, 1=maximally miscalibrated
+    overconfidence_bias: float = 0.0  # >0 = overconfident, <0 = underconfident
+    hypothesis_survival_rate: float = 0.0  # % of hypotheses that survived testing
+    falsification_rate: float = 0.0  # % of hypotheses actively falsified
+    prediction_accuracy: float = 0.0  # Overall prediction accuracy
+    total_predictions: int = 0  # Number of predictions evaluated
+    total_hypotheses: int = 0  # Number of hypotheses evaluated
+    domain_calibration: dict[str, float] = field(default_factory=dict)
+    evidence_bias: dict[str, float] = field(default_factory=dict)
+    recommendations: list[str] = field(default_factory=list)
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class CounterfactualResult:
+    """Result of a 'what if' epistemic analysis.
+
+    Describes how beliefs would change under hypothetical modifications
+    to the evidence graph.  Never modifies the real graph.
+    """
+
+    scenario: str = ""  # Human-readable description
+    mutation_type: str = ""  # "remove_evidence", "falsify_hypothesis", etc.
+    mutation_target_id: str = ""  # ID of the modified node
+    affected_beliefs: list[str] = field(default_factory=list)
+    confidence_deltas: dict[str, float] = field(default_factory=dict)
+    cascading_effects: list[str] = field(default_factory=list)
+    structural_impact: float = 0.0  # 0-1: how much the belief graph changed
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Wave 3 — Meta-Cognition Protocols
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@runtime_checkable
+class IEpistemicMemory(Protocol):
+    """Universal epistemic memory — the history of reasoning.
+
+    Stores things the graph and workspace don't track:
+    past hypotheses (abandoned, falsified), failed predictions,
+    evidence retractions, confidence trajectories, calibration data.
+
+    Any epistemic consumer can use this memory.
+    """
+
+    async def record_hypothesis_outcome(
+        self,
+        hypothesis_id: str,
+        outcome: str,
+        reason: str,
+    ) -> None:
+        """Record a hypothesis's final outcome (falsified, promoted, abandoned)."""
+        ...
+
+    async def record_prediction_result(
+        self,
+        outcome: PredictionOutcome,
+    ) -> None:
+        """Record a prediction outcome for calibration analysis."""
+        ...
+
+    async def record_evidence_retraction(
+        self,
+        evidence_id: str,
+        reason: str,
+    ) -> None:
+        """Record that evidence was retracted or superseded."""
+        ...
+
+    async def snapshot_belief_confidence(
+        self,
+        belief_id: str,
+        snapshot: ConfidenceSnapshot,
+    ) -> None:
+        """Record a point-in-time confidence snapshot."""
+        ...
+
+    async def get_prediction_accuracy(
+        self,
+        hypothesis_id: str = "",
+    ) -> float:
+        """Compute prediction accuracy over stored history."""
+        ...
+
+    async def get_confidence_trajectory(
+        self,
+        belief_id: str,
+    ) -> list[ConfidenceSnapshot]:
+        """Get the confidence trajectory for a belief over time."""
+        ...
+
+    async def get_calibration_data(
+        self,
+        domain: str = "",
+    ) -> list[dict[str, Any]]:
+        """Get raw calibration data (predicted confidence vs actual outcome)."""
+        ...
+
+
+@runtime_checkable
+class IEpistemicCalibrator(Protocol):
+    """Meta-epistemic self-calibration.
+
+    Answers: "How good am I at knowing things?"
+
+    Different from self_model/confidence_estimator which estimates
+    per-task confidence.  This is system-wide epistemic calibration
+    across all domains and reasoning history.
+    """
+
+    async def calibrate(self) -> CalibrationReport:
+        """Run full calibration analysis."""
+        ...
+
+    async def detect_epistemic_biases(self) -> list[str]:
+        """Identify systematic biases in the system's reasoning."""
+        ...
+
+    async def recommend_strategy_adjustment(self) -> str | None:
+        """Recommend a ResearchStrategyType change based on calibration."""
+        ...
+
+
+@runtime_checkable
+class ICounterfactualReasoner(Protocol):
+    """'What if...' reasoning via cognitive graph modification.
+
+    Creates temporary graph forks to evaluate how beliefs would
+    change under hypothetical modifications.  Never modifies
+    the real graph.
+
+    Complementary to simulation/models.py CounterfactualScenario:
+    that operates at the planning level (tasks → world states);
+    this operates at the epistemic level (evidence → beliefs).
+    """
+
+    async def what_if_hypothesis_wrong(
+        self,
+        hypothesis_id: str,
+    ) -> CounterfactualResult:
+        """What would change if this hypothesis were falsified?"""
+        ...
+
+    async def what_if_evidence_removed(
+        self,
+        evidence_id: str,
+    ) -> CounterfactualResult:
+        """What would change if this evidence were retracted?"""
+        ...
+
+    async def what_if_evidence_quality(
+        self,
+        evidence_id: str,
+        new_quality: float,
+    ) -> CounterfactualResult:
+        """What would change if this evidence quality were different?"""
+        ...
+
+    async def sensitivity_analysis(
+        self,
+        belief_id: str,
+    ) -> dict[str, float]:
+        """Find which evidence has the highest impact on this belief.
+
+        Returns:
+            Dict of evidence_id → impact score (how much removing
+            that evidence would change the belief's confidence).
+        """
+        ...
+
