@@ -8,6 +8,7 @@ This directory contains records of key architectural decisions made for the **HB
 | :--- | :--- | :--- | :--- |
 | [0001](0001-hbllm-core-architecture.md) | HBLLM Core Master Cognitive System Architecture | **Accepted** | 2026-07-17 |
 | [0002](0002-operational-architecture-and-governance.md) | Long-Term Operational Architecture, Tripartite Executive & Digital Twin | **Implemented** | 2026-07-17 |
+| [0003](0003-epistemic-runtime.md) | Domain-Neutral Epistemic Runtime for Autonomous Discovery | **Implemented** | 2026-08-08 |
 
 ## ADR Guidelines
 
