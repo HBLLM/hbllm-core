@@ -205,15 +205,25 @@ class EpistemicMemory:
                 created_at, archived_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                hypothesis_id, claim, lifecycle, outcome, reason,
-                program_id, domain, novelty, testability,
-                final_confidence, created_at, time.time(),
+                hypothesis_id,
+                claim,
+                lifecycle,
+                outcome,
+                reason,
+                program_id,
+                domain,
+                novelty,
+                testability,
+                final_confidence,
+                created_at,
+                time.time(),
             ),
         )
         self._conn.commit()
         logger.debug(
             "Recorded hypothesis outcome: %s → %s",
-            hypothesis_id, outcome,
+            hypothesis_id,
+            outcome,
         )
 
     async def record_prediction_result(
@@ -243,10 +253,17 @@ class EpistemicMemory:
                 domain, predicted_confidence, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                outcome.prediction_id, claim, outcome.predicted,
-                outcome.observed, correct_int, outcome.confidence_delta,
-                outcome.hypothesis_id, program_id, domain,
-                predicted_confidence, outcome.timestamp,
+                outcome.prediction_id,
+                claim,
+                outcome.predicted,
+                outcome.observed,
+                correct_int,
+                outcome.confidence_delta,
+                outcome.hypothesis_id,
+                program_id,
+                domain,
+                predicted_confidence,
+                outcome.timestamp,
             ),
         )
         self._conn.commit()
@@ -260,14 +277,17 @@ class EpistemicMemory:
                 (
                     predicted_confidence,
                     1 if outcome.correct else 0,
-                    domain, "prediction", time.time(),
+                    domain,
+                    "prediction",
+                    time.time(),
                 ),
             )
             self._conn.commit()
 
         logger.debug(
             "Recorded prediction result: %s (correct=%s)",
-            outcome.prediction_id, outcome.correct,
+            outcome.prediction_id,
+            outcome.correct,
         )
 
     async def record_evidence_retraction(
@@ -292,9 +312,14 @@ class EpistemicMemory:
                 reason, source_uri, created_at, retracted_at)
                VALUES (?, ?, ?, ?, 'retracted', ?, ?, ?, ?)""",
             (
-                evidence_id, quality_score, weight,
-                json.dumps(bias_flags or []), reason,
-                source_uri, time.time(), time.time(),
+                evidence_id,
+                quality_score,
+                weight,
+                json.dumps(bias_flags or []),
+                reason,
+                source_uri,
+                time.time(),
+                time.time(),
             ),
         )
         self._conn.commit()
@@ -365,8 +390,13 @@ class EpistemicMemory:
                 importance, created_at, resolved_at)
                VALUES (?, ?, 'resolved', ?, ?, ?, ?, ?)""",
             (
-                unknown_id, question, resolution, program_id,
-                importance, created_at, time.time(),
+                unknown_id,
+                question,
+                resolution,
+                program_id,
+                importance,
+                created_at,
+                time.time(),
             ),
         )
         self._conn.commit()
@@ -388,8 +418,13 @@ class EpistemicMemory:
                 importance, created_at, resolved_at)
                VALUES (?, ?, 'abandoned', ?, ?, ?, ?, ?)""",
             (
-                unknown_id, question, reason, program_id,
-                importance, created_at, time.time(),
+                unknown_id,
+                question,
+                reason,
+                program_id,
+                importance,
+                created_at,
+                time.time(),
             ),
         )
         self._conn.commit()
@@ -641,9 +676,12 @@ class EpistemicMemory:
         """Get counts of all stored records."""
         counts: dict[str, int] = {}
         for table in (
-            "hypothesis_history", "prediction_history",
-            "evidence_history", "confidence_snapshots",
-            "unknown_history", "calibration_data",
+            "hypothesis_history",
+            "prediction_history",
+            "evidence_history",
+            "confidence_snapshots",
+            "unknown_history",
+            "calibration_data",
         ):
             row = self._conn.execute(
                 f"SELECT COUNT(*) as c FROM {table}",

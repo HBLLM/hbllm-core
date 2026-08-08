@@ -36,8 +36,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import math
-from typing import Any
 
 from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
 from hbllm.brain.epistemics.interfaces import CalibrationReport
@@ -127,8 +125,11 @@ class EpistemicCalibrationEngine:
         logger.info(
             "Calibration complete: cal=%.3f, bias=%.3f, pred_acc=%.3f, "
             "hyp_survival=%.3f, falsification=%.3f, %d recs",
-            overall_calibration, overconfidence_bias,
-            prediction_accuracy, survival_rate, falsification_rate,
+            overall_calibration,
+            overconfidence_bias,
+            prediction_accuracy,
+            survival_rate,
+            falsification_rate,
             len(recommendations),
         )
 
@@ -160,8 +161,7 @@ class EpistemicCalibrationEngine:
         # Initialize bins
         bin_width = 1.0 / n_bins
         bins: list[tuple[float, list[int]]] = [
-            (i * bin_width + bin_width / 2, [])
-            for i in range(n_bins)
+            (i * bin_width + bin_width / 2, []) for i in range(n_bins)
         ]
 
         # Assign data points to bins
@@ -283,10 +283,10 @@ class EpistemicCalibrationEngine:
         if total_count == 0:
             return 0.0
 
-        ece = sum(
-            abs(accuracy - confidence) * count
-            for confidence, accuracy, count in curve
-        ) / total_count
+        ece = (
+            sum(abs(accuracy - confidence) * count for confidence, accuracy, count in curve)
+            / total_count
+        )
 
         return min(1.0, ece)
 
@@ -309,10 +309,10 @@ class EpistemicCalibrationEngine:
         if total_count == 0:
             return 0.0
 
-        bias = sum(
-            (confidence - accuracy) * count
-            for confidence, accuracy, count in curve
-        ) / total_count
+        bias = (
+            sum((confidence - accuracy) * count for confidence, accuracy, count in curve)
+            / total_count
+        )
 
         return max(-1.0, min(1.0, bias))
 
@@ -363,8 +363,7 @@ class EpistemicCalibrationEngine:
 
         if overall_calibration > 0.2:
             recs.append(
-                "Calibration is poor. Consider using more conservative "
-                "confidence estimates."
+                "Calibration is poor. Consider using more conservative confidence estimates."
             )
 
         if overconfidence_bias > 0.1:

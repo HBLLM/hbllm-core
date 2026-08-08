@@ -40,18 +40,14 @@ Usage::
 
 from __future__ import annotations
 
-import copy
 import logging
-from typing import Any
 
 from hbllm.brain.epistemics.interfaces import CounterfactualResult
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
     EvidenceNode,
-    HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
     HypothesisNode,
 )
 
@@ -126,25 +122,21 @@ class CounterfactualReasoner:
                         # Estimate impact: how much does this hypothesis
                         # contribute to the belief's confidence?
                         impact = self._estimate_support_impact(
-                            target_id, hypothesis_id,
+                            target_id,
+                            hypothesis_id,
                         )
                         confidence_deltas[target_id] = -impact
                         cascading.append(
-                            f"Belief '{target.claim[:50]}' loses "
-                            f"{impact:.2f} confidence"
+                            f"Belief '{target.claim[:50]}' loses {impact:.2f} confidence"
                         )
 
         # Also check predictions from this hypothesis
         for edge in edges_from:
             if edge.edge_type == HCIREdgeType.PREDICTS:
                 for target_id in edge.targets:
-                    cascading.append(
-                        f"Prediction {target_id} would be invalidated"
-                    )
+                    cascading.append(f"Prediction {target_id} would be invalidated")
 
-        structural_impact = (
-            len(affected_beliefs) / max(1, self._count_beliefs())
-        )
+        structural_impact = len(affected_beliefs) / max(1, self._count_beliefs())
 
         return CounterfactualResult(
             scenario=f"If hypothesis '{node.claim[:60]}' were falsified",
@@ -193,17 +185,12 @@ class CounterfactualReasoner:
                 affected_beliefs.append(node_id)
                 impact = self._estimate_support_impact(node_id, evidence_id)
                 confidence_deltas[node_id] = -impact
-                cascading.append(
-                    f"Belief '{target.claim[:50]}' loses {impact:.2f} confidence"
-                )
+                cascading.append(f"Belief '{target.claim[:50]}' loses {impact:.2f} confidence")
 
             elif isinstance(target, HypothesisNode):
                 # The hypothesis loses support → cascade to its beliefs
                 impact = self._estimate_support_impact(node_id, evidence_id)
-                cascading.append(
-                    f"Hypothesis '{target.claim[:50]}' loses "
-                    f"{impact:.2f} support"
-                )
+                cascading.append(f"Hypothesis '{target.claim[:50]}' loses {impact:.2f} support")
 
                 # Find beliefs depending on this hypothesis
                 hyp_beliefs = self._find_supported_nodes(node_id)
@@ -212,13 +199,15 @@ class CounterfactualReasoner:
                     if isinstance(b, BeliefNode) and bid not in affected_beliefs:
                         affected_beliefs.append(bid)
                         cascade_impact = impact * 0.5  # Dampened cascade
-                        confidence_deltas[bid] = confidence_deltas.get(
-                            bid, 0.0,
-                        ) - cascade_impact
+                        confidence_deltas[bid] = (
+                            confidence_deltas.get(
+                                bid,
+                                0.0,
+                            )
+                            - cascade_impact
+                        )
 
-        structural_impact = (
-            len(affected_beliefs) / max(1, self._count_beliefs())
-        )
+        structural_impact = len(affected_beliefs) / max(1, self._count_beliefs())
 
         return CounterfactualResult(
             scenario=f"If evidence '{evidence_id}' were retracted",
@@ -281,14 +270,12 @@ class CounterfactualReasoner:
                 confidence_deltas[node_id] = delta
                 direction = "gains" if delta > 0 else "loses"
                 cascading.append(
-                    f"Belief '{target.claim[:50]}' {direction} "
-                    f"{abs(delta):.3f} confidence"
+                    f"Belief '{target.claim[:50]}' {direction} {abs(delta):.3f} confidence"
                 )
 
         return CounterfactualResult(
             scenario=(
-                f"If evidence quality changed from "
-                f"{current_quality:.2f} → {new_quality:.2f}"
+                f"If evidence quality changed from {current_quality:.2f} → {new_quality:.2f}"
             ),
             mutation_type="change_evidence_quality",
             mutation_target_id=evidence_id,
@@ -345,10 +332,7 @@ class CounterfactualReasoner:
             mutation_target_id=belief_id,
             affected_beliefs=[belief_id],
             confidence_deltas={belief_id: delta},
-            cascading_effects=[
-                f"Confidence: {current_conf:.3f} → {new_conf:.3f} "
-                f"(Δ={delta:+.3f})"
-            ],
+            cascading_effects=[f"Confidence: {current_conf:.3f} → {new_conf:.3f} (Δ={delta:+.3f})"],
             structural_impact=abs(delta),
         )
 
@@ -386,9 +370,7 @@ class CounterfactualReasoner:
                 impacts[eid] = impact
 
         # Sort by impact descending
-        return dict(
-            sorted(impacts.items(), key=lambda x: x[1], reverse=True)
-        )
+        return dict(sorted(impacts.items(), key=lambda x: x[1], reverse=True))
 
     # ── Internal Methods ───────────────────────────────────────────────
 
@@ -467,7 +449,8 @@ class CounterfactualReasoner:
             is_supporter = False
             for edge in edges_from:
                 if (
-                    edge.edge_type in (
+                    edge.edge_type
+                    in (
                         HCIREdgeType.SUPPORTS,
                         HCIREdgeType.STRENGTHENS,
                     )

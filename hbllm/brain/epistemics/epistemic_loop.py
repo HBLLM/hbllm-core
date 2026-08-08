@@ -64,7 +64,6 @@ from hbllm.brain.epistemics.interfaces import (
     ConfidenceSnapshot,
     CuriositySignal,
     InvestigationBudget,
-    PredictionOutcome,
 )
 from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
 from hbllm.brain.epistemics.research_strategy import (
@@ -308,7 +307,6 @@ class EpistemicLoop:
 
             Signal → Ideas → Hypotheses → Predictions → Experiment Design
         """
-        source_id = signal.source_id or signal.unknown_id
         logger.debug(
             "Investigating: %s (trigger=%s)",
             signal.description[:60],
@@ -493,8 +491,8 @@ class EpistemicLoop:
                         source_trust=bc.source_trust,
                     )
                     await self._memory.snapshot_belief_confidence(
-                        node.id, snap,
+                        node.id,
+                        snap,
                     )
         except Exception as exc:
             logger.debug("Memory recording failed: %s", exc)
-

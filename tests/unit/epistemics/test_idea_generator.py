@@ -15,7 +15,9 @@ class TestGenerateFromUnknown:
 
     @pytest.mark.asyncio
     async def test_basic_generation(
-        self, graph: CognitiveGraph, workspace: DiscoveryWorkspace,
+        self,
+        graph: CognitiveGraph,
+        workspace: DiscoveryWorkspace,
     ) -> None:
         prog = workspace.create_program("Test", "Why X?")
         obj = workspace.add_objective(prog.program_id, "Find")
@@ -41,7 +43,8 @@ class TestGenerateFromContradiction:
     @pytest.mark.asyncio
     async def test_basic_contradiction(self, graph: CognitiveGraph) -> None:
         node = ContradictionNode(
-            claim_a_id="claim_a", claim_b_id="claim_b",
+            claim_a_id="claim_a",
+            claim_b_id="claim_b",
             contradiction_type="logical",
         )
         graph.upsert_node(node)
@@ -84,7 +87,8 @@ class TestMemoryFiltering:
         """Without memory, all ideas pass through."""
         gen = IdeaGenerator(graph=graph, memory=None)
         node = ContradictionNode(
-            claim_a_id="a", claim_b_id="b",
+            claim_a_id="a",
+            claim_b_id="b",
             contradiction_type="logical",
         )
         graph.upsert_node(node)
@@ -93,18 +97,23 @@ class TestMemoryFiltering:
 
     @pytest.mark.asyncio
     async def test_memory_filters_known_failures(
-        self, graph: CognitiveGraph, memory: EpistemicMemory,
+        self,
+        graph: CognitiveGraph,
+        memory: EpistemicMemory,
     ) -> None:
         """Ideas matching past failures should be filtered out."""
         # Record a past failure with keywords matching template ideas
         await memory.record_hypothesis_outcome(
-            "h_old", "falsified", "Proved wrong",
+            "h_old",
+            "falsified",
+            "Proved wrong",
             claim="A hidden variable may explain the contradiction",
         )
 
         gen = IdeaGenerator(graph=graph, memory=memory)
         node = ContradictionNode(
-            claim_a_id="a", claim_b_id="b",
+            claim_a_id="a",
+            claim_b_id="b",
             contradiction_type="logical",
         )
         graph.upsert_node(node)
@@ -115,12 +124,15 @@ class TestMemoryFiltering:
 
     @pytest.mark.asyncio
     async def test_memory_empty_no_filtering(
-        self, graph: CognitiveGraph, memory: EpistemicMemory,
+        self,
+        graph: CognitiveGraph,
+        memory: EpistemicMemory,
     ) -> None:
         """Empty memory should not filter anything."""
         gen = IdeaGenerator(graph=graph, memory=memory)
         node = ContradictionNode(
-            claim_a_id="a", claim_b_id="b",
+            claim_a_id="a",
+            claim_b_id="b",
             contradiction_type="logical",
         )
         graph.upsert_node(node)

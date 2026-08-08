@@ -6,7 +6,7 @@ import pytest
 
 from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
-from hbllm.hcir.graph import CognitiveGraph, HypothesisNode
+from hbllm.hcir.graph import CognitiveGraph
 
 
 class TestRegisterPrediction:
@@ -14,14 +14,16 @@ class TestRegisterPrediction:
 
     @pytest.mark.asyncio
     async def test_register_creates_prediction(
-        self, graph: CognitiveGraph, workspace: DiscoveryWorkspace,
+        self,
+        graph: CognitiveGraph,
+        workspace: DiscoveryWorkspace,
     ) -> None:
         prog = workspace.create_program("Test", "Why X?")
         obj = workspace.add_objective(prog.program_id, "Find")
         q_id = workspace.add_question(prog.program_id, obj, "Why X?", importance=0.8)
 
-        from hbllm.brain.epistemics.idea_generator import IdeaGenerator
         from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
+        from hbllm.brain.epistemics.idea_generator import IdeaGenerator
 
         gen = IdeaGenerator(graph=graph)
         ideas = await gen.generate_from_unknown(q_id)
@@ -31,19 +33,24 @@ class TestRegisterPrediction:
 
         tracker = PredictionTracker(graph=graph)
         pred_id = await tracker.register_prediction(
-            hyp_id, "X increases by 10%", "increase",
+            hyp_id,
+            "X increases by 10%",
+            "increase",
         )
 
         assert pred_id != ""
 
     @pytest.mark.asyncio
     async def test_register_for_nonexistent_hypothesis(
-        self, graph: CognitiveGraph,
+        self,
+        graph: CognitiveGraph,
     ) -> None:
         tracker = PredictionTracker(graph=graph)
         with pytest.raises(ValueError, match="Dangling edge reference"):
             await tracker.register_prediction(
-                "nonexistent", "X increases", "increase",
+                "nonexistent",
+                "X increases",
+                "increase",
             )
 
 
@@ -52,14 +59,16 @@ class TestCheckPrediction:
 
     @pytest.mark.asyncio
     async def test_check_correct_prediction(
-        self, graph: CognitiveGraph, workspace: DiscoveryWorkspace,
+        self,
+        graph: CognitiveGraph,
+        workspace: DiscoveryWorkspace,
     ) -> None:
         prog = workspace.create_program("Test", "Why X?")
         obj = workspace.add_objective(prog.program_id, "Find")
         q_id = workspace.add_question(prog.program_id, obj, "Why X?", importance=0.8)
 
-        from hbllm.brain.epistemics.idea_generator import IdeaGenerator
         from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
+        from hbllm.brain.epistemics.idea_generator import IdeaGenerator
 
         gen = IdeaGenerator(graph=graph)
         ideas = await gen.generate_from_unknown(q_id)
@@ -69,7 +78,9 @@ class TestCheckPrediction:
 
         tracker = PredictionTracker(graph=graph)
         pred_id = await tracker.register_prediction(
-            hyp_id, "X increases", "increase",
+            hyp_id,
+            "X increases",
+            "increase",
         )
         outcome = await tracker.check_prediction(pred_id, "increased by 15%")
 

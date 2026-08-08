@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,7 +28,9 @@ class TestWireEpistemics:
     """Test the wire_epistemics() helper."""
 
     def test_returns_loop(
-        self, graph: CognitiveGraph, tmp_dir: str,
+        self,
+        graph: CognitiveGraph,
+        tmp_dir: str,
     ) -> None:
         core = MockAutonomyCore()
         loop = wire_epistemics(
@@ -40,7 +41,9 @@ class TestWireEpistemics:
         assert isinstance(loop, EpistemicLoop)
 
     def test_registers_handler(
-        self, graph: CognitiveGraph, tmp_dir: str,
+        self,
+        graph: CognitiveGraph,
+        tmp_dir: str,
     ) -> None:
         core = MockAutonomyCore()
         wire_epistemics(
@@ -52,7 +55,9 @@ class TestWireEpistemics:
         assert callable(core.handlers["epistemic"])
 
     def test_engines_wired(
-        self, graph: CognitiveGraph, tmp_dir: str,
+        self,
+        graph: CognitiveGraph,
+        tmp_dir: str,
     ) -> None:
         core = MockAutonomyCore()
         loop = wire_epistemics(
@@ -68,7 +73,9 @@ class TestWireEpistemics:
         assert loop.engines["experiment_planner"]._counterfactual is not None
 
     def test_custom_params(
-        self, graph: CognitiveGraph, tmp_dir: str,
+        self,
+        graph: CognitiveGraph,
+        tmp_dir: str,
     ) -> None:
         core = MockAutonomyCore()
         loop = wire_epistemics(
@@ -84,7 +91,9 @@ class TestWireEpistemics:
 
     @pytest.mark.asyncio
     async def test_handler_is_callable(
-        self, graph: CognitiveGraph, tmp_dir: str,
+        self,
+        graph: CognitiveGraph,
+        tmp_dir: str,
     ) -> None:
         core = MockAutonomyCore()
         wire_epistemics(

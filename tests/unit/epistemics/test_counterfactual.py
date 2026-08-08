@@ -10,12 +10,8 @@ from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
-    EvidenceNode,
-    HCIREdge,
-    HCIREdgeType,
-    HypothesisNode,
 )
-from hbllm.hcir.types import BeliefConfidence, EvidenceStrength
+from hbllm.hcir.types import BeliefConfidence
 
 
 class TestWhatIfHypothesisWrong:
@@ -23,7 +19,8 @@ class TestWhatIfHypothesisWrong:
 
     @pytest.mark.asyncio
     async def test_falsify_hypothesis(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)
@@ -47,7 +44,8 @@ class TestWhatIfEvidenceRemoved:
 
     @pytest.mark.asyncio
     async def test_remove_evidence(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)
@@ -73,13 +71,15 @@ class TestWhatIfEvidenceQuality:
 
     @pytest.mark.asyncio
     async def test_increase_quality(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)
 
         result = await cf.what_if_evidence_quality(
-            populated_graph["evidence_ids"][0], new_quality=1.0,
+            populated_graph["evidence_ids"][0],
+            new_quality=1.0,
         )
         assert result.mutation_type == "change_evidence_quality"
 
@@ -89,7 +89,8 @@ class TestWhatIfNewEvidence:
 
     @pytest.mark.asyncio
     async def test_supporting_evidence(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)
@@ -105,7 +106,8 @@ class TestWhatIfNewEvidence:
 
     @pytest.mark.asyncio
     async def test_contradicting_evidence(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)
@@ -124,7 +126,8 @@ class TestSensitivityAnalysis:
 
     @pytest.mark.asyncio
     async def test_sensitivity(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)
