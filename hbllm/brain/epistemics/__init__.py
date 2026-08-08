@@ -69,6 +69,9 @@ from hbllm.brain.epistemics.calibration import EpistemicCalibrationEngine
 from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
 
+# ── Wave 4: Integration ──────────────────────────────────────────
+from hbllm.brain.epistemics.integration import wire_epistemics
+
 # ── Protocols ──────────────────────────────────────────────────────────
 from hbllm.brain.epistemics.interfaces import (
     # Wave 2 Protocols
@@ -128,6 +131,8 @@ __all__ = [
     "EpistemicCalibrationEngine",
     "CounterfactualReasoner",
     "EpistemicMemory",
+    # ── Wave 4: Integration ──────────────────────────────────────
+    "wire_epistemics",
     # ── Protocols ──────────────────────────────────────────────────
     "IBeliefReviser",
     "IContradictionSeeker",

@@ -185,6 +185,45 @@ class ResearchStrategyManager:
 
     def __init__(self, graph: CognitiveGraph) -> None:
         self._graph = graph
+        self._active_strategy: ResearchStrategyType = ResearchStrategyType.EXPLORATION
+
+    @property
+    def active_strategy(self) -> ResearchStrategyType:
+        """The currently active research strategy."""
+        return self._active_strategy
+
+    @property
+    def active_config(self) -> StrategyConfig:
+        """The configuration for the currently active strategy."""
+        return self.get_strategy_config(self._active_strategy)
+
+    def set_active_strategy(
+        self,
+        strategy: ResearchStrategyType | str,
+    ) -> None:
+        """Set the active research strategy.
+
+        Args:
+            strategy: A ResearchStrategyType value or its string name.
+        """
+        if isinstance(strategy, str):
+            # Convert string to enum
+            try:
+                strategy = ResearchStrategyType(strategy)
+            except ValueError:
+                # Try by name
+                for member in ResearchStrategyType:
+                    if member.name.lower() == strategy.lower():
+                        strategy = member
+                        break
+                else:
+                    logger.warning("Unknown strategy: %s", strategy)
+                    return
+
+        old = self._active_strategy
+        self._active_strategy = strategy
+        if old != strategy:
+            logger.info("Strategy switched: %s → %s", old.value, strategy.value)
 
     def get_strategy_config(
         self,
@@ -243,3 +282,4 @@ class ResearchStrategyManager:
             return ResearchStrategyType.SYNTHESIS
 
         return current_strategy
+

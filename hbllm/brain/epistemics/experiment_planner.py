@@ -59,9 +59,11 @@ class ExperimentPlanner:
         self,
         graph: CognitiveGraph,
         llm: Any | None = None,
+        counterfactual: Any | None = None,
     ) -> None:
         self._graph = graph
         self._llm = llm
+        self._counterfactual = counterfactual  # Optional CounterfactualReasoner
 
     async def design_discriminative_experiment(
         self,
@@ -283,3 +285,69 @@ class ExperimentPlanner:
             reality_level=max_reality_level,
             reasoning="Template-designed discriminative experiment",
         )
+
+    # ── Counterfactual-Enhanced Design ───────────────────────────────
+
+    async def design_counterfactual_experiment(
+        self,
+        belief_id: str,
+        budget: InvestigationBudget | None = None,
+    ) -> ExperimentDesign:
+        """Design an experiment targeting the most impactful evidence gap.
+
+        Uses CounterfactualReasoner.sensitivity_analysis() to find which
+        evidence has the highest impact on the belief.  Then designs an
+        experiment that targets the weakest link.
+
+        Args:
+            belief_id: The belief to strengthen or challenge.
+            budget: Resource constraints.
+
+        Returns:
+            An ExperimentDesign targeting the highest-impact evidence.
+        """
+        budget = budget or _DEFAULT_BUDGET
+
+        if self._counterfactual is None:
+            return ExperimentDesign(
+                hypothesis_ids=[],
+                reasoning="No CounterfactualReasoner available",
+            )
+
+        # Find the most impactful evidence
+        sensitivity = await self._counterfactual.sensitivity_analysis(belief_id)
+        if not sensitivity:
+            return ExperimentDesign(
+                hypothesis_ids=[],
+                reasoning="No evidence found for sensitivity analysis",
+            )
+
+        # Target the highest-impact evidence
+        top_evidence_id = next(iter(sensitivity))
+        top_impact = sensitivity[top_evidence_id]
+
+        # Get belief details
+        belief = self._graph.get_node(belief_id)
+        belief_claim = getattr(belief, "claim", belief_id) if belief else belief_id
+
+        # Design experiment to strengthen or challenge this evidence
+        design = ExperimentDesign(
+            hypothesis_ids=[belief_id],
+            design=(
+                f"Target highest-impact evidence ({top_evidence_id[:20]}, "
+                f"impact={top_impact:.3f}) for belief: {str(belief_claim)[:60]}. "
+                f"Design a replication or extension experiment for this evidence."
+            ),
+            discriminating_power=min(1.0, top_impact * 1.5),
+            estimated_cost=0.4,
+            expected_information_gain=top_impact,
+            reality_level="experiment",
+            reasoning=(
+                f"Counterfactual-guided: this evidence has the highest impact "
+                f"({top_impact:.3f}) on the belief. Strengthening or challenging "
+                f"it will have the largest effect on our confidence."
+            ),
+        )
+
+        return design
+

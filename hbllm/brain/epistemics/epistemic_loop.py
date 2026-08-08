@@ -61,15 +61,17 @@ from hbllm.brain.epistemics.explanation import ExplanationEngine
 from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
 from hbllm.brain.epistemics.idea_generator import IdeaGenerator
 from hbllm.brain.epistemics.interfaces import (
+    ConfidenceSnapshot,
     CuriositySignal,
     InvestigationBudget,
+    PredictionOutcome,
 )
 from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
 from hbllm.brain.epistemics.research_strategy import (
     ResearchStrategyManager,
 )
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
-from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.graph import BeliefNode, CognitiveGraph
 from hbllm.hcir.types import DiscoveryTrigger
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,10 @@ class EpistemicLoop:
         budget: InvestigationBudget | None = None,
         max_investigations_per_cycle: int = 3,
         max_ideas_per_investigation: int = 15,
+        memory: Any | None = None,
+        calibration: Any | None = None,
+        counterfactual: Any | None = None,
+        calibration_interval: int = 5,
     ) -> None:
         """Initialize the epistemic loop.
 
@@ -122,6 +128,10 @@ class EpistemicLoop:
             budget: Default investigation budget per cycle.
             max_investigations_per_cycle: Max targets per cycle.
             max_ideas_per_investigation: Max ideas per target.
+            memory: Optional EpistemicMemory for outcome recording.
+            calibration: Optional EpistemicCalibrationEngine for auto-switching.
+            counterfactual: Optional CounterfactualReasoner for experiment design.
+            calibration_interval: Run calibration every N cycles.
         """
         self._graph = graph
         self._workspace = workspace
@@ -129,6 +139,12 @@ class EpistemicLoop:
         self._budget = budget or InvestigationBudget()
         self._max_investigations = max_investigations_per_cycle
         self._max_ideas = max_ideas_per_investigation
+
+        # Wave 3 meta-cognition (optional)
+        self._memory = memory
+        self._calibration = calibration
+        self._counterfactual = counterfactual
+        self._calibration_interval = calibration_interval
 
         # Instantiate all engines
         self._curiosity = CuriosityEngine(
@@ -139,6 +155,7 @@ class EpistemicLoop:
             graph=graph,
             llm=llm,
             max_ideas_per_generation=max_ideas_per_investigation,
+            memory=memory,
         )
         self._hypothesis_builder = HypothesisBuilder(
             graph=graph,
@@ -151,6 +168,7 @@ class EpistemicLoop:
         self._experiment_planner = ExperimentPlanner(
             graph=graph,
             llm=llm,
+            counterfactual=counterfactual,
         )
         self._evidence_evaluator = EvidenceEvaluator(
             graph=graph,
@@ -230,6 +248,22 @@ class EpistemicLoop:
             contradictions = await self._contradiction_engine.scan_for_contradictions()
             if contradictions:
                 results.append(f"Found {len(contradictions)} potential contradictions")
+
+            # Step 6: Record to epistemic memory
+            await self._record_cycle_to_memory(results)
+
+            # Step 7: Periodic calibration + auto strategy switching
+            if (
+                self._calibration is not None
+                and self._cycle_count % self._calibration_interval == 0
+            ):
+                try:
+                    rec = await self._calibration.recommend_strategy_adjustment()
+                    if rec:
+                        self._strategy_manager.set_active_strategy(rec)
+                        results.append(f"Calibration: switching strategy → {rec}")
+                except Exception as exc:
+                    logger.warning("Calibration failed: %s", exc)
 
         except Exception as exc:
             logger.error("Epistemic cycle #%d failed: %s", self._cycle_count, exc)
@@ -431,3 +465,36 @@ class EpistemicLoop:
             "explanation_engine": self._explanation_engine,
             "strategy_manager": self._strategy_manager,
         }
+
+    # ── Memory Recording ─────────────────────────────────────────────────
+
+    async def _record_cycle_to_memory(self, results: list[str]) -> None:
+        """Record cycle outcomes to epistemic memory.
+
+        Snapshots all beliefs' confidence after each cycle for
+        trajectory tracking and calibration.
+        """
+        if self._memory is None:
+            return
+
+        try:
+            # Snapshot all belief confidences
+            for node in self._graph.all_nodes():
+                if isinstance(node, BeliefNode):
+                    bc = node.belief_confidence
+                    snap = ConfidenceSnapshot(
+                        belief_id=node.id,
+                        derived_confidence=bc.derived_confidence,
+                        evidence_quality=bc.evidence_quality,
+                        evidence_quantity=bc.evidence_quantity,
+                        reproducibility=bc.reproducibility,
+                        prediction_accuracy=bc.prediction_accuracy,
+                        model_agreement=bc.model_agreement,
+                        source_trust=bc.source_trust,
+                    )
+                    await self._memory.snapshot_belief_confidence(
+                        node.id, snap,
+                    )
+        except Exception as exc:
+            logger.debug("Memory recording failed: %s", exc)
+
