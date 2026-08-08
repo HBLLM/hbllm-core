@@ -85,6 +85,10 @@ And it has the **safety instincts of a responsible person** — it knows when it
 <h3>👤 Human Modeling Layer</h3>
 <p>UserModel learns expertise, preferences, and trust. ProjectGraph tracks goals and blockers. ExecutiveCortex manages focus. RelationshipMemory builds a social graph. RealityGraph unifies world state. The system models <em>you</em>.</p>
 </div>
+<div class="feature-card">
+<h3>🔬 Epistemic Runtime</h3>
+<p>Domain-neutral autonomous discovery: hypothesis generation, evidence evaluation, Bayesian belief revision, prediction tracking, counterfactual reasoning, and meta-epistemic self-calibration. The system reasons about its own reasoning. <a href="architecture/epistemics.md">Architecture &rarr;</a></p>
+</div>
 </div>
 
 ---

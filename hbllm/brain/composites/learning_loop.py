@@ -86,6 +86,7 @@ class LearningLoop(Node):
                     node_id=f"{self.node_id}.spawner",
                     model=provider._model,
                     tokenizer=provider._tokenizer,
+                    use_execution_os=getattr(self, "_use_execution_os", False),
                 )
                 self._spawner.node_identity = self.node_identity
                 await self._spawner.start(bus)

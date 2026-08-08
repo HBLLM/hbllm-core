@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Epistemic Runtime — Domain-Neutral Discovery Engine (Waves 1–4)
+
+- **Wave 1 — Epistemic Foundations**: `DiscoveryBeliefManager` (Bayesian revision), `SourceReputationTracker` (source trust), `DiscoveryWorkspace` (research program lifecycle) — `hbllm/brain/epistemics/`
+- **Wave 2 — Closed Discovery Loop**: `CuriosityEngine`, `IdeaGenerator`, `HypothesisBuilder`, `PredictionTracker`, `ExperimentPlanner`, `EvidenceEvaluator`, `ContradictionEngine`, `ExplanationEngine`, `ResearchStrategyManager`, `EpistemicLoop` — 10 engines forming a complete autonomous discovery cycle
+- **Wave 3 — Meta-Epistemic Cognition**: `EpistemicMemory` (SQLite-backed reasoning history), `EpistemicCalibrationEngine` (ECE curves, bias detection, strategy recommendation), `CounterfactualReasoner` ("What if..." graph analysis with 5 methods)
+- **Wave 4 — Deep Integration & Wiring**: Memory-aware IdeaGenerator (filters past failures), auto-strategy switching via calibration, counterfactual-driven experiment planning, `wire_epistemics()` one-function AutonomyCore integration
+- **Test Suite**: 126 unit tests + 3 E2E integration tests + 5 cross-component tests = 134 total, all passing
+- **Documentation**: Architecture deep-dive at `docs/architecture/epistemics.md`, overview and index updated
+
 #### v3: SNN Cognitive Architecture (Milestones 1–5)
 
 - **M1 — Reactive Brain**: LIF spiking neurons, multi-layer `SpikingNetwork`, `LayerProjection` with STDP plasticity, short-term plasticity (STP), `ComprehensionStream`, `ExpressionStream`, `ReasoningNetwork` — `hbllm/brain/snn/`

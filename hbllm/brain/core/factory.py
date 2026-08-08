@@ -222,6 +222,7 @@ class BrainConfig(BaseModel):
 
     # ── Mode selection ────────────────────────────────────────────
     use_composites: bool = True  # Use consolidated composite nodes (v4)
+    use_execution_os: bool = False  # Use Execution OS (GenerationNode + Orchestrator)
 
     # Knowledge base
     inject_knowledge: bool = True  # Auto-create knowledge base
@@ -1128,7 +1129,7 @@ class BrainFactory:
             event_store = InMemoryEventStore()
             normalizer = SemanticNormalizer()
             journal = CognitiveJournal(store=event_store)
-            event_log = CognitiveEventLog(journal=journal, normalizer=normalizer)
+            event_log = CognitiveEventLog(store=event_store)
 
             # 5. Tiered workspace
             tiered = TieredWorkspace()
@@ -1136,10 +1137,11 @@ class BrainFactory:
             # 6. Bus bridge — projects MessageBus events → HCIR workspace
             bus_bridge = HCIRBusBridge(
                 bus=message_bus,
-                workspace=hcir_ws,
-                transaction_manager=tx_mgr,
                 normalizer=normalizer,
                 journal=journal,
+                event_log=event_log,
+                tiered_workspace=tiered,
+                tx_manager=tx_mgr,
             )
 
             # 7. Assemble KernelServices
@@ -1633,38 +1635,93 @@ class BrainFactory:
         else:
             world_state = None
 
-        # Register and start default DomainModuleNode instances
-        if (
-            type(llm_provider).__name__ == "LocalProvider"
-            and getattr(llm_provider, "_model", None) is not None
-        ):
-            from hbllm.modules.base_module import DomainModuleNode
+        # ── Execution Layer: DomainModuleNode vs GenerationNode ──────────
+        use_execution_os = getattr(cfg, "use_execution_os", False)
 
-            model = llm_provider._model
-            tokenizer = llm_provider._tokenizer
-            for domain in ["general", "coding", "math"]:
-                dnode = DomainModuleNode(
-                    node_id=f"domain_{domain}",
-                    domain_name=domain,
-                    model=model,
-                    tokenizer=tokenizer,
-                    lora_state_dict=None,
-                )
-                await _register_node(registry, dnode)
-                await dnode.start(message_bus)
-                nodes.append(dnode)
+        if use_execution_os:
+            # New path: Execution OS — GenerationNode + ExecutionOrchestrator
+            from hbllm.brain.execution.generation_node import GenerationNode
+            from hbllm.execution.bus import ExecutionBus
+            from hbllm.execution.capability import CapabilityResolver
+            from hbllm.execution.orchestrator import ExecutionOrchestrator
+            from hbllm.execution.policy import GenerationPolicy
+            from hbllm.execution.registry import ProviderRegistry, RuntimeRegistry
+            from hbllm.execution.text.text_runtime import TextRuntime
+
+            # Build execution infrastructure
+            provider_registry = ProviderRegistry()
+            runtime_registry = RuntimeRegistry()
+            policy = GenerationPolicy.default()
+            capability_resolver = CapabilityResolver()
+            execution_bus = ExecutionBus()
+
+            # Register text runtime with the LLM provider
+            text_runtime = TextRuntime()
+            text_runtime.register_provider("default", llm)
+            runtime_registry.register(text_runtime)
+
+            # Optionally register training runtime for local models
+            if (
+                type(llm_provider).__name__ == "LocalProvider"
+                and getattr(llm_provider, "_model", None) is not None
+            ):
+                from hbllm.execution.training.training_runtime import TrainingRuntime
+
+                model = llm_provider._model
+                tokenizer = llm_provider._tokenizer
+                training_runtime = TrainingRuntime(model=model, tokenizer=tokenizer)
+                runtime_registry.register(training_runtime)
+
+            orchestrator = ExecutionOrchestrator(
+                policy=policy,
+                capability_resolver=capability_resolver,
+                runtime_registry=runtime_registry,
+                provider_registry=provider_registry,
+                execution_bus=execution_bus,
+            )
+
+            gen_node = GenerationNode(
+                node_id="generation_node",
+                orchestrator=orchestrator,
+            )
+            await _register_node(registry, gen_node)
+            await gen_node.start(message_bus)
+            nodes.append(gen_node)
+            logger.info("Execution OS wired — GenerationNode + ExecutionOrchestrator active")
+
         else:
-            from hbllm.modules.base_module import DomainModuleNode
+            # Legacy path: DomainModuleNode instances
+            if (
+                type(llm_provider).__name__ == "LocalProvider"
+                and getattr(llm_provider, "_model", None) is not None
+            ):
+                from hbllm.modules.base_module import DomainModuleNode
 
-            for domain in ["general", "coding", "math"]:
-                dnode = DomainModuleNode(
-                    node_id=f"domain_{domain}",
-                    domain_name=domain,
-                    llm=llm,
-                )
-                await _register_node(registry, dnode)
-                await dnode.start(message_bus)
-                nodes.append(dnode)
+                model = llm_provider._model
+                tokenizer = llm_provider._tokenizer
+                for domain in ["general", "coding", "math"]:
+                    dnode = DomainModuleNode(
+                        node_id=f"domain_{domain}",
+                        domain_name=domain,
+                        model=model,
+                        tokenizer=tokenizer,
+                        lora_state_dict=None,
+                    )
+                    await _register_node(registry, dnode)
+                    await dnode.start(message_bus)
+                    nodes.append(dnode)
+            else:
+                from hbllm.modules.base_module import DomainModuleNode
+
+                for domain in ["general", "coding", "math"]:
+                    dnode = DomainModuleNode(
+                        node_id=f"domain_{domain}",
+                        domain_name=domain,
+                        llm=llm,
+                    )
+                    await _register_node(registry, dnode)
+                    await dnode.start(message_bus)
+                    nodes.append(dnode)
 
         # Create pipeline
         pipeline_config = PipelineConfig(

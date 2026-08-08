@@ -1,8 +1,14 @@
-"""Spawner node — dynamic LoRA adapter training on-demand.
+"""Spawner node — dynamic skill discovery and domain expansion.
 
-Listens for spawn requests on the bus and forks a background training
-job to create a new domain-specific LoRA adapter without interrupting
-the running model's inference path.
+Listens for spawn requests on the bus. When triggered:
+
+**New path (Execution OS):**
+    Emits ``skill.discovered`` event on the bus. Training is handled
+    by the TrainingRuntime via the Execution OS. No direct LoRA imports.
+
+**Legacy path:**
+    Forks a background training job to create a new LoRA adapter.
+    Controlled by ``use_execution_os=False`` flag.
 """
 
 import asyncio
@@ -10,8 +16,6 @@ import logging
 import os
 from typing import Any
 
-from hbllm.data.synthesizer import DataSynthesizer
-from hbllm.modules.base_module import DomainModuleNode
 from hbllm.network.messages import Message, MessageType, SpawnRequestPayload
 from hbllm.network.node import Node, NodeType
 
@@ -112,13 +116,22 @@ class SpawnerNode(Node):
         tokenizer: Any,
         adapter_registry: Any | None = None,
         default_lora_rank: int | None = None,
+        use_execution_os: bool = False,
     ):
         super().__init__(node_id=node_id, node_type=NodeType.SPAWNER)
         self.model = model
         self.tokenizer = tokenizer
-        self.synthesizer = DataSynthesizer(model=model, tokenizer=tokenizer)
         self.spawning_tasks: set[asyncio.Task[Any]] = set()
         self.adapter_registry = adapter_registry
+        self.use_execution_os = use_execution_os
+
+        # Legacy: DataSynthesizer only needed for old path
+        self.synthesizer: Any = None
+        if not use_execution_os:
+            from hbllm.data.synthesizer import DataSynthesizer
+
+            self.synthesizer = DataSynthesizer(model=model, tokenizer=tokenizer)
+
         # Priority: constructor arg > env var > auto-classify per domain
         self.default_lora_rank = (
             default_lora_rank or int(os.environ.get("HBLLM_LORA_RANK", "0")) or None
@@ -165,14 +178,27 @@ class SpawnerNode(Node):
     async def _spawn_new_module(
         self, topic: str, tenant_id: str | None = None, lora_rank: int = 8
     ) -> None:
-        """The core expansion logic: resolve adapter → (or synthesize + train) → register module."""
-        # Support hierarchical sub-domains (e.g., "coding.python" stays as-is)
+        """The core expansion logic.
+
+        New path (use_execution_os=True):
+            Emit ``skill.discovered`` event. Training handled by Execution OS.
+
+        Legacy path (use_execution_os=False):
+            Resolve adapter → (or synthesize + train) → register DomainModuleNode.
+        """
         domain_name = topic.replace(" ", "_").lower()
         if tenant_id and tenant_id != "system":
             domain_name = f"{tenant_id}_{domain_name}"
-        new_node_id = f"domain_{domain_name.replace('.', '_')}"
 
         logger.info("--- Self-Expansion Initiated for '%s' ---", domain_name)
+
+        if self.use_execution_os:
+            # ── New Path: Emit skill.discovered event ──────────────────────
+            await self._emit_skill_discovered(domain_name, topic, tenant_id, lora_rank)
+            return
+
+        # ── Legacy Path: Direct LoRA training ─────────────────────────────
+        new_node_id = f"domain_{domain_name.replace('.', '_')}"
 
         # Step 1: Try to resolve a pre-trained adapter from the registry
         lora_state_dict = None
@@ -204,6 +230,8 @@ class SpawnerNode(Node):
 
         # 3. Create and Register the New Node
         try:
+            from hbllm.modules.base_module import DomainModuleNode
+
             logger.info("Wiring new DomainModuleNode ('%s') to the MessageBus...", new_node_id)
             new_module = DomainModuleNode(
                 node_id=new_node_id,
@@ -248,6 +276,54 @@ class SpawnerNode(Node):
 
         except Exception as e:
             logger.error("Failed to spawn DomainModuleNode %s: %s", new_node_id, e)
+
+    async def _emit_skill_discovered(
+        self,
+        domain_name: str,
+        topic: str,
+        tenant_id: str | None,
+        lora_rank: int,
+    ) -> None:
+        """Emit a skill.discovered event for the Execution OS to handle.
+
+        The TrainingRuntime subscribes to this event and dispatches
+        training jobs via the ExecutionBus.
+        """
+        centroid_text = f"Topics relating to {domain_name.replace('.', ' ').replace('_', ' ')}"
+
+        # Emit skill.discovered — training is the Execution OS's responsibility
+        skill_event = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            target_node_id="",
+            topic="skill.discovered",
+            payload={
+                "domain": domain_name,
+                "topic": topic,
+                "tenant_id": tenant_id,
+                "centroid_text": centroid_text,
+                "suggested_rank": lora_rank,
+            },
+        )
+        await self.bus.publish("skill.discovered", skill_event)
+
+        # Also register the domain with the router immediately
+        domain_msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            target_node_id="",
+            topic="system.domain_registered",
+            payload={
+                "domain": domain_name,
+                "centroid_text": centroid_text,
+            },
+        )
+        await self.bus.publish("system.domain_registered", domain_msg)
+
+        logger.info(
+            "--- Skill discovered: '%s' (training delegated to Execution OS) ---",
+            domain_name,
+        )
 
     async def _train_lora_adapter(
         self,

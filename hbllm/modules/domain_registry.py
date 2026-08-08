@@ -2,13 +2,17 @@
 Hierarchical Domain Registry.
 
 Manages a tree of domain specializations (e.g. ``coding`` → ``coding.python``
-→ ``coding.python.django``) and resolves LoRA adapter names by walking up the
-hierarchy until a matching adapter is found.
+→ ``coding.python.django``).  This is a **cognitive** component — it describes
+domains as knowledge structures, not as execution targets.
+
+Execution concerns (LoRA adapters, provider selection) are handled by the
+Execution OS in ``hbllm.execution``.
 """
 
 from __future__ import annotations
 
 import logging
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,13 +22,24 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DomainSpec:
-    """Describes a single domain node in the hierarchy."""
+    """Describes a single domain node in the hierarchy.
+
+    This is a **cognitive** structure — it describes what a domain *knows*,
+    not how it's *executed*.  Execution concerns (LoRA adapters, provider
+    selection, modifier pipelines) belong in the Execution OS.
+    """
 
     name: str  # e.g. "coding.python"
-    adapter_name: str = ""  # LoRA adapter key (defaults to name)
     centroid_text: str = ""  # Text used to bootstrap vector embedding
     weight_multiplier: float = 1.0  # Priority boost for this domain
+    ontology: list[str] = field(default_factory=list)  # Domain concepts/taxonomy
+    reasoning_rules: list[str] = field(default_factory=list)  # Domain reasoning hints
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    # ── Deprecated: adapter_name ──────────────────────────────────────────
+    # Preserved for backward compatibility during Execution OS migration.
+    # Will be removed in a future release.
+    adapter_name: str = ""
 
     @property
     def parent(self) -> str | None:
@@ -86,16 +101,17 @@ _DEFAULT_DOMAINS: list[DomainSpec] = [
 
 class DomainRegistry:
     """
-    Hierarchical domain management with LoRA adapter resolution.
+    Hierarchical domain management.
+
+    This is a **cognitive** registry — it manages domain knowledge structures,
+    not execution targets.  Adapter resolution is deprecated; use the
+    Execution OS (``hbllm.execution``) for execution concerns.
 
     Domains use **dot-notation** to encode parent–child relationships::
 
         coding            (root)
         coding.python     (child of coding)
         coding.python.django  (child of coding.python)
-
-    Adapter resolution walks **up** the tree until a registered adapter is
-    found, falling back to ``"default"`` at the root.
     """
 
     def __init__(self, *, load_defaults: bool = True) -> None:
@@ -167,15 +183,24 @@ class DomainRegistry:
         """Domains with no children."""
         return sorted(n for n in self._domains if not self._children.get(n))
 
-    # ── Adapter Resolution ────────────────────────────────────────────────
+    # ── Adapter Resolution (DEPRECATED) ────────────────────────────────────
+    # These methods are preserved for backward compatibility during the
+    # Execution OS migration.  Use hbllm.execution for new code.
 
     def resolve_adapter(self, domain: str) -> str:
         """
         Walk up the hierarchy to find the nearest registered LoRA adapter.
 
-        ``coding.python.django`` → try ``coding.python.django``, then
-        ``coding.python``, then ``coding``, then ``"default"``.
+        .. deprecated::
+            Adapter resolution is now handled by the Execution OS.
+            Use ``hbllm.execution.orchestrator.ExecutionOrchestrator`` instead.
         """
+        warnings.warn(
+            "DomainRegistry.resolve_adapter() is deprecated. "
+            "Use hbllm.execution.ExecutionOrchestrator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         parts = domain.split(".")
         for i in range(len(parts), 0, -1):
             candidate = ".".join(parts[:i])
@@ -188,10 +213,15 @@ class DomainRegistry:
         """
         Resolve a weighted domain dict to **adapter** weights.
 
-        Multiple domains may map to the same adapter (e.g. ``coding.python``
-        and ``coding.rust`` both fall back to ``coding``).  In that case their
-        weights are summed.
+        .. deprecated::
+            Adapter resolution is now handled by the Execution OS.
         """
+        warnings.warn(
+            "DomainRegistry.resolve_weighted() is deprecated. "
+            "Use hbllm.execution.ExecutionOrchestrator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         adapter_weights: dict[str, float] = {}
         for domain, weight in domain_weights.items():
             adapter = self.resolve_adapter(domain)
