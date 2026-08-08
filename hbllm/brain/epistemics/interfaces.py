@@ -812,4 +812,3 @@ class ICounterfactualReasoner(Protocol):
             that evidence would change the belief's confidence).
         """
         ...
-

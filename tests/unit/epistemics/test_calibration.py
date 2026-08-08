@@ -17,12 +17,15 @@ async def seeded_memory(memory: EpistemicMemory) -> EpistemicMemory:
         correct = i < 7  # 70% accuracy
         predicted_conf = 0.8 if i < 5 else 0.5  # overconfident on first 5
         outcome = PredictionOutcome(
-            prediction_id=f"p{i}", hypothesis_id=f"h{i % 3}",
-            predicted="x", observed="x" if correct else "y",
+            prediction_id=f"p{i}",
+            hypothesis_id=f"h{i % 3}",
+            predicted="x",
+            observed="x" if correct else "y",
             correct=correct,
         )
         await memory.record_prediction_result(
-            outcome, predicted_confidence=predicted_conf,
+            outcome,
+            predicted_confidence=predicted_conf,
         )
 
     # 5 hypotheses: 3 promoted, 1 falsified, 1 abandoned
@@ -40,7 +43,8 @@ class TestCalibrate:
 
     @pytest.mark.asyncio
     async def test_calibration_report_fields(
-        self, seeded_memory: EpistemicMemory,
+        self,
+        seeded_memory: EpistemicMemory,
     ) -> None:
         calibrator = EpistemicCalibrationEngine(memory=seeded_memory)
         report = await calibrator.calibrate()
@@ -54,7 +58,8 @@ class TestCalibrate:
 
     @pytest.mark.asyncio
     async def test_empty_memory_calibration(
-        self, memory: EpistemicMemory,
+        self,
+        memory: EpistemicMemory,
     ) -> None:
         calibrator = EpistemicCalibrationEngine(memory=memory)
         report = await calibrator.calibrate()
@@ -69,7 +74,8 @@ class TestCalibrationCurve:
 
     @pytest.mark.asyncio
     async def test_calibration_curve_bins(
-        self, seeded_memory: EpistemicMemory,
+        self,
+        seeded_memory: EpistemicMemory,
     ) -> None:
         calibrator = EpistemicCalibrationEngine(memory=seeded_memory)
         curve = await calibrator.compute_calibration_curve(n_bins=5)
@@ -83,7 +89,8 @@ class TestCalibrationCurve:
 
     @pytest.mark.asyncio
     async def test_empty_calibration_curve(
-        self, memory: EpistemicMemory,
+        self,
+        memory: EpistemicMemory,
     ) -> None:
         calibrator = EpistemicCalibrationEngine(memory=memory)
         curve = await calibrator.compute_calibration_curve()
@@ -95,7 +102,8 @@ class TestBiasDetection:
 
     @pytest.mark.asyncio
     async def test_detect_biases(
-        self, seeded_memory: EpistemicMemory,
+        self,
+        seeded_memory: EpistemicMemory,
     ) -> None:
         calibrator = EpistemicCalibrationEngine(memory=seeded_memory)
         biases = await calibrator.detect_epistemic_biases()
@@ -109,7 +117,8 @@ class TestStrategyRecommendation:
 
     @pytest.mark.asyncio
     async def test_recommend_strategy(
-        self, seeded_memory: EpistemicMemory,
+        self,
+        seeded_memory: EpistemicMemory,
     ) -> None:
         calibrator = EpistemicCalibrationEngine(memory=seeded_memory)
         rec = await calibrator.recommend_strategy_adjustment()

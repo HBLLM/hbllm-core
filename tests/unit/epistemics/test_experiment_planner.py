@@ -10,7 +10,7 @@ from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.brain.epistemics.experiment_planner import ExperimentPlanner
 from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
 from hbllm.brain.epistemics.idea_generator import IdeaGenerator
-from hbllm.brain.epistemics.interfaces import ExperimentDesign, InvestigationBudget
+from hbllm.brain.epistemics.interfaces import ExperimentDesign
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
 from hbllm.hcir.graph import CognitiveGraph, HypothesisNode
 
@@ -20,7 +20,9 @@ class TestDesignDiscriminativeExperiment:
 
     @pytest.mark.asyncio
     async def test_design_with_two_hypotheses(
-        self, graph: CognitiveGraph, workspace: DiscoveryWorkspace,
+        self,
+        graph: CognitiveGraph,
+        workspace: DiscoveryWorkspace,
     ) -> None:
         prog = workspace.create_program("Test", "Why X?")
         obj = workspace.add_objective(prog.program_id, "Find")
@@ -51,7 +53,8 @@ class TestDesignDiscriminativeExperiment:
 
     @pytest.mark.asyncio
     async def test_design_single_hypothesis(
-        self, graph: CognitiveGraph,
+        self,
+        graph: CognitiveGraph,
     ) -> None:
         hyp = HypothesisNode(claim="X causes Y")
         graph.upsert_node(hyp)
@@ -99,7 +102,8 @@ class TestCounterfactualExperiment:
 
     @pytest.mark.asyncio
     async def test_design_without_counterfactual(
-        self, graph: CognitiveGraph,
+        self,
+        graph: CognitiveGraph,
     ) -> None:
         planner = ExperimentPlanner(graph=graph, counterfactual=None)
         design = await planner.design_counterfactual_experiment("b1")
@@ -107,7 +111,8 @@ class TestCounterfactualExperiment:
 
     @pytest.mark.asyncio
     async def test_design_with_counterfactual(
-        self, populated_graph: dict[str, Any],
+        self,
+        populated_graph: dict[str, Any],
     ) -> None:
         graph = populated_graph["graph"]
         cf = CounterfactualReasoner(graph=graph)

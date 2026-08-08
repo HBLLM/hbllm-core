@@ -471,10 +471,12 @@ class IdeaGenerator:
 
         try:
             failed = await self._memory.get_hypothesis_history(
-                outcome="falsified", limit=100,
+                outcome="falsified",
+                limit=100,
             )
             abandoned = await self._memory.get_hypothesis_history(
-                outcome="abandoned", limit=100,
+                outcome="abandoned",
+                limit=100,
             )
             past_failures = failed + abandoned
         except Exception as exc:
@@ -498,9 +500,7 @@ class IdeaGenerator:
 
         filtered: list[RawIdea] = []
         for idea in ideas:
-            idea_words = set(
-                w for w in idea.claim.lower().split() if len(w) >= 4
-            )
+            idea_words = set(w for w in idea.claim.lower().split() if len(w) >= 4)
             # If >50% of idea words match failure keywords, skip it
             if idea_words:
                 overlap = len(idea_words & failure_keywords) / len(idea_words)
@@ -516,7 +516,9 @@ class IdeaGenerator:
         if len(filtered) < len(ideas):
             logger.info(
                 "Memory filter: %d/%d ideas passed (removed %d similar to past failures)",
-                len(filtered), len(ideas), len(ideas) - len(filtered),
+                len(filtered),
+                len(ideas),
+                len(ideas) - len(filtered),
             )
 
         return filtered

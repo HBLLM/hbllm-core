@@ -282,4 +282,3 @@ class ResearchStrategyManager:
             return ResearchStrategyType.SYNTHESIS
 
         return current_strategy
-

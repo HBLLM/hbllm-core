@@ -46,52 +46,34 @@ Design principles:
 
 # ── Wave 1: Epistemic Foundations ──────────────────────────────────────
 from hbllm.brain.epistemics.belief_manager import DiscoveryBeliefManager
-from hbllm.brain.epistemics.reputation import SourceReputation, SourceReputationTracker
-from hbllm.brain.epistemics.workspace import DiscoveryWorkspace, ResearchProgram
+
+# ── Wave 3: Meta-Cognition ────────────────────────────────────────────
+from hbllm.brain.epistemics.calibration import EpistemicCalibrationEngine
 
 # ── Wave 2: Epistemic Engines ─────────────────────────────────────────
 from hbllm.brain.epistemics.contradiction_engine import ContradictionEngine
+from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.brain.epistemics.curiosity_engine import CuriosityEngine
 from hbllm.brain.epistemics.epistemic_loop import EpistemicLoop
+from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
 from hbllm.brain.epistemics.evidence_evaluator import EvidenceEvaluator
 from hbllm.brain.epistemics.experiment_planner import ExperimentPlanner
 from hbllm.brain.epistemics.explanation import ExplanationEngine
 from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
 from hbllm.brain.epistemics.idea_generator import IdeaGenerator
-from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
-from hbllm.brain.epistemics.research_strategy import (
-    ResearchStrategyManager,
-    StrategyConfig,
-)
-
-# ── Wave 3: Meta-Cognition ────────────────────────────────────────────
-from hbllm.brain.epistemics.calibration import EpistemicCalibrationEngine
-from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
-from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
 
 # ── Wave 4: Integration ──────────────────────────────────────────
 from hbllm.brain.epistemics.integration import wire_epistemics
 
 # ── Protocols ──────────────────────────────────────────────────────────
 from hbllm.brain.epistemics.interfaces import (
-    # Wave 2 Protocols
-    IBeliefReviser,
-    IContradictionSeeker,
-    ICuriosityEngine,
-    IEvidenceEvaluator,
-    IExperimentDesigner,
-    IExplanationEngine,
-    IHypothesisBuilder,
-    IIdeaGenerator,
-    IPredictionTracker,
-    ISourceReputationTracker,
-    # Wave 3 Protocols
-    ICounterfactualReasoner,
-    IEpistemicCalibrator,
-    IEpistemicMemory,
     # Wave 2 Data Types
     BeliefRevision,
+    # Wave 3 Data Types
+    CalibrationReport,
+    ConfidenceSnapshot,
     ContradictionReport,
+    CounterfactualResult,
     CuriositySignal,
     EpistemicTask,
     EvidenceAssessment,
@@ -99,14 +81,32 @@ from hbllm.brain.epistemics.interfaces import (
     ExplanationChain,
     ExplanationStep,
     HypothesisCandidate,
+    # Wave 2 Protocols
+    IBeliefReviser,
+    IContradictionSeeker,
+    # Wave 3 Protocols
+    ICounterfactualReasoner,
+    ICuriosityEngine,
+    IEpistemicCalibrator,
+    IEpistemicMemory,
+    IEvidenceEvaluator,
+    IExperimentDesigner,
+    IExplanationEngine,
+    IHypothesisBuilder,
+    IIdeaGenerator,
     InvestigationBudget,
+    IPredictionTracker,
+    ISourceReputationTracker,
     PredictionOutcome,
     RawIdea,
-    # Wave 3 Data Types
-    CalibrationReport,
-    ConfidenceSnapshot,
-    CounterfactualResult,
 )
+from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
+from hbllm.brain.epistemics.reputation import SourceReputation, SourceReputationTracker
+from hbllm.brain.epistemics.research_strategy import (
+    ResearchStrategyManager,
+    StrategyConfig,
+)
+from hbllm.brain.epistemics.workspace import DiscoveryWorkspace, ResearchProgram
 
 __all__ = [
     # ── Wave 1: Foundations ────────────────────────────────────────

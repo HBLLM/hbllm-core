@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import tempfile
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 
 import pytest
 
 from hbllm.brain.epistemics.calibration import EpistemicCalibrationEngine
 from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
-from hbllm.brain.epistemics.interfaces import PredictionOutcome
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
 from hbllm.hcir.graph import (
     BeliefNode,
@@ -19,7 +19,6 @@ from hbllm.hcir.graph import (
     HCIREdge,
     HCIREdgeType,
     HypothesisNode,
-    UnknownNode,
 )
 from hbllm.hcir.types import BeliefConfidence, EvidenceStrength
 
@@ -71,11 +70,15 @@ def populated_graph(graph: CognitiveGraph) -> dict[str, Any]:
     """
     ev1 = EvidenceNode(
         evidence_type=EvidenceStrength.EXPERIMENTAL,
-        methodology="RCT n=200", sample_size=200, reproducible=True,
+        methodology="RCT n=200",
+        sample_size=200,
+        reproducible=True,
     )
     ev2 = EvidenceNode(
         evidence_type=EvidenceStrength.OBSERVATIONAL,
-        methodology="Survey n=50", sample_size=50, reproducible=False,
+        methodology="Survey n=50",
+        sample_size=50,
+        reproducible=False,
     )
     graph.upsert_node(ev1)
     graph.upsert_node(ev2)
@@ -86,8 +89,10 @@ def populated_graph(graph: CognitiveGraph) -> dict[str, Any]:
     belief = BeliefNode(
         claim="X is caused by mechanism Z",
         belief_confidence=BeliefConfidence(
-            evidence_quality=0.8, evidence_quantity=0.5,
-            reproducibility=0.7, prediction_accuracy=0.6,
+            evidence_quality=0.8,
+            evidence_quantity=0.5,
+            reproducibility=0.7,
+            prediction_accuracy=0.6,
         ),
     )
     graph.upsert_node(belief)
