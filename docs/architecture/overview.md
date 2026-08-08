@@ -314,6 +314,25 @@ The human modeling layer that makes HBLLM feel persistent and personal. See [Cog
 - **RelationshipMemory** — Social graph of people mentioned in conversations with roles, sentiment trends, interaction history, and notification prioritization.
 - **RealityGraph** — Read-only unified facade over KnowledgeGraph, BrainWorldState, and PerceptionWorldState. Merges entities by confidence.
 
+### Layer 4c: Epistemic Runtime (Autonomous Discovery)
+
+The domain-neutral discovery engine that gives HBLLM the ability to form hypotheses, evaluate evidence, revise beliefs, and calibrate its own reasoning. See [Epistemic Runtime](epistemics.md) for the full deep-dive.
+
+- **EpistemicLoop** — Orchestrator running the full discovery cycle (curiosity → ideas → hypotheses → predictions → experiments → belief revision) on every cognitive tick.
+- **CuriosityEngine** — Self-directed investigation prioritization from unknowns and untested hypotheses.
+- **IdeaGenerator** — Generates hypotheses from unknowns, contradictions, and anomalies. Memory-filtered against past failures.
+- **HypothesisBuilder** — Validates, deduplicates, and promotes raw ideas to HCIR HypothesisNodes.
+- **PredictionTracker** — Registers competing predictions with deadlines and checks outcomes.
+- **ExperimentPlanner** — Designs discriminative experiments ranked by information gain.
+- **EvidenceEvaluator** — Scores evidence quality via graph topology analysis.
+- **BeliefManager** — Bayesian confidence updates from evidence and prediction outcomes.
+- **ContradictionEngine** — Proactive contradiction scanning across the belief graph.
+- **ExplanationEngine** — Graph-traversal provenance chains: belief → evidence → observations.
+- **EpistemicMemory** — SQLite-backed long-term reasoning history (hypotheses, predictions, biases).
+- **CalibrationEngine** — Meta-epistemic self-calibration: "How good am I at knowing things?"
+- **CounterfactualReasoner** — "What if..." graph analysis (sensitivity, evidence removal, falsification).
+- **SourceReputationTracker** — Bayesian source trust scoring.
+
 ## Communication & Security
 
 All nodes communicate via the **MessageBus**, which has been hardened for distributed swarms:
@@ -418,6 +437,7 @@ sequenceDiagram
 
 - [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
 - [Cognitive Subsystems](cognitive-subsystems.md) — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph.
+- [Epistemic Runtime](epistemics.md) — Autonomous discovery: hypothesis generation, evidence evaluation, belief revision, calibration.
 - [Message Bus](message-bus.md) — How Pub/Sub routing works.
 - [Memory Systems](memory-systems.md) — HCIR-native memory architecture with tiered workspace and cross-memory search.
 - [Embodiment](embodiment.md) — Actuator safety and verification.
