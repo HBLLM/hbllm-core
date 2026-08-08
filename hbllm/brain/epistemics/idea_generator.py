@@ -64,6 +64,7 @@ class IdeaGenerator:
         graph: CognitiveGraph,
         llm: Any | None = None,
         max_ideas_per_generation: int = 15,
+        memory: Any | None = None,
     ) -> None:
         """Initialize the idea generator.
 
@@ -71,10 +72,12 @@ class IdeaGenerator:
             graph: The shared HCIR cognitive graph.
             llm: Optional LLM instance for creative reasoning.
             max_ideas_per_generation: Maximum ideas per generation call.
+            memory: Optional EpistemicMemory for past-failure filtering.
         """
         self._graph = graph
         self._llm = llm
         self._max_ideas = max_ideas_per_generation
+        self._memory = memory  # EpistemicMemory (optional)
 
     async def generate_from_unknown(
         self,
@@ -96,10 +99,12 @@ class IdeaGenerator:
             return []
 
         if self._llm is not None:
-            return await self._llm_generate_from_unknown(node, context)
+            ideas = await self._llm_generate_from_unknown(node, context)
+        else:
+            # Fallback: template-based generation
+            ideas = self._template_generate_from_unknown(node)
 
-        # Fallback: template-based generation
-        return self._template_generate_from_unknown(node)
+        return await self._filter_known_failures(ideas)
 
     async def generate_from_contradiction(
         self,
@@ -119,9 +124,11 @@ class IdeaGenerator:
             return []
 
         if self._llm is not None:
-            return await self._llm_generate_from_contradiction(node)
+            ideas = await self._llm_generate_from_contradiction(node)
+        else:
+            ideas = self._template_generate_from_contradiction(node)
 
-        return self._template_generate_from_contradiction(node)
+        return await self._filter_known_failures(ideas)
 
     async def generate_from_analogy(
         self,
@@ -174,9 +181,11 @@ class IdeaGenerator:
             return []
 
         if self._llm is not None:
-            return await self._llm_generate_from_anomaly(node)
+            ideas = await self._llm_generate_from_anomaly(node)
+        else:
+            ideas = self._template_generate_from_anomaly(node)
 
-        return self._template_generate_from_anomaly(node)
+        return await self._filter_known_failures(ideas)
 
     # ── LLM-Powered Generation ─────────────────────────────────────────
 
@@ -438,3 +447,76 @@ class IdeaGenerator:
         if claim:
             return claim
         return getattr(node, "description", node_id) or node_id
+
+    # ── Memory-Aware Filtering ─────────────────────────────────────────
+
+    async def _filter_known_failures(self, ideas: list[RawIdea]) -> list[RawIdea]:
+        """Remove ideas too similar to past falsified hypotheses.
+
+        Queries EpistemicMemory for previously falsified and abandoned
+        hypotheses.  If a new idea's claim closely matches a known failure,
+        it's dropped to avoid wasting cycles on dead ends.
+
+        Uses substring matching.  In production, this should use semantic
+        similarity via the embedding system for better recall.
+
+        Args:
+            ideas: Raw ideas to filter.
+
+        Returns:
+            Filtered list with known failures removed.
+        """
+        if self._memory is None or not ideas:
+            return ideas
+
+        try:
+            failed = await self._memory.get_hypothesis_history(
+                outcome="falsified", limit=100,
+            )
+            abandoned = await self._memory.get_hypothesis_history(
+                outcome="abandoned", limit=100,
+            )
+            past_failures = failed + abandoned
+        except Exception as exc:
+            logger.debug("Memory query failed, skipping filter: %s", exc)
+            return ideas
+
+        if not past_failures:
+            return ideas
+
+        # Build set of failure claim keywords (lowered, 4+ char words)
+        failure_keywords: set[str] = set()
+        for record in past_failures:
+            claim = record.get("claim", "")
+            if claim:
+                for word in claim.lower().split():
+                    if len(word) >= 4:
+                        failure_keywords.add(word)
+
+        if not failure_keywords:
+            return ideas
+
+        filtered: list[RawIdea] = []
+        for idea in ideas:
+            idea_words = set(
+                w for w in idea.claim.lower().split() if len(w) >= 4
+            )
+            # If >50% of idea words match failure keywords, skip it
+            if idea_words:
+                overlap = len(idea_words & failure_keywords) / len(idea_words)
+                if overlap > 0.5:
+                    logger.debug(
+                        "Filtered idea (%.0f%% overlap with past failures): %s",
+                        overlap * 100,
+                        idea.claim[:60],
+                    )
+                    continue
+            filtered.append(idea)
+
+        if len(filtered) < len(ideas):
+            logger.info(
+                "Memory filter: %d/%d ideas passed (removed %d similar to past failures)",
+                len(filtered), len(ideas), len(ideas) - len(filtered),
+            )
+
+        return filtered
