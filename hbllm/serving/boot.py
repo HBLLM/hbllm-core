@@ -40,7 +40,19 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.brain.autonomy.loop import AutonomyCore
+    from hbllm.brain.core.factory import Brain
+    from hbllm.brain.self_model.identity import IdentityStateManager
+    from hbllm.config.brain_profile import BrainProfile
+    from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
+    from hbllm.hcir.kernel.services import KernelServices
+    from hbllm.network.gateway import Gateway
+    from hbllm.security.permission_engine import PermissionEngine
+    from hbllm.serving.cognitive_scheduler import CognitiveScheduler
+    from hbllm.workspace.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 
@@ -96,16 +108,16 @@ class BootConfig:
 class BootContext:
     """All subsystems created during boot, available for wiring."""
 
-    brain: Any = None
-    profile: Any = None  # BrainProfile
-    gateway: Any = None  # Gateway
-    scheduler: Any = None  # CognitiveScheduler
-    permission_engine: Any = None  # PermissionEngine
-    identity: Any = None  # IdentityStateManager
-    workspace_manager: Any = None  # WorkspaceManager
-    autonomy: Any = None  # AutonomyCore
-    kernel_services: Any = None  # HCIR KernelServices
-    executive_runtime: Any = None  # HCIR ExecutiveRuntime
+    brain: Brain | None = None
+    profile: BrainProfile | None = None
+    gateway: Gateway | None = None
+    scheduler: CognitiveScheduler | None = None
+    permission_engine: PermissionEngine | None = None
+    identity: IdentityStateManager | None = None
+    workspace_manager: WorkspaceManager | None = None
+    autonomy: AutonomyCore | None = None
+    kernel_services: KernelServices | None = None
+    executive_runtime: ExecutiveRuntime | None = None
     boot_time_ms: float = 0.0
 
 
@@ -165,6 +177,12 @@ class BootOrchestrator:
             ctx.profile.features.local_inference,
         )
 
+        # ── 1.5 Initialize Tracing ───────────────────────────────────
+        from hbllm.observability.tracing import init_tracing
+
+        if init_tracing():
+            logger.info("OpenTelemetry tracing initialized")
+
         # ── 2. Create Brain ──────────────────────────────────────────
         from hbllm.brain.core.factory import BrainConfig, BrainFactory
 
@@ -219,7 +237,12 @@ class BootOrchestrator:
 
             # Export brain nodes capabilities to HCIR workspace
             if hasattr(ctx.brain, "nodes"):
-                for node_obj in ctx.brain.nodes.values():
+                node_list = (
+                    ctx.brain.nodes.values()
+                    if isinstance(ctx.brain.nodes, dict)
+                    else ctx.brain.nodes
+                )
+                for node_obj in node_list:
                     adapter = NodeAdapter(node_obj)
                     for cap_node in adapter.export_capabilities(tenant_id="default"):
                         hcir_ws.upsert_node(cap_node)
@@ -245,9 +268,14 @@ class BootOrchestrator:
 
             ctx.scheduler = CognitiveScheduler(
                 max_concurrent_llm=cfg.max_concurrent_llm,
+                max_concurrent_background=cfg.scheduler_workers,
             )
-            await ctx.scheduler.start(num_workers=cfg.scheduler_workers)
-            logger.info("CognitiveScheduler started (%d workers)", cfg.scheduler_workers)
+            await ctx.scheduler.start()
+            logger.info(
+                "CognitiveScheduler online (%d workers, max %d LLM concurrent)",
+                cfg.scheduler_workers,
+                cfg.max_concurrent_llm,
+            )
 
         # ── 5. Initialize PermissionEngine ───────────────────────────
         if cfg.enable_permissions:
@@ -280,7 +308,7 @@ class BootOrchestrator:
             logger.info("WorkspaceManager initialized")
 
         # ── 8. Start AutonomyCore ────────────────────────────────────
-        if cfg.enable_autonomy and ctx.profile.features.autonomous_loops:
+        if cfg.enable_autonomy and ctx.profile.features.autonomy_core:
             try:
                 from hbllm.brain.autonomy.loop import AutonomyCore
 
@@ -348,6 +376,11 @@ class BootOrchestrator:
         # Shutdown brain
         if ctx.brain:
             await ctx.brain.shutdown()
+
+        # Flush tracing spans
+        from hbllm.observability.tracing import shutdown_tracing
+
+        shutdown_tracing()
 
         self._started = False
         logger.info("Cognitive OS shutdown complete")

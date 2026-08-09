@@ -384,6 +384,10 @@ class TestCognitiveScheduler:
         assert result is not None
         assert result.name == "user_task"
 
+        # Drain the remaining task to avoid unawaited coroutine warning
+        remaining = await scheduler.run_next()
+        assert remaining is not None
+
     @pytest.mark.asyncio
     async def test_resource_budget_enforcement(self) -> None:
         scheduler = CognitiveScheduler(
@@ -411,10 +415,13 @@ class TestCognitiveScheduler:
         async def noop() -> str:
             return "done"
 
-        task_id = scheduler.submit("cancel_me", TaskPriority.BACKGROUND, noop())
+        coro = noop()
+        task_id = scheduler.submit("cancel_me", TaskPriority.BACKGROUND, coro)
         assert scheduler.pending_count() == 1
         assert scheduler.cancel(task_id) is True
         assert scheduler.pending_count() == 0
+        # Close the coroutine explicitly to avoid unawaited warning
+        coro.close()
 
     def test_stats(self) -> None:
         scheduler = CognitiveScheduler()

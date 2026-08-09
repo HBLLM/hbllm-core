@@ -10,6 +10,7 @@
 
 services:
   hbllm-core:
+    volumes: []  # Override: don't mount source in production
     deploy:
       replicas: 2
       resources:
