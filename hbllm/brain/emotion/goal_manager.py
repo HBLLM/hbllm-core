@@ -907,13 +907,21 @@ class GoalManager(TenantSQLiteRepository):
     # ─── Helpers ──────────────────────────────────────────────────────
 
     def _row_to_goal(self, row: tuple[Any, ...]) -> Goal:
-        if len(row) > 17:  # v2 schema has 18 columns
+        # Detect if tenant_id is column index 1 or column index 17 / absent
+        try:
+            priority = GoalPriority(row[5])
+            is_tenant_col1 = True
+        except (ValueError, IndexError):
+            priority = GoalPriority(row[4])
+            is_tenant_col1 = False
+
+        if is_tenant_col1:
             return Goal(
                 goal_id=row[0],
                 name=row[2],
                 description=row[3],
                 goal_type=row[4],
-                priority=GoalPriority(row[5]),
+                priority=priority,
                 status=GoalStatus(row[6]),
                 progress=row[7],
                 success_criteria=row[8],
@@ -921,19 +929,18 @@ class GoalManager(TenantSQLiteRepository):
                 actions_taken=json.loads(row[10] or "[]"),
                 metadata=json.loads(row[11] or "{}"),
                 created_at=row[12],
-                deadline=row[14],
-                dependencies=json.loads(row[15] or "[]"),
-                block_reason=row[16],
-                execution_journal=json.loads(row[17] or "{}"),
+                deadline=row[14] if len(row) > 14 else None,
+                dependencies=json.loads(row[15] or "[]") if len(row) > 15 else [],
+                block_reason=row[16] if len(row) > 16 else "",
+                execution_journal=json.loads(row[17] or "{}") if len(row) > 17 else {},
             )
         else:
-            # v1 legacy fallback
             return Goal(
                 goal_id=row[0],
                 name=row[1],
                 description=row[2],
                 goal_type=row[3],
-                priority=GoalPriority(row[4]),
+                priority=priority,
                 status=GoalStatus(row[5]),
                 progress=row[6],
                 success_criteria=row[7],
@@ -941,7 +948,7 @@ class GoalManager(TenantSQLiteRepository):
                 actions_taken=json.loads(row[9] or "[]"),
                 metadata=json.loads(row[10] or "{}"),
                 created_at=row[11],
-                deadline=row[13],
+                deadline=row[13] if len(row) > 13 else None,
                 dependencies=json.loads(row[14] or "[]") if len(row) > 14 else [],
                 block_reason=row[15] if len(row) > 15 else "",
                 execution_journal=json.loads(row[16] or "{}") if len(row) > 16 else {},

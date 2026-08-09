@@ -111,5 +111,12 @@ class PersistenceService:
 
     async def close_all(self) -> None:
         """Close all registered database pools."""
+        for name, pool in self._stores.items():
+            for conn in pool._connections:
+                try:
+                    await conn.close()
+                except Exception as e:
+                    logger.debug("[PersistenceService] Error closing %s conn: %s", name, e)
+            pool._connections.clear()
         self._stores.clear()
         logger.info("[PersistenceService] All persistence pools closed")

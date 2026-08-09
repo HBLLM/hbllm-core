@@ -47,12 +47,10 @@ jobs:
         run: ruff format --check .
 
       - name: Audit dependencies for CVEs
-        run: pip-audit --strict --desc 2>/dev/null || true
-        continue-on-error: true
+        run: pip-audit --strict --desc
 
       - name: Static security analysis (bandit)
-        run: bandit -r hbllm/ -c pyproject.toml --severity-level medium -q || true
-        continue-on-error: true
+        run: bandit -r hbllm/ -c pyproject.toml --severity-level medium -q
 
   # ── Unit Tests ────────────────────────────────────────────────────────
   test:
