@@ -48,11 +48,12 @@ def _check_unshare() -> bool:
     if not sys.platform.startswith("linux"):
         _can_unshare = False
         return False
-    unshare_path = shutil.which("unshare")
+    unshare_path: str | None = shutil.which("unshare")
     if not unshare_path:
         logger.warning("unshare not found. Network isolation unavailable.")
         _can_unshare = False
         return False
+    assert unshare_path is not None  # for type narrowing; guarded above
     # Test if unshare actually works (may fail in containers without CAP_SYS_ADMIN)
     try:
         import subprocess
