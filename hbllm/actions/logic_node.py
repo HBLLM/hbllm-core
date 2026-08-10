@@ -194,7 +194,8 @@ class LogicNode(Node):
                     logger.error("[LogicNode] Blocked dunder access: %s", node.attr)
                     return None
 
-            exec(z3_code, sandbox_globals, sandbox_locals)  # noqa: S102 — sandboxed
+            # Sandboxed execution: AST is pre-validated above
+            exec(z3_code, sandbox_globals, sandbox_locals)  # noqa: S102 # nosec B102
             result = sandbox_locals.get("result")
             if result is not None:
                 return str(result)

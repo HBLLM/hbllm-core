@@ -390,7 +390,7 @@ class SemanticMemory(MemoryRepository):
         """Fast hash for deduplication."""
         if _HAS_RUST_SEARCH:
             return _rust_hash(content)
-        return hashlib.md5(content.encode()).hexdigest()
+        return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
 
     from hbllm.security.tenant_guard import require_tenant
 

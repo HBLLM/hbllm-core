@@ -510,7 +510,7 @@ class KVCache:
         """
         import hashlib
 
-        payload = torch.load(file_path, map_location="cpu", weights_only=False)  # noqa: S301
+        payload = torch.load(file_path, map_location="cpu", weights_only=False)  # noqa: S301 # nosec B614
 
         config_dict = {
             "num_layers": getattr(model_config, "num_layers", 0),

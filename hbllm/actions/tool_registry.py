@@ -419,7 +419,7 @@ def create_tool_from_code(code_string: str, function_name: str) -> Callable:
     namespace = {}
 
     # Execute the code — now doubly validated
-    exec(code_string, {"__builtins__": {}}, namespace)  # noqa: S102
+    exec(code_string, {"__builtins__": {}}, namespace)  # noqa: S102 # nosec B102
 
     func = namespace.get(function_name)
     if not func or not callable(func):

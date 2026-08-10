@@ -166,3 +166,15 @@ disable_error_code = [
     "misc", "var-annotated", "index", "dict-item", "override", 
     "operator", "valid-type", "union-attr"
 ]
+
+[tool.bandit]
+exclude_dirs = ["tests", "plugins"]
+skips = [
+    "B104",  # hardcoded_bind_all_interfaces: binding 0.0.0.0 is intentional for server/daemon serving
+    "B108",  # hardcoded_tmp_directory: /tmp used for benchmark files and OS adapter sandbox allowlist
+    "B310",  # urllib urlopen in legacy studio UI
+    "B608",  # hardcoded_sql_expressions: dynamic parameter placeholders and internal table queries
+    "B614",  # pytorch_load: model checkpoint and KV cache tensor loading
+    "B615",  # huggingface_unsafe_download: HuggingFace hub downloads without pinned revision
+]
+
