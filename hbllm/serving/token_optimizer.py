@@ -270,7 +270,7 @@ class TokenOptimizer:
 
     def _cache_key(self, query: str) -> str:
         normalized = query.lower().strip()
-        return hashlib.md5(normalized.encode()).hexdigest()
+        return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()
 
     # ─── Helpers ─────────────────────────────────────────────────────
 

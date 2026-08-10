@@ -10,7 +10,7 @@
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
   [![Tests](https://img.shields.io/badge/Tests-4200%2B%20passing-brightgreen.svg)](#)
-  [![Files](https://img.shields.io/badge/Source-421%20modules-purple.svg)](#)
+  [![Files](https://img.shields.io/badge/Source-674%20modules-purple.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 

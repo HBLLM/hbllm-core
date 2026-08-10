@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -146,7 +146,7 @@ testpaths = ["tests", "plugins"]
 asyncio_mode = "auto"
 timeout = 300
 timeout_method = "thread"
-addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal"
+addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal --ignore=tests/scratch"
 markers = [
     "unit: Unit tests (single component, fast)",
     "integration: Integration tests (multi-component)",
@@ -166,3 +166,15 @@ disable_error_code = [
     "misc", "var-annotated", "index", "dict-item", "override", 
     "operator", "valid-type", "union-attr"
 ]
+
+[tool.bandit]
+exclude_dirs = ["tests", "plugins"]
+skips = [
+    "B104",  # hardcoded_bind_all_interfaces: binding 0.0.0.0 is intentional for server/daemon serving
+    "B108",  # hardcoded_tmp_directory: /tmp used for benchmark files and OS adapter sandbox allowlist
+    "B310",  # urllib urlopen in legacy studio UI
+    "B608",  # hardcoded_sql_expressions: dynamic parameter placeholders and internal table queries
+    "B614",  # pytorch_load: model checkpoint and KV cache tensor loading
+    "B615",  # huggingface_unsafe_download: HuggingFace hub downloads without pinned revision
+]
+

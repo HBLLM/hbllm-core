@@ -302,8 +302,9 @@ class MemoryMigrationProxy:
         try:
             for item in results[:5]:  # Cap warming to avoid overload
                 if memory_type == MemoryType.EPISODIC and isinstance(item, dict):
+                    summary = item.get("content") or item.get("summary") or str(item)
                     await self._hcir.store_episode(
-                        summary=item.get("content", item.get("summary", str(item))),
+                        summary=summary,
                         tenant_id=tenant_id,
                     )
                 elif memory_type == MemoryType.SEMANTIC and isinstance(item, dict):

@@ -84,7 +84,7 @@ def load_checkpoint(
         )
         return cast(
             dict[str, Any],
-            torch.load(
+            torch.load(  # nosec B614
                 str(path),
                 map_location=map_location,
                 weights_only=False,

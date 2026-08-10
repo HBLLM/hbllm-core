@@ -238,7 +238,7 @@ class BackupManager:
                 if hasattr(tarfile, "data_filter"):
                     tar.extractall(tmpdir, filter="data")
                 else:
-                    tar.extractall(tmpdir)
+                    tar.extractall(tmpdir)  # nosec B202
 
             # Read manifest
             manifest_path = Path(tmpdir) / "manifest.json"
@@ -308,7 +308,7 @@ class BackupManager:
                 if hasattr(tarfile, "data_filter"):
                     tar.extractall(tmpdir, filter="data")
                 else:
-                    tar.extractall(tmpdir)
+                    tar.extractall(tmpdir)  # nosec B202
 
             for file_info in manifest.files:
                 file_path = Path(tmpdir) / file_info["name"]

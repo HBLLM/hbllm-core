@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import warnings
 from pathlib import Path
 
 # ── DomainRegistry Tests ─────────────────────────────────────────────────────
@@ -44,32 +45,42 @@ class TestDomainRegistry:
 
         reg = self._make_registry()
         reg.register(DomainSpec(name="coding.python", adapter_name="py-adapter"))
-        assert reg.resolve_adapter("coding.python") == "py-adapter"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert reg.resolve_adapter("coding.python") == "py-adapter"
 
     def test_resolve_adapter_fallback(self):
         reg = self._make_registry()
         # "coding.rust" doesn't exist, should fall back to "coding"
-        result = reg.resolve_adapter("coding.rust")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = reg.resolve_adapter("coding.rust")
         assert result == "coding"
 
     def test_resolve_adapter_deep_fallback(self):
         reg = self._make_registry()
         # "coding.python.django" → "coding" (neither coding.python nor coding.python.django exist)
-        result = reg.resolve_adapter("coding.python.django")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = reg.resolve_adapter("coding.python.django")
         assert result == "coding"
 
     def test_resolve_adapter_default(self):
         from hbllm.modules.domain_registry import DomainRegistry
 
         reg = DomainRegistry(load_defaults=False)
-        assert reg.resolve_adapter("unknown.topic") == "default"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert reg.resolve_adapter("unknown.topic") == "default"
 
     def test_resolve_weighted(self):
         from hbllm.modules.domain_registry import DomainSpec
 
         reg = self._make_registry()
         reg.register(DomainSpec(name="coding.python"))
-        result = reg.resolve_weighted({"coding.python": 0.7, "math": 0.3})
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = reg.resolve_weighted({"coding.python": 0.7, "math": 0.3})
         assert "coding.python" in result
         assert "math" in result
         assert abs(sum(result.values()) - 1.0) < 0.01
@@ -78,7 +89,9 @@ class TestDomainRegistry:
         """Two sub-domains without their own adapters should merge to parent."""
         reg = self._make_registry()
         # coding.python and coding.rust both fall back to "coding"
-        result = reg.resolve_weighted({"coding.python": 0.5, "coding.rust": 0.5})
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = reg.resolve_weighted({"coding.python": 0.5, "coding.rust": 0.5})
         # Both should merge into "coding"
         assert "coding" in result
         assert abs(result["coding"] - 1.0) < 0.01

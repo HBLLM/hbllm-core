@@ -77,3 +77,7 @@ site/
 # Logs
 *.log
 cognitive_checkpoints/
+
+# Stray debug outputs (prevent recurring root-level commits)
+test_full_output.txt
+test_*_output.txt

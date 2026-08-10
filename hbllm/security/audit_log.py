@@ -89,8 +89,12 @@ class AuditAction(str, Enum):
 
 
 @dataclass
-class AuditEntry:
-    """A single audit log entry with full identity context."""
+class ComplianceAuditEntry:
+    """A single compliance audit log entry with full identity context.
+
+    Named to distinguish from ``SafetyAuditEntry`` in ``audit_trail.py``
+    (hash-chained safety-governance audit used by the brain layer).
+    """
 
     id: str
     timestamp: float
@@ -190,7 +194,7 @@ class AuditLog:
         severity: str | AuditSeverity = AuditSeverity.INFO,
         details: dict[str, Any] | None = None,
         success: bool = True,
-    ) -> AuditEntry:
+    ) -> ComplianceAuditEntry:
         """Log an audit event with full identity context."""
         entry_id = str(uuid.uuid4())[:12]
         now = time.time()
@@ -220,7 +224,7 @@ class AuditLog:
         )
         self._conn.commit()
 
-        entry = AuditEntry(
+        entry = ComplianceAuditEntry(
             id=entry_id,
             timestamp=now,
             tenant_id=tenant_id,

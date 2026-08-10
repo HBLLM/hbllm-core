@@ -362,7 +362,10 @@ class Packager:
         """Unpack a .hbpkg archive to a temporary directory."""
         tmp_dir = Path(tempfile.mkdtemp(prefix="hbpkg-"))
         with tarfile.open(str(archive_path), "r:gz") as tar:
-            tar.extractall(str(tmp_dir))
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(str(tmp_dir), filter="data")
+            else:
+                tar.extractall(str(tmp_dir))  # nosec B202
         logger.debug("Unpacked %s → %s", archive_path, tmp_dir)
         return tmp_dir
 

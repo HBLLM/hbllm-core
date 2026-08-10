@@ -128,7 +128,7 @@ _STOPWORDS = frozenset(
 def _entity_id(label: str) -> str:
     """Deterministic ID from normalized label."""
     normalized = label.strip().lower()
-    return hashlib.md5(normalized.encode()).hexdigest()[:12]
+    return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def extract_entities_from_text(text: str) -> list[tuple[str, str, str]]:

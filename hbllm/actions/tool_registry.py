@@ -401,12 +401,25 @@ def create_tool_from_code(code_string: str, function_name: str) -> Callable:
     """
     Dynamically executes a code string and extracts a specific function by name.
     Used for registering induced skills at runtime.
+
+    Defense-in-depth: validates code via the same AST security checks used by
+    ``ExecutionNode``, including dunder-access blocking, even though
+    ``SkillInductionNode`` should have already validated upstream.
     """
+    from hbllm.actions.execution_node import validate_code
+
+    # Defense-in-depth: re-validate even though SkillInductionNode
+    # should have already checked. This catches dunder gadget chains
+    # that could escape the restricted-__builtins__ sandbox.
+    violations = validate_code(code_string)
+    if violations:
+        raise ValueError(f"Induced skill code failed security validation: {'; '.join(violations)}")
+
     # Create a clean namespace
     namespace = {}
 
-    # Execute the code — SkillInductionNode already performed AST safety checks
-    exec(code_string, {"__builtins__": {}}, namespace)
+    # Execute the code — now doubly validated
+    exec(code_string, {"__builtins__": {}}, namespace)  # noqa: S102 # nosec B102
 
     func = namespace.get(function_name)
     if not func or not callable(func):

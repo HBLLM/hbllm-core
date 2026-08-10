@@ -71,7 +71,7 @@ _RULE_PATTERNS: list[tuple[str, str, str]] = [
 def _rule_id(condition: str, action: str) -> str:
     """Deterministic rule ID."""
     key = f"{condition.lower().strip()}|{action.lower().strip()}"
-    return hashlib.md5(key.encode()).hexdigest()[:12]
+    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def extract_rules_from_text(text: str) -> list[tuple[str, str, float]]:

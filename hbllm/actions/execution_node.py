@@ -9,13 +9,8 @@ and resource limits) and returns output or traceback as a reward signal.
 from __future__ import annotations
 
 import ast
-import asyncio
 import logging
-import os
 import re
-import shutil
-import sys
-import tempfile
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
@@ -202,30 +197,6 @@ class ExecutionNode(Node):
 
     async def on_start(self) -> None:
         logger.info("Starting ExecutionNode")
-        # Check if unshare is supported in this environment
-        if self.disable_network and sys.platform.startswith("linux"):
-            unshare_path = shutil.which("unshare")
-            if unshare_path:
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        unshare_path,
-                        "-Urn",
-                        "true",
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
-                    )
-                    await proc.wait()
-                    if proc.returncode == 0:
-                        self._can_unshare = True
-                    else:
-                        logger.warning(
-                            "unshare -Urn failed (exit %s). Network isolation disabled.",
-                            proc.returncode,
-                        )
-                except Exception as e:
-                    logger.warning("unshare check failed: %s. Network isolation disabled.", e)
-            else:
-                logger.warning("unshare not found. Network isolation disabled.")
         await self.bus.subscribe("action.execute_code", self.handle_message)
         await self.bus.subscribe("task.execute.python", self.handle_message)
 
@@ -263,73 +234,18 @@ class ExecutionNode(Node):
             logger.warning("ExecutionNode rejected code: %s", detail)
             return message.create_error(f"Code rejected by security policy: {detail}")
 
-        # Run code in an isolated subprocess
+        # Run code in an isolated subprocess via the shared sandbox
         result = await self._execute_python(code)
         return message.create_response(result)
 
     async def _execute_python(self, code: str) -> dict[str, Any]:
         """Write to temp file and run in a restricted subprocess with POSIX resource limits."""
-        temp_script = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
-        try:
-            # Inject strict OS-level hardware quotas
-            bound_wrapper = (
-                "import resource\n"
-                "try:\n"
-                f"    resource.setrlimit(resource.RLIMIT_AS, ({self.max_memory_mb} * 1024 * 1024, {self.max_memory_mb} * 1024 * 1024))\n"
-                f"    resource.setrlimit(resource.RLIMIT_CPU, ({int(self.timeout)}, {int(self.timeout)}))\n"
-                "except BaseException:\n"
-                "    pass\n\n"
-            )
+        from hbllm.actions.sandbox import run_sandboxed_python
 
-            temp_script.write(bound_wrapper + code)
-            temp_script.close()  # Close so subprocess can read it
-
-            try:
-                # Build a restricted environment: strip PATH and dangerous env vars
-                safe_env = {
-                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
-                    if not sys.platform.startswith("win")
-                    else "",
-                    "PYTHONDONTWRITEBYTECODE": "1",
-                    "PYTHONHASHSEED": "0",
-                }
-
-                exec_cmd = [sys.executable, "-I", temp_script.name]
-
-                # Use platform-specific unshare to disable network if on linux
-                if self._can_unshare:
-                    unshare_path = shutil.which("unshare")
-                    if unshare_path:
-                        exec_cmd = [unshare_path, "-Urn"] + exec_cmd
-
-                proc = await asyncio.create_subprocess_exec(
-                    *exec_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=safe_env,
-                )
-
-                try:
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(), timeout=self.timeout
-                    )
-                except (TimeoutError, asyncio.TimeoutError):
-                    proc.kill()
-                    await proc.communicate()
-                    return {
-                        "status": "FAILURE",
-                        "output": f"Execution timed out after {self.timeout} seconds.",
-                        "error": "TimeoutError",
-                    }
-
-                output = stdout.decode().strip()
-                error = stderr.decode().strip()
-
-                if proc.returncode == 0:
-                    return {"status": "SUCCESS", "output": output, "error": error}
-                else:
-                    return {"status": "FAILURE", "output": output, "error": error}
-            except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
-                return {"status": "FAILURE", "output": "", "error": str(e)}
-        finally:
-            os.unlink(temp_script.name)
+        result = await run_sandboxed_python(
+            code,
+            timeout=self.timeout,
+            max_memory_mb=self.max_memory_mb,
+            disable_network=self.disable_network,
+        )
+        return {"status": result.status, "output": result.output, "error": result.error}

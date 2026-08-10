@@ -570,7 +570,7 @@ class PlannerNode(Node):
     @staticmethod
     def _cache_key(text: str) -> str:
         """Generate a cache key from prompt text."""
-        return hashlib.md5(text.strip().lower().encode()).hexdigest()
+        return hashlib.md5(text.strip().lower().encode(), usedforsecurity=False).hexdigest()
 
     def _cache_response(self, key: str, response: str) -> None:
         """Store a response in the LRU cache, evicting oldest if full."""

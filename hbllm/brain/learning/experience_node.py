@@ -305,7 +305,9 @@ class ExperienceNode(Node):
 
     def _score_novelty(self, content: str) -> float:
         """Score based on how different this content is from recent interactions."""
-        content_hash = hashlib.md5(content.lower().strip().encode()).hexdigest()
+        content_hash = hashlib.md5(
+            content.lower().strip().encode(), usedforsecurity=False
+        ).hexdigest()
 
         if not self._recent_hashes:
             self._recent_hashes.append(content_hash)
@@ -351,7 +353,7 @@ class ExperienceNode(Node):
             del self._priority_cooldowns[k]
 
         # Check if similar content was recently marked priority
-        topic_key = hashlib.md5(content[:100].lower().encode()).hexdigest()
+        topic_key = hashlib.md5(content[:100].lower().encode(), usedforsecurity=False).hexdigest()
         if topic_key in self._priority_cooldowns:
             logger.debug("[ExperienceNode] Suppressing duplicate priority event")
             return False
@@ -729,7 +731,9 @@ class ExperienceNode(Node):
                 if category in ("security", "error"):
                     confidence += 0.1
 
-                rule_id = hashlib.md5(f"{condition}|{action}".encode()).hexdigest()[:12]
+                rule_id = hashlib.md5(
+                    f"{condition}|{action}".encode(), usedforsecurity=False
+                ).hexdigest()[:12]
 
                 rules.append(
                     {
