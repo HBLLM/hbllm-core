@@ -173,9 +173,9 @@ class CognitivePipeline:
                             stale_ids.append(cid)
 
                 for cid in stale_ids:
-                    fut = self._response_futures.pop(cid, None)
+                    fut = self._response_futures.pop(cid) if cid in self._response_futures else None
                     self._response_creation_times.pop(cid, None)
-                    if fut and not fut.done():
+                    if fut is not None and not fut.done():
                         fut.cancel()
                         logger.debug("Cleaned up stale future: %s", cid)
             except asyncio.CancelledError:

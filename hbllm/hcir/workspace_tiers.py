@@ -482,7 +482,7 @@ class TieredWorkspace:
                 self._snapshot_interval,
             )
 
-    def populate_meta_stats(self) -> dict[str, int | float]:
+    def populate_meta_stats(self) -> dict[str, int | float | dict[str, int]]:
         """Populate the Meta workspace with cognitive performance statistics.
 
         Reads node counts, skill success rates, goal completion rates,

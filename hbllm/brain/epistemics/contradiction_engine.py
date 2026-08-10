@@ -216,7 +216,7 @@ class ContradictionEngine:
 
                 for src in edge.sources:
                     for tgt in edge.targets:
-                        pair = tuple(sorted([src, tgt]))
+                        pair: tuple[str, str] = (min(src, tgt), max(src, tgt))
                         if pair in seen:
                             continue
                         seen.add(pair)
