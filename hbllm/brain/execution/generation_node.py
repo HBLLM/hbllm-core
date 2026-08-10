@@ -137,9 +137,7 @@ class GenerationNode(Node):
 
         # Extract cognitive outputs
         payload_metadata = getattr(payload, "metadata", {}) or {}
-        prompt: str = str(
-            payload_metadata.get("augmented_prompt") or getattr(payload, "text", "")
-        )
+        prompt: str = str(payload_metadata.get("augmented_prompt") or getattr(payload, "text", ""))
         domain_hint = getattr(payload, "domain_hint", "general")
 
         # Build RoutingResult from cognitive layer outputs
@@ -239,7 +237,11 @@ class GenerationNode(Node):
         """Build a RoutingResult from cognitive layer outputs."""
         if isinstance(domain_hint, dict):
             # Weighted routing — pick the top domain
-            domain = max(domain_hint, key=lambda k: domain_hint.get(k, 0.0)) if domain_hint else "general"
+            domain = (
+                max(domain_hint, key=lambda k: domain_hint.get(k, 0.0))
+                if domain_hint
+                else "general"
+            )
             return RoutingResult(
                 domain=domain,
                 domain_weights=domain_hint,
