@@ -525,7 +525,7 @@ class TieredWorkspace:
             completed_goals / goals.total_matches if goals.total_matches > 0 else 0.0
         )
 
-        stats = {
+        stats: dict[str, int | float | dict[str, int]] = {
             "persistent_node_count": persistent_result.total_matches,
             "brain_node_count": brain_result.total_matches,
             "active_task_frames": len(self.working.all_frames),
