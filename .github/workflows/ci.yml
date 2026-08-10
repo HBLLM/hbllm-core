@@ -81,7 +81,8 @@ jobs:
       - name: Build Rust extensions
         run: |
           pip install maturin
-          maturin develop --manifest-path rust/perception/Cargo.toml
+          maturin build --manifest-path rust/perception/Cargo.toml --release --out dist
+          pip install dist/*.whl
 
       - name: Run unit tests
         run: |
