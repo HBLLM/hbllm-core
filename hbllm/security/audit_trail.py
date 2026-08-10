@@ -31,8 +31,12 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class AuditEntry:
-    """An immutable audit trail entry."""
+class SafetyAuditEntry:
+    """An immutable, hash-chained safety audit trail entry.
+
+    Named to distinguish from ``ComplianceAuditEntry`` in ``audit_log.py``
+    (SOC2/GDPR compliance audit used by the serving layer).
+    """
 
     id: int = 0
     timestamp: float = field(default_factory=time.time)
@@ -220,7 +224,7 @@ class AuditTrail:
         source: str | None = None,
         result: str | None = None,
         limit: int = 100,
-    ) -> list[AuditEntry]:
+    ) -> list[SafetyAuditEntry]:
         """Query audit trail entries.
 
         Args:
@@ -233,7 +237,7 @@ class AuditTrail:
             limit: Maximum entries to return.
 
         Returns:
-            List of AuditEntry objects, newest first.
+            List of SafetyAuditEntry objects, newest first.
         """
         cutoff = time.time() - hours * 3600
         conditions = ["timestamp > ?"]
@@ -271,7 +275,7 @@ class AuditTrail:
             entries = []
             for row in cursor.fetchall():
                 entries.append(
-                    AuditEntry(
+                    SafetyAuditEntry(
                         id=row[0],
                         timestamp=row[1],
                         tenant_id=row[2],

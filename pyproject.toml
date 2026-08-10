@@ -146,7 +146,7 @@ testpaths = ["tests", "plugins"]
 asyncio_mode = "auto"
 timeout = 300
 timeout_method = "thread"
-addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal"
+addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal --ignore=tests/scratch"
 markers = [
     "unit: Unit tests (single component, fast)",
     "integration: Integration tests (multi-component)",

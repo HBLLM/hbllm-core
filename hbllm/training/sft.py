@@ -252,7 +252,10 @@ def run_sft_training(
         mgr = CheckpointManager(ckpt_dir)
         ckpt = mgr.load_latest()
         if ckpt:
-            model.load_state_dict(torch.load(ckpt, map_location="cpu")["model"], strict=False)
+            from hbllm.utils.checkpoint import load_checkpoint
+
+            ckpt_data = load_checkpoint(ckpt, map_location="cpu")
+            model.load_state_dict(ckpt_data.get("model", ckpt_data), strict=False)
             logger.info("Loaded pre-trained weights from %s", ckpt)
 
     # Inject LoRA

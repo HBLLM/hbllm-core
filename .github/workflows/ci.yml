@@ -38,7 +38,10 @@ jobs:
       - name: Install lint tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pip-audit bandit
+          pip install ruff pip-audit bandit mypy
+
+      - name: Type check (mypy)
+        run: mypy hbllm/ --config-file pyproject.toml
 
       - name: Lint with ruff
         run: ruff check .
@@ -72,12 +75,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Set up Rust (for native extensions)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust extensions
+        run: |
+          pip install maturin
+          maturin develop --manifest-path rust/perception/Cargo.toml
+
       - name: Run unit tests
         run: |
           python -m pytest tests/unit/ tests/modules/ \
-            --timeout=60 -x \
-            --ignore=tests/unit/misc/test_change_detector.py \
-            --ignore=tests/unit/perception/test_vision_node.py \
+            --timeout=60 \
             -q
 
   # ── Integration Tests (PostgreSQL + Redis) ───────────────────────────
@@ -129,7 +138,7 @@ jobs:
 
   # ── Rust Kernel ──────────────────────────────────────────────────────
   rust:
-    name: "🦀 Rust Kernel"
+    name: "🦀 Rust Workspace"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,18 +150,15 @@ jobs:
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            rust/compute_kernel -> target
 
       - name: Check formatting
-        run: cargo fmt --manifest-path rust/compute_kernel/Cargo.toml -- --check
+        run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --manifest-path rust/compute_kernel/Cargo.toml --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
 
       - name: Compile
-        run: cargo check --manifest-path rust/compute_kernel/Cargo.toml
+        run: cargo check --workspace
 
   # ── Documentation Build ──────────────────────────────────────────────
   docs-build:

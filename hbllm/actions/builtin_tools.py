@@ -9,9 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import sys
-import tempfile
 from pathlib import Path
 
 from hbllm.actions.execution_node import validate_code
@@ -70,44 +67,15 @@ async def tool_python_exec(code: str) -> ToolResult:
             error=f"Security policy violation: {'; '.join(violations)}",
         )
 
-    tmp = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False)
-    try:
-        wrapper = (
-            "import resource\n"
-            "try:\n"
-            "    resource.setrlimit(resource.RLIMIT_AS, (256*1024*1024, 256*1024*1024))\n"
-            "    resource.setrlimit(resource.RLIMIT_CPU, (3, 3))\n"
-            "except BaseException:\n"
-            "    pass\n\n"
-        )
-        tmp.write(wrapper + code)
-        tmp.close()
+    from hbllm.actions.sandbox import run_sandboxed_python
 
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-I",
-            tmp.name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0"},
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        except (TimeoutError, asyncio.TimeoutError):
-            proc.kill()
-            await proc.communicate()
-            return ToolResult(tool="python_exec", success=False, output="", error="Timed out (5s)")
-
-        out = stdout.decode().strip()
-        err = stderr.decode().strip()
-        return ToolResult(
-            tool="python_exec",
-            success=(proc.returncode == 0),
-            output=out,
-            error=err,
-        )
-    finally:
-        os.unlink(tmp.name)
+    result = await run_sandboxed_python(code, timeout=5.0, max_memory_mb=256)
+    return ToolResult(
+        tool="python_exec",
+        success=(result.status == "SUCCESS"),
+        output=result.output,
+        error=result.error,
+    )
 
 
 # ── Shell Execution ───────────────────────────────────────────────────────────

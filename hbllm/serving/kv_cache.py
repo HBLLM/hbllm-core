@@ -10,9 +10,12 @@ Features:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 class KVCache:
@@ -389,10 +392,12 @@ class KVCache:
         """
         Serialize the active KV cache history to disk with strict integrity hashing.
 
-        Uses ``torch.save`` instead of ``pickle`` to avoid arbitrary code
-        execution when loading untrusted cache files.
+        Saves metadata (config hash, sequence lengths) as a JSON sidecar and
+        tensors via ``torch.save`` — allowing ``weights_only=True`` on reload
+        to prevent arbitrary code execution from crafted cache files.
         """
         import hashlib
+        import json as _json
 
         # Calculate strict configuration signature
         config_dict = {
@@ -409,33 +414,56 @@ class KVCache:
         config_str = str(sorted(config_dict.items())).encode("utf-8")
         config_hash = hashlib.sha256(config_str).hexdigest()
 
-        # Gather active cache tensors (moved to CPU for safe persistence)
-        payload = {
+        # ── Split metadata (JSON) from tensors (torch) ──────────────────
+        meta_path = file_path + ".meta.json"
+        metadata = {
             "config_hash": config_hash,
             "config_dict": config_dict,
             "seq_len": self.seq_len,
             "_total_tokens_seen": self._total_tokens_seen,
+            "has_key_scales": self.key_scales is not None,
+        }
+        with open(meta_path, "w") as f:
+            _json.dump(metadata, f)
+
+        # Tensors-only payload — safe to load with weights_only=True
+        tensor_payload = {
             "key_cache": self.key_cache.cpu(),
             "value_cache": self.value_cache.cpu(),
-            "key_scales": self.key_scales.cpu() if self.key_scales is not None else None,
         }
+        if self.key_scales is not None:
+            tensor_payload["key_scales"] = self.key_scales.cpu()
 
-        torch.save(payload, file_path)
+        torch.save(tensor_payload, file_path)
 
     def load_cache(self, file_path: str, model_config: Any, tokenizer: Any) -> None:
         """
         Load active KV cache history from disk, performing strict integrity checks.
 
         Uses ``torch.load(weights_only=True)`` to prevent arbitrary code
-        execution from crafted cache files.
+        execution from crafted cache files. Metadata is read from a JSON
+        sidecar file (no pickle deserialization).
         """
         import hashlib
+        import json as _json
 
-        payload = torch.load(file_path, map_location="cpu", weights_only=False)
-        # NOTE: weights_only=False is required here because the payload
-        # contains non-tensor metadata (dicts, ints, strings). The config
-        # hash integrity check below ensures the payload structure is valid.
-        # Future improvement: split metadata (JSON) from tensors (safetensors).
+        # ── Load metadata from JSON sidecar ──────────────────────────────
+        meta_path = file_path + ".meta.json"
+        try:
+            with open(meta_path) as f:
+                metadata = _json.load(f)
+        except FileNotFoundError:
+            # Backwards compatibility: fall back to legacy mixed-payload format
+            logger.warning(
+                "No metadata sidecar found at %s — falling back to legacy "
+                "mixed-payload load (weights_only=False). Re-save to upgrade.",
+                meta_path,
+            )
+            self._load_cache_legacy(file_path, model_config, tokenizer)
+            return
+
+        # ── Load tensors safely ──────────────────────────────────────────
+        tensor_payload = torch.load(file_path, map_location="cpu", weights_only=True)
 
         # Re-calculate strict configuration signature
         config_dict = {
@@ -453,17 +481,59 @@ class KVCache:
         config_hash = hashlib.sha256(config_str).hexdigest()
 
         # Validate integrity hash
-        if payload.get("config_hash") != config_hash:
+        if metadata.get("config_hash") != config_hash:
             raise ValueError(
                 "KV Cache reload failed: Strict integrity mismatch. The cached state does not "
                 "match the active model, tokenizer, or cache shape configuration."
             )
 
         # Hydrate values
-        self.seq_len = payload["seq_len"]
-        self._total_tokens_seen = payload["_total_tokens_seen"]
+        self.seq_len = metadata["seq_len"]
+        self._total_tokens_seen = metadata["_total_tokens_seen"]
 
         # Load tensors and move back to original target device
+        self.key_cache.copy_(tensor_payload["key_cache"].to(self.device))
+        self.value_cache.copy_(tensor_payload["value_cache"].to(self.device))
+
+        if self.quantize_k and self.key_scales is not None:
+            if "key_scales" in tensor_payload:
+                self.key_scales.copy_(tensor_payload["key_scales"].to(self.device))
+            else:
+                raise ValueError("Expected key_scales in payload but none was found.")
+
+    def _load_cache_legacy(self, file_path: str, model_config: Any, tokenizer: Any) -> None:
+        """Backwards-compatible loader for pre-split cache files (weights_only=False).
+
+        This exists only to support cache files saved before the metadata/tensor
+        split. New saves always use the split format. Remove this method once all
+        existing cache files have been re-saved.
+        """
+        import hashlib
+
+        payload = torch.load(file_path, map_location="cpu", weights_only=False)  # noqa: S301
+
+        config_dict = {
+            "num_layers": getattr(model_config, "num_layers", 0),
+            "hidden_size": getattr(model_config, "hidden_size", 0),
+            "num_kv_heads": getattr(model_config, "num_kv_heads", 0),
+            "head_dim": getattr(model_config, "head_dim", 0),
+            "vocab_size": getattr(tokenizer, "vocab_size", 0),
+            "max_seq_len": self.max_seq_len,
+            "quantize_k": self.quantize_k,
+            "sliding_window": self.sliding_window,
+            "attention_sinks": self.attention_sinks,
+        }
+        config_str = str(sorted(config_dict.items())).encode("utf-8")
+        config_hash = hashlib.sha256(config_str).hexdigest()
+
+        if payload.get("config_hash") != config_hash:
+            raise ValueError(
+                "KV Cache reload failed: Strict integrity mismatch. The cached state does not "
+                "match the active model, tokenizer, or cache shape configuration."
+            )
+
+        self.seq_len = payload["seq_len"]
+        self._total_tokens_seen = payload["_total_tokens_seen"]
         self.key_cache.copy_(payload["key_cache"].to(self.device))
         self.value_cache.copy_(payload["value_cache"].to(self.device))
 
