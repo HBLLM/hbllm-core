@@ -155,89 +155,54 @@ async def get_hcir_workspaces(request: Request) -> dict[str, Any]:
         except Exception as e:
             logger.warning("[Studio] Failed to query live HCIR workspace: %s", e)
 
-    # Informative fallback
+    # Empty/initial state when workspace has not populated entries yet
     return {
-        "status": "simulated",
+        "status": "idle",
         "tenant_id": tenant_id,
         "tier_counts": {
-            "working": 3,
-            "brain": 42,
-            "persistent": 128,
-            "meta": 12,
-            "audit": 350,
+            "working": 0,
+            "brain": 0,
+            "persistent": 0,
+            "meta": 0,
+            "audit": 0,
         },
         "meta_stats": {
-            "avg_skill_success_rate": 0.942,
-            "goal_completion_rate": 0.885,
-            "commits_since_snapshot": 14,
+            "avg_skill_success_rate": 0.0,
+            "goal_completion_rate": 0.0,
+            "commits_since_snapshot": 0,
         },
-        "working_frames": [
-            {
-                "frame_id": "frame_task_01",
-                "subtask_title": "Analyze User Intent & Retrieve Context",
-                "status": "active",
-                "node_count": 4,
-            },
-            {
-                "frame_id": "frame_task_02",
-                "subtask_title": "Synthesize Plan & Check Contradictions",
-                "status": "pending",
-                "node_count": 2,
-            },
-        ],
-        "brain_nodes": [
-            {
-                "id": "belief_01",
-                "type": "belief",
-                "label": "User prefers concise Python 3.11+ solutions",
-                "confidence": 0.95,
-                "lifecycle": "active",
-            },
-            {
-                "id": "goal_01",
-                "type": "goal",
-                "label": "Maintain 100% test coverage on cognitive loop",
-                "confidence": 1.0,
-                "lifecycle": "active",
-            },
-            {
-                "id": "skill_01",
-                "type": "skill",
-                "label": "Deterministic AST Security Validator",
-                "confidence": 0.98,
-                "lifecycle": "active",
-            },
-        ],
+        "working_frames": [],
+        "brain_nodes": [],
         "tiers": {
             "working": {
                 "name": "Working Memory",
-                "description": "Active task frames & execution scratchpad",
-                "count": 3,
-                "status": "active",
+                "description": "Short-term active task frames & scratchpad execution context",
+                "count": 0,
+                "status": "idle",
             },
             "brain": {
                 "name": "Brain Tier",
-                "description": "Beliefs, Goals, Skills & Hypotheses",
-                "count": 42,
-                "status": "active",
+                "description": "Dynamic beliefs, active goals, induced skills & hypotheses",
+                "count": 0,
+                "status": "idle",
             },
             "persistent": {
                 "name": "Persistent Store",
-                "description": "Long-term episodic and semantic knowledge",
-                "count": 128,
-                "status": "active",
+                "description": "Long-term episodic, semantic, procedural & value memories",
+                "count": 0,
+                "status": "idle",
             },
             "meta": {
-                "name": "Meta Tier",
-                "description": "Self-model reflection and performance stats",
-                "count": 12,
-                "status": "active",
+                "name": "Meta-Cognitive Tier",
+                "description": "Self-model reflection, skill success rates & performance stats",
+                "count": 0,
+                "status": "idle",
             },
             "audit": {
                 "name": "Audit Tier",
-                "description": "Hash-chained immutable cognitive logs",
-                "count": 350,
-                "status": "active",
+                "description": "Immutable, cryptographic hash-chained cognitive audit records",
+                "count": 0,
+                "status": "idle",
             },
         },
     }
@@ -321,20 +286,14 @@ async def get_epistemics_status(request: Request) -> dict[str, Any]:
 
     return {
         "status": "idle",
-        "cycle_count": 28,
-        "last_cycle_time": time.time() - 140,
-        "idle_time_seconds": 140,
-        "engines_loaded": [
-            "CuriosityEngine",
-            "ContradictionEngine",
-            "ExperimentPlanner",
-            "EvidenceEvaluator",
-            "BeliefJustification",
-        ],
+        "cycle_count": 0,
+        "last_cycle_time": 0.0,
+        "idle_time_seconds": 0.0,
+        "engines_loaded": [],
         "calibration": {
-            "brier_score": 0.118,
-            "source_trust_index": 0.945,
-            "total_hypotheses_tested": 84,
+            "brier_score": 0.0,
+            "source_trust_index": 1.0,
+            "total_hypotheses_tested": 0,
         },
     }
 
@@ -364,19 +323,6 @@ async def get_contradictions(request: Request) -> dict[str, Any]:
                 )
         except Exception as e:
             logger.debug("[Studio] Live contradiction scan failed: %s", e)
-
-    if not reports:
-        # Default report items
-        reports = [
-            {
-                "claim_a_id": "belief_sync_01",
-                "claim_b_id": "obs_sensor_09",
-                "contradiction_type": "value_mismatch",
-                "investigation_priority": 0.72,
-                "context": "Reported CPU core count differed between static config and hardware HAL observation.",
-                "timestamp": time.time() - 3600,
-            }
-        ]
 
     return {
         "total_contradictions": len(reports),
@@ -482,47 +428,34 @@ async def get_execution_os_status(request: Request) -> dict[str, Any]:
 
 
 @router.get("/studio/router/telemetry")
-async def get_router_telemetry(request: Request) -> dict[str, Any]:
-    """Return live Dual-LLM router telemetry and decision statistics."""
-    # Sample decision telemetry
+    node_map = get_node_map()
+    router_node = node_map.get("RouterNode") or node_map.get("DualLLMRouter")
+
+    total = getattr(router_node, "total_routed", 0) if router_node else 0
+    local_count = getattr(router_node, "local_routed", 0) if router_node else 0
+    external_count = getattr(router_node, "external_routed", 0) if router_node else 0
+    local_ratio = round((local_count / total * 100.0), 1) if total > 0 else 0.0
+    avg_complexity = getattr(router_node, "avg_complexity", 0.0) if router_node else 0.0
+    avg_local_lat = getattr(router_node, "avg_local_latency_ms", 0.0) if router_node else 0.0
+    avg_ext_lat = getattr(router_node, "avg_external_latency_ms", 0.0) if router_node else 0.0
+    recent_decisions = getattr(router_node, "recent_decisions", []) if router_node else []
+
     return {
-        "status": "active",
+        "status": "active" if router_node else "idle",
         "routing_policy": "adaptive_tiering",
         "metrics": {
-            "total_routed": 142,
-            "local_tier_count": 98,
-            "external_tier_count": 44,
-            "local_ratio_pct": 69.0,
-            "avg_complexity_score": 0.41,
-            "avg_local_latency_ms": 48.2,
-            "avg_external_latency_ms": 612.0,
+            "total_routed": total,
+            "local_tier_count": local_count,
+            "external_tier_count": external_count,
+            "local_ratio_pct": local_ratio,
+            "avg_complexity_score": avg_complexity,
+            "avg_local_latency_ms": avg_local_lat,
+            "avg_external_latency_ms": avg_ext_lat,
         },
         "complexity_thresholds": {
             "local_max_complexity": 0.60,
             "external_min_complexity": 0.60,
             "auto_fallback_enabled": True,
         },
-        "recent_decisions": [
-            {
-                "timestamp": time.time() - 30,
-                "tier": "local",
-                "complexity": 0.25,
-                "reason": "Direct factual query; within on-device parameter capacity.",
-                "latency_ms": 42.1,
-            },
-            {
-                "timestamp": time.time() - 110,
-                "tier": "external",
-                "complexity": 0.88,
-                "reason": "Complex multi-step refactoring & symbolic constraint detected.",
-                "latency_ms": 780.4,
-            },
-            {
-                "timestamp": time.time() - 240,
-                "tier": "local",
-                "complexity": 0.18,
-                "reason": "Conversational greeting & memory check.",
-                "latency_ms": 36.5,
-            },
-        ],
+        "recent_decisions": recent_decisions,
     }
