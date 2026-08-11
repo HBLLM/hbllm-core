@@ -136,10 +136,20 @@ class AuditLog:
     time range, and severity.
     """
 
-    def __init__(self, db_path: str = "data/audit.db"):
-        self._db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        data_dir: str | Path | None = None,
+    ):
+        if db_path is None:
+            if data_dir is not None:
+                db_path = Path(data_dir) / "audit.db"
+            else:
+                db_path = "data/audit.db"
+        db_path_str = str(db_path)
+        self._db_path = db_path_str
+        Path(db_path_str).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path_str, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_schema()
