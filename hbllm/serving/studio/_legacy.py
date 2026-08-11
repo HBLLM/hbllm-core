@@ -1961,11 +1961,12 @@ async def studio_rbac_audit(request: Request, limit: int = 50) -> Any:
     """Get recent audit log entries for the current tenant."""
     tenant_id = getattr(request.state, "tenant_id", "default")
     data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
+    db_path = os.path.join(data_dir, "audit.db")
 
     try:
         from hbllm.security.audit_log import AuditLog
 
-        audit = AuditLog(data_dir=data_dir)
+        audit = AuditLog(db_path=db_path)
         entries = audit.query(tenant_id=tenant_id, limit=limit)
         return {
             "tenant_id": tenant_id,

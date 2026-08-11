@@ -419,6 +419,14 @@ class TestAuditLog:
         yield log
         log.close()
 
+    def test_init_with_data_dir(self, tmp_path):
+        from hbllm.security.audit_log import AuditLog
+
+        log = AuditLog(data_dir=tmp_path)
+        assert Path(log._db_path).name == "audit.db"
+        assert Path(log._db_path).parent == tmp_path
+        log.close()
+
     def test_log_basic(self, audit):
         from hbllm.security.audit_log import AuditAction
 
