@@ -154,6 +154,13 @@ async def test_studio_routes_registered():
         "/studio/memory",
         "/studio/knowledge",
         "/studio/lora",
+        "/studio/hcir/workspaces",
+        "/studio/hcir/tier/{tier_name}",
+        "/studio/epistemics/status",
+        "/studio/epistemics/contradictions",
+        "/studio/epistemics/contradictions/scan",
+        "/studio/execution-os/status",
+        "/studio/router/telemetry",
         "/api/plugins",
         "/api/plugins/{plugin_name}/toggle",
         "/api/plugins/marketplace",
@@ -162,3 +169,41 @@ async def test_studio_routes_registered():
     ]
     for ep in expected_studio_routes:
         assert ep in routes, f"Missing studio route: {ep}"
+
+
+@pytest.mark.asyncio
+async def test_hcir_epistemics_studio_endpoints():
+    """Verify HCIR, Epistemics, and Execution OS endpoints return valid responses."""
+    from starlette.testclient import TestClient
+
+    client = TestClient(app)
+
+    # 1. HCIR workspaces
+    res = client.get("/studio/hcir/workspaces")
+    assert res.status_code == 200
+    data = res.json()
+    assert "tiers" in data
+    assert "working" in data["tiers"]
+    assert "brain" in data["tiers"]
+
+    # 2. Epistemics status
+    res = client.get("/studio/epistemics/status")
+    assert res.status_code == 200
+    assert "cycle_count" in res.json()
+
+    # 3. Contradictions
+    res = client.get("/studio/epistemics/contradictions")
+    assert res.status_code == 200
+    assert "reports" in res.json()
+
+    # 4. Execution OS status
+    res = client.get("/studio/execution-os/status")
+    assert res.status_code == 200
+    assert "modifiers" in res.json()
+    assert "runtimes" in res.json()
+
+    # 5. Router telemetry
+    res = client.get("/studio/router/telemetry")
+    assert res.status_code == 200
+    assert "metrics" in res.json()
+
