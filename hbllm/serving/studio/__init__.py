@@ -20,6 +20,7 @@ from fastapi import APIRouter
 from hbllm.serving.studio._legacy import router as legacy_router
 from hbllm.serving.studio.cognitive import router as cognitive_router
 from hbllm.serving.studio.emotion import router as emotion_router
+from hbllm.serving.studio.hcir_epistemics import router as hcir_epistemics_router
 from hbllm.serving.studio.perception import router as perception_router
 from hbllm.serving.studio.persona import router as persona_router
 
@@ -31,6 +32,7 @@ router.include_router(emotion_router, tags=["studio:emotion"])
 router.include_router(persona_router, tags=["studio:persona"])
 router.include_router(perception_router, tags=["studio:perception"])
 router.include_router(cognitive_router, tags=["studio:cognitive"])
+router.include_router(hcir_epistemics_router, tags=["studio:hcir_epistemics"])
 
 # Legacy endpoints (everything else: SNN, memory, learning, voice, plugins, etc.)
 router.include_router(legacy_router, tags=["studio:legacy"])
