@@ -286,75 +286,12 @@ async def replay_cognitive_search(request: Request):
         memory_node = node_map.get("MemoryNode")
 
     if not memory_node:
-        # Fallback Mock Comparison if brain is not running or MemoryNode is not loaded
-        mock_unprimed = [
-            {
-                "id": "doc1",
-                "content": "Introduction to string theory and quantum loop gravity.",
-                "metadata": {"domain": "physics"},
-                "score": 0.75,
-                "score_breakdown": {
-                    "similarity": 0.75,
-                    "usefulness_boost": 0.0,
-                    "reward_boost": 0.0,
-                    "priming_boost": 0.0,
-                },
-            },
-            {
-                "id": "doc2",
-                "content": "Writing clean asynchronous Python code and modules.",
-                "metadata": {"domain": "coding"},
-                "score": 0.62,
-                "score_breakdown": {
-                    "similarity": 0.62,
-                    "usefulness_boost": 0.0,
-                    "reward_boost": 0.0,
-                    "priming_boost": 0.0,
-                },
-            },
-        ]
-
-        # Stimulate coding in primed results
-        coding_prime = priming_state.get("coding", 0.0)
-        coding_boost = 0.15 * coding_prime
-        mock_primed = [
-            {
-                "id": "doc2",
-                "content": "Writing clean asynchronous Python code and modules.",
-                "metadata": {"domain": "coding"},
-                "score": 0.62 + coding_boost,
-                "score_breakdown": {
-                    "similarity": 0.62,
-                    "usefulness_boost": 0.0,
-                    "reward_boost": 0.0,
-                    "priming_boost": coding_boost,
-                },
-            },
-            {
-                "id": "doc1",
-                "content": "Introduction to string theory and quantum loop gravity.",
-                "metadata": {"domain": "physics"},
-                "score": 0.75,
-                "score_breakdown": {
-                    "similarity": 0.75,
-                    "usefulness_boost": 0.0,
-                    "reward_boost": 0.0,
-                    "priming_boost": 0.0,
-                },
-            },
-        ]
-        if mock_primed[0]["score"] < mock_primed[1]["score"]:
-            mock_primed = [mock_primed[1], mock_primed[0]]
-
-        from hbllm.memory.semantic import SemanticMemory
-
-        sm = SemanticMemory()
-        differentials = sm.get_ranking_differential(mock_primed)
         return {
-            "status": "success",
-            "unprimed": mock_unprimed,
-            "primed": mock_primed,
-            "differentials": differentials,
+            "status": "not_loaded",
+            "message": "MemoryNode is not loaded",
+            "unprimed": [],
+            "primed": [],
+            "differentials": [],
         }
 
     sem_db = memory_node.semantic_db
