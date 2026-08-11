@@ -428,6 +428,8 @@ async def get_execution_os_status(request: Request) -> dict[str, Any]:
 
 
 @router.get("/studio/router/telemetry")
+async def get_router_telemetry(request: Request) -> dict[str, Any]:
+    """Return live Dual-LLM router telemetry and decision statistics."""
     node_map = get_node_map()
     router_node = node_map.get("RouterNode") or node_map.get("DualLLMRouter")
 
