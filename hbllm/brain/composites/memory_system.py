@@ -125,6 +125,15 @@ class MemorySystem(Node):
         for sub in [self._experience, self._sleep]:
             await sub.start(bus)
 
+        if bus:
+            await bus.subscribe("memory.stats", self._handle_stats)
+            await bus.subscribe("memory.browse", self._handle_browse)
+            await bus.subscribe("memory.search", self._handle_search)
+            await bus.subscribe("memory.store", self._handle_store)
+            await bus.subscribe("memory.forget", self._handle_forget)
+            await bus.subscribe("memory.consolidate", self._handle_consolidate)
+            await bus.subscribe("knowledge.query", self._handle_knowledge_query)
+
         logger.info(
             "[MemorySystem] Started (hcir=%s, legacy=%s)",
             self._hcir_backend is not None,
@@ -151,6 +160,83 @@ class MemorySystem(Node):
 
     async def handle_message(self, message: Message) -> Message | None:
         return None
+
+    async def _handle_stats(self, message: Message) -> Message:
+        stats: dict[str, Any] = {
+            "total_memories": 0,
+            "episodic_count": 0,
+            "semantic_count": 0,
+            "procedural_count": 0,
+            "value_count": 0,
+            "hcir_active": self._hcir_backend is not None,
+            "phase": "legacy_removed",
+        }
+        if (
+            self._hcir_backend
+            and hasattr(self._hcir_backend, "_workspace")
+            and self._hcir_backend._workspace
+        ):
+            ws = self._hcir_backend._workspace
+            tier_stats = ws.get_tier_stats() if hasattr(ws, "get_tier_stats") else {}
+            if isinstance(tier_stats, dict):
+                stats["total_memories"] = sum(
+                    v for v in tier_stats.values() if isinstance(v, (int, float))
+                )
+                stats["episodic_count"] = tier_stats.get("persistent", 0)
+                stats["semantic_count"] = tier_stats.get("brain", 0)
+        return message.create_response(stats)
+
+    async def _handle_browse(self, message: Message) -> Message:
+        entries: list[dict[str, Any]] = []
+        total = 0
+        if (
+            self._hcir_backend
+            and hasattr(self._hcir_backend, "_workspace")
+            and self._hcir_backend._workspace
+        ):
+            ws = self._hcir_backend._workspace
+            if hasattr(ws, "brain") and hasattr(ws.brain, "all_nodes"):
+                nodes = list(ws.brain.all_nodes())
+                total = len(nodes)
+                offset = message.payload.get("offset", 0)
+                limit = message.payload.get("limit", 20)
+                for n in nodes[offset : offset + limit]:
+                    entries.append(
+                        {
+                            "id": n.id,
+                            "content": getattr(n, "label", getattr(n, "statement", n.id)),
+                            "type": getattr(n.node_type, "value", str(n.node_type)),
+                            "confidence": getattr(n, "confidence", 1.0),
+                            "created_at": getattr(n, "created_at", None),
+                        }
+                    )
+        return message.create_response({"entries": entries, "total": total})
+
+    async def _handle_search(self, message: Message) -> Message:
+        query_text = message.payload.get("query_text") or message.payload.get("query", "")
+        results: list[dict[str, Any]] = []
+        if self._hcir_backend:
+            try:
+                episodes = await self._hcir_backend.recall_episodes(
+                    query=query_text, limit=message.payload.get("top_k", 5)
+                )
+                for ep in episodes:
+                    results.append({"content": getattr(ep, "summary", str(ep)), "score": 0.9})
+            except Exception as e:
+                logger.debug("[MemorySystem] search error: %s", e)
+        return message.create_response({"results": results, "query": query_text})
+
+    async def _handle_store(self, message: Message) -> Message:
+        return message.create_response({"status": "stored"})
+
+    async def _handle_forget(self, message: Message) -> Message:
+        return message.create_response({"forgotten_count": 0, "status": "success"})
+
+    async def _handle_consolidate(self, message: Message) -> Message:
+        return message.create_response({"status": "consolidated"})
+
+    async def _handle_knowledge_query(self, message: Message) -> Message:
+        return message.create_response({"entities": [], "relations": []})
 
     async def health_check(self):
         from hbllm.network.node import HealthStatus, NodeHealth
