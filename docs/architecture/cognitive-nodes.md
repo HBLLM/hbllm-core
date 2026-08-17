@@ -69,31 +69,31 @@ The `NodeType` enum defines the categories of nodes:
 ### RouterNode
 
 - **Type:** `NodeType.ROUTER`
-- **File:** `hbllm/brain/router_node.py`
+- **File:** `hbllm/brain/control/router_node.py`
 - **Purpose:** Classifies user intent and selects the optimal domain expert(s). Uses the ONNX Vector Router for sub-millisecond routing decisions.
 
 ### PlannerNode
 
 - **Type:** `NodeType.PLANNER`
-- **File:** `hbllm/brain/planner_node.py`
+- **File:** `hbllm/brain/planning/planner_node.py`
 - **Purpose:** Generates Graph-of-Thoughts (GoT) directed acyclic graphs for multi-step reasoning. Each node in the DAG represents a reasoning step.
 
 ### WorkspaceNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/workspace_node.py`
+- **File:** `hbllm/brain/planning/workspace_node.py`
 - **Purpose:** Blackboard-style consensus node. Aggregates outputs from multiple reasoning paths and resolves conflicts.
 
 ### CriticNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/critic_node.py`
+- **File:** `hbllm/brain/evaluation/critic_node.py`
 - **Purpose:** Self-evaluation layer. Scores intermediate reasoning steps and provides constructive feedback.
 
 ### DecisionNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/decision_node.py`
+- **File:** `hbllm/brain/control/decision_node.py`
 - **Purpose:** Synthesizes the final output from workspace state, confidence scores, and critic feedback.
 - **Upgrades:** Integrates a Bounded Rationality 3-tier validation path:
     1. **Level 1: Safety Gate**: Enforces risk-based filters (regular expression checks for low/medium risk, LLM-backed classifiers for high-risk tools).
@@ -104,7 +104,7 @@ The `NodeType` enum defines the categories of nodes:
 ### ProcessRewardNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/process_reward_node.py`
+- **File:** `hbllm/brain/evaluation/process_reward_node.py`
 - **Purpose:** Provides continuous neural scoring `[0-1]` of intermediate reasoning steps, catching hallucinations before they compound.
 
 ### AutonomyManager
@@ -120,25 +120,25 @@ The `NodeType` enum defines the categories of nodes:
 ### LearnerNode
 
 - **Type:** `NodeType.LEARNER`
-- **File:** `hbllm/brain/learner_node.py`
+- **File:** `hbllm/brain/learning/learner_node.py`
 - **Purpose:** Implements contrastive DPO using a persistent atomic JSON queue. Consolidates feedback into permanent HCIR `SkillNode` updates during sleep cycles.
 
 ### CuriosityNode
 
 - **Type:** `NodeType.DETECTOR`
-- **File:** `hbllm/brain/curiosity_node.py`
+- **File:** `hbllm/brain/emotion/curiosity_node.py`
 - **Purpose:** Monitors conversation patterns for knowledge gaps and generates exploratory goals that trigger the SpawnerNode.
 
 ### SpawnerNode
 
 - **Type:** `NodeType.SPAWNER`
-- **File:** `hbllm/brain/spawner_node.py`
+- **File:** `hbllm/brain/emotion/spawner_node.py`
 - **Purpose:** Artificial neurogenesis — acquires new domain-specific skills at runtime via HCIR `SkillNode` creation when the system encounters unfamiliar domains.
 
 ### SleepCycleNode
 
 - **Type:** `NodeType.DOMAIN_MODULE`
-- **File:** `hbllm/brain/sleep_node.py`
+- **File:** `hbllm/brain/emotion/sleep_node.py`
 - **Purpose:** Multi-phase memory consolidation inspired by biological sleep cycles. Runs during idle periods.
 - **Phases:** Memory Replay → Temporal Normalization → Contradiction Resolution → DPO Training → Curiosity Replay → Dream Journal
 - **Triggers:** Idle timeout (auto), `system.sleep.force` (manual), REST API
@@ -147,40 +147,40 @@ The `NodeType` enum defines the categories of nodes:
 ### EvaluationNode
 
 - **Type:** `NodeType.META`
-- **File:** `hbllm/brain/evaluation_node.py`
+- **File:** `hbllm/brain/evaluation/evaluation_node.py`
 - **Purpose:** Closes the intelligence feedback loop. Scores every interaction across 5 dimensions (task_success, plan_validity, tool_accuracy, memory_usage, confidence_error) and feeds results into GoalManager.
 - **Micro-learning:** On negative user feedback, publishes `system.micro_learn` events so LearnerNode can queue DPO corrections in real-time.
 
 ### SkillInductionNode
 
 - **Type:** `NodeType.META`
-- **File:** `hbllm/brain/skill_induction_node.py`
+- **File:** `hbllm/brain/skills/skill_induction_node.py`
 - **Purpose:** Autonomous code generation for new tools. When ReflectionNode identifies a capability gap, this node prompts the LLM to generate a sandboxed Python function, validates it via AST security scanning, and registers it as a new tool.
 
 ### SchedulerNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/scheduler_node.py`
+- **File:** `hbllm/brain/control/scheduler_node.py`
 - **Purpose:** Proactive event scheduler backed by SQLite. Manages recurring and one-shot tasks with cron-style interval expressions, publishing events to the bus when they come due.
 - **Supports:** `fire_and_forget` and `retry` policies for task execution.
 
 ### SelfModel
 
 - **Type:** Utility (not a Node)
-- **File:** `hbllm/brain/self_model.py`
+- **File:** `hbllm/brain/self_model/self_model.py`
 - **Purpose:** SQLite-backed internal model of system capabilities. Tracks domain expertise levels, confidence calibration, performance trends (improving/stable/declining), and recommends model selection based on domain strength.
 - **Integration:** Consulted by SleepCycleNode for targeted DPO training, by DecisionNode for model routing, and by GoalManager for self-improvement priorities.
 
 ### IdentityNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/identity_node.py`
+- **File:** `hbllm/brain/social/identity_node.py`
 - **Purpose:** Maintains ethical constraints, personality traits, and behavioral consistency across tenant profiles.
 
 ### WorldModelNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/world_model_node.py`
+- **File:** `hbllm/brain/world/world_model_node.py`
 - **Purpose:** Sandboxed AST-level simulation for "what-if" reasoning. Validates code execution plans by analyzing imports and potential side effects.
 - **Upgrades:** Extended to handle physical action dry-runs and simulated repository/code world modifications:
     - **AST Static Analysis**: Parses Python code to compile and check imports against `dangerous_imports` (blocking modules like `os`, `subprocess`, `sys`, `shutil`, `socket`).
@@ -190,43 +190,37 @@ The `NodeType` enum defines the categories of nodes:
 ### ExperienceNode
 
 - **Type:** `NodeType.META`
-- **File:** `hbllm/brain/experience_node.py`
+- **File:** `hbllm/brain/learning/experience_node.py`
 - **Purpose:** Computes salience scores for interactions and triggers high-value experiences for consolidation during sleep.
 
 ### MetaReasoningNode
 
 - **Type:** `NodeType.META`
-- **File:** `hbllm/brain/meta_node.py`
+- **File:** `hbllm/brain/self_model/meta_node.py`
 - **Purpose:** Monitors the brain's own reasoning patterns to identify systematic biases or inefficiencies.
 
 ### WebResearchNode
 
 - **Type:** `NodeType.META`
-- **File:** `hbllm/brain/web_research_node.py`
+- **File:** `hbllm/brain/world/web_research_node.py`
 - **Purpose:** Autonomous knowledge acquisition from the internet. Detects knowledge gaps, searches the web via BrowserNode, verifies source credibility, and ingests validated findings into episodic or semantic memory based on the 3-tier classification system (Information / Task Knowledge / Core Knowledge).
 
 ### CollectiveNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/collective_node.py`
+- **File:** `hbllm/brain/world/collective_node.py`
 - **Purpose:** Multi-agent coordination and consensus building.
 
 ### SentinelNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/sentinel_node.py`
+- **File:** `hbllm/brain/governance/sentinel_node.py`
 - **Purpose:** Proactively scans async bus traffic for policy violations and governance constraints.
-
-### RuleExtractorNode
-
-- **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/rule_extractor.py`
-- **Purpose:** Mines high-salience interactions for recurring *if→then* preferences, auto-promoting them to behavioral guardrails.
 
 ### RevisionNode
 
 - **Type:** `NodeType.CORE`
-- **File:** `hbllm/brain/revision_node.py`
+- **File:** `hbllm/brain/evaluation/revision_node.py`
 - **Purpose:** Manages a self-critique loop that iteratively refines the response based on confidence scores and critic feedback.
 
 ### HardwareHAL
@@ -242,7 +236,7 @@ The SNN Cognitive Stream is a pipeline of Spiking Neural Network components that
 
 ### ComprehensionStream
 
-- **File:** `hbllm/brain/snn/comprehension/comprehension_stream.py`
+- **File:** `hbllm/brain/snn/comprehension/stream.py`
 - **Purpose:** Extracts structured concepts from user input using a 5-channel LIF neuron ensemble (entity, clause, discourse, surprise, constraint). ONNX embeddings fire only on concept boundary spikes — 3× faster than per-token embedding.
 - **Architecture:** 5-channel LIF ensemble with lexical signal input
 

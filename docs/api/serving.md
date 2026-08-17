@@ -192,17 +192,19 @@ The KV Cache can be serialized to disk to preserve active cognitive contexts bet
 Endpoints are organized into modular routers:
 
 | Router | Module | Endpoints |
-|--------|--------|-----------|
+|---|---|---|
 | `health_router` | `routes/health.py` | `/health`, `/health/live`, `/health/ready`, `/routing/stats` |
 | `memory_router` | `routes/memory.py` | `/v1/memory/*`, `/v1/sync/*`, `/v1/feedback/*`, `/v1/knowledge/*`, `/v1/rules` |
-| `studio_router` | `studio.py` | `/api/*`, `/studio/*` (Studio UI endpoints) |
-| Core (api.py) | `api.py` | `/v1/chat`, `/v1/audio/*`, `/v1/benchmarks/*`, `/v1/cognitive/*`, `/studio/voice/*` |
+| `notifications_router`| `routes/notifications.py` | `/v1/notifications/*`, `/v1/notifications/stream` (SSE channel) |
+| `studio_router` | `studio/` | `/studio/cognitive/*`, `/studio/emotion/*`, `/studio/hcir/*`, `/studio/perception/*`, `/studio/persona/*` |
+| Core API | `api.py` | `/v1/chat/completions`, `/v1/brain/process`, `/v1/audio/*`, `/v1/benchmarks/*` |
 
 ### Dependency Injection
 
 `serving/deps.py` provides `Depends()`-based state injection:
 
 ```python
+from fastapi import Depends
 from hbllm.serving.deps import get_brain, get_bus
 
 
@@ -218,6 +220,10 @@ async def my_endpoint(brain=Depends(get_brain)):
 | REST API | `serving/api.py` | FastAPI app, core endpoints, middleware registration |
 | Route: Health | `serving/routes/health.py` | Health probes, routing stats |
 | Route: Memory | `serving/routes/memory.py` | Memory, sync, feedback, knowledge |
+| Route: Notifications | `serving/routes/notifications.py` | REST + SSE notification streaming |
+| Studio: Cognitive | `serving/studio/cognitive.py` | Live cognitive graph and node inspection |
+| Studio: Epistemics | `serving/studio/hcir_epistemics.py`| Epistemic hypothesis and calibration visualizer |
+| Studio: Persona | `serving/studio/persona.py` | Persona traits and UserModel debugger |
 | Dependencies | `serving/deps.py` | `Depends()` injection for routes |
 | Chat | `serving/chat.py` | Chat completion logic and streaming |
 | MCP Server | `serving/mcp_server.py` | MCP tool provider |
@@ -226,16 +232,18 @@ async def my_endpoint(brain=Depends(get_brain)):
 | Auth | `serving/auth.py` | JWT authentication middleware |
 | Security | `serving/security.py` | Input sanitization, body limits, CORS, API keys |
 | Middleware: Rate Limit | `serving/middleware/rate_limit.py` | Per-tenant HTTP rate limiting |
+| Middleware: RBAC | `serving/middleware/rbac.py` | Role-based endpoint authorization |
+| Middleware: Headers | `serving/middleware/security_headers.py`| OWASP security headers injection |
 | Middleware: Prometheus | `serving/middleware/prometheus.py` | Prometheus metrics collection |
 | Middleware: Versioning | `serving/middleware/api_version.py` | API version headers |
 | KV Cache | `serving/kv_cache.py` | Efficient key-value cache for inference |
+| Cognitive Scheduler | `serving/cognitive_scheduler.py` | Background autonomous task queue |
 | Token Optimizer | `serving/token_optimizer.py` | Token budget management |
 | Self-Improve | `serving/self_improve.py` | Background self-improvement loop |
 | Launcher | `serving/launcher.py` | Server startup and configuration |
 | **Cognitive Daemon** | `serving/daemon.py` | Always-on cognitive process with autonomy heartbeat |
-| **Proactive Processor** | `serving/proactive.py` | Routes autonomy actions to user-facing output via SSE |
+| **Proactive Processor**| `serving/proactive.py` | Routes autonomy actions to user-facing output via SSE |
 | **Device Bridge** | `serving/device_bridge.py` | Cross-device session continuity and presence tracking |
-| **Notification Routes** | `serving/routes/notifications.py` | REST + SSE notification API |
 
 ---
 

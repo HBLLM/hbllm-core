@@ -315,6 +315,92 @@ for concept in concepts:
 
 ---
 
+## MemCube & Event Sourcing
+
+**Module:** `hbllm.memory.memcube.MemCube`
+
+`MemCube` is an append-only event-sourced memory projection structure. It tracks all mutations as discrete events and reconstructs state on demand via deterministic `fold()` functions.
+
+```python
+from hbllm.memory.memcube import MemCube, MemoryEvent
+
+cube = MemCube(cube_id="cube-user-01")
+
+# Append memory event
+cube.append_event(
+    MemoryEvent(
+        event_type="concept_created",
+        payload={"concept_id": "c-1", "label": "Rust SIMD"},
+    )
+)
+
+# Project current state
+state = cube.fold()
+print(f"Current active concepts in MemCube: {len(state.concepts)}")
+```
+
+---
+
+## BeliefGraph
+
+**Module:** `hbllm.memory.belief_graph.BeliefGraph`
+
+Maintains probabilistic, confidence-weighted propositions with bidirectional evidence edges and contradiction tracking.
+
+```python
+from hbllm.memory.belief_graph import BeliefGraph
+
+graph = BeliefGraph()
+
+# Add belief with initial Bayesian confidence
+graph.add_belief(
+    belief_id="belief-1",
+    statement="Server latency is caused by NVMe queue depth saturation",
+    confidence=0.85,
+)
+
+# Link supporting evidence
+graph.add_evidence(
+    belief_id="belief-1",
+    evidence_id="ev-metrics-101",
+    weight=0.9,
+    is_supporting=True,
+)
+```
+
+---
+
+## GoalMemory
+
+**Module:** `hbllm.memory.goal_memory.GoalMemory`
+
+Hierarchical goal agenda manager supporting sub-goal decomposition, status transitions (`PENDING` $\to$ `ACTIVE` $\to$ `COMPLETED` / `BLOCKED`), and priority scheduling.
+
+```python
+from hbllm.memory.goal_memory import Goal, GoalMemory, GoalStatus
+
+goals = GoalMemory(db_path="data/goal_memory.db")
+await goals.init_db()
+
+# Create high-level goal with sub-goals
+goal_id = await goals.create_goal(
+    title="Optimize API response latency",
+    priority=1,
+    subgoals=["Enable SIMD matmul", "Profile tokenization", "Warm up KV cache"],
+)
+```
+
+---
+
+## Spatial & Temporal Memory
+
+**Modules:** `hbllm.memory.spatial_memory`, `hbllm.memory.temporal_patterns`
+
+- **`SpatialMemory`**: Stores 2D/3D spatial coordinates, indoor topology, and embodied entity anchors for robotics and edge IoT nodes.
+- **`TemporalPatterns`**: Analyzes periodic interaction rhythms (hourly, daily, weekly) to predict upcoming user requests.
+
+---
+
 ## Memory Tier Comparison
 
 | Tier | What It Stores | Backend | Retention |
@@ -324,3 +410,6 @@ for concept in concepts:
 | **Procedural** | Skills & sequences | SQLite | Permanent |
 | **Value** | Preferences & rewards | SQLite | Decayed over time |
 | **Knowledge Graph** | Entity relations | In-memory + JSON | Permanent |
+| **Belief Graph** | Probabilistic beliefs | Graph structure | Bayesian updated |
+| **Goal Memory** | Hierarchical agendas | SQLite | Lifecycle managed |
+| **MemCube** | Immutable event logs | Event store | Append-only |

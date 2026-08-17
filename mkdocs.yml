@@ -55,10 +55,6 @@ plugins:
       separator: '[\s\-\.]+'
   - minify:
       minify_html: true
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: ["."]
 
 markdown_extensions:
   - abbr
@@ -123,13 +119,20 @@ nav:
   - Home: index.md
   - Architecture:
       - Overview: architecture/overview.md
+      - ADR Index: adr/README.md
       - ADR 001 (Core Architecture): adr/0001-hbllm-core-architecture.md
       - ADR 002 (Operational & Governance): adr/0002-operational-architecture-and-governance.md
+      - ADR 003 (Epistemic Runtime): adr/0003-epistemic-runtime.md
+      - HCIR Cognitive OS Kernel: architecture/hcir-kernel-os.md
+      - Epistemic Discovery Engine: architecture/epistemics.md
+      - SNN Cognitive Engine: architecture/snn-cognitive-engine.md
+      - Social Cognition & UserModel: architecture/social-cognition.md
+      - Execution Engine: architecture/execution-engine.md
       - Cognitive Nodes: architecture/cognitive-nodes.md
       - Cognitive Subsystems: architecture/cognitive-subsystems.md
       - Decision & Control Plane: architecture/decision-gatekeeper.md
-      - Executive Brain: architecture/executive-brain-layer.md
-      - Sleep Cycle: architecture/sleep-cycle.md
+      - Executive Brain Layer: architecture/executive-brain-layer.md
+      - Sleep Consolidation Cycle: architecture/sleep-cycle.md
       - Voice Pipeline: architecture/voice-pipeline.md
       - Web Research: architecture/web-research.md
       - Self-Model: architecture/self-model.md
@@ -151,6 +154,9 @@ nav:
   - Guides:
       - Quick Start: guides/quickstart.md
       - Configuration: guides/configuration.md
+      - CLI Reference Manual: guides/cli.md
+      - Packages & Skills (.hbpkg): guides/hbpkg-and-skills.md
+      - Persistence & Backups: guides/persistence-backup.md
       - Custom Nodes: guides/custom-nodes.md
       - Plugin SDK: guides/plugins.md
       - Training Pipeline: guides/training.md
@@ -161,17 +167,26 @@ nav:
   - API Reference:
       - Brain Factory: api/brain-factory.md
       - Brain Subsystems: api/brain-subsystems.md
+      - HCIR Cognitive Kernel: api/hcir.md
+      - Epistemic Runtime: api/epistemics.md
+      - SNN Neuromorphic Engine: api/snn.md
+      - Social Cognition & Persona: api/social.md
+      - Execution Engine: api/execution.md
       - Actions & Tools: api/actions.md
       - Governance & Policies: api/governance.md
-      - Memory: api/memory.md
+      - Memory Systems: api/memory.md
       - Perception: api/perception.md
       - Plugin System: api/plugins.md
+      - Packages & Skills: api/hbpkg-skills.md
       - Model Internals: api/model.md
       - Serving & REST API: api/serving.md
       - Tokenizer: api/tokenizer.md
-      - Network: api/network.md
-      - Security: api/security.md
+      - Network & Swarms: api/network.md
+      - Security & Auth: api/security.md
+      - Persistence & DB Pools: api/persistence.md
+      - Observability & Telemetry: api/telemetry.md
+      - Workspace Management: api/workspace.md
       - Data Pipeline: api/data-pipeline.md
       - Benchmarks & Profiling: api/benchmarks.md
-      - Rust Kernels: api/rust-kernels.md
+      - Rust Kernels (10 Crates): api/rust-kernels.md
   - Contributing: contributing.md

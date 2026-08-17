@@ -15,54 +15,54 @@ Beyond the core cognitive nodes, HBLLM includes specialized subsystems that prov
 
 | Subsystem | Module | Config Flag | Purpose |
 |---|---|---|---|
-| `SkillRegistry` | `skill_registry.py` | Always on | Learn, store, and reuse skills from experience |
-| `GoalManager` | `goal_manager.py` | `inject_goals` | Autonomous goal generation and tracking |
-| `SelfModel` | `self_model.py` | `inject_self_model` | Track capabilities and performance per domain |
-| `CognitiveMetrics` | `cognitive_metrics.py` | `inject_metrics` | Live latency, reasoning quality, and throughput dashboards |
-| `ConfidenceEstimator` | `confidence_estimator.py` | `inject_revision` | Estimate response confidence for self-critique |
-| `RevisionNode` | `revision_node.py` | `inject_revision` | Self-critique loop for improving responses |
-| `WorldSimulator` | `world_simulator.py` | Always on | Simulate outcomes before committing actions |
-| `PolicyEngine` | `policy_engine.py` | `inject_policy_engine` | YAML-based governance policy enforcement |
-| `OwnerRuleStore` | `owner_rules.py` | `inject_owner_rules` | Auto-extracted behavioral guardrails |
-| `TokenOptimizer` | `token_optimizer.py` | `inject_cost_optimizer` | Reduce token usage for cost optimization |
-| `EvaluationNode` | `evaluation_node.py` | `inject_evaluation` | Per-interaction quality scoring (v2) |
-| `SkillCompilerNode` | `skill_compiler_node.py` | `inject_skill_compiler` | Automatic skill extraction from patterns (v2) |
-| `ReflectionNode` | `reflection_node.py` | `inject_reflection` | Periodic batch performance analysis (v2) |
-| `AttentionManager` | `attention_manager.py` | `inject_attention` | Memory budgets and focus allocation (v2) |
-| `LoadManager` | `load_manager.py` | `inject_load_manager` | Cognitive load monitoring & degradation (v2) |
-| `CollectiveNode` | `collective_node.py` | Always on | Multi-agent voting, delegation & knowledge sharing (v2) |
-| `SchedulerNode` | `scheduler_node.py` | `inject_scheduler` | Proactive scheduling and background execution via SQLite (v2) |
-| `ContextFusionEngine` | `context_fusion.py` | Always on | Token-budgeted multi-source context assembly |
-| `ActionVerificationBridge` | `autonomy/verification_bridge.py` | Always on | Execute → verify → correct feedback loop |
-| `EmotionEngine` | `emotion_engine.py` | `inject_emotion` | Multi-signal emotion detection with LLM inference |
-| **`UserModelEngine`** | `user_model.py` | `inject_user_model` | Predictive model of the human operator |
-| **`ProjectGraph`** | `project_graph.py` | `inject_project_graph` | Graph-based project state tracking |
-| **`ExecutiveCortex`** | `executive_cortex.py` | `inject_executive_cortex` | Unified cognitive control and budget allocation |
-| **`RelationshipMemory`** | `relationship_memory.py` | `inject_relationship_memory` | Social graph and interaction history |
-| **`RealityGraph`** | `reality_graph.py` | `inject_reality_graph` | Unified read-only world state facade |
-| **`AutonomyManager`** | `autonomy/autonomy_manager.py` | `inject_autonomy_manager` | Passive presence monitoring & proactive opportunity routing |
+| `SkillRegistry` | `hbllm.brain.skills.skill_registry` | Always on | Learn, store, and reuse skills from experience |
+| `GoalManager` | `hbllm.brain.emotion.goal_manager` | `inject_goals` | Autonomous goal generation and tracking |
+| `SelfModel` | `hbllm.brain.self_model.self_model` | `inject_self_model` | Track capabilities and performance per domain |
+| `CognitiveMetrics` | `hbllm.brain.self_model.cognitive_metrics` | `inject_metrics` | Live latency, reasoning quality, and throughput dashboards |
+| `ConfidenceEstimator` | `hbllm.brain.self_model.confidence_estimator` | `inject_revision` | Estimate response confidence for self-critique |
+| `RevisionNode` | `hbllm.brain.nodes.revision_node` | `inject_revision` | Self-critique loop for improving responses |
+| `WorldSimulator` | `hbllm.brain.simulation.engine` | Always on | Simulate outcomes before committing actions |
+| `PolicyEngine` | `hbllm.brain.executive.policy_engine` | `inject_policy_engine` | YAML-based governance policy enforcement |
+| `OwnerRuleStore` | `hbllm.brain.executive.owner_rules` | `inject_owner_rules` | Auto-extracted behavioral guardrails |
+| `TokenOptimizer` | `hbllm.serving.token_optimizer` | `inject_cost_optimizer` | Reduce token usage for cost optimization |
+| `EvaluationNode` | `hbllm.brain.nodes.evaluation_node` | `inject_evaluation` | Per-interaction quality scoring |
+| `SkillCompilerNode` | `hbllm.brain.skills.skill_compiler_node` | `inject_skill_compiler` | Automatic skill extraction from patterns |
+| `ReflectionNode` | `hbllm.brain.nodes.reflection_node` | `inject_reflection` | Periodic batch performance analysis |
+| `AttentionManager` | `hbllm.brain.self_model.attention_manager` | `inject_attention` | Memory budgets and focus allocation |
+| `LoadManager` | `hbllm.brain.self_model.cognitive_load_estimator` | `inject_load_manager` | Cognitive load monitoring & degradation |
+| `CollectiveNode` | `hbllm.brain.world.collective_node` | Always on | Multi-agent voting, delegation & knowledge sharing |
+| `SchedulerNode` | `hbllm.brain.nodes.scheduler_node` | `inject_scheduler` | Proactive scheduling and background execution |
+| `ContextFusionEngine` | `hbllm.brain.reasoning.context_fusion` | Always on | Token-budgeted multi-source context assembly |
+| `ActionVerificationBridge` | `hbllm.brain.autonomy.verification_bridge` | Always on | Execute → verify → correct feedback loop |
+| `EmotionEngine` | `hbllm.brain.emotion.emotion_engine` | `inject_emotion` | Multi-signal emotion detection with LLM inference |
+| **`UserModelEngine`** | `hbllm.brain.social.user_model` | `inject_user_model` | Predictive model of the human operator |
+| **`ProjectGraph`** | `hbllm.brain.world.project_graph` | `inject_project_graph` | Graph-based project state tracking |
+| **`ExecutiveCortex`** | `hbllm.brain.executive.executive_cortex` | `inject_executive_cortex` | Unified cognitive control and budget allocation |
+| **`RelationshipMemory`** | `hbllm.brain.social.relationship_memory` | `inject_relationship_memory` | Social graph and interaction history |
+| **`RealityGraph`** | `hbllm.brain.reasoning.reality_graph` | `inject_reality_graph` | Unified read-only world state facade |
+| **`AutonomyManager`** | `hbllm.brain.autonomy.autonomy_manager` | `inject_autonomy_manager` | Passive presence monitoring & proactive opportunity routing |
 
-### v3: Integration Layer
-
-| Subsystem | Module | Purpose |
-|---|---|---|
-| `BrainContext` | `brain/brain_context.py` | Service/state separation — coordination layer |
-| `BrainContainer` | `brain/brain_container.py` | Bootstrap factory (7 services, 20 capabilities) |
-| `CapabilityRegistry` | `brain/capability_registry.py` | Dynamic service discovery by capability tags |
-| `TraceCollector` | `brain/trace.py` | End-to-end cognitive event tracing |
-| `EvidencePacket` | `brain/evidence.py` | Structured evidence for reasoning |
-| `DeliberationBudget` | `brain/simulation_engine.py` | Adaptive computation budgeting |
-| `BrainTick` | `brain/snn/oscillations.py` | Global oscillation heartbeat events |
-
-### v3: Memory Infrastructure
+### Core Integration Layer
 
 | Subsystem | Module | Purpose |
 |---|---|---|
-| `MemoryRepository` | `memory/repository.py` | Abstract base for event-sourced memory types |
-| `MemoryProjection` | `memory/repository.py` | Folds event streams into MemCube state |
-| `MemoryEventStore` | `memory/memcube.py` | Append-only event log with fold() |
-| `BeliefGraph` | `memory/belief_graph.py` | Belief provenance and contradiction tracking |
-| `GoalMemory` | `memory/goal_memory.py` | Hierarchical goal lifecycle management |
+| `BrainContext` | `hbllm.brain.core.brain_context` | Service/state separation — coordination layer |
+| `BrainContainer` | `hbllm.brain.core.brain_container` | Bootstrap factory (7 services, 20 capabilities) |
+| `CapabilityRegistry` | `hbllm.brain.skills.capability_registry` | Dynamic service discovery by capability tags |
+| `TraceCollector` | `hbllm.observability.tracing` | End-to-end cognitive event tracing |
+| `EvidencePacket` | `hbllm.brain.reasoning.evidence` | Structured evidence for reasoning |
+| `DeliberationBudget` | `hbllm.brain.simulation.engine` | Adaptive computation budgeting |
+| `BrainTick` | `hbllm.brain.snn.oscillations` | Global oscillation heartbeat events |
+
+### Memory Infrastructure
+
+| Subsystem | Module | Purpose |
+|---|---|---|
+| `MemoryRepository` | `hbllm.memory.repository` | Abstract base for event-sourced memory types |
+| `MemoryProjection` | `hbllm.memory.repository` | Folds event streams into MemCube state |
+| `MemoryEventStore` | `hbllm.memory.memcube` | Append-only event log with fold() |
+| `BeliefGraph` | `hbllm.memory.belief_graph` | Belief provenance and contradiction tracking |
+| `GoalMemory` | `hbllm.memory.goal_memory` | Hierarchical goal lifecycle management |
 
 ---
 
