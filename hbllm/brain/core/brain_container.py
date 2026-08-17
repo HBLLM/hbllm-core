@@ -12,7 +12,7 @@ Architecture::
     BrainContainer.build(config)
         │
         ├─→ construct OscillationManager (BrainClock)
-        ├─→ construct CapabilityRegistry
+        ├─→ construct SkillCapabilityRegistry
         ├─→ construct TraceCollector
         ├─→ construct SimulationEngine
         ├─→ construct GoalMemory
@@ -46,7 +46,7 @@ from hbllm.brain.core.cognitive_state import CognitiveState
 from hbllm.brain.core.trace import TraceCollector
 from hbllm.brain.emotion.neuromodulation import NeuromodulationEngine
 from hbllm.brain.reasoning.prediction import CognitivePredictors
-from hbllm.brain.skills.capability_registry import CapabilityRegistry
+from hbllm.brain.skills.capability_registry import SkillCapabilityRegistry
 from hbllm.brain.snn.oscillations import OscillationManager
 from hbllm.brain.world.simulation_engine import SimulationEngine
 from hbllm.memory.belief_graph import BeliefGraph
@@ -110,7 +110,7 @@ class BrainContainer:
 
         # ── Construct infrastructure services ────────────────────────
         clock = OscillationManager()
-        registry = CapabilityRegistry()
+        registry = SkillCapabilityRegistry()
         traces = TraceCollector(max_retained=cfg.trace_retention)
 
         # ── Construct cognitive state ────────────────────────────────

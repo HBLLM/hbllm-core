@@ -13,7 +13,7 @@ Architecture::
 
     Background Path (autonomous work)
         ↓
-    CognitiveScheduler  →  TaskQueue  →  Worker Pool  (PRIORITY: LOW)
+    ServingTaskScheduler  →  TaskQueue  →  Worker Pool  (PRIORITY: LOW)
         ↓
     Arbiter decides: run now / defer / drop
 
@@ -32,9 +32,9 @@ Priority levels::
 
 Usage::
 
-    from hbllm.serving.cognitive_scheduler import CognitiveScheduler
+    from hbllm.serving.cognitive_scheduler import ServingTaskScheduler
 
-    scheduler = CognitiveScheduler(max_concurrent_llm=3)
+    scheduler = ServingTaskScheduler(max_concurrent_llm=3)
     await scheduler.start()
 
     # Submit interactive work (bypasses queue)
@@ -93,7 +93,7 @@ class TaskState:
 
 @dataclass
 class ScheduledTask:
-    """A task managed by the CognitiveScheduler."""
+    """A task managed by the ServingTaskScheduler."""
 
     id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
     name: str = ""
@@ -151,7 +151,7 @@ class ResourceSlots:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class CognitiveScheduler:
+class ServingTaskScheduler:
     """Central resource arbitrator for background cognitive tasks.
 
     Ensures background work (consolidation, planning, proactive
@@ -198,7 +198,7 @@ class CognitiveScheduler:
 
         self._started = True
         logger.info(
-            "CognitiveScheduler started (%d workers, %d max LLM slots)",
+            "ServingTaskScheduler started (%d workers, %d max LLM slots)",
             num_workers,
             self._resources._counts["llm"],
         )
@@ -222,7 +222,7 @@ class CognitiveScheduler:
             task.state = TaskState.CANCELLED
         self._active.clear()
 
-        logger.info("CognitiveScheduler stopped")
+        logger.info("ServingTaskScheduler stopped")
 
     # ── Submit Methods ───────────────────────────────────────────────────
 

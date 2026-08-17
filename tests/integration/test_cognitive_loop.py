@@ -4,7 +4,7 @@ Integration Test — Full Cognitive Loop Verification.
 Tests the end-to-end cognitive pipeline with the v3 integration wiring:
 
     Happy Path:
-        BrainContainer → BrainContext → Trace → CapabilityRegistry
+        BrainContainer → BrainContext → Trace → SkillCapabilityRegistry
         → OscillationManager (BrainTick) → Simulation (DeliberationBudget)
         → BeliefGraph → EvidencePacket → Memory (Repository + Projection)
 
@@ -29,7 +29,7 @@ from hbllm.brain.reasoning.evidence import EvidenceBuilder, EvidencePacket
 
 # ── Prediction (Phase D) ──
 from hbllm.brain.reasoning.prediction import CognitivePredictors
-from hbllm.brain.skills.capability_registry import CapabilityRegistry
+from hbllm.brain.skills.capability_registry import SkillCapabilityRegistry
 
 # ── Brain (Phase C) ──
 from hbllm.brain.snn.network import ProjectionType
@@ -103,11 +103,11 @@ class TestBrainContainerBootstrap:
         assert stats["services"]["capabilities"]["services"] > 0
 
 
-class TestCapabilityRegistry:
+class TestSkillCapabilityRegistry:
     """Verify the capability registry lifecycle."""
 
     def test_register_and_find(self) -> None:
-        reg = CapabilityRegistry()
+        reg = SkillCapabilityRegistry()
         service = {"name": "test_service"}
         reg.register("test", service, ["reasoning", "planning"])
 
@@ -116,7 +116,7 @@ class TestCapabilityRegistry:
         assert reg.find("nonexistent") == []
 
     def test_unregister(self) -> None:
-        reg = CapabilityRegistry()
+        reg = SkillCapabilityRegistry()
         reg.register("test", "svc", ["cap_a"])
         assert reg.has("test")
         assert reg.unregister("test")
@@ -124,14 +124,14 @@ class TestCapabilityRegistry:
         assert reg.find("cap_a") == []
 
     def test_find_one(self) -> None:
-        reg = CapabilityRegistry()
+        reg = SkillCapabilityRegistry()
         reg.register("a", "svc_a", ["shared"])
         reg.register("b", "svc_b", ["shared"])
         result = reg.find_one("shared")
         assert result in ["svc_a", "svc_b"]
 
     def test_duplicate_registration_raises(self) -> None:
-        reg = CapabilityRegistry()
+        reg = SkillCapabilityRegistry()
         reg.register("test", "svc", ["cap"])
         with pytest.raises(ValueError, match="already registered"):
             reg.register("test", "svc2", ["cap2"])

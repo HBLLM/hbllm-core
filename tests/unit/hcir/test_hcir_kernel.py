@@ -16,8 +16,8 @@ from hbllm.hcir.kernel.capability_resolver import (
 )
 from hbllm.hcir.kernel.scheduler import (
     CognitiveProcess,
-    CognitiveScheduler,
     CognitiveThread,
+    KernelInstructionScheduler,
     ProcessState,
 )
 from hbllm.hcir.types import Scope, SecurityLevel
@@ -205,16 +205,16 @@ class TestCapabilityResolver:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestCognitiveScheduler:
+class TestKernelInstructionScheduler:
     def test_register_process(self):
-        sched = CognitiveScheduler()
+        sched = KernelInstructionScheduler()
         proc = CognitiveProcess(process_id="p1", conversation_id="c1")
         sched.register_process(proc)
         assert sched.get_process("p1") is proc
         assert sched.process_count == 1
 
     def test_enqueue_and_dispatch(self):
-        sched = CognitiveScheduler()
+        sched = KernelInstructionScheduler()
         proc = CognitiveProcess(process_id="p1")
         thread = CognitiveThread(thread_id="t1")
         proc.add_thread(thread)
@@ -226,7 +226,7 @@ class TestCognitiveScheduler:
         assert entry.thread_id == "t1"
 
     def test_dispatch_priority_ordering(self):
-        sched = CognitiveScheduler()
+        sched = KernelInstructionScheduler()
         for pid, sal in [("p1", 0.3), ("p2", 0.9), ("p3", 0.6)]:
             proc = CognitiveProcess(process_id=pid)
             proc.add_thread(CognitiveThread(thread_id=f"t_{pid}"))
@@ -239,7 +239,7 @@ class TestCognitiveScheduler:
         assert second.process_id == "p3"
 
     def test_dispatch_respects_max_concurrent(self):
-        sched = CognitiveScheduler(max_concurrent=1)
+        sched = KernelInstructionScheduler(max_concurrent=1)
         proc = CognitiveProcess(process_id="p1")
         proc.add_thread(CognitiveThread(thread_id="t1"))
         sched.register_process(proc)
@@ -248,7 +248,7 @@ class TestCognitiveScheduler:
         assert sched.dispatch() is None  # Blocked by concurrency limit
 
     def test_complete_frees_slot(self):
-        sched = CognitiveScheduler(max_concurrent=1)
+        sched = KernelInstructionScheduler(max_concurrent=1)
         proc = CognitiveProcess(process_id="p1")
         proc.add_thread(CognitiveThread(thread_id="t1"))
         proc.add_thread(CognitiveThread(thread_id="t2"))
@@ -262,7 +262,7 @@ class TestCognitiveScheduler:
         assert entry.thread_id == "t2"
 
     def test_thread_state_transitions(self):
-        sched = CognitiveScheduler()
+        sched = KernelInstructionScheduler()
         proc = CognitiveProcess(process_id="p1")
         thread = CognitiveThread(thread_id="t1")
         proc.add_thread(thread)
@@ -274,7 +274,7 @@ class TestCognitiveScheduler:
         assert thread.state == ProcessState.COMPLETED
 
     def test_process_completes_when_all_threads_done(self):
-        sched = CognitiveScheduler()
+        sched = KernelInstructionScheduler()
         proc = CognitiveProcess(process_id="p1")
         proc.add_thread(CognitiveThread(thread_id="t1"))
         sched.register_process(proc)

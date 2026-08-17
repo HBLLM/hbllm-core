@@ -59,7 +59,7 @@ from typing import Any
 from hbllm.brain.core.cognitive_state import CognitiveState
 from hbllm.brain.core.trace import TraceCollector
 from hbllm.brain.emotion.neuromodulation import NeuromodulationEngine
-from hbllm.brain.skills.capability_registry import CapabilityRegistry
+from hbllm.brain.skills.capability_registry import SkillCapabilityRegistry
 from hbllm.brain.snn.oscillations import OscillationManager
 from hbllm.memory.goal_memory import GoalMemory
 
@@ -88,7 +88,7 @@ class BrainServices:
 
     clock: OscillationManager = field(default_factory=OscillationManager)
     bus: Any = None  # MessageBus — typed as Any to avoid circular imports
-    capability_registry: CapabilityRegistry = field(default_factory=CapabilityRegistry)
+    capability_registry: SkillCapabilityRegistry = field(default_factory=SkillCapabilityRegistry)
     traces: TraceCollector = field(default_factory=TraceCollector)
     simulation: Any = None  # SimulationEngine — resolved at bootstrap
 

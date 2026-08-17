@@ -12,7 +12,7 @@ mDNS is DISCOVERY ONLY. It does not:
   - Understand capabilities (that's the Registry's job).
 
 It simply announces presence and discovers peers, then feeds them into
-the NodeState engine and CapabilityRegistry.
+the NodeState engine and NetworkCapabilityRegistry.
 
 Service format:
     _hbllm._tcp.local.

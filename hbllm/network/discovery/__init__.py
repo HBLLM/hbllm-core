@@ -5,10 +5,10 @@ This package provides peer discovery (mDNS), state synchronization (Gossip),
 and the Capability Registry.
 """
 
-from hbllm.network.discovery.registry import CapabilityRegistry
+from hbllm.network.discovery.registry import NetworkCapabilityRegistry
 
 # Lazy imports for optional dependencies (zeroconf, etc.)
-__all__ = ["CapabilityRegistry", "MDNSDiscovery", "GossipSync"]
+__all__ = ["NetworkCapabilityRegistry", "MDNSDiscovery", "GossipSync"]
 
 
 def __getattr__(name: str):  # noqa: N807

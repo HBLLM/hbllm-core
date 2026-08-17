@@ -1,7 +1,7 @@
 """
 Tests for the Adaptive Hybrid Network Architecture.
 
-Covers: Transport abstractions, NodeState Engine, CapabilityRegistry,
+Covers: Transport abstractions, NodeState Engine, NetworkCapabilityRegistry,
 ExecutionContext, RoutingIntelligenceLayer, and GossipSync.
 """
 
@@ -13,7 +13,7 @@ import time
 import pytest
 
 from hbllm.network.discovery.gossip import GossipEntry, GossipMessage, GossipSync
-from hbllm.network.discovery.registry import CapabilityRegistry
+from hbllm.network.discovery.registry import NetworkCapabilityRegistry
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node_state import (
     NodeRole,
@@ -298,13 +298,13 @@ class TestNodeStateEngine:
 
 
 # ──────────────────────────────────────────────
-# CapabilityRegistry tests
+# NetworkCapabilityRegistry tests
 # ──────────────────────────────────────────────
 
 
-class TestCapabilityRegistry:
+class TestNetworkCapabilityRegistry:
     def test_register_and_find(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("node_a", ["llm", "search"], is_local=True)
         results = reg.find_by_capability("llm")
         assert len(results) == 1
@@ -312,21 +312,21 @@ class TestCapabilityRegistry:
         assert results[0].is_local
 
     def test_deregister(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("node_a", ["llm"])
         reg.deregister("node_a")
         assert reg.find_by_capability("llm") == []
         assert reg.node_count == 0
 
     def test_re_register_replaces(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("node_a", ["llm", "search"])
         reg.register("node_a", ["llm"])  # Re-register with fewer caps
         assert reg.get_node_capabilities("node_a") == ["llm"]
         assert reg.find_by_capability("search") == []
 
     def test_find_best_prefers_local(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("remote", ["llm"], latency_ms=5.0, is_local=False)
         reg.register("local", ["llm"], latency_ms=0.1, is_local=True)
         best = reg.find_best_for_capability("llm")
@@ -334,7 +334,7 @@ class TestCapabilityRegistry:
         assert best.node_id == "local"
 
     def test_find_best_lowest_latency(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("slow", ["gps"], latency_ms=100.0)
         reg.register("fast", ["gps"], latency_ms=10.0)
         best = reg.find_best_for_capability("gps")
@@ -342,11 +342,11 @@ class TestCapabilityRegistry:
         assert best.node_id == "fast"
 
     def test_find_best_nonexistent(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         assert reg.find_best_for_capability("nonexistent") is None
 
     def test_update_node_health(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("node_a", ["llm"], latency_ms=10.0)
         reg.update_node_health("node_a", latency_ms=5.0, load=0.8)
         entries = reg.find_by_capability("llm")
@@ -354,21 +354,21 @@ class TestCapabilityRegistry:
         assert entries[0].load == 0.8
 
     def test_unreachable_filtered(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("node_a", ["llm"])
         reg.update_node_health("node_a", is_reachable=False)
         assert reg.find_by_capability("llm", reachable_only=True) == []
         assert len(reg.find_by_capability("llm", reachable_only=False)) == 1
 
     def test_get_all_capabilities(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("a", ["llm", "search"])
         reg.register("b", ["gps"])
         caps = reg.get_all_capabilities()
         assert set(caps) == {"llm", "search", "gps"}
 
     def test_network_summary(self):
-        reg = CapabilityRegistry()
+        reg = NetworkCapabilityRegistry()
         reg.register("a", ["llm"])
         reg.register("b", ["gps", "camera"])
         summary = reg.get_network_summary()
@@ -376,14 +376,14 @@ class TestCapabilityRegistry:
         assert summary["total_capabilities"] == 3
 
     def test_refresh_node(self):
-        reg = CapabilityRegistry(default_ttl=0.1)
+        reg = NetworkCapabilityRegistry(default_ttl=0.1)
         reg.register("a", ["llm"])
         reg.refresh_node("a")
         entries = reg.find_by_capability("llm")
         assert len(entries) == 1  # Still alive after refresh
 
     def test_ttl_pruning(self):
-        reg = CapabilityRegistry(default_ttl=0.0)  # Instant expiry
+        reg = NetworkCapabilityRegistry(default_ttl=0.0)  # Instant expiry
         reg.register("stale", ["llm"])
         # Force prune via query
         results = reg.find_by_capability("llm")
@@ -400,7 +400,7 @@ class TestGossipSync:
     def test_publish_local_state(self):
         engine = NodeStateEngine("server", role=NodeRole.COORDINATOR)
         engine.set_status(NodeStateStatus.HEALTHY)
-        registry = CapabilityRegistry()
+        registry = NetworkCapabilityRegistry()
         registry.register("server", ["llm", "search"], is_local=True)
 
         gossip = GossipSync(node_id="server")
@@ -457,7 +457,7 @@ class TestGossipSync:
 
     @pytest.mark.asyncio
     async def test_gossip_applies_to_registry(self):
-        registry = CapabilityRegistry()
+        registry = NetworkCapabilityRegistry()
         engine = NodeStateEngine("server")
 
         gossip = GossipSync(node_id="server")

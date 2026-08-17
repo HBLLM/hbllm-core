@@ -6,7 +6,7 @@ Wires together the Phase A–C subsystems into a coherent startup:
     1. Load BrainProfile → determines which subsystems activate
     2. Create Brain (existing BrainFactory)
     3. Initialize Gateway + Transports
-    4. Initialize CognitiveScheduler
+    4. Initialize ServingTaskScheduler
     5. Initialize PermissionEngine
     6. Initialize IdentityStateManager → restore identity
     7. Initialize WorkspaceManager
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from hbllm.hcir.kernel.services import KernelServices
     from hbllm.network.gateway import Gateway
     from hbllm.security.permission_engine import PermissionEngine
-    from hbllm.serving.cognitive_scheduler import CognitiveScheduler
+    from hbllm.serving.cognitive_scheduler import ServingTaskScheduler
     from hbllm.workspace.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ class BootContext:
     brain: Brain | None = None
     profile: BrainProfile | None = None
     gateway: Gateway | None = None
-    scheduler: CognitiveScheduler | None = None
+    scheduler: ServingTaskScheduler | None = None
     permission_engine: PermissionEngine | None = None
     identity: IdentityStateManager | None = None
     workspace_manager: WorkspaceManager | None = None
@@ -132,7 +132,7 @@ class BootOrchestrator:
     Composes:
       - BrainProfile (Phase A) — determines which subsystems activate
       - Gateway + Transports (Phase A) — transport → bus bridge
-      - CognitiveScheduler (Phase B) — background task arbitration
+      - ServingTaskScheduler (Phase B) — background task arbitration
       - PermissionEngine (Phase B) — plugin sandbox enforcement
       - IdentityStateManager (Phase C) — cross-session continuity
       - WorkspaceManager (Phase A) — multi-domain isolation
@@ -212,7 +212,7 @@ class BootOrchestrator:
             from hbllm.hcir.adapters.node_adapter import NodeAdapter
             from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
             from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.scheduler import CognitiveScheduler as HCIRScheduler
+            from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
             from hbllm.hcir.kernel.services import KernelServices
             from hbllm.hcir.kernel.transaction_manager import TransactionManager
             from hbllm.hcir.workspace import HCIRWorkspaceState
@@ -224,7 +224,7 @@ class BootOrchestrator:
             )
             tx_mgr = TransactionManager(hcir_ws)
             resolver = CapabilityResolver()
-            hcir_sched = HCIRScheduler()
+            hcir_sched = KernelInstructionScheduler()
 
             ctx.kernel_services = KernelServices(
                 workspace=hcir_ws,
@@ -262,17 +262,17 @@ class BootOrchestrator:
             await ctx.gateway.start()
             logger.info("Gateway started (max_sessions=%d)", gateway_config.max_sessions)
 
-        # ── 4. Initialize CognitiveScheduler ─────────────────────────
+        # ── 4. Initialize ServingTaskScheduler ─────────────────────────
         if cfg.enable_scheduler:
-            from hbllm.serving.cognitive_scheduler import CognitiveScheduler
+            from hbllm.serving.cognitive_scheduler import ServingTaskScheduler
 
-            ctx.scheduler = CognitiveScheduler(
+            ctx.scheduler = ServingTaskScheduler(
                 max_concurrent_llm=cfg.max_concurrent_llm,
                 max_concurrent_background=cfg.scheduler_workers,
             )
             await ctx.scheduler.start()
             logger.info(
-                "CognitiveScheduler online (%d workers, max %d LLM concurrent)",
+                "ServingTaskScheduler online (%d workers, max %d LLM concurrent)",
                 cfg.scheduler_workers,
                 cfg.max_concurrent_llm,
             )

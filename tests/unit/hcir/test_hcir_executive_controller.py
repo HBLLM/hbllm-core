@@ -6,7 +6,7 @@ from hbllm.hcir.cognitive_state import UnifiedCognitiveState
 from hbllm.hcir.graph import ActionNode, GoalNode
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.executive_controller import ExecutiveController
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
@@ -22,7 +22,7 @@ class TestExecutiveController:
             workspace=ws,
             transaction_manager=TransactionManager(ws),
             capability_resolver=CapabilityResolver(),
-            scheduler=CognitiveScheduler(),
+            scheduler=KernelInstructionScheduler(),
         )
 
         executive = ExecutiveController(services)

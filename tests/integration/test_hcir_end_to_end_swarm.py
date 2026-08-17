@@ -12,7 +12,7 @@ from hbllm.hcir.delta_transport import DeltaTransportProtocol
 from hbllm.hcir.graph import ActionNode, GoalNode
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.learning_loop import LearningLoopEngine
@@ -27,7 +27,7 @@ class TestHCIREndToEndSwarm:
         ws_a = HCIRWorkspaceState()
         tx_mgr_a = TransactionManager(ws_a)
         resolver_a = CapabilityResolver()
-        scheduler_a = CognitiveScheduler()
+        scheduler_a = KernelInstructionScheduler()
         services_a = KernelServices(
             workspace=ws_a,
             transaction_manager=tx_mgr_a,

@@ -11,7 +11,7 @@ The RIL:
   - Maintains fallback chains.
   - Attaches ExecutionContext for traceability.
   - Factors in NodeState (load, health) for scoring (Phase 2).
-  - Queries CapabilityRegistry for capability-aware routing (Phase 2).
+  - Queries NetworkCapabilityRegistry for capability-aware routing (Phase 2).
 
 The RIL MUST NOT:
   - Manage memory sync logic.
@@ -32,7 +32,7 @@ from hbllm.network.routing.context import ExecutionContext
 from hbllm.network.transports.base import Transport, TransportState
 
 if TYPE_CHECKING:
-    from hbllm.network.discovery.registry import CapabilityRegistry
+    from hbllm.network.discovery.registry import NetworkCapabilityRegistry
     from hbllm.network.node_state import NodeStateEngine
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class RoutingIntelligenceLayer:
 
     Phase 2 enhancements:
       - NodeState integration: node load_score is applied as a penalty.
-      - CapabilityRegistry integration: if a target capability is specified,
+      - NetworkCapabilityRegistry integration: if a target capability is specified,
         the RIL queries the registry for the best transport to reach it.
 
     The RIL exposes the same publish/subscribe/request interface as
@@ -65,17 +65,17 @@ class RoutingIntelligenceLayer:
 
         # Phase 2: State awareness (optional, gracefully degrades if not set)
         self._node_state: NodeStateEngine | None = None
-        self._capability_registry: CapabilityRegistry | None = None
+        self._capability_registry: NetworkCapabilityRegistry | None = None
 
     def set_node_state(self, engine: NodeStateEngine) -> None:
         """Attach the NodeState engine for load-aware scoring."""
         self._node_state = engine
         logger.info("RIL: NodeState engine attached (node=%s)", engine.node_id)
 
-    def set_capability_registry(self, registry: CapabilityRegistry) -> None:
-        """Attach the CapabilityRegistry for capability-aware routing."""
+    def set_capability_registry(self, registry: NetworkCapabilityRegistry) -> None:
+        """Attach the NetworkCapabilityRegistry for capability-aware routing."""
         self._capability_registry = registry
-        logger.info("RIL: CapabilityRegistry attached (%d nodes)", registry.node_count)
+        logger.info("RIL: NetworkCapabilityRegistry attached (%d nodes)", registry.node_count)
 
     # ── Transport Management ──────────────────────────────────────────
 
@@ -300,7 +300,7 @@ class RoutingIntelligenceLayer:
 
         Phase 2 scoring (state-aware):
           1. Prefer InProcess if it has local subscribers for the topic.
-          2. If a target capability is specified, query the CapabilityRegistry
+          2. If a target capability is specified, query the NetworkCapabilityRegistry
              to find the best transport to reach a node with that capability.
           3. Factor in NodeState load as a penalty.
           4. Fall back to the connected transport with the best score.

@@ -13,7 +13,7 @@ from hbllm.hcir.graph import (
     WorldVariableNode,
 )
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
@@ -121,7 +121,7 @@ class TestCounterfactualPlanner:
             workspace=ws,
             transaction_manager=TransactionManager(ws),
             capability_resolver=CapabilityResolver(),
-            scheduler=CognitiveScheduler(),
+            scheduler=KernelInstructionScheduler(),
         )
 
         planner = CounterfactualPlanner(ws, services)

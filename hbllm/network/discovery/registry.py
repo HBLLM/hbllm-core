@@ -48,7 +48,7 @@ class CapabilityEntry(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class CapabilityRegistry:
+class NetworkCapabilityRegistry:
     """
     Merged view of all capabilities across the distributed network.
 
@@ -124,7 +124,7 @@ class CapabilityRegistry:
         self._total_registrations += 1
 
         logger.debug(
-            "CapabilityRegistry: registered %s with %d capabilities (transport=%s)",
+            "NetworkCapabilityRegistry: registered %s with %d capabilities (transport=%s)",
             node_id,
             len(capabilities),
             transport_type,
@@ -141,7 +141,7 @@ class CapabilityRegistry:
                 del self._by_capability[entry.capability]
 
         if old_entries:
-            logger.debug("CapabilityRegistry: deregistered %s", node_id)
+            logger.debug("NetworkCapabilityRegistry: deregistered %s", node_id)
 
     # ── Queries ───────────────────────────────────────────────────────
 
@@ -280,7 +280,7 @@ class CapabilityRegistry:
         for node_id in stale_nodes:
             self.deregister(node_id)
             self._total_evictions += 1
-            logger.debug("CapabilityRegistry: evicted stale node %s", node_id)
+            logger.debug("NetworkCapabilityRegistry: evicted stale node %s", node_id)
 
     def refresh_node(self, node_id: str) -> None:
         """Refresh the TTL for all entries of a node (e.g., on heartbeat)."""
@@ -299,4 +299,4 @@ class CapabilityRegistry:
         return len(self._by_capability)
 
     def __repr__(self) -> str:
-        return f"<CapabilityRegistry nodes={self.node_count} capabilities={self.capability_count}>"
+        return f"<NetworkCapabilityRegistry nodes={self.node_count} capabilities={self.capability_count}>"

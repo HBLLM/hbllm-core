@@ -2,8 +2,9 @@
 Safe checkpoint loading utilities for HBLLM.
 
 Provides ``load_checkpoint()`` which wraps ``torch.load()`` with
-``weights_only=True`` by default, preventing arbitrary code execution
-from untrusted checkpoint files (CVE-2025-XXXX class vulnerabilities).
+``weights_only=True`` by default, mitigating arbitrary code execution
+from untrusted checkpoint files via pickle deserialization (see
+`PyTorch security advisory <https://github.com/pytorch/pytorch/security>`_).
 
 For legacy checkpoints that contain non-tensor objects (e.g., optimizer
 state with custom LR schedulers), falls back to ``weights_only=False``

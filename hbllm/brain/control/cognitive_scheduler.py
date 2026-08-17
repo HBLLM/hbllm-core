@@ -20,10 +20,10 @@ Design invariants (ADR 002):
 Usage::
 
     from hbllm.brain.control.cognitive_scheduler import (
-        CognitiveScheduler, TaskPriority, ScheduledTask, ResourceBudget,
+        BudgetAwareScheduler, TaskPriority, ScheduledTask, ResourceBudget,
     )
 
-    scheduler = CognitiveScheduler()
+    scheduler = BudgetAwareScheduler()
     task_id = scheduler.submit(ScheduledTask(
         name="process_audio",
         priority=TaskPriority.USER_INTERACTIVE,
@@ -111,7 +111,7 @@ DEFAULT_BUDGETS: dict[TaskPriority, ResourceBudget] = {
 
 @dataclass(order=True)
 class ScheduledTask:
-    """A task submitted to the CognitiveScheduler.
+    """A task submitted to the BudgetAwareScheduler.
 
     Attributes:
         task_id: Globally unique identifier.
@@ -159,7 +159,7 @@ class ScheduledTask:
         }
 
 
-class CognitiveScheduler:
+class BudgetAwareScheduler:
     """Budget-aware priority scheduler for cognitive tasks.
 
     Maintains 5 priority-stratified queues and enforces resource
@@ -198,7 +198,7 @@ class CognitiveScheduler:
         self._total_deferred = 0
 
         logger.info(
-            "CognitiveScheduler initialized (max_concurrent=%d)",
+            "BudgetAwareScheduler initialized (max_concurrent=%d)",
             max_concurrent,
         )
 

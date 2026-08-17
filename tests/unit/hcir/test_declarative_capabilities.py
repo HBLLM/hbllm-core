@@ -14,8 +14,8 @@ from hbllm.hcir.kernel.capability_resolver import (
 from hbllm.hcir.kernel.scheduler import (
     CognitiveBudget,
     CognitiveProcess,
-    CognitiveScheduler,
     CognitiveThread,
+    KernelInstructionScheduler,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -262,11 +262,11 @@ class TestCognitiveBudget:
 
 
 class TestBudgetAwareScheduling:
-    """Verify CognitiveScheduler with budget constraints."""
+    """Verify KernelInstructionScheduler with budget constraints."""
 
     def test_enqueue_with_cost_within_budget(self) -> None:
         budget = CognitiveBudget(total_tokens=1000)
-        scheduler = CognitiveScheduler(budget=budget)
+        scheduler = KernelInstructionScheduler(budget=budget)
 
         proc = CognitiveProcess(process_id="p1")
         thread = CognitiveThread(thread_id="t1")
@@ -280,7 +280,7 @@ class TestBudgetAwareScheduling:
 
     def test_enqueue_with_cost_exceeds_budget(self) -> None:
         budget = CognitiveBudget(total_tokens=100)
-        scheduler = CognitiveScheduler(budget=budget)
+        scheduler = KernelInstructionScheduler(budget=budget)
 
         proc = CognitiveProcess(process_id="p1")
         thread = CognitiveThread(thread_id="t1")
@@ -293,7 +293,7 @@ class TestBudgetAwareScheduling:
         assert scheduler.queue_size == 0
 
     def test_enqueue_without_budget(self) -> None:
-        scheduler = CognitiveScheduler()  # No budget
+        scheduler = KernelInstructionScheduler()  # No budget
 
         proc = CognitiveProcess(process_id="p1")
         thread = CognitiveThread(thread_id="t1")
@@ -305,6 +305,6 @@ class TestBudgetAwareScheduling:
 
     def test_budget_property(self) -> None:
         budget = CognitiveBudget(total_tokens=5000)
-        scheduler = CognitiveScheduler(budget=budget)
+        scheduler = KernelInstructionScheduler(budget=budget)
         assert scheduler.budget is budget
         assert scheduler.budget.total_tokens == 5000

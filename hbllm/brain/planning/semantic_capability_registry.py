@@ -1,7 +1,7 @@
 """
 Semantic Capability Registry — Intelligent capability discovery for planning.
 
-Extends the existing ``CapabilityRegistry`` with rich semantic metadata,
+Extends the existing ``SkillCapabilityRegistry`` with rich semantic metadata,
 enabling the planner to choose intelligently among alternative capabilities
 rather than simply invoking the first matching tool.
 
@@ -29,7 +29,7 @@ Architecture::
         ↓
     Planner selects optimal capability for the plan step
 
-This registry builds on ``hbllm.brain.skills.capability_registry.CapabilityRegistry``
+This registry builds on ``hbllm.brain.skills.capability_registry.SkillCapabilityRegistry``
 and is designed to eventually replace it as the primary discovery mechanism.
 
 Usage::
@@ -173,7 +173,7 @@ class CapabilityDescriptor:
 class SemanticCapabilityRegistry:
     """Registry with rich metadata for intelligent capability selection.
 
-    Unlike the basic ``CapabilityRegistry`` which maps string tags to
+    Unlike the basic ``SkillCapabilityRegistry`` which maps string tags to
     providers, this registry stores full ``CapabilityDescriptor`` objects
     and supports semantic queries: filtering by domain, permission
     requirements, confidence thresholds, and cost budgets.

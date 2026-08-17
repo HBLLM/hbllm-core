@@ -1097,9 +1097,7 @@ class BrainFactory:
             )
             from hbllm.hcir.kernel.scheduler import (
                 CognitiveBudget,
-            )
-            from hbllm.hcir.kernel.scheduler import (
-                CognitiveScheduler as HCIRScheduler,
+                KernelInstructionScheduler,
             )
             from hbllm.hcir.kernel.services import KernelServices
             from hbllm.hcir.kernel.transaction_manager import TransactionManager
@@ -1123,7 +1121,7 @@ class BrainFactory:
             # 3. Capability resolver + budget-aware scheduler
             resolver = CapabilityResolver()
             budget = CognitiveBudget(total_tokens=getattr(cfg, "hcir_token_budget", 100_000))
-            hcir_sched = HCIRScheduler(budget=budget)
+            hcir_sched = KernelInstructionScheduler(budget=budget)
 
             # 4. Event sourcing pipeline
             event_store = InMemoryEventStore()

@@ -206,4 +206,3 @@ async def test_hcir_epistemics_studio_endpoints():
     res = client.get("/studio/router/telemetry")
     assert res.status_code == 200
     assert "metrics" in res.json()
-

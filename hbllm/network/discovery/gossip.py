@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from hbllm.network.discovery.registry import CapabilityRegistry
+    from hbllm.network.discovery.registry import NetworkCapabilityRegistry
     from hbllm.network.node_state import NodeStateEngine
 
 
@@ -79,7 +79,7 @@ class GossipSync:
     Periodically picks a random peer and exchanges state digests. If a peer
     has newer data, we pull it. If we have newer data, we push it.
 
-    The gossip engine updates the CapabilityRegistry and NodeState
+    The gossip engine updates the NetworkCapabilityRegistry and NodeState
     engine when it receives new state from peers.
 
     Usage:
@@ -112,7 +112,7 @@ class GossipSync:
 
         # External connections
         self._node_state: NodeStateEngine | None = None
-        self._capability_registry: CapabilityRegistry | None = None
+        self._capability_registry: NetworkCapabilityRegistry | None = None
         self._send_fn: Any | None = None  # async fn(peer_node_id, GossipMessage)
         self._get_peers_fn: Any | None = None  # fn() -> list[str]
 
@@ -132,8 +132,8 @@ class GossipSync:
         """Attach the NodeState engine for state updates."""
         self._node_state = engine
 
-    def set_capability_registry(self, registry: CapabilityRegistry) -> None:
-        """Attach the CapabilityRegistry for capability updates."""
+    def set_capability_registry(self, registry: NetworkCapabilityRegistry) -> None:
+        """Attach the NetworkCapabilityRegistry for capability updates."""
         self._capability_registry = registry
 
     def set_send_fn(self, fn: Any) -> None:
@@ -282,7 +282,7 @@ class GossipSync:
                 )
             )
 
-        # Update CapabilityRegistry
+        # Update NetworkCapabilityRegistry
         if self._capability_registry and entry.key == "capabilities":
             capabilities = entry.value if isinstance(entry.value, list) else []
             if capabilities:

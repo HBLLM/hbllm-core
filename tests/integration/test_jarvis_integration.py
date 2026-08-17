@@ -262,14 +262,14 @@ async def test_full_notification_pipeline(tmp_path):
     from hbllm.perception.temporal_fuser import PerceptionSnapshot, TemporalFuser
     from hbllm.perception.world_state import WorldStateEngine
     from hbllm.security.audit_trail import AuditTrail
-    from hbllm.serving.push_backends import InMemoryBackend, PushNotification
+    from hbllm.serving.push_backends import InMemoryPushBackend, PushNotification
 
     # Setup pipeline
     fuser = TemporalFuser(window_s=60.0)
     world = WorldStateEngine(state_ttl_s=300.0)
     suppressor = NotificationSuppressor()
     timing = SocialTimingEngine()
-    push = InMemoryBackend()
+    push = InMemoryPushBackend()
     audit = AuditTrail(db_path=tmp_path / "audit.db")
     await audit.init_db()
 

@@ -376,7 +376,7 @@ class TokenBucket:
         return deficit / self.refill_rate if self.refill_rate > 0 else float("inf")
 
 
-class RateLimiter:
+class SecurityRateLimiter:
     """
     Per-tenant rate limiting using token bucket algorithm.
     """
@@ -426,7 +426,7 @@ class RateLimiter:
         self._enabled = value
 
 
-class InputSanitizer:
+class SecurityInputSanitizer:
     """
     Sanitizes user input to prevent injection and abuse.
     """
