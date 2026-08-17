@@ -1,5 +1,7 @@
 """Unit tests for HCIR Integration Adapters."""
 
+from typing import Any, cast
+
 # Import existing cognitive state types
 from hbllm.brain.core.cognitive_state import (
     CognitiveStateDelta,
@@ -25,8 +27,8 @@ from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
 class TestCognitiveStateAdapter:
-    def _make_snapshot(self, **overrides) -> CognitiveStateSnapshot:
-        defaults = {
+    def _make_snapshot(self, **overrides: Any) -> CognitiveStateSnapshot:
+        defaults: dict[str, Any] = {
             "confidence": 0.8,
             "uncertainty": 0.3,
             "relevance": 0.9,
@@ -42,7 +44,7 @@ class TestCognitiveStateAdapter:
             "version": 1,
         }
         defaults.update(overrides)
-        return CognitiveStateSnapshot(**defaults)
+        return CognitiveStateSnapshot(**cast(dict[str, Any], defaults))
 
     def test_snapshot_to_nodes(self):
         adapter = CognitiveStateAdapter()

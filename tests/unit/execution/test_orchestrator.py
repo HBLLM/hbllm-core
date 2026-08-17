@@ -53,7 +53,14 @@ class MockProvider:
     def capabilities(self) -> RuntimeCapabilities:
         return RuntimeCapabilities()
 
-    async def generate(self, **kwargs: Any) -> dict[str, Any]:
+    async def generate(
+        self,
+        messages: list[dict[str, str]] | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 256,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         return {"content": "mock"}
 
     async def is_available(self) -> bool:
