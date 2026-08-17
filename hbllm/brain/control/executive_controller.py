@@ -39,9 +39,9 @@ Design principles:
 
 Usage::
 
-    from hbllm.brain.control.executive_controller import ExecutiveController
+    from hbllm.brain.control.executive_controller import TripartiteExecutiveController
 
-    controller = ExecutiveController(
+    controller = TripartiteExecutiveController(
         queue=event_queue,
         attention=saliency_evaluator,
         competition=competition_engine,
@@ -76,7 +76,7 @@ from hbllm.brain.core.cognitive_state import (
 logger = logging.getLogger(__name__)
 
 
-class ExecutiveController:
+class TripartiteExecutiveController:
     """Thin orchestrator for the cognitive event loop.
 
     Wires: IEventQueue → IAttentionSelector → ICompetition → IWorkspace

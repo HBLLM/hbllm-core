@@ -68,3 +68,15 @@ class UnifiedMemoryInterface(Protocol):
     async def stats(self, tenant_id: str) -> dict[str, Any]:
         """Get usage statistics for the memory systems."""
         ...
+
+
+class IGoalProvider(Protocol):
+    """Provides active goal context for saliency and planning."""
+
+    async def get_active_goals(self, tenant_id: str) -> list[Any]:
+        """Return all active goals for a tenant."""
+        ...
+
+    async def get_urgent_goals(self, horizon: float = 3600.0) -> list[Any]:
+        """Return goals with deadlines within the horizon."""
+        ...

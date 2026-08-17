@@ -262,14 +262,14 @@ class CausalEvent:
 
 
 @dataclass
-class CausalGraph:
+class IdentityCausalGraph:
     """A directed acyclic graph of causal events.
 
     Enables tracing "why did X happen?" by walking the causal chain.
 
     Usage::
 
-        cg = CausalGraph()
+        cg = IdentityCausalGraph()
         e1 = CausalEvent(event_id="e1", event_type="observation")
         e2 = CausalEvent(event_id="e2", parent_event_ids=["e1"], event_type="belief_update")
         cg.add_event(e1)

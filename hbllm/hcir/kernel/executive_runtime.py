@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from hbllm.hcir.kernel.cognitive_kernel import CognitiveKernel
-from hbllm.hcir.kernel.executive_controller import CognitiveCycleResult, ExecutiveController
+from hbllm.hcir.kernel.executive_controller import CognitiveCycleResult, KernelExecutiveController
 from hbllm.hcir.kernel.runtime_state import RuntimeState
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.workspace import BranchMode
@@ -34,7 +34,7 @@ class ExecutiveRuntime:
     ) -> None:
         self._services = services
         self._kernel = kernel or CognitiveKernel(services.workspace)
-        self._controller = ExecutiveController(services)
+        self._controller = KernelExecutiveController(services)
         self._state = RuntimeState()
         self._is_running = False
         self._session_id: str = ""
@@ -48,7 +48,7 @@ class ExecutiveRuntime:
         return self._kernel
 
     @property
-    def controller(self) -> ExecutiveController:
+    def controller(self) -> KernelExecutiveController:
         return self._controller
 
     @property

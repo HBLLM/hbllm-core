@@ -140,38 +140,7 @@ class ICompetition(ABC):
 # IGoalProvider — goal context for saliency and planning
 # ═══════════════════════════════════════════════════════════════════════════
 
-
-class IGoalProvider(ABC):
-    """Provides active goal context for saliency and planning.
-
-    The executive controller reads goals to bias saliency scoring
-    and to route events to goal-relevant subsystems.
-    """
-
-    @abstractmethod
-    async def get_active_goals(self, tenant_id: str) -> list[Any]:
-        """Return all active goals for a tenant.
-
-        Args:
-            tenant_id: Multi-tenant isolation key.
-
-        Returns:
-            List of active goal objects.
-        """
-        ...
-
-    @abstractmethod
-    async def get_urgent_goals(self, horizon: float = 3600.0) -> list[Any]:
-        """Return goals with deadlines within the horizon.
-
-        Args:
-            horizon: Time window in seconds (default 1 hour).
-
-        Returns:
-            List of urgent goal objects.
-        """
-        ...
-
+from hbllm.memory.interface import IGoalProvider as IGoalProvider
 
 # ═══════════════════════════════════════════════════════════════════════════
 # IWorkspace — receive winning events for reasoning

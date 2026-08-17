@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from hbllm.hcir.world.prediction_error import PredictionErrorNode, PredictionErrorTypology
+from hbllm.hcir.world.prediction_error import PredictionErrorTypology, WorldPredictionError
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class SurpriseEvaluation:
 
     surprise_score: float
     is_surprising: bool
-    prediction_error_node: PredictionErrorNode | None = None
+    prediction_error_node: WorldPredictionError | None = None
     salience_boost: float = 0.0
 
 
@@ -68,7 +68,7 @@ class SurpriseEngine:
                 if confidence > 0.70
                 else PredictionErrorTypology.ENVIRONMENT_CHANGE
             )
-            err_node = PredictionErrorNode(
+            err_node = WorldPredictionError(
                 prediction_id=prediction_id,
                 prediction_source=prediction_source,
                 typology=typology,

@@ -19,8 +19,8 @@ class PredictionErrorTypology(str, Enum):
 
 
 @dataclass
-class PredictionErrorNode:
-    """Graph node capturing expectation vs reality variance and error typology."""
+class WorldPredictionError:
+    """Error record capturing expectation vs reality variance and error typology."""
 
     error_id: str = field(default_factory=lambda: f"perr_{uuid.uuid4().hex[:8]}")
     prediction_id: str = ""

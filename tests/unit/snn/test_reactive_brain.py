@@ -425,7 +425,7 @@ from typing import Any
 
 from hbllm.brain.control.competition_engine import CompetitionEngine
 from hbllm.brain.control.event_queue import CognitiveEventQueue
-from hbllm.brain.control.executive_controller import ExecutiveController
+from hbllm.brain.control.executive_controller import TripartiteExecutiveController
 from hbllm.brain.core.cognitive_event import CognitiveEvent, CognitiveEventType
 from hbllm.brain.core.cognitive_interfaces import IWorkspace
 from hbllm.brain.self_model.saliency_evaluator import SaliencyEvaluator
@@ -589,7 +589,7 @@ class TestCompetitionEngine:
         assert len(winners) <= len(events)
 
 
-class TestExecutiveController:
+class TestTripartiteExecutiveController:
     """Test the full cognitive loop pipeline."""
 
     @pytest.fixture
@@ -609,7 +609,7 @@ class TestExecutiveController:
 
         workspace = MockWorkspace()
 
-        controller = ExecutiveController(
+        controller = TripartiteExecutiveController(
             queue=queue,
             attention=evaluator,
             competition=competition,

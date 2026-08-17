@@ -5,12 +5,12 @@ Tests PredictionErrorNode, PredictionErrorTypology, and SurpriseEngine.
 
 from __future__ import annotations
 
-from hbllm.hcir.world.prediction_error import PredictionErrorNode, PredictionErrorTypology
+from hbllm.hcir.world.prediction_error import PredictionErrorTypology, WorldPredictionError
 from hbllm.hcir.world.surprise_engine import SurpriseEngine
 
 
-def test_prediction_error_node():
-    err = PredictionErrorNode(
+def test_world_prediction_error():
+    err = WorldPredictionError(
         prediction_id="p1",
         typology=PredictionErrorTypology.MODEL_ERROR,
         expected_state={"temp": 80.0},
