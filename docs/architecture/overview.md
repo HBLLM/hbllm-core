@@ -435,11 +435,16 @@ sequenceDiagram
 
 ## Next Steps
 
-- [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for each node.
+- [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for all 28+ cognitive nodes.
 - [Cognitive Subsystems](cognitive-subsystems.md) — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph.
-- [Epistemic Runtime](epistemics.md) — Autonomous discovery: hypothesis generation, evidence evaluation, belief revision, calibration.
-- [Message Bus](message-bus.md) — How Pub/Sub routing works.
+- [HCIR Cognitive OS Kernel](hcir-kernel-os.md) — Event-sourced Cognitive OS kernel, tiered workspace, and transactional governance.
+- [Epistemic Runtime](epistemics.md) — Autonomous discovery: hypothesis generation, evidence evaluation, belief revision, and calibration.
+- [SNN Cognitive Engine](snn-cognitive-engine.md) — Neuromorphic dual-stream inference, Broca prompt compression, and STDP learning.
+- [Social Cognition](social-cognition.md) — UserModel predictive human modeling, PersonaEngine, and SocialTiming pacing.
+- [Execution Engine](execution-engine.md) — Declarative ExecutionOrchestrator, ExecutionBus, and runtime modifiers.
+- [Decision & Control Plane](decision-gatekeeper.md) — Gatekeeper safety and 3-tier bounded rationality control loops.
 - [Memory Systems](memory-systems.md) — HCIR-native memory architecture with tiered workspace and cross-memory search.
+- [Message Bus](message-bus.md) — How Pub/Sub routing and distributed bus topologies work.
 - [Embodiment](embodiment.md) — Actuator safety and verification.
 - [Human Control](human-control.md) — Safety boundaries and intent integrity.
 - [Causality & Compaction](causality-and-compaction.md) — Decision trace graphs and memory folding.

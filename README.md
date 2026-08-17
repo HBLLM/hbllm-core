@@ -84,19 +84,24 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 ## Key Capabilities
 
 | Category | What it does | Docs |
-|----------|-------------|------|
-| **👤 Human Modeling** | Learns expertise, preferences, trust, and habits from every interaction — the system models *you* | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
+|---|---|---|
+| **👤 Human Modeling** | Learns expertise, preferences, trust, and habits from every interaction — the system models *you* | [Social Cognition](docs/architecture/social-cognition.md) |
 | **📋 Project Awareness** | Tracks goals, blockers, decisions, and milestones per project — auto-detects what you're working on | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
+| **🧠 HCIR Cognitive OS** | Event-sourced Cognitive OS kernel, tiered workspace, transactional governance, and rollback engine | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
+| **🔬 Epistemic Runtime** | Domain-neutral autonomous discovery: hypothesis generation, Bayesian belief revision, self-calibration | [Epistemic Runtime](docs/architecture/epistemics.md) |
+| **⚡ SNN Cognitive Stream** | Spiking Neural Networks for concept extraction, content planning, and reward evaluation with Broca compression | [SNN Cognitive Engine](docs/architecture/snn-cognitive-engine.md) |
 | **🧠 Always-On Cognition** | Stays awake between queries — notices events, forms thoughts, and acts proactively | [Executive Brain](docs/architecture/executive-brain-layer.md) |
 | **💾 9 Memory Subsystems** | Working, Episodic, Semantic, Procedural, Value, Knowledge Graph, Spatial, Temporal, Importance | [Memory Systems](docs/architecture/memory-systems.md) |
 | **🎯 Goal Pursuit** | Decomposes objectives into persistent DAG tasks, retries failures, verifies outcomes | [Executive Brain](docs/architecture/executive-brain-layer.md) |
-| **🤝 Social Intelligence** | Relationship memory with sentiment tracking, interaction history, and notification priority | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
+| **🤝 Social Intelligence** | Relationship memory with sentiment tracking, interaction history, and notification priority | [Social Cognition](docs/architecture/social-cognition.md) |
 | **🌍 Unified World State** | RealityGraph merges KnowledgeGraph, BrainWorldState, and sensor data into one view | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
+| **🦀 10 Rust SIMD Crates** | Native AVX-512/NEON inference, BPE tokenization, MinHash LSH, vector search, and graph traversal | [Rust Kernels](docs/api/rust-kernels.md) |
 | **⚙️ Fully Local** | Runs on CPU-only machines — 125M model needs ~500MB RAM, 1.5B fits in 4GB with INT4 | [Benchmarks](docs/api/benchmarks.md) |
-| **⚡ SNN Cognitive Stream** | Spiking Neural Networks for concept extraction, content planning, and reward evaluation | [Cognitive Nodes](docs/architecture/cognitive-nodes.md) |
 | **🧪 Self-Personalizing** | SpawnerNode auto-creates 2MB LoRA adapters — the brain grows new specialist regions at runtime | [Zoning](docs/zoning/how-it-works.md) |
 | **🌐 Distributed** | Spans your devices via Ed25519 cryptographic trust — zero cloud required | [Adaptive Network](docs/architecture/adaptive-network.md) |
 | **🛑 Safety & Control** | Policy engine, restraint engine, PII redaction, voice auth, rollback, audit trail | [Human Control](docs/architecture/human-control.md) |
+| **📦 Packages & Skills** | Standalone `.hbpkg` archives, `manifest.json` standard, and autonomous skill induction | [Packages & Skills](docs/guides/hbpkg-and-skills.md) |
+| **💻 CLI Tools** | Full developer manual for `serve`, `train`, `data`, `agent`, `code`, `diagnostics`, `export_dpo` | [CLI Manual](docs/guides/cli.md) |
 | **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding — extend any cognitive loop | [Plugin Guide](docs/guides/plugins.md) |
 
 ---
