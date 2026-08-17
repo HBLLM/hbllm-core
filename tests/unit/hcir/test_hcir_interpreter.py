@@ -8,7 +8,7 @@ from hbllm.hcir.interpreter import HCIRInterpreter, SyscallDispatcher
 from hbllm.hcir.kernel.capability_resolver import (
     CapabilityResolver,
 )
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
@@ -60,7 +60,7 @@ class TestSyscallDispatcher:
         ws = HCIRWorkspaceState()
         mgr = TransactionManager(ws)
         resolver = CapabilityResolver()
-        scheduler = CognitiveScheduler()
+        scheduler = KernelInstructionScheduler()
         services = KernelServices(
             workspace=ws,
             transaction_manager=mgr,
@@ -81,7 +81,7 @@ def _make_system():
     ws = HCIRWorkspaceState()
     mgr = TransactionManager(ws)
     resolver = CapabilityResolver()
-    scheduler = CognitiveScheduler()
+    scheduler = KernelInstructionScheduler()
     services = KernelServices(
         workspace=ws,
         transaction_manager=mgr,

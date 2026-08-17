@@ -24,7 +24,7 @@ class TestKernelServicesExtensions:
 
     def test_hcir_fields_default_to_none(self) -> None:
         from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-        from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+        from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
         from hbllm.hcir.kernel.transaction_manager import TransactionManager
 
         ws = HCIRWorkspaceState()
@@ -32,7 +32,7 @@ class TestKernelServicesExtensions:
             workspace=ws,
             transaction_manager=TransactionManager(ws),
             capability_resolver=CapabilityResolver(),
-            scheduler=CognitiveScheduler(),
+            scheduler=KernelInstructionScheduler(),
         )
         assert services.tiered_workspace is None
         assert services.cognitive_journal is None
@@ -44,7 +44,7 @@ class TestKernelServicesExtensions:
     def test_hcir_fields_can_be_set(self) -> None:
         from hbllm.hcir.cognitive_journal import CognitiveJournal
         from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-        from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+        from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
         from hbllm.hcir.kernel.transaction_manager import TransactionManager
         from hbllm.hcir.stores import InMemoryEventStore
         from hbllm.hcir.workspace_tiers import TieredWorkspace
@@ -57,7 +57,7 @@ class TestKernelServicesExtensions:
             workspace=ws,
             transaction_manager=TransactionManager(ws),
             capability_resolver=CapabilityResolver(),
-            scheduler=CognitiveScheduler(),
+            scheduler=KernelInstructionScheduler(),
             tiered_workspace=tiered,
             cognitive_journal=journal,
         )

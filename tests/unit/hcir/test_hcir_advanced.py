@@ -6,8 +6,8 @@ import pytest
 
 from hbllm.hcir.compiler import HCIRCompiler, IntentType, SemanticAST, SemanticSlot
 from hbllm.hcir.kernel.capability_registry import (
-    CapabilityRegistry,
     CapabilitySpec,
+    KernelCapabilityRegistry,
     PerformanceProfile,
 )
 from hbllm.hcir.kernel.capability_resolver import ICapabilityExecutor
@@ -403,9 +403,9 @@ class _MockExecutor(ICapabilityExecutor):
         return {"status": "ok"}
 
 
-class TestCapabilityRegistry:
+class TestKernelCapabilityRegistry:
     def test_register_and_list(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="image_understanding",
@@ -418,7 +418,7 @@ class TestCapabilityRegistry:
         assert "image_understanding" in reg.list_capabilities()
 
     def test_find_best_by_priority(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="llm",
@@ -442,7 +442,7 @@ class TestCapabilityRegistry:
         assert best.provider_id == "qwen-3"
 
     def test_find_cheapest(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="embed",
@@ -464,7 +464,7 @@ class TestCapabilityRegistry:
         assert best.provider_id == "local"
 
     def test_find_fastest(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="ocr",
@@ -486,7 +486,7 @@ class TestCapabilityRegistry:
         assert best.provider_id == "local"
 
     def test_find_most_accurate(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="classify",
@@ -508,7 +508,7 @@ class TestCapabilityRegistry:
         assert best.provider_id == "large"
 
     def test_filter_by_cost(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="gen",
@@ -530,7 +530,7 @@ class TestCapabilityRegistry:
         assert best.provider_id == "cheap"
 
     def test_unavailable_provider_excluded(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="gpu_task",
@@ -552,7 +552,7 @@ class TestCapabilityRegistry:
         assert best.provider_id == "online"
 
     def test_unregister(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="task",
@@ -564,7 +564,7 @@ class TestCapabilityRegistry:
         assert len(reg.list_providers("task")) == 0
 
     def test_stats(self):
-        reg = CapabilityRegistry()
+        reg = KernelCapabilityRegistry()
         reg.register(
             CapabilitySpec(
                 capability_name="a",

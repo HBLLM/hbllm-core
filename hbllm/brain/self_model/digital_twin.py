@@ -17,7 +17,7 @@ Use cases:
     - Runtime monitoring and scheduling decisions.
     - Zero-downtime failover and state migration.
     - Swarm diagnostics and distributed execution.
-    - DigitalTwin feeds CognitiveScheduler resource budget checks.
+    - DigitalTwin feeds ServingTaskScheduler resource budget checks.
 
 Usage::
 
@@ -116,7 +116,7 @@ class DigitalTwin:
         # Cluster peers (for distributed mode)
         self._cluster_peers: dict[str, dict[str, Any]] = {}
 
-        # Running tasks (fed by CognitiveScheduler)
+        # Running tasks (fed by ServingTaskScheduler)
         self._running_tasks: dict[str, dict[str, Any]] = {}
 
         # Memory subsystem stats
@@ -209,7 +209,7 @@ class DigitalTwin:
     # ── Task tracking ────────────────────────────────────────────────
 
     def register_task(self, task_id: str, task_info: dict[str, Any]) -> None:
-        """Register a running task (fed by CognitiveScheduler)."""
+        """Register a running task (fed by ServingTaskScheduler)."""
         self._running_tasks[task_id] = {
             **task_info,
             "started_at": time.time(),

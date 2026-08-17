@@ -6,7 +6,7 @@ from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.delta_transport import DeltaTransportProtocol
 from hbllm.hcir.graph import GoalNode, PredictionErrorNode
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.receipt import ExecutionReceipt
@@ -70,7 +70,7 @@ class TestReplayDebugger:
             workspace=ws,
             transaction_manager=TransactionManager(ws),
             capability_resolver=CapabilityResolver(),
-            scheduler=CognitiveScheduler(),
+            scheduler=KernelInstructionScheduler(),
         )
 
         debugger = ReplayDebugger(services)

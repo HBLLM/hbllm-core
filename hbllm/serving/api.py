@@ -499,9 +499,9 @@ async def lifespan(app: FastAPI) -> Any:
             ApiSecurityMiddleware,
         )
 
-        from hbllm.serving.security import RateLimiter
+        from hbllm.serving.security import SecurityRateLimiter
 
-        rate_limiter = RateLimiter(requests_per_minute=60.0, burst_size=10.0)
+        rate_limiter = SecurityRateLimiter(requests_per_minute=60.0, burst_size=10.0)
         _state["rate_limiter"] = rate_limiter
         app.add_middleware(
             ApiSecurityMiddleware,

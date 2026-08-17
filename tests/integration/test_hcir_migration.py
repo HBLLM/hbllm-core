@@ -20,7 +20,7 @@ from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
 from hbllm.hcir.kernel.governance.policies.migration_policy import MigrationMode, MigrationPolicy
 from hbllm.hcir.kernel.identity_bridge import IdentityBridge
 from hbllm.hcir.kernel.migration_metrics import MigrationMetrics
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_envelope import (
     CognitiveAuthorityChain,
@@ -40,7 +40,7 @@ class TestPhase10Migration:
 
         tx_mgr = TransactionManager(ws)
         resolver = CapabilityResolver()
-        scheduler = CognitiveScheduler()
+        scheduler = KernelInstructionScheduler()
 
         services = KernelServices(
             workspace=ws,

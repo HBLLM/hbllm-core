@@ -15,7 +15,7 @@ from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.executor import KernelExecutor
 from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
 from hbllm.hcir.kernel.runtime_state import RuntimeState
-from hbllm.hcir.kernel.scheduler import CognitiveScheduler
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.telemetry import KernelTelemetry
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.stores import IEventStore
@@ -46,7 +46,7 @@ class KernelServices:
     workspace: HCIRWorkspaceState
     transaction_manager: TransactionManager
     capability_resolver: CapabilityResolver
-    scheduler: CognitiveScheduler
+    scheduler: KernelInstructionScheduler
     event_store: IEventStore | None = None
     governance: GovernanceEngine | None = None
     runtime_state: RuntimeState | None = None

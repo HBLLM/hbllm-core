@@ -87,7 +87,7 @@ class CapabilitySpec:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class CapabilityRegistry:
+class KernelCapabilityRegistry:
     """Structured capability registry with metadata-driven selection.
 
     Wraps ``CapabilityResolver`` and adds:
@@ -97,7 +97,7 @@ class CapabilityRegistry:
 
     Usage::
 
-        registry = CapabilityRegistry()
+        registry = KernelCapabilityRegistry()
         registry.register(CapabilitySpec(
             capability_name="image_understanding",
             provider_id="qwen-vl",

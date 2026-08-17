@@ -19,9 +19,9 @@ and especially when users can enable/disable components.
 
 Usage::
 
-    from hbllm.brain.skills.capability_registry import CapabilityRegistry
+    from hbllm.brain.skills.capability_registry import SkillCapabilityRegistry
 
-    registry = CapabilityRegistry()
+    registry = SkillCapabilityRegistry()
     registry.register("planner", planner_node, ["planning", "graph_of_thoughts"])
     registry.register("sim_engine", sim_engine, ["simulation", "deliberation"])
 
@@ -62,11 +62,11 @@ class ServiceEntry:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CapabilityRegistry
+# SkillCapabilityRegistry
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class CapabilityRegistry:
+class SkillCapabilityRegistry:
     """Dynamic service registry for cognitive capability discovery.
 
     Services register themselves with capability tags. Other services

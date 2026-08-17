@@ -360,18 +360,18 @@ class TestReflectiveController:
 # ═══════════════════════════════════════════════════════════════════════════
 
 from hbllm.brain.control.cognitive_scheduler import (
-    CognitiveScheduler,
+    BudgetAwareScheduler,
     ResourceBudget,
     TaskPriority,
 )
 
 
-class TestCognitiveScheduler:
+class TestBudgetAwareScheduler:
     """Test budget-aware priority scheduler."""
 
     @pytest.mark.asyncio
     async def test_priority_ordering(self) -> None:
-        scheduler = CognitiveScheduler()
+        scheduler = BudgetAwareScheduler()
 
         async def noop() -> str:
             return "done"
@@ -390,7 +390,7 @@ class TestCognitiveScheduler:
 
     @pytest.mark.asyncio
     async def test_resource_budget_enforcement(self) -> None:
-        scheduler = CognitiveScheduler(
+        scheduler = BudgetAwareScheduler(
             global_budget=ResourceBudget(cpu_shares=0.5, ram_mb=1024, attention_units=1.0),
         )
 
@@ -410,7 +410,7 @@ class TestCognitiveScheduler:
 
     @pytest.mark.asyncio
     async def test_task_cancellation(self) -> None:
-        scheduler = CognitiveScheduler()
+        scheduler = BudgetAwareScheduler()
 
         async def noop() -> str:
             return "done"
@@ -424,7 +424,7 @@ class TestCognitiveScheduler:
         coro.close()
 
     def test_stats(self) -> None:
-        scheduler = CognitiveScheduler()
+        scheduler = BudgetAwareScheduler()
         stats = scheduler.stats()
         assert "total_submitted" in stats
         assert "queue_by_priority" in stats

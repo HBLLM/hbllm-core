@@ -9,7 +9,7 @@ Attention is represented as a first-class resource allocation graph:
                │
     AttentionGraph (allocates salience across subtrees)
                │
-    CognitiveScheduler Dispatch Priority
+    KernelInstructionScheduler Dispatch Priority
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ Architecture:
     1. PushBackend interface with send() and send_batch()
     2. FCMBackend using google-auth + HTTP/2
     3. APNsBackend using httpx + JWT
-    4. InMemoryBackend for testing
+    4. InMemoryPushBackend for testing
     5. MultiBackend that routes to FCM or APNs by device type
 """
 
@@ -367,7 +367,7 @@ class APNsBackend(PushBackend):
         return bool(token and len(token) == 64)
 
 
-class InMemoryBackend(PushBackend):
+class InMemoryPushBackend(PushBackend):
     """In-memory push backend for testing."""
 
     def __init__(self) -> None:
@@ -396,7 +396,7 @@ class MultiBackend(PushBackend):
     ) -> None:
         self.fcm = fcm
         self.apns = apns
-        self.fallback = fallback or InMemoryBackend()
+        self.fallback = fallback or InMemoryPushBackend()
 
     async def send(self, notification: PushNotification) -> PushResult:
         if notification.device_type == "apns" and self.apns:

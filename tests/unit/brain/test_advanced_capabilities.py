@@ -107,13 +107,13 @@ class TestExplorationSandbox:
 
 # ── Push Backends ─────────────────────────────────────────────────────────
 
-from hbllm.serving.push_backends import InMemoryBackend, MultiBackend, PushNotification
+from hbllm.serving.push_backends import InMemoryPushBackend, MultiBackend, PushNotification
 
 
 class TestPushBackends:
     @pytest.mark.asyncio
     async def test_in_memory_send(self):
-        backend = InMemoryBackend()
+        backend = InMemoryPushBackend()
         result = await backend.send(
             PushNotification(title="Test", body="Hello", device_token="abc")
         )
@@ -122,7 +122,7 @@ class TestPushBackends:
 
     @pytest.mark.asyncio
     async def test_in_memory_batch(self):
-        backend = InMemoryBackend()
+        backend = InMemoryPushBackend()
         notifs = [
             PushNotification(title=f"N{i}", body="body", device_token=f"t{i}") for i in range(3)
         ]
@@ -132,8 +132,8 @@ class TestPushBackends:
 
     @pytest.mark.asyncio
     async def test_multi_backend_routing(self):
-        fcm = InMemoryBackend()
-        apns = InMemoryBackend()
+        fcm = InMemoryPushBackend()
+        apns = InMemoryPushBackend()
         multi = MultiBackend(fcm=fcm, apns=apns)
 
         await multi.send(PushNotification(title="A", body="a", device_type="fcm", device_token="t"))

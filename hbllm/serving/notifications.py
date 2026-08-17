@@ -92,7 +92,7 @@ class DeliveryBackend(ABC):
         pass
 
 
-class InMemoryBackend(DeliveryBackend):
+class InMemoryNotificationBackend(DeliveryBackend):
     """In-memory backend — notifications are stored for polling via API."""
 
     async def deliver(self, notification: Notification) -> bool:
@@ -163,7 +163,7 @@ class NotificationGateway:
         default_backend: DeliveryBackend | None = None,
     ) -> None:
         self._max_per_tenant = max_per_tenant
-        self._default_backend = default_backend or InMemoryBackend()
+        self._default_backend = default_backend or InMemoryNotificationBackend()
         # Per-tenant notification queues
         self._queues: dict[str, deque[Notification]] = {}
         # Per-tenant real-time callbacks

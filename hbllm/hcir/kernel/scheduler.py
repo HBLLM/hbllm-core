@@ -132,7 +132,7 @@ class CognitiveBudget:
         self.consumed_tokens = 0
 
 
-class CognitiveScheduler:
+class KernelInstructionScheduler:
     """Attention-driven instruction scheduler with budget awareness.
 
     Dispatches cognitive instruction streams based on attention
@@ -142,7 +142,7 @@ class CognitiveScheduler:
     Usage::
 
         budget = CognitiveBudget(total_tokens=50000)
-        scheduler = CognitiveScheduler(budget=budget)
+        scheduler = KernelInstructionScheduler(budget=budget)
         proc = CognitiveProcess(conversation_id="conv_123")
         thread = CognitiveThread(instruction_stream_ref="stream_42")
         proc.add_thread(thread)

@@ -1,7 +1,7 @@
 """
 World Capabilities — Privileged World Kernel Capability Provider Registration.
 
-Registers world capabilities in HCIR CapabilityRegistry:
+Registers world capabilities in HCIR KernelCapabilityRegistry:
     - world.predict
     - world.evaluate_error
     - world.sync_twin

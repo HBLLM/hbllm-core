@@ -15,7 +15,11 @@ import pytest_asyncio
 
 from hbllm.memory.episodic import EpisodicMemory
 from hbllm.memory.semantic import SemanticMemory
-from hbllm.serving.security import ApiKeyManager, InputSanitizer, RateLimiter
+from hbllm.serving.security import (
+    ApiKeyManager,
+    SecurityInputSanitizer,
+    SecurityRateLimiter,
+)
 
 # ─── 1. API Key Manager ─────────────────────────────────────────────────────
 
@@ -74,13 +78,13 @@ class TestRateLimiting:
     """Test per-tenant rate limiting."""
 
     async def test_allows_within_limit(self):
-        rl = RateLimiter(requests_per_minute=60, burst_size=10)
+        rl = SecurityRateLimiter(requests_per_minute=60, burst_size=10)
         for _ in range(10):
             allowed, _ = await rl.check("acme")
             assert allowed is True
 
     async def test_blocks_over_limit(self):
-        rl = RateLimiter(requests_per_minute=60, burst_size=3)
+        rl = SecurityRateLimiter(requests_per_minute=60, burst_size=3)
         # Use up burst
         for _ in range(3):
             await rl.check("acme")
@@ -91,7 +95,7 @@ class TestRateLimiting:
         assert retry_after > 0
 
     async def test_separate_tenant_limits(self):
-        rl = RateLimiter(requests_per_minute=60, burst_size=2)
+        rl = SecurityRateLimiter(requests_per_minute=60, burst_size=2)
         await rl.check("acme")
         await rl.check("acme")
 
@@ -100,7 +104,7 @@ class TestRateLimiting:
         assert allowed_globex is True
 
     async def test_reset(self):
-        rl = RateLimiter(requests_per_minute=60, burst_size=1)
+        rl = SecurityRateLimiter(requests_per_minute=60, burst_size=1)
         await rl.check("acme")
         allowed, _ = await rl.check("acme")
         assert allowed is False
@@ -117,18 +121,18 @@ class TestInputSanitizer:
     """Test input sanitization."""
 
     def test_normal_text(self):
-        san = InputSanitizer()
+        san = SecurityInputSanitizer()
         text, warnings = san.sanitize("Hello, how are you?")
         assert text == "Hello, how are you?"
         assert len(warnings) == 0
 
     def test_strips_html(self):
-        san = InputSanitizer()
+        san = SecurityInputSanitizer()
         text, warnings = san.sanitize("<script>alert('xss')</script>Hello")
         assert "<script>" not in text
 
     def test_max_length(self):
-        san = InputSanitizer(max_length=10)
+        san = SecurityInputSanitizer(max_length=10)
         text, warnings = san.sanitize("This is a long text that exceeds the limit")
         assert len(text) <= 10
 
@@ -241,8 +245,8 @@ class TestFullTenantJourney:
     @pytest_asyncio.fixture(autouse=True)
     async def setup_journey(self, tmp_path):
         self.akm = ApiKeyManager()
-        self.rl = RateLimiter(requests_per_minute=60, burst_size=10)
-        self.san = InputSanitizer()
+        self.rl = SecurityRateLimiter(requests_per_minute=60, burst_size=10)
+        self.san = SecurityInputSanitizer()
         self.db_path = str(tmp_path / "journey.db")
         self.episodic = EpisodicMemory(self.db_path)
         await self.episodic.init_db()
