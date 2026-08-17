@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from hbllm.execution.registry import BaseRuntime, LLMProvider
+    from hbllm.execution.registry import BaseRuntime, ExecutionLLMProvider
     from hbllm.execution.text.modifiers.modifier import GenerationModifier
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class PluginContext:
         self._runtimes.append(runtime)
         logger.info("Plugin registered runtime: %s", runtime.runtime_type)
 
-    def register_provider(self, provider: LLMProvider) -> None:
+    def register_provider(self, provider: ExecutionLLMProvider) -> None:
         """Register a model provider."""
         self._providers.append(provider)
         logger.info("Plugin registered provider: %s", provider.name)

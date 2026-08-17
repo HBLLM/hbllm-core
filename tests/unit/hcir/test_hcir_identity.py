@@ -4,9 +4,9 @@ import pytest
 
 from hbllm.hcir.identity import (
     CausalEvent,
-    CausalGraph,
     HCIRNamespace,
     HCIRObjectID,
+    IdentityCausalGraph,
     IDFactory,
 )
 
@@ -138,16 +138,16 @@ class TestCausalEvent:
         assert e1.compute_hash() != e2.compute_hash()
 
 
-class TestCausalGraph:
+class TestIdentityCausalGraph:
     def test_add_and_get_event(self):
-        cg = CausalGraph()
+        cg = IdentityCausalGraph()
         e = CausalEvent(event_id="e1", event_type="observation")
         cg.add_event(e)
         assert cg.get_event("e1") is e
         assert cg.event_count == 1
 
     def test_trace_causes_linear_chain(self):
-        cg = CausalGraph()
+        cg = IdentityCausalGraph()
         e1 = CausalEvent(event_id="e1", event_type="sensor")
         e2 = CausalEvent(event_id="e2", event_type="observation", parent_event_ids=["e1"])
         e3 = CausalEvent(event_id="e3", event_type="belief", parent_event_ids=["e2"])
@@ -161,7 +161,7 @@ class TestCausalGraph:
 
     def test_trace_causes_diamond(self):
         """Test diamond-shaped causal DAG."""
-        cg = CausalGraph()
+        cg = IdentityCausalGraph()
         e1 = CausalEvent(event_id="e1", event_type="root")
         e2 = CausalEvent(event_id="e2", event_type="branch_a", parent_event_ids=["e1"])
         e3 = CausalEvent(event_id="e3", event_type="branch_b", parent_event_ids=["e1"])
@@ -174,7 +174,7 @@ class TestCausalGraph:
         assert cause_ids == {"e1", "e2", "e3"}
 
     def test_trace_effects(self):
-        cg = CausalGraph()
+        cg = IdentityCausalGraph()
         e1 = CausalEvent(event_id="e1", event_type="root")
         e2 = CausalEvent(event_id="e2", event_type="child1", parent_event_ids=["e1"])
         e3 = CausalEvent(event_id="e3", event_type="child2", parent_event_ids=["e1"])
@@ -187,7 +187,7 @@ class TestCausalGraph:
         assert effect_ids == {"e2", "e3", "e4"}
 
     def test_trace_causes_no_parents(self):
-        cg = CausalGraph()
+        cg = IdentityCausalGraph()
         e1 = CausalEvent(event_id="e1", event_type="root")
         cg.add_event(e1)
         causes = cg.trace_causes("e1")

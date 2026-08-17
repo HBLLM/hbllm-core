@@ -5,14 +5,14 @@ import pytest
 from hbllm.hcir.cognitive_state import UnifiedCognitiveState
 from hbllm.hcir.graph import ActionNode, GoalNode
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-from hbllm.hcir.kernel.executive_controller import ExecutiveController
+from hbllm.hcir.kernel.executive_controller import KernelExecutiveController
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
-class TestExecutiveController:
+class TestKernelExecutiveController:
     @pytest.mark.asyncio
     async def test_executive_run_cycle(self):
         ws = HCIRWorkspaceState()
@@ -25,7 +25,7 @@ class TestExecutiveController:
             scheduler=KernelInstructionScheduler(),
         )
 
-        executive = ExecutiveController(services)
+        executive = KernelExecutiveController(services)
         candidates = [
             ActionNode(id="act_low_power", intent="enable_low_power_mode", estimated_cost=10),
             ActionNode(id="act_off", intent="power_off", estimated_cost=90),

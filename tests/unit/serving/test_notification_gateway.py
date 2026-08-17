@@ -3,7 +3,7 @@
 import pytest
 
 from hbllm.serving.notifications import (
-    InMemoryBackend,
+    InMemoryNotificationBackend,
     Notification,
     NotificationCategory,
     NotificationGateway,
@@ -130,7 +130,7 @@ class TestNotificationGateway:
 
     @pytest.mark.asyncio
     async def test_deliver_pending(self):
-        gw = NotificationGateway(default_backend=InMemoryBackend())
+        gw = NotificationGateway(default_backend=InMemoryNotificationBackend())
         gw.push("t1", title="test")
         delivered = await gw.deliver_pending("t1")
         assert delivered == 1

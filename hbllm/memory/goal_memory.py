@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from hbllm.brain.core.cognitive_interfaces import IGoalProvider
+from hbllm.memory.interface import IGoalProvider
 
 logger = logging.getLogger(__name__)
 

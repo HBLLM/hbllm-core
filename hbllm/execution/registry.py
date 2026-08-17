@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
-class LLMProvider(Protocol):
+class ExecutionLLMProvider(Protocol):
     """
     Protocol for model providers.
 
@@ -145,14 +145,14 @@ class ProviderRegistry:
     """
 
     def __init__(self) -> None:
-        self._providers: dict[str, LLMProvider] = {}
+        self._providers: dict[str, ExecutionLLMProvider] = {}
 
-    def register(self, provider: LLMProvider) -> None:
+    def register(self, provider: ExecutionLLMProvider) -> None:
         """Register a provider."""
         self._providers[provider.name] = provider
         logger.info("Registered provider: %s", provider.name)
 
-    def resolve(self, provider_name: str) -> LLMProvider | None:
+    def resolve(self, provider_name: str) -> ExecutionLLMProvider | None:
         """Get a provider by name."""
         return self._providers.get(provider_name)
 

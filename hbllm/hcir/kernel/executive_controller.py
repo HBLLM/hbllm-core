@@ -49,12 +49,12 @@ class CognitiveCycleResult:
     state_snapshot: UnifiedCognitiveState
 
 
-class ExecutiveController:
+class KernelExecutiveController:
     """Top-level executive brain orchestrator running the closed cognitive loop.
 
     Usage::
 
-        executive = ExecutiveController(services)
+        executive = KernelExecutiveController(services)
         res = await executive.run_cycle()
     """
 
