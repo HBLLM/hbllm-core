@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -277,7 +277,7 @@ class TestHCIRBusBridge:
         self.event_log = CognitiveEventLog(InMemoryEventStore())
         self.workspace = TieredWorkspace()
         self.bridge = HCIRBusBridge(
-            bus=self.bus,
+            bus=cast(Any, self.bus),
             normalizer=self.normalizer,
             journal=self.journal,
             event_log=self.event_log,
@@ -354,7 +354,7 @@ class TestHCIRBusBridge:
         )
         # Call handler directly since the bus wouldn't dispatch
         # an unsubscribed topic
-        await self.bridge._on_event(msg)
+        await self.bridge._on_event(cast(Any, msg))
 
         # Unrecognized → still journaled as observation
         assert self.journal.count() == 1
