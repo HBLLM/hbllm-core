@@ -185,7 +185,7 @@ class BeliefStore(TenantSQLiteRepository):
                     conn.execute("""
                         CREATE TABLE beliefs (
                             belief_id TEXT PRIMARY KEY,
-                            tenant_id TEXT DEFAULT '__legacy__',
+                            tenant_id TEXT DEFAULT 'default',
                             concept TEXT NOT NULL,
                             claim TEXT NOT NULL,
                             belief_type TEXT NOT NULL DEFAULT 'factual',
@@ -200,7 +200,7 @@ class BeliefStore(TenantSQLiteRepository):
                     conn.execute("""
                         CREATE TABLE persistent_contradictions (
                             contradiction_id TEXT PRIMARY KEY,
-                            tenant_id TEXT DEFAULT '__legacy__',
+                            tenant_id TEXT DEFAULT 'default',
                             concept TEXT NOT NULL,
                             claim_a TEXT NOT NULL,
                             claim_b TEXT NOT NULL,
@@ -241,14 +241,14 @@ class BeliefStore(TenantSQLiteRepository):
                 try:
                     if "tenant_id" not in beliefs_columns:
                         conn.execute(
-                            "ALTER TABLE beliefs ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                            "ALTER TABLE beliefs ADD COLUMN tenant_id TEXT DEFAULT 'default'"
                         )
                         conn.execute(
                             "CREATE INDEX IF NOT EXISTS idx_beliefs_tenant_concept ON beliefs(tenant_id, concept)"
                         )
                     if "tenant_id" not in contradictions_columns:
                         conn.execute(
-                            "ALTER TABLE persistent_contradictions ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                            "ALTER TABLE persistent_contradictions ADD COLUMN tenant_id TEXT DEFAULT 'default'"
                         )
                         conn.execute(
                             "CREATE INDEX IF NOT EXISTS idx_contradictions_tenant ON persistent_contradictions(tenant_id, concept)"
@@ -520,7 +520,7 @@ class BeliefStore(TenantSQLiteRepository):
         """
         ctr_id = f"ctr_{uuid.uuid4().hex[:10]}"
         now = time.time()
-        tenant_id = self.current_tenant() or "__legacy__"
+        tenant_id = self.current_tenant() or "default"
         data = {
             "contradiction_id": ctr_id,
             "concept": concept,
@@ -687,7 +687,7 @@ class BeliefStore(TenantSQLiteRepository):
     # ── Internal Helpers ─────────────────────────────────────────────────
 
     def _persist_belief(self, belief: Belief) -> None:
-        tenant_id = self.current_tenant() or "__legacy__"
+        tenant_id = self.current_tenant() or "default"
         try:
             with sqlite3.connect(self._db_path) as conn:
                 self.execute_tenant(

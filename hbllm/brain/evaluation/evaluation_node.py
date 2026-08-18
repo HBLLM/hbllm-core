@@ -156,7 +156,7 @@ class EvaluationNode(Node, TenantSQLiteRepository):
                         CREATE TABLE evaluations (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             correlation_id TEXT UNIQUE NOT NULL,
-                            tenant_id TEXT DEFAULT '__legacy__',
+                            tenant_id TEXT DEFAULT 'default',
                             timestamp REAL NOT NULL,
                             task_success REAL NOT NULL,
                             plan_validity REAL NOT NULL,
@@ -183,7 +183,7 @@ class EvaluationNode(Node, TenantSQLiteRepository):
                     conn.execute("BEGIN TRANSACTION")
                     try:
                         conn.execute(
-                            "ALTER TABLE evaluations ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                            "ALTER TABLE evaluations ADD COLUMN tenant_id TEXT DEFAULT 'default'"
                         )
                         conn.execute(
                             "CREATE INDEX IF NOT EXISTS idx_eval_tenant_time ON evaluations(tenant_id, timestamp DESC)"
@@ -284,7 +284,7 @@ class EvaluationNode(Node, TenantSQLiteRepository):
         """Write a single evaluation report to SQLite."""
         if not self._db_path:
             return
-        tenant_id = self.current_tenant() or "__legacy__"
+        tenant_id = self.current_tenant() or "default"
         try:
             with sqlite3.connect(self._db_path) as conn:
                 self.execute_tenant(

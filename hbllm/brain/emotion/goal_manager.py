@@ -99,7 +99,7 @@ class GoalManager(TenantSQLiteRepository):
                     conn.execute("""
                         CREATE TABLE goals (
                             goal_id TEXT PRIMARY KEY,
-                            tenant_id TEXT DEFAULT '__legacy__',
+                            tenant_id TEXT DEFAULT 'default',
                             name TEXT NOT NULL,
                             description TEXT NOT NULL,
                             goal_type TEXT NOT NULL,
@@ -134,7 +134,7 @@ class GoalManager(TenantSQLiteRepository):
                     conn.execute("BEGIN TRANSACTION")
                     try:
                         conn.execute(
-                            "ALTER TABLE goals ADD COLUMN tenant_id TEXT DEFAULT '__legacy__'"
+                            "ALTER TABLE goals ADD COLUMN tenant_id TEXT DEFAULT 'default'"
                         )
                         conn.execute(
                             "CREATE INDEX IF NOT EXISTS idx_goals_tenant ON goals(tenant_id, status)"
@@ -179,7 +179,7 @@ class GoalManager(TenantSQLiteRepository):
 
     def _save(self, goal: Goal) -> None:
         now = time.time()
-        tenant_id = self.current_tenant() or "__legacy__"
+        tenant_id = self.current_tenant() or "default"
         with sqlite3.connect(self._db_path) as conn:
             self.execute_tenant(
                 conn,
