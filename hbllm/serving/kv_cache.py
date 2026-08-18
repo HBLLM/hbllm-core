@@ -509,6 +509,14 @@ class KVCache:
         existing cache files have been re-saved.
         """
         import hashlib
+        import warnings
+
+        warnings.warn(
+            "Legacy mixed-payload KV cache format is deprecated and will be removed in v1.2. "
+            "Re-save cache to upgrade to safe split format.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         payload = torch.load(file_path, map_location="cpu", weights_only=False)  # noqa: S301 # nosec B614
 
