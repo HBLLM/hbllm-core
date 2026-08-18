@@ -232,13 +232,13 @@ def test_belief_store_v1_v2_migration():
         # Step 2: Initialize BeliefStore which should auto-migrate from v1 to v2
         BeliefStore(tmpdir)
 
-        # Verify database is now v2 and contains tenant_id set to '__legacy__'
+        # Verify database is now v2 and contains tenant_id set to 'default'
         with sqlite3.connect(db_path) as conn:
             cur = conn.execute("PRAGMA user_version")
             assert cur.fetchone()[0] == 2
 
             row = conn.execute("SELECT tenant_id, belief_id FROM beliefs").fetchone()
-            assert row[0] == "__legacy__"
+            assert row[0] == "default"
             assert row[1] == "b1"
 
 
