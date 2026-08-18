@@ -483,6 +483,12 @@ class Brain:
 
         return result
 
+    def get_cognitive_authority(self) -> float:
+        """Return the percentage of cognitive decisions made by HCIR (100.0 = full authority)."""
+        if self.hcir_services and getattr(self.hcir_services, "migration_metrics", None):
+            return self.hcir_services.migration_metrics.get_cognitive_authority_metric()
+        return 100.0
+
     async def _hardware_monitor_loop(self) -> None:
         """Periodic hardware health check for dynamic model offloading."""
         try:
@@ -960,6 +966,16 @@ class BrainFactory:
                 dual_router=dual_router,
             )
 
+        import warnings
+
+        warnings.warn(
+            "BrainConfig.use_composites=False (legacy flat-node wiring) is deprecated "
+            "and will be removed in v1.2. Use the v4 Subsystem Composite Architecture "
+            "(use_composites=True).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # 3. Create cognitive nodes with LLM injected (legacy path)
         from hbllm.brain.wiring.nodes import create_legacy_nodes
 
@@ -1142,6 +1158,21 @@ class BrainFactory:
                 tx_manager=tx_mgr,
             )
 
+            # 6b. Migration policy & metrics tracking (100% Cognitive Authority)
+            from hbllm.hcir.kernel.governance.policies.migration_policy import (
+                MigrationMode,
+                MigrationPolicy,
+            )
+            from hbllm.hcir.kernel.migration_metrics import MigrationMetrics
+
+            migration_mode_val = getattr(cfg, "hcir_migration_mode", MigrationMode.HCIR)
+            if isinstance(migration_mode_val, str):
+                migration_mode = MigrationMode(migration_mode_val)
+            else:
+                migration_mode = migration_mode_val
+            migration_policy = MigrationPolicy(initial_mode=migration_mode)
+            migration_metrics = MigrationMetrics()
+
             # 7. Assemble KernelServices
             brain.hcir_services = KernelServices(
                 workspace=hcir_ws,
@@ -1155,16 +1186,23 @@ class BrainFactory:
                 semantic_normalizer=normalizer,
                 constitutional_verifier=verifier,
                 bus_bridge=bus_bridge,
+                migration_policy=migration_policy,
+                migration_metrics=migration_metrics,
             )
 
             # 8. Executive runtime
             brain.hcir_runtime = ExecutiveRuntime(brain.hcir_services)
 
-            # 9. Export capability nodes for all brain nodes
+            # 9. Export capability nodes for all brain nodes & record to metrics
             for node_obj in nodes:
                 adapter = NodeAdapter(node_obj)
                 for cap_node in adapter.export_capabilities(tenant_id="default"):
                     hcir_ws.upsert_node(cap_node)
+                    migration_metrics.record_execution(
+                        capability_name=cap_node.id,
+                        mode=migration_mode,
+                        backend="hcir",
+                    )
 
             # 10. Inject HCIR workspace into MemorySystem for dual-write
             if hasattr(brain, "memory_system") and brain.memory_system is not None:
