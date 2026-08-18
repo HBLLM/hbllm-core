@@ -119,7 +119,9 @@ async def test_use_composites_false_deprecation_warning():
                 ]
                 assert len(dep_warnings) > 0
                 messages = [str(w.message) for w in dep_warnings]
-                assert any("use_composites=False" in m or "create_legacy_nodes" in m for m in messages)
+                assert any(
+                    "use_composites=False" in m or "create_legacy_nodes" in m for m in messages
+                )
             finally:
                 await brain.shutdown()
 
