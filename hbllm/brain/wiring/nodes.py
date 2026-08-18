@@ -33,8 +33,21 @@ def create_legacy_nodes(
 ) -> list[Node]:
     """Create and return the list of legacy cognitive nodes.
 
+    .. deprecated:: 1.0.0
+        Legacy flat-node wiring is deprecated and will be removed in v1.2.
+        Use the v4 Subsystem Composite Architecture (``use_composites=True``).
+
     Does NOT start them on the bus — caller must iterate and start.
     """
+    import warnings
+
+    warnings.warn(
+        "create_legacy_nodes() is deprecated and will be removed in v1.2. "
+        "Use the v4 Composite Architecture (BrainConfig.use_composites=True).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     from hbllm.brain.control.decision_node import DecisionNode
     from hbllm.brain.control.router_node import RouterNode
     from hbllm.brain.emotion.curiosity_node import CuriosityNode

@@ -130,6 +130,21 @@ class ExecutiveRuntime:
         if tiered is not None:
             tiered.notify_commit()
 
+        # Record cycle execution to MigrationMetrics if available
+        metrics = self._services.migration_metrics
+        if metrics is not None:
+            policy = self._services.migration_policy
+            mode = getattr(policy, "mode", None)
+            from hbllm.hcir.kernel.governance.policies.migration_policy import MigrationMode
+
+            migration_mode = mode if isinstance(mode, MigrationMode) else MigrationMode.HCIR
+            metrics.record_execution(
+                capability_name="executive_runtime.cycle",
+                mode=migration_mode,
+                backend="hcir",
+                elapsed_ms=result.elapsed_ms,
+            )
+
         logger.debug(
             "ExecutiveRuntime finished cycle #%d in %d ms", result.cycle_index, result.elapsed_ms
         )

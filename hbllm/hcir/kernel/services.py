@@ -61,6 +61,8 @@ class KernelServices:
     semantic_normalizer: Any = None  # SemanticNormalizer
     constitutional_verifier: Any = None  # ConstitutionalVerifier
     bus_bridge: Any = None  # HCIRBusBridge
+    migration_policy: Any = None  # MigrationPolicy
+    migration_metrics: Any = None  # MigrationMetrics
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)

@@ -19,6 +19,7 @@ class NodeType(StrEnum):
     CAR = "car"
     CLOUD_SERVER = "cloud_server"
     WATCH = "watch"
+    EDGE = "edge"
 
 
 class TaskPriorityClass(IntEnum):
