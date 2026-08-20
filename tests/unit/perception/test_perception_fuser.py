@@ -200,3 +200,58 @@ def test_fuser_modality_summary():
     summary = fuser.get_modality_summary()
     assert summary["audio"] == 2
     assert summary["visual"] == 1
+
+
+def test_fuser_correlate_window():
+    """Should produce CorrelationCandidates for cross-modal events."""
+    now = time.time()
+    fuser = PerceptionFuser(window_seconds=5.0)
+    fuser._window.append(
+        PerceptionEvent(
+            modality="audio",
+            content="audio event",
+            timestamp=now,
+            metadata={"observation_id": "aud_1", "duration": 1.0},
+        )
+    )
+    fuser._window.append(
+        PerceptionEvent(
+            modality="visual",
+            content="visual event",
+            timestamp=now + 0.1,
+            metadata={"observation_id": "vis_1", "duration": 1.0},
+        )
+    )
+
+    candidates = fuser.correlate_window()
+    assert len(candidates) >= 1
+    assert candidates[0].source_modality != candidates[0].target_modality
+    assert candidates[0].score > 0.5
+
+
+def test_fuser_ingest_event_produces_correlations():
+    """Ingesting cross-modal events directly should populate correlations in FusedContext."""
+    now = time.time()
+    fuser = PerceptionFuser(window_seconds=5.0, min_modalities=2)
+    fuser.ingest_event(
+        PerceptionEvent(
+            modality="audio",
+            content="doorbell",
+            timestamp=now,
+            metadata={"observation_id": "aud_door", "duration": 0.5},
+        )
+    )
+    fused = fuser.ingest_event(
+        PerceptionEvent(
+            modality="visual",
+            content="person at door",
+            timestamp=now + 0.05,
+            metadata={"observation_id": "vis_person", "duration": 0.5},
+        )
+    )
+
+    assert fused is not None
+    assert fused.is_multimodal is True
+    assert len(fused.correlations) >= 1
+    assert fused.to_dict()["correlation_count"] >= 1
+

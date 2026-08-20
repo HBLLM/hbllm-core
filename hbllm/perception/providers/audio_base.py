@@ -17,6 +17,7 @@ Protocols:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from hbllm.perception.providers.base import PerceptionProvider
@@ -71,7 +72,7 @@ class SpeechProvider(AudioProvider, Protocol):
 
     async def transcribe_streaming(
         self,
-        audio_chunks: list[AudioInput],
+        audio_chunks: Sequence[AudioInput],
     ) -> SpeechResult:
         """Transcribe from streaming audio chunks.
 

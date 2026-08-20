@@ -33,6 +33,7 @@ from hbllm.perception.providers.audio_types import (
     SpeakerIdentification,
     TemporalSpan,
 )
+from hbllm.perception.providers.provider_provenance import ProviderProvenance
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Acoustic Observation — "the microphone received this"
@@ -94,6 +95,7 @@ class SpeechEvidence:
     speaker_ref: SpeakerIdentification | None = None
     paralinguistic: ParalinguisticProfile | None = None
     is_partial: bool = False
+    provider_provenance: ProviderProvenance = field(default_factory=ProviderProvenance)
 
 
 @dataclass
@@ -116,6 +118,7 @@ class SoundEventEvidence:
     is_critical: bool = False
     event_state: AudioEventState = AudioEventState.INSTANTANEOUS
     top_classes: list[tuple[str, float]] = field(default_factory=list)
+    provider_provenance: ProviderProvenance = field(default_factory=ProviderProvenance)
 
 
 @dataclass
@@ -136,6 +139,7 @@ class SoundSourceEvidence:
     direction_degrees: float | None = None
     distance_estimate: float | None = None
     confidence: float = 0.0
+    provider_provenance: ProviderProvenance = field(default_factory=ProviderProvenance)
 
 
 @dataclass
@@ -163,6 +167,7 @@ class AcousticSceneEvidence:
     estimated_activity: float = 0.0
     scene_tags: list[str] = field(default_factory=list)
     confidence: float = 0.0
+    provider_provenance: ProviderProvenance = field(default_factory=ProviderProvenance)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

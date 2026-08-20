@@ -19,11 +19,15 @@ import logging
 import tempfile
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
 from hbllm.perception.voice_config import ASRBackend, AudioPipelineConfig
+
+if TYPE_CHECKING:
+    from hbllm.perception.audio_perception_runtime import AudioPerceptionRuntime
+    from hbllm.perception.providers.audio_base import SpeechProvider
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,8 @@ class AudioInputNode(Node):
         node_id: str,
         config: AudioPipelineConfig | None = None,
         model_size: str | None = None,
+        speech_provider: SpeechProvider | None = None,
+        runtime: AudioPerceptionRuntime | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -51,8 +57,10 @@ class AudioInputNode(Node):
         )
         self.config = config or AudioPipelineConfig()
         self.model_size = model_size or self.config.asr_model_size
+        self._speech_provider = speech_provider
+        self._runtime = runtime
 
-        # ASR model (lazy-loaded)
+        # ASR model (lazy-loaded fallback if no speech_provider given)
         self._moonshine_model: Any | None = None
         self._whisper_model: Any | None = None
         self._model_lock = threading.Lock()  # Prevent concurrent model loads
@@ -385,7 +393,11 @@ class AudioInputNode(Node):
     # ── Transcription backends ───────────────────────────────────────────
 
     async def _transcribe_file(self, file_path: str) -> str:
-        """Transcribe an audio file using the configured backend."""
+        """Transcribe an audio file using provider or configured backend."""
+        if self._speech_provider is not None:
+            res = await self._speech_provider.transcribe(file_path)
+            return res.transcript
+
         import os
 
         # Try NVIDIA Cloud first if configured
@@ -411,6 +423,11 @@ class AudioInputNode(Node):
 
     async def _transcribe_pcm(self, pcm_bytes: bytes, sample_rate: int = 16000) -> str:
         """Transcribe raw PCM audio bytes (16-bit, mono). Moonshine primary."""
+        if self._speech_provider is not None:
+            res = await self._speech_provider.transcribe(pcm_bytes)
+            if res.transcript:
+                return res.transcript
+
         # Try Moonshine first (local, fast)
         result = await self._transcribe_pcm_moonshine(pcm_bytes, sample_rate)
         if result:
