@@ -260,6 +260,67 @@ class PerceptionFuser:
             # Clear window after fusion to avoid re-fusing same events
             self._window.clear()
 
+    def ingest_event(self, event: PerceptionEvent) -> FusedContext | None:
+        """Directly ingest a PerceptionEvent and return FusedContext if threshold met."""
+        self._total_events += 1
+        self._window.append(event)
+        self._prune_window()
+
+        modalities = {e.modality for e in self._window}
+        if len(modalities) >= self.min_modalities:
+            fused = FusedContext(
+                events=list(self._window),
+                timestamp=time.time(),
+                modalities=modalities,
+            )
+            self._total_fusions += 1
+            return fused
+        return None
+
+    def ingest_audio_assessment(self, assessment: Any) -> FusedContext | None:
+        """Ingest AudioAssessment into cross-modal fusion window."""
+        content_parts = []
+        if getattr(assessment, "speech", None) is not None:
+            content_parts.append(f"speech: {assessment.speech.transcript}")
+        for ev in getattr(assessment, "events", []):
+            content_parts.append(f"sound: {ev.event_type} ({ev.confidence:.2f})")
+
+        content = " | ".join(content_parts) or "audio event"
+        event = PerceptionEvent(
+            modality="audio",
+            content=content,
+            confidence=getattr(assessment.epistemic_profile, "combined", 1.0),
+            source="audio_perception",
+            timestamp=getattr(assessment.observation.temporal, "start_time", time.time()),
+            metadata={"observation_id": assessment.observation.observation_id},
+        )
+        return self.ingest_event(event)
+
+    def ingest_audio_observation(self, node: Any) -> FusedContext | None:
+        """Ingest AudioObservationNode into cross-modal fusion window."""
+        content = getattr(node, "transcript", "") or getattr(node, "event_type", "audio")
+        event = PerceptionEvent(
+            modality="audio",
+            content=f"audio: {content}",
+            confidence=1.0,
+            source=getattr(node, "embedding_model", "audio"),
+            timestamp=getattr(node, "start_time", time.time()) or time.time(),
+            metadata={"observation_id": getattr(node, "id", "")},
+        )
+        return self.ingest_event(event)
+
+    def ingest_visual_assessment(self, assessment: Any) -> FusedContext | None:
+        """Ingest VisualAssessment into cross-modal fusion window."""
+        label = getattr(assessment, "proposed_label", "") or "visual entity"
+        event = PerceptionEvent(
+            modality="visual",
+            content=f"visual: {label}",
+            confidence=1.0,
+            source="visual_perception",
+            timestamp=time.time(),
+        )
+        return self.ingest_event(event)
+
     def get_current_window(self) -> list[PerceptionEvent]:
         """Get current events in the sliding window."""
         self._prune_window()

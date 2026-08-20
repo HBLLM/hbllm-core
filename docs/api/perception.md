@@ -316,3 +316,111 @@ result = await evaluator.evaluate(test_cases)
 | `VisualAssessment` | Mutable | Current interpretation (candidates, ranking) |
 | `EpistemicEvidenceProfile` | Mutable | Multi-dimensional confidence |
 | `RecognitionPolicy` | Immutable | Configurable thresholds |
+
+---
+
+## Grounded Audio Perception Runtime (Waves A1–A6)
+
+Audio is an evidence-producing perception modality where providers produce raw/typed observations, the `AudioPerceptionRuntime` normalizes them into structured evidence, SNN gates determine processing compute, and the `AudioPerceptionTransaction` commits observations to HCIR.
+
+```
+Microphone → AudioSignals → AudioPerceptionEnsemble (SNN Gate)
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼ (should_process=True)       ▼ (should_process=False)
+               Providers                        Skip (Silence/Steady)
+         (Speech, Event, Scene, Speaker)
+                    │
+                    ▼
+          AudioPerceptionRuntime
+                    │
+                    ▼
+              AudioEvidence (composition model)
+                    │
+                    ▼
+       AudioPerceptionTransaction (HCIR)
+                    │
+        AUDIO_OBSERVATION / ACOUSTIC_CONCEPT
+```
+
+### Invariants
+
+1. **Audio perception produces evidence. HCIR commits state.** Providers never know about HCIR.
+2. **SNN is an attention controller, not a classifier.** It decides *how much compute to spend*, not *what the sound is*.
+3. **Composition over inheritance.** `AcousticObservation` ("the microphone received this") is composed with `SpeechEvidence`, `SoundEventEvidence`, and `AcousticSceneEvidence`.
+4. **Learning creates cognitive artifacts.** `commit_learning()` creates `AcousticConceptNode` in HCIR without synchronous model training.
+
+### Audio Provider Protocols
+
+```python
+from hbllm.perception.providers.audio_base import (
+    SpeechProvider,
+    AcousticEventProvider,
+    AcousticSceneProvider,
+    SpeakerProvider,
+    SoundLocalizationProvider,
+)
+```
+
+### Full Audio Pipeline Usage
+
+```python
+from hbllm.hcir.graph import CognitiveGraph
+from hbllm.perception.audio_memory import AudioMemory
+from hbllm.perception.audio_perception import AudioPerception
+from hbllm.perception.audio_perception_runtime import AudioPerceptionRuntime
+from hbllm.perception.audio_perception_transaction import AudioPerceptionTransaction
+from hbllm.perception.providers.mock_audio_provider import MockAudioProvider
+
+# 1. Initialize providers & memory
+provider = MockAudioProvider()
+memory = AudioMemory()
+graph = CognitiveGraph()
+
+# 2. Runtime & Transaction
+runtime = AudioPerceptionRuntime(
+    speech=provider,
+    events=provider,
+    scene=provider,
+    speaker=provider,
+    memory=memory,
+)
+transaction = AudioPerceptionTransaction(graph=graph, memory=memory)
+perception = AudioPerception(runtime, transaction)
+
+# 3. Listen (evidence only — no HCIR mutation)
+assessment = await perception.listen(audio_bytes)
+
+# 4. Learn a sound (creates AcousticConceptNode in HCIR)
+concept = await perception.learn_sound(audio_bytes, "doorbell")
+
+# 5. Recognize & commit speech
+obs_node = await perception.recognize_speech(speech_audio)
+```
+
+### SNN Audio Gating Stream
+
+```python
+from hbllm.perception.audio_perception_stream import AudioPerceptionStream
+
+stream = AudioPerceptionStream(runtime=runtime, sample_rate=16000)
+
+for chunk in audio_stream:
+    decision, assessment = await stream.process_chunk(chunk)
+    if decision.should_process:
+        print(f"[{decision.event_type}] Processing level: {decision.processing_level}")
+```
+
+### Audio HCIR Nodes
+
+| Node Type | Parent | Purpose |
+|-----------|--------|---------|
+| `AudioObservationNode` | `ObservationNode` | Audio telemetry with `embedding_ref` + temporal identity |
+| `AcousticConceptNode` | `ConceptNode` | Learned acoustic concept with prototype & exemplar refs |
+
+### Temporal & Cross-Modal Integration
+
+- **`TemporalFuser`**: Ingests `AudioObservationNode` and `AudioAssessment` to produce `TemporalPatternCandidate`s without premature factual commitment.
+- **`PerceptionFuser`**: Aligns visual detections and audio speech/events across sliding time windows into multimodal `FusedContext`.
+- **`WorldStateEngine`**: Ingests typed `AudioAssessment` and authoritative HCIR `CognitiveGraph` (dual-source gradual migration).
+

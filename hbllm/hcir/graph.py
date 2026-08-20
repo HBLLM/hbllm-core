@@ -100,6 +100,8 @@ class HCIRNodeType(StrEnum):
     # --- Grounded Perception ---
     VISUAL_OBSERVATION = "visual_observation"
     VISUAL_CONCEPT = "visual_concept"
+    AUDIO_OBSERVATION = "audio_observation"
+    ACOUSTIC_CONCEPT = "acoustic_concept"
 
     # --- World Model & Predictive Cognitive Runtime ---
     WORLD_VARIABLE = "world_variable"
@@ -531,6 +533,63 @@ class VisualConceptNode(ConceptNode):
     contexts: list[str] = Field(default_factory=list)
 
 
+class AudioObservationNode(ObservationNode):
+    """An audio observation in HCIR — "the microphone received this."
+
+    Stores a reference to the audio embedding, not the vector itself.
+    The vector lives in AudioMemory.
+
+    Architecture::
+
+        HCIR (cognitive state)
+          └── AudioObservationNode
+                 └── embedding_ref ──────→ AudioMemory (vector store)
+
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.AUDIO_OBSERVATION
+    label: str = ""  # Human-readable summary
+    embedding_ref: str = ""  # ID in audio vector store
+    embedding_space: str = ""  # e.g. "yamnet-v1"
+    embedding_model: str = ""  # e.g. "mock-audio-v1"
+    audio_hash: str = ""  # SHA-256 for dedup
+    event_type: str = ""  # e.g. "speech", "doorbell", "silence"
+    event_id: str = ""  # Groups related observations
+    start_time: float = 0.0
+    end_time: float = 0.0
+    duration: float = 0.0
+    transcript: str = ""  # If speech
+    speaker_ref: str = ""  # Speaker embedding ref
+
+
+class AcousticConceptNode(ConceptNode):
+    """A learned acoustic concept — extends ConceptNode.
+
+    Represents a learned sound pattern (e.g., "my doorbell",
+    "washing machine cycle"). Created by commit_learning(),
+    which creates a cognitive artifact, NOT model training.
+
+    Role separation::
+
+        prototype_ref  = retrieval accelerator (centroid)
+        exemplar_refs  = perceptual evidence
+        HCIR node      = semantic identity
+        BeliefRecord   = epistemic commitment
+
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.ACOUSTIC_CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    prototype_ref: str = ""  # EmbeddingRef ID for centroid
+    embedding_space: str = ""
+    embedding_model: str = ""
+    observation_count: int = 0
+    exemplar_refs: list[str] = Field(default_factory=list)
+    last_heard: float = 0.0
+    sound_type: str = ""  # e.g. "event", "ambient", "speech_pattern"
+    contexts: list[str] = Field(default_factory=list)
+
+
 class SkillNode(HCIRNode):
     """A reusable, learned skill with success tracking."""
 
@@ -846,6 +905,8 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     # --- Grounded Perception ---
     HCIRNodeType.VISUAL_OBSERVATION: VisualObservationNode,
     HCIRNodeType.VISUAL_CONCEPT: VisualConceptNode,
+    HCIRNodeType.AUDIO_OBSERVATION: AudioObservationNode,
+    HCIRNodeType.ACOUSTIC_CONCEPT: AcousticConceptNode,
     # --- World Model ---
     HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
     HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,

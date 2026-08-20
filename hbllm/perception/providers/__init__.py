@@ -7,10 +7,40 @@ implement multiple capabilities.
 
 Architecture invariant:
     Providers NEVER mutate HCIR.
-    Providers produce VisualEvidence.
+    Providers produce evidence (visual or audio).
     HCIR transactions own state mutation.
 """
 
+from hbllm.perception.providers.audio_base import (
+    AcousticEventProvider,
+    AcousticSceneProvider,
+    AudioProvider,
+    SoundLocalizationProvider,
+    SpeakerProvider,
+    SpeechProvider,
+)
+from hbllm.perception.providers.audio_evidence import (
+    AcousticObservation,
+    AcousticSceneEvidence,
+    AudioAssessment,
+    AudioEpistemicProfile,
+    SoundEventEvidence,
+    SoundSourceEvidence,
+    SpeechEvidence,
+)
+from hbllm.perception.providers.audio_policy import AudioRecognitionPolicy
+from hbllm.perception.providers.audio_types import (
+    AcousticSceneResult,
+    AudioEmbedding,
+    AudioEventState,
+    AudioInput,
+    ParalinguisticProfile,
+    SoundEventResult,
+    SoundLocalizationResult,
+    SpeakerIdentification,
+    SpeechResult,
+    TemporalSpan,
+)
 from hbllm.perception.providers.base import (
     ImageInput,
     PerceptionProvider,
@@ -34,24 +64,50 @@ from hbllm.perception.providers.types import (
 )
 
 __all__ = [
-    # Protocols
+    # ── Vision Protocols ──
     "PerceptionProvider",
-    "VisionProvider",
     "VisionDetector",
     "VisionOCR",
-    # Input
+    "VisionProvider",
+    # ── Audio Protocols ──
+    "AcousticEventProvider",
+    "AcousticSceneProvider",
+    "AudioProvider",
+    "SoundLocalizationProvider",
+    "SpeakerProvider",
+    "SpeechProvider",
+    # ── Vision Types ──
+    "EmbeddingRef",
     "ImageInput",
-    # Types
     "VisualEmbedding",
     "VisualRegion",
-    "EmbeddingRef",
-    # Evidence
-    "VisualEvidence",
-    "VisualAssessment",
+    # ── Audio Types ──
+    "AcousticSceneResult",
+    "AudioEmbedding",
+    "AudioEventState",
+    "AudioInput",
+    "ParalinguisticProfile",
+    "SoundEventResult",
+    "SoundLocalizationResult",
+    "SpeakerIdentification",
+    "SpeechResult",
+    "TemporalSpan",
+    # ── Vision Evidence ──
+    "CandidateRanking",
+    "ConceptCandidate",
     "EpistemicEvidenceProfile",
     "ObservationMatch",
-    "ConceptCandidate",
-    "CandidateRanking",
-    # Policy
+    "VisualAssessment",
+    "VisualEvidence",
+    # ── Audio Evidence ──
+    "AcousticObservation",
+    "AcousticSceneEvidence",
+    "AudioAssessment",
+    "AudioEpistemicProfile",
+    "SoundEventEvidence",
+    "SoundSourceEvidence",
+    "SpeechEvidence",
+    # ── Policies ──
+    "AudioRecognitionPolicy",
     "RecognitionPolicy",
 ]

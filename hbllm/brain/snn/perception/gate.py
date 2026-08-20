@@ -53,17 +53,26 @@ class PerceptionProcessingLevel(StrEnum):
 
 
 class PerceptionEventType(StrEnum):
-    """Why the SNN decided this frame deserves processing.
+    """Why the SNN decided this input deserves processing.
 
-    Multiple channels can fire on a single frame.  The event type
+    Multiple channels can fire on a single sample. The event type
     is determined by channel priority ordering.
     """
 
+    # Visual events
     SCENE_CHANGE = "scene_change"
     NOVEL_APPEARANCE = "novel_appearance"
     ENTITY_CHANGE = "entity_change"
     MOTION_EVENT = "motion_event"
     STABILITY_SHIFT = "stability_shift"
+
+    # Audio events
+    SPEECH_ONSET = "speech_onset"
+    ACOUSTIC_EVENT = "acoustic_event"
+    AMBIENT_CHANGE = "ambient_change"
+    TRANSIENT_BURST = "transient_burst"
+
+    # Common
     HEARTBEAT = "heartbeat"  # Periodic confirmation (prevents blind spots)
 
 
@@ -80,22 +89,23 @@ class PerceptionGateDecision(BaseModel):
 
     The SNN outputs a **salience profile**: each channel contributes
     its spike strength.  The decision considers all channels, not
-    just ``"scene"``.  A novelty spike without a scene spike can
-    still trigger expensive embedding.
+    just a single signal.
 
     Attributes:
+        modality: Perception modality ("visual", "audio", etc.).
         should_process: Whether any processing is warranted.
         processing_level: How much compute to spend (NONE → URGENT).
         urgency: Highest channel spike strength [0.0, 1.0].
         event_type: Primary reason for the decision.
         channels_fired: Map of channel_name → spike strength.
-        novelty: Novelty channel signal strength.
+        novelty: Novelty/change channel signal strength.
         temporal_significance: Average across fired channels.
-        frame_index: Index of the frame in the video stream.
+        frame_index: Index of the frame/sample in the stream.
         timestamp: When the decision was made.
 
     """
 
+    modality: str = "visual"
     should_process: bool
     processing_level: PerceptionProcessingLevel
     urgency: float = 0.0
