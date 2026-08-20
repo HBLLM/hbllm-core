@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Visual Cognition Runtime (Waves V0–V3)
+
+- **V0 — Grounded Perception Contracts**: `VisionProvider`, `VisionDetector`, `VisionOCR` protocols, `VisualEmbedding`, `VisualEvidence` (immutable), `VisualAssessment` (mutable), `EpistemicEvidenceProfile` (multi-dimensional confidence), `RecognitionPolicy` (configurable thresholds), `PerceptionGateDecision`, `PerceptionProcessingLevel` — `hbllm/perception/providers/`, `hbllm/brain/snn/perception/`
+- **V1 — Perceptual Evidence**: `MockVisionProvider` (deterministic testing), `SigLIPVisionProvider` (lazy loading, CPU/CUDA/MPS auto-detect), `VisualObservationNode`, `VisualConceptNode` graph types added to HCIR `CognitiveGraph` — `hbllm/perception/providers/`, `hbllm/hcir/graph.py`
+- **V2 — Epistemic Visual Memory**: `VisualMemory` (observation-first vector index with prototype acceleration), `VisualPerceptionRuntime` (evidence-only, never mutates HCIR), `VisualPerceptionTransaction` (atomic HCIR commitment: learn/recognize), `VisualPerception` facade (`learn()` / `recognize()`), `OneShotEvaluator` evaluation harness — `hbllm/perception/`
+- **V3 — Temporal Attention**: `VisualSignalExtractor` (cheap ~0.1ms frame features: motion, intensity, edge, color, texture), `PerceptionEnsemble` (5-channel LIF ensemble: scene/entity/motion/novelty/stability), `VisualPerceptionStream` (SNN-gated continuous perception with frame-level stats) — `hbllm/brain/snn/perception/`, `hbllm/perception/`
+- **Test Suite**: 105 unit tests across V0–V3, all passing (36 + 25 + 26 + 18)
+- **Documentation**: Updated `docs/api/perception.md` and `docs/api/snn.md` with visual cognition API reference
+
 #### Epistemic Runtime — Domain-Neutral Discovery Engine (Waves 1–4)
 
 - **Wave 1 — Epistemic Foundations**: `DiscoveryBeliefManager` (Bayesian revision), `SourceReputationTracker` (source trust), `DiscoveryWorkspace` (research program lifecycle) — `hbllm/brain/epistemics/`

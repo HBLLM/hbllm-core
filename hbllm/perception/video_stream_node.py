@@ -16,6 +16,7 @@ Backends:
     - OpenCV (cv2) for camera/screen capture
     - PIL/Pillow as fallback for screenshots
     - Vision LLM for scene understanding (via existing provider)
+    - VisionProvider protocol for typed embedding providers
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ class VideoStreamNode(Node):
         camera_index: int = 0,
         capture_fps: float = 0.5,  # Ambient monitoring: 1 frame per 2 seconds
         change_threshold: float = 0.05,  # Min pixel change to process frame
-        vision_provider: Any | None = None,
+        vision_provider: Any | None = None,  # VisionProvider or legacy provider
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -64,6 +65,7 @@ class VideoStreamNode(Node):
         self.camera_index = camera_index
         self.capture_fps = capture_fps
         self.change_threshold = change_threshold
+        # Accepts both typed VisionProvider and legacy ad-hoc providers
         self.vision_provider = vision_provider
 
         self._capture: Any = None  # cv2.VideoCapture

@@ -190,3 +190,129 @@ snap = mgr.snapshot()
 | `cognitive.response.ready` | Subscribe | LLM response available |
 | `tts.playback.done` | Subscribe | TTS finished playing |
 
+---
+
+## Visual Cognition Runtime
+
+The visual cognition system extends perception with typed evidence production,
+one-shot visual learning, and SNN-gated temporal attention.
+
+**Core invariant:** Perception produces evidence. HCIR commits state.
+
+### Architecture
+
+```
+Image → VisionProvider.encode() → VisualEmbedding
+      → VisualPerceptionRuntime.perceive() → VisualAssessment
+      → VisualPerceptionTransaction.commit_*() → HCIR nodes + edges + beliefs
+
+Video → VisualSignalExtractor → VisualSignals (cheap, ~0.1ms)
+      → PerceptionEnsemble (SNN) → PerceptionGateDecision
+      → (if should_process) → full perception pipeline
+```
+
+### Vision Providers
+
+| Module | Class | Purpose |
+|--------|-------|---------|
+| `providers/base.py` | `VisionProvider` | Protocol for embedding providers |
+| `providers/base.py` | `VisionDetector` | Protocol for object detection |
+| `providers/base.py` | `VisionOCR` | Protocol for OCR |
+| `providers/siglip_provider.py` | `SigLIPVisionProvider` | SigLIP model (lazy loading, CPU/CUDA/MPS) |
+| `providers/mock_provider.py` | `MockVisionProvider` | Deterministic mock for testing |
+
+```python
+from hbllm.perception.providers.siglip_provider import SigLIPVisionProvider
+
+provider = SigLIPVisionProvider()  # Lazy loads on first encode
+embedding = await provider.encode(image)
+# embedding.vector: list[float], L2-normalized
+# embedding.space_id: "google/siglip-base-patch16-224-image"
+```
+
+### Visual Perception Pipeline
+
+```python
+from hbllm.perception.visual_perception import VisualPerception
+from hbllm.perception.visual_perception_runtime import VisualPerceptionRuntime
+from hbllm.perception.visual_perception_transaction import VisualPerceptionTransaction
+from hbllm.perception.visual_memory import VisualMemory
+from hbllm.hcir.graph import CognitiveGraph
+
+provider = SigLIPVisionProvider()
+memory = VisualMemory()
+graph = CognitiveGraph()
+
+runtime = VisualPerceptionRuntime(provider, memory)
+transaction = VisualPerceptionTransaction(graph=graph, memory=memory)
+perception = VisualPerception(runtime, transaction)
+
+# One-shot learning
+concept = await perception.learn(image, "screwdriver")
+
+# Recognition
+result = await perception.recognize(test_image)
+# result.matched, result.label, result.confidence
+```
+
+### Visual Memory
+
+| Method | Purpose |
+|--------|---------|
+| `search_observations()` | Primary evidence retrieval (cosine similarity) |
+| `search_prototypes()` | Fast coarse retrieval via concept centroids |
+| `derive_concept_candidates()` | Group observations → ranked concept candidates |
+| `add_exemplar()` | Add observation with diversity enforcement |
+| `update_prototype()` | Running-average centroid update |
+
+### HCIR Visual Nodes
+
+| Node Type | Parent | Purpose |
+|-----------|--------|---------|
+| `VisualObservationNode` | `ObservationNode` | Visual evidence with `embedding_ref` (not vector) |
+| `VisualConceptNode` | `ConceptNode` | Learned concept with `prototype_ref` + `exemplar_refs` |
+
+### SNN-Gated Perception Stream
+
+```python
+from hbllm.perception.visual_perception_stream import VisualPerceptionStream
+
+stream = VisualPerceptionStream(perception=perception)
+
+for frame in video_frames:
+    result = await stream.process_frame(frame)
+    if result.processed:
+        print(f"Recognized: {result.recognition_label}")
+
+print(f"Process rate: {stream.stats.process_rate:.1%}")  # e.g., 12%
+```
+
+### Processing Levels (SNN Gate)
+
+| Level | Trigger | Action |
+|-------|---------|--------|
+| `NONE` | Static scene | Skip |
+| `LOW` | Minor motion | Log only |
+| `STANDARD` | Object movement | Full perception |
+| `HIGH` | Scene change | Perception + context |
+| `URGENT` | Multiple channels | Immediate + alert |
+
+### Evaluation
+
+```python
+from hbllm.perception.evaluation.one_shot_eval import OneShotEvaluator
+
+evaluator = OneShotEvaluator(perception)
+await evaluator.teach("cup", [cup_images])
+result = await evaluator.evaluate(test_cases)
+# result.accuracy, result.ambiguity_rate
+```
+
+### Evidence Types
+
+| Type | Mutability | Purpose |
+|------|-----------|---------|
+| `VisualEvidence` | Immutable | Raw perceptual measurement |
+| `VisualAssessment` | Mutable | Current interpretation (candidates, ranking) |
+| `EpistemicEvidenceProfile` | Mutable | Multi-dimensional confidence |
+| `RecognitionPolicy` | Immutable | Configurable thresholds |

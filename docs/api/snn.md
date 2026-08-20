@@ -27,6 +27,9 @@ The **SNN Neuromorphic Engine** provides spike-rate neural computation, low-powe
 | `WTACircuit` | `wta.py` | Winner-Take-All lateral inhibition competitive circuit |
 | `NeuromodulationEngine` | `neuromodulation.py` | Global dopamine, serotonin, ACh, and noradrenaline dynamics |
 | `OscillationManager` | `oscillations.py` | Cortical oscillation clocks ($\theta, \alpha, \beta, \gamma$) |
+| `PerceptionEnsemble` | `perception/visual_ensemble.py` | 5-channel visual perception SNN gating |
+| `VisualSignalExtractor` | `perception/visual_signals.py` | Cheap frame-level feature extraction |
+| `PerceptionGateDecision` | `perception/gate.py` | SNN-driven processing level decision |
 
 ---
 
@@ -94,3 +97,29 @@ compressed_prompt = encoder.encode(
 )
 print(f"Compressed Broca tokens length: ~{len(compressed_prompt.split())}")
 ```
+
+---
+
+### Visual Perception Gating
+
+The SNN perception subsystem decides **when** and **how much** visual
+computation to spend on incoming video frames.
+
+```python
+from hbllm.brain.snn.perception.visual_signals import VisualSignalExtractor
+from hbllm.brain.snn.perception.visual_ensemble import PerceptionEnsemble
+
+extractor = VisualSignalExtractor(downsample=4)
+ensemble = PerceptionEnsemble()
+
+signals = extractor.extract(frame)  # ~0.1ms, numpy only
+decision = ensemble.step(signals)   # ~0.01ms, 5 LIF neurons
+
+if decision.should_process:
+    # Run expensive VisionProvider encoding
+    assessment = await runtime.perceive(frame)
+```
+
+**Channels:** scene (slow), entity (medium), motion (fast), novelty (medium-slow), stability (very slow).
+
+**Outputs:** `PerceptionProcessingLevel` — NONE / LOW / STANDARD / HIGH / URGENT.
