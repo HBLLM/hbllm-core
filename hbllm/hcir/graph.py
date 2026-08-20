@@ -143,6 +143,10 @@ class HCIREdgeType(StrEnum):
     WEAKENS = "weakens"  # Evidence that decreases confidence
     REFINES = "refines"  # Hypothesis refines another
 
+    # Cross-modal perception edges
+    CORRELATES_WITH = "correlates_with"  # Temporal/spatial association only (NOT causal)
+    OBSERVED_AS = "observed_as"  # Classifier relationship (observation → classification)
+
 
 class CognitiveCategory(StrEnum):
     """High-level cognitive function classification.

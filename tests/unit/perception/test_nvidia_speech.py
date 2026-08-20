@@ -2,10 +2,10 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Dynamically mock riva/riva.client module if not installed to prevent import errors in CI
+# Dynamically mock riva/riva.client module if not installed or broken to prevent import errors in CI
 try:
     import riva.client  # noqa: F401
-except ImportError:
+except (ImportError, RuntimeError, Exception):
     import importlib.machinery
 
     riva_spec = importlib.machinery.ModuleSpec("riva", None)

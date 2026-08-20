@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -166,7 +167,7 @@ class MockAudioProvider:
 
     async def transcribe_streaming(
         self,
-        audio_chunks: list[AudioInput],
+        audio_chunks: Sequence[AudioInput],
     ) -> SpeechResult:
         """Transcribe by combining chunk hashes."""
         combined = b"".join(

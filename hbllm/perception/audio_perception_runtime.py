@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from hbllm.perception.audio_memory import AudioMemory
 from hbllm.perception.providers.audio_base import (
@@ -39,6 +40,7 @@ from hbllm.perception.providers.audio_types import (
     AudioInput,
     TemporalSpan,
 )
+from hbllm.perception.providers.provider_provenance import ProviderProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,16 @@ class AudioPerceptionRuntime:
         self._scene = scene
         self._speaker = speaker
         self._memory = memory or AudioMemory()
+
+    def _get_provenance(self, provider: Any) -> ProviderProvenance:
+        """Extract provenance metadata from a provider."""
+        provider_id = getattr(provider, "provider_id", "unknown")
+        # Parse provider_id format "name:model" if available
+        parts = provider_id.split(":", 1)
+        return ProviderProvenance(
+            provider=parts[0],
+            model=parts[1] if len(parts) > 1 else "",
+        )
 
     async def perceive(
         self,
@@ -108,6 +120,7 @@ class AudioPerceptionRuntime:
                     confidence=result.confidence,
                     speaker_ref=result.speaker,
                     paralinguistic=result.paralinguistic,
+                    provider_provenance=self._get_provenance(self._speech),
                 )
             except Exception:
                 logger.exception("Speech provider failed")
@@ -116,6 +129,7 @@ class AudioPerceptionRuntime:
         if self._events is not None:
             try:
                 results = await self._events.classify(audio)
+                event_prov = self._get_provenance(self._events)
                 for r in results:
                     event_evidence.append(
                         SoundEventEvidence(
@@ -125,6 +139,7 @@ class AudioPerceptionRuntime:
                             is_critical=r.is_critical,
                             event_state=r.temporal.state,
                             top_classes=r.top_classes,
+                            provider_provenance=event_prov,
                         ),
                     )
             except Exception:
@@ -141,6 +156,7 @@ class AudioPerceptionRuntime:
                     noise_level=result.noise_level,
                     estimated_activity=result.estimated_activity,
                     scene_tags=result.scene_tags,
+                    provider_provenance=self._get_provenance(self._scene),
                 )
             except Exception:
                 logger.exception("Scene provider failed")
@@ -187,6 +203,7 @@ class AudioPerceptionRuntime:
             confidence=result.confidence,
             speaker_ref=result.speaker,
             paralinguistic=result.paralinguistic,
+            provider_provenance=self._get_provenance(self._speech),
         )
 
     def _build_profile(

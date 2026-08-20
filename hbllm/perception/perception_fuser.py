@@ -1,7 +1,8 @@
 """Perception Fuser — cross-modal temporal alignment and fusion.
 
 Collects perception events from multiple modalities (audio, visual, system)
-in a sliding time window and produces fused context for ComprehensionStream.
+in a sliding time window and produces fused context with correlation candidates
+for ComprehensionStream and HCIR.
 """
 
 from __future__ import annotations
@@ -11,9 +12,17 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.network.messages import Message, MessageType
+from hbllm.perception.correlation_engine import (
+    CorrelationCandidate,
+    CorrelationEngine,
+    ObservationEnvelope,
+)
+
+if TYPE_CHECKING:
+    from hbllm.perception.correlation_transaction import CorrelationTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +53,7 @@ class FusedContext:
     events: list[PerceptionEvent] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
     modalities: set[str] = field(default_factory=set)
+    correlations: list[CorrelationCandidate] = field(default_factory=list)
 
     @property
     def is_multimodal(self) -> bool:
@@ -57,6 +67,7 @@ class FusedContext:
             "modalities": sorted(self.modalities),
             "is_multimodal": self.is_multimodal,
             "event_count": len(self.events),
+            "correlation_count": len(self.correlations),
         }
 
         # Group by modality
@@ -85,11 +96,11 @@ class FusedContext:
 
 
 class PerceptionFuser:
-    """Sliding-window cross-modal perception fusion.
+    """Sliding-window cross-modal perception fusion and correlation.
 
     Collects events from different perception sources (audio, visual,
     system state) and when multiple modalities fire within the fusion
-    window, produces a FusedContext.
+    window, computes correlation candidates and produces a FusedContext.
 
     Usage::
 
@@ -107,11 +118,17 @@ class PerceptionFuser:
         min_modalities: int = 2,
         max_events: int = 50,
         bus: Any = None,
+        correlation_engine: CorrelationEngine | None = None,
+        correlation_transaction: CorrelationTransaction | None = None,
     ) -> None:
         self.window_seconds = window_seconds
         self.min_modalities = min_modalities
         self.max_events = max_events
         self.bus = bus
+        self._correlation_engine = correlation_engine or CorrelationEngine(
+            max_temporal_gap=window_seconds,
+        )
+        self._correlation_transaction = correlation_transaction
 
         # Sliding window of recent perception events
         self._window: deque[PerceptionEvent] = deque(maxlen=max_events)
@@ -123,6 +140,46 @@ class PerceptionFuser:
         # Stats
         self._total_events = 0
         self._total_fusions = 0
+        self._total_correlations = 0
+
+    def correlate_window(self) -> list[CorrelationCandidate]:
+        """Compute cross-modal correlations among events in the window."""
+        self._prune_window()
+        envelopes: list[ObservationEnvelope] = []
+
+        for event in self._window:
+            obs_id = str(event.metadata.get("observation_id", "") or f"{event.modality}_{id(event)}")
+            duration = float(event.metadata.get("duration", 0.5))
+            direction = event.metadata.get("direction_degrees")
+            direction_val = float(direction) if direction is not None else None
+
+            envelopes.append(
+                ObservationEnvelope(
+                    observation_id=obs_id,
+                    modality=event.modality,
+                    start_time=event.timestamp,
+                    end_time=event.timestamp + duration,
+                    direction_degrees=direction_val,
+                )
+            )
+
+        # Group envelopes by modality
+        candidates: list[CorrelationCandidate] = []
+        modalities = {e.modality for e in envelopes}
+        mod_list = sorted(modalities)
+
+        for i in range(len(mod_list)):
+            for j in range(i + 1, len(mod_list)):
+                m1_envs = [e for e in envelopes if e.modality == mod_list[i]]
+                m2_envs = [e for e in envelopes if e.modality == mod_list[j]]
+                matches = self._correlation_engine.correlate_batch(m1_envs, m2_envs)
+                candidates.extend(matches)
+
+        if self._correlation_transaction is not None and candidates:
+            self._correlation_transaction.commit_batch(candidates)
+
+        self._total_correlations += len(candidates)
+        return candidates
 
     def _prune_window(self) -> None:
         """Remove events older than the window."""
@@ -231,18 +288,21 @@ class PerceptionFuser:
         modalities = {e.modality for e in self._window}
 
         if len(modalities) >= self.min_modalities:
+            correlations = self.correlate_window()
             fused = FusedContext(
                 events=list(self._window),
                 timestamp=time.time(),
                 modalities=modalities,
+                correlations=correlations,
             )
 
             self._total_fusions += 1
 
             logger.info(
-                "[PerceptionFuser] Fused %d events across %s",
+                "[PerceptionFuser] Fused %d events across %s (%d correlations)",
                 len(fused.events),
                 sorted(modalities),
+                len(correlations),
             )
 
             # Publish fused context
@@ -268,10 +328,12 @@ class PerceptionFuser:
 
         modalities = {e.modality for e in self._window}
         if len(modalities) >= self.min_modalities:
+            correlations = self.correlate_window()
             fused = FusedContext(
                 events=list(self._window),
                 timestamp=time.time(),
                 modalities=modalities,
+                correlations=correlations,
             )
             self._total_fusions += 1
             return fused
