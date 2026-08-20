@@ -97,6 +97,10 @@ class HCIRNodeType(StrEnum):
     VALUE = "value"
     EXTERNAL_KNOWLEDGE = "external_knowledge"
 
+    # --- Grounded Perception ---
+    VISUAL_OBSERVATION = "visual_observation"
+    VISUAL_CONCEPT = "visual_concept"
+
     # --- World Model & Predictive Cognitive Runtime ---
     WORLD_VARIABLE = "world_variable"
     PHYSICAL_ENTITY = "physical_entity"
@@ -269,6 +273,29 @@ class ObservationNode(HCIRNode):
     category: CognitiveCategory = CognitiveCategory.PERCEPTION
     payload: dict[str, Any] = Field(default_factory=dict)
     sensor_source: str = ""
+
+
+class VisualObservationNode(ObservationNode):
+    """A visual observation with embedding reference and provenance.
+
+    The actual embedding vector resides in VisualMemory (vector store).
+    HCIR holds the reference, not the vector — keeping the graph
+    lightweight and transactional.
+
+    Architecture::
+
+        HCIR (cognitive state)
+          └── VisualObservationNode
+                 └── embedding_ref ──────→ VisualMemory (vector store)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.VISUAL_OBSERVATION
+    embedding_ref: str = ""  # ID in vector store
+    embedding_space: str = ""  # e.g. "siglip-base-patch16-224-image"
+    embedding_model: str = ""  # e.g. "google/siglip-base-patch16-224"
+    image_hash: str = ""  # SHA-256 for dedup
+    caption: str = ""  # Optional text description
+    regions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FactNode(HCIRNode):
@@ -476,6 +503,32 @@ class ConceptNode(HCIRNode):
     label: str = ""
     definition: str = ""
     domain: str = ""
+
+
+class VisualConceptNode(ConceptNode):
+    """A learned visual concept — extends ConceptNode, single hierarchy.
+
+    Role separation::
+
+        prototype_ref  = retrieval accelerator (centroid in vector store)
+        exemplar_refs  = perceptual evidence (actual observation embeddings)
+        HCIR node      = semantic identity
+        BeliefRecord   = epistemic commitment
+
+    The canonical concept identity is this HCIR node.
+    VisualMemory indexes the prototype and exemplar vectors.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.VISUAL_CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    prototype_ref: str = ""  # EmbeddingRef ID for centroid
+    embedding_space: str = ""  # e.g. "siglip-base-patch16-224-image"
+    embedding_model: str = ""  # e.g. "google/siglip-base-patch16-224"
+    observation_count: int = 0
+    exemplar_refs: list[str] = Field(default_factory=list)  # EmbeddingRef IDs
+    aliases: list[str] = Field(default_factory=list)
+    last_seen: float = 0.0
+    contexts: list[str] = Field(default_factory=list)
 
 
 class SkillNode(HCIRNode):
@@ -790,6 +843,9 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.PROCEDURE: ProcedureNode,
     HCIRNodeType.VALUE: ValueNode,
     HCIRNodeType.EXTERNAL_KNOWLEDGE: ExternalKnowledgeNode,
+    # --- Grounded Perception ---
+    HCIRNodeType.VISUAL_OBSERVATION: VisualObservationNode,
+    HCIRNodeType.VISUAL_CONCEPT: VisualConceptNode,
     # --- World Model ---
     HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
     HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,

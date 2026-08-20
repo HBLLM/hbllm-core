@@ -8,7 +8,10 @@ from images, allowing the text-based cognitive architecture to "see".
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.perception.providers.base import VisionProvider
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
@@ -23,7 +26,7 @@ class VisionNode(Node):
     and extracts text via OCR, bridging visual perception to the LLM.
     """
 
-    def __init__(self, node_id: str) -> None:
+    def __init__(self, node_id: str, provider: VisionProvider | None = None) -> None:
         super().__init__(
             node_id=node_id,
             node_type=NodeType.PERCEPTION,
@@ -37,6 +40,7 @@ class VisionNode(Node):
         self.projector = MultimodalProjector(llm_dim=4096)
         self._last_caption_cache: dict[str, str] = {}
         self._last_embedding_cache: dict[str, list[float]] = {}
+        self._vision_provider = provider  # Optional typed VisionProvider
 
     async def on_start(self) -> None:
         logger.info("Starting VisionNode. Loading ViT model...")
@@ -189,6 +193,33 @@ class VisionNode(Node):
         raise RuntimeError("No vision model pipeline is available.")
 
     def _embed_image(self, path_or_hex: str) -> list[float]:
+        # Delegate to typed VisionProvider if available
+        if self._vision_provider is not None:
+            try:
+                import asyncio
+
+                image_input: Any
+                if len(path_or_hex) > 512:
+                    image_input = bytes.fromhex(path_or_hex)
+                else:
+                    import pathlib
+
+                    image_input = pathlib.Path(path_or_hex)
+
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        embedding = pool.submit(
+                            asyncio.run, self._vision_provider.encode(image_input)
+                        ).result()
+                else:
+                    embedding = asyncio.run(self._vision_provider.encode(image_input))
+                return embedding.vector
+            except Exception as e:
+                logger.error("VisionProvider embedding failed: %s, falling back", e)
+
         if self.rust_engine:
             try:
                 image_bytes = self._get_image_bytes(path_or_hex)
@@ -255,6 +286,7 @@ class VisionNode(Node):
 
         Returns:
             caption: str, ocr_text: str, combined: str
+
         """
         image_data = message.payload.get("image_path") or message.payload.get("image_data")
         if not image_data:
