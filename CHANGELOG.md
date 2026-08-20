@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Grounded Audio Perception Runtime (Waves A1–A6)
+
+- **A1 — Audio Perception Contracts**: `SpeechProvider`, `AcousticEventProvider`, `AcousticSceneProvider`, `SpeakerProvider`, `SoundLocalizationProvider` protocols; `TemporalSpan` (separated `observation_id`, `event_id`, `segment_id`, `AudioEventState`); composition evidence model (`AcousticObservation`, `SpeechEvidence`, `SoundEventEvidence`, `SoundSourceEvidence`, `AcousticSceneEvidence`); structured `SpeakerIdentification`; probabilistic `ParalinguisticProfile`; `AudioEpistemicProfile`; `AudioRecognitionPolicy` — `hbllm/perception/providers/`
+- **A2 — Extracted Providers**: `MockAudioProvider` deterministic SHA-256 testing provider supporting all audio perception protocols — `hbllm/perception/providers/mock_audio_provider.py`
+- **A3 — Audio Perception Runtime & Memory**: `AudioPerceptionRuntime` (evidence-only, normalizes provider outputs, never mutates HCIR), `AudioMemory` (observation-first embedding index with running-average prototype acceleration and exemplar diversity enforcement) — `hbllm/perception/`
+- **A4 — HCIR Transaction Layer**: `AudioObservationNode`, `AcousticConceptNode` added to HCIR `CognitiveGraph`; `AudioPerceptionTransaction` (atomic HCIR commitment for speech, events, and cognitive artifact learning); `AudioPerception` unified facade API — `hbllm/hcir/graph.py`, `hbllm/perception/`
+- **A5 — SNN Audio Gating**: `AudioSignals` cheap numpy feature extraction (~0.1ms: energy, spectral centroid, spectral flux, zero-crossing rate, speech likelihood); `AudioPerceptionEnsemble` (4-channel LIF SNN ensemble: speech, event, change, transient) driving `PerceptionGateDecision`; `AudioPerceptionStream` (SNN-gated continuous stream processor) — `hbllm/brain/snn/perception/`, `hbllm/perception/`
+- **A6 — Temporal & Cross-Modal Integration**: `TemporalFuser` candidate pattern extraction (`TemporalPatternCandidate`) with audio observations; `PerceptionFuser` cross-modal fusion (audio + visual); `WorldStateEngine` dual-source gradual migration (`update_from_audio_assessment`, `update_from_hcir`) — `hbllm/perception/`
+- **Test Suite**: 134 unit tests across A1–A6, all passing (48 + 31 + 19 + 16 + 14 + 6); full perception suite: 256/256 passing
+- **Documentation**: Updated `docs/api/perception.md` with Grounded Audio Perception Architecture
+
 #### Visual Cognition Runtime (Waves V0–V3)
 
 - **V0 — Grounded Perception Contracts**: `VisionProvider`, `VisionDetector`, `VisionOCR` protocols, `VisualEmbedding`, `VisualEvidence` (immutable), `VisualAssessment` (mutable), `EpistemicEvidenceProfile` (multi-dimensional confidence), `RecognitionPolicy` (configurable thresholds), `PerceptionGateDecision`, `PerceptionProcessingLevel` — `hbllm/perception/providers/`, `hbllm/brain/snn/perception/`

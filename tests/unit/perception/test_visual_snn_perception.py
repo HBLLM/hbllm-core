@@ -176,7 +176,7 @@ class TestVisualPerceptionStream:
         # Send 50 identical frames
         frame = np.full((50, 50, 3), 128, dtype=np.uint8)
         for _ in range(50):
-            result = await stream.process_frame(frame)
+            await stream.process_frame(frame)
 
         assert stream.stats.total_frames == 50
         # Most frames should be skipped (no perception needed)

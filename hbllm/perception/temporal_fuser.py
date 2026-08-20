@@ -69,6 +69,34 @@ class FusedSequence:
         }
 
 
+@dataclass
+class TemporalPatternCandidate:
+    """A candidate sequence pattern detected from temporal observations.
+
+    Perception produces candidate patterns with confidence, but does not
+    assert epistemic facts. Cognitive systems decide whether to commit.
+    """
+
+    pattern_name: str
+    observations: list[str] = field(default_factory=list)  # Observation IDs
+    pattern_steps: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    duration_s: float = 0.0
+    timestamp: float = field(default_factory=time.time)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pattern_name": self.pattern_name,
+            "observations": self.observations,
+            "pattern_steps": self.pattern_steps,
+            "confidence": round(self.confidence, 3),
+            "duration_s": round(self.duration_s, 1),
+            "timestamp": self.timestamp,
+            "metadata": self.metadata,
+        }
+
+
 # ── Pattern Definitions ──────────────────────────────────────────────────────
 
 
@@ -231,6 +259,75 @@ class TemporalFuser:
                 detected.append(match)
 
         return detected
+
+    def ingest_candidates(self, event: PerceptionSnapshot) -> list[TemporalPatternCandidate]:
+        """Ingest event and return candidate patterns without asserting fact."""
+        sequences = self.ingest(event)
+        candidates = []
+        for seq in sequences:
+            candidates.append(
+                TemporalPatternCandidate(
+                    pattern_name=seq.pattern_name,
+                    observations=[e.payload.get("observation_id", e.sub_type or e.event_type) for e in seq.events],
+                    pattern_steps=[f"{e.event_type}:{e.sub_type}" for e in seq.events],
+                    confidence=seq.confidence,
+                    duration_s=seq.duration_s,
+                    timestamp=seq.timestamp,
+                )
+            )
+        return candidates
+
+    def ingest_audio_observation(self, node: Any) -> list[TemporalPatternCandidate]:
+        """Ingest an AudioObservationNode and return candidate patterns."""
+        event_type = "audio.ambient" if getattr(node, "event_type", "") != "speech" else "audio.speech"
+        sub_type = getattr(node, "event_type", "unknown")
+        snapshot = PerceptionSnapshot(
+            event_type=event_type,
+            sub_type=sub_type,
+            source=getattr(node, "embedding_model", "audio"),
+            timestamp=getattr(node, "start_time", time.time()) or time.time(),
+            payload={
+                "observation_id": getattr(node, "id", ""),
+                "transcript": getattr(node, "transcript", ""),
+                "speaker_ref": getattr(node, "speaker_ref", ""),
+            },
+        )
+        return self.ingest_candidates(snapshot)
+
+    def ingest_audio_assessment(self, assessment: Any) -> list[TemporalPatternCandidate]:
+        """Ingest full AudioAssessment and return candidate patterns."""
+        candidates: list[TemporalPatternCandidate] = []
+        # Ingest speech if present
+        if getattr(assessment, "speech", None) is not None:
+            speech = assessment.speech
+            snapshot = PerceptionSnapshot(
+                event_type="audio.speech",
+                sub_type="speech",
+                source="speech_provider",
+                timestamp=getattr(assessment.observation.temporal, "start_time", time.time()),
+                payload={
+                    "observation_id": assessment.observation.observation_id,
+                    "transcript": speech.transcript,
+                },
+            )
+            candidates.extend(self.ingest_candidates(snapshot))
+
+        # Ingest sound events
+        for event in getattr(assessment, "events", []):
+            snapshot = PerceptionSnapshot(
+                event_type="audio.ambient",
+                sub_type=event.event_type,
+                source="ambient_provider",
+                timestamp=getattr(assessment.observation.temporal, "start_time", time.time()),
+                payload={
+                    "observation_id": assessment.observation.observation_id,
+                    "event_type": event.event_type,
+                    "confidence": event.confidence,
+                },
+            )
+            candidates.extend(self.ingest_candidates(snapshot))
+
+        return candidates
 
     async def _on_perception_event(self, msg: Message) -> None:
         """Handle perception events from the bus."""

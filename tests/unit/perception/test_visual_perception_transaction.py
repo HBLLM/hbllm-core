@@ -135,11 +135,11 @@ class TestCommitLearning:
         """Learning different label with similar embedding creates new concept + SIMILAR_TO."""
         # Learn "cup"
         a1 = await runtime.perceive_with_label(b"cup_image", "cup")
-        c1 = await transaction.commit_learning(a1)
+        await transaction.commit_learning(a1)
 
         # Learn "mug" with same image (will be similar) but different label
         a2 = await runtime.perceive_with_label(b"cup_image", "mug")
-        c2 = await transaction.commit_learning(a2)
+        await transaction.commit_learning(a2)
 
         # Should create two different concepts
         concepts = graph.nodes_by_type(HCIRNodeType.VISUAL_CONCEPT)

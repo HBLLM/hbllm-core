@@ -128,6 +128,51 @@ class WorldStateEngine:
         }
         self._timestamps["audio"] = time.time()
 
+    def update_from_audio_assessment(self, assessment: Any) -> None:
+        """Update world state from typed AudioAssessment (HCIR pathway)."""
+        self._updates_received += 1
+        sound_class = "speech" if getattr(assessment, "speech", None) else "ambient"
+        confidence = 1.0
+        is_critical = False
+
+        if getattr(assessment, "events", None):
+            best = max(assessment.events, key=lambda e: getattr(e, "confidence", 0.0))
+            sound_class = getattr(best, "event_type", sound_class)
+            confidence = getattr(best, "confidence", confidence)
+            is_critical = getattr(best, "is_critical", False)
+        elif getattr(assessment, "speech", None):
+            confidence = getattr(assessment.speech, "confidence", 1.0)
+
+        self._audio_env = {
+            "sound_class": sound_class,
+            "confidence": confidence,
+            "energy_db": getattr(assessment.observation, "energy_db", -40.0),
+            "is_critical": is_critical,
+            "transcript": getattr(assessment.speech, "transcript", "") if getattr(assessment, "speech", None) else "",
+            "_updated_at": time.time(),
+        }
+        self._timestamps["audio"] = time.time()
+
+    def update_from_audio_observation(self, node: Any) -> None:
+        """Update world state from HCIR AudioObservationNode."""
+        self._updates_received += 1
+        self._audio_env = {
+            "sound_class": getattr(node, "event_type", "unknown"),
+            "confidence": 1.0,
+            "transcript": getattr(node, "transcript", ""),
+            "_updated_at": getattr(node, "start_time", time.time()) or time.time(),
+        }
+        self._timestamps["audio"] = time.time()
+
+    def update_from_hcir(self, graph: Any) -> None:
+        """Update world state from HCIR CognitiveGraph (authoritative state)."""
+        from hbllm.hcir.graph import HCIRNodeType
+        # Audio observations
+        audio_nodes = list(graph.nodes_by_type(HCIRNodeType.AUDIO_OBSERVATION))
+        if audio_nodes:
+            latest_audio = max(audio_nodes, key=lambda n: getattr(n, "start_time", 0.0))
+            self.update_from_audio_observation(latest_audio)
+
     async def _on_user_state(self, msg: Message) -> None:
         self._updates_received += 1
         self._user_state = msg.payload
