@@ -203,6 +203,7 @@ class Scope(BaseModel):
 
     Attributes:
         tenant_id: Tenant isolation boundary.
+        workspace_id: Workspace/domain context within tenant.
         user_id: User within tenant.
         device_id: Device within user scope.
         cluster_id: Distributed cluster identifier.
@@ -211,6 +212,7 @@ class Scope(BaseModel):
     """
 
     tenant_id: str = "default"
+    workspace_id: str = "default"
     user_id: str = "default"
     device_id: str = "default"
     cluster_id: str = "local"
