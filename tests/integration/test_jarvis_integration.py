@@ -69,10 +69,13 @@ async def test_temporal_to_spatial_correlation(tmp_path):
         await spatial.record_interaction("t1", "office", "coding")
 
     # Both subsystems have data
-    _patterns = temporal.detect_patterns("t1")  # noqa: F841
-    location_ctx = await spatial.get_location_context("t1", "office")
-    assert len(location_ctx) >= 1
-    assert location_ctx[0].domain == "coding"
+    try:
+        _patterns = temporal.detect_patterns("t1")  # noqa: F841
+        location_ctx = await spatial.get_location_context("t1", "office")
+        assert len(location_ctx) >= 1
+        assert location_ctx[0].domain == "coding"
+    finally:
+        await spatial.close()
 
 
 @pytest.mark.asyncio

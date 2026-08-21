@@ -480,6 +480,7 @@ class TestLearnerNodeMicroLearning:
 # ── Factory Integration Tests ────────────────────────────────────────────
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 @pytest.mark.asyncio
 class TestPhase2FactoryIntegration:
     """Verify Phase 2 nodes are wired into Brain via factory."""
