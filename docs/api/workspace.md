@@ -29,9 +29,7 @@ from hbllm.workspace.workspace_manager import WorkspaceManager
 manager = WorkspaceManager(base_dir=Path("./workspace"))
 
 # Acquire an isolated workspace for a session
-with manager.session_workspace(
-    tenant_id="tenant-alpha", session_id="session-42"
-) as ws:
+with manager.session_workspace(tenant_id="tenant-alpha", session_id="session-42") as ws:
     scratch_file = ws.path / "temp_script.py"
     scratch_file.write_text("print('Hello from sandboxed workspace')")
     print(f"Executing in isolated workspace: {ws.path}")

@@ -97,7 +97,5 @@ runtime.add_modifier(
 )
 
 # Transform text input
-transformed_prompt = runtime.apply(
-    "Check query slow log for PostgreSQL table users"
-)
+transformed_prompt = runtime.apply("Check query slow log for PostgreSQL table users")
 ```

@@ -110,10 +110,10 @@ Every piece of evidence carries a `ProviderProvenance` record:
 ```python
 @dataclass(frozen=True)
 class ProviderProvenance:
-    provider: str      # e.g., "moonshine", "ambient", "resemblyzer"
-    model: str         # e.g., "base", "yamnet", "ge2e"
-    version: str       # e.g., "1.2"
-    device: str        # e.g., "cpu", "cuda"
+    provider: str  # e.g., "moonshine", "ambient", "resemblyzer"
+    model: str  # e.g., "base", "yamnet", "ge2e"
+    version: str  # e.g., "1.2"
+    device: str  # e.g., "cpu", "cuda"
 ```
 
 ---

@@ -79,9 +79,7 @@ curiosity = CuriosityEngine(workspace=workspace)
 signals = await curiosity.prioritize_investigations(limit=5)
 
 for sig in signals:
-    print(
-        f"Investigation Target: {sig.target_id}, Information Value: {sig.priority_score:.2f}"
-    )
+    print(f"Investigation Target: {sig.target_id}, Information Value: {sig.priority_score:.2f}")
 ```
 
 ### `EpistemicCalibrationEngine`

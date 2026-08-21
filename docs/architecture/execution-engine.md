@@ -98,9 +98,7 @@ from hbllm.execution.text.text_runtime import TextRuntime
 async def main():
     # 1. Initialize text execution runtime with modifiers
     runtime = TextRuntime()
-    runtime.add_modifier(
-        PromptModifier(prefix="[System: Respond with strict JSON]\n")
-    )
+    runtime.add_modifier(PromptModifier(prefix="[System: Respond with strict JSON]\n"))
     runtime.add_modifier(GrammarModifier(schema={"type": "object"}))
 
     # 2. Build declarative execution plan
