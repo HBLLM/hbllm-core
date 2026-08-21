@@ -148,11 +148,11 @@ class LIFNeuron(BaseNeuron):
         self.last_update_time = None
         self.refractory_time_remaining = 0.0
         self._firing_history = []
+        self._effective_threshold = self.config.threshold
 
     def reset(self) -> None:
         """Alias for reset_state()."""
         self.reset_state()
-        self._effective_threshold = self.config.threshold
 
 
 class SpikingAccumulator:
