@@ -35,21 +35,52 @@ from hbllm.perception.providers.audio_types import (
 
 # Deterministic word pool for transcript generation
 _WORD_POOL = [
-    "hello", "world", "turn", "on", "off", "the", "light",
-    "what", "is", "time", "play", "music", "stop", "open",
-    "door", "set", "alarm", "call", "home", "check",
+    "hello",
+    "world",
+    "turn",
+    "on",
+    "off",
+    "the",
+    "light",
+    "what",
+    "is",
+    "time",
+    "play",
+    "music",
+    "stop",
+    "open",
+    "door",
+    "set",
+    "alarm",
+    "call",
+    "home",
+    "check",
 ]
 
 # Deterministic event pool
 _EVENT_POOL = [
-    "silence", "speech", "doorbell", "knock", "alarm",
-    "dog_bark", "vehicle", "footsteps", "music", "appliance",
+    "silence",
+    "speech",
+    "doorbell",
+    "knock",
+    "alarm",
+    "dog_bark",
+    "vehicle",
+    "footsteps",
+    "music",
+    "appliance",
 ]
 
 # Deterministic scene tags
 _SCENE_TAGS = [
-    "indoor", "outdoor", "quiet", "noisy", "residential",
-    "urban", "natural", "mechanical",
+    "indoor",
+    "outdoor",
+    "quiet",
+    "noisy",
+    "residential",
+    "urban",
+    "natural",
+    "mechanical",
 ]
 
 
@@ -170,9 +201,7 @@ class MockAudioProvider:
         audio_chunks: Sequence[AudioInput],
     ) -> SpeechResult:
         """Transcribe by combining chunk hashes."""
-        combined = b"".join(
-            _hash_audio(chunk).encode() for chunk in audio_chunks
-        )
+        combined = b"".join(_hash_audio(chunk).encode() for chunk in audio_chunks)
         return await self.transcribe(combined)
 
     # ── AcousticEventProvider ───────────────────────────────────────────

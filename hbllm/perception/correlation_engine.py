@@ -164,10 +164,7 @@ class CorrelationEngine:
 
         # ── Combined score ──
         if spatial_overlap is not None:
-            score = (
-                self.temporal_weight * temporal_overlap
-                + self.spatial_weight * spatial_overlap
-            )
+            score = self.temporal_weight * temporal_overlap + self.spatial_weight * spatial_overlap
         else:
             # No spatial data — score based on temporal alone
             score = temporal_overlap

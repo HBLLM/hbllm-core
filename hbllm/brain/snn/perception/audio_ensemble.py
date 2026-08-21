@@ -68,10 +68,10 @@ AUDIO_CHANNEL_CONFIGS: dict[str, LIFConfig] = {
 # Input vector: [energy, spectral_centroid, spectral_flux, zero_crossing_rate, speech_likelihood]
 
 AUDIO_SIGNAL_WEIGHTS: dict[str, list[float]] = {
-    "speech": [0.2, 0.1, 0.1, 0.2, 0.8],      # Speech likelihood dominant
-    "event": [0.5, 0.3, 0.6, 0.2, 0.1],       # Flux + energy dominant
-    "change": [0.2, 0.6, 0.7, 0.1, 0.0],      # Centroid + flux dominant
-    "transient": [0.8, 0.2, 0.8, 0.3, 0.0],   # Energy + flux dominant
+    "speech": [0.2, 0.1, 0.1, 0.2, 0.8],  # Speech likelihood dominant
+    "event": [0.5, 0.3, 0.6, 0.2, 0.1],  # Flux + energy dominant
+    "change": [0.2, 0.6, 0.7, 0.1, 0.0],  # Centroid + flux dominant
+    "transient": [0.8, 0.2, 0.8, 0.3, 0.0],  # Energy + flux dominant
 }
 
 

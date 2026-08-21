@@ -52,8 +52,12 @@ class TestPerceptualEpistemicProfile:
         assert abs(profile.reliability - 0.80) < 1e-4
 
     def test_preserves_multidimensional_evidence(self) -> None:
-        p1 = PerceptualEpistemicProfile(sensory_clarity=0.9, model_confidence=0.6, temporal_stability=0.9)
-        p2 = PerceptualEpistemicProfile(sensory_clarity=0.6, model_confidence=0.9, temporal_stability=0.9)
+        p1 = PerceptualEpistemicProfile(
+            sensory_clarity=0.9, model_confidence=0.6, temporal_stability=0.9
+        )
+        p2 = PerceptualEpistemicProfile(
+            sensory_clarity=0.6, model_confidence=0.9, temporal_stability=0.9
+        )
         # Different underlying dimensions even if composite is close
         assert p1.sensory_clarity != p2.sensory_clarity
         assert p1.model_confidence != p2.model_confidence
@@ -106,7 +110,9 @@ class TestEpistemicLikelihoodEvaluator:
         graph.upsert_node(evidence)
 
         assessment = perceptual_eval.evaluate(evidence)
-        prop_lik = evaluator.evaluate_likelihood(belief, evidence, assessment, direction="supporting")
+        prop_lik = evaluator.evaluate_likelihood(
+            belief, evidence, assessment, direction="supporting"
+        )
 
         assert prop_lik.p_e_given_h > 0.8
         assert prop_lik.p_e_given_not_h < 0.2
@@ -205,7 +211,8 @@ class TestThreeLevelContradictions:
 
         reports = await engine.scan_for_perceptual_contradictions()
         l1_reports = [
-            r for r in reports
+            r
+            for r in reports
             if r.contradiction_level == PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT
         ]
         assert len(l1_reports) >= 1
@@ -233,7 +240,8 @@ class TestThreeLevelContradictions:
 
         reports = await engine.scan_for_perceptual_contradictions()
         l2_reports = [
-            r for r in reports
+            r
+            for r in reports
             if r.contradiction_level == PerceptualContradictionLevel.LEVEL_2_CROSS_MODAL_CONFLICT
         ]
         assert len(l2_reports) >= 1
@@ -261,7 +269,8 @@ class TestThreeLevelContradictions:
 
         reports = await engine.scan_for_perceptual_contradictions()
         l3_reports = [
-            r for r in reports
+            r
+            for r in reports
             if r.contradiction_level == PerceptualContradictionLevel.LEVEL_3_BELIEF_CONFLICT
         ]
         assert len(l3_reports) >= 1
@@ -278,14 +287,18 @@ class TestPerceptionEpistemicBridge:
         obs = AcousticObservation(
             observation_id="aud_123",
             temporal=TemporalSpan(start_time=now, end_time=now + 2.0, duration=2.0),
-            provenance=ProviderProvenance(provider="moonshine", model="base", version="1.0", device="cpu"),
+            provenance=ProviderProvenance(
+                provider="moonshine", model="base", version="1.0", device="cpu"
+            ),
         )
         assessment = AudioAssessment(
             observation=obs,
             speech=SpeechEvidence(
                 transcript="Antigravity online",
                 confidence=0.94,
-                provider_provenance=ProviderProvenance(provider="moonshine", model="base", version="1.0", device="cpu"),
+                provider_provenance=ProviderProvenance(
+                    provider="moonshine", model="base", version="1.0", device="cpu"
+                ),
             ),
             epistemic_profile=AudioEpistemicProfile(
                 perceptual_confidence=0.92,
@@ -332,8 +345,5 @@ class TestPerceptionEpistemicBridge:
         assert cand.confidence > 0.5
 
         # Check CORRELATES_WITH edge in graph
-        corr_edges = [
-            e for e in graph.all_edges()
-            if e.edge_type == HCIREdgeType.CORRELATES_WITH
-        ]
+        corr_edges = [e for e in graph.all_edges() if e.edge_type == HCIREdgeType.CORRELATES_WITH]
         assert len(corr_edges) == 1

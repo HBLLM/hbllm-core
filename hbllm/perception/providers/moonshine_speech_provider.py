@@ -169,8 +169,7 @@ class MoonshineSpeechProvider:
                 logger.info("Moonshine ASR loaded successfully")
             except ImportError:
                 logger.warning(
-                    "moonshine-onnx not installed. "
-                    "Install with: pip install useful-moonshine-onnx"
+                    "moonshine-onnx not installed. Install with: pip install useful-moonshine-onnx"
                 )
             except Exception:
                 logger.exception("Failed to load Moonshine model")
@@ -319,7 +318,9 @@ class MoonshineSpeechProvider:
                 pass
 
     async def _transcribe_nvidia_pcm(
-        self, samples: np.ndarray, api_key: str,
+        self,
+        samples: np.ndarray,
+        api_key: str,
     ) -> str | None:
         """Transcribe via NVIDIA Cloud Whisper API."""
         import tempfile
@@ -361,7 +362,10 @@ class MoonshineSpeechProvider:
     # ── Confidence Estimation ────────────────────────────────────────────
 
     def _estimate_confidence(
-        self, transcript: str, samples: np.ndarray, elapsed: float,
+        self,
+        transcript: str,
+        samples: np.ndarray,
+        elapsed: float,
     ) -> float:
         """Estimate transcription confidence from heuristics."""
         if not transcript:

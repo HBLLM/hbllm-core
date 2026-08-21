@@ -81,7 +81,7 @@ def extract_audio_signals(
     audio = audio.astype(np.float32)
 
     # ── Energy (RMS) ──
-    rms = float(np.sqrt(np.mean(audio ** 2)))
+    rms = float(np.sqrt(np.mean(audio**2)))
     # Normalize: -60 dB → 0.0, 0 dB → 1.0
     energy_db = 20 * np.log10(max(rms, 1e-10))
     energy = float(np.clip((energy_db + 60) / 60, 0.0, 1.0))
@@ -105,7 +105,7 @@ def extract_audio_signals(
     if prev_spectrum is not None and prev_spectrum.size == spectrum.size:
         flux = float(np.sum((spectrum - prev_spectrum) ** 2))
         # Normalize by frame energy
-        max_flux = float(np.sum(spectrum ** 2)) + 1e-10
+        max_flux = float(np.sum(spectrum**2)) + 1e-10
         spectral_flux = float(np.clip(flux / max_flux, 0.0, 1.0))
     else:
         spectral_flux = 0.0

@@ -139,17 +139,50 @@ class DiscoveryBeliefManager:
     ) -> BeliefTransition:
         """Revise belief confidence using Bayesian odds-space updating.
 
-        O(H|E) = O(H) * LR
+        O(H|E) = O(H) * LR_effective
         P(H|E) = O(H|E) / (1 + O(H|E))
+
+        Idempotency invariant: An evidence item can cause at most one
+        authoritative belief transition per proposition. The idempotency
+        key is (evidence_id, belief_id).
 
         Emits and commits an event-sourced BeliefTransitionNode into HCIR.
         """
+        from hbllm.hcir.graph import EvidenceNode
+
         node = self._graph.get_node(belief_id)
         if not isinstance(node, BeliefNode):
             raise ValueError(f"Node {belief_id} is not a BeliefNode")
 
         prior_confidence = float(node.uncertainty.confidence)
         prior_revision = node.current_revision
+
+        # ── Idempotency guard: (evidence_id, belief_id) ──
+        evidence_node = self._graph.get_node(proposition_likelihood.evidence_id)
+        if isinstance(evidence_node, EvidenceNode):
+            if belief_id in evidence_node.incorporated_transitions:
+                existing_tid = evidence_node.incorporated_transitions[belief_id]
+                logger.debug(
+                    "Idempotency guard: evidence=%s already incorporated for "
+                    "belief=%s (transition=%s). Returning no-op.",
+                    proposition_likelihood.evidence_id,
+                    belief_id,
+                    existing_tid,
+                )
+                return BeliefTransition(
+                    transition_id="",
+                    belief_id=belief_id,
+                    prior_confidence=prior_confidence,
+                    posterior_confidence=prior_confidence,
+                    delta=0.0,
+                    prior_revision=prior_revision,
+                    posterior_revision=prior_revision,
+                    likelihood_ratio=proposition_likelihood.likelihood_ratio,
+                    effective_likelihood_ratio=1.0,
+                    novelty_score=0.0,
+                    source_evidence_id=proposition_likelihood.evidence_id,
+                    rationale="No update: already incorporated for this proposition",
+                )
 
         # Check if update should be skipped
         if proposition_likelihood.status in ("insufficient", "redundant"):
@@ -167,6 +200,8 @@ class DiscoveryBeliefManager:
                 prior_revision=prior_revision,
                 posterior_revision=prior_revision,
                 likelihood_ratio=proposition_likelihood.likelihood_ratio,
+                effective_likelihood_ratio=proposition_likelihood.effective_likelihood_ratio,
+                novelty_score=proposition_likelihood.novelty_discount,
                 source_evidence_id=proposition_likelihood.evidence_id,
                 rationale=f"No update: status={proposition_likelihood.status}",
             )
@@ -175,9 +210,9 @@ class DiscoveryBeliefManager:
         p_prior = max(0.001, min(0.999, prior_confidence))
         prior_odds = p_prior / (1.0 - p_prior)
 
-        # 2. Update posterior odds via Likelihood Ratio (LR)
-        lr = proposition_likelihood.likelihood_ratio
-        posterior_odds = prior_odds * lr
+        # 2. Update posterior odds via effective Likelihood Ratio (dependence-corrected)
+        effective_lr = proposition_likelihood.effective_likelihood_ratio
+        posterior_odds = prior_odds * effective_lr
 
         # 3. Convert back to posterior probability
         posterior_confidence = posterior_odds / (1.0 + posterior_odds)
@@ -217,10 +252,13 @@ class DiscoveryBeliefManager:
             delta=delta,
             prior_revision=prior_revision,
             posterior_revision=posterior_revision,
-            likelihood_ratio=lr,
+            likelihood_ratio=proposition_likelihood.likelihood_ratio,
+            effective_likelihood_ratio=effective_lr,
+            novelty_score=proposition_likelihood.novelty_discount,
             source_evidence_id=proposition_likelihood.evidence_id,
             timestamp=time.time(),
-            rationale=rationale or f"LR={lr:.2f} ({proposition_likelihood.status})",
+            rationale=rationale
+            or f"LR_eff={effective_lr:.2f} (novelty={proposition_likelihood.novelty_discount:.3f}, {proposition_likelihood.status})",
         )
 
         transition_node = BeliefTransitionNode(
@@ -231,24 +269,37 @@ class DiscoveryBeliefManager:
             delta=delta,
             prior_revision=prior_revision,
             posterior_revision=posterior_revision,
-            likelihood_ratio=lr,
+            likelihood_ratio=proposition_likelihood.likelihood_ratio,
+            effective_likelihood_ratio=effective_lr,
+            novelty_score=proposition_likelihood.novelty_discount,
             source_evidence_id=proposition_likelihood.evidence_id,
             rationale=transition_record.rationale,
         )
         self._graph.upsert_node(transition_node)
 
         # Append lightweight history entry to node
-        node.revision_history.append({
-            "timestamp": transition_record.timestamp,
-            "transition_id": transition_id,
-            "prior": prior_confidence,
-            "posterior": posterior_confidence,
-            "delta": delta,
-            "evidence_id": proposition_likelihood.evidence_id,
-        })
+        node.revision_history.append(
+            {
+                "timestamp": transition_record.timestamp,
+                "transition_id": transition_id,
+                "prior": prior_confidence,
+                "posterior": posterior_confidence,
+                "delta": delta,
+                "evidence_id": proposition_likelihood.evidence_id,
+                "effective_lr": effective_lr,
+                "novelty": proposition_likelihood.novelty_discount,
+            }
+        )
         self._graph.upsert_node(node)
 
-        # 6. Commit epistemic edge
+        # 6. Mark evidence node as incorporated for this proposition
+        if isinstance(evidence_node, EvidenceNode):
+            evidence_node.incorporated_transitions[belief_id] = transition_id
+            evidence_node.incorporation_status = "incorporated"
+            evidence_node.last_incorporated_at = time.time()
+            self._graph.upsert_node(evidence_node)
+
+        # 7. Commit epistemic edge
         edge_type = HCIREdgeType.STRENGTHENS if delta >= 0 else HCIREdgeType.WEAKENS
         edge = HCIREdge(
             edge_type=edge_type,

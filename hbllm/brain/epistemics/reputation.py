@@ -4,34 +4,47 @@ Tracks the reliability of knowledge sources over time.  The system
 learns which sources are trustworthy, which reasoning patterns work,
 and which hypothesis origins historically succeed.
 
-This is the internal epistemic model that humans use subconsciously:
-"Source A's claims are confirmed 90% of the time; Source B only 30%."
+A11 Architectural Invariant:
+    Provider reputation decomposes into three INDEPENDENT scores:
 
-Architecture::
+    1. signal_quality      — SNR, sensor clarity, raw output quality
+    2. cross_modal_concordance — agreement with other modalities
+    3. empirical_accuracy   — ground-truth validated outcomes ONLY
 
-    Claim from Source A → confirmed    → reputation ↑
-    Claim from Source A → contradicted → reputation ↓
+    Cross-modal consensus updates only cross_modal_concordance,
+    NEVER empirical_accuracy. empirical_accuracy may ONLY be
+    updated by external ground truth:
+    - Experiment verification
+    - User confirmation
+    - Tool execution
+    - External verification
 
-    New claim from Source A:
-        "Source A has 0.87 reputation → weight this claim higher"
+Provider reputation remains OUTSIDE the belief feedback loop::
 
-    New claim from Source B:
-        "Source B has 0.34 reputation → weight this claim lower"
+                    PROVIDER
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+   signal_quality  concordance  empirical_accuracy
+                                      ▲
+                                      │
+                              external ground truth
 
 Usage::
 
     tracker = SourceReputationTracker(data_dir=Path("./research"))
 
-    # Record outcomes
-    await tracker.record_outcome("arxiv:2301.12345", "claim_001", confirmed=True)
-    await tracker.record_outcome("arxiv:2301.12345", "claim_002", confirmed=True)
-    await tracker.record_outcome("blog:random", "claim_003", confirmed=False)
+    # Record external ground truth outcomes
+    await tracker.record_empirical_outcome(
+        "vision_yolo", "claim_001",
+        outcome=OutcomeType.EXPERIMENT, verified=True
+    )
 
-    # Query reputation
-    score = await tracker.get_reputation("arxiv:2301.12345")  # → 0.85
+    # Record cross-modal concordance (does NOT affect empirical_accuracy)
+    await tracker.record_concordance("vision_yolo", concordant=True)
 
-    # Get top sources
-    tops = await tracker.get_top_sources(domain="neuroscience")
+    # Record sensor signal quality
+    await tracker.record_signal_quality("vision_yolo", quality_score=0.85)
 """
 
 from __future__ import annotations
@@ -54,21 +67,40 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SourceReputation:
-    """Reputation record for a knowledge source."""
+    """Reputation record for a knowledge source.
+
+    Decomposes into three independent scores:
+    - signal_quality: SNR, sensor clarity, raw output quality
+    - cross_modal_concordance: agreement with other modalities
+    - empirical_accuracy: ground-truth validated outcomes ONLY
+    """
 
     source_id: str = ""
     display_name: str = ""
     domain: str = ""  # Primary knowledge domain
 
-    # Tracking
+    # Three independent reputation dimensions
+    signal_quality: float = 0.5  # SNR, sensor clarity [0.0, 1.0]
+    cross_modal_concordance: float = 0.5  # Agreement with other modalities [0.0, 1.0]
+    empirical_accuracy: float = 0.5  # Ground-truth validated outcomes ONLY [0.0, 1.0]
+
+    # Legacy tracking (still used for empirical_accuracy computation)
     total_claims: int = 0
     confirmed_claims: int = 0
     refuted_claims: int = 0
     pending_claims: int = 0
 
-    # Computed scores
+    # Derived scores
     confirmation_rate: float = 0.5  # confirmed / total (smoothed)
-    reputation_score: float = 0.5  # Weighted reputation [0.0, 1.0]
+    reputation_score: float = 0.5  # Composite reputation [0.0, 1.0]
+
+    # Concordance tracking
+    concordance_total: int = 0
+    concordance_agreements: int = 0
+
+    # Signal quality tracking
+    signal_quality_samples: int = 0
+    signal_quality_sum: float = 0.0
 
     # History
     first_seen: float = field(default_factory=time.time)
@@ -76,17 +108,32 @@ class SourceReputation:
     score_history: list[dict[str, Any]] = field(default_factory=list)
     # Each entry: {"timestamp": float, "score": float, "reason": str}
 
+    def compute_composite_reputation(self) -> float:
+        """Compute composite reputation from three independent dimensions."""
+        return (
+            0.3 * self.signal_quality
+            + 0.2 * self.cross_modal_concordance
+            + 0.5 * self.empirical_accuracy
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "source_id": self.source_id,
             "display_name": self.display_name,
             "domain": self.domain,
+            "signal_quality": self.signal_quality,
+            "cross_modal_concordance": self.cross_modal_concordance,
+            "empirical_accuracy": self.empirical_accuracy,
             "total_claims": self.total_claims,
             "confirmed_claims": self.confirmed_claims,
             "refuted_claims": self.refuted_claims,
             "pending_claims": self.pending_claims,
             "confirmation_rate": self.confirmation_rate,
             "reputation_score": self.reputation_score,
+            "concordance_total": self.concordance_total,
+            "concordance_agreements": self.concordance_agreements,
+            "signal_quality_samples": self.signal_quality_samples,
+            "signal_quality_sum": self.signal_quality_sum,
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "score_history": self.score_history,
@@ -98,12 +145,19 @@ class SourceReputation:
             source_id=d.get("source_id", ""),
             display_name=d.get("display_name", ""),
             domain=d.get("domain", ""),
+            signal_quality=d.get("signal_quality", 0.5),
+            cross_modal_concordance=d.get("cross_modal_concordance", 0.5),
+            empirical_accuracy=d.get("empirical_accuracy", 0.5),
             total_claims=d.get("total_claims", 0),
             confirmed_claims=d.get("confirmed_claims", 0),
             refuted_claims=d.get("refuted_claims", 0),
             pending_claims=d.get("pending_claims", 0),
             confirmation_rate=d.get("confirmation_rate", 0.5),
             reputation_score=d.get("reputation_score", 0.5),
+            concordance_total=d.get("concordance_total", 0),
+            concordance_agreements=d.get("concordance_agreements", 0),
+            signal_quality_samples=d.get("signal_quality_samples", 0),
+            signal_quality_sum=d.get("signal_quality_sum", 0.0),
             first_seen=d.get("first_seen", time.time()),
             last_seen=d.get("last_seen", time.time()),
             score_history=d.get("score_history", []),
@@ -168,12 +222,62 @@ class SourceReputationTracker:
     ) -> SourceReputation:
         """Record whether a claim from a source was confirmed or refuted.
 
-        Updates the source's reputation score using Bayesian smoothing.
+        Updates the source's empirical_accuracy using Bayesian smoothing.
+        This is a convenience method that delegates to record_empirical_outcome.
         """
+        from hbllm.hcir.types import OutcomeType
+
+        return await self.record_empirical_outcome(
+            source_id=source_id,
+            claim_id=claim_id,
+            outcome=OutcomeType.EXTERNAL_VERIFICATION,
+            verified=confirmed,
+            domain=domain,
+            display_name=display_name,
+        )
+
+    async def record_empirical_outcome(
+        self,
+        source_id: str,
+        claim_id: str,
+        outcome: Any,
+        verified: bool,
+        domain: str = "",
+        display_name: str = "",
+    ) -> SourceReputation:
+        """Record an external ground-truth outcome for a source.
+
+        Anti-circularity guard: Only OutcomeType values (EXPERIMENT,
+        USER_CONFIRMATION, TOOL_EXECUTION, EXTERNAL_VERIFICATION) are
+        accepted. Internal belief convergence CANNOT update empirical_accuracy.
+
+        Args:
+            source_id: The source identifier.
+            claim_id: The claim being verified.
+            outcome: Must be a valid OutcomeType.
+            verified: Whether the claim was confirmed (True) or refuted (False).
+            domain: Knowledge domain.
+            display_name: Human-readable source name.
+
+        Raises:
+            ValueError: If outcome is not a valid OutcomeType.
+        """
+        from hbllm.hcir.types import OutcomeType
+
+        # Anti-circularity guard
+        valid_outcomes = set(OutcomeType)
+        outcome_str = str(outcome)
+        if outcome_str not in valid_outcomes:
+            raise ValueError(
+                f"Invalid outcome type '{outcome_str}' for empirical accuracy update. "
+                f"Only external ground truth is accepted: {sorted(valid_outcomes)}. "
+                f"Cross-modal consensus updates cross_modal_concordance only."
+            )
+
         rep = await self._get_or_create(source_id, domain, display_name)
 
         rep.total_claims += 1
-        if confirmed:
+        if verified:
             rep.confirmed_claims += 1
         else:
             rep.refuted_claims += 1
@@ -184,23 +288,26 @@ class SourceReputationTracker:
         beta = self._config.smoothing_beta
         rep.confirmation_rate = (rep.confirmed_claims + alpha) / (rep.total_claims + alpha + beta)
 
-        # Reputation score — confirmation rate weighted by claim count confidence
+        # Update empirical_accuracy
         claim_confidence = min(
             1.0,
             rep.total_claims / self._config.min_claims_for_confidence,
         )
-        # Blend between prior (0.5) and observed rate based on how many claims we have
-        rep.reputation_score = (
+        rep.empirical_accuracy = (
             (1.0 - claim_confidence) * 0.5  # Prior
             + claim_confidence * rep.confirmation_rate  # Observed
         )
+
+        # Update composite reputation
+        rep.reputation_score = rep.compute_composite_reputation()
 
         # Record history
         rep.score_history.append(
             {
                 "timestamp": time.time(),
                 "score": rep.reputation_score,
-                "reason": f"claim {claim_id} {'confirmed' if confirmed else 'refuted'}",
+                "dimension": "empirical_accuracy",
+                "reason": f"claim {claim_id} {'confirmed' if verified else 'refuted'} via {outcome_str}",
             }
         )
         # Trim history
@@ -211,11 +318,104 @@ class SourceReputationTracker:
         self._persist(rep)
 
         logger.debug(
-            "Source %s reputation: %.3f (confirmed=%d, refuted=%d)",
+            "Source %s empirical_accuracy: %.3f (confirmed=%d, refuted=%d, outcome=%s)",
             source_id,
-            rep.reputation_score,
+            rep.empirical_accuracy,
             rep.confirmed_claims,
             rep.refuted_claims,
+            outcome_str,
+        )
+        return rep
+
+    async def record_concordance(
+        self,
+        source_id: str,
+        concordant: bool,
+        domain: str = "",
+        display_name: str = "",
+    ) -> SourceReputation:
+        """Record cross-modal concordance for a source.
+
+        Updates ONLY cross_modal_concordance. Does NOT affect empirical_accuracy.
+        This is the correct place to record audio ↔ vision agreement.
+        """
+        rep = await self._get_or_create(source_id, domain, display_name)
+
+        rep.concordance_total += 1
+        if concordant:
+            rep.concordance_agreements += 1
+        rep.last_seen = time.time()
+
+        # Bayesian-smoothed concordance rate
+        alpha = self._config.smoothing_alpha
+        beta = self._config.smoothing_beta
+        rep.cross_modal_concordance = (rep.concordance_agreements + alpha) / (
+            rep.concordance_total + alpha + beta
+        )
+
+        # Update composite reputation
+        rep.reputation_score = rep.compute_composite_reputation()
+
+        # Record history
+        rep.score_history.append(
+            {
+                "timestamp": time.time(),
+                "score": rep.reputation_score,
+                "dimension": "cross_modal_concordance",
+                "reason": f"concordance {'agreement' if concordant else 'disagreement'}",
+            }
+        )
+        if len(rep.score_history) > self._config.max_history_entries:
+            rep.score_history = rep.score_history[-self._config.max_history_entries :]
+
+        self._cache[source_id] = rep
+        self._persist(rep)
+
+        logger.debug(
+            "Source %s concordance: %.3f (agreements=%d, total=%d)",
+            source_id,
+            rep.cross_modal_concordance,
+            rep.concordance_agreements,
+            rep.concordance_total,
+        )
+        return rep
+
+    async def record_signal_quality(
+        self,
+        source_id: str,
+        quality_score: float,
+        domain: str = "",
+        display_name: str = "",
+    ) -> SourceReputation:
+        """Record a signal quality measurement for a source.
+
+        Updates signal_quality via exponential moving average.
+        Does NOT affect empirical_accuracy or cross_modal_concordance.
+        """
+        rep = await self._get_or_create(source_id, domain, display_name)
+
+        rep.signal_quality_samples += 1
+        rep.signal_quality_sum += quality_score
+        rep.last_seen = time.time()
+
+        # Exponential moving average with increasing weight on observations
+        alpha = min(0.9, rep.signal_quality_samples / 10.0)
+        rep.signal_quality = (
+            (1.0 - alpha) * 0.5  # Prior
+            + alpha * (rep.signal_quality_sum / rep.signal_quality_samples)  # Observed
+        )
+
+        # Update composite reputation
+        rep.reputation_score = rep.compute_composite_reputation()
+
+        self._cache[source_id] = rep
+        self._persist(rep)
+
+        logger.debug(
+            "Source %s signal_quality: %.3f (samples=%d)",
+            source_id,
+            rep.signal_quality,
+            rep.signal_quality_samples,
         )
         return rep
 

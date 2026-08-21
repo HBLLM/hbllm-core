@@ -59,7 +59,8 @@ class TestPerceptualAssessment:
     def test_provider_provenance(self) -> None:
         assessment = PerceptualAssessment(
             provider_provenance=ProviderProvenance(
-                provider="moonshine", model="base",
+                provider="moonshine",
+                model="base",
             ),
         )
         assert assessment.provider_provenance.provider == "moonshine"

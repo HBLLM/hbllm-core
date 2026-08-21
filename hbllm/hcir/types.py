@@ -16,6 +16,9 @@ Design invariant:
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import time
 from enum import StrEnum
 from typing import Annotated
@@ -647,9 +650,7 @@ class PerceptualEpistemicProfile(BaseModel):
     def reliability(self) -> float:
         """Derived composite reliability score preserving multidimensional state."""
         return float(
-            0.3 * self.sensory_clarity
-            + 0.4 * self.model_confidence
-            + 0.3 * self.temporal_stability
+            0.3 * self.sensory_clarity + 0.4 * self.model_confidence + 0.3 * self.temporal_stability
         )
 
 
@@ -679,6 +680,103 @@ class PerceptualContradictionLevel(StrEnum):
     LEVEL_3_BELIEF_CONFLICT = "level_3_belief_conflict"
 
 
+class IncorporationStatus(StrEnum):
+    """Lifecycle status of evidence incorporation into belief revisions."""
+
+    PENDING = "pending"
+    INCORPORATED = "incorporated"
+    STALE = "stale"
+    REDUNDANT = "redundant"
+
+
+class EvidenceTemporalPattern(StrEnum):
+    """Classification of temporal evidence patterns.
+
+    - PERSISTENT: Same state repeated consistently (>3 consecutive similar).
+    - TRANSITION: Significant state change from previous observation.
+    - TRANSIENT: Single instantaneous event (knock, flash) — always high novelty.
+    - PERIODIC: Recurring pattern with detectable periodicity.
+    - UNKNOWN: Insufficient history to classify.
+    """
+
+    PERSISTENT = "persistent"
+    TRANSITION = "transition"
+    TRANSIENT = "transient"
+    PERIODIC = "periodic"
+    UNKNOWN = "unknown"
+
+
+class OutcomeType(StrEnum):
+    """Types of external ground truth for provider reputation validation.
+
+    Cross-modal consensus is explicitly excluded — it updates
+    cross_modal_concordance only, never empirical_accuracy.
+    """
+
+    EXPERIMENT = "experiment"
+    USER_CONFIRMATION = "user_confirmation"
+    TOOL_EXECUTION = "tool_execution"
+    EXTERNAL_VERIFICATION = "external_verification"
+
+
+class NoveltyPolicy(BaseModel):
+    """Configurable weights for multidimensional novelty computation.
+
+    Default policy: state transitions override temporal/semantic decay.
+    Different modalities (audio vs vision) may use different policies.
+    """
+
+    temporal_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    semantic_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    state_change_weight: float = Field(default=1.0, ge=0.0, le=1.0)
+    state_change_override: bool = True
+    half_life_seconds: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Half-life T½ for temporal novelty decay: n_t = 1 − 2^(−Δt/T½)",
+    )
+    novelty_threshold: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Below this composite novelty, evidence is treated as redundant",
+    )
+
+    def compute_temporal_novelty(self, delta_t_seconds: float) -> float:
+        """Compute temporal novelty using proper half-life decay.
+
+        n_t = 1 − 2^(−Δt / T½)
+        """
+        if delta_t_seconds <= 0.0:
+            return 0.0
+        return 1.0 - math.pow(2.0, -delta_t_seconds / self.half_life_seconds)
+
+
+class EpistemicRuntimeConfig(BaseModel):
+    """Immutable configuration snapshot for deterministic replay.
+
+    Captured at session start and stored as the first journal entry.
+    Replay must verify config_hash matches before reconstructing state.
+    """
+
+    novelty_policy: NoveltyPolicy = Field(default_factory=NoveltyPolicy)
+    bayesian_epsilon: float = 1e-5
+    falsification_threshold: float = 0.1
+    corroboration_threshold: float = 0.7
+    max_support_delta: float = 0.15
+    max_contradict_delta: float = 0.20
+    algorithm_version: str = "a11.0"
+    config_hash: str = ""
+
+    def model_post_init(self, __context: object) -> None:
+        """Compute config_hash after initialization."""
+        if not self.config_hash:
+            # Exclude config_hash itself from the hash computation
+            data = self.model_dump(exclude={"config_hash"})
+            raw = json.dumps(data, sort_keys=True, default=str)
+            self.config_hash = hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 class EvidenceAssessment(BaseModel):
     """General evaluation of evidence quality and reliability.
 
@@ -692,6 +790,16 @@ class EvidenceAssessment(BaseModel):
     epistemic_profile: PerceptualEpistemicProfile | None = None
     provenance_quality: Confidence = 0.8
     information_gain: float = 0.0
+    incorporation_status: IncorporationStatus = IncorporationStatus.PENDING
+    novelty_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    temporal_pattern: EvidenceTemporalPattern = EvidenceTemporalPattern.UNKNOWN
+    temporal_delta_seconds: float = 0.0
+    semantic_delta: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Jaccard distance from prior incorporated evidence tags",
+    )
 
 
 class PropositionLikelihood(BaseModel):
@@ -699,17 +807,44 @@ class PropositionLikelihood(BaseModel):
 
     Produced by EpistemicLikelihoodEvaluator to evaluate how well evidence E
     supports hypothesis H versus its negation ¬H.
+
+    Contains both raw LR (before dependence correction) and effective LR
+    (after novelty-based dependence correction: LR_effective = LR^novelty).
     """
 
     belief_id: str
     evidence_id: str
     p_e_given_h: float = Field(ge=0.0, le=1.0, default=0.5, description="P(E | H)")
     p_e_given_not_h: float = Field(ge=0.0, le=1.0, default=0.5, description="P(E | ¬H)")
-    likelihood_ratio: float = Field(default=1.0, description="LR = P(E|H) / P(E|¬H)")
+    likelihood_ratio: float = Field(default=1.0, description="LR = P(E|H) / P(E|¬H) (raw)")
+    raw_likelihood_ratio: float = Field(
+        default=1.0, description="Raw LR before dependence correction"
+    )
+    effective_likelihood_ratio: float = Field(
+        default=1.0,
+        description="LR^novelty — the value actually used for Bayesian update",
+    )
+    novelty_discount: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Novelty exponent applied: LR_eff = LR^novelty_discount",
+    )
     status: str = Field(
         default="informative",
         description="insufficient | redundant | informative | contradictory",
     )
+
+    def model_post_init(self, __context: object) -> None:
+        """Ensure backward compatibility when only likelihood_ratio is provided."""
+        if self.raw_likelihood_ratio == 1.0 and self.likelihood_ratio != 1.0:
+            self.raw_likelihood_ratio = self.likelihood_ratio
+        if (
+            self.effective_likelihood_ratio == 1.0
+            and self.likelihood_ratio != 1.0
+            and self.novelty_discount == 1.0
+        ):
+            self.effective_likelihood_ratio = self.likelihood_ratio
 
 
 class BeliefTransition(BaseModel):
@@ -726,8 +861,9 @@ class BeliefTransition(BaseModel):
     prior_revision: int = 0
     posterior_revision: int = 1
     likelihood_ratio: float = 1.0
+    effective_likelihood_ratio: float = 1.0
+    novelty_score: float = 1.0
     source_evidence_id: str = ""
     source_event_ids: list[str] = Field(default_factory=list)
     timestamp: Timestamp = Field(default_factory=time.time)
     rationale: str = ""
-

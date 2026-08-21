@@ -282,7 +282,11 @@ class CuriosityEngine:
             if not isinstance(node, ContradictionNode):
                 continue
 
-            level = getattr(node, "contradiction_level", PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT)
+            level = getattr(
+                node,
+                "contradiction_level",
+                PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT,
+            )
             if level == PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT:
                 trigger = DiscoveryTrigger.PERCEPTUAL_AMBIGUITY
                 gain = 0.6

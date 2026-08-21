@@ -7,6 +7,7 @@ versus its negation ¬H:
 - P(E | H)    = Probability of observing evidence E if hypothesis H is true
 - P(E | ¬H)   = Probability of observing evidence E if hypothesis H is false
 - LR          = P(E | H) / P(E | ¬H)  (Likelihood Ratio)
+- LR_eff      = LR^novelty  (dependence-corrected effective LR)
 
 Architecture::
 
@@ -15,13 +16,19 @@ Architecture::
                         ▼
     EpistemicLikelihoodEvaluator.evaluate_likelihood(belief, evidence, assessment)
                         │
+                        ├── raw LR from proposition semantics
+                        ├── novelty from TemporalEvidenceModel (if available)
+                        ├── effective LR = raw_LR^novelty
+                        └── information_gain = |log2(LR_eff)| × novelty
+                        │
                         ▼
-    PropositionLikelihood (P(E|H), P(E|¬H), LR, status)
+    PropositionLikelihood (P(E|H), P(E|¬H), raw_LR, effective_LR, status)
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any
 
@@ -32,15 +39,22 @@ logger = logging.getLogger(__name__)
 
 
 class EpistemicLikelihoodEvaluator:
-    """Evaluates proposition-specific likelihoods for a candidate belief and evidence."""
+    """Evaluates proposition-specific likelihoods for a candidate belief and evidence.
+
+    When a TemporalEvidenceModel is provided, applies dependence correction:
+    LR_effective = LR^novelty, where novelty ∈ [0.0, 1.0] corrects for
+    correlated observations from the same sensor pipeline.
+    """
 
     def __init__(
         self,
         graph: CognitiveGraph | None = None,
         llm: Any | None = None,
+        temporal_model: Any | None = None,
     ) -> None:
         self._graph = graph
         self._llm = llm
+        self._temporal_model = temporal_model
 
     def evaluate_likelihood(
         self,
@@ -58,7 +72,8 @@ class EpistemicLikelihoodEvaluator:
             direction: Explicit direction or auto-inferred from semantic alignment.
 
         Returns:
-            PropositionLikelihood containing P(E|H), P(E|¬H), LR, and categorization.
+            PropositionLikelihood containing P(E|H), P(E|¬H), raw LR,
+            effective LR (after dependence correction), and categorization.
         """
         reliability = float(assessment.reliability)
 
@@ -84,19 +99,56 @@ class EpistemicLikelihoodEvaluator:
             p_e_given_h = 0.5
             p_e_given_not_h = 0.5
 
-        # 3. Calculate Likelihood Ratio (LR)
-        lr = p_e_given_h / max(1e-6, p_e_given_not_h)
+        # 3. Calculate raw Likelihood Ratio (LR)
+        raw_lr = p_e_given_h / max(1e-6, p_e_given_not_h)
 
-        # 4. Categorize evidence incorporation decision
-        # - insufficient: reliability too low or evidence too weak
-        # - redundant: LR near 1.0 (no informational change)
-        # - contradictory: strongly disconfirms a high-confidence belief
-        # - informative: significant shift warranting Bayesian transition
+        # 4. Apply dependence correction via TemporalEvidenceModel
+        novelty_discount = 1.0
+        if self._temporal_model is not None:
+            novelty_assessment = self._temporal_model.assess(evidence, belief)
+            novelty_discount = novelty_assessment.composite_novelty
+
+            # If already incorporated for this proposition, force redundant
+            if novelty_assessment.already_incorporated:
+                return PropositionLikelihood(
+                    belief_id=belief.id,
+                    evidence_id=evidence.id,
+                    p_e_given_h=float(p_e_given_h),
+                    p_e_given_not_h=float(p_e_given_not_h),
+                    likelihood_ratio=float(raw_lr),
+                    raw_likelihood_ratio=float(raw_lr),
+                    effective_likelihood_ratio=1.0,
+                    novelty_discount=0.0,
+                    status="redundant",
+                )
+
+        # 5. Compute effective LR: LR_effective = LR^novelty
+        if novelty_discount <= 0.0 or raw_lr <= 0.0:
+            effective_lr = 1.0
+        elif novelty_discount >= 1.0:
+            effective_lr = raw_lr
+        else:
+            effective_lr = math.pow(raw_lr, novelty_discount)
+
+        # 6. Calculate information gain: |log2(LR_eff)| × novelty
+        if effective_lr > 0.0 and effective_lr != 1.0:
+            information_gain = abs(math.log2(effective_lr)) * novelty_discount
+        else:
+            information_gain = 0.0
+
+        # 7. Determine novelty threshold for redundancy
+        novelty_threshold = 0.05
+        if self._temporal_model is not None:
+            novelty_threshold = self._temporal_model.policy.novelty_threshold
+
+        # 8. Categorize evidence incorporation decision
         if reliability < 0.45:
             status = "insufficient"
-        elif 0.95 <= lr <= 1.05:
+        elif novelty_discount < novelty_threshold:
             status = "redundant"
-        elif lr < 0.35 and belief.uncertainty.confidence > 0.65:
+        elif 0.95 <= effective_lr <= 1.05:
+            status = "redundant"
+        elif effective_lr < 0.35 and belief.uncertainty.confidence > 0.65:
             status = "contradictory"
         else:
             status = "informative"
@@ -106,17 +158,25 @@ class EpistemicLikelihoodEvaluator:
             evidence_id=evidence.id,
             p_e_given_h=float(p_e_given_h),
             p_e_given_not_h=float(p_e_given_not_h),
-            likelihood_ratio=float(lr),
+            likelihood_ratio=float(raw_lr),
+            raw_likelihood_ratio=float(raw_lr),
+            effective_likelihood_ratio=float(effective_lr),
+            novelty_discount=float(novelty_discount),
             status=status,
         )
 
         logger.debug(
-            "Proposition likelihood for belief=%s, evidence=%s: P(E|H)=%.2f, P(E|¬H)=%.2f, LR=%.2f, status=%s",
+            "Proposition likelihood for belief=%s, evidence=%s: "
+            "P(E|H)=%.2f, P(E|¬H)=%.2f, raw_LR=%.2f, eff_LR=%.2f, "
+            "novelty=%.3f, IG=%.3f, status=%s",
             belief.id,
             evidence.id,
             p_e_given_h,
             p_e_given_not_h,
-            lr,
+            raw_lr,
+            effective_lr,
+            novelty_discount,
+            information_gain,
             status,
         )
 
@@ -127,19 +187,47 @@ class EpistemicLikelihoodEvaluator:
         # 1. Check if an explicit edge exists in the HCIR graph
         if self._graph is not None:
             for edge in self._graph.edges_from(evidence.id):
-                if edge.edge_type == HCIREdgeType.WEAKENS and any(t == claim or self._graph.get_node(t) is not None for t in edge.targets):
+                if edge.edge_type == HCIREdgeType.WEAKENS and any(
+                    t == claim or self._graph.get_node(t) is not None for t in edge.targets
+                ):
                     return "contradicting"
-                elif edge.edge_type == HCIREdgeType.STRENGTHENS and any(t == claim or self._graph.get_node(t) is not None for t in edge.targets):
+                elif edge.edge_type == HCIREdgeType.STRENGTHENS and any(
+                    t == claim or self._graph.get_node(t) is not None for t in edge.targets
+                ):
                     return "supporting"
 
         claim_norm = claim.lower()
 
         # 2. Check for semantic absence vs presence opposition
-        absence_terms = {"empty", "quiet", "nobody", "vacant", "silent", "dark", "no person", "clear", "unoccupied"}
+        absence_terms = {
+            "empty",
+            "quiet",
+            "nobody",
+            "vacant",
+            "silent",
+            "dark",
+            "no person",
+            "clear",
+            "unoccupied",
+        }
         presence_terms = {
-            "person", "human", "speech", "talking", "voice", "applause", "sound",
-            "crowd", "noise", "active", "asr", "speaker", "conversation",
-            "movement", "occupant", "occupied", "utterance",
+            "person",
+            "human",
+            "speech",
+            "talking",
+            "voice",
+            "applause",
+            "sound",
+            "crowd",
+            "noise",
+            "active",
+            "asr",
+            "speaker",
+            "conversation",
+            "movement",
+            "occupant",
+            "occupied",
+            "utterance",
         }
 
         has_absence_claim = any(term in claim_norm for term in absence_terms)
@@ -147,11 +235,15 @@ class EpistemicLikelihoodEvaluator:
 
         evidence_text = (
             " ".join([str(cand.get("label", "")) for cand in evidence.candidates]).lower()
-            + " " + evidence.methodology.lower()
-            + " " + evidence.modality.lower()
+            + " "
+            + evidence.methodology.lower()
+            + " "
+            + evidence.modality.lower()
         )
 
-        evidence_has_presence = any(term in evidence_text for term in presence_terms) or evidence.modality in ("audio", "visual")
+        evidence_has_presence = any(
+            term in evidence_text for term in presence_terms
+        ) or evidence.modality in ("audio", "visual")
         evidence_has_absence = any(term in evidence_text for term in absence_terms)
 
         if has_absence_claim and evidence_has_presence:

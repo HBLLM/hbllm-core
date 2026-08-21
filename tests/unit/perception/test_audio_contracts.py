@@ -541,30 +541,36 @@ class TestProtocolChecks:
 
     def test_audio_provider_is_runtime_checkable(self) -> None:
         assert hasattr(AudioProvider, "__protocol_attrs__") or isinstance(
-            AudioProvider, type,
+            AudioProvider,
+            type,
         )
 
     def test_speech_provider_is_runtime_checkable(self) -> None:
         assert hasattr(SpeechProvider, "__protocol_attrs__") or isinstance(
-            SpeechProvider, type,
+            SpeechProvider,
+            type,
         )
 
     def test_event_provider_is_runtime_checkable(self) -> None:
         assert hasattr(AcousticEventProvider, "__protocol_attrs__") or isinstance(
-            AcousticEventProvider, type,
+            AcousticEventProvider,
+            type,
         )
 
     def test_scene_provider_is_runtime_checkable(self) -> None:
         assert hasattr(AcousticSceneProvider, "__protocol_attrs__") or isinstance(
-            AcousticSceneProvider, type,
+            AcousticSceneProvider,
+            type,
         )
 
     def test_speaker_provider_is_runtime_checkable(self) -> None:
         assert hasattr(SpeakerProvider, "__protocol_attrs__") or isinstance(
-            SpeakerProvider, type,
+            SpeakerProvider,
+            type,
         )
 
     def test_localization_provider_is_runtime_checkable(self) -> None:
         assert hasattr(SoundLocalizationProvider, "__protocol_attrs__") or isinstance(
-            SoundLocalizationProvider, type,
+            SoundLocalizationProvider,
+            type,
         )

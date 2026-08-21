@@ -254,4 +254,3 @@ def test_fuser_ingest_event_produces_correlations():
     assert fused.is_multimodal is True
     assert len(fused.correlations) >= 1
     assert fused.to_dict()["correlation_count"] >= 1
-
