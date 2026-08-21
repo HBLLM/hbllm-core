@@ -189,21 +189,33 @@ graph TB
 
 ### Layer 1: Perception
 
-Input nodes that transform raw signals into structured messages:
+Perception transforms sensory signals into normalized, structured evidence carrying model provenance, which is committed into the HCIR cognitive graph:
 
-| Node                      | Input                    | Output                                                           |
-| ------------------------- | ------------------------ | ---------------------------------------------------------------- |
-| `VisionNode`              | Images, video frames     | Captions, OCR text, object labels                                |
-| `AudioInputNode`          | Microphone stream        | Transcribed text (STT)                                           |
-| `VideoStreamNode`         | Camera / RTSP feeds      | Frame events, motion detection                                   |
-| `GestureNode`             | Body/hand landmarks      | Gesture classification events                                    |
-| `AmbientAudioClassifier`  | Background audio         | Scene classification (speech, music, silence, noise)             |
-| `SpeakerIdNode`           | Audio embeddings         | Speaker identification and diarization                           |
-| `ConversationTurnManager` | STT + TTS events         | Turn state management (IDLE → LISTENING → PROCESSING → SPEAKING) |
-| `TemporalFuser`           | Multi-sensor streams     | Fused perception snapshots with temporal alignment               |
-| `WorldStateTracker`       | All perception events    | Unified world state model (entities, locations, activities)      |
-| `IoTMQTTNode`             | MQTT sensor topics       | Structured sensor events                                         |
-| `ROS2Node`                | ROS2 topic subscriptions | Robot state, LIDAR, joint data                                   |
+```text
+Providers produce raw/typed perception results
+        ↓
+AudioPerceptionRuntime / VisionPipeline normalizes them into Evidence + ProviderProvenance
+        ↓
+SNN decides processing depth
+        ↓
+Perception Transactions commit observations to HCIR Graph
+        ↓
+CorrelationEngine establishes CORRELATES_WITH edges without early factual collapse
+        ↓
+Cognitive Core & Epistemics interpret the evidence graph
+```
+
+| Component | Role | Description |
+| :--- | :--- | :--- |
+| **`MoonshineSpeechProvider`** | Speech Provider | Fast on-device ASR (<100ms) with Whisper and NVIDIA cloud fallback |
+| **`AmbientEventProvider`** | Event & Scene Provider | YAMNet-based acoustic classification and ambient scene characterization |
+| **`ResemblyzerSpeakerProvider`**| Speaker Provider | 256-dim GE2E speaker embeddings and profile matching |
+| **`AudioInputNode`** | Transport Adapter | Silero VAD, streaming chunk buffer, and bus message bridge |
+| **`AudioPerceptionRuntime`** | Normalization Runtime | Assembles multi-provider evidence, attaches `ProviderProvenance`, and gates SNN depth |
+| **`CorrelationEngine`** | Multimodal Alignment | Pure geometric & temporal correlation across visual and audio observations |
+| **`PerceptionFuser`** | Sliding Window Fuser | Collects multi-modal events and produces `FusedContext` with correlation candidates |
+| **`VisionNode`** | Vision Perception | Captions, OCR text, and dense visual embeddings |
+| **`WorldStateTracker`** | World State | Unified world state model (entities, locations, activities) |
 
 ### Layer 2: Cognitive Core
 

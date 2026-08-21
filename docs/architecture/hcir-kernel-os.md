@@ -207,6 +207,33 @@ Managed persistence layer providing workload-tuned SQLite connection PRAGMAs:
 
 ---
 
+## Cross-Modal Hyperedges & Perception Transactions
+
+HCIR serves as the unified representational graph for perceptual observations across modalities (vision, audio, touch, etc.).
+
+### 1. Invariant: Evidence vs. Belief
+Perception providers produce structured evidence; HCIR transactions commit typed observation nodes (`VisualObservationNode`, `AudioObservationNode`). The system avoids premature factual collapse by preserving competing hypotheses and measurable correlations.
+
+```mermaid
+graph LR
+    V["VisualObservationNode<br/>(vis_obs_001)"] ---|CORRELATES_WITH<br/>confidence: 0.87, Δt: 120ms| A["AudioObservationNode<br/>(aud_obs_001)"]
+    A -->|OBSERVED_AS| C["Classification Hypothesis<br/>(doorbell vs knock)"]
+```
+
+### 2. Edge Semantics
+
+| Edge Type | Nature | Description |
+| :--- | :--- | :--- |
+| `CORRELATES_WITH` | Temporal / Spatial | Measurable association only. Does **not** assert causality or semantic identity. |
+| `OBSERVED_AS` | Classifier Relationship | Connects observation to competing classification hypotheses with individual confidences. |
+| `FALSIFIES` / `PREDICTS` | Epistemic | Scientific reasoning relationships managed by the Epistemic Subsystem. |
+| `STRENGTHENS` / `WEAKENS` | Epistemic | Confidence revision edges linking observations to working beliefs. |
+
+### 3. Transactional Commitment (`CorrelationTransaction`)
+The `CorrelationTransaction` atomically commits `CORRELATES_WITH` hyperedges with geometric properties (`confidence`, `temporal_overlap`, `spatial_overlap`, `delta_time_ms`, `created_by`), leaving observations as independent graph nodes for higher-order reasoning.
+
+---
+
 ## Brain Lifecycle Integration
 
 The HCIR Cognitive OS is wired into the Brain lifecycle via `BrainFactory`:
