@@ -357,15 +357,23 @@ To support the hierarchical distributed architecture, HBLLM uses specialized gat
 
 - **Type:** `NodeType.PERCEPTION`
 - **File:** `hbllm/perception/audio_in_node.py`
-- **Purpose:** Speech-to-text streaming transcription with speaker identification.
-- **ASR Engines:**
-    - **Moonshine ONNX** (default): Local inference via `useful-moonshine-onnx` (~50MB, <100ms latency). Runs on CPU with no cloud dependency.
-    - **NVIDIA Cloud Whisper API**: When `NVIDIA_API_KEY` is active, routes requests to the NVIDIA Cloud Whisper API using the `openai/whisper-large-v3` model.
-    - **Local Whisper Fallback**: Thread-safe local Whisper model (`whisper.load_model(model_size)`) if cloud API calls fail or timeout.
+- **Purpose:** Pure I/O transport adapter for audio capture, VAD segmentation, and streaming lifecycle management.
+- **Provider Delegation:** Decoupled from direct model execution; delegates transcription to injected `SpeechProvider` (default: `MoonshineSpeechProvider`).
 - **Voice Activity Detection (VAD):** Silero VAD with configurable silence timeout (default 1500ms) for natural conversation pause handling.
 - **Audio Pipeline:** Normalization, silence trimming, linear interpolation downsampling from browser sample rates to 16kHz.
-- **Speaker Identification:** After transcription, sends the same PCM buffer to `SpeakerIdNode` for speaker identification. Attaches `speaker_id`, `speaker_name`, and `speaker_confidence` to both the `sensory.transcription` event and the `router.query` message.
-- **Topics:** `sensory.audio.stream`, `sensory.transcription`, `router.query`
+- **Speaker Identification:** Coordinates with `SpeakerProvider` (`ResemblyzerSpeakerProvider`) to extract 256-dim embeddings and attach speaker provenance.
+- **Topics:** `sensory.audio.stream`, `sensory.audio.in`, `router.query`
+
+### Perception Providers
+
+- **Location:** `hbllm/perception/providers/`
+- **Purpose:** Decoupled, stateless ML models implementing typed protocols (`SpeechProvider`, `AcousticEventProvider`, `AcousticSceneProvider`, `SpeakerProvider`).
+- **Implementations:**
+    - **`MoonshineSpeechProvider`**: Moonshine ONNX primary engine with local Whisper and NVIDIA cloud fallback.
+    - **`AmbientEventProvider`**: YAMNet acoustic event classification with multi-candidate preservation.
+    - **`ResemblyzerSpeakerProvider`**: GE2E voice encoder for speaker identification and voice embeddings.
+- **Runtime:** `AudioPerceptionRuntime` manages normalization, attaches `ProviderProvenance`, and coordinates with `AudioMemory`.
+- **Cross-Modal Correlation:** `CorrelationEngine` and `CorrelationTransaction` construct `CORRELATES_WITH` hyperedges between visual and acoustic observations without premature semantic collapse.
 
 ### AudioOutputNode
 

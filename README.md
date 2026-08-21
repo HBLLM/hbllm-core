@@ -88,6 +88,7 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 | **👤 Human Modeling** | Learns expertise, preferences, trust, and habits from every interaction — the system models *you* | [Social Cognition](docs/architecture/social-cognition.md) |
 | **📋 Project Awareness** | Tracks goals, blockers, decisions, and milestones per project — auto-detects what you're working on | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
 | **🧠 HCIR Cognitive OS** | Event-sourced Cognitive OS kernel, tiered workspace, transactional governance, and rollback engine | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
+| **👁️ Evidence Perception** | Decoupled providers, structured evidence normalization, `CorrelationEngine`, and HCIR hyperedge binding | [Voice & Audio Pipeline](docs/architecture/voice-pipeline.md) |
 | **🔬 Epistemic Runtime** | Domain-neutral autonomous discovery: hypothesis generation, Bayesian belief revision, self-calibration | [Epistemic Runtime](docs/architecture/epistemics.md) |
 | **⚡ SNN Cognitive Stream** | Spiking Neural Networks for concept extraction, content planning, and reward evaluation with Broca compression | [SNN Cognitive Engine](docs/architecture/snn-cognitive-engine.md) |
 | **🧠 Always-On Cognition** | Stays awake between queries — notices events, forms thoughts, and acts proactively | [Executive Brain](docs/architecture/executive-brain-layer.md) |

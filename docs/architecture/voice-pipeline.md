@@ -1,126 +1,162 @@
 ---
-title: "Voice Pipeline — HBLLM Audio Processing Architecture"
-description: "End-to-end voice processing: speech recognition, speaker identification, voice synthesis, and real-time audio streaming."
+title: "Audio & Voice Pipeline — HBLLM Perception Architecture"
+description: "End-to-end audio perception architecture: decoupled providers, AudioPerceptionRuntime, ProviderProvenance, HCIR transaction boundaries, and cross-modal correlation."
 ---
 
-# Voice Pipeline
+# Audio & Voice Pipeline
 
-HBLLM's voice pipeline provides end-to-end audio processing for natural
-spoken interaction. It runs entirely on-device — no cloud STT/TTS required.
+HBLLM treats audio as an **evidence-producing perception modality**. Audio perception produces structured evidence, while the Human-Cognitive Intermediate Representation (HCIR) transaction layer commits observations to the cognitive graph for epistemic interpretation.
 
-## Architecture
+> **Core Architectural Invariant:**
+>
+> ```text
+> Providers produce raw/typed perception results
+>         ↓
+> AudioPerceptionRuntime normalizes them into Evidence + ProviderProvenance
+>         ↓
+> SNN decides processing depth
+>         ↓
+> AudioPerceptionTransaction commits observations to HCIR
+>         ↓
+> Cognitive systems interpret them (Epistemics / Router / Dialogue)
+> ```
+>
+> *The provider itself never knows about HCIR or the cognitive core.*
+
+---
+
+## High-Level Architecture
+
+```mermaid
+graph TB
+    subgraph INGESTION["🎤 Audio Ingestion & Transport"]
+        MIC["Microphone / Stream"] --> AIN["AudioInputNode<br/>(Silero VAD + Stream Buffer)"]
+    end
+
+    subgraph PROVIDERS["⚡ Perception Providers (Stateless ML)"]
+        MSP["MoonshineSpeechProvider<br/>(SpeechProvider)"]
+        AEP["AmbientEventProvider<br/>(Event & Scene Provider)"]
+        RSP["ResemblyzerSpeakerProvider<br/>(SpeakerProvider)"]
+    end
+
+    subgraph RUNTIME["⚙️ AudioPerceptionRuntime"]
+        APR["AudioPerceptionRuntime"]
+        AMEM["AudioMemory<br/>(Short-term Ring Buffer)"]
+        SNN_G["SNN Depth Gate"]
+        PROV["ProviderProvenance<br/>(model/version metadata)"]
+    end
+
+    subgraph CORRELATION["🔗 Cross-Modal Correlation"]
+        CE["CorrelationEngine<br/>(Pure geometry & time)"]
+        FUSER["PerceptionFuser<br/>(Sliding Window)"]
+    end
+
+    subgraph HCIR["🧠 HCIR Cognitive Graph"]
+        TX["AudioPerceptionTransaction<br/>(Atomic Commit)"]
+        A_OBS["AudioObservationNode"]
+        V_OBS["VisualObservationNode"]
+        EDGE["CORRELATES_WITH<br/>(Hyperedge)"]
+    end
+
+    AIN -->|pcm_bytes| APR
+    APR --> MSP
+    APR --> AEP
+    APR --> RSP
+    APR --> AMEM
+    APR --> SNN_G
+    APR --> PROV
+
+    APR -->|AudioAssessment| TX
+    TX --> A_OBS
+
+    A_OBS --- EDGE --- V_OBS
+    CE --> EDGE
+    FUSER --> CE
+```
+
+---
+
+## Core Components
+
+### 1. Perception Providers (`perception/providers/`)
+
+Providers implement typed protocols from `hbllm.perception.providers.audio_base`. They encapsulate machine-learning models, sample-rate conversion, and normalization, returning typed results without HCIR awareness.
+
+| Provider | Protocol | Models / Backends | Output |
+|:---|:---|:---|:---|
+| **`MoonshineSpeechProvider`** | `SpeechProvider` | Moonshine ONNX (primary, ~50MB, <100ms), Whisper (local fallback), NVIDIA Cloud ASR | `SpeechResult` (transcript, language, confidence, temporal) |
+| **`AmbientEventProvider`** | `AcousticEventProvider`, `AcousticSceneProvider` | YAMNet ONNX + Energy heuristics | `list[SoundEventResult]`, `AcousticSceneResult` |
+| **`ResemblyzerSpeakerProvider`** | `SpeakerProvider` | Resemblyzer GE2E VoiceEncoder (256-dim embedding) | `SpeakerIdentification`, `AudioEmbedding` |
+
+#### Multi-Candidate Preservation (No Early Factual Collapse)
+When an acoustic classifier detects multiple possibilities (e.g., `doorbell: 0.82` vs `knock: 0.76`), providers preserve all candidates in `top_classes`. The runtime and epistemic layer evaluate competing hypotheses rather than forcing a premature single winner.
+
+---
+
+### 2. AudioPerceptionRuntime (`perception/audio_perception_runtime.py`)
+
+The runtime coordinates provider execution, attaches provenance, manages short-term memory, and constructs normalized evidence.
+
+```python
+assessment = await runtime.perceive(audio_bytes)
+# assessment.speech -> SpeechEvidence (transcript, confidence, provenance)
+# assessment.events -> list[SoundEventEvidence] (ranked candidate events)
+# assessment.scene  -> AcousticSceneEvidence (indoor/outdoor, noise level)
+# assessment.epistemic_profile -> PerceptualEpistemicProfile (confidence dimensions)
+```
+
+#### Provider Provenance
+Every piece of evidence carries a `ProviderProvenance` record:
+```python
+@dataclass(frozen=True)
+class ProviderProvenance:
+    provider: str      # e.g., "moonshine", "ambient", "resemblyzer"
+    model: str         # e.g., "base", "yamnet", "ge2e"
+    version: str       # e.g., "1.2"
+    device: str        # e.g., "cpu", "cuda"
+```
+
+---
+
+### 3. AudioInputNode as Transport Adapter (`perception/audio_in_node.py`)
+
+`AudioInputNode` acts as a pure I/O transport adapter:
+- **Microphone / Stream I/O:** Captures 16kHz PCM audio from streaming bus topics or local soundcards.
+- **Voice Activity Detection (VAD):** Uses Silero VAD to detect utterance boundaries.
+- **Session Lifecycle:** Manages `_StreamBuffer` per session and latency thresholds.
+- **Delegation:** Delegates ASR execution to injected `SpeechProvider` (`MoonshineSpeechProvider`).
+
+---
+
+### 4. CorrelationEngine & PerceptionFuser (`perception/correlation_engine.py`)
+
+The `CorrelationEngine` performs stateless geometry and temporal alignment across modalities:
+- **Measurable Relationships Only:** Computes temporal overlap, delta time ($ms$), and angular spatial proximity.
+- **No Semantic Leap:** It does **not** assert "the person made the footsteps" (which is a cognitive belief). It only asserts "visual observation $V$ and acoustic observation $A$ occurred within $\Delta t = 120\text{ms}$ at $\theta \approx 32^\circ$".
+- **HCIR Commitment:** Commits `CORRELATES_WITH` hyperedges to HCIR via `CorrelationTransaction`.
 
 ```mermaid
 graph LR
-    MIC["🎤 Microphone"] --> AIN["AudioInputNode<br/>(VAD + STT)"]
-    AIN --> SID["SpeakerIDNode<br/>(Voice Print)"]
-    SID --> BUS["MessageBus"]
-    BUS --> BRAIN["Cognitive Core"]
-    BRAIN --> EXPR["ExpressionStream"]
-    EXPR --> AOUT["AudioOutputNode<br/>(TTS)"]
-    AOUT --> SPK["🔊 Speaker"]
+    V["VisualObservationNode<br/>(Person detected)"] ---|CORRELATES_WITH<br/>confidence: 0.87, Δt: 120ms| A["AudioObservationNode<br/>(Footsteps)"]
 ```
 
-## Components
+---
 
-### AudioInputNode (`perception/audio_in_node.py`)
+### 5. Output Synthesis (`perception/audio_out_node.py`)
 
-Handles real-time audio capture, Voice Activity Detection (VAD), and
-Speech-to-Text (STT) transcription.
+Text-to-Speech synthesis for agent verbal responses:
+- **Engines:** Kokoro TTS (default local neural TTS), NVIDIA Riva TTS (gRPC), SpeechT5 (local fallback).
+- **Streaming:** Sentence-level streaming starts audio playback before complete LLM generation finishes.
+- **Barge-in Protection:** Audio playback instantly pauses when `AudioInputNode` detects incoming speech.
 
-| Feature | Description |
-|---------|-------------|
-| **VAD** | Silero VAD for energy-efficient speech detection |
-| **STT Engines** | Whisper (local), Moonshine (ultra-fast), NVIDIA Riva |
-| **Barge-in** | Interrupts TTS playback when user starts speaking |
-| **Streaming** | Real-time streaming transcription for low latency |
-| **Audio Format** | 16kHz mono PCM, configurable buffer sizes |
-
-### SpeakerIDNode (`perception/speaker_id_node.py`)
-
-Identifies who is speaking using voice embeddings, enabling
-multi-user households and personalized responses.
-
-| Feature | Description |
-|---------|-------------|
-| **Enrollment** | One-shot voice print enrollment from short sample |
-| **Verification** | Cosine similarity matching against stored profiles |
-| **Storage** | Voice profiles persisted via `VoiceProfileStore` |
-| **Privacy** | Embeddings only — raw audio is never stored |
-
-### AudioOutputNode (`perception/audio_out_node.py`)
-
-Text-to-Speech synthesis and audio playback with support for
-multiple TTS backends.
-
-| Feature | Description |
-|---------|-------------|
-| **TTS Engines** | Coqui TTS (local), NVIDIA Riva, system TTS |
-| **Streaming** | Sentence-level streaming — starts speaking before full response |
-| **Voice Cloning** | Custom voice profiles via Coqui speaker embeddings |
-| **Interruption** | Graceful stop when barge-in is detected |
-
-### VoiceConfig (`perception/voice_config.py`)
-
-Centralized configuration for all voice pipeline settings:
-STT model selection, VAD thresholds, TTS voice, audio device
-selection, and streaming parameters.
-
-### VoiceProfileStore (`perception/voice_profile_store.py`)
-
-Persistent storage for speaker voice prints with per-tenant isolation.
-
-## Data Flow
-
-```mermaid
-sequenceDiagram
-    participant M as Microphone
-    participant V as VAD
-    participant S as STT
-    participant SI as SpeakerID
-    participant B as Brain
-    participant T as TTS
-    participant SP as Speaker
-
-    M->>V: Audio chunks (16kHz PCM)
-    V->>V: Detect speech segments
-    V->>S: Speech segment
-    S->>SI: Transcribed text + audio
-    SI->>SI: Match voice print
-    SI->>B: {text, speaker_id, confidence}
-    B->>B: Process with persona context
-    B->>T: Response text (streamed)
-    T->>SP: Audio chunks (sentence-by-sentence)
-    Note over M,V: Barge-in detection<br/>interrupts TTS playback
-```
-
-## Configuration
-
-```yaml
-voice:
-  stt:
-    engine: whisper      # whisper | moonshine | riva
-    model: base          # tiny | base | small | medium
-    language: en
-  tts:
-    engine: coqui        # coqui | riva | system
-    voice: default
-    speed: 1.0
-  vad:
-    threshold: 0.5
-    min_speech_ms: 250
-    min_silence_ms: 300
-  speaker_id:
-    enabled: true
-    min_confidence: 0.7
-```
+---
 
 ## Bus Topics
 
-| Topic | Publisher | Description |
-|-------|----------|-------------|
-| `audio.transcription` | AudioInputNode | Transcribed speech text |
-| `audio.speaker` | SpeakerIDNode | Speaker identification result |
-| `audio.speak` | Brain/Decision | Text to synthesize and speak |
-| `audio.bargein` | AudioInputNode | Barge-in event (user interrupted) |
-| `audio.vad` | AudioInputNode | Voice activity start/stop |
+| Topic | Publisher | Payload Description |
+|:---|:---|:---|
+| `sensory.audio.stream` | Client / Device Bridge | Raw PCM streaming chunks (`{chunk: hex, is_final: bool}`) |
+| `sensory.audio.in` | Client / Test | Audio file path for file-based perception |
+| `perception.fused` | PerceptionFuser | Fused multimodal context with correlation candidates |
+| `sensory.audio.out` | Cognitive Core | Text / SSML payload for speech synthesis |
+| `speaker.identify` | Speaker Provider | Speaker voice print query |
