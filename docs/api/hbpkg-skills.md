@@ -39,9 +39,7 @@ manifest = PackageManifest(
 )
 
 builder = PackageBuilder(source_dir=Path("./src/auditor"))
-archive_path = builder.build(
-    output_path=Path("./dist/system-auditor.hbpkg"), manifest=manifest
-)
+archive_path = builder.build(output_path=Path("./dist/system-auditor.hbpkg"), manifest=manifest)
 print(f"Archive built at: {archive_path}")
 ```
 

@@ -125,9 +125,7 @@ async def main():
 
     # 4. Adapt Persona for current context
     persona = PersonaEngine()
-    tone = persona.get_render_style(
-        user_id="user-01", context="production_incident"
-    )
+    tone = persona.get_render_style(user_id="user-01", context="production_incident")
     print(f"Adapted Tone: {tone.formality_level}, Brevity: {tone.brevity}")
 
 

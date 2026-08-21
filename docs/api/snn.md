@@ -92,9 +92,7 @@ score = prm.evaluate_step(
 print(f"PRM Step Reward Score: {score:.3f}")
 
 # Compress thought to minimal prompt
-compressed_prompt = encoder.encode(
-    intent="drain_node", parameters={"node": "node-3"}
-)
+compressed_prompt = encoder.encode(intent="drain_node", parameters={"node": "node-3"})
 print(f"Compressed Broca tokens length: ~{len(compressed_prompt.split())}")
 ```
 
@@ -113,7 +111,7 @@ extractor = VisualSignalExtractor(downsample=4)
 ensemble = PerceptionEnsemble()
 
 signals = extractor.extract(frame)  # ~0.1ms, numpy only
-decision = ensemble.step(signals)   # ~0.01ms, 5 LIF neurons
+decision = ensemble.step(signals)  # ~0.01ms, 5 LIF neurons
 
 if decision.should_process:
     # Run expensive VisionProvider encoding
