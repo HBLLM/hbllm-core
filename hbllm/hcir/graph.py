@@ -283,9 +283,15 @@ class ObservationNode(HCIRNode):
     payload: dict[str, Any] = Field(default_factory=dict)
     sensor_source: str = ""
     modality: str = ""  # "audio", "visual", "iot", etc.
-    temporal_span: dict[str, float] = Field(default_factory=dict)  # {"start_time": ..., "end_time": ...}
-    spatial_span: dict[str, float] | None = None  # {"azimuth": ..., "elevation": ..., "distance": ...}
-    provider_provenance: dict[str, Any] | None = None  # {"provider": ..., "model": ..., "version": ...}
+    temporal_span: dict[str, float] = Field(
+        default_factory=dict
+    )  # {"start_time": ..., "end_time": ...}
+    spatial_span: dict[str, float] | None = (
+        None  # {"azimuth": ..., "elevation": ..., "distance": ...}
+    )
+    provider_provenance: dict[str, Any] | None = (
+        None  # {"provider": ..., "model": ..., "version": ...}
+    )
     raw_reference: str = ""
 
 
@@ -369,6 +375,8 @@ class BeliefTransitionNode(HCIRNode):
     prior_revision: int = 0
     posterior_revision: int = 1
     likelihood_ratio: float = 1.0
+    effective_likelihood_ratio: float = 1.0
+    novelty_score: float = 1.0
     source_evidence_id: str = ""
     source_event_ids: list[str] = Field(default_factory=list)
     rationale: str = ""
@@ -632,9 +640,17 @@ class SkillNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.SKILL
     category: CognitiveCategory = CognitiveCategory.MEMORY
     name: str = ""
+    skill_name: str = ""
+    description: str = ""
     preconditions: list[str] = Field(default_factory=list)
     postconditions: list[str] = Field(default_factory=list)
     success_rate: Confidence = 0.5
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.skill_name and self.name:
+            self.skill_name = self.name
+        elif not self.name and self.skill_name:
+            self.name = self.skill_name
 
 
 class ProcedureNode(HCIRNode):
@@ -691,8 +707,21 @@ class EvidenceNode(HCIRNode):
     effect_size: float | None = None  # Measured effect size, if applicable
     modality: str = ""  # "audio", "visual", "multimodal", etc.
     epistemic_profile: PerceptualEpistemicProfile | None = None
-    provider_provenance: dict[str, Any] | None = None  # {"provider": ..., "model": ..., "version": ...}
-    candidates: list[dict[str, Any]] = Field(default_factory=list)  # Ranked classification candidates
+    provider_provenance: dict[str, Any] | None = (
+        None  # {"provider": ..., "model": ..., "version": ...}
+    )
+    candidates: list[dict[str, Any]] = Field(
+        default_factory=list
+    )  # Ranked classification candidates
+    incorporation_status: str = "pending"  # pending | incorporated | stale | redundant
+    incorporated_transitions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Idempotency map: {proposition_id: transition_id}. "
+        "Same evidence may legitimately affect multiple propositions.",
+    )
+    novelty_score: float = 1.0  # Composite multidimensional novelty [0.0, 1.0]
+    temporal_pattern: str = "unknown"  # persistent | transition | transient | periodic | unknown
+    last_incorporated_at: float = 0.0  # Timestamp of most recent incorporation
 
 
 class ClaimNode(HCIRNode):

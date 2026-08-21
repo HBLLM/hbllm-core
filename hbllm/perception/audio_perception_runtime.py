@@ -163,7 +163,9 @@ class AudioPerceptionRuntime:
 
         # ── Build epistemic profile ──
         profile = self._build_profile(
-            speech_evidence, event_evidence, scene_evidence,
+            speech_evidence,
+            event_evidence,
+            scene_evidence,
         )
 
         return AudioAssessment(

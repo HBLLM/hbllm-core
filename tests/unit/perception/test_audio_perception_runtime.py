@@ -68,7 +68,8 @@ class TestAudioMemory:
         memory.store_observation("obs2", self._make_embedding(1), "alarm")
 
         results = memory.search_observations(
-            self._make_embedding(0), concept_filter="doorbell",
+            self._make_embedding(0),
+            concept_filter="doorbell",
         )
         assert len(results) == 1
         assert results[0].concept_label == "doorbell"
@@ -146,7 +147,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_perceive_returns_assessment(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         assessment = await runtime.perceive(b"test audio")
         assert isinstance(assessment, AudioAssessment)
@@ -154,7 +156,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_speech_evidence_populated(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         assessment = await runtime.perceive(b"speech test")
         assert assessment.speech is not None
@@ -163,7 +166,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_event_evidence_populated(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         assessment = await runtime.perceive(b"event test")
         assert len(assessment.events) >= 1
@@ -171,7 +175,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_scene_evidence_populated(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         assessment = await runtime.perceive(b"scene test")
         assert assessment.scene is not None
@@ -179,7 +184,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_shared_observation(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         """All evidence types share the same AcousticObservation."""
         assessment = await runtime.perceive(b"shared obs test")
@@ -193,7 +199,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_epistemic_profile(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         assessment = await runtime.perceive(b"profile test")
         profile = assessment.epistemic_profile
@@ -202,14 +209,16 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_perceive_with_label(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         assessment = await runtime.perceive(b"labeled", label="doorbell")
         assert assessment.proposed_label == "doorbell"
 
     @pytest.mark.asyncio
     async def test_perceive_speech_only(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         speech = await runtime.perceive_speech(b"speech only")
         assert isinstance(speech, SpeechEvidence)
@@ -233,7 +242,8 @@ class TestAudioPerceptionRuntime:
 
     @pytest.mark.asyncio
     async def test_does_not_mutate_memory(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
     ) -> None:
         """Perceive must not store anything in memory."""
         memory = runtime._memory

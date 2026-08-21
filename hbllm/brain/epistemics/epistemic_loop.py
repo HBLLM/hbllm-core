@@ -324,7 +324,9 @@ class EpistemicLoop:
 
         for _node in self._graph.all_nodes():
             node = self._graph.get_node(_node.id)
-            if isinstance(node, EvidenceNode) and (node.modality or node.epistemic_profile is not None):
+            if isinstance(node, EvidenceNode) and (
+                node.modality or node.epistemic_profile is not None
+            ):
                 perceptual_evidence.append(node)
             elif isinstance(node, BeliefNode):
                 beliefs.append(node)

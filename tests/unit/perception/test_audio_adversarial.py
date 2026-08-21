@@ -66,7 +66,8 @@ class DisagreeingSpeechProvider:
         )
 
     async def transcribe_streaming(
-        self, audio_chunks: Sequence[AudioInput],
+        self,
+        audio_chunks: Sequence[AudioInput],
     ) -> SpeechResult:
         return await self.transcribe(audio_chunks[0] if audio_chunks else b"")
 
@@ -172,7 +173,8 @@ class FailingSpeechProvider:
         raise RuntimeError(msg)
 
     async def transcribe_streaming(
-        self, audio_chunks: Sequence[AudioInput],
+        self,
+        audio_chunks: Sequence[AudioInput],
     ) -> SpeechResult:
         msg = "STT model crashed"
         raise RuntimeError(msg)
@@ -199,7 +201,8 @@ class LowConfidenceSpeechProvider:
         )
 
     async def transcribe_streaming(
-        self, audio_chunks: Sequence[AudioInput],
+        self,
+        audio_chunks: Sequence[AudioInput],
     ) -> SpeechResult:
         return await self.transcribe(audio_chunks[0] if audio_chunks else b"")
 
@@ -497,7 +500,8 @@ class TestTemporalAmbiguity:
         )
         span2 = TemporalSpan(
             observation_id=span1.observation_id.replace(
-                span1.observation_id, f"aobs_{span1.observation_id[-12:]}_2",
+                span1.observation_id,
+                f"aobs_{span1.observation_id[-12:]}_2",
             ),
             event_id=span1.event_id,  # Same event
             start_time=1000.15,
@@ -540,7 +544,9 @@ class TestEvidenceStructure:
             transcript="test",
             confidence=0.9,
             provider_provenance=ProviderProvenance(
-                provider="moonshine", model="base", version="1.2",
+                provider="moonshine",
+                model="base",
+                version="1.2",
             ),
         )
         assert ev.transcript == "test"

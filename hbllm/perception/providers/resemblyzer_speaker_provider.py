@@ -85,7 +85,8 @@ class ResemblyzerSpeakerProvider:
                 from resemblyzer import VoiceEncoder  # type: ignore[import-untyped]
 
                 self._encoder = await asyncio.to_thread(
-                    VoiceEncoder, "cpu",
+                    VoiceEncoder,
+                    "cpu",
                 )
                 logger.info("Resemblyzer GE2E encoder loaded")
             except ImportError:
@@ -157,7 +158,8 @@ class ResemblyzerSpeakerProvider:
 
         if self._encoder is not None and len(samples) > 0:
             embedding = await asyncio.to_thread(
-                self._encoder.embed_utterance, samples,
+                self._encoder.embed_utterance,
+                samples,
             )
             # L2 normalize
             norm = float(np.linalg.norm(embedding))
@@ -228,7 +230,7 @@ class ResemblyzerSpeakerProvider:
         """Deterministic hash-based embedding fallback."""
         data = samples.tobytes() if len(samples) > 0 else b"empty"
         h = hashlib.sha256(data).digest()
-        vector = [float(b) / 255.0 for b in h[:self.EMBEDDING_DIM]]
+        vector = [float(b) / 255.0 for b in h[: self.EMBEDDING_DIM]]
         # Pad to full dimension
         while len(vector) < self.EMBEDDING_DIM:
             vector.append(0.0)
@@ -237,7 +239,7 @@ class ResemblyzerSpeakerProvider:
         if norm > 0:
             vector = [v / norm for v in vector]
         return AudioEmbedding(
-            vector=vector[:self.EMBEDDING_DIM],
+            vector=vector[: self.EMBEDDING_DIM],
             model_id="hash-fallback",
             space_id="hash-256",
             dimensions=self.EMBEDDING_DIM,

@@ -148,7 +148,9 @@ class WorldStateEngine:
             "confidence": confidence,
             "energy_db": getattr(assessment.observation, "energy_db", -40.0),
             "is_critical": is_critical,
-            "transcript": getattr(assessment.speech, "transcript", "") if getattr(assessment, "speech", None) else "",
+            "transcript": getattr(assessment.speech, "transcript", "")
+            if getattr(assessment, "speech", None)
+            else "",
             "_updated_at": time.time(),
         }
         self._timestamps["audio"] = time.time()
@@ -167,6 +169,7 @@ class WorldStateEngine:
     def update_from_hcir(self, graph: Any) -> None:
         """Update world state from HCIR CognitiveGraph (authoritative state)."""
         from hbllm.hcir.graph import HCIRNodeType
+
         # Audio observations
         audio_nodes = list(graph.nodes_by_type(HCIRNodeType.AUDIO_OBSERVATION))
         if audio_nodes:

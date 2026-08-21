@@ -268,7 +268,10 @@ class TemporalFuser:
             candidates.append(
                 TemporalPatternCandidate(
                     pattern_name=seq.pattern_name,
-                    observations=[e.payload.get("observation_id", e.sub_type or e.event_type) for e in seq.events],
+                    observations=[
+                        e.payload.get("observation_id", e.sub_type or e.event_type)
+                        for e in seq.events
+                    ],
                     pattern_steps=[f"{e.event_type}:{e.sub_type}" for e in seq.events],
                     confidence=seq.confidence,
                     duration_s=seq.duration_s,
@@ -279,7 +282,9 @@ class TemporalFuser:
 
     def ingest_audio_observation(self, node: Any) -> list[TemporalPatternCandidate]:
         """Ingest an AudioObservationNode and return candidate patterns."""
-        event_type = "audio.ambient" if getattr(node, "event_type", "") != "speech" else "audio.speech"
+        event_type = (
+            "audio.ambient" if getattr(node, "event_type", "") != "speech" else "audio.speech"
+        )
         sub_type = getattr(node, "event_type", "unknown")
         snapshot = PerceptionSnapshot(
             event_type=event_type,

@@ -132,7 +132,10 @@ class TestAudioPerceptionEnsemble:
         decisions = [ensemble.step(transient_signals, sample_index=i) for i in range(1, 4)]
         firing_decisions = [d for d in decisions if d.should_process]
         assert len(firing_decisions) >= 1
-        assert any(d.processing_level in (PerceptionProcessingLevel.HIGH, PerceptionProcessingLevel.URGENT) for d in firing_decisions)
+        assert any(
+            d.processing_level in (PerceptionProcessingLevel.HIGH, PerceptionProcessingLevel.URGENT)
+            for d in firing_decisions
+        )
 
     def test_ensemble_reset(self) -> None:
         ensemble = AudioPerceptionEnsemble()

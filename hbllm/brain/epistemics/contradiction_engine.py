@@ -163,7 +163,10 @@ class ContradictionEngine:
                     is_conflict = False
                     reason = ""
                     if any(empty in vis_cap for empty in ["empty", "nobody", "no person", "dark"]):
-                        if aud_event in ["speech", "applause", "crowd", "screaming", "footsteps"] or len(aud_transcript) > 5:
+                        if (
+                            aud_event in ["speech", "applause", "crowd", "screaming", "footsteps"]
+                            or len(aud_transcript) > 5
+                        ):
                             is_conflict = True
                             reason = f"Vision indicates '{vis_cap}' while Audio detected '{aud_event or aud_transcript}'"
 

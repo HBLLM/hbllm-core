@@ -148,7 +148,9 @@ class PerceptionFuser:
         envelopes: list[ObservationEnvelope] = []
 
         for event in self._window:
-            obs_id = str(event.metadata.get("observation_id", "") or f"{event.modality}_{id(event)}")
+            obs_id = str(
+                event.metadata.get("observation_id", "") or f"{event.modality}_{id(event)}"
+            )
             duration = float(event.metadata.get("duration", 0.5))
             direction = event.metadata.get("direction_degrees")
             direction_val = float(direction) if direction is not None else None

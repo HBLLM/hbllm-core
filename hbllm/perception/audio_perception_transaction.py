@@ -90,10 +90,7 @@ class AudioPerceptionTransaction:
             end_time=obs.temporal.end_time,
             duration=obs.temporal.duration,
             transcript=speech.transcript,
-            speaker_ref=(
-                speech.speaker_ref.embedding_ref
-                if speech.speaker_ref else ""
-            ),
+            speaker_ref=(speech.speaker_ref.embedding_ref if speech.speaker_ref else ""),
         )
         self._graph.add_node(node)
         return node

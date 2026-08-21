@@ -48,10 +48,13 @@ def runtime(provider: MockAudioProvider) -> AudioPerceptionRuntime:
 
 @pytest.fixture
 def transaction(
-    graph: CognitiveGraph, memory: AudioMemory,
+    graph: CognitiveGraph,
+    memory: AudioMemory,
 ) -> AudioPerceptionTransaction:
     return AudioPerceptionTransaction(
-        graph=graph, memory=memory, provider_id="mock-audio-v1",
+        graph=graph,
+        memory=memory,
+        provider_id="mock-audio-v1",
     )
 
 
@@ -73,7 +76,8 @@ class TestCommitSpeech:
 
     @pytest.mark.asyncio
     async def test_commit_creates_node(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
         graph: CognitiveGraph,
     ) -> None:
@@ -86,7 +90,8 @@ class TestCommitSpeech:
 
     @pytest.mark.asyncio
     async def test_node_in_graph(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
         graph: CognitiveGraph,
     ) -> None:
@@ -99,16 +104,19 @@ class TestCommitSpeech:
 
     @pytest.mark.asyncio
     async def test_no_speech_returns_none(
-        self, transaction: AudioPerceptionTransaction,
+        self,
+        transaction: AudioPerceptionTransaction,
     ) -> None:
         from hbllm.perception.providers.audio_evidence import AudioAssessment
+
         assessment = AudioAssessment()  # No speech
         node = transaction.commit_speech(assessment)
         assert node is None
 
     @pytest.mark.asyncio
     async def test_speaker_ref_stored(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
     ) -> None:
         assessment = await runtime.perceive(b"speaker test")
@@ -128,7 +136,8 @@ class TestCommitEvent:
 
     @pytest.mark.asyncio
     async def test_commit_creates_node(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
         graph: CognitiveGraph,
     ) -> None:
@@ -140,9 +149,11 @@ class TestCommitEvent:
 
     @pytest.mark.asyncio
     async def test_no_events_returns_none(
-        self, transaction: AudioPerceptionTransaction,
+        self,
+        transaction: AudioPerceptionTransaction,
     ) -> None:
         from hbllm.perception.providers.audio_evidence import AudioAssessment
+
         assessment = AudioAssessment()  # No events
         node = transaction.commit_event(assessment)
         assert node is None
@@ -158,7 +169,8 @@ class TestCommitLearning:
 
     @pytest.mark.asyncio
     async def test_creates_concept(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
         graph: CognitiveGraph,
     ) -> None:
@@ -171,7 +183,8 @@ class TestCommitLearning:
 
     @pytest.mark.asyncio
     async def test_concept_in_graph(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
         graph: CognitiveGraph,
     ) -> None:
@@ -183,20 +196,21 @@ class TestCommitLearning:
 
     @pytest.mark.asyncio
     async def test_supports_edge_created(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
         graph: CognitiveGraph,
     ) -> None:
         assessment = await runtime.perceive(b"edge", label="siren")
         transaction.commit_learning(assessment)
 
-        edges = [e for e in graph.all_edges()
-                 if e.edge_type == HCIREdgeType.SUPPORTS]
+        edges = [e for e in graph.all_edges() if e.edge_type == HCIREdgeType.SUPPORTS]
         assert len(edges) >= 1
 
     @pytest.mark.asyncio
     async def test_update_existing_concept(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
     ) -> None:
         a1 = await runtime.perceive(b"sample1", label="kettle")
@@ -213,7 +227,8 @@ class TestCommitLearning:
 
     @pytest.mark.asyncio
     async def test_no_label_returns_none(
-        self, runtime: AudioPerceptionRuntime,
+        self,
+        runtime: AudioPerceptionRuntime,
         transaction: AudioPerceptionTransaction,
     ) -> None:
         assessment = await runtime.perceive(b"no label")
@@ -231,7 +246,8 @@ class TestAudioPerceptionFacade:
 
     @pytest.mark.asyncio
     async def test_listen_returns_assessment(
-        self, perception: AudioPerception,
+        self,
+        perception: AudioPerception,
     ) -> None:
         assessment = await perception.listen(b"listen test")
         assert assessment.speech is not None
@@ -239,7 +255,8 @@ class TestAudioPerceptionFacade:
 
     @pytest.mark.asyncio
     async def test_learn_sound(
-        self, perception: AudioPerception,
+        self,
+        perception: AudioPerception,
         graph: CognitiveGraph,
     ) -> None:
         concept = await perception.learn_sound(b"doorbell", "my_doorbell")
@@ -252,7 +269,8 @@ class TestAudioPerceptionFacade:
 
     @pytest.mark.asyncio
     async def test_recognize_speech(
-        self, perception: AudioPerception,
+        self,
+        perception: AudioPerception,
         graph: CognitiveGraph,
     ) -> None:
         node = await perception.recognize_speech(b"hello world")
@@ -265,7 +283,8 @@ class TestAudioPerceptionFacade:
 
     @pytest.mark.asyncio
     async def test_recognize_event(
-        self, perception: AudioPerception,
+        self,
+        perception: AudioPerception,
         graph: CognitiveGraph,
     ) -> None:
         node = await perception.recognize_event(b"alarm sound")
@@ -274,7 +293,8 @@ class TestAudioPerceptionFacade:
 
     @pytest.mark.asyncio
     async def test_learn_five_recognize(
-        self, perception: AudioPerception,
+        self,
+        perception: AudioPerception,
         graph: CognitiveGraph,
     ) -> None:
         """Learn 5 sounds and verify all in HCIR."""

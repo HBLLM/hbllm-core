@@ -101,9 +101,7 @@ class VisualPerceptionTransaction:
 
         if best and best.label == label and best.best_similarity >= self.policy.minimum_similarity:
             return await self._update_existing_concept(assessment, best)
-        if (
-            best and best.label != label and best.best_similarity >= self.policy.minimum_similarity
-        ):
+        if best and best.label != label and best.best_similarity >= self.policy.minimum_similarity:
             return await self._create_with_similarity(assessment, best)
         return await self._create_new_concept(assessment)
 

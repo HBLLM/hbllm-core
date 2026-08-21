@@ -85,9 +85,27 @@ class PerceptionEpistemicBridge:
 
         # 1. Map epistemic profile
         audio_profile = assessment.epistemic_profile
-        sensory_clarity = float(getattr(audio_profile, "sensory_clarity", getattr(audio_profile, "perceptual_confidence", 0.85)))
-        model_conf = float(getattr(audio_profile, "model_confidence", getattr(audio_profile, "classification_confidence", 0.85)))
-        temp_stab = float(getattr(audio_profile, "temporal_stability", getattr(audio_profile, "temporal_confidence", 0.85)))
+        sensory_clarity = float(
+            getattr(
+                audio_profile,
+                "sensory_clarity",
+                getattr(audio_profile, "perceptual_confidence", 0.85),
+            )
+        )
+        model_conf = float(
+            getattr(
+                audio_profile,
+                "model_confidence",
+                getattr(audio_profile, "classification_confidence", 0.85),
+            )
+        )
+        temp_stab = float(
+            getattr(
+                audio_profile,
+                "temporal_stability",
+                getattr(audio_profile, "temporal_confidence", 0.85),
+            )
+        )
         epistemic_profile = PerceptualEpistemicProfile(
             sensory_clarity=sensory_clarity,
             model_confidence=model_conf,
@@ -95,34 +113,69 @@ class PerceptionEpistemicBridge:
         )
 
         # 2. Materialize AudioObservationNode
-        start_t = float(getattr(assessment.observation.temporal, "start_time", getattr(assessment.observation.temporal, "start_seconds", 0.0)))
-        end_t = float(getattr(assessment.observation.temporal, "end_time", getattr(assessment.observation.temporal, "end_seconds", start_t)))
-        dur = float(getattr(assessment.observation.temporal, "duration", getattr(assessment.observation.temporal, "duration_seconds", end_t - start_t)))
+        start_t = float(
+            getattr(
+                assessment.observation.temporal,
+                "start_time",
+                getattr(assessment.observation.temporal, "start_seconds", 0.0),
+            )
+        )
+        end_t = float(
+            getattr(
+                assessment.observation.temporal,
+                "end_time",
+                getattr(assessment.observation.temporal, "end_seconds", start_t),
+            )
+        )
+        dur = float(
+            getattr(
+                assessment.observation.temporal,
+                "duration",
+                getattr(assessment.observation.temporal, "duration_seconds", end_t - start_t),
+            )
+        )
 
         transcript_text = assessment.speech.transcript if assessment.speech else ""
         label_text = ""
         first_event_type = ""
         if assessment.events:
-            first_event_type = getattr(assessment.events[0], "event_type", getattr(assessment.events[0], "label", "sound_event"))
+            first_event_type = getattr(
+                assessment.events[0],
+                "event_type",
+                getattr(assessment.events[0], "label", "sound_event"),
+            )
             label_text = first_event_type
         elif transcript_text:
             label_text = transcript_text[:50]
         elif assessment.scene:
             label_text = assessment.scene.scene_tags[0] if assessment.scene.scene_tags else "scene"
 
-        emb_ref = getattr(assessment.observation, "embedding_ref", getattr(assessment.observation, "embedding_id", "")) or ""
+        emb_ref = (
+            getattr(
+                assessment.observation,
+                "embedding_ref",
+                getattr(assessment.observation, "embedding_id", ""),
+            )
+            or ""
+        )
         aud_node = AudioObservationNode(
             id=obs_id,
             modality="audio",
             label=label_text,
             embedding_ref=emb_ref,
-            event_type=first_event_type if first_event_type else "speech" if transcript_text else "audio",
+            event_type=first_event_type
+            if first_event_type
+            else "speech"
+            if transcript_text
+            else "audio",
             start_time=start_t,
             end_time=end_t,
             duration=dur,
             transcript=transcript_text,
             temporal_span={"start_time": start_t, "end_time": end_t, "duration": dur},
-            provider_provenance=assessment.observation.provenance.__dict__ if hasattr(assessment.observation.provenance, "__dict__") else None,
+            provider_provenance=assessment.observation.provenance.__dict__
+            if hasattr(assessment.observation.provenance, "__dict__")
+            else None,
         )
         self._graph.upsert_node(aud_node)
         committed_ids.append(obs_id)
@@ -130,7 +183,11 @@ class PerceptionEpistemicBridge:
         # 3. Materialize Speech Evidence (if present)
         if assessment.speech and assessment.speech.transcript:
             speech_evi_id = _generate_id("evi_speech")
-            prov_dict = assessment.speech.provider_provenance.to_dict() if hasattr(assessment.speech.provider_provenance, "to_dict") else None
+            prov_dict = (
+                assessment.speech.provider_provenance.to_dict()
+                if hasattr(assessment.speech.provider_provenance, "to_dict")
+                else None
+            )
             speech_evi = EvidenceNode(
                 id=speech_evi_id,
                 modality="audio",
@@ -139,7 +196,12 @@ class PerceptionEpistemicBridge:
                 methodology=f"ASR ({assessment.speech.provider_provenance.provider if assessment.speech.provider_provenance else 'speech'})",
                 epistemic_profile=epistemic_profile,
                 provider_provenance=prov_dict,
-                candidates=[{"label": assessment.speech.transcript, "score": float(assessment.speech.confidence)}],
+                candidates=[
+                    {
+                        "label": assessment.speech.transcript,
+                        "score": float(assessment.speech.confidence),
+                    }
+                ],
             )
             self._graph.upsert_node(speech_evi)
             committed_ids.append(speech_evi_id)
@@ -163,7 +225,11 @@ class PerceptionEpistemicBridge:
                 }
                 for ev in assessment.events
             ]
-            prov_dict = assessment.events[0].provider_provenance.to_dict() if hasattr(assessment.events[0].provider_provenance, "to_dict") else None
+            prov_dict = (
+                assessment.events[0].provider_provenance.to_dict()
+                if hasattr(assessment.events[0].provider_provenance, "to_dict")
+                else None
+            )
             event_evi = EvidenceNode(
                 id=event_evi_id,
                 modality="audio",
@@ -206,14 +272,34 @@ class PerceptionEpistemicBridge:
             List of node IDs committed to the graph.
         """
         committed_ids: list[str] = []
-        obs_id = assessment.observation.observation_id if hasattr(assessment, "observation") and assessment.observation else _generate_id("vis_obs")
+        obs_id = (
+            assessment.observation.observation_id
+            if hasattr(assessment, "observation") and assessment.observation
+            else _generate_id("vis_obs")
+        )
 
         # 1. Map epistemic profile
         vis_profile = getattr(assessment, "epistemic_profile", None)
         if vis_profile:
-            sensory_clarity = float(getattr(vis_profile, "source_reliability", getattr(vis_profile, "sensory_clarity", 0.85)))
-            model_conf = float(getattr(vis_profile, "perceptual_similarity", getattr(vis_profile, "model_confidence", 0.85)))
-            temp_stab = float(getattr(vis_profile, "evidence_strength", getattr(vis_profile, "temporal_stability", 0.85)))
+            sensory_clarity = float(
+                getattr(
+                    vis_profile, "source_reliability", getattr(vis_profile, "sensory_clarity", 0.85)
+                )
+            )
+            model_conf = float(
+                getattr(
+                    vis_profile,
+                    "perceptual_similarity",
+                    getattr(vis_profile, "model_confidence", 0.85),
+                )
+            )
+            temp_stab = float(
+                getattr(
+                    vis_profile,
+                    "evidence_strength",
+                    getattr(vis_profile, "temporal_stability", 0.85),
+                )
+            )
             epistemic_profile = PerceptualEpistemicProfile(
                 sensory_clarity=sensory_clarity,
                 model_confidence=model_conf,
@@ -228,7 +314,11 @@ class PerceptionEpistemicBridge:
 
         # 2. Materialize VisualObservationNode
         caption_text = getattr(assessment, "caption", "") or ""
-        if not caption_text and hasattr(assessment, "candidate_concepts") and assessment.candidate_concepts:
+        if (
+            not caption_text
+            and hasattr(assessment, "candidate_concepts")
+            and assessment.candidate_concepts
+        ):
             caption_text = assessment.candidate_concepts[0].label
 
         vis_node = VisualObservationNode(
@@ -247,13 +337,22 @@ class PerceptionEpistemicBridge:
             candidates = [
                 {
                     "label": c.label,
-                    "score": float(getattr(c, "best_similarity", getattr(c, "mean_similarity", getattr(c, "similarity", 0.8)))),
+                    "score": float(
+                        getattr(
+                            c,
+                            "best_similarity",
+                            getattr(c, "mean_similarity", getattr(c, "similarity", 0.8)),
+                        )
+                    ),
                 }
                 for c in assessment.candidate_concepts
             ]
         elif hasattr(assessment, "candidates") and assessment.candidates:
             candidates = [
-                {"label": getattr(c, "label", str(c)), "score": float(getattr(c, "confidence", 0.8))}
+                {
+                    "label": getattr(c, "label", str(c)),
+                    "score": float(getattr(c, "confidence", 0.8)),
+                }
                 for c in assessment.candidates
             ]
         elif caption_text:

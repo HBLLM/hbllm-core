@@ -62,7 +62,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_transcribe_returns_speech_result(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         result = await provider.transcribe(b"audio data")
         assert result.transcript != ""
@@ -71,7 +72,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_determinism_same_input(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         r1 = await provider.transcribe(b"same audio")
         r2 = await provider.transcribe(b"same audio")
@@ -80,7 +82,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_different_inputs_different_results(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         r1 = await provider.transcribe(b"audio one")
         r2 = await provider.transcribe(b"audio two")
@@ -89,7 +92,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_speaker_ref_present(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         result = await provider.transcribe(b"with speaker")
         assert result.speaker is not None
@@ -98,7 +102,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_paralinguistic_present(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         result = await provider.transcribe(b"emotional")
         assert result.paralinguistic is not None
@@ -106,7 +111,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_temporal_span(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         result = await provider.transcribe(b"temporal test")
         assert result.temporal.start_time > 0
@@ -115,7 +121,8 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_streaming_transcribe(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         chunks = [b"chunk1", b"chunk2", b"chunk3"]
         result = await provider.transcribe_streaming(chunks)
@@ -123,14 +130,16 @@ class TestMockSpeechProvider:
 
     @pytest.mark.asyncio
     async def test_string_path_input(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         result = await provider.transcribe("/path/to/audio.wav")
         assert result.transcript != ""
 
     @pytest.mark.asyncio
     async def test_numpy_input(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         audio = np.random.randn(16000).astype(np.float32)
         result = await provider.transcribe(audio)
@@ -147,7 +156,8 @@ class TestMockEventProvider:
 
     @pytest.mark.asyncio
     async def test_classify_returns_list(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         events = await provider.classify(b"event audio")
         assert isinstance(events, list)
@@ -155,7 +165,8 @@ class TestMockEventProvider:
 
     @pytest.mark.asyncio
     async def test_event_has_type_and_confidence(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         events = await provider.classify(b"event audio")
         event = events[0]
@@ -164,14 +175,16 @@ class TestMockEventProvider:
 
     @pytest.mark.asyncio
     async def test_event_has_top_classes(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         events = await provider.classify(b"classify me")
         assert len(events[0].top_classes) >= 1
 
     @pytest.mark.asyncio
     async def test_determinism(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         e1 = await provider.classify(b"same audio")
         e2 = await provider.classify(b"same audio")
@@ -188,7 +201,8 @@ class TestMockSceneProvider:
 
     @pytest.mark.asyncio
     async def test_scene_result(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         scene = await provider.analyze_scene(b"scene audio")
         assert isinstance(scene.indoor, bool)
@@ -197,7 +211,8 @@ class TestMockSceneProvider:
 
     @pytest.mark.asyncio
     async def test_scene_tags(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         scene = await provider.analyze_scene(b"tagged scene")
         assert len(scene.scene_tags) >= 1
@@ -213,7 +228,8 @@ class TestMockSpeakerProvider:
 
     @pytest.mark.asyncio
     async def test_identify_returns_structured(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         speaker = await provider.identify(b"voice sample")
         assert speaker.speaker_id is not None
@@ -222,14 +238,16 @@ class TestMockSpeakerProvider:
 
     @pytest.mark.asyncio
     async def test_enroll_succeeds(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         result = await provider.enroll("alice", b"enrollment audio")
         assert result is True
 
     @pytest.mark.asyncio
     async def test_voice_characteristics(
-        self, provider: MockAudioProvider,
+        self,
+        provider: MockAudioProvider,
     ) -> None:
         speaker = await provider.identify(b"voice features")
         assert "pitch_hz" in speaker.voice_characteristics

@@ -102,24 +102,28 @@ class AmbientEventProvider:
 
         # Primary classification
         if result.sound_class.value != "silence":
-            events.append(SoundEventResult(
-                event_type=result.sound_class.value,
-                confidence=result.confidence,
-                is_critical=result.is_critical,
-                temporal=TemporalSpan(start_time=now),
-                top_classes=result.top_classes,
-            ))
+            events.append(
+                SoundEventResult(
+                    event_type=result.sound_class.value,
+                    confidence=result.confidence,
+                    is_critical=result.is_critical,
+                    temporal=TemporalSpan(start_time=now),
+                    top_classes=result.top_classes,
+                )
+            )
 
         # Add runner-up candidates above threshold
         for class_name, score in result.top_classes[1:]:
             if score >= 0.3:
-                events.append(SoundEventResult(
-                    event_type=class_name,
-                    confidence=score,
-                    is_critical=False,
-                    temporal=TemporalSpan(start_time=now),
-                    top_classes=[],
-                ))
+                events.append(
+                    SoundEventResult(
+                        event_type=class_name,
+                        confidence=score,
+                        is_critical=False,
+                        temporal=TemporalSpan(start_time=now),
+                        top_classes=[],
+                    )
+                )
 
         return events
 
