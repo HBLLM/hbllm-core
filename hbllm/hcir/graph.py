@@ -45,6 +45,8 @@ from hbllm.hcir.types import (
     ExperimentStatus,
     FalsificationStatus,
     KnowledgeValue,
+    PerceptualContradictionLevel,
+    PerceptualEpistemicProfile,
     Priority,
     Provenance,
     ResearchStrategyType,
@@ -70,6 +72,7 @@ class HCIRNodeType(StrEnum):
     OBSERVATION = "observation"
     FACT = "fact"
     BELIEF = "belief"
+    BELIEF_TRANSITION = "belief_transition"
     HYPOTHESIS = "hypothesis"
     PREDICTION = "prediction"
     PREDICTION_ERROR = "prediction_error"
@@ -279,6 +282,11 @@ class ObservationNode(HCIRNode):
     category: CognitiveCategory = CognitiveCategory.PERCEPTION
     payload: dict[str, Any] = Field(default_factory=dict)
     sensor_source: str = ""
+    modality: str = ""  # "audio", "visual", "iot", etc.
+    temporal_span: dict[str, float] = Field(default_factory=dict)  # {"start_time": ..., "end_time": ...}
+    spatial_span: dict[str, float] | None = None  # {"azimuth": ..., "elevation": ..., "distance": ...}
+    provider_provenance: dict[str, Any] | None = None  # {"provider": ..., "model": ..., "version": ...}
+    raw_reference: str = ""
 
 
 class VisualObservationNode(ObservationNode):
@@ -296,6 +304,7 @@ class VisualObservationNode(ObservationNode):
     """
 
     node_type: HCIRNodeType = HCIRNodeType.VISUAL_OBSERVATION
+    modality: str = "visual"
     embedding_ref: str = ""  # ID in vector store
     embedding_space: str = ""  # e.g. "siglip-base-patch16-224-image"
     embedding_model: str = ""  # e.g. "google/siglip-base-patch16-224"
@@ -316,11 +325,11 @@ class BeliefNode(HCIRNode):
     """An integrated assertion held by the system.
 
     Beliefs are the atomic units of knowledge in HBLLM's epistemic
-    architecture.  Unlike raw facts, every belief carries confidence,
-    evidence provenance, falsification status, and revision history.
+    architecture. Unlike raw facts, every belief carries confidence,
+    evidence provenance, falsification status, and revision tracking.
 
     In the epistemic OS, there are no absolute truths — only beliefs
-    with varying confidence.  A ``FactNode`` is simply a ``BeliefNode``
+    with varying confidence. A ``FactNode`` is simply a ``BeliefNode``
     with confidence >= threshold and strong evidence.
     """
 
@@ -334,13 +343,35 @@ class BeliefNode(HCIRNode):
     counter_evidence: list[str] = Field(default_factory=list)
     falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
     prediction_score: float = 0.0  # Track record of predictions made from this belief
+    current_revision: int = 1
+    latest_transition_id: str = ""
     revision_history: list[dict[str, Any]] = Field(default_factory=list)
-    # Each entry: {"timestamp": float, "old_confidence": float,
-    #              "new_confidence": float, "reason": str, "evidence_id": str}
+    # Lightweight summary entries; detailed transition objects live in BeliefTransitionNode / event log
 
     # ── Multi-dimensional confidence & value ────────────────────────
     belief_confidence: BeliefConfidence = Field(default_factory=BeliefConfidence)
     knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
+
+
+class BeliefTransitionNode(HCIRNode):
+    """An event-sourced record of a Bayesian belief state transition.
+
+    Stored in HCIR as an immutable audit node to preserve historical
+    transparency without ballooning the active BeliefNode payload.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.BELIEF_TRANSITION
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    belief_id: str = ""
+    prior_confidence: float = 0.5
+    posterior_confidence: float = 0.5
+    delta: float = 0.0
+    prior_revision: int = 0
+    posterior_revision: int = 1
+    likelihood_ratio: float = 1.0
+    source_evidence_id: str = ""
+    source_event_ids: list[str] = Field(default_factory=list)
+    rationale: str = ""
 
 
 class HypothesisNode(HCIRNode):
@@ -552,6 +583,7 @@ class AudioObservationNode(ObservationNode):
     """
 
     node_type: HCIRNodeType = HCIRNodeType.AUDIO_OBSERVATION
+    modality: str = "audio"
     label: str = ""  # Human-readable summary
     embedding_ref: str = ""  # ID in audio vector store
     embedding_space: str = ""  # e.g. "yamnet-v1"
@@ -573,12 +605,12 @@ class AcousticConceptNode(ConceptNode):
     "washing machine cycle"). Created by commit_learning(),
     which creates a cognitive artifact, NOT model training.
 
-    Role separation::
+    Architecture::
 
-        prototype_ref  = retrieval accelerator (centroid)
-        exemplar_refs  = perceptual evidence
-        HCIR node      = semantic identity
-        BeliefRecord   = epistemic commitment
+        HCIR (cognitive state)
+          └── AcousticConceptNode
+                 ├── prototype_ref ─────→ AudioMemory (centroid vector)
+                 └── exemplar_refs ─────→ AudioMemory (cluster vectors)
 
     """
 
@@ -595,34 +627,32 @@ class AcousticConceptNode(ConceptNode):
 
 
 class SkillNode(HCIRNode):
-    """A reusable, learned skill with success tracking."""
+    """A reusable procedural skill discovered through experience."""
 
     node_type: HCIRNodeType = HCIRNodeType.SKILL
     category: CognitiveCategory = CognitiveCategory.MEMORY
-    skill_name: str = ""
-    description: str = ""
-    success_rate: Confidence = 0.0
-    invocation_count: int = 0
+    name: str = ""
+    preconditions: list[str] = Field(default_factory=list)
+    postconditions: list[str] = Field(default_factory=list)
+    success_rate: Confidence = 0.5
 
 
 class ProcedureNode(HCIRNode):
-    """A parameterized, reusable bytecode subroutine."""
+    """A multi-step executable recipe."""
 
     node_type: HCIRNodeType = HCIRNodeType.PROCEDURE
     category: CognitiveCategory = CognitiveCategory.MEMORY
-    procedure_name: str = ""
-    parameters: list[str] = Field(default_factory=list)
-    preconditions: list[str] = Field(default_factory=list)
-    # Bytecode instructions are stored by reference, not inline
+    steps: list[str] = Field(default_factory=list)
+    is_atomic: bool = False
 
 
 class ValueNode(HCIRNode):
-    """An emotional or alignment preference marker."""
+    """A preference or value axiom used in decision ranking."""
 
     node_type: HCIRNodeType = HCIRNodeType.VALUE
     category: CognitiveCategory = CognitiveCategory.VALUE
-    dimension: str = ""  # e.g., "utility", "safety", "curiosity"
-    weight: Confidence = 0.5
+    dimension: str = ""  # e.g., "brevity", "accuracy", "safety"
+    weight: Priority = 0.5
 
 
 class ExternalKnowledgeNode(HCIRNode):
@@ -643,7 +673,7 @@ class EvidenceNode(HCIRNode):
 
     Evidence is not just a reference — it's a first-class cognitive entity
     that carries its own confidence, methodology, limitations, and
-    reproducibility status.  The discovery engine uses evidence strength
+    reproducibility status. The discovery engine uses evidence strength
     to weight contributions during belief revision.
     """
 
@@ -659,6 +689,10 @@ class EvidenceNode(HCIRNode):
     reproducible: bool = False  # Has this been independently reproduced?
     sample_size: int | None = None  # Statistical sample size, if applicable
     effect_size: float | None = None  # Measured effect size, if applicable
+    modality: str = ""  # "audio", "visual", "multimodal", etc.
+    epistemic_profile: PerceptualEpistemicProfile | None = None
+    provider_provenance: dict[str, Any] | None = None  # {"provider": ..., "model": ..., "version": ...}
+    candidates: list[dict[str, Any]] = Field(default_factory=list)  # Ranked classification candidates
 
 
 class ClaimNode(HCIRNode):
@@ -710,7 +744,7 @@ class ExperimentNode(HCIRNode):
 
 
 class ContradictionNode(HCIRNode):
-    """An identified contradiction between claims, evidence, or beliefs.
+    """An identified contradiction between claims, evidence, observations, or beliefs.
 
     Contradictions are not errors — they are **opportunities**.
     Every contradiction potentially reveals a hidden variable,
@@ -722,9 +756,14 @@ class ContradictionNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.CONTRADICTION
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    claim_a_id: str = ""  # First conflicting claim/evidence
-    claim_b_id: str = ""  # Second conflicting claim/evidence
+    claim_a_id: str = ""  # First conflicting claim/evidence/observation
+    claim_b_id: str = ""  # Second conflicting claim/evidence/observation
     contradiction_type: str = ""  # "direct", "statistical", "methodological", "contextual"
+    contradiction_level: PerceptualContradictionLevel = (
+        PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT
+    )
+    observation_ids: list[str] = Field(default_factory=list)
+    conflicting_belief_ids: list[str] = Field(default_factory=list)
     possible_explanations: list[str] = Field(default_factory=list)
     resolution_status: str = "unresolved"  # "unresolved", "explained", "resolved", "accepted"
     investigation_priority: Confidence = 0.5
@@ -883,6 +922,7 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.OBSERVATION: ObservationNode,
     HCIRNodeType.FACT: FactNode,
     HCIRNodeType.BELIEF: BeliefNode,
+    HCIRNodeType.BELIEF_TRANSITION: BeliefTransitionNode,
     HCIRNodeType.HYPOTHESIS: HypothesisNode,
     HCIRNodeType.PREDICTION: PredictionNode,
     HCIRNodeType.PREDICTION_ERROR: PredictionErrorNode,

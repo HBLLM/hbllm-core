@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Epistemic Integration of Perception (Waves A9–A10)
+
+- **A9 — Epistemic Primitives in HCIR**: `PerceptualEpistemicProfile` (multidimensional profiles with derived `.reliability`), `CorrelationCandidate`, `PerceptualContradictionLevel`, `EvidenceAssessment`, `PropositionLikelihood` ($P(E|H)$, $P(E|\neg H)$, $LR$), `BeliefTransition`, `BeliefTransitionNode` (event-sourced history node), `ObservationNode`, `EvidenceNode`, `ContradictionNode`, `BeliefNode` HCIR schemas — `hbllm/hcir/types.py`, `hbllm/hcir/graph.py`
+- **A9 — Decoupled Evaluators**: `PerceptualEvidenceEvaluator` (general signal reliability and provider calibration) and `EpistemicLikelihoodEvaluator` (proposition-specific discrimination in likelihood space) — `hbllm/brain/epistemics/`
+- **A9 — Odds-Space Bayesian Belief Revision**: `DiscoveryBeliefManager.revise()` computing $O(H|E) = O(H) \times LR$ and emitting event-sourced `BeliefTransitionNode` records into the HCIR graph — `hbllm/brain/epistemics/belief_manager.py`
+- **A9 — 3-Tier Contradiction Hierarchy**: `ContradictionEngine.scan_for_perceptual_contradictions()` classifying Level 1 (Classifier/Candidate), Level 2 (Cross-Modal Correlated), and Level 3 (Belief-Perception Conflict) — `hbllm/brain/epistemics/contradiction_engine.py`
+- **A10 — Perception-Epistemic Bridge**: `PerceptionEpistemicBridge` structural adapter materializing audio/visual observations, evidence, and `CORRELATES_WITH` hyperedges without directly mutating beliefs — `hbllm/perception/perception_epistemic_bridge.py`
+- **A10 — Epistemic Loop Multimodal Orchestration**: `EpistemicLoop` processing perceptual evidence, scanning 3-level contradictions, and triggering curiosity investigations — `hbllm/brain/epistemics/epistemic_loop.py`
+- **Test Suite**: 11 perceptual epistemics unit tests + 2 multimodal end-to-end integration tests (13/13 passing); full epistemics and perception suite: 576/576 passing
+
+#### Production Audio Providers & Multimodal Evidence Semantics (Waves A7–A8)
+
+- **A7 — Provider Provenance & Production Providers**: `ProviderProvenance` metadata tracking across all audio evidence types; `MoonshineSpeechProvider`, `AmbientEventProvider`, `ResemblyzerSpeakerProvider`; `AudioInputNode` refactored as adapter with provider delegation; 23-test adversarial suite — `hbllm/perception/`
+- **A8 — Multimodal Evidence Semantics**: Modality-neutral `PerceptualObservation` and `PerceptualAssessment` base types; `CorrelationEngine` geometric/temporal correlation without early collapse; `CORRELATES_WITH` and `OBSERVED_AS` edge types; `CorrelationTransaction` HCIR commitment — `hbllm/perception/`, `hbllm/hcir/graph.py`
+
 #### Grounded Audio Perception Runtime (Waves A1–A6)
 
 - **A1 — Audio Perception Contracts**: `SpeechProvider`, `AcousticEventProvider`, `AcousticSceneProvider`, `SpeakerProvider`, `SoundLocalizationProvider` protocols; `TemporalSpan` (separated `observation_id`, `event_id`, `segment_id`, `AudioEventState`); composition evidence model (`AcousticObservation`, `SpeechEvidence`, `SoundEventEvidence`, `SoundSourceEvidence`, `AcousticSceneEvidence`); structured `SpeakerIdentification`; probabilistic `ParalinguisticProfile`; `AudioEpistemicProfile`; `AudioRecognitionPolicy` — `hbllm/perception/providers/`

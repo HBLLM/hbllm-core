@@ -26,14 +26,21 @@ from hbllm.brain.epistemics.interfaces import (
     CuriositySignal,
 )
 from hbllm.hcir.graph import (
+    AudioObservationNode,
     BeliefNode,
     CognitiveGraph,
     ContradictionNode,
+    EvidenceNode,
     ExperimentNode,
     HCIREdgeType,
     ObservationNode,
+    VisualObservationNode,
 )
-from hbllm.hcir.types import DiscoveryTrigger, ExperimentStatus
+from hbllm.hcir.types import (
+    DiscoveryTrigger,
+    ExperimentStatus,
+    PerceptualContradictionLevel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +75,7 @@ class ContradictionEngine:
         1. Beliefs that contradict each other
         2. Hypotheses with conflicting evidence
         3. Claims with opposing support
+        4. Three-level perceptual contradictions
 
         Args:
             domain: Optional filter by knowledge domain.
@@ -83,6 +91,146 @@ class ContradictionEngine:
 
         # Scan for beliefs with opposing evidence
         reports.extend(await self._scan_belief_conflicts(domain))
+
+        # Scan for 3-level perceptual contradictions
+        reports.extend(await self.scan_for_perceptual_contradictions())
+
+        return reports
+
+    async def scan_for_perceptual_contradictions(self) -> list[ContradictionReport]:
+        """Scan for 3-tiered perceptual and epistemic contradictions:
+
+        - Level 1: Classifier / multi-candidate disagreement within observation
+        - Level 2: Cross-modal contradiction across correlated observations
+        - Level 3: Perception vs active belief conflict
+        """
+        reports: list[ContradictionReport] = []
+
+        # ── Level 1: Classifier Disagreement ──────────────────────────────
+        for _node in self._graph.all_nodes():
+            node = self._graph.get_node(_node.id)
+            if not isinstance(node, EvidenceNode) or not node.candidates:
+                continue
+
+            if len(node.candidates) >= 2:
+                top1 = float(node.candidates[0].get("score", 0.0))
+                top2 = float(node.candidates[1].get("score", 0.0))
+                if top1 >= 0.5 and top2 >= 0.5 and (top1 - top2) < 0.20:
+                    label1 = node.candidates[0].get("label", "cand1")
+                    label2 = node.candidates[1].get("label", "cand2")
+                    report = ContradictionReport(
+                        claim_a_id=f"{node.id}:{label1}",
+                        claim_b_id=f"{node.id}:{label2}",
+                        contradiction_type="classifier_ambiguity",
+                        contradiction_level=str(
+                            PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT
+                        ),
+                        possible_explanations=[
+                            f"Model uncertainty between '{label1}' and '{label2}'",
+                            "Acoustic/visual signal contains blended features",
+                        ],
+                        investigation_priority=float(top2),
+                        context=f"Evidence {node.id} multi-candidate conflict",
+                    )
+                    reports.append(report)
+
+        # ── Level 2: Cross-Modal Conflict ──────────────────────────────────
+        for edge in self._graph.all_edges():
+            if edge.edge_type != HCIREdgeType.CORRELATES_WITH:
+                continue
+
+            for src_id in edge.sources:
+                for tgt_id in edge.targets:
+                    src_node = self._graph.get_node(src_id)
+                    tgt_node = self._graph.get_node(tgt_id)
+
+                    if isinstance(src_node, VisualObservationNode) and isinstance(
+                        tgt_node, AudioObservationNode
+                    ):
+                        vis, aud = src_node, tgt_node
+                    elif isinstance(src_node, AudioObservationNode) and isinstance(
+                        tgt_node, VisualObservationNode
+                    ):
+                        aud, vis = src_node, tgt_node
+                    else:
+                        continue
+
+                    # Check for semantic conflict between visual and audio
+                    vis_cap = vis.caption.lower()
+                    aud_event = aud.event_type.lower() or aud.label.lower()
+                    aud_transcript = aud.transcript.lower()
+
+                    is_conflict = False
+                    reason = ""
+                    if any(empty in vis_cap for empty in ["empty", "nobody", "no person", "dark"]):
+                        if aud_event in ["speech", "applause", "crowd", "screaming", "footsteps"] or len(aud_transcript) > 5:
+                            is_conflict = True
+                            reason = f"Vision indicates '{vis_cap}' while Audio detected '{aud_event or aud_transcript}'"
+
+                    if is_conflict:
+                        report = ContradictionReport(
+                            claim_a_id=vis.id,
+                            claim_b_id=aud.id,
+                            contradiction_type="cross_modal_conflict",
+                            contradiction_level=str(
+                                PerceptualContradictionLevel.LEVEL_2_CROSS_MODAL_CONFLICT
+                            ),
+                            possible_explanations=[
+                                "Occluded or off-camera sound source",
+                                "Microphone picking up audio from adjacent room",
+                                "Vision detector false negative",
+                            ],
+                            investigation_priority=0.85,
+                            context=reason,
+                        )
+                        reports.append(report)
+
+        # ── Level 3: Belief Conflict ──────────────────────────────────────
+        for _node in self._graph.all_nodes():
+            belief = self._graph.get_node(_node.id)
+            if not isinstance(belief, BeliefNode) or belief.uncertainty.confidence < 0.6:
+                continue
+
+            # Check if any incoming WEAKENS edges from high-confidence evidence
+            incoming = self._graph.edges_to(belief.id)
+            for edge in incoming:
+                if edge.edge_type in (HCIREdgeType.WEAKENS, HCIREdgeType.CONTRADICTS):
+                    for src_id in edge.sources:
+                        evi = self._graph.get_node(src_id)
+                        if isinstance(evi, EvidenceNode) and float(evi.strength) >= 0.7:
+                            report = ContradictionReport(
+                                claim_a_id=belief.id,
+                                claim_b_id=evi.id,
+                                contradiction_type="belief_perception_conflict",
+                                contradiction_level=str(
+                                    PerceptualContradictionLevel.LEVEL_3_BELIEF_CONFLICT
+                                ),
+                                possible_explanations=[
+                                    f"Belief '{belief.claim}' is out-of-date",
+                                    "Sensory evidence represents an anomalous exception",
+                                ],
+                                investigation_priority=0.90,
+                                context=f"Belief '{belief.claim}' contradicted by Evidence {evi.id}",
+                            )
+                            reports.append(report)
+
+        # Commit ContradictionNodes to graph
+        for report in reports:
+            contra_id = f"contra_{abs(hash(report.claim_a_id + report.claim_b_id)) % 1000000}"
+            if self._graph.get_node(contra_id) is None:
+                contra_node = ContradictionNode(
+                    id=contra_id,
+                    claim_a_id=report.claim_a_id,
+                    claim_b_id=report.claim_b_id,
+                    contradiction_type=report.contradiction_type,
+                    contradiction_level=PerceptualContradictionLevel(
+                        report.contradiction_level
+                        or PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT
+                    ),
+                    possible_explanations=report.possible_explanations,
+                    investigation_priority=report.investigation_priority,
+                )
+                self._graph.upsert_node(contra_node)
 
         return reports
 
@@ -186,7 +334,8 @@ class ContradictionEngine:
             if program_id and getattr(node, "research_program_id", "") != program_id:
                 continue
 
-            if node.status == ExperimentStatus.FAILED:
+            exp_status = getattr(node, "experiment_status", getattr(node, "status", None))
+            if exp_status == ExperimentStatus.FAILED:
                 signals.append(
                     CuriositySignal(
                         trigger=DiscoveryTrigger.UNEXPECTED_FAILURE,
@@ -284,6 +433,9 @@ class ContradictionEngine:
             f"Belief B: {b.claim}\n\n"
             f"Answer YES or NO only."
         )
+        if self._llm is None:
+            return False
+
         try:
             response = await self._llm.generate(prompt)
             text = response if isinstance(response, str) else str(response)
@@ -298,6 +450,9 @@ class ContradictionEngine:
         contradiction_type: str,
     ) -> dict[str, Any]:
         """Use LLM for deep contradiction analysis."""
+        if self._llm is None:
+            return {}
+
         prompt = (
             f"Analyze this contradiction:\n"
             f"Claim A: {claim_a}\n"
