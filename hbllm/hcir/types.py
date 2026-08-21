@@ -592,6 +592,8 @@ class DiscoveryTrigger(StrEnum):
         UNEXPECTED_FAILURE:  Something failed that should have succeeded
         ANALOGY:             Cross-domain structural similarity detected
         CURIOSITY:           Self-directed investigation (no external trigger)
+        PERCEPTUAL_ANOMALY:   Sensory observation conflicts with expectation
+        PERCEPTUAL_AMBIGUITY: Competing high-confidence sensory classifications
     """
 
     CONTRADICTION = "contradiction"
@@ -602,3 +604,130 @@ class DiscoveryTrigger(StrEnum):
     UNEXPECTED_FAILURE = "unexpected_failure"
     ANALOGY = "analogy"
     CURIOSITY = "curiosity"
+    PERCEPTUAL_ANOMALY = "perceptual_anomaly"
+    PERCEPTUAL_AMBIGUITY = "perceptual_ambiguity"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Perceptual & Multimodal Epistemic Types
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class PerceptualModality(StrEnum):
+    """Sensory modalities supported by the perceptual subsystem."""
+
+    AUDIO = "audio"
+    VISUAL = "visual"
+    TEXT = "text"
+    IOT = "iot"
+    MULTIMODAL = "multimodal"
+
+
+class PerceptualEpistemicProfile(BaseModel):
+    """Multidimensional epistemic profile for sensory evidence.
+
+    Preserves underlying evidence dimensions (clarity, model confidence,
+    temporal stability) without compressing into a lossy canonical scalar.
+    """
+
+    sensory_clarity: Confidence = Field(
+        default=0.8,
+        description="Signal-to-noise ratio, illumination, acoustic clarity [0.0, 1.0]",
+    )
+    model_confidence: Confidence = Field(
+        default=0.8,
+        description="Confidence emitted by the perception model [0.0, 1.0]",
+    )
+    temporal_stability: Confidence = Field(
+        default=0.8,
+        description="Consistency of detection across consecutive temporal windows [0.0, 1.0]",
+    )
+
+    @property
+    def reliability(self) -> float:
+        """Derived composite reliability score preserving multidimensional state."""
+        return float(
+            0.3 * self.sensory_clarity
+            + 0.4 * self.model_confidence
+            + 0.3 * self.temporal_stability
+        )
+
+
+class CorrelationCandidate(BaseModel):
+    """A candidate geometric / temporal cross-modal correlation.
+
+    Represents a measurable, epistemically neutral relationship between
+    two observations without prematurely asserting causality.
+    """
+
+    source_obs_id: str
+    target_obs_id: str
+    source_modality: PerceptualModality
+    target_modality: PerceptualModality
+    temporal_overlap: float = Field(ge=0.0, le=1.0, default=0.0)
+    spatial_overlap: float | None = Field(default=None)
+    delta_time_ms: float = 0.0
+    confidence: Confidence = 0.5
+    rationale: str = ""
+
+
+class PerceptualContradictionLevel(StrEnum):
+    """Three-tiered hierarchy of perceptual and epistemic contradictions."""
+
+    LEVEL_1_CLASSIFIER_DISAGREEMENT = "level_1_classifier_disagreement"
+    LEVEL_2_CROSS_MODAL_CONFLICT = "level_2_cross_modal_conflict"
+    LEVEL_3_BELIEF_CONFLICT = "level_3_belief_conflict"
+
+
+class EvidenceAssessment(BaseModel):
+    """General evaluation of evidence quality and reliability.
+
+    Produced by PerceptualEvidenceEvaluator independently of any
+    specific candidate belief proposition.
+    """
+
+    evidence_id: str
+    reliability: Confidence = 0.5
+    uncertainty: UncertaintyVector = Field(default_factory=UncertaintyVector)
+    epistemic_profile: PerceptualEpistemicProfile | None = None
+    provenance_quality: Confidence = 0.8
+    information_gain: float = 0.0
+
+
+class PropositionLikelihood(BaseModel):
+    """Proposition-specific likelihood evaluation for a hypothesis/belief.
+
+    Produced by EpistemicLikelihoodEvaluator to evaluate how well evidence E
+    supports hypothesis H versus its negation ¬H.
+    """
+
+    belief_id: str
+    evidence_id: str
+    p_e_given_h: float = Field(ge=0.0, le=1.0, default=0.5, description="P(E | H)")
+    p_e_given_not_h: float = Field(ge=0.0, le=1.0, default=0.5, description="P(E | ¬H)")
+    likelihood_ratio: float = Field(default=1.0, description="LR = P(E|H) / P(E|¬H)")
+    status: str = Field(
+        default="informative",
+        description="insufficient | redundant | informative | contradictory",
+    )
+
+
+class BeliefTransition(BaseModel):
+    """Immutable audit record of a Bayesian belief state transition.
+
+    Stored in HCIR event journal and as event-sourced history nodes.
+    """
+
+    transition_id: str
+    belief_id: str
+    prior_confidence: Confidence
+    posterior_confidence: Confidence
+    delta: float
+    prior_revision: int = 0
+    posterior_revision: int = 1
+    likelihood_ratio: float = 1.0
+    source_evidence_id: str = ""
+    source_event_ids: list[str] = Field(default_factory=list)
+    timestamp: Timestamp = Field(default_factory=time.time)
+    rationale: str = ""
+

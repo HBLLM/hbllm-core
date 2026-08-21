@@ -40,10 +40,15 @@ from typing import Any
 from hbllm.brain.epistemics.interfaces import CuriositySignal, InvestigationBudget
 from hbllm.hcir.graph import (
     CognitiveGraph,
+    ContradictionNode,
     HypothesisNode,
     UnknownNode,
 )
-from hbllm.hcir.types import DiscoveryTrigger, KnowledgeValue
+from hbllm.hcir.types import (
+    DiscoveryTrigger,
+    KnowledgeValue,
+    PerceptualContradictionLevel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +117,9 @@ class CuriosityEngine:
 
         # Scan hypotheses needing testing
         signals.extend(self._scan_untested_hypotheses())
+
+        # Scan contradictions (including perceptual Level 1/2/3)
+        signals.extend(self._scan_contradictions())
 
         # Scan for anomalies via contradiction engine
         if self._contradiction_engine is not None:
@@ -260,6 +268,46 @@ class CuriosityEngine:
                     estimated_impact=kv.impact,
                     estimated_cost=1.0 - node.testability,  # Hard to test = expensive
                     description=f"Untested hypothesis: {node.claim[:80]}",
+                )
+            )
+
+        return signals
+
+    def _scan_contradictions(self) -> list[CuriositySignal]:
+        """Scan all ContradictionNodes (including perceptual Level 1/2/3) for signals."""
+        signals: list[CuriositySignal] = []
+
+        for _node in self._graph.all_nodes():
+            node = self._graph.get_node(_node.id)
+            if not isinstance(node, ContradictionNode):
+                continue
+
+            level = getattr(node, "contradiction_level", PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT)
+            if level == PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT:
+                trigger = DiscoveryTrigger.PERCEPTUAL_AMBIGUITY
+                gain = 0.6
+                impact = 0.5
+            elif level in (
+                PerceptualContradictionLevel.LEVEL_2_CROSS_MODAL_CONFLICT,
+                PerceptualContradictionLevel.LEVEL_3_BELIEF_CONFLICT,
+            ):
+                trigger = DiscoveryTrigger.PERCEPTUAL_ANOMALY
+                gain = 0.85
+                impact = 0.8
+            else:
+                trigger = DiscoveryTrigger.CONTRADICTION
+                gain = 0.75
+                impact = 0.7
+
+            signals.append(
+                CuriositySignal(
+                    trigger=trigger,
+                    source_engine="curiosity_engine",
+                    source_id=node.id,
+                    estimated_info_gain=gain,
+                    estimated_impact=impact,
+                    estimated_cost=0.3,
+                    description=f"Contradiction [{node.contradiction_type}]: {node.claim_a_id} vs {node.claim_b_id}",
                 )
             )
 

@@ -41,12 +41,18 @@ from typing import Any
 from hbllm.brain.epistemics.interfaces import BeliefRevision, PredictionOutcome
 from hbllm.hcir.graph import (
     BeliefNode,
+    BeliefTransitionNode,
     CognitiveGraph,
     HCIREdge,
     HCIREdgeType,
     HCIRNodeType,
 )
-from hbllm.hcir.types import FalsificationStatus
+from hbllm.hcir.types import (
+    BeliefTransition,
+    EvidenceAssessment,
+    FalsificationStatus,
+    PropositionLikelihood,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,33 +110,14 @@ class DiscoveryBeliefManager:
     """Manages beliefs with discovery-aware lifecycle.
 
     Wraps the shared CognitiveGraph to provide:
+    - Odds-space Bayesian belief updates with Likelihood Ratios
     - Evidence-based confidence updates (Bayesian)
     - Prediction-based belief revision
     - Falsification candidate identification
-    - Belief revision history tracking
+    - Event-sourced BeliefTransitionNode tracking
 
     This is NOT a separate belief store — it operates on BeliefNodes
     in the shared HCIR graph.
-
-    Usage::
-
-        manager = DiscoveryBeliefManager(graph)
-
-        # Update belief from evidence
-        revision = await manager.revise_belief(
-            belief_id="bel_001",
-            evidence_id="evi_001",
-            direction="supporting",
-        )
-
-        # Update belief from prediction outcome
-        revision = await manager.revise_from_prediction(
-            belief_id="bel_001",
-            prediction_outcome=outcome,
-        )
-
-        # Find beliefs worth testing
-        candidates = await manager.get_falsification_candidates()
     """
 
     def __init__(
@@ -140,6 +127,140 @@ class DiscoveryBeliefManager:
     ) -> None:
         self._graph = graph
         self._config = config or BayesianConfig()
+
+    # ── Odds-Space Bayesian Revision ──────────────────────────────────
+
+    async def revise(
+        self,
+        belief_id: str,
+        proposition_likelihood: PropositionLikelihood,
+        evidence_assessment: EvidenceAssessment | None = None,
+        rationale: str = "",
+    ) -> BeliefTransition:
+        """Revise belief confidence using Bayesian odds-space updating.
+
+        O(H|E) = O(H) * LR
+        P(H|E) = O(H|E) / (1 + O(H|E))
+
+        Emits and commits an event-sourced BeliefTransitionNode into HCIR.
+        """
+        node = self._graph.get_node(belief_id)
+        if not isinstance(node, BeliefNode):
+            raise ValueError(f"Node {belief_id} is not a BeliefNode")
+
+        prior_confidence = float(node.uncertainty.confidence)
+        prior_revision = node.current_revision
+
+        # Check if update should be skipped
+        if proposition_likelihood.status in ("insufficient", "redundant"):
+            logger.debug(
+                "Skipping belief update for %s: status=%s",
+                belief_id,
+                proposition_likelihood.status,
+            )
+            return BeliefTransition(
+                transition_id="",
+                belief_id=belief_id,
+                prior_confidence=prior_confidence,
+                posterior_confidence=prior_confidence,
+                delta=0.0,
+                prior_revision=prior_revision,
+                posterior_revision=prior_revision,
+                likelihood_ratio=proposition_likelihood.likelihood_ratio,
+                source_evidence_id=proposition_likelihood.evidence_id,
+                rationale=f"No update: status={proposition_likelihood.status}",
+            )
+
+        # 1. Compute prior odds (clamped to prevent div by zero)
+        p_prior = max(0.001, min(0.999, prior_confidence))
+        prior_odds = p_prior / (1.0 - p_prior)
+
+        # 2. Update posterior odds via Likelihood Ratio (LR)
+        lr = proposition_likelihood.likelihood_ratio
+        posterior_odds = prior_odds * lr
+
+        # 3. Convert back to posterior probability
+        posterior_confidence = posterior_odds / (1.0 + posterior_odds)
+        posterior_confidence = float(max(0.01, min(0.99, posterior_confidence)))
+
+        delta = posterior_confidence - prior_confidence
+        posterior_revision = prior_revision + 1
+
+        # 4. Update BeliefNode state
+        node.uncertainty.confidence = posterior_confidence
+        node.current_revision = posterior_revision
+
+        if delta > 0:
+            if proposition_likelihood.evidence_id not in node.evidence_sources:
+                node.evidence_sources.append(proposition_likelihood.evidence_id)
+        elif delta < 0:
+            if proposition_likelihood.evidence_id not in node.counter_evidence:
+                node.counter_evidence.append(proposition_likelihood.evidence_id)
+
+        # Update falsification status
+        if posterior_confidence < self._config.falsification_threshold:
+            node.falsification_status = FalsificationStatus.FALSIFIED
+        elif posterior_confidence >= self._config.corroboration_threshold:
+            node.falsification_status = FalsificationStatus.CORROBORATED
+        elif delta < 0:
+            node.falsification_status = FalsificationStatus.WEAKENED
+
+        # 5. Create immutable BeliefTransitionNode in HCIR
+        transition_id = f"trans_{int(time.time() * 1000)}_{belief_id}"
+        node.latest_transition_id = transition_id
+
+        transition_record = BeliefTransition(
+            transition_id=transition_id,
+            belief_id=belief_id,
+            prior_confidence=prior_confidence,
+            posterior_confidence=posterior_confidence,
+            delta=delta,
+            prior_revision=prior_revision,
+            posterior_revision=posterior_revision,
+            likelihood_ratio=lr,
+            source_evidence_id=proposition_likelihood.evidence_id,
+            timestamp=time.time(),
+            rationale=rationale or f"LR={lr:.2f} ({proposition_likelihood.status})",
+        )
+
+        transition_node = BeliefTransitionNode(
+            id=transition_id,
+            belief_id=belief_id,
+            prior_confidence=prior_confidence,
+            posterior_confidence=posterior_confidence,
+            delta=delta,
+            prior_revision=prior_revision,
+            posterior_revision=posterior_revision,
+            likelihood_ratio=lr,
+            source_evidence_id=proposition_likelihood.evidence_id,
+            rationale=transition_record.rationale,
+        )
+        self._graph.upsert_node(transition_node)
+
+        # Append lightweight history entry to node
+        node.revision_history.append({
+            "timestamp": transition_record.timestamp,
+            "transition_id": transition_id,
+            "prior": prior_confidence,
+            "posterior": posterior_confidence,
+            "delta": delta,
+            "evidence_id": proposition_likelihood.evidence_id,
+        })
+        self._graph.upsert_node(node)
+
+        # 6. Commit epistemic edge
+        edge_type = HCIREdgeType.STRENGTHENS if delta >= 0 else HCIREdgeType.WEAKENS
+        edge = HCIREdge(
+            edge_type=edge_type,
+            sources=[proposition_likelihood.evidence_id],
+            targets=[belief_id],
+        )
+        try:
+            self._graph.add_edge(edge)
+        except ValueError:
+            pass
+
+        return transition_record
 
     # ── Evidence-Based Revision ───────────────────────────────────────
 
@@ -185,6 +306,7 @@ class DiscoveryBeliefManager:
 
         # Update the node
         node.uncertainty.confidence = new_confidence
+        node.current_revision += 1
 
         # Update falsification status
         if new_confidence < self._config.falsification_threshold:
@@ -195,8 +317,12 @@ class DiscoveryBeliefManager:
             node.falsification_status = FalsificationStatus.WEAKENED
 
         # Record revision history
+        transition_id = f"trans_{int(time.time() * 1000)}_{belief_id}"
+        node.latest_transition_id = transition_id
+
         revision_entry = {
             "timestamp": time.time(),
+            "transition_id": transition_id,
             "old_confidence": old_confidence,
             "new_confidence": new_confidence,
             "reason": f"{direction} evidence ({evidence_strength})",
@@ -204,6 +330,18 @@ class DiscoveryBeliefManager:
         }
         node.revision_history.append(revision_entry)
 
+        transition_node = BeliefTransitionNode(
+            id=transition_id,
+            belief_id=belief_id,
+            prior_confidence=old_confidence,
+            posterior_confidence=new_confidence,
+            delta=new_confidence - old_confidence,
+            prior_revision=node.current_revision - 1,
+            posterior_revision=node.current_revision,
+            source_evidence_id=evidence_id,
+            rationale=f"{direction} evidence ({evidence_strength})",
+        )
+        self._graph.upsert_node(transition_node)
         self._graph.upsert_node(node)
 
         # Create epistemic edge

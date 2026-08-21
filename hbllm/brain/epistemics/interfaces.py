@@ -123,6 +123,7 @@ class ContradictionReport:
     claim_a_id: str = ""
     claim_b_id: str = ""
     contradiction_type: str = ""
+    contradiction_level: str = ""
     possible_explanations: list[str] = field(default_factory=list)
     investigation_priority: float = 0.5
     context: str = ""

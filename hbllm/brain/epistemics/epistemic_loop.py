@@ -53,6 +53,7 @@ import logging
 import time
 from typing import Any
 
+from hbllm.brain.epistemics.belief_manager import DiscoveryBeliefManager
 from hbllm.brain.epistemics.contradiction_engine import ContradictionEngine
 from hbllm.brain.epistemics.curiosity_engine import CuriosityEngine
 from hbllm.brain.epistemics.evidence_evaluator import EvidenceEvaluator
@@ -65,12 +66,14 @@ from hbllm.brain.epistemics.interfaces import (
     CuriositySignal,
     InvestigationBudget,
 )
+from hbllm.brain.epistemics.likelihood_evaluator import EpistemicLikelihoodEvaluator
+from hbllm.brain.epistemics.perceptual_evaluator import PerceptualEvidenceEvaluator
 from hbllm.brain.epistemics.prediction_tracker import PredictionTracker
 from hbllm.brain.epistemics.research_strategy import (
     ResearchStrategyManager,
 )
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
-from hbllm.hcir.graph import BeliefNode, CognitiveGraph
+from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode
 from hbllm.hcir.types import DiscoveryTrigger
 
 logger = logging.getLogger(__name__)
@@ -183,6 +186,17 @@ class EpistemicLoop:
         )
         self._strategy_manager = ResearchStrategyManager(graph=graph)
 
+        # Perceptual epistemics & belief management
+        self._perceptual_evaluator = PerceptualEvidenceEvaluator(
+            graph=graph,
+            reputation_tracker=reputation_tracker,
+        )
+        self._likelihood_evaluator = EpistemicLikelihoodEvaluator(
+            graph=graph,
+            llm=llm,
+        )
+        self._belief_manager = DiscoveryBeliefManager(graph=graph)
+
         # Wire the contradiction engine into the curiosity engine
         self._curiosity._contradiction_engine = self._contradiction_engine
 
@@ -206,12 +220,22 @@ class EpistemicLoop:
         results: list[str] = []
 
         try:
+            # Step 0: Process and evaluate unassessed sensory evidence
+            revisions_made = await self._process_perceptual_evidence()
+            if revisions_made:
+                results.append(f"Evaluated sensory evidence: {revisions_made} belief revisions")
+
             # Step 1: Check expired predictions
             expired = await self._prediction_tracker.check_expired_predictions()
             if expired:
                 results.append(f"Checked {len(expired)} expired predictions")
 
-            # Step 2: Scan for curiosity signals
+            # Step 2: Scan for contradictions (including perceptual contradictions)
+            contradictions = await self._contradiction_engine.scan_for_contradictions()
+            if contradictions:
+                results.append(f"Found {len(contradictions)} potential contradictions")
+
+            # Step 3: Scan for curiosity signals (incorporating new unknowns and contradictions)
             signals = await self._curiosity.prioritize_investigations(
                 self._budget,
             )
@@ -219,9 +243,9 @@ class EpistemicLoop:
             if not signals:
                 logger.info("Epistemic cycle #%d: nothing to investigate", self._cycle_count)
                 self._last_cycle_time = time.time() - cycle_start
-                return None
+                return results or None
 
-            # Step 3: Investigate top signals
+            # Step 4: Investigate top signals
             investigated = 0
             for signal in signals[: self._max_investigations]:
                 try:
@@ -236,17 +260,12 @@ class EpistemicLoop:
                         exc,
                     )
 
-            # Step 4: Generate spontaneous unknowns
+            # Step 5: Generate spontaneous unknowns
             new_unknowns = await self._curiosity.generate_spontaneous_unknowns()
             if new_unknowns:
                 results.append(
                     f"Generated {len(new_unknowns)} spontaneous unknowns from uncertainty hotspots"
                 )
-
-            # Step 5: Scan for contradictions
-            contradictions = await self._contradiction_engine.scan_for_contradictions()
-            if contradictions:
-                results.append(f"Found {len(contradictions)} potential contradictions")
 
             # Step 6: Record to epistemic memory
             await self._record_cycle_to_memory(results)
@@ -294,6 +313,64 @@ class EpistemicLoop:
             return messages
 
         return results  # type: ignore[return-value]
+
+    async def _process_perceptual_evidence(self) -> int:
+        """Process unassessed sensory evidence and evaluate candidate belief revisions."""
+        revisions_count = 0
+
+        # Find all perceptual evidence nodes
+        perceptual_evidence: list[EvidenceNode] = []
+        beliefs: list[BeliefNode] = []
+
+        for _node in self._graph.all_nodes():
+            node = self._graph.get_node(_node.id)
+            if isinstance(node, EvidenceNode) and (node.modality or node.epistemic_profile is not None):
+                perceptual_evidence.append(node)
+            elif isinstance(node, BeliefNode):
+                beliefs.append(node)
+
+        if not perceptual_evidence or not beliefs:
+            return 0
+
+        # Evaluate evidence and candidate revisions
+        for evidence in perceptual_evidence:
+            assessment = self._perceptual_evaluator.evaluate(evidence)
+            if assessment.reliability < 0.4:
+                continue
+
+            for belief in beliefs:
+                # Check if this evidence was already incorporated
+                if evidence.id in belief.evidence_sources or evidence.id in belief.counter_evidence:
+                    continue
+
+                prop_lik = self._likelihood_evaluator.evaluate_likelihood(
+                    belief=belief,
+                    evidence=evidence,
+                    assessment=assessment,
+                )
+
+                if prop_lik.status in ("informative", "contradictory"):
+                    try:
+                        transition = await self._belief_manager.revise(
+                            belief_id=belief.id,
+                            proposition_likelihood=prop_lik,
+                            evidence_assessment=assessment,
+                            rationale=f"Perceptual revision from {evidence.modality} evidence ({evidence.id}) [{prop_lik.status}]",
+                        )
+                        if transition.transition_id:
+                            revisions_count += 1
+                            logger.info(
+                                "Revised belief %s from perceptual evidence %s: prior=%.2f -> post=%.2f (LR=%.2f)",
+                                belief.id,
+                                evidence.id,
+                                transition.prior_confidence,
+                                transition.posterior_confidence,
+                                transition.likelihood_ratio,
+                            )
+                    except Exception as exc:
+                        logger.warning("Failed to revise belief %s: %s", belief.id, exc)
+
+        return revisions_count
 
     # ── Investigation Pipeline ─────────────────────────────────────────
 
@@ -393,6 +470,10 @@ class EpistemicLoop:
         elif trigger in (
             "contradiction",
             str(DiscoveryTrigger.CONTRADICTION),
+            "perceptual_anomaly",
+            str(DiscoveryTrigger.PERCEPTUAL_ANOMALY),
+            "perceptual_ambiguity",
+            str(DiscoveryTrigger.PERCEPTUAL_AMBIGUITY),
         ):
             return (
                 await self._idea_generator.generate_from_contradiction(
