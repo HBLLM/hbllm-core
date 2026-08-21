@@ -250,4 +250,4 @@ class ResemblyzerSpeakerProvider:
     def _embedding_ref(embedding: AudioEmbedding) -> str:
         """Generate a reference ID for an embedding."""
         data = str(embedding.vector[:8]).encode()
-        return f"voice_{hashlib.md5(data).hexdigest()[:12]}"  # noqa: S324
+        return f"voice_{hashlib.sha256(data).hexdigest()[:12]}"
