@@ -31,7 +31,12 @@ class WorldModelNode(Node):
     Simulation Node to predict success/failure of proposed actions before execution.
     """
 
-    def __init__(self, node_id: str, llm: ProviderLLM | None = None):
+    def __init__(
+        self,
+        node_id: str,
+        llm: ProviderLLM | None = None,
+        active_inference: Any | None = None,
+    ):
         super().__init__(
             node_id=node_id,
             node_type=NodeType.DOMAIN_MODULE,
@@ -40,9 +45,13 @@ class WorldModelNode(Node):
                 "ast_parsing",
                 "outcome_prediction",
                 "code_world_simulation",
+                "active_inference",
             ],
         )
         self.llm = llm
+        from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+
+        self.active_inference = active_inference or ActiveInferenceEngine()
         # A list of inherently dangerous modules we want to prevent the LLM from executing
         self.dangerous_imports = {"os", "subprocess", "sys", "shutil", "socket"}
         # Dangerous bash patterns

@@ -73,6 +73,8 @@ class WorkspaceNode(Node, IWorkspace):
         thinking_deadline: float = 60.0,
         max_concurrent_boards: int = 100,
         max_board_age: float = 300.0,
+        hcir_workspace: Any | None = None,
+        tx_manager: Any | None = None,
     ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.CORE)
 
@@ -90,8 +92,19 @@ class WorkspaceNode(Node, IWorkspace):
 
         # Native HCIR Workspace State container
         from hbllm.hcir.workspace import HCIRWorkspaceState
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
 
-        self.hcir_workspace = HCIRWorkspaceState()
+        if hcir_workspace is None:
+            self.hcir_workspace = HCIRWorkspaceState()
+            self.tiered_workspace = None
+        elif isinstance(hcir_workspace, TieredWorkspace):
+            self.tiered_workspace = hcir_workspace
+            self.hcir_workspace = hcir_workspace.brain
+        else:
+            self.hcir_workspace = hcir_workspace
+            self.tiered_workspace = None
+
+        self.tx_manager = tx_manager
 
     @property
     def max_board_age(self) -> float:

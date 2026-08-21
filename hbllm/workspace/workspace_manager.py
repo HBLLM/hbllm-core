@@ -565,3 +565,15 @@ class WorkspaceManager:
             tags=json.loads(row["tags_json"] or "[]"),
             metadata=json.loads(row["metadata_json"] or "{}"),
         )
+
+    def get_hcir_scope(
+        self,
+        workspace_id: str | None = None,
+        tenant_id: str = "default",
+        user_id: str = "default",
+    ) -> Any:
+        """Get an HCIR Scope corresponding to the active workspace context."""
+        from hbllm.hcir.types import Scope
+
+        ws_id = workspace_id or self.get_current_workspace_id(tenant_id)
+        return Scope(tenant_id=tenant_id, workspace_id=ws_id, user_id=user_id)

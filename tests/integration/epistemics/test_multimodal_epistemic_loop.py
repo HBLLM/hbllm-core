@@ -27,6 +27,7 @@ from hbllm.hcir.graph import (
 )
 from hbllm.hcir.types import (
     PerceptualContradictionLevel,
+    Provenance,
 )
 from hbllm.perception.perception_epistemic_bridge import PerceptionEpistemicBridge
 from hbllm.perception.providers.audio_evidence import (
@@ -134,8 +135,8 @@ class TestMultimodalEpistemicLoop:
         aud_obs = AcousticObservation(
             observation_id="aud_utterance_01",
             temporal=TemporalSpan(start_time=now, end_time=now + 2.5, duration=2.5),
-            provenance=ProviderProvenance(
-                provider="moonshine", model="base", version="1.0", device="cpu"
+            provenance=Provenance(
+                created_by="moonshine", engine="moonshine:base", model_used="base"
             ),
         )
         aud_assessment = AudioAssessment(
