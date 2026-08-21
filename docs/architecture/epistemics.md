@@ -1,6 +1,6 @@
 ---
 title: "Epistemic Runtime — Domain-Neutral Discovery Engine"
-description: "Architecture deep-dive into HBLLM's epistemic runtime: continuous perceptual integration, multidimensional temporal evidence modeling, odds-space Bayesian belief revision, deterministic replay, decoupled provider reputation, calibration, and counterfactual reasoning — all domain-neutral."
+description: "Architecture deep-dive into HBLLM's epistemic runtime: continuous perceptual integration, multidimensional temporal evidence modeling, odds-space Bayesian belief revision, deterministic replay, decoupled provider reputation, calibration, counterfactual reasoning, and closed-loop discovery — all domain-neutral."
 ---
 
 # Epistemic Runtime — Domain-Neutral Discovery Engine
@@ -9,7 +9,7 @@ description: "Architecture deep-dive into HBLLM's epistemic runtime: continuous 
 >
 > **Architectural Invariant**: Perception produces observations and candidate signals. Epistemics owns interpretation, evidence evaluation, and belief revision. HCIR owns the resulting state and immutable history. Replay reconstructs the same state from the same causal inputs.
 
-The Epistemic Runtime is HBLLM's autonomous discovery and belief lifecycle layer. It gives the system the ability to **evaluate continuous perceptual streams**, **model temporal dependence and novelty**, **form hypotheses**, **design experiments**, **evaluate evidence**, **revise beliefs in odds-space**, **calibrate its own reasoning**, **reconstruct deterministic states via event sourcing**, and **isolate provider reputation from circular internal feedback** — without domain-specific knowledge.
+The Epistemic Runtime is HBLLM's autonomous discovery and belief lifecycle layer. It gives the system the ability to **evaluate continuous perceptual streams**, **model temporal dependence and novelty**, **form hypotheses**, **design experiments**, **evaluate evidence**, **revise beliefs in odds-space**, **calibrate its own reasoning**, **reconstruct deterministic states via event sourcing**, **perform counterfactual sensitivity analysis**, and **isolate provider reputation from circular internal feedback** — without domain-specific knowledge.
 
 **Module:** `hbllm.brain.epistemics`
 
@@ -36,6 +36,8 @@ The runtime operates on abstract epistemic primitives:
 | Experiment | Test design ranked by information gain | "Cross-modal sensor probe" |
 | Belief | Confidence-weighted claim with transition audit chain | "Alice is in the room (p=0.88, rev=4)" |
 | BeliefTransition | Event-sourced, immutable record of belief confidence delta | "prior=0.50 → post=0.82 via LR_eff=4.5" |
+
+The same engines that reason about sensory perception also reason about scientific research, robotics, debugging, and finance — because they only manipulate the graph topology and probability metrics, never domain-specific semantics.
 
 ### Epistemic Hierarchy & Continuous Flow
 
@@ -140,7 +142,7 @@ Provider reputation remains strictly **outside the internal belief feedback loop
 ```mermaid
 graph TB
     subgraph "Epistemic Runtime (brain/epistemics/)"
-        subgraph "Perceptual Epistemic Integration"
+        subgraph "Perceptual Epistemic Integration (Waves A9–A11)"
             PEE["PerceptualEvidenceEvaluator\n(signal quality & reliability)"]
             TEM["TemporalEvidenceModel\n(novelty & pattern classification)"]
             ELE["EpistemicLikelihoodEvaluator\n(odds-space LR_effective)"]
@@ -197,7 +199,7 @@ graph TB
 
 ## Module Inventory
 
-### Perceptual Epistemics & Scalability (Waves A9–A11)
+### Wave A9–A11: Perceptual Epistemics & Scalability
 
 | Module | Lines | Purpose |
 |---|---|---|
@@ -208,7 +210,7 @@ graph TB
 | `belief_manager.py` | 530 | Odds-space Bayesian revision, $(E, H)$ idempotency enforcement, `BeliefTransitionNode` creation. |
 | `reputation.py` | 370 | Three-dimensional source reputation (`signal_quality`, `concordance`, `empirical_accuracy`) with anti-circularity guard. |
 
-### Closed Discovery Loop (Waves 1–3)
+### Waves 1–3: Closed Discovery Loop & Meta-Cognition
 
 | Module | Lines | Purpose |
 |---|---|---|
@@ -217,14 +219,173 @@ graph TB
 | `hypothesis_builder.py` | 280 | Validates, deduplicates, and promotes raw ideas to HCIR `HypothesisNode`s. |
 | `prediction_tracker.py` | 320 | Registers competing predictions with deadlines and evaluates outcomes. |
 | `experiment_planner.py` | 380 | Designs discriminative experiments ranked by information gain. |
+| `evidence_evaluator.py` | 270 | Scores evidence quality via graph topology analysis. |
 | `contradiction_engine.py` | 340 | Cross-modal contradiction scanning across belief, evidence, and perceptual nodes. |
 | `explanation.py` | 334 | Graph-traversal provenance chains: belief $\to$ transition $\to$ evidence $\to$ observation. |
 | `research_strategy.py` | 270 | Pluggable research strategies with dynamic weighting. |
-| `epistemic_loop.py` | 510 | Orchestrates autonomous cycles on cognitive ticks. |
+| `epistemic_loop.py` | 510 | Orchestrates autonomous discovery cycles on cognitive ticks. |
 | `workspace.py` | 867 | Research program lifecycle: objectives, questions, hypotheses, unknowns, experiments. |
 | `epistemic_memory.py` | 600 | SQLite-backed reasoning history (hypotheses, predictions, snapshots, biases). |
 | `calibration.py` | 400 | Meta-epistemic self-calibration: ECE curves, bias detection, strategy adjustment. |
 | `counterfactual.py` | 450 | "What if..." analysis: hypothesis falsification, evidence removal, sensitivity analysis. |
+
+### Integration Layer
+
+| Module | Lines | Purpose |
+|---|---|---|
+| `integration.py` | 100 | `wire_epistemics()` helper for AutonomyCore proactive cycle attachment. |
+| `interfaces.py` | 815 | Domain-neutral epistemic protocols, data types, and enums. |
+
+---
+
+## The Discovery Cycle
+
+Every cognitive tick, the `EpistemicLoop` runs this complete autonomous discovery pipeline:
+
+```
+1. CuriosityEngine.prioritize_investigations()
+   → Ranked list of CuriositySignals (scans unknowns, contradictions, untested hypotheses)
+
+2. IdeaGenerator.generate_from_unknown()
+   → Raw ideas (filtered against EpistemicMemory past failures)
+
+3. HypothesisBuilder.validate() + deduplicate() + promote()
+   → Validated HypothesisNodes committed to the HCIR graph
+
+4. PredictionTracker.register_prediction()
+   → Falsifiable predictions with explicit deadlines
+
+5. ExperimentPlanner.design_discriminative_experiment()
+   → Ranked ExperimentDesigns by expected information gain
+
+6. ContradictionEngine.scan_for_contradictions()
+   → Proactive anomaly and cross-modal tension detection
+
+7. TemporalEvidenceModel.assess() + EpistemicLikelihoodEvaluator.evaluate_likelihood()
+   → Multidimensional novelty scoring and dependence-corrected LR_effective
+
+8. DiscoveryBeliefManager.revise()
+   → Bayesian odds-space update with (evidence_id, proposition_id) idempotency guard
+
+9. EpistemicMemory.record_*()
+   → Snapshots belief confidences and outcomes for calibration
+```
+
+Every $N$ cycles (configurable), the loop also triggers self-calibration:
+
+```
+10. CalibrationEngine.calibrate()
+    → Expected Calibration Error (ECE) calculation + bias detection
+
+11. CalibrationEngine.recommend_strategy_adjustment()
+    → Auto-switches research strategy based on empirical calibration
+```
+
+---
+
+## Feedback Loops
+
+```mermaid
+graph LR
+    Memory["EpistemicMemory"] -->|past failures| IdeaGen["IdeaGenerator"]
+    Memory -->|prediction history| Calibrator["CalibrationEngine"]
+    Calibrator -->|strategy recommendation| StrategyMgr["StrategyManager"]
+    StrategyMgr -->|weights| Loop["EpistemicLoop"]
+    CF["CounterfactualReasoner"] -->|sensitivity analysis| Planner["ExperimentPlanner"]
+    Loop -->|belief snapshots| Memory
+```
+
+These feedback loops make the epistemic system **self-correcting**:
+
+- **Memory $\to$ IdeaGenerator**: Ideas matching past falsified hypotheses are filtered out (>50% keyword overlap).
+- **Memory $\to$ CalibrationEngine**: Prediction history drives ECE curves and systematic bias detection.
+- **CalibrationEngine $\to$ StrategyManager**: Automatically transitions between Exploration, Verification, Synthesis, etc.
+- **CounterfactualReasoner $\to$ ExperimentPlanner**: Sensitivity analysis pinpoints the most critical or fragile evidence links to target for experiment design.
+
+---
+
+## Research Strategies
+
+The `ResearchStrategyManager` supports 5 pluggable research strategies:
+
+| Strategy | Focus | When Used |
+|---|---|---|
+| **Exploration** | Maximum idea generation, high novelty tolerance | Early research, few hypotheses |
+| **Verification** | Maximum hypothesis testing and falsification | Many untested hypotheses |
+| **Synthesis** | Cross-modal evidence integration | Conflicting evidence or high uncertainty |
+| **Counterexample Search** | Aggressive falsification | Overconfident beliefs |
+| **Consolidation** | Explanation building and pruning | Mature research programs |
+
+Each strategy configures weights and activation thresholds for all epistemic engines.
+
+---
+
+## EpistemicMemory Schema
+
+SQLite-backed universal reasoning history with 6 tables:
+
+| Table | Records |
+|---|---|
+| `hypothesis_outcomes` | Hypothesis ID, outcome (supported/falsified/abandoned), confidence at resolution |
+| `prediction_results` | Prediction ID, predicted vs observed, correct/incorrect, confidence delta |
+| `confidence_snapshots` | Belief ID, confidence value at timestamp |
+| `discovered_biases` | Bias type, severity, domain, description |
+| `research_notes` | Free-form reasoning journal entries |
+| `calibration_reports` | ECE score, accuracy, total predictions at timestamp |
+
+---
+
+## Meta-Epistemics (Calibration)
+
+HBLLM asks: **"How good am I at knowing things?"**
+
+The `EpistemicCalibrationEngine` provides:
+
+- **Expected Calibration Error (ECE)**: When I claim 80% confidence, am I correct 80% of the time?
+- **Bias Detection**: Do I overestimate sensory observations? Underestimate counter-evidence?
+- **Strategy Recommendation**: Based on calibration trends, should the system shift focus?
+
+```python
+report = await calibrator.calibrate()
+print(f"ECE: {report.ece:.3f}")
+print(f"Accuracy: {report.prediction_accuracy:.1%}")
+print(f"Biases: {report.detected_biases}")
+```
+
+---
+
+## Counterfactual Reasoning
+
+Five "what if..." methods for epistemic graph analysis:
+
+| Method | Question |
+|---|---|
+| `what_if_hypothesis_wrong()` | What beliefs change if this hypothesis is falsified? |
+| `what_if_evidence_removed()` | What happens to belief confidence without this evidence? |
+| `what_if_evidence_quality()` | How does changing evidence quality affect beliefs? |
+| `what_if_new_evidence()` | What would supporting/contradicting evidence do? |
+| `sensitivity_analysis()` | Which evidence has the most impact on this belief? |
+
+---
+
+## Integration with AutonomyCore
+
+A single function call wires the entire epistemic runtime:
+
+```python
+from hbllm.brain.epistemics import wire_epistemics
+
+loop = wire_epistemics(
+    autonomy_core=core,
+    graph=graph,
+    data_dir="/path/to/data",
+    llm=llm,  # Optional
+    calibration_interval=10,  # Run calibration every 10 cycles
+)
+# The epistemic loop now runs on every cognitive tick automatically
+```
+
+`wire_epistemics` creates Memory, Calibrator, CounterfactualReasoner, Workspace, and all 15 engines, then registers an `"epistemic"` proactive handler on AutonomyCore.
 
 ---
 
