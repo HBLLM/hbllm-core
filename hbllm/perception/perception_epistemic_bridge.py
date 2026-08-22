@@ -189,20 +189,32 @@ class PerceptionEpistemicBridge:
                 if hasattr(assessment.speech.provider_provenance, "to_dict")
                 else None
             )
-            speech_evi = EvidenceNode(
+            from hbllm.hcir.proposition import Proposition, TemporalValidity
+
+            speech_evi = PerceptualEvidenceNode(
                 id=speech_evi_id,
+                proposition=Proposition(
+                    subject=obs_id,
+                    predicate="transcribed_as",
+                    object_value=assessment.speech.transcript,
+                    object_type="transcript",
+                ),
+                temporal_validity=TemporalValidity(
+                    observed_at=start_t,
+                    received_at=time.time(),
+                ),
                 modality="audio",
                 evidence_type=EvidenceStrength.OBSERVATIONAL,
                 strength=float(assessment.speech.confidence),
-                methodology=f"ASR ({assessment.speech.provider_provenance.provider if assessment.speech.provider_provenance else 'speech'})",
                 epistemic_profile=epistemic_profile,
                 provider_provenance=prov_dict,
                 candidates=[
                     {
                         "label": assessment.speech.transcript,
-                        "score": float(assessment.speech.confidence),
+                        "confidence": float(assessment.speech.confidence),
                     }
                 ],
+                payload={"transcript": assessment.speech.transcript},
             )
             self._graph.upsert_node(speech_evi)
             committed_ids.append(speech_evi_id)
@@ -222,7 +234,7 @@ class PerceptionEpistemicBridge:
             cand_list = [
                 {
                     "label": getattr(ev, "event_type", getattr(ev, "label", "sound_event")),
-                    "score": float(ev.confidence),
+                    "confidence": float(ev.confidence),
                 }
                 for ev in assessment.events
             ]
@@ -231,15 +243,28 @@ class PerceptionEpistemicBridge:
                 if hasattr(assessment.events[0].provider_provenance, "to_dict")
                 else None
             )
-            event_evi = EvidenceNode(
+            first_label = getattr(assessment.events[0], "event_type", getattr(assessment.events[0], "label", "sound_event"))
+            from hbllm.hcir.proposition import Proposition, TemporalValidity
+
+            event_evi = PerceptualEvidenceNode(
                 id=event_evi_id,
+                proposition=Proposition(
+                    subject=obs_id,
+                    predicate="classified_as",
+                    object_value=first_label,
+                    object_type="sound_event",
+                ),
+                temporal_validity=TemporalValidity(
+                    observed_at=start_t,
+                    received_at=time.time(),
+                ),
                 modality="audio",
                 evidence_type=EvidenceStrength.OBSERVATIONAL,
                 strength=float(assessment.events[0].confidence),
-                methodology="Acoustic Event Classification",
                 epistemic_profile=epistemic_profile,
                 provider_provenance=prov_dict,
                 candidates=cand_list,
+                payload={"event_type": first_label},
             )
             self._graph.upsert_node(event_evi)
             committed_ids.append(event_evi_id)
@@ -359,14 +384,26 @@ class PerceptionEpistemicBridge:
         elif caption_text:
             candidates = [{"label": caption_text, "score": 0.85}]
 
-        vis_evi = EvidenceNode(
+        from hbllm.hcir.proposition import Proposition, TemporalValidity
+
+        vis_evi = PerceptualEvidenceNode(
             id=vis_evi_id,
+            proposition=Proposition(
+                subject=obs_id,
+                predicate="classified_as",
+                object_value=caption_text or "visual_concept",
+                object_type="visual_concept",
+            ),
+            temporal_validity=TemporalValidity(
+                observed_at=time.time(),
+                received_at=time.time(),
+            ),
             modality="visual",
             evidence_type=EvidenceStrength.OBSERVATIONAL,
             strength=0.85,
-            methodology="Vision Pipeline (SigLIP/Captioning)",
             epistemic_profile=epistemic_profile,
             candidates=candidates,
+            payload={"caption": caption_text},
         )
         self._graph.upsert_node(vis_evi)
         committed_ids.append(vis_evi_id)

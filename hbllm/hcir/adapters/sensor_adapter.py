@@ -18,10 +18,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.graph import NodeLifecycle, ObservationNode, WorldVariableNode
+from hbllm.hcir.graph import (
+    NodeLifecycle,
+    ObservationNode,
+    PerceptualEvidenceNode,
+    WorldVariableNode,
+)
 from hbllm.hcir.kernel.services import KernelServices
+from hbllm.hcir.proposition import Proposition, TemporalValidity
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
-from hbllm.hcir.types import Provenance, Scope, UncertaintyVector
+from hbllm.hcir.types import EvidenceStrength, Provenance, Scope, UncertaintyVector
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +108,28 @@ class SensorCapabilityAdapter:
             tags=["world_variable", reading.variable_name],
         )
 
-        # 3. Submit transaction via TransactionManager
+        # 3. Construct PerceptualEvidenceNode for unified propositional epistemics
+        evi_id = f"evi_sensor_{reading.sensor_id}_{int(reading.timestamp)}"
+        evi_node = PerceptualEvidenceNode(
+            id=evi_id,
+            proposition=Proposition(
+                subject=reading.sensor_id,
+                predicate=reading.variable_name,
+                object_value=reading.value,
+                object_type=reading.unit or "scalar",
+            ),
+            temporal_validity=TemporalValidity(
+                observed_at=reading.timestamp,
+                received_at=time.time(),
+            ),
+            modality="sensor",
+            evidence_type=EvidenceStrength.OBSERVATIONAL,
+            strength=reading.confidence,
+            scope=Scope(tenant_id=tenant_id),
+            tags=["sensor_evidence", reading.sensor_type, reading.variable_name],
+        )
+
+        # 4. Submit transaction via TransactionManager
         tx = HCIRTransaction(
             author=author,
             operations=[
@@ -115,6 +142,11 @@ class SensorCapabilityAdapter:
                     op=TransactionOp.UPSERT_NODE,
                     node_id=wv_node.id,
                     node_data=wv_node.model_dump(),
+                ),
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id=evi_node.id,
+                    node_data=evi_node.model_dump(),
                 ),
             ],
             provenance=Provenance(created_by=author, source_type="observed"),

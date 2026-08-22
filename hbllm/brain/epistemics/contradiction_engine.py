@@ -34,6 +34,7 @@ from hbllm.hcir.graph import (
     ExperimentNode,
     HCIREdgeType,
     ObservationNode,
+    PerceptualEvidenceNode,
     VisualObservationNode,
 )
 from hbllm.hcir.types import (
@@ -141,24 +142,47 @@ class ContradictionEngine:
 
             for src_id in edge.sources:
                 for tgt_id in edge.targets:
-                    src_node = self._graph.get_node(src_id)
-                    tgt_node = self._graph.get_node(tgt_id)
+                    vis_node: Any = None
+                    aud_node: Any = None
 
-                    if isinstance(src_node, VisualObservationNode) and isinstance(
-                        tgt_node, AudioObservationNode
-                    ):
-                        vis, aud = src_node, tgt_node
-                    elif isinstance(src_node, AudioObservationNode) and isinstance(
-                        tgt_node, VisualObservationNode
-                    ):
-                        aud, vis = src_node, tgt_node
+                    if isinstance(src_node, VisualObservationNode) and isinstance(tgt_node, AudioObservationNode):
+                        vis_node, aud_node = src_node, tgt_node
+                    elif isinstance(src_node, AudioObservationNode) and isinstance(tgt_node, VisualObservationNode):
+                        aud_node, vis_node = src_node, tgt_node
+                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(tgt_node, PerceptualEvidenceNode):
+                        if src_node.modality == "visual" and tgt_node.modality == "audio":
+                            vis_node, aud_node = src_node, tgt_node
+                        elif src_node.modality == "audio" and tgt_node.modality == "visual":
+                            aud_node, vis_node = src_node, tgt_node
+                        else:
+                            continue
+                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(tgt_node, AudioObservationNode):
+                        if src_node.modality == "visual":
+                            vis_node, aud_node = src_node, tgt_node
+                        else:
+                            continue
+                    elif isinstance(src_node, AudioObservationNode) and isinstance(tgt_node, PerceptualEvidenceNode):
+                        if tgt_node.modality == "visual":
+                            aud_node, vis_node = src_node, tgt_node
+                        else:
+                            continue
+                    elif isinstance(src_node, VisualObservationNode) and isinstance(tgt_node, PerceptualEvidenceNode):
+                        if tgt_node.modality == "audio":
+                            vis_node, aud_node = src_node, tgt_node
+                        else:
+                            continue
+                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(tgt_node, VisualObservationNode):
+                        if src_node.modality == "audio":
+                            aud_node, vis_node = src_node, tgt_node
+                        else:
+                            continue
                     else:
                         continue
 
                     # Check for semantic conflict between visual and audio
-                    vis_cap = vis.caption.lower()
-                    aud_event = aud.event_type.lower() or aud.label.lower()
-                    aud_transcript = aud.transcript.lower()
+                    vis_cap = str(getattr(vis_node, "caption", "") or getattr(getattr(vis_node, "proposition", None), "object_value", "")).lower()
+                    aud_event = str(getattr(aud_node, "event_type", "") or getattr(aud_node, "label", "") or getattr(getattr(aud_node, "proposition", None), "object_value", "")).lower()
+                    aud_transcript = str(getattr(aud_node, "transcript", "") or (getattr(aud_node, "payload", {}).get("transcript", "") if hasattr(aud_node, "payload") and isinstance(aud_node.payload, dict) else "")).lower()
 
                     is_conflict = False
                     reason = ""
@@ -172,8 +196,8 @@ class ContradictionEngine:
 
                     if is_conflict:
                         report = ContradictionReport(
-                            claim_a_id=vis.id,
-                            claim_b_id=aud.id,
+                            claim_a_id=vis_node.id,
+                            claim_b_id=aud_node.id,
                             contradiction_type="cross_modal_conflict",
                             contradiction_level=str(
                                 PerceptualContradictionLevel.LEVEL_2_CROSS_MODAL_CONFLICT

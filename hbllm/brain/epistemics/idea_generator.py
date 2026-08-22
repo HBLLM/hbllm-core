@@ -35,10 +35,13 @@ from typing import Any
 
 from hbllm.brain.epistemics.interfaces import RawIdea
 from hbllm.hcir.graph import (
+    AudioObservationNode,
     CognitiveGraph,
     ContradictionNode,
     ObservationNode,
+    PerceptualEvidenceNode,
     UnknownNode,
+    VisualObservationNode,
 )
 from hbllm.hcir.types import DiscoveryTrigger
 
@@ -176,8 +179,8 @@ class IdeaGenerator:
             List of unvalidated RawIdea objects.
         """
         node = self._graph.get_node(observation_id)
-        if not isinstance(node, ObservationNode):
-            logger.warning("Node %s is not an ObservationNode", observation_id)
+        if not isinstance(node, (ObservationNode, PerceptualEvidenceNode, VisualObservationNode, AudioObservationNode)):
+            logger.warning("Node %s is not an observation/perceptual evidence node", observation_id)
             return []
 
         if self._llm is not None:

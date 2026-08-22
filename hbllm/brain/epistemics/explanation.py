@@ -31,6 +31,7 @@ import logging
 
 from hbllm.brain.epistemics.interfaces import ExplanationChain, ExplanationStep
 from hbllm.hcir.graph import (
+    AudioObservationNode,
     BeliefNode,
     ClaimNode,
     CognitiveGraph,
@@ -41,7 +42,9 @@ from hbllm.hcir.graph import (
     HCIRNode,
     HypothesisNode,
     ObservationNode,
+    PerceptualEvidenceNode,
     PredictionNode,
+    VisualObservationNode,
 )
 
 logger = logging.getLogger(__name__)
@@ -254,7 +257,7 @@ class ExplanationEngine:
             return
 
         node = self._graph.get_node(node_id)
-        if isinstance(node, ObservationNode):
+        if isinstance(node, (ObservationNode, PerceptualEvidenceNode, VisualObservationNode, AudioObservationNode, EvidenceNode)):
             observations.append(node_id)
             return
 
@@ -302,6 +305,8 @@ class ExplanationEngine:
         if isinstance(node, EvidenceNode):
             source_uri = node.source_uri
             confidence_contribution = node.strength
+        elif isinstance(node, PerceptualEvidenceNode):
+            confidence_contribution = node.strength
         elif isinstance(node, ExperimentNode):
             label = f"Experiment: {node.design[:60]}" if node.design else label
         elif isinstance(node, PredictionNode):
@@ -323,6 +328,8 @@ class ExplanationEngine:
         if isinstance(node, (BeliefNode, HypothesisNode, PredictionNode, ClaimNode)):
             claim = getattr(node, "claim", "") or getattr(node, "statement", "")
             return f"{node.node_type.value}: {claim[:80]}" if claim else node.node_type.value
+        if isinstance(node, PerceptualEvidenceNode):
+            return f"perceptual_evidence ({node.modality}): {node.proposition.subject} {node.proposition.predicate} {node.proposition.object_value}"
         if isinstance(node, EvidenceNode):
             return f"evidence: {node.methodology[:60]}" if node.methodology else "evidence"
         if isinstance(node, ExperimentNode):
