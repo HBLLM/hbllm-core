@@ -43,6 +43,16 @@ class TrustInterceptor:
             "registry",
             "autonomy",
             "autonomy_core",
+            "proactive_processor",
+            "synapse_gateway",
+            "hcir_bus_bridge",
+            "notification_gateway",
+            "perception_fuser",
+            "temporal_fuser",
+            "ambient_audio_classifier",
+            "epistemic_loop",
+            "executive_cortex",
+            "reality_graph",
         ):
             return message
 
