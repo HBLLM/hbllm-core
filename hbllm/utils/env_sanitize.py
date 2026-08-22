@@ -28,4 +28,7 @@ def sanitize_proxy_env() -> None:
             cleaned = ",".join(part for part in env_val.split(",") if "::1" not in part)
             os.environ[env_var] = cleaned
 
+    # Prevent HuggingFace tokenizers from deadlocking across process forks
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
     _SANITIZED = True
