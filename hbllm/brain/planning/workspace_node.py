@@ -222,11 +222,11 @@ class WorkspaceNode(Node, IWorkspace):
         is_slow = _is_slow_cpu()
 
         is_fast_path = payload.get("is_fast_path", False)
-        # Fast-path queries resolve via early consensus as soon as the expected thought arrives.
-        # Allow sufficient thinking time (20.0s) for LLM generation (cloud API or local weights).
-        thinking_time = 20.0 if is_fast_path else self._thinking_deadline
-        # Scale absolute deadline: 60s for fast-path, 300s for complex CPU path, 120s for GPU path
-        abs_deadline = (60.0 if is_slow else 45.0) if is_fast_path else (300.0 if is_slow else 120.0)
+        # All queries resolve via early consensus as soon as the expected thought arrives.
+        # Allow the full thinking deadline (default 60s) so cloud and local generation can complete.
+        thinking_time = self._thinking_deadline
+        # Scale absolute deadline: 300s for complex CPU path, 120s for GPU/Cloud path
+        abs_deadline = 300.0 if is_slow else 120.0
 
         episode = WorkspaceEpisode(
             corr_id=correlation_id,
