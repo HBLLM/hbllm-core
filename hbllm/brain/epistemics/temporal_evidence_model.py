@@ -54,7 +54,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode
+from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode, PerceptualEvidenceNode
 from hbllm.hcir.types import EvidenceTemporalPattern, NoveltyPolicy
 
 logger = logging.getLogger(__name__)
@@ -164,29 +164,31 @@ class LabelStateChangeDetector:
         )
 
     @classmethod
-    def get_evidence_label(cls, evidence: EvidenceNode) -> str:
-        """Extract a primary label/state description from an EvidenceNode."""
-        if evidence.candidates:
+    def get_evidence_label(cls, evidence: EvidenceNode | PerceptualEvidenceNode | Any) -> str:
+        """Extract a primary label/state description from an EvidenceNode or PerceptualEvidenceNode."""
+        if hasattr(evidence, "proposition") and evidence.proposition is not None:
+            return f"{evidence.proposition.subject} {evidence.proposition.predicate} {evidence.proposition.object_value}"
+        if getattr(evidence, "candidates", None):
             top_cand = evidence.candidates[0]
             if isinstance(top_cand, dict) and "label" in top_cand and top_cand["label"]:
                 return str(top_cand["label"])
-        if evidence.tags:
+        if getattr(evidence, "tags", None):
             return " ".join(evidence.tags)
-        if evidence.methodology:
+        if getattr(evidence, "methodology", None):
             return evidence.methodology
-        if evidence.claim_id:
+        if getattr(evidence, "claim_id", None):
             return evidence.claim_id
         return getattr(evidence, "id", "")
 
     @classmethod
-    def _extract_tags(cls, evidence: EvidenceNode) -> set[str]:
+    def _extract_tags(cls, evidence: EvidenceNode | PerceptualEvidenceNode | Any) -> set[str]:
         """Extract normalized tags from evidence candidates, tags, and label."""
-        tags: set[str] = set(evidence.tags)
+        tags: set[str] = set(getattr(evidence, "tags", []))
         label = cls.get_evidence_label(evidence).lower().strip()
         if label:
             tags.update(w for w in re.findall(r"\w+", label) if len(w) > 2)
 
-        for cand in evidence.candidates:
+        for cand in getattr(evidence, "candidates", []):
             cand_label = str(cand.get("label", "")).lower()
             if cand_label:
                 tags.update(w for w in re.findall(r"\w+", cand_label) if len(w) > 2)
@@ -373,37 +375,37 @@ class TemporalEvidenceModel:
         self,
         belief_id: str,
         max_count: int = 10,
-    ) -> list[EvidenceNode]:
+    ) -> list[EvidenceNode | PerceptualEvidenceNode | Any]:
         """Get recently incorporated evidence for a specific belief.
 
         Reconstructed deterministically from the HCIR graph by scanning
         EvidenceNodes whose incorporated_transitions contain the belief_id.
         """
-        results: list[EvidenceNode] = []
+        results: list[Any] = []
         for node in self._graph.all_nodes():
-            if not isinstance(node, EvidenceNode):
+            if not isinstance(node, (EvidenceNode, PerceptualEvidenceNode)):
                 continue
-            if belief_id in node.incorporated_transitions:
+            if belief_id in getattr(node, "incorporated_transitions", {}):
                 results.append(node)
 
         # Sort by last_incorporated_at descending (most recent first)
-        results.sort(key=lambda e: e.last_incorporated_at, reverse=True)
+        results.sort(key=lambda e: getattr(e, "last_incorporated_at", 0.0), reverse=True)
         return results[:max_count]
 
     def _compute_temporal_delta(
         self,
-        evidence: EvidenceNode,
-        recent: list[EvidenceNode],
+        evidence: EvidenceNode | PerceptualEvidenceNode | Any,
+        recent: list[Any],
     ) -> float:
         """Compute time delta from the most recently incorporated evidence."""
         if not recent:
             return float("inf")  # First evidence → full novelty
 
-        most_recent_time = recent[0].last_incorporated_at
+        most_recent_time = getattr(recent[0], "last_incorporated_at", 0.0)
         if most_recent_time <= 0.0:
             return float("inf")
 
-        current_time = evidence.provenance.timestamp
+        current_time = getattr(getattr(evidence, "provenance", None), "timestamp", 0.0)
         if current_time <= 0.0:
             import time
 

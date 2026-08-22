@@ -23,7 +23,7 @@ import logging
 import math
 from typing import Any
 
-from hbllm.hcir.graph import CognitiveGraph, EvidenceNode
+from hbllm.hcir.graph import CognitiveGraph, EvidenceNode, PerceptualEvidenceNode
 from hbllm.hcir.types import (
     Confidence,
     EvidenceAssessment,
@@ -34,14 +34,13 @@ from hbllm.hcir.types import (
 
 logger = logging.getLogger(__name__)
 
-# Known high-reliability providers track record weights
+# Weight multipliers for provider reputations (domain-neutral calibration)
 _PROVIDER_REPUTATION_WEIGHTS: dict[str, float] = {
-    "moonshine": 0.92,
     "whisper": 0.90,
+    "moonshine": 0.88,
     "yamnet": 0.85,
-    "ambient": 0.85,
-    "resemblyzer": 0.88,
-    "siglip": 0.90,
+    "siglip": 0.88,
+    "yolo": 0.85,
     "mock": 0.70,
 }
 
@@ -60,19 +59,19 @@ class PerceptualEvidenceEvaluator:
         self._graph = graph
         self._reputation_tracker = reputation_tracker
 
-    def evaluate(self, evidence: EvidenceNode) -> EvidenceAssessment:
-        """Evaluate an EvidenceNode and return an EvidenceAssessment.
+    def evaluate(self, evidence: EvidenceNode | PerceptualEvidenceNode | Any) -> EvidenceAssessment:
+        """Evaluate an EvidenceNode or PerceptualEvidenceNode and return an EvidenceAssessment.
 
         Args:
-            evidence: The EvidenceNode to assess.
+            evidence: The EvidenceNode or PerceptualEvidenceNode to assess.
 
         Returns:
             EvidenceAssessment containing reliability, uncertainty vector, and info gain.
         """
-        epistemic_profile = evidence.epistemic_profile
+        epistemic_profile = getattr(evidence, "epistemic_profile", None)
         if epistemic_profile is None:
             # Construct a default profile from evidence strength if none attached
-            strength = float(evidence.strength)
+            strength = float(getattr(evidence, "strength", 0.8))
             epistemic_profile = PerceptualEpistemicProfile(
                 sensory_clarity=strength,
                 model_confidence=strength,
@@ -84,8 +83,9 @@ class PerceptualEvidenceEvaluator:
 
         # 2. Provenance quality weighting
         prov_quality = 0.8
-        if evidence.provider_provenance:
-            prov_name = evidence.provider_provenance.get("provider", "").lower()
+        prov = getattr(evidence, "provider_provenance", None)
+        if prov and isinstance(prov, dict):
+            prov_name = str(prov.get("provider", "")).lower()
             prov_quality = _PROVIDER_REPUTATION_WEIGHTS.get(prov_name, 0.75)
 
         # 3. Combined calibrated reliability score in [0.0, 1.0]
