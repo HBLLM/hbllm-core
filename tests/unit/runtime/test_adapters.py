@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.hcir.types import Provenance
 from hbllm.perception.providers.audio_types import SpeechResult, TemporalSpan
 from hbllm.perception.providers.types import VisualEmbedding
 from hbllm.runtime.adapters.action.system_adapter import SystemActionAdapter

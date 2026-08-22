@@ -47,7 +47,6 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     HCIRNode,
     HCIRNodeType,
-    has_evidence_integration,
 )
 from hbllm.hcir.types import (
     BeliefTransition,

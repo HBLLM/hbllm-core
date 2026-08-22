@@ -23,7 +23,6 @@ from hbllm.perception.providers.audio_types import (
 )
 from hbllm.perception.providers.provider_provenance import ProviderProvenance
 from hbllm.runtime.providers.capability import ProviderCapability
-from hbllm.runtime.providers.perception import UnifiedPerceptionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,11 @@ class AudioEventPerceptionAdapter:
         return ProviderCapability(
             provider_id=self._provider_id,
             provider_type="perception",
-            capabilities=["classify_sound_events", "detect_acoustic_scene", "audio_event_detection"],
+            capabilities=[
+                "classify_sound_events",
+                "detect_acoustic_scene",
+                "audio_event_detection",
+            ],
             modalities=["audio"],
             latency_profile="very_low",
             quality_profile="high",
@@ -121,7 +124,9 @@ class AudioEventPerceptionAdapter:
             scene = await self._provider.analyze_scene(input_data)
             if scene is not None:
                 scene_obs = AcousticObservation(
-                    temporal=scene.temporal if scene.temporal else TemporalSpan(start_time=time.time()),
+                    temporal=scene.temporal
+                    if scene.temporal
+                    else TemporalSpan(start_time=time.time()),
                     provenance=Provenance(
                         created_by=self._provider_id,
                         engine="yamnet-scene",

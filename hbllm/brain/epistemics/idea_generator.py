@@ -179,7 +179,10 @@ class IdeaGenerator:
             List of unvalidated RawIdea objects.
         """
         node = self._graph.get_node(observation_id)
-        if not isinstance(node, (ObservationNode, PerceptualEvidenceNode, VisualObservationNode, AudioObservationNode)):
+        if not isinstance(
+            node,
+            (ObservationNode, PerceptualEvidenceNode, VisualObservationNode, AudioObservationNode),
+        ):
             logger.warning("Node %s is not an observation/perceptual evidence node", observation_id)
             return []
 
@@ -281,14 +284,21 @@ class IdeaGenerator:
 
     async def _llm_generate_from_anomaly(
         self,
-        node: ObservationNode | PerceptualEvidenceNode | VisualObservationNode | AudioObservationNode,
+        node: ObservationNode
+        | PerceptualEvidenceNode
+        | VisualObservationNode
+        | AudioObservationNode,
     ) -> list[RawIdea]:
         """Use LLM to explain an anomalous observation."""
-        description = getattr(node, "description", "") or (
-            f"{node.proposition.subject} {node.proposition.predicate} {node.proposition.object_value}"
-            if hasattr(node, "proposition")
-            else ""
-        ) or ""
+        description = (
+            getattr(node, "description", "")
+            or (
+                f"{node.proposition.subject} {node.proposition.predicate} {node.proposition.object_value}"
+                if hasattr(node, "proposition")
+                else ""
+            )
+            or ""
+        )
 
         prompt = (
             f"An anomalous observation has been recorded:\n"
@@ -424,7 +434,10 @@ class IdeaGenerator:
 
     def _template_generate_from_anomaly(
         self,
-        node: ObservationNode | PerceptualEvidenceNode | VisualObservationNode | AudioObservationNode,
+        node: ObservationNode
+        | PerceptualEvidenceNode
+        | VisualObservationNode
+        | AudioObservationNode,
     ) -> list[RawIdea]:
         """Generate structural ideas from anomalous observation."""
         return [

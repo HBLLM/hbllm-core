@@ -19,7 +19,6 @@ from hbllm.perception.providers.audio_types import TemporalSpan
 from hbllm.perception.providers.moonshine_speech_provider import MoonshineSpeechProvider
 from hbllm.perception.providers.provider_provenance import ProviderProvenance
 from hbllm.runtime.providers.capability import ProviderCapability
-from hbllm.runtime.providers.perception import UnifiedPerceptionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +88,9 @@ class SpeechPerceptionAdapter:
         try:
             result = await self._provider.transcribe(input_data)
             obs = AcousticObservation(
-                temporal=result.temporal if result.temporal else TemporalSpan(start_time=time.time()),
+                temporal=result.temporal
+                if result.temporal
+                else TemporalSpan(start_time=time.time()),
                 provenance=Provenance(
                     created_by=self._provider_id,
                     engine=f"moonshine-{self._model_size}",

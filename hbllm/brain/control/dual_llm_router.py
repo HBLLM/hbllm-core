@@ -288,11 +288,18 @@ class DualLLMRouter:
     def capability(self) -> ProviderCapability:
         """Declarative capability manifest conforming to Unified Cognition Provider."""
         local_name = getattr(self._local_name, "name", "local") if self._local_name else "local"
-        ext_name = getattr(self._external_name, "name", "external") if self._external_name else "none"
+        ext_name = (
+            getattr(self._external_name, "name", "external") if self._external_name else "none"
+        )
         return ProviderCapability(
             provider_id=f"dual_router_{local_name}_{ext_name}",
             provider_type="cognition",
-            capabilities=["text_reasoning", "hierarchical_routing", "planning", "intent_resolution"],
+            capabilities=[
+                "text_reasoning",
+                "hierarchical_routing",
+                "planning",
+                "intent_resolution",
+            ],
             modalities=["text"],
             latency_profile="adaptive",
             quality_profile="high",

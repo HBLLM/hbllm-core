@@ -150,33 +150,47 @@ class ContradictionEngine:
                     vis_node: Any = None
                     aud_node: Any = None
 
-                    if isinstance(src_node, VisualObservationNode) and isinstance(tgt_node, AudioObservationNode):
+                    if isinstance(src_node, VisualObservationNode) and isinstance(
+                        tgt_node, AudioObservationNode
+                    ):
                         vis_node, aud_node = src_node, tgt_node
-                    elif isinstance(src_node, AudioObservationNode) and isinstance(tgt_node, VisualObservationNode):
+                    elif isinstance(src_node, AudioObservationNode) and isinstance(
+                        tgt_node, VisualObservationNode
+                    ):
                         aud_node, vis_node = src_node, tgt_node
-                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(tgt_node, PerceptualEvidenceNode):
+                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(
+                        tgt_node, PerceptualEvidenceNode
+                    ):
                         if src_node.modality == "visual" and tgt_node.modality == "audio":
                             vis_node, aud_node = src_node, tgt_node
                         elif src_node.modality == "audio" and tgt_node.modality == "visual":
                             aud_node, vis_node = src_node, tgt_node
                         else:
                             continue
-                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(tgt_node, AudioObservationNode):
+                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(
+                        tgt_node, AudioObservationNode
+                    ):
                         if src_node.modality == "visual":
                             vis_node, aud_node = src_node, tgt_node
                         else:
                             continue
-                    elif isinstance(src_node, AudioObservationNode) and isinstance(tgt_node, PerceptualEvidenceNode):
+                    elif isinstance(src_node, AudioObservationNode) and isinstance(
+                        tgt_node, PerceptualEvidenceNode
+                    ):
                         if tgt_node.modality == "visual":
                             aud_node, vis_node = src_node, tgt_node
                         else:
                             continue
-                    elif isinstance(src_node, VisualObservationNode) and isinstance(tgt_node, PerceptualEvidenceNode):
+                    elif isinstance(src_node, VisualObservationNode) and isinstance(
+                        tgt_node, PerceptualEvidenceNode
+                    ):
                         if tgt_node.modality == "audio":
                             vis_node, aud_node = src_node, tgt_node
                         else:
                             continue
-                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(tgt_node, VisualObservationNode):
+                    elif isinstance(src_node, PerceptualEvidenceNode) and isinstance(
+                        tgt_node, VisualObservationNode
+                    ):
                         if src_node.modality == "audio":
                             aud_node, vis_node = src_node, tgt_node
                         else:
@@ -185,9 +199,23 @@ class ContradictionEngine:
                         continue
 
                     # Check for semantic conflict between visual and audio
-                    vis_cap = str(getattr(vis_node, "caption", "") or getattr(getattr(vis_node, "proposition", None), "object_value", "")).lower()
-                    aud_event = str(getattr(aud_node, "event_type", "") or getattr(aud_node, "label", "") or getattr(getattr(aud_node, "proposition", None), "object_value", "")).lower()
-                    aud_transcript = str(getattr(aud_node, "transcript", "") or (getattr(aud_node, "payload", {}).get("transcript", "") if hasattr(aud_node, "payload") and isinstance(aud_node.payload, dict) else "")).lower()
+                    vis_cap = str(
+                        getattr(vis_node, "caption", "")
+                        or getattr(getattr(vis_node, "proposition", None), "object_value", "")
+                    ).lower()
+                    aud_event = str(
+                        getattr(aud_node, "event_type", "")
+                        or getattr(aud_node, "label", "")
+                        or getattr(getattr(aud_node, "proposition", None), "object_value", "")
+                    ).lower()
+                    aud_transcript = str(
+                        getattr(aud_node, "transcript", "")
+                        or (
+                            getattr(aud_node, "payload", {}).get("transcript", "")
+                            if hasattr(aud_node, "payload") and isinstance(aud_node.payload, dict)
+                            else ""
+                        )
+                    ).lower()
 
                     is_conflict = False
                     reason = ""

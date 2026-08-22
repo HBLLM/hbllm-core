@@ -32,7 +32,6 @@ import uuid
 from hbllm.hcir.graph import (
     AudioObservationNode,
     CognitiveGraph,
-    EvidenceNode,
     HCIREdge,
     HCIREdgeType,
     PerceptualEvidenceNode,
@@ -243,7 +242,11 @@ class PerceptionEpistemicBridge:
                 if hasattr(assessment.events[0].provider_provenance, "to_dict")
                 else None
             )
-            first_label = getattr(assessment.events[0], "event_type", getattr(assessment.events[0], "label", "sound_event"))
+            first_label = getattr(
+                assessment.events[0],
+                "event_type",
+                getattr(assessment.events[0], "label", "sound_event"),
+            )
             from hbllm.hcir.proposition import Proposition, TemporalValidity
 
             event_evi = PerceptualEvidenceNode(

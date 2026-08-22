@@ -18,7 +18,6 @@ from hbllm.perception.providers.evidence import (
 )
 from hbllm.perception.providers.siglip_provider import SigLIPVisionProvider
 from hbllm.runtime.providers.capability import ProviderCapability
-from hbllm.runtime.providers.perception import UnifiedPerceptionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +101,9 @@ class VisionPerceptionAdapter:
             assessment = VisualAssessment(
                 evidence=evidence,
                 candidate_concepts=[],
-                ranking=CandidateRanking(best_score=1.0, second_score=0.0, margin=1.0, ambiguity=0.0),
+                ranking=CandidateRanking(
+                    best_score=1.0, second_score=0.0, margin=1.0, ambiguity=0.0
+                ),
                 epistemic_profile=EpistemicEvidenceProfile(
                     label_provenance=0.5,
                     perceptual_similarity=0.9,
