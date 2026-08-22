@@ -1096,6 +1096,7 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.VISUAL_CONCEPT: VisualConceptNode,
     HCIRNodeType.AUDIO_OBSERVATION: AudioObservationNode,
     HCIRNodeType.ACOUSTIC_CONCEPT: AcousticConceptNode,
+    HCIRNodeType.PERCEPTUAL_EVIDENCE: PerceptualEvidenceNode,
     # --- World Model ---
     HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
     HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,
