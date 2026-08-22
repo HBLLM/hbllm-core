@@ -40,6 +40,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from hbllm.runtime.providers.capability import ProviderCapability
+from hbllm.runtime.providers.cognition import CognitionRequest, ThoughtResult
+
 if TYPE_CHECKING:
     from hbllm.brain.autonomy.state_machine import CognitiveStateMachine
     from hbllm.brain.core.provider_adapter import ProviderLLM
@@ -279,6 +282,65 @@ class DualLLMRouter:
             complexity_threshold,
             circuit_failure_threshold,
             circuit_recovery_timeout,
+        )
+
+    @property
+    def capability(self) -> ProviderCapability:
+        """Declarative capability manifest conforming to Unified Cognition Provider."""
+        local_name = getattr(self._local_name, "name", "local") if self._local_name else "local"
+        ext_name = getattr(self._external_name, "name", "external") if self._external_name else "none"
+        return ProviderCapability(
+            provider_id=f"dual_router_{local_name}_{ext_name}",
+            provider_type="cognition",
+            capabilities=["text_reasoning", "hierarchical_routing", "planning", "intent_resolution"],
+            modalities=["text"],
+            latency_profile="adaptive",
+            quality_profile="high",
+            max_input_tokens=16384,
+            cost_per_1k_tokens=0.001 if self.external is not None else 0.0,
+        )
+
+    async def reason(self, request: CognitionRequest) -> ThoughtResult:
+        """Execute reasoning over a structured CognitionRequest using dual routing."""
+        start = time.monotonic()
+        # Assess routing tier from structured request
+        tier = TaskTier.AUTO
+        if request.reasoning_budget_tokens > 2048 or len(request.goals) > 1:
+            tier = TaskTier.EXTERNAL
+
+        # Format prompt summary
+        prompt_parts: list[str] = [f"INTENT: {request.intent}"]
+        if request.cognitive_state_summary:
+            prompt_parts.append(f"STATE: {request.cognitive_state_summary}")
+        if request.goals:
+            prompt_parts.append(f"GOALS: {', '.join(request.goals)}")
+        if request.constraints:
+            prompt_parts.append(f"CONSTRAINTS: {', '.join(request.constraints)}")
+        prompt = "\n".join(prompt_parts)
+
+        # Route and generate
+        decision = self.route(prompt, tier)
+        llm = self._get_llm(decision)
+
+        conclusion = await self.generate(
+            prompt,
+            max_tokens=min(request.reasoning_budget_tokens, 2048),
+            tier=tier,
+        )
+
+        latency_ms = (time.monotonic() - start) * 1000
+
+        return ThoughtResult(
+            conclusion=conclusion,
+            confidence=0.9 if decision.tier == TaskTier.EXTERNAL else 0.8,
+            reasoning_trace=[
+                f"DualLLMRouter routed to: {decision.tier.value}",
+                f"Reason: {decision.reason}",
+                f"Provider: {getattr(llm, 'provider', llm)}",
+            ],
+            tokens_used=self.usage.get("total_tokens", 0),
+            latency_ms=latency_ms,
+            provider_id=self.capability.provider_id,
         )
 
     # ── Routing Decision ──────────────────────────────────────────────
