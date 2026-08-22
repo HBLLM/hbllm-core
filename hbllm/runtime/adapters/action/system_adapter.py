@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any
 
-from hbllm.runtime.providers.action import ActionIntent, ActionProvider, ExecutionResult
+from hbllm.runtime.providers.action import ActionIntent, ExecutionResult
 from hbllm.runtime.providers.capability import ProviderCapability
 
 logger = logging.getLogger(__name__)

@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
 
 from hbllm.runtime.providers.capability import ProviderCapability
-from hbllm.runtime.providers.cognition import CognitionProvider, CognitionRequest, ThoughtResult
+from hbllm.runtime.providers.cognition import CognitionRequest, ThoughtResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,11 @@ class SymbolicCognitionAdapter:
         return ProviderCapability(
             provider_id=self._provider_id,
             provider_type="cognition",
-            capabilities=["symbolic_reasoning", "constraint_satisfaction", "deterministic_planning"],
+            capabilities=[
+                "symbolic_reasoning",
+                "constraint_satisfaction",
+                "deterministic_planning",
+            ],
             modalities=["text", "symbolic"],
             latency_profile="very_low",
             quality_profile="very_high",
@@ -87,7 +90,9 @@ class SymbolicCognitionAdapter:
             conclusions.append(f"Answer synthesized for query: '{state['query']}'")
 
         if not conclusions:
-            conclusions.append(f"Resolved intent '{request.intent}' with {len(request.evidence_refs)} supporting facts.")
+            conclusions.append(
+                f"Resolved intent '{request.intent}' with {len(request.evidence_refs)} supporting facts."
+            )
 
         final_conclusion = " | ".join(conclusions)
         duration_ms = (time.time() - start_time) * 1000.0

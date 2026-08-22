@@ -32,7 +32,7 @@ import math
 import re
 from typing import Any
 
-from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode, HCIREdgeType
+from hbllm.hcir.graph import BeliefNode, CognitiveGraph, HCIREdgeType
 from hbllm.hcir.types import EvidenceAssessment, PropositionLikelihood
 
 logger = logging.getLogger(__name__)
@@ -241,7 +241,9 @@ class EpistemicLikelihoodEvaluator:
         modality_text = getattr(evidence, "modality", "") or ""
 
         evidence_text = (
-            " ".join([str(cand.get("label", "")) for cand in getattr(evidence, "candidates", [])]).lower()
+            " ".join(
+                [str(cand.get("label", "")) for cand in getattr(evidence, "candidates", [])]
+            ).lower()
             + " "
             + prop_text.lower()
             + " "

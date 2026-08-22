@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
 
-from hbllm.runtime.providers.action import ActionIntent, ActionProvider, ExecutionResult
+from hbllm.runtime.providers.action import ActionIntent, ExecutionResult
 from hbllm.runtime.providers.capability import ProviderCapability
 
 logger = logging.getLogger(__name__)
@@ -56,7 +55,9 @@ class TTSActionAdapter:
 
     async def initialize(self) -> None:
         """Initialize TTS audio output resources."""
-        logger.info("Initialized TTSActionAdapter (%s, backend=%s)", self._provider_id, self._backend)
+        logger.info(
+            "Initialized TTSActionAdapter (%s, backend=%s)", self._provider_id, self._backend
+        )
 
     async def shutdown(self) -> None:
         """Release TTS audio resources."""

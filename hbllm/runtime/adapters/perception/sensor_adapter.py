@@ -13,7 +13,6 @@ import time
 from typing import Any
 
 from hbllm.runtime.providers.capability import ProviderCapability
-from hbllm.runtime.providers.perception import UnifiedPerceptionProvider
 
 logger = logging.getLogger(__name__)
 

@@ -257,7 +257,16 @@ class ExplanationEngine:
             return
 
         node = self._graph.get_node(node_id)
-        if isinstance(node, (ObservationNode, PerceptualEvidenceNode, VisualObservationNode, AudioObservationNode, EvidenceNode)):
+        if isinstance(
+            node,
+            (
+                ObservationNode,
+                PerceptualEvidenceNode,
+                VisualObservationNode,
+                AudioObservationNode,
+                EvidenceNode,
+            ),
+        ):
             observations.append(node_id)
             return
 

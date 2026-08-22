@@ -321,7 +321,9 @@ class EvidenceNormalizer:
             )
 
         temporal = TemporalValidity(
-            observed_at=observed_at if observed_at is not None else float(getattr(ev.provenance, "timestamp", now)),
+            observed_at=observed_at
+            if observed_at is not None
+            else float(getattr(ev.provenance, "timestamp", now)),
             received_at=now,
         )
 
