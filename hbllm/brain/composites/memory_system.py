@@ -129,6 +129,8 @@ class MemorySystem(Node):
             await bus.subscribe("memory.stats", self._handle_stats)
             await bus.subscribe("memory.browse", self._handle_browse)
             await bus.subscribe("memory.search", self._handle_search)
+            await bus.subscribe("memory.retrieve", self._handle_retrieve_recent)
+            await bus.subscribe("memory.retrieve_recent", self._handle_retrieve_recent)
             await bus.subscribe("memory.store", self._handle_store)
             await bus.subscribe("memory.forget", self._handle_forget)
             await bus.subscribe("memory.consolidate", self._handle_consolidate)
@@ -225,6 +227,41 @@ class MemorySystem(Node):
             except Exception as e:
                 logger.debug("[MemorySystem] search error: %s", e)
         return message.create_response({"results": results, "query": query_text})
+
+    async def _handle_retrieve_recent(self, message: Message) -> Message:
+        session_id = message.payload.get("session_id", "")
+        limit = message.payload.get("limit", 10)
+        tenant_id = message.tenant_id or "default"
+        turns: list[dict[str, Any]] = []
+
+        if self._hcir_backend:
+            try:
+                episodes = await self._hcir_backend.recall_episodes(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    limit=limit,
+                )
+                for ep in episodes:
+                    turns.append(
+                        {
+                            "id": getattr(ep, "id", ""),
+                            "summary": getattr(ep, "summary", ""),
+                            "outcome": getattr(ep, "outcome", ""),
+                            "role": getattr(ep, "role", "user"),
+                            "content": getattr(ep, "summary", ""),
+                            "timestamp": getattr(ep, "created_at", None),
+                        }
+                    )
+            except Exception as e:
+                logger.debug("[MemorySystem] retrieve_recent error: %s", e)
+
+        return message.create_response(
+            {
+                "session_id": session_id,
+                "turns": turns,
+                "count": len(turns),
+            }
+        )
 
     async def _handle_store(self, message: Message) -> Message:
         return message.create_response({"status": "stored"})
