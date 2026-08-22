@@ -52,7 +52,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode, PerceptualEvidenceNode
 from hbllm.hcir.types import EvidenceTemporalPattern, NoveltyPolicy
@@ -104,13 +104,13 @@ class StateChangeDetector(Protocol):
 
     def detect(
         self,
-        previous: EvidenceNode | None,
-        current: EvidenceNode,
+        previous: Any | None,
+        current: Any,
     ) -> StateChangeAssessment:
         """Detect whether a state transition occurred between observations."""
         ...
 
-    def get_evidence_label(self, evidence: EvidenceNode) -> str:
+    def get_evidence_label(self, evidence: Any) -> str:
         """Extract primary label/state description from evidence."""
         ...
 
@@ -125,8 +125,8 @@ class LabelStateChangeDetector:
 
     def detect(
         self,
-        previous: EvidenceNode | None,
-        current: EvidenceNode,
+        previous: Any | None,
+        current: Any,
     ) -> StateChangeAssessment:
         """Detect state change by comparing evidence labels and candidate tags."""
         curr_state = self.get_evidence_label(current).lower().strip()
@@ -231,7 +231,7 @@ class TemporalEvidenceModel:
 
     def assess(
         self,
-        evidence: EvidenceNode,
+        evidence: Any,
         belief: BeliefNode,
     ) -> NoveltyAssessment:
         """Compute full multidimensional novelty assessment.
@@ -307,18 +307,18 @@ class TemporalEvidenceModel:
 
         return assessment
 
-    def check_identity(self, evidence: EvidenceNode, belief: BeliefNode) -> bool:
+    def check_identity(self, evidence: Any, belief: BeliefNode) -> bool:
         """Check if this evidence has already been incorporated for this belief.
 
         Idempotency key: (evidence_id, belief_id).
         Same evidence may legitimately affect multiple independent propositions.
         """
-        return belief.id in evidence.incorporated_transitions
+        return belief.id in getattr(evidence, "incorporated_transitions", {})
 
     def classify_pattern(
         self,
-        evidence: EvidenceNode,
-        recent_history: list[EvidenceNode],
+        evidence: Any,
+        recent_history: list[Any],
     ) -> EvidenceTemporalPattern:
         """Classify the temporal pattern of evidence relative to recent history.
 
@@ -415,8 +415,8 @@ class TemporalEvidenceModel:
 
     def _compute_semantic_novelty(
         self,
-        evidence: EvidenceNode,
-        recent: list[EvidenceNode],
+        evidence: Any,
+        recent: list[Any],
     ) -> tuple[float, float]:
         """Compute semantic novelty using Jaccard distance on tags.
 
