@@ -32,6 +32,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from hbllm.hcir.proposition import (
+    Proposition,
+    SpatialContext,
+    TemporalValidity,
+)
 from hbllm.hcir.types import (
     Attention,
     BeliefConfidence,
@@ -105,6 +110,7 @@ class HCIRNodeType(StrEnum):
     VISUAL_CONCEPT = "visual_concept"
     AUDIO_OBSERVATION = "audio_observation"
     ACOUSTIC_CONCEPT = "acoustic_concept"
+    PERCEPTUAL_EVIDENCE = "perceptual_evidence"
 
     # --- World Model & Predictive Cognitive Runtime ---
     WORLD_VARIABLE = "world_variable"
@@ -681,31 +687,44 @@ class ExternalKnowledgeNode(HCIRNode):
     summary: str = ""
 
 
-# ── Discovery & Epistemic Nodes ──────────────────────────────────────────
+# ── Evidence Integration Mixin ───────────────────────────────────────────
 
 
-class EvidenceNode(HCIRNode):
-    """A structured unit of evidence with full provenance.
+class EvidenceIntegrationMixin:
+    """Shared epistemic integration fields for all evidence types.
 
-    Evidence is not just a reference — it's a first-class cognitive entity
-    that carries its own confidence, methodology, limitations, and
-    reproducibility status. The discovery engine uses evidence strength
-    to weight contributions during belief revision.
+    This mixin provides the fields that the belief revision pipeline
+    (BeliefManager, TemporalEvidenceModel, Replay) uses to track
+    evidence incorporation.  Both discovery evidence and perceptual
+    evidence participate in the same Bayesian update pipeline via
+    these shared fields.
+
+    This is deliberately NOT an HCIRNode subclass.  The semantic
+    hierarchy remains flat::
+
+        HCIRNode
+        ├── EvidenceNode              (discovery)
+        └── PerceptualEvidenceNode    (perception/embodiment)
+
+    while the epistemic capability is orthogonal::
+
+                 EvidenceIntegrationMixin
+                    /              \\
+        EvidenceNode     PerceptualEvidenceNode
+
+    Usage::
+
+        # Check if a node participates in evidence integration
+        if has_evidence_integration(node):
+            node.incorporation_status = "incorporated"
     """
 
-    node_type: HCIRNodeType = HCIRNodeType.EVIDENCE
-    category: CognitiveCategory = CognitiveCategory.DISCOVERY
-    claim_id: str = ""  # Which claim does this evidence support/refute?
+    # Fields declared here are picked up by Pydantic when combined
+    # with HCIRNode via multiple inheritance.  Defaults ensure all
+    # fields are optional.
     evidence_type: EvidenceStrength = EvidenceStrength.OBSERVATIONAL
     strength: Confidence = 0.5  # Quantitative strength [0.0, 1.0]
-    source_uri: str = ""  # Paper DOI, dataset URL, experiment ID, etc.
-    methodology: str = ""  # How was this evidence produced?
-    limitations: list[str] = Field(default_factory=list)
-    dataset_refs: list[str] = Field(default_factory=list)
-    reproducible: bool = False  # Has this been independently reproduced?
-    sample_size: int | None = None  # Statistical sample size, if applicable
-    effect_size: float | None = None  # Measured effect size, if applicable
-    modality: str = ""  # "audio", "visual", "multimodal", etc.
+    modality: str = ""  # "audio", "visual", "multimodal", "sensor", etc.
     epistemic_profile: PerceptualEpistemicProfile | None = None
     provider_provenance: dict[str, Any] | None = (
         None  # {"provider": ..., "model": ..., "version": ...}
@@ -722,6 +741,103 @@ class EvidenceNode(HCIRNode):
     novelty_score: float = 1.0  # Composite multidimensional novelty [0.0, 1.0]
     temporal_pattern: str = "unknown"  # persistent | transition | transient | periodic | unknown
     last_incorporated_at: float = 0.0  # Timestamp of most recent incorporation
+
+
+def has_evidence_integration(node: Any) -> bool:
+    """Check if a node has evidence integration fields.
+
+    Use this instead of ``isinstance(node, EvidenceNode)`` when the
+    code needs to work with both discovery and perceptual evidence.
+    """
+    return hasattr(node, "incorporation_status") and hasattr(node, "incorporated_transitions")
+
+
+# ── Discovery & Epistemic Nodes ──────────────────────────────────────────
+
+
+class EvidenceNode(EvidenceIntegrationMixin, HCIRNode):
+    """A structured unit of evidence with full provenance.
+
+    Discovery-specific evidence — papers, experiments, claims.
+    Carries methodology, sample size, and reproducibility metadata
+    used by the discovery engine for evidence quality scoring.
+
+    Shares epistemic integration fields (incorporation_status,
+    incorporated_transitions, novelty_score, temporal_pattern) with
+    ``PerceptualEvidenceNode`` via ``EvidenceIntegrationMixin``.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.EVIDENCE
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    claim_id: str = ""  # Which claim does this evidence support/refute?
+    source_uri: str = ""  # Paper DOI, dataset URL, experiment ID, etc.
+    methodology: str = ""  # How was this evidence produced?
+    limitations: list[str] = Field(default_factory=list)
+    dataset_refs: list[str] = Field(default_factory=list)
+    reproducible: bool = False  # Has this been independently reproduced?
+    sample_size: int | None = None  # Statistical sample size, if applicable
+    effect_size: float | None = None  # Measured effect size, if applicable
+
+
+class PerceptualEvidenceNode(EvidenceIntegrationMixin, HCIRNode):
+    """Modality-neutral evidence from any perception provider.
+
+    The UNIVERSAL CONTRACT between raw world sensing and HCIR.
+    Whisper, YOLO, an IMU, and a LiDAR all produce these.
+    HCIR does not care which provider created it.
+
+    Shares epistemic integration fields (incorporation_status,
+    incorporated_transitions, novelty_score, temporal_pattern) with
+    ``EvidenceNode`` via ``EvidenceIntegrationMixin``, enabling both
+    discovery and perceptual evidence to participate in the same
+    Bayesian belief revision pipeline.
+
+    Invariant:
+        Providers emit ``PerceptualObservation``.
+        The ``EvidenceNormalizer`` converts to ``PerceptualEvidenceNode``.
+        HCIR owns state transitions from evidence → belief.
+
+    Examples::
+
+        # Vision (YOLO)
+        PerceptualEvidenceNode(
+            proposition=Proposition(
+                subject="person_17", predicate="located_at",
+                object_value="kitchen"),
+            spatial=SpatialContext(
+                frame_id="camera_0",
+                bounding_box=BoundingBox(x1=0.1, y1=0.2, x2=0.5, y2=0.8)),
+        )
+
+        # Audio (Whisper)
+        PerceptualEvidenceNode(
+            proposition=Proposition(
+                subject="utterance_42", predicate="transcribed_as",
+                object_value="turn on the lights"),
+        )
+
+        # IMU
+        PerceptualEvidenceNode(
+            proposition=Proposition(
+                subject="robot", predicate="acceleration",
+                object_value=[0.1, -0.3, 9.8], object_type="vector3"),
+        )
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.PERCEPTUAL_EVIDENCE
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+
+    # What was observed (modality-neutral semantic triple)
+    proposition: Proposition = Field(default_factory=Proposition)
+
+    # Where in the world
+    spatial: SpatialContext | None = None
+
+    # When — with observation/ingestion distinction
+    temporal_validity: TemporalValidity = Field(default_factory=TemporalValidity)
+
+    # Modality-specific opaque payload (schema varies by provider)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class ClaimNode(HCIRNode):
