@@ -433,13 +433,18 @@ class AudioInputNode(Node):
         if result:
             return result
 
-        # Fall back to NVIDIA Cloud ASR if Moonshine returns empty
+        # Fall back to NVIDIA Cloud ASR only if explicitly enabled
         import os
 
+        enable_cloud_asr = os.getenv("HBLLM_ENABLE_CLOUD_ASR", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         nvidia_api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_NIM_API_KEY")
-        if nvidia_api_key:
+        if nvidia_api_key and enable_cloud_asr:
             try:
-                logger.info("Moonshine returned empty, trying NVIDIA Cloud ASR...")
+                logger.info("Trying NVIDIA Cloud ASR fallback...")
                 cloud_result = await self._transcribe_pcm_via_file(pcm_bytes, sample_rate)
                 if cloud_result:
                     return cloud_result

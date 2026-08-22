@@ -262,9 +262,14 @@ class MoonshineSpeechProvider:
         if result:
             return result
 
-        # Fallback to NVIDIA Cloud
+        # Fallback to NVIDIA Cloud only if explicitly enabled
+        enable_cloud_asr = os.getenv("HBLLM_ENABLE_CLOUD_ASR", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         nvidia_key = os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_NIM_API_KEY")
-        if nvidia_key:
+        if nvidia_key and enable_cloud_asr:
             try:
                 cloud_result = await self._transcribe_nvidia_pcm(samples, nvidia_key)
                 if cloud_result:
