@@ -35,6 +35,7 @@ from hbllm.hcir.graph import (
     EvidenceNode,
     HCIREdge,
     HCIREdgeType,
+    PerceptualEvidenceNode,
     VisualObservationNode,
 )
 from hbllm.hcir.types import (
@@ -467,3 +468,48 @@ class PerceptionEpistemicBridge:
             len(candidates),
         )
         return candidates
+
+    # ── Universal Modality-Neutral Ingestion ─────────────────────────────
+
+    def ingest_perceptual_evidence(
+        self,
+        evidence: PerceptualEvidenceNode,
+    ) -> list[str]:
+        """Ingest a modality-neutral PerceptualEvidenceNode into HCIR.
+
+        This is the UNIVERSAL ingestion path.  Any perception provider
+        can produce a ``PerceptualEvidenceNode`` (via the
+        ``EvidenceNormalizer``), and this method commits it to HCIR.
+
+        The existing ``ingest_audio_assessment()`` and
+        ``ingest_visual_assessment()`` methods remain for backward
+        compatibility with the existing modality-specific pipeline.
+
+        Architecture::
+
+            Provider → Observation → EvidenceNormalizer →
+            PerceptualEvidenceNode → ingest_perceptual_evidence() → HCIR
+
+        Args:
+            evidence: A ``PerceptualEvidenceNode`` produced by the
+                ``EvidenceNormalizer``.
+
+        Returns:
+            List of node IDs committed to the graph (typically one).
+        """
+        committed_ids: list[str] = []
+
+        # Commit PerceptualEvidenceNode to HCIR
+        self._graph.upsert_node(evidence)
+        committed_ids.append(evidence.id)
+
+        logger.debug(
+            "Ingested PerceptualEvidenceNode: id=%s modality=%s proposition=(%s %s %s)",
+            evidence.id,
+            evidence.modality,
+            evidence.proposition.subject,
+            evidence.proposition.predicate,
+            evidence.proposition.object_value,
+        )
+
+        return committed_ids

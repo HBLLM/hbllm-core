@@ -45,7 +45,9 @@ from hbllm.hcir.graph import (
     CognitiveGraph,
     HCIREdge,
     HCIREdgeType,
+    HCIRNode,
     HCIRNodeType,
+    has_evidence_integration,
 )
 from hbllm.hcir.types import (
     BeliefTransition,
@@ -148,7 +150,7 @@ class DiscoveryBeliefManager:
 
         Emits and commits an event-sourced BeliefTransitionNode into HCIR.
         """
-        from hbllm.hcir.graph import EvidenceNode
+        from hbllm.hcir.graph import has_evidence_integration
 
         node = self._graph.get_node(belief_id)
         if not isinstance(node, BeliefNode):
@@ -159,7 +161,7 @@ class DiscoveryBeliefManager:
 
         # ── Idempotency guard: (evidence_id, belief_id) ──
         evidence_node = self._graph.get_node(proposition_likelihood.evidence_id)
-        if isinstance(evidence_node, EvidenceNode):
+        if isinstance(evidence_node, HCIRNode) and has_evidence_integration(evidence_node):
             if belief_id in evidence_node.incorporated_transitions:
                 existing_tid = evidence_node.incorporated_transitions[belief_id]
                 logger.debug(
@@ -293,7 +295,7 @@ class DiscoveryBeliefManager:
         self._graph.upsert_node(node)
 
         # 6. Mark evidence node as incorporated for this proposition
-        if isinstance(evidence_node, EvidenceNode):
+        if isinstance(evidence_node, HCIRNode) and has_evidence_integration(evidence_node):
             evidence_node.incorporated_transitions[belief_id] = transition_id
             evidence_node.incorporation_status = "incorporated"
             evidence_node.last_incorporated_at = time.time()
