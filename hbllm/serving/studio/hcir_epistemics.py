@@ -85,10 +85,13 @@ async def get_hcir_workspaces(request: Request) -> dict[str, Any]:
             # Working tier active frames
             working_frames = []
             if hasattr(workspace, "working") and hasattr(workspace.working, "all_frames"):
-                for frame_id, frame in list(workspace.working.all_frames.items())[:10]:
+                frames_list = workspace.working.all_frames
+                if isinstance(frames_list, dict):
+                    frames_list = list(frames_list.values())
+                for frame in frames_list[:10]:
                     working_frames.append(
                         {
-                            "frame_id": frame_id,
+                            "frame_id": getattr(frame, "frame_id", ""),
                             "parent_id": getattr(frame, "parent_id", None),
                             "subtask_title": getattr(frame, "subtask_title", "General Task"),
                             "status": getattr(frame, "status", "active"),
