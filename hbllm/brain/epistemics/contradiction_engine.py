@@ -142,6 +142,11 @@ class ContradictionEngine:
 
             for src_id in edge.sources:
                 for tgt_id in edge.targets:
+                    src_node = self._graph.get_node(src_id)
+                    tgt_node = self._graph.get_node(tgt_id)
+                    if src_node is None or tgt_node is None:
+                        continue
+
                     vis_node: Any = None
                     aud_node: Any = None
 

@@ -281,10 +281,14 @@ class IdeaGenerator:
 
     async def _llm_generate_from_anomaly(
         self,
-        node: ObservationNode,
+        node: ObservationNode | PerceptualEvidenceNode | VisualObservationNode | AudioObservationNode,
     ) -> list[RawIdea]:
         """Use LLM to explain an anomalous observation."""
-        description = getattr(node, "description", "") or ""
+        description = getattr(node, "description", "") or (
+            f"{node.proposition.subject} {node.proposition.predicate} {node.proposition.object_value}"
+            if hasattr(node, "proposition")
+            else ""
+        ) or ""
 
         prompt = (
             f"An anomalous observation has been recorded:\n"
@@ -420,7 +424,7 @@ class IdeaGenerator:
 
     def _template_generate_from_anomaly(
         self,
-        node: ObservationNode,
+        node: ObservationNode | PerceptualEvidenceNode | VisualObservationNode | AudioObservationNode,
     ) -> list[RawIdea]:
         """Generate structural ideas from anomalous observation."""
         return [
