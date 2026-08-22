@@ -59,7 +59,7 @@ class EpistemicLikelihoodEvaluator:
     def evaluate_likelihood(
         self,
         belief: BeliefNode,
-        evidence: EvidenceNode,
+        evidence: Any,
         assessment: EvidenceAssessment,
         direction: str = "auto",  # "auto" | "supporting" | "contradicting"
     ) -> PropositionLikelihood:
@@ -182,7 +182,7 @@ class EpistemicLikelihoodEvaluator:
 
         return prop_likelihood
 
-    def _infer_direction(self, claim: str, evidence: EvidenceNode) -> str:
+    def _infer_direction(self, claim: str, evidence: Any) -> str:
         """Infer whether evidence supports or contradicts the belief claim."""
         # 1. Check if an explicit edge exists in the HCIR graph
         if self._graph is not None:
