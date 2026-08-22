@@ -26,6 +26,8 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
+from hbllm.runtime.providers.capability import ProviderCapability
+from hbllm.runtime.providers.cognition import CognitionRequest, ThoughtResult
 from hbllm.serving.provider import LLMProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -34,14 +36,16 @@ logger = logging.getLogger(__name__)
 class ProviderLLM:
     """
     Adapter that wraps an LLMProvider to expose the same interface
-    as LLMInterface (generate / generate_json / generate_stream).
+    as LLMInterface (generate / generate_json / generate_stream) while also
+    conforming to the unified ``CognitionProvider`` protocol.
 
     Brain nodes accept ``llm=`` and call:
       - ``await llm.generate(prompt)`` → str
       - ``await llm.generate_json(prompt)`` → dict
       - ``async for token in llm.generate_stream(prompt)``
+      - ``await llm.reason(cognition_request)`` → ThoughtResult
 
-    This class makes any LLMProvider (OpenAI, Anthropic, Local) compatible.
+    This class makes any LLMProvider (OpenAI, Anthropic, Local, Ollama) compatible.
     """
 
     def __init__(
@@ -60,6 +64,34 @@ class ProviderLLM:
         self._total_prompt_tokens = 0
         self._total_completion_tokens = 0
         self._call_count = 0
+
+    @property
+    def capability(self) -> ProviderCapability:
+        """Declarative capability manifest conforming to Unified Cognition Provider."""
+        provider_name = getattr(self.provider, "name", "llm_provider")
+        return ProviderCapability(
+            provider_id=f"provider_llm_{provider_name}",
+            provider_type="cognition",
+            capabilities=["text_reasoning", "planning", "structured_json", "streaming"],
+            modalities=["text"],
+            latency_profile="medium",
+            quality_profile="high",
+            max_input_tokens=8192,
+        )
+
+    def to_cognition_adapter(self) -> Any:
+        """Convert this ProviderLLM into a unified LLMCognitionAdapter."""
+        from hbllm.runtime.adapters.cognition.llm_adapter import LLMCognitionAdapter
+
+        return LLMCognitionAdapter(
+            provider_id=f"cognition_{getattr(self.provider, 'name', 'llm')}",
+            underlying_provider=self.provider,
+        )
+
+    async def reason(self, request: CognitionRequest) -> ThoughtResult:
+        """Execute reasoning over a structured CognitionRequest."""
+        adapter = self.to_cognition_adapter()
+        return await adapter.reason(request)
 
     @property
     def usage(self) -> dict[str, int]:
