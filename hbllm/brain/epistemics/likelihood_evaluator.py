@@ -233,17 +233,26 @@ class EpistemicLikelihoodEvaluator:
         has_absence_claim = any(term in claim_norm for term in absence_terms)
         has_presence_claim = any(term in claim_norm for term in presence_terms)
 
+        prop_text = ""
+        if hasattr(evidence, "proposition") and evidence.proposition is not None:
+            prop_text = f"{evidence.proposition.subject} {evidence.proposition.predicate} {evidence.proposition.object_value}"
+
+        method_text = getattr(evidence, "methodology", "") or ""
+        modality_text = getattr(evidence, "modality", "") or ""
+
         evidence_text = (
-            " ".join([str(cand.get("label", "")) for cand in evidence.candidates]).lower()
+            " ".join([str(cand.get("label", "")) for cand in getattr(evidence, "candidates", [])]).lower()
             + " "
-            + evidence.methodology.lower()
+            + prop_text.lower()
             + " "
-            + evidence.modality.lower()
+            + method_text.lower()
+            + " "
+            + modality_text.lower()
         )
 
         evidence_has_presence = any(
             term in evidence_text for term in presence_terms
-        ) or evidence.modality in ("audio", "visual")
+        ) or modality_text in ("audio", "visual")
         evidence_has_absence = any(term in evidence_text for term in absence_terms)
 
         if has_absence_claim and evidence_has_presence:
@@ -256,7 +265,7 @@ class EpistemicLikelihoodEvaluator:
             return "supporting"
 
         # Check candidate labels in evidence for direct word matches
-        for cand in evidence.candidates:
+        for cand in getattr(evidence, "candidates", []):
             label = str(cand.get("label", "")).lower()
             if not label:
                 continue
@@ -267,7 +276,7 @@ class EpistemicLikelihoodEvaluator:
                     return "supporting"
 
         # Check method / description
-        method = evidence.methodology.lower()
+        method = method_text.lower()
         if any(neg in method for neg in ["negation", "contradicts", "conflict", "false"]):
             return "contradicting"
 

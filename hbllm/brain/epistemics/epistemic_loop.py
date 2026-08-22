@@ -73,7 +73,7 @@ from hbllm.brain.epistemics.research_strategy import (
     ResearchStrategyManager,
 )
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
-from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode
+from hbllm.hcir.graph import BeliefNode, CognitiveGraph, EvidenceNode, PerceptualEvidenceNode
 from hbllm.hcir.types import DiscoveryTrigger
 
 logger = logging.getLogger(__name__)
@@ -284,7 +284,7 @@ class EpistemicLoop:
                     logger.warning("Calibration failed: %s", exc)
 
         except Exception as exc:
-            logger.error("Epistemic cycle #%d failed: %s", self._cycle_count, exc)
+            logger.exception("Epistemic cycle #%d failed: %s", self._cycle_count, exc)
             results.append(f"Cycle error: {exc}")
 
         self._last_cycle_time = time.time() - cycle_start
@@ -319,13 +319,13 @@ class EpistemicLoop:
         revisions_count = 0
 
         # Find all perceptual evidence nodes
-        perceptual_evidence: list[EvidenceNode] = []
+        perceptual_evidence: list[EvidenceNode | PerceptualEvidenceNode | Any] = []
         beliefs: list[BeliefNode] = []
 
         for _node in self._graph.all_nodes():
             node = self._graph.get_node(_node.id)
-            if isinstance(node, EvidenceNode) and (
-                node.modality or node.epistemic_profile is not None
+            if isinstance(node, (EvidenceNode, PerceptualEvidenceNode)) and (
+                getattr(node, "modality", None) or getattr(node, "epistemic_profile", None) is not None
             ):
                 perceptual_evidence.append(node)
             elif isinstance(node, BeliefNode):
