@@ -227,6 +227,30 @@ The reasoning pipeline that processes every query:
 4. **Critic** — Self-evaluation using Process Reward Models (PRM).
 5. **Decision** — Final output synthesis with confidence scoring. Delegates to ExpressionStream for SNN-gated, thought-by-thought text generation.
 
+#### Cognitive Execution Runtime (Wave A12)
+
+The execution layer for composable, LLM-free reasoning over canonical HCIR state ([Architecture Deep-Dive &rarr;](cognitive-execution-runtime.md)):
+
+```text
+HCIR State  ──►  FrozenGraphView (Snapshot)  ──►  CognitiveContext
+                                                        │
+                                                        ▼
+                                               OperatorRegistry.select()
+                                                        │
+                                                        ▼
+                                               UnifiedReasoningRuntime
+                                          (Deduction, Induction, Abduction,
+                                           Temporal, Spatial, Analogy,
+                                           Causal, Prediction, ActiveInf, ...)
+                                                        │
+                                                        ▼
+Live HCIR   ◄──  HCIRTransaction (Proposed)  ◄──  CognitiveResult[] (Trace)
+```
+
+- **13 Composable Operators**: Formal deduction, statistical induction, abductive inference, Allen's temporal algebra, RCC-8 spatial containment, structure-mapping analogy, Markov prediction, structural contradiction detection, counterfactual graph traversal, BFS causal chain discovery, active inference action ranking, layered risk simulation, and SNN spiking feature evaluation.
+- **Invariants**: Operators calculate, HCIR decides. Read-only snapshots (`FrozenGraphView`), explicit resource budgets (`ReasoningBudget`), full provenance chains (`ProvenanceChain`), and 100% LLM independence.
+- **Compounding Reasoning**: Proven behavioral benchmark demonstrating multi-cycle cognitive state advancement without LLM intervention.
+
 #### SNN Cognitive Stream
 
 The SNN layer runs alongside the cognitive core:

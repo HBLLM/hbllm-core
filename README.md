@@ -90,6 +90,7 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 | **🧠 HCIR Cognitive OS** | Event-sourced Cognitive OS kernel, tiered workspace, transactional governance, and rollback engine | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
 | **👁️ Evidence Perception** | Decoupled providers, structured evidence normalization, `CorrelationEngine`, and HCIR hyperedge binding | [Voice & Audio Pipeline](docs/architecture/voice-pipeline.md) |
 | **🔬 Epistemic Runtime** | Domain-neutral autonomous discovery: hypothesis generation, Bayesian belief revision, self-calibration | [Epistemic Runtime](docs/architecture/epistemics.md) |
+| **🧩 Cognitive Execution Runtime** | 13 composable reasoning operators (deduction, causal, spatial, temporal, etc.) executing over immutable HCIR state with zero LLM dependency | [Reasoning Runtime](docs/architecture/cognitive-execution-runtime.md) |
 | **⚡ SNN Cognitive Stream** | Spiking Neural Networks for concept extraction, content planning, and reward evaluation with Broca compression | [SNN Cognitive Engine](docs/architecture/snn-cognitive-engine.md) |
 | **🧠 Always-On Cognition** | Stays awake between queries — notices events, forms thoughts, and acts proactively | [Executive Brain](docs/architecture/executive-brain-layer.md) |
 | **💾 9 Memory Subsystems** | Working, Episodic, Semantic, Procedural, Value, Knowledge Graph, Spatial, Temporal, Importance | [Memory Systems](docs/architecture/memory-systems.md) |
