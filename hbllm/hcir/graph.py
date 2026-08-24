@@ -122,6 +122,9 @@ class HCIRNodeType(StrEnum):
     PREDICTIVE_MODEL = "predictive_model"
     ADAPTATION_EVENT = "adaptation_event"
 
+    # --- A15: Grounded Concept Formation ---
+    GROUNDED_CONCEPT = "grounded_concept"
+
 
 class HCIREdgeType(StrEnum):
     """All valid typed edge relationships in HCIR."""
@@ -182,6 +185,11 @@ class HCIREdgeType(StrEnum):
     ADAPTS = "adapts"  # AdaptationEvent → PredictiveModel
     ADAPTED_BY = "adapted_by"  # PredictiveModel → AdaptationEvent
     APPLIES_TO = "applies_to"  # LearnedRule → entity/domain scope
+
+    # A15: Grounded concept formation edges
+    INSTANCE_OF = "instance_of"  # Entity → GroundedConcept (validated membership)
+    GENERALIZES = "generalizes"  # GroundedConcept (specific) → GroundedConcept (abstract)
+    EXEMPLAR_OF = "exemplar_of"  # Entity → GroundedConcept (candidate, pre-validation)
 
 
 class CognitiveCategory(StrEnum):
@@ -791,6 +799,46 @@ class AdaptationEventNode(HCIRNode):
     trigger_error_ids: list[str] = Field(default_factory=list)
     outcome: str = ""  # "improved", "degraded", "neutral", "" (not yet evaluated)
 
+
+# ── A15: Grounded Concept Formation Node ────────────────────────────────────
+
+
+class GroundedConceptNode(HCIRNode):
+    """A concept discovered from accumulated grounded experience.
+
+    Not a label — a predictive abstraction that generates expectations
+    about entity behavior.  Validated through A14: similarity proposes
+    a concept; prediction justifies a concept.
+
+    Confidence comes from **recent predictive performance**, not from
+    time or instance count.  Low confidence produces a degradation
+    signal rather than immediate deletion.
+
+    Lifecycle::
+
+        EXEMPLAR_OF (candidate phase)
+               ↓
+        predictive utility test
+               ↓
+        INSTANCE_OF (validated phase)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.GROUNDED_CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    concept_name: str = ""  # Internal ID: "C-00417"
+    feature_prototype: dict[str, Any] = Field(default_factory=dict)
+    behavioral_regularities: list[str] = Field(default_factory=list)
+    causal_rule_ids: list[str] = Field(default_factory=list)
+    prediction_accuracy: Confidence = 0.5
+    confidence: Confidence = 0.5  # From predictive performance
+    formation_score: dict[str, float] = Field(default_factory=dict)
+    exemplar_count: int = 0
+    domain: str = ""
+    formation_source: str = ""  # "feature", "behavioral", "predictive"
+    utility_delta: float = 0.0  # concept_accuracy - baseline_accuracy
+    prediction_count: int = 0
+
+
 class ValueNode(HCIRNode):
     """A preference or value axiom used in decision ranking."""
 
@@ -1247,6 +1295,8 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.LEARNED_RULE: LearnedRuleNode,
     HCIRNodeType.PREDICTIVE_MODEL: PredictiveModelNode,
     HCIRNodeType.ADAPTATION_EVENT: AdaptationEventNode,
+    # --- A15: Grounded Concept Formation ---
+    HCIRNodeType.GROUNDED_CONCEPT: GroundedConceptNode,
 }
 
 
