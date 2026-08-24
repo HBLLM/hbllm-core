@@ -156,6 +156,21 @@ class HCIREdgeType(StrEnum):
     CORRELATES_WITH = "correlates_with"  # Temporal/spatial association only (NOT causal)
     OBSERVED_AS = "observed_as"  # Classifier relationship (observation → classification)
 
+    # World-model identity edges (A13)
+    IDENTIFIES = "identifies"  # Observation → PhysicalEntity (accepted association)
+    POTENTIAL_SAME_AS = "potential_same_as"  # Candidate identity link (hypothesis)
+    SAME_AS = "same_as"  # Confirmed identity equivalence
+
+    # Spatial edges (A13) — distinct from PART_OF (composition)
+    LOCATED_IN = "located_in"  # Spatial containment (Car LOCATED_IN Garage)
+    ABOVE = "above"  # Directional: A above B
+    BELOW = "below"  # Directional: A below B
+    LEFT_OF = "left_of"  # Directional: A left of B
+    RIGHT_OF = "right_of"  # Directional: A right of B
+    NEAR = "near"  # Metric/approximate: A near B
+    TOUCHING = "touching"  # Topological: A touching B
+    OVERLAPPING = "overlapping"  # Topological: A overlapping B
+
 
 class CognitiveCategory(StrEnum):
     """High-level cognitive function classification.
@@ -183,6 +198,27 @@ class NodeLifecycle(StrEnum):
     VALIDATED = "validated"
     ACTIVE = "active"
     ARCHIVED = "archived"
+    FORGOTTEN = "forgotten"
+
+
+class EntityLifecycle(StrEnum):
+    """Lifecycle states for persistent world-model entities (A13).
+
+    RE_IDENTIFIED is intentionally absent — it is a *transition event*,
+    not a durable state.  When an entity is re-identified, it transitions
+    back to TRACKED and a re-identification EventNode is recorded in the
+    event chronicle.
+
+    Lifecycle::
+
+        DISCOVERED → TRACKED → OCCLUDED → TRACKED (via re-identification)
+                                            │
+                                            └──→ FORGOTTEN
+    """
+
+    DISCOVERED = "discovered"
+    TRACKED = "tracked"
+    OCCLUDED = "occluded"
     FORGOTTEN = "forgotten"
 
 
@@ -1033,7 +1069,21 @@ class WorldVariableNode(HCIRNode):
 
 
 class PhysicalEntityNode(HCIRNode):
-    """A physical asset, component, or system in the physical world."""
+    """A persistent world-model entity hypothesis (A13).
+
+    Represents the system's current identity hypothesis for an entity in
+    the external world.  This is NOT "the real entity" — it is the
+    currently maintained hypothesis about a persistent thing.
+
+    Epistemic beliefs (existence_belief, identity_belief, location_belief)
+    are NOT stored here.  They are projections of epistemic state,
+    derived from canonical epistemic nodes/transactions when queried.
+    This prevents the entity registry from owning belief state.
+
+    Multiple observations link to a single entity via ``IDENTIFIES`` edges.
+    Candidate identity associations use ``POTENTIAL_SAME_AS`` edges until
+    epistemic evaluation confirms the association.
+    """
 
     node_type: HCIRNodeType = HCIRNodeType.PHYSICAL_ENTITY
     category: CognitiveCategory = CognitiveCategory.PERCEPTION
@@ -1041,6 +1091,11 @@ class PhysicalEntityNode(HCIRNode):
     entity_type: str = ""
     status: str = "operational"
     properties: dict[str, Any] = Field(default_factory=dict)
+
+    # A13 extensions — lifecycle and temporal tracking
+    entity_lifecycle: EntityLifecycle = EntityLifecycle.DISCOVERED
+    last_observed_at: float | None = None  # Timestamp of last confirmed observation
+    first_observed_at: float | None = None  # Timestamp of first discovery
 
 
 class EnvironmentStateNode(HCIRNode):
