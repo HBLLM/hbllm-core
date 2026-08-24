@@ -89,6 +89,10 @@ And it has the **safety instincts of a responsible person** — it knows when it
 <h3>🔬 Epistemic Runtime</h3>
 <p>Domain-neutral autonomous discovery: hypothesis generation, evidence evaluation, Bayesian belief revision, prediction tracking, counterfactual reasoning, and meta-epistemic self-calibration. The system reasons about its own reasoning. <a href="architecture/epistemics.md">Architecture &rarr;</a></p>
 </div>
+<div class="feature-card">
+<h3>🧩 Cognitive Execution Runtime (A12)</h3>
+<p>13 composable reasoning operators (deduction, induction, abduction, temporal, spatial, analogy, causal, prediction, active inference, simulation, SNN) executing over immutable HCIR state with zero LLM dependency, strict resource budgets, and deterministic replay. <a href="architecture/cognitive-execution-runtime.md">Architecture &rarr;</a></p>
+</div>
 </div>
 
 ---

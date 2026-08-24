@@ -11,6 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Cognitive Execution Runtime — Composable Reasoning Substrate (Wave A12)
+
+- **A12 — Execution Contract & Invariants**: `ReasoningOperator` protocol, `ReasoningProblem`, `CognitiveContext`, `CognitiveResult`, `ReasoningBudget`, `OperatorTrace`, `OperatorInvocation`, `OperatorSelectionScore`, `ProvenanceChain`, and `ResourceCost` base types — `hbllm/brain/reasoning/operators/base.py`
+- **A12 — Immutable Cognitive Views**: `FrozenGraphView` read-only snapshot with deterministic `content_hash` computation and bounded node views, guaranteeing that operators calculate without owning or directly mutating cognitive state — `hbllm/brain/reasoning/operators/base.py`
+- **A12 — Operator Registry & Dynamic Selection**: `OperatorRegistry` with multi-dimensional fitness scoring (applicability, reliability EMA tracking, normalized cost, domain affinity) — `hbllm/brain/reasoning/operators/registry.py`
+- **A12 — Unified Reasoning Runtime**: `UnifiedReasoningRuntime` handling snapshot capture, registry queries, multi-operator pipelining, monotonic budget decrementing, deterministic trace recording, and atomic `HCIRTransaction` proposal — `hbllm/brain/reasoning/unified_runtime.py`
+- **A12 — 6 New Formal Operators (Phase 7)**:
+  - `DeductionOperator` (forward chaining, modus ponens rule application) — `hbllm/brain/reasoning/operators/deduction.py`
+  - `InductionOperator` (statistical property co-occurrence and population generalization) — `hbllm/brain/reasoning/operators/induction.py`
+  - `AbductionOperator` (backward best-explanation hypothesis generation) — `hbllm/brain/reasoning/operators/abduction.py`
+  - `TemporalOperator` (Allen's 13 interval relations and temporal transitivity) — `hbllm/brain/reasoning/operators/temporal.py`
+  - `SpatialOperator` (RCC-8 qualitative spatial containment and topological adjacency) — `hbllm/brain/reasoning/operators/spatial.py`
+  - `AnalogyOperator` (structure-mapping relational isomorphism transfer) — `hbllm/brain/reasoning/operators/analogy.py`
+- **A12 — 7 Wrapped Cognitive Engines (Phase 8)**:
+  - `PredictionOperator` (wraps Markov next-state prediction over HCIR event sequences) — `hbllm/brain/reasoning/operators/prediction.py`
+  - `ContradictionOperator` (LLM-free structural graph analysis replacing legacy LLM detector) — `hbllm/brain/reasoning/operators/contradiction.py`
+  - `CounterfactualOperator` (synchronous "what-if" belief confidence sensitivity) — `hbllm/brain/reasoning/operators/counterfactual.py`
+  - `CausalOperator` (BFS multi-hop causal chain discovery with transitivity) — `hbllm/brain/reasoning/operators/causal.py`
+  - `ActiveInferenceOperator` (multi-attribute utility action optimization) — `hbllm/brain/reasoning/operators/active_inference.py`
+  - `SimulationOperator` (multi-layer safety, resource, and belief risk filters) — `hbllm/brain/reasoning/operators/simulation.py`
+  - `SNNReasoningOperator` (neuromorphic spiking feature evaluation with calibrated fallback) — `hbllm/brain/reasoning/operators/snn_reasoning.py`
+- **A12 — Test & Benchmark Suites**:
+  - `test_a12_runtime.py`: 20 unit tests covering immutability, budgets, deterministic traces, transaction generation, and LLM-independence static analysis (20/20 passing)
+  - `test_a12_benchmark.py`: 5 canonical end-to-end behavioral scenarios verifying reasoning compounding across HCIR transactions with zero LLM modules (6/6 passing)
+- **Documentation**: Dedicated architectural deep-dive at `docs/architecture/cognitive-execution-runtime.md` and complete API reference at `docs/api/reasoning.md`
+
 #### Epistemic Integration of Perception (Waves A9–A10)
 
 - **A9 — Epistemic Primitives in HCIR**: `PerceptualEpistemicProfile` (multidimensional profiles with derived `.reliability`), `CorrelationCandidate`, `PerceptualContradictionLevel`, `EvidenceAssessment`, `PropositionLikelihood` ($P(E|H)$, $P(E|\neg H)$, $LR$), `BeliefTransition`, `BeliefTransitionNode` (event-sourced history node), `ObservationNode`, `EvidenceNode`, `ContradictionNode`, `BeliefNode` HCIR schemas — `hbllm/hcir/types.py`, `hbllm/hcir/graph.py`

@@ -124,6 +124,7 @@ nav:
       - ADR 002 (Operational & Governance): adr/0002-operational-architecture-and-governance.md
       - ADR 003 (Epistemic Runtime): adr/0003-epistemic-runtime.md
       - HCIR Cognitive OS Kernel: architecture/hcir-kernel-os.md
+      - Cognitive Execution Runtime: architecture/cognitive-execution-runtime.md
       - Epistemic Discovery Engine: architecture/epistemics.md
       - SNN Cognitive Engine: architecture/snn-cognitive-engine.md
       - Social Cognition & UserModel: architecture/social-cognition.md
@@ -168,6 +169,7 @@ nav:
       - Brain Factory: api/brain-factory.md
       - Brain Subsystems: api/brain-subsystems.md
       - HCIR Cognitive Kernel: api/hcir.md
+      - Cognitive Execution & Reasoning: api/reasoning.md
       - Epistemic Runtime: api/epistemics.md
       - SNN Neuromorphic Engine: api/snn.md
       - Social Cognition & Persona: api/social.md
