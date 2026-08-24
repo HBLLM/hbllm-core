@@ -117,6 +117,11 @@ class HCIRNodeType(StrEnum):
     PHYSICAL_ENTITY = "physical_entity"
     ENVIRONMENT_STATE = "environment_state"
 
+    # --- A14: Prediction-Error-Centered Learning ---
+    LEARNED_RULE = "learned_rule"
+    PREDICTIVE_MODEL = "predictive_model"
+    ADAPTATION_EVENT = "adaptation_event"
+
 
 class HCIREdgeType(StrEnum):
     """All valid typed edge relationships in HCIR."""
@@ -170,6 +175,13 @@ class HCIREdgeType(StrEnum):
     NEAR = "near"  # Metric/approximate: A near B
     TOUCHING = "touching"  # Topological: A touching B
     OVERLAPPING = "overlapping"  # Topological: A overlapping B
+
+    # A14: Prediction-error-centered learning edges
+    LEARNED_FROM = "learned_from"  # LearnedRule → PredictionError (source errors)
+    CONTRIBUTED_TO = "contributed_to"  # PredictionError → LearnedRule (provenance)
+    ADAPTS = "adapts"  # AdaptationEvent → PredictiveModel
+    ADAPTED_BY = "adapted_by"  # PredictiveModel → AdaptationEvent
+    APPLIES_TO = "applies_to"  # LearnedRule → entity/domain scope
 
 
 class CognitiveCategory(StrEnum):
@@ -704,6 +716,81 @@ class ProcedureNode(HCIRNode):
     is_atomic: bool = False
 
 
+# ── A14: Prediction-Error-Centered Learning Nodes ────────────────────────
+
+
+class LearnedRuleNode(HCIRNode):
+    """An if→then rule extracted from prediction error patterns.
+
+    Not merely a parameter update — this is explicit knowledge
+    constructed from prediction failures.  Provenance is maintained
+    via LEARNED_FROM edges to source PredictionErrorNodes.
+
+    Example::
+
+        LearnedRuleNode(
+            condition="support_surface = absent",
+            prediction="object_motion = downward",
+            confidence=0.81,
+            source_error_count=14,
+            domain="physics",
+        )
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.LEARNED_RULE
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    condition: str = ""  # If-clause: "support_surface = absent"
+    prediction: str = ""  # Then-clause: "object_motion = downward"
+    confidence: Confidence = 0.5
+    source_error_count: int = 0  # How many errors contributed to this rule
+    domain: str = ""  # "physics", "social", "spatial"
+    applies_to_types: list[str] = Field(default_factory=list)  # Entity types
+
+
+class PredictiveModelNode(HCIRNode):
+    """A registered predictive model with tracked accuracy.
+
+    HCIR-native so A12 operators can reason about model reliability.
+    Adaptation history is tracked via ADAPTED_BY edges.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.PREDICTIVE_MODEL
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    model_type: str = ""  # "markov", "permanence", "spatial"
+    domain: str = ""  # "physics", "social", "spatial"
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    accuracy: Confidence = 0.5  # Running accuracy
+    calibration: float = 0.5  # How well-calibrated predictions are
+    error_rate: float = 0.0  # Recent error rate
+    adaptation_count: int = 0
+    learning_rate: float = 0.01
+    prediction_count: int = 0
+    created_at: float = 0.0
+    last_adapted_at: float = 0.0
+
+
+class AdaptationEventNode(HCIRNode):
+    """A first-class record of a model adaptation.
+
+    Every model mutation is recorded as an AdaptationEventNode,
+    enabling deterministic replay and provenance queries.
+
+    Linked via:
+    - ADAPTS → PredictiveModelNode (target model)
+    - LEARNED_FROM → PredictionErrorNode(s) (triggering errors)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.ADAPTATION_EVENT
+    category: CognitiveCategory = CognitiveCategory.REFLECTION
+    model_id: str = ""
+    adaptation_type: str = ""  # "parameter_update", "rule_extraction", "model_selection"
+    parameters_before: dict[str, Any] = Field(default_factory=dict)
+    parameters_after: dict[str, Any] = Field(default_factory=dict)
+    learning_rate_used: float = 0.0
+    evidence_count: int = 0
+    trigger_error_ids: list[str] = Field(default_factory=list)
+    outcome: str = ""  # "improved", "degraded", "neutral", "" (not yet evaluated)
+
 class ValueNode(HCIRNode):
     """A preference or value axiom used in decision ranking."""
 
@@ -1156,6 +1243,10 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
     HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,
     HCIRNodeType.ENVIRONMENT_STATE: EnvironmentStateNode,
+    # --- A14: Prediction-Error-Centered Learning ---
+    HCIRNodeType.LEARNED_RULE: LearnedRuleNode,
+    HCIRNodeType.PREDICTIVE_MODEL: PredictiveModelNode,
+    HCIRNodeType.ADAPTATION_EVENT: AdaptationEventNode,
 }
 
 
