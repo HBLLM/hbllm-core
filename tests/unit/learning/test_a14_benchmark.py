@@ -19,11 +19,7 @@ All scenarios are zero-LLM.
 from __future__ import annotations
 
 import sys
-import time
 
-import pytest
-
-from hbllm.brain.learning.adaptation_engine import AdaptationEngine
 from hbllm.brain.learning.adaptation_gate import (
     AdaptationGate,
     ErrorEvidenceAccumulator,
@@ -36,23 +32,18 @@ from hbllm.brain.learning.error_classifier import (
     ErrorContext,
 )
 from hbllm.brain.learning.learning_signal_router import (
-    LearningSignalRouter,
     RoutingAction,
 )
 from hbllm.brain.learning.prediction_evaluation_engine import (
     AdaptationOutcome,
     PredictionEvaluationEngine,
 )
-from hbllm.brain.learning.predictive_model_registry import PredictiveModelRegistry
 from hbllm.hcir.graph import (
     CognitiveGraph,
     HCIREdgeType,
-    HCIRNodeType,
     LearnedRuleNode,
     PredictionErrorNode,
-    PredictiveModelNode,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -454,18 +445,13 @@ class TestCrossModuleFeedback:
 
         # Simulate A13 permanence prediction errors
         for i in range(4):
-            result = loop.process_error(
+            loop.process_error(
                 error_id=f"perm_err_{i}",
                 model_id=model_id,
-                context=ErrorContext(
-                    error_magnitude=0.4,
-                    prediction_confidence=0.7,
-                    historical_error_rate=0.25,
-                    temporal_pattern="recurring",
-                    cross_entity_correlation=0.1,
-                    recency_weighted_frequency=0.3,
-                    prediction_domain="physics",
-                ),
+                domain="spatial_permanence",
+                error_vector={"position_error": 0.35},
+                error_magnitude=0.35,
+                source_subsystem="a13_permanence",
             )
 
         # Should have triggered adaptation

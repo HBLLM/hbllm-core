@@ -191,19 +191,11 @@ class EnglishParser:
                     frame.set_role(ThematicRole.LOCATION, target_ref)
                 return frame
 
-            # Copular property assertion: "The ball is red"
+            # Copular property assertion: "The box is red"
             if ast.verb_phrase and ast.verb_phrase.adjective_complement:
                 adj_tok = ast.verb_phrase.adjective_complement
                 adj_props = self._get_properties_for_adj(adj_tok.lemma)
-
-                # Merge adjective property into subject reference
-                if subject_ref:
-                    subject_ref = EntityReference(
-                        concept_name=subject_ref.concept_name,
-                        properties={**subject_ref.properties, **adj_props},
-                        specifier=subject_ref.specifier,
-                        raw_text=subject_ref.raw_text,
-                    )
+                prop_ref = EntityReference(properties=adj_props, raw_text=adj_tok.surface, specifier="generic")
 
                 frame = SemanticFrame(
                     frame_type=FrameType.ASSERTION,
@@ -212,6 +204,7 @@ class EnglishParser:
                 )
                 if subject_ref:
                     frame.set_role(ThematicRole.THEME, subject_ref)
+                frame.set_role(ThematicRole.LOCATION, prop_ref)
                 return frame
 
             # SVO action assertion: "The robot pushed the box"

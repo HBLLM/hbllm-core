@@ -57,6 +57,8 @@ class SinhalaRealizer:
         subj_sin = self._concept_map.get(epistemic_state.target_subject, epistemic_state.target_subject)
         obj_sin = self._concept_map.get(epistemic_state.target_object or "", epistemic_state.target_object or "")
         postp = self._postp_map.get(epistemic_state.target_predicate, "මත")
+        if epistemic_state.target_predicate in ("located_in", "in"):
+            postp = "මත" if obj_sin in ("මේසය", "මේසේ", "පුටුව", "බිම") else "තුළ"
 
         # 1. Unknown / Insufficient evidence
         if level == EpistemicVerbalizationLevel.INSUFFICIENT_EVIDENCE:

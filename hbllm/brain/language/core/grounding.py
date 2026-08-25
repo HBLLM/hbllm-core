@@ -11,6 +11,7 @@ Detects explicit epistemic error states:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from hbllm.brain.language.core.reference import ReferenceResolver
 from hbllm.brain.language.core.semantic_frame import (
@@ -68,6 +69,8 @@ class GroundingResolver:
             key=lambda item: role_priority.get(item[0], 0),
         )
 
+        new_mentions: list[tuple[str, str, dict[str, Any]]] = []
+
         for role, ref in sorted_args:
             if ref is None:
                 continue
@@ -110,8 +113,6 @@ class GroundingResolver:
             # 4. Evaluate Definite vs Indefinite matching
             if ref.specifier == "definite":  # "the red ball"
                 if len(matching_entities) == 0:
-                    # If this is an assertion about a new entity, grounding might introduce it,
-                    # but for queries/commands, it's a grounding failure.
                     grounded.grounding_success = False
                     grounded.grounding_error = LanguageErrorType.GROUNDING_FAILED
                     grounded.grounding_error_detail = (
@@ -129,22 +130,29 @@ class GroundingResolver:
                 else:
                     chosen_entity = matching_entities[0]
                     grounded.grounded_entities[role] = chosen_entity.id
-                    # Register mention in discourse
-                    self._ref_resolver.register_mention(
-                        entity_id=chosen_entity.id,
-                        concept_name=ref.concept_name or chosen_entity.entity_type,
-                        properties=ref.properties,
-                    )
+                    new_mentions.append((
+                        chosen_entity.id,
+                        ref.concept_name or chosen_entity.entity_type,
+                        ref.properties,
+                    ))
 
             elif ref.specifier in ("indefinite", "generic"):  # "a ball" / "balls"
                 if matching_entities:
                     chosen_entity = matching_entities[0]
                     grounded.grounded_entities[role] = chosen_entity.id
-                    self._ref_resolver.register_mention(
-                        entity_id=chosen_entity.id,
-                        concept_name=ref.concept_name or chosen_entity.entity_type,
-                        properties=ref.properties,
-                    )
+                    new_mentions.append((
+                        chosen_entity.id,
+                        ref.concept_name or chosen_entity.entity_type,
+                        ref.properties,
+                    ))
+
+        # Register mentions in discourse only after all references in frame are resolved
+        for ent_id, c_name, props in new_mentions:
+            self._ref_resolver.register_mention(
+                entity_id=ent_id,
+                concept_name=c_name,
+                properties=props,
+            )
 
         return grounded
 
