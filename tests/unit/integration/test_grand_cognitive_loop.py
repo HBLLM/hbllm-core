@@ -306,7 +306,124 @@ class TestDeterministicSessionReplay:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Scenario 6: Zero-LLM Invariant
+# Scenario 6: Prediction Failure & Cognitive Surprise (Counterfactual / Error Loop)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestPredictionFailureAndSurprise:
+    """Action outcome contradicts forward prediction -> Error classified -> Confidence adapts."""
+
+    def test_prediction_error_modulates_concept_and_dialogue(self) -> None:
+        graph = CognitiveGraph()
+        runtime = MultilingualLanguageRuntime(graph)
+        concept_registry = GroundedConceptRegistry(graph)
+        bridge = ConceptPredictionBridge(concept_registry)
+
+        # 1. World setup: Ball on table
+        table = PhysicalEntityNode(entity_type="table")
+        box = PhysicalEntityNode(entity_type="box")
+        ball = PhysicalEntityNode(entity_type="ball", properties={"color": "red"})
+        graph.add_node(table)
+        graph.add_node(box)
+        graph.add_node(ball)
+        init_edge = HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[ball.id], targets=[table.id])
+        graph.add_edge(init_edge)
+
+        # 2. Register concept with initial prediction accuracy
+        c_id = concept_registry.register(
+            concept_name="ball",
+            feature_prototype={"shape": "round"},
+            member_ids=[ball.id],
+            domain="physical_object",
+            utility_delta=0.15,
+        )
+        concept_before = concept_registry.get_concept(c_id)
+        assert concept_before is not None
+        initial_accuracy = concept_before.prediction_accuracy
+
+        # 3. Predict forward outcome: expected destination is "box"
+        expected_destination = "box"
+
+        # 4. Action attempted, but failed / blocked: ball remains ON table
+        # (Actual observation contradicts prediction: observed "table" != expected "box")
+        observed_destination = "table"
+        prediction_succeeded = (expected_destination == observed_destination)
+        assert not prediction_succeeded, "Prediction failed: ball did not move to box"
+
+        # 5. A14/A15 records negative outcome: concept prediction accuracy drops
+        bridge.record_outcome(c_id, correct=False)
+        concept_after = concept_registry.get_concept(c_id)
+        assert concept_after is not None
+        assert concept_after.prediction_accuracy < initial_accuracy
+        assert concept_after.prediction_count == 1
+
+        # 6. Human asks in English: "Is the ball in the box?"
+        q_verify = runtime.process_utterance("Is the ball in the box?", language="en")
+        assert q_verify.is_success
+        assert "No, the ball is not" in q_verify.response_text
+
+        # 7. Human asks: "Where is the ball?"
+        q_loc = runtime.process_utterance("Where is the ball?", language="en")
+        assert q_loc.is_success
+        assert q_loc.response_text == "The ball is on the table."
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Scenario 7: Conflicting Speakers & Epistemic Contradiction
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestConflictingEvidenceContradiction:
+    """Contradictory assertions from different speakers trigger CONTRADICTED state."""
+
+    def test_contradictory_assertions_trigger_conflict_warning(self) -> None:
+        graph = CognitiveGraph()
+        runtime = MultilingualLanguageRuntime(graph)
+
+        box = PhysicalEntityNode(entity_type="box", properties={})
+        graph.add_node(box)
+
+        # Speaker 1 asserts: "The box is red."
+        res1 = runtime.process_utterance("The box is red.", speaker="operator_alice")
+        assert res1.is_success
+
+        # Speaker 2 asserts: "The box is blue."
+        res2 = runtime.process_utterance("The box is blue.", speaker="operator_bob")
+        assert res2.is_success
+
+        # Query color -> Epistemic evaluation detects conflicting evidence
+        res_q = runtime.process_utterance("What color is the box?")
+        assert res_q.is_success
+        assert "conflicting evidence" in res_q.response_text.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Scenario 8: Stale Observation & Epistemic Uncertainty Decay
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestStalePerceptionDecay:
+    """Stale observations decay effective confidence, resulting in calibrated epistemic hedges."""
+
+    def test_stale_observation_causes_hedged_verbalization(self) -> None:
+        graph = CognitiveGraph()
+        runtime = MultilingualLanguageRuntime(graph)
+
+        # Entity with low freshness (observed in the past, no recent update)
+        cup = PhysicalEntityNode(entity_type="cup", properties={"freshness": 0.55})
+        table = PhysicalEntityNode(entity_type="table")
+        graph.add_node(cup)
+        graph.add_node(table)
+        graph.add_edge(HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id]))
+
+        # Query location -> System hedges due to staleness (0.96 * 0.55 = 0.528 -> PLAUSIBLE)
+        res_q = runtime.process_utterance("Where is the cup?")
+        assert res_q.is_success
+        assert "I think the cup may be on the table" in res_q.response_text
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Scenario 9: Zero-LLM Invariant
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -318,3 +435,4 @@ class TestZeroLLMIntegration:
         loaded = set(sys.modules.keys())
         for marker in llm_markers:
             assert marker not in loaded, f"LLM module loaded in integrated runtime: {marker}"
+
