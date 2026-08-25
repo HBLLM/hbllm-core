@@ -448,10 +448,15 @@ class TestCrossModuleFeedback:
             loop.process_error(
                 error_id=f"perm_err_{i}",
                 model_id=model_id,
-                domain="spatial_permanence",
-                error_vector={"position_error": 0.35},
-                error_magnitude=0.35,
-                source_subsystem="a13_permanence",
+                context=ErrorContext(
+                    error_magnitude=0.4,
+                    prediction_confidence=0.7,
+                    historical_error_rate=0.25,
+                    temporal_pattern="recurring",
+                    cross_entity_correlation=0.1,
+                    recency_weighted_frequency=0.3,
+                    prediction_domain="physics",
+                ),
             )
 
         # Should have triggered adaptation
