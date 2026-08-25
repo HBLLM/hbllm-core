@@ -1,0 +1,271 @@
+"""HCIR Gateway for A16.
+
+Connects Language SemanticFrames to HCIR cognitive operations:
+- Assertions -> Ingested as EvidenceNodes (Language is an evidence modality).
+- Queries -> Evaluated against A13 World Model & A11 Epistemics, returning CognitiveEpistemicState.
+- Commands -> Converted to GoalNode / Intent proposals for A12 Execution & Planning.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from hbllm.brain.language.core.epistemic_policy import CognitiveEpistemicState
+from hbllm.brain.language.core.semantic_frame import (
+    GroundedSemanticFrame,
+    ThematicRole,
+)
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    EvidenceNode,
+    GoalNode,
+    PhysicalEntityNode,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class HCIRGateway:
+    """Bridges grounded linguistic frames with HCIR cognition.
+
+    Usage::
+
+        gateway = HCIRGateway(graph)
+        # Assertions
+        evidence_node = gateway.process_assertion(grounded_frame)
+
+        # Queries
+        epistemic_state = gateway.process_query(grounded_frame)
+
+        # Commands
+        goal_node = gateway.process_command(grounded_frame)
+    """
+
+    def __init__(self, graph: CognitiveGraph) -> None:
+        self._graph = graph
+
+    # ── Assertion: Language as Evidence ───────────────────────────────
+
+    def process_assertion(
+        self,
+        grounded: GroundedSemanticFrame,
+        speaker: str = "human",
+    ) -> EvidenceNode:
+        """Ingest a linguistic assertion as an EvidenceNode in HCIR.
+
+        Language does NOT directly mutate truth; it is treated as a perception
+        modality with explicit linguistic provenance.
+        """
+        frame = grounded.frame
+        subject_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+        object_ref = frame.get_role(ThematicRole.LOCATION) or frame.get_role(ThematicRole.PATIENT)
+
+        subject_name = subject_ref.concept_name if subject_ref else "entity"
+        target_entity_id = grounded.grounded_entities.get(ThematicRole.THEME) or grounded.grounded_entities.get(ThematicRole.AGENT)
+
+        claim_str = f"{subject_name} {frame.predicate} {object_ref.concept_name if object_ref else ''}".strip()
+        evidence = EvidenceNode(
+            summary=claim_str,
+            methodology=f"language_assertion:{frame.metadata.language}",
+            confidence=0.85,
+            source_uri=f"language://{frame.metadata.language}/{speaker}/{frame.metadata.utterance_id}",
+            tags=[
+                "language_evidence",
+                frame.metadata.language,
+                speaker,
+                frame.predicate,
+            ],
+        )
+        self._graph.add_node(evidence)
+
+        # If entity exists, update observed property / spatial relation if supported
+        if target_entity_id:
+            ent = self._graph.get_node(target_entity_id)
+            if isinstance(ent, PhysicalEntityNode):
+                if subject_ref and subject_ref.properties:
+                    target_dict = ent.properties if hasattr(ent, "properties") and isinstance(ent.properties, dict) else ent.observed_properties
+                    target_dict.update(subject_ref.properties)
+                    self._graph.upsert_node(ent)
+
+        logger.debug(
+            "HCIRGateway: Ingested language assertion as EvidenceNode %s (%s)",
+            evidence.id,
+            evidence.methodology,
+        )
+        return evidence
+
+    # ── Query: Epistemic Query Processing ─────────────────────────────
+
+    def process_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
+        """Query HCIR world model and epistemics for a grounded question."""
+        frame = grounded.frame
+        target_role = ThematicRole.THEME if ThematicRole.THEME in grounded.grounded_entities else ThematicRole.AGENT
+        entity_id = grounded.grounded_entities.get(target_role)
+
+        subject_ref = frame.get_role(target_role)
+        subject_name: str = subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+
+        # If entity could not be grounded, return insufficient evidence
+        if not entity_id:
+            return CognitiveEpistemicState(
+                target_predicate=frame.predicate,
+                target_subject=subject_name,
+                is_known=False,
+                confidence=0.0,
+                uncertainty=1.0,
+                support_count=0,
+            )
+
+        entity = self._graph.get_node(entity_id)
+        if not isinstance(entity, PhysicalEntityNode):
+            return CognitiveEpistemicState(
+                target_predicate=frame.predicate,
+                target_subject=subject_name,
+                is_known=False,
+            )
+
+        ent_props = getattr(entity, "properties", None) or getattr(entity, "observed_properties", {}) or {}
+
+        # 1. Location / Spatial Query ("Where is the X?")
+        if frame.query_target == "location":
+            location_name: str | None = None
+            edge_type_found: str = ""
+
+            # Check spatial edges (LOCATED_IN, ABOVE, NEAR, etc.)
+            for edge in self._graph.edges_from(entity_id):
+                for target_id in edge.targets:
+                    target_node = self._graph.get_node(target_id)
+                    if isinstance(target_node, PhysicalEntityNode):
+                        location_name = target_node.entity_type
+                        edge_type_found = str(edge.edge_type)
+                        break
+
+            if location_name:
+                return CognitiveEpistemicState(
+                    target_predicate=edge_type_found or "located_on",
+                    target_subject=subject_name,
+                    target_object=location_name,
+                    confidence=0.95,
+                    uncertainty=0.05,
+                    support_count=3,
+                    is_known=True,
+                    raw_belief_value=location_name,
+                )
+            else:
+                # Check entity's current location property
+                loc_prop = ent_props.get("location")
+                if loc_prop:
+                    return CognitiveEpistemicState(
+                        target_predicate="located_on",
+                        target_subject=subject_name,
+                        target_object=str(loc_prop),
+                        confidence=0.88,
+                        uncertainty=0.12,
+                        support_count=2,
+                        is_known=True,
+                        raw_belief_value=str(loc_prop),
+                    )
+
+                return CognitiveEpistemicState(
+                    target_predicate="located_on",
+                    target_subject=subject_name,
+                    is_known=False,
+                    confidence=0.10,
+                    uncertainty=0.90,
+                )
+
+        # 2. Property / Color Query ("What color is the X?")
+        elif frame.query_target == "property":
+            prop_key = frame.predicate.replace("color_of", "color").replace("property_", "")
+            prop_val = ent_props.get(prop_key)
+            if prop_val:
+                return CognitiveEpistemicState(
+                    target_predicate=prop_key,
+                    target_subject=subject_name,
+                    target_object=str(prop_val),
+                    confidence=0.98,
+                    uncertainty=0.02,
+                    support_count=4,
+                    is_known=True,
+                    raw_belief_value=str(prop_val),
+                )
+            return CognitiveEpistemicState(
+                target_predicate=prop_key,
+                target_subject=subject_name,
+                is_known=False,
+            )
+
+        # 3. Verification / Yes-No Query ("Is the ball on the table?")
+        elif frame.query_target == "verification":
+            object_role = ThematicRole.LOCATION if ThematicRole.LOCATION in grounded.grounded_entities else ThematicRole.PATIENT
+            object_id = grounded.grounded_entities.get(object_role)
+            object_ref = frame.get_role(object_role)
+            expected_object_name = object_ref.concept_name if object_ref else ""
+
+            # Check if matching edge exists
+            is_connected = False
+            for edge in self._graph.edges_from(entity_id):
+                if object_id and object_id in edge.targets:
+                    is_connected = True
+                    break
+                for target_id in edge.targets:
+                    target_node = self._graph.get_node(target_id)
+                    if isinstance(target_node, PhysicalEntityNode) and target_node.entity_type == expected_object_name:
+                        is_connected = True
+                        break
+
+            # Also check properties
+            if not is_connected and expected_object_name:
+                if str(ent_props.get("location", "")).lower() == expected_object_name.lower():
+                    is_connected = True
+
+            if is_connected:
+                return CognitiveEpistemicState(
+                    target_predicate=frame.predicate or "located_on",
+                    target_subject=subject_name,
+                    target_object=expected_object_name,
+                    confidence=0.96,
+                    uncertainty=0.04,
+                    support_count=3,
+                    is_known=True,
+                    raw_belief_value=True,
+                )
+            else:
+                return CognitiveEpistemicState(
+                    target_predicate=frame.predicate or "located_on",
+                    target_subject=subject_name,
+                    target_object=expected_object_name,
+                    confidence=0.15,
+                    uncertainty=0.85,
+                    support_count=0,
+                    contradiction_count=1,
+                    is_known=True,
+                    raw_belief_value=False,
+                )
+
+        return CognitiveEpistemicState(
+            target_predicate=frame.predicate,
+            target_subject=subject_name,
+            is_known=False,
+        )
+
+    # ── Command: Goal & Action Proposals ──────────────────────────────
+
+    def process_command(self, grounded: GroundedSemanticFrame) -> GoalNode:
+        """Convert a grounded command frame into a GoalNode in HCIR."""
+        frame = grounded.frame
+        action_verb = frame.predicate
+        patient_ref = frame.get_role(ThematicRole.PATIENT) or frame.get_role(ThematicRole.THEME)
+        destination_ref = frame.get_role(ThematicRole.DESTINATION) or frame.get_role(ThematicRole.LOCATION)
+
+        patient_name = patient_ref.concept_name if patient_ref else "object"
+        dest_name = destination_ref.concept_name if destination_ref else ""
+
+        goal_spec = f"{action_verb} {patient_name} to {dest_name}".strip()
+        goal = GoalNode(
+            description=goal_spec,
+            priority=0.8,
+            tags=["language_command", frame.metadata.language, action_verb],
+        )
+        self._graph.add_node(goal)
+        return goal
