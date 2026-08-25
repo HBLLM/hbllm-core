@@ -82,10 +82,12 @@ class HCIRGateway:
         if target_entity_id:
             ent = self._graph.get_node(target_entity_id)
             if isinstance(ent, PhysicalEntityNode):
+                target_dict = ent.properties if hasattr(ent, "properties") and isinstance(ent.properties, dict) else ent.observed_properties
                 if subject_ref and subject_ref.properties:
-                    target_dict = ent.properties if hasattr(ent, "properties") and isinstance(ent.properties, dict) else ent.observed_properties
                     target_dict.update(subject_ref.properties)
-                    self._graph.upsert_node(ent)
+                if object_ref and object_ref.properties:
+                    target_dict.update(object_ref.properties)
+                self._graph.upsert_node(ent)
 
         logger.debug(
             "HCIRGateway: Ingested language assertion as EvidenceNode %s (%s)",
@@ -235,10 +237,10 @@ class HCIRGateway:
                     target_predicate=frame.predicate or "located_on",
                     target_subject=subject_name,
                     target_object=expected_object_name,
-                    confidence=0.15,
-                    uncertainty=0.85,
-                    support_count=0,
-                    contradiction_count=1,
+                    confidence=0.92,
+                    uncertainty=0.08,
+                    support_count=2,
+                    contradiction_count=0,
                     is_known=True,
                     raw_belief_value=False,
                 )

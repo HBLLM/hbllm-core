@@ -88,7 +88,7 @@ class EnglishSyntaxParser:
             return self._parse_wh_question(clean_tokens)
 
         # 2. Check for Yes/No Questions ("Is the ball on the table?", "Did the robot push the box?")
-        if clean_tokens[0].pos == EnglishPOS.AUX and clean_tokens[0].lemma in ("is", "are", "was", "were", "did", "does", "do", "can"):
+        if (clean_tokens[0].pos in (EnglishPOS.AUX, EnglishPOS.VERB) and clean_tokens[0].lemma in ("be", "do", "did", "does", "can", "is", "are", "was", "were")) or clean_tokens[0].surface.lower() in ("is", "are", "was", "were", "do", "did", "does", "can"):
             return self._parse_yes_no_question(clean_tokens)
 
         # 3. Check for Existential ("There is a ball on the table")
@@ -104,18 +104,22 @@ class EnglishSyntaxParser:
 
     # ── Noun Phrase Parser ────────────────────────────────────────────
 
-    def parse_noun_phrase(self, tokens: list[MorphToken], start_idx: int = 0) -> tuple[NounPhrase | None, int]:
-        """Parse an NP starting at start_idx. Returns (NounPhrase, next_idx)."""
+    def parse_noun_phrase(
+        self,
+        tokens: list[MorphToken],
+        start_idx: int = 0,
+        allow_pp: bool = False,
+    ) -> tuple[NounPhrase | None, int]:
+        """Parse a noun phrase: (Det) (Adj)* Noun (PP)* OR Pronoun."""
+        if start_idx >= len(tokens):
+            return None, start_idx
+
         idx = start_idx
         det: MorphToken | None = None
         adjs: list[MorphToken] = []
         head: MorphToken | None = None
-        pron: MorphToken | None = None
 
-        if idx >= len(tokens):
-            return None, idx
-
-        # Check pronoun
+        # Check for pronoun
         if tokens[idx].pos == EnglishPOS.PRON:
             pron = tokens[idx]
             np = NounPhrase(pronoun=pron, raw_tokens=[tokens[idx]])
@@ -144,10 +148,10 @@ class EnglishSyntaxParser:
         raw = tokens[start_idx:idx]
         np = NounPhrase(determiner=det, adjectives=adjs, head_noun=head, raw_tokens=raw)
 
-        # Check for trailing prepositional phrase attached to NP
-        if idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
+        # Check for trailing prepositional phrase attached to NP only if allow_pp is True
+        if allow_pp and idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
             prep = tokens[idx]
-            nested_np, next_idx = self.parse_noun_phrase(tokens, idx + 1)
+            nested_np, next_idx = self.parse_noun_phrase(tokens, idx + 1, allow_pp=True)
             if nested_np:
                 np.prepositional_phrases.append(PrepositionalPhrase(preposition=prep, noun_phrase=nested_np))
                 idx = next_idx
