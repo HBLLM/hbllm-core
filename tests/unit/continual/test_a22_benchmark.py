@@ -546,12 +546,20 @@ class TestZeroLLM:
     """Memory consolidation, replay, compaction, and stability gating execute with 100% deterministic code."""
 
     def test_zero_llm_imports(self) -> None:
-        llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, (
-                f"LLM module loaded in continual learning runtime: {marker}"
-            )
+        import subprocess
+        import sys
+
+        check_code = """
+import sys
+import hbllm.brain.continual
+
+llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded in continual learning runtime: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

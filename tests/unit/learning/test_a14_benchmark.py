@@ -543,23 +543,30 @@ class TestZeroLLM:
     """Entire A14 loop runs without LLM invocation."""
 
     def test_no_llm_imports(self) -> None:
-        llm_markers = [
-            "openai",
-            "anthropic",
-            "litellm",
-            "langchain",
-            "transformers",
-        ]
+        import subprocess
+        import sys
 
-        # Import all A14 modules
-        import hbllm.brain.learning.adaptation_engine  # noqa: F401
-        import hbllm.brain.learning.adaptation_gate  # noqa: F401
-        import hbllm.brain.learning.cognitive_adaptation_loop  # noqa: F401
-        import hbllm.brain.learning.error_classifier  # noqa: F401
-        import hbllm.brain.learning.learning_signal_router  # noqa: F401
-        import hbllm.brain.learning.prediction_evaluation_engine  # noqa: F401
-        import hbllm.brain.learning.predictive_model_registry  # noqa: F401
+        check_code = """
+import sys
+import hbllm.brain.learning.adaptation_engine
+import hbllm.brain.learning.adaptation_gate
+import hbllm.brain.learning.cognitive_adaptation_loop
+import hbllm.brain.learning.error_classifier
+import hbllm.brain.learning.learning_signal_router
+import hbllm.brain.learning.prediction_evaluation_engine
+import hbllm.brain.learning.predictive_model_registry
 
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded: {marker}"
+llm_markers = [
+    "openai",
+    "anthropic",
+    "litellm",
+    "langchain",
+    "transformers",
+]
+
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"

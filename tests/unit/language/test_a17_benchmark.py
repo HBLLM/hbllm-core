@@ -682,10 +682,20 @@ class TestNovelLanguageExperiment:
         assert realized.is_produced
 
         # ── Phase 6: Zero-LLM Invariant ──────────────────────────────
-        llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded: {marker}"
+        import subprocess
+        import sys
+
+        check_code = """
+import sys
+import hbllm.brain.language.acquisition
+
+llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

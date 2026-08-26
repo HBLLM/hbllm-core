@@ -863,17 +863,31 @@ class TestZeroLLM:
 
     def test_no_llm_imports(self, world):
         """The A13 world model stack must not import any LLM modules."""
+        import subprocess
         import sys
 
-        # Modules that indicate LLM dependency
-        llm_markers = [
-            "hbllm.hcir.world.predictors.llm",
-            "openai",
-            "anthropic",
-            "litellm",
-            "langchain",
-        ]
+        check_code = """
+import sys
+from hbllm.brain.world.entity_registry import EntityRegistry
+from hbllm.brain.world.event_chronicle import EventChronicle
+from hbllm.brain.world.object_permanence import ObjectPermanence
+from hbllm.brain.world.reconciler import WorldStateReconciler
+from hbllm.brain.world.scene_graph import SceneGraph
+from hbllm.brain.world.spatial_ontology import SpatialOntology
+from hbllm.hcir.world.predictive_reality import PredictiveRealityModel
 
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded: {marker}"
+llm_markers = [
+    "hbllm.hcir.world.predictors.llm",
+    "openai",
+    "anthropic",
+    "litellm",
+    "langchain",
+    "transformers",
+]
+
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"

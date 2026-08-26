@@ -737,21 +737,30 @@ class TestZeroLLMCalls:
 
     def test_no_llm_modules_loaded(self) -> None:
         """After running all scenarios, no LLM modules should be loaded."""
+        import subprocess
         import sys
 
-        llm_modules = [
-            name
-            for name in sys.modules
-            if any(
-                kw in name.lower()
-                for kw in [
-                    "openai",
-                    "anthropic",
-                    "langchain",
-                    "llama",
-                    "transformers",
-                    "chatgpt",
-                ]
-            )
+        check_code = """
+import sys
+import hbllm.brain.reasoning.unified_runtime
+import hbllm.brain.reasoning.operators.registry
+
+llm_modules = [
+    name
+    for name in sys.modules
+    if any(
+        kw in name.lower()
+        for kw in [
+            "openai",
+            "anthropic",
+            "langchain",
+            "llama",
+            "transformers",
+            "chatgpt",
         ]
-        assert not llm_modules, f"LLM modules were loaded during benchmark: {llm_modules}"
+    )
+]
+assert not llm_modules, f"LLM modules were loaded: {llm_modules}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"

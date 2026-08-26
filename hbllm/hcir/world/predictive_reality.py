@@ -10,7 +10,6 @@ from typing import Any
 
 from hbllm.hcir.world.disagreement_analyzer import PredictorDisagreementAnalyzer
 from hbllm.hcir.world.prediction_types import EnsemblePrediction, PredictionProvenance
-from hbllm.hcir.world.predictors.llm import LLMReasoningPredictor
 from hbllm.hcir.world.predictors.neural import NeuralWorldModel
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
@@ -23,13 +22,22 @@ logger = logging.getLogger(__name__)
 class PredictiveRealityModel:
     """Multi-horizon ensemble predictive reality model."""
 
-    def __init__(self) -> None:
+    def __init__(self, enable_llm: bool = False) -> None:
         self.physics = PhysicsPredictor()
         self.statistical = StatisticalPredictor()
         self.snn = SNNTemporalPredictor()
         self.neural = NeuralWorldModel()
-        self.llm = LLMReasoningPredictor()
+        self.enable_llm = enable_llm
+        self._llm: Any | None = None
         self.disagreement_analyzer = PredictorDisagreementAnalyzer()
+
+    @property
+    def llm(self) -> Any:
+        if self._llm is None:
+            from hbllm.hcir.world.predictors.llm import LLMReasoningPredictor
+
+            self._llm = LLMReasoningPredictor()
+        return self._llm
 
     def predict(
         self,
@@ -53,22 +61,29 @@ class PredictiveRealityModel:
         neu_state, neu_conf = self.neural.predict_state(snapshot, action_intent, horizon_ms)
         comp_results["neural"] = (neu_state, neu_conf)
 
-        llm_state, llm_conf = self.llm.predict_state(snapshot, action_intent, horizon_ms)
-        comp_results["llm"] = (llm_state, llm_conf)
+        if self.enable_llm:
+            llm_state, llm_conf = self.llm.predict_state(snapshot, action_intent, horizon_ms)
+            comp_results["llm"] = (llm_state, llm_conf)
+            avg_confidence = (
+                p_conf * 0.4 + snn_conf * 0.3 + st_conf * 0.15 + neu_conf * 0.1 + llm_conf * 0.05
+            )
+            predictors_used = ["physics", "statistical", "snn", "neural", "llm"]
+        else:
+            avg_confidence = (
+                p_conf * 0.42 + snn_conf * 0.32 + st_conf * 0.16 + neu_conf * 0.10
+            )
+            predictors_used = ["physics", "statistical", "snn", "neural"]
 
         disagreement = self.disagreement_analyzer.analyze_disagreement(comp_results)
 
         # Unified state prediction uses physics + snn weighted average
         unified_state = dict(p_state)
-        avg_confidence = (
-            p_conf * 0.4 + snn_conf * 0.3 + st_conf * 0.15 + neu_conf * 0.1 + llm_conf * 0.05
-        )
         if disagreement.high_disagreement:
             avg_confidence *= 0.85  # Confidence penalty on high disagreement
 
         prov = provenance or PredictionProvenance(
             world_id=snapshot.world_id,
-            predictors_used=["physics", "statistical", "snn", "neural", "llm"],
+            predictors_used=predictors_used,
         )
 
         pred_id = f"pred_{uuid.uuid4().hex[:8]}"

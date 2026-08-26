@@ -478,10 +478,20 @@ class TestZeroLLM:
     """Metacognitive self-model and calibration execute with 100% deterministic code and zero LLM imports."""
 
     def test_zero_llm_imports(self) -> None:
-        llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded in self-model runtime: {marker}"
+        import subprocess
+        import sys
+
+        check_code = """
+import sys
+import hbllm.brain.self_model
+
+llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded in self-model runtime: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

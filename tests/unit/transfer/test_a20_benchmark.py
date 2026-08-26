@@ -633,10 +633,20 @@ class TestZeroLLM:
     """Structure mapping and relational transfer run with 100% deterministic code and zero neural/LLM imports."""
 
     def test_zero_llm_imports(self) -> None:
-        llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded in transfer runtime: {marker}"
+        import subprocess
+        import sys
+
+        check_code = """
+import sys
+import hbllm.brain.transfer
+
+llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded in transfer runtime: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
