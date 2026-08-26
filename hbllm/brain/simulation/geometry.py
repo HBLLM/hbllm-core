@@ -49,7 +49,7 @@ class BoundingBox:
         )
 
 
-def derive_surface_geometry(properties: dict[str, Any], entity_type: str = "") -> SurfaceGeometry:
+def derive_surface_geometry(properties: dict[str, Any], entity_type: str = "") -> SurfaceGeometry | None:
     """Infer surface geometry from entity properties and prototype shapes."""
     geom_str = str(properties.get("geometry", properties.get("surface", ""))).lower()
     if geom_str in ("flat", "planar"):
@@ -60,7 +60,15 @@ def derive_surface_geometry(properties: dict[str, Any], entity_type: str = "") -
         return SurfaceGeometry.CONCAVE
 
     # Fallback from shape / entity type
-    shape = str(properties.get("shape", entity_type)).lower()
+    shape = str(properties.get("shape", "")).lower()
+    if shape in ("unknown", ""):
+        etype = entity_type.lower()
+        if etype in ("table", "box", "block", "floor", "shelf", "cube", "tray"):
+            return SurfaceGeometry.FLAT
+        if etype in ("ball", "sphere", "globe", "egg"):
+            return SurfaceGeometry.CONVEX
+        return None  # Unknown geometry
+
     if shape in ("ball", "sphere", "globe", "egg"):
         return SurfaceGeometry.CONVEX
     if shape in ("bowl", "basin", "cup_interior", "container"):
@@ -68,7 +76,7 @@ def derive_surface_geometry(properties: dict[str, Any], entity_type: str = "") -
     if shape in ("table", "box", "block", "floor", "shelf", "cube", "tray"):
         return SurfaceGeometry.FLAT
 
-    return SurfaceGeometry.FLAT
+    return None
 
 
 def evaluate_support_stability(
@@ -82,6 +90,9 @@ def evaluate_support_stability(
         (is_stable, stability_score, reason)
     """
     base_geom = derive_surface_geometry(supporting_props, supporting_type)
+
+    if base_geom is None:
+        return False, 0.20, "unstable_unknown_geometry"
 
     if base_geom == SurfaceGeometry.FLAT:
         return True, 0.95, "stable_flat_support"
