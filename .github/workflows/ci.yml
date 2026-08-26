@@ -84,9 +84,10 @@ jobs:
           for crate in rust/*/; do
             if [ -f "$crate/Cargo.toml" ]; then
               echo "Building $crate..."
-              maturin develop --manifest-path "$crate/Cargo.toml" --release
+              maturin build --manifest-path "$crate/Cargo.toml" --release --out dist
             fi
           done
+          pip install dist/*.whl
 
       - name: Run unit tests
         run: |
