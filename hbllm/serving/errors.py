@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import Request
-from starlette.responses import JSONResponse
+if TYPE_CHECKING:
+    from fastapi import Request
+    from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,8 @@ def error_response(
         body["error"]["request_id"] = request_id
     if extra:
         body["error"].update(extra)
+    from starlette.responses import JSONResponse
+
     return JSONResponse(status_code=status_code, content=body)
 
 

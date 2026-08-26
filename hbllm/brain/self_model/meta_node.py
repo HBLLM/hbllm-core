@@ -36,6 +36,7 @@ class MetaReasoningNode(Node):
         node_id: str,
         weakness_threshold: int = 3,
         cooldown_seconds: float = 300.0,
+        reflection_dir: str = "workspace/reflection",
     ) -> None:
         super().__init__(node_id=node_id, node_type=NodeType.ROUTER)
 
@@ -47,15 +48,31 @@ class MetaReasoningNode(Node):
         self.negative_feedback_buffer: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self._max_buffer_per_domain: int = 100
         self._last_reflection_time: dict[str, float] = {}
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
 
-        self.reflection_dir = "workspace/reflection"
-        os.makedirs(self.reflection_dir, exist_ok=True)
+        self._reflection_dir = reflection_dir
+        os.makedirs(self._reflection_dir, exist_ok=True)
 
         # SQLite persistence for feedback buffer
-        self._db_path = os.path.join(self.reflection_dir, "meta_feedback.db")
+        self._db_path = os.path.join(self._reflection_dir, "meta_feedback.db")
         self._init_db()
         self._load_from_db()
-        self._pending_tasks: set[asyncio.Task[Any]] = set()
+
+    @property
+    def reflection_dir(self) -> str:
+        """Directory path where reflection logs and persistent buffer are stored."""
+        return self._reflection_dir
+
+    @reflection_dir.setter
+    def reflection_dir(self, value: str) -> None:
+        if self._reflection_dir == value:
+            return
+        self._reflection_dir = value
+        os.makedirs(self._reflection_dir, exist_ok=True)
+        self._db_path = os.path.join(self._reflection_dir, "meta_feedback.db")
+        self.negative_feedback_buffer.clear()
+        self._init_db()
+        self._load_from_db()
 
     # ── Sync SQLite helpers (safe for asyncio.to_thread) ──────────────────
 

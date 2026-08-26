@@ -643,7 +643,12 @@ loaded = set(sys.modules.keys())
 for marker in llm_markers:
     assert marker not in loaded, f"LLM module loaded in transfer runtime: {marker}"
 """
-        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        import os
+
+        env = dict(os.environ, PYTHONPATH=":".join(sys.path))
+        res = subprocess.run(
+            [sys.executable, "-c", check_code], capture_output=True, text=True, env=env
+        )
         assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"
 
 

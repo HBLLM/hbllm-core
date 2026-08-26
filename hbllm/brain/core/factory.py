@@ -67,11 +67,14 @@ from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
 from hbllm.network.node import HealthStatus, Node, NodeHealth
 from hbllm.network.registry import ServiceRegistry
-from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig, PipelineResult
-from hbllm.serving.provider import LLMProvider, get_provider
-from hbllm.serving.token_optimizer import TokenOptimizer
+from hbllm.serving.pipeline import PipelineResult
 from hbllm.training.policy_optimizer import PolicyOptimizer
 from hbllm.training.reward_model import RewardModel
+
+if TYPE_CHECKING:
+    from hbllm.serving.pipeline import CognitivePipeline
+    from hbllm.serving.provider import LLMProvider
+    from hbllm.serving.token_optimizer import TokenOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -731,6 +734,8 @@ class BrainFactory:
 
         # 1. Create provider
         if isinstance(provider, str):
+            from hbllm.serving.provider import get_provider
+
             llm_provider = get_provider(provider, **provider_kwargs)
         else:
             llm_provider = provider
@@ -904,6 +909,8 @@ class BrainFactory:
         _neuromodulator = None  # Created later if SNN streams are injected
         if cfg.external_provider:
             try:
+                from hbllm.serving.provider import get_provider
+
                 external_provider = get_provider(
                     cfg.external_provider, **cfg.external_provider_kwargs
                 )
@@ -1030,6 +1037,8 @@ class BrainFactory:
             await _register_node(registry, node)
 
         # 5. Create and start pipeline
+        from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
+
         pipeline_config = PipelineConfig(
             total_timeout=cfg.total_timeout,
             inject_memory=cfg.inject_memory,
@@ -1760,6 +1769,8 @@ class BrainFactory:
                     nodes.append(dnode)
 
         # Create pipeline
+        from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
+
         pipeline_config = PipelineConfig(
             total_timeout=cfg.total_timeout,
             inject_memory=cfg.inject_memory,
@@ -1877,6 +1888,8 @@ class BrainFactory:
                 meta.reflection.self_model = brain.self_model
 
         if cfg.inject_cost_optimizer:
+            from hbllm.serving.token_optimizer import TokenOptimizer
+
             brain.token_optimizer = TokenOptimizer()
 
         if cfg.inject_owner_rules:

@@ -762,5 +762,10 @@ llm_modules = [
 ]
 assert not llm_modules, f"LLM modules were loaded: {llm_modules}"
 """
-        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        import os
+
+        env = dict(os.environ, PYTHONPATH=":".join(sys.path))
+        res = subprocess.run(
+            [sys.executable, "-c", check_code], capture_output=True, text=True, env=env
+        )
         assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"

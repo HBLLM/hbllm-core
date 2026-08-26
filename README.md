@@ -270,12 +270,12 @@ hbllm data --dataset fineweb       # Run data preparation pipeline
 |--------|-------|
 | Source modules | **421** Python files across 16+ packages |
 | Brain layer | **166** files — 16 cognitive subsystems |
-| Test suite | **4200+** tests (unit, integration, e2e) |
+| Test suite | **6,100+** tests (unit, integration, e2e) |
 | Cognitive nodes | **50+** async nodes on the message bus |
 | Memory types | **9** (Working, Episodic, Semantic, Procedural, KG, Value, Spatial, Temporal, Importance) |
 | Human modeling | **5** subsystems (UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph) |
 | SNN networks | **5** (Comprehension, Association, Reasoning, Expression, TrainedPRM) |
-| Rust crates | **4** (compute, semantic_search, knowledge_graph, perception) |
+| Rust crates | **13** (compute, concept_extract, confidence, data_tools, hcir_graph, knowledge_graph, network_utils, perception, policy_eval, semantic_search, simulation_engine, structure_matcher, tokenizer) |
 | LoRA adapter size | **~2MB** each |
 
 ---

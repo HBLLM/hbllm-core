@@ -89,6 +89,36 @@ class ExperimentMetricsCalculator:
         return round(fwt_sum / float(t - 1), 4)
 
     @staticmethod
+    def calculate_selective_risk_and_coverage(
+        predictions: list[float],
+        outcomes: list[bool],
+        abstentions: list[bool],
+    ) -> tuple[float, float]:
+        """Compute selective risk (error rate on answered items) and coverage (fraction of answered items)."""
+        if not abstentions or len(abstentions) != len(outcomes):
+            return 0.0, 1.0
+
+        n = len(abstentions)
+        answered = [(p, o) for p, o, a in zip(predictions, outcomes, abstentions) if not a]
+        coverage = round(len(answered) / float(n), 4)
+
+        if not answered:
+            return 0.0, coverage
+
+        errors = sum(1.0 for _, o in answered if not o)
+        selective_risk = round(errors / float(len(answered)), 4)
+        return selective_risk, coverage
+
+    @staticmethod
+    def calculate_continual_learning_bwt_fwt(
+        r_matrix: list[list[float]],
+    ) -> tuple[float, float]:
+        """Compute both Backward Transfer (BWT) and Forward Transfer (FWT) from R_{i,j} matrix."""
+        bwt = ExperimentMetricsCalculator.calculate_bwt_from_matrix(r_matrix)
+        fwt = ExperimentMetricsCalculator.calculate_fwt_from_matrix(r_matrix)
+        return bwt, fwt
+
+    @staticmethod
     def calculate_capability_normalized_compute(
         total_wall_clock_ms: float,
         accuracy: float,

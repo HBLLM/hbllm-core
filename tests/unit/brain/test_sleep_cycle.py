@@ -65,11 +65,13 @@ async def test_sleep_cycle_triggers_on_idle(simulated_sleep_env):
     # Assert it starts awake
     assert not sleep_node.is_sleeping
 
-    # Let it idle past the 0.5s timeout + 0.5s loop interval
-    await asyncio.sleep(1.2)
+    # Wait for the 0.5s timeout + loop interval to trigger consolidation
+    for _ in range(30):
+        if len(memory.store_calls) > 0:
+            break
+        await asyncio.sleep(0.1)
 
-    # Should now be asleep (in consolidation mode) or have finished sleeping
-    # Since we mocked memory, the compression should execute quickly and reset flag
+    # Should now have consolidated memories
     assert len(memory.store_calls) > 0
 
     store_msg = memory.store_calls[0]
@@ -112,8 +114,11 @@ async def test_sleep_cycle_interrupted_by_user(simulated_sleep_env):
     assert not sleep_node.is_sleeping
     assert len(memory.store_calls) == 0
 
-    # Wait a full idle timeout from the interrupt + loop interval
-    await asyncio.sleep(1.2)
+    # Wait for idle timeout from the interrupt
+    for _ in range(30):
+        if len(memory.store_calls) > 0:
+            break
+        await asyncio.sleep(0.1)
 
     # Now it should trigger
     assert len(memory.store_calls) > 0
@@ -367,7 +372,10 @@ async def test_manual_trigger(temporal_sleep_env):
     assert response.payload.get("status") == "consolidation_started"
 
     # Wait for the sleep cycle to complete
-    await asyncio.sleep(2.0)
+    for _ in range(30):
+        if len(memory.store_calls) > 0:
+            break
+        await asyncio.sleep(0.1)
 
     # Sleep should have completed and produced stores
     assert len(memory.store_calls) > 0
