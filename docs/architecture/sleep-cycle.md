@@ -2,6 +2,8 @@
 
 The **Lifelong Continual Learning Substrate** enables HBLLM to accumulate experience, concepts, vocabulary, and relational schemas across long operating lifetimes without catastrophic forgetting, representational drift, or unchecked graph entropy.
 
+Unlike stateless language models that forget every interaction after a session ends, HBLLM mirrors human cognitive consolidation by executing multi-stage offline sleep cycles orchestrated by the `SleepCycleNode`.
+
 ```text
                                 REAL-WORLD INTERACTION
                                           │
@@ -117,9 +119,60 @@ Before any candidate schema or concept update is committed to the slow consolida
 
 ---
 
-## 5. Versioned Knowledge Revisions
+## 5. Multi-Stage Operational Sleep Cycle Sequence
 
-Mature knowledge is never overwritten in place. Revisions are tracked monotonically with full rollback capabilities:
+The `SleepCycleNode` executes an automated 5-stage consolidation sequence when the system enters idle mode:
+
+### Stage 1: Memory Replay & Knowledge Consolidation
+- **Selective Replay & Compaction:** Folds active `EpisodeNode` entries into durable `ConceptNode` and `BeliefNode` representations.
+- **Temporal Normalization:** Scans relative temporal references ("yesterday", "last month") and annotates them with absolute ISO timestamps based on event creation time.
+- **Contradiction Resolution:** Scans exclusive relation types (`prefers`, `is_a`, `has`) and resolves conflicting targets by preserving the latest verified evidence.
+- **Knowledge Staleness Audit:** Flags expired web or external entries past their TTL for re-verification.
+- **Task Knowledge Promotion:** Promotes frequently accessed task-level research into permanent long-term memory.
+
+### Stage 2: Artificial Neuroplasticity & Skill Optimization
+- **Continuous Preference Learning:** Evaluates critic feedback and refines local adapter weights without modifying the base read-only model.
+- **Skill Optimization:** Re-evaluates custom procedural routines and repairs low-success actions in the Skill Registry.
+
+### Stage 3: Curiosity-Driven Exploration
+- Replays unanswered curiosity goals and explores knowledge gaps across the Knowledge Graph.
+
+### Stage 4: Dream Journaling & Observability
+- Emits a structured `system.sleep.report` summarizing:
+  - Memories compacted and temporal references normalized
+  - Contradictions resolved and schemas specialized
+  - Skills refined and curiosity gaps investigated
+- Accessible programmatically or via UI dashboards.
+
+### Stage 5: Proactive Memory Warming
+- Pre-warms the fast-path memory cache with recent topic summaries to ensure zero-latency response upon wakeup.
+
+---
+
+## 6. Execution & Triggers
+
+Consolidation cycles can be triggered via three mechanisms:
+
+1. **Auto-Trigger (Idle Timeout):** Automatically activates when no user query is detected for a configurable duration (default: 6 hours). Wakes up immediately if a live query arrives.
+2. **Bus Trigger (`/dream`):** Any node or CLI can publish to `system.sleep.force` for an immediate cycle:
+   ```python
+   await bus.publish(
+       "system.sleep.force",
+       Message(type=MessageType.QUERY, source_node_id="cli", topic="system.sleep.force", payload={}),
+   )
+   ```
+3. **REST API Trigger:**
+   ```bash
+   curl -X POST "https://api.hbllm.ai/v1/system/sleep" \
+        -H "Authorization: Bearer <TOKEN>" \
+        -d '{"tenant_id": "tenant-001", "mode": "deep"}'
+   ```
+
+---
+
+## 7. Versioned Knowledge Revisions
+
+Mature knowledge is never overwritten destructively. Revisions are tracked monotonically with full audit logs:
 
 ```python
 @dataclass
@@ -137,9 +190,9 @@ class VersionedKnowledgeRecord:
 
 ---
 
-## 6. Lifelong Multi-Task Retention Evaluation
+## 8. Lifelong Multi-Task Retention Evaluation
 
-Lifelong continual learning evaluates performance across sequential task curricula ($T_1 \to \dots \to T_N$) using the full task-performance matrix $R_{i,j}$:
+Continual learning evaluates performance across sequential task curricula ($T_1 \to \dots \to T_N$) using the full task-performance matrix $R_{i,j}$:
 
 $$R_{i,j} = \text{Performance on task } j \text{ after learning task } i$$
 

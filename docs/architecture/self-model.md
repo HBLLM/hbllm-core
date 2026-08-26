@@ -83,7 +83,27 @@ Every attempt is recorded with full provenance:
 
 ---
 
-## 3. Epistemic Calibration Engine (`EpistemicCalibrator`)
+## 3. Granular Capability Profiles & Experience Records
+
+To assess granular tool and action capabilities, the Self-Model maintains dedicated execution records:
+
+### Capability Profile
+The `CapabilityProfile` stores running metrics for specific capability strings (e.g., `execute_python`, `spatial_stacking`):
+- **capability**: Unique capability identifier.
+- **confidence**: Rolling confidence score representing predicted success rate.
+- **success_rate**: Running success rate of executions.
+- **avg_cost**: Average token usage and latency (in milliseconds).
+- **last_validated**: Timestamp of the most recent evaluation.
+
+### Experience Record
+The `ExperienceRecord` preserves raw execution history and validation details for offline consolidation:
+- **capability**: The targeted capability.
+- **executions_count**: Cumulative number of execution runs.
+- **validation_runs**: JSON list containing individual execution metadata and validation outputs.
+
+---
+
+## 4. Epistemic Calibration Engine (`EpistemicCalibrator`)
 
 The calibrator evaluates the reliability of the system's probabilistic forecasts:
 
@@ -100,7 +120,7 @@ Detects high-confidence failures ($p \ge 0.80 \land \text{outcome} = \text{False
 
 ---
 
-## 4. Cognitive Resource Budgeting (`CognitiveBudgetManager`)
+## 5. Cognitive Resource Budgeting (`CognitiveBudgetManager`)
 
 The budget manager allocates computational depth based on current cognitive load:
 
@@ -113,7 +133,7 @@ This prevents the system from mistaking reduced computational search for high ep
 
 ---
 
-## 5. Metacognitive Monitoring & Strategy Switching (`MetacognitiveMonitor`)
+## 6. Metacognitive Monitoring & Strategy Switching (`MetacognitiveMonitor`)
 
 The monitor oversees execution and drives a formal self-correction state machine:
 
@@ -162,7 +182,7 @@ The monitor oversees execution and drives a formal self-correction state machine
 
 ---
 
-## 6. Integration with Decision Policy
+## 7. Integration with Decision Policy & Multi-Armed Bandit
 
 The Metacognitive Self-Model modulates the decision engine by scaling risk and value of information:
 
@@ -170,3 +190,27 @@ $$R_{\text{effective}} = \min(1.0, R_{\text{sim}} + \lambda_m \cdot U_{\text{mod
 $$VoI_{\text{effective}} = VoI \cdot (1.0 + \lambda_u \cdot U_{\text{epistemic}})$$
 
 In uncalibrated or novel domains, elevated epistemic uncertainty dynamically prioritizes discriminative information gathering over premature goal commitment.
+
+### Bayesian Policy Selection
+During task planning, the system employs an **Epsilon-Greedy Multi-Armed Bandit** strategy:
+- **Exploration (15%):** Selects exploratory probing policies to gather empirical performance data.
+- **Exploitation (85%):** Selects the verified optimal policy with the highest proven success rate for the target domain.
+
+---
+
+## 8. DigitalTwin — Ephemeral Operational State (ADR 002)
+
+!!! info "Architecture Decision"
+    See **[ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md)** for the rationale behind the SelfModel / DigitalTwin separation.
+
+The **DigitalTwin** (`brain/self_model/digital_twin.py`) decouples **persistent self-competence identity** from **live operational runtime state**.
+
+| Aspect | SelfModel | DigitalTwin |
+|---|---|---|
+| **Purpose** | Enduring competence, calibration, ethics, capabilities | Live hardware, tasks, devices, cluster state |
+| **Persistence** | Durable, survives restarts | **Ephemeral** — rebuilt on every startup |
+| **Memory consolidation** | Tracked through learning cycles | **Excluded** from consolidation |
+| **Example data** | Competence profiles, Brier scores, capability records | CPU %, active goals, loaded plugins, connected IoT devices |
+
+### Invariant
+> The DigitalTwin is **disposable and rebuildable**. After a restart, it is reconstructed from active subsystem queries — never from persistent storage, ensuring live runtime telemetry never pollutes long-term memory.
