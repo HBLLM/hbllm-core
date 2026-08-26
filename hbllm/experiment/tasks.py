@@ -410,7 +410,7 @@ class E5_ActiveEpistemicDiscoveryTask:  # noqa: N801
         env = CanonicalTaskEnvironment(domain="active_discovery")
         oracle = env.oracle
 
-        scenarios = [
+        scenarios: list[dict[str, Any]] = [
             {"name": "hollow_cube", "cost_probe": 0.2, "d_power": 0.85, "is_safe": True},
             {"name": "magnetic_cylinder", "cost_probe": 0.15, "d_power": 0.90, "is_safe": True},
             {"name": "fragile_glass", "cost_probe": 0.25, "d_power": 0.80, "is_safe": False},
