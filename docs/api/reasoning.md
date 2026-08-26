@@ -178,7 +178,9 @@ registry.register(DeductionOperator())
 # Query ranked operators for a specific problem and context
 scores = registry.select(problem=problem, context=context, max_candidates=3)
 for s in scores:
-    print(f"Operator: {s.operator_id}, Score: {s.composite_score:.3f} (Applicability: {s.applicability:.2f})")
+    print(
+        f"Operator: {s.operator_id}, Score: {s.composite_score:.3f} (Applicability: {s.applicability:.2f})"
+    )
 
 # Record execution outcome for dynamic reliability adaptation
 registry.record_execution(
