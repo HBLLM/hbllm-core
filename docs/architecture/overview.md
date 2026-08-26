@@ -227,7 +227,7 @@ The reasoning pipeline that processes every query:
 4. **Critic** — Self-evaluation using Process Reward Models (PRM).
 5. **Decision** — Final output synthesis with confidence scoring. Delegates to ExpressionStream for SNN-gated, thought-by-thought text generation.
 
-#### Cognitive Execution Runtime (Wave A12)
+#### Cognitive Execution Runtime
 
 The execution layer for composable, LLM-free reasoning over canonical HCIR state ([Architecture Deep-Dive &rarr;](cognitive-execution-runtime.md)):
 
