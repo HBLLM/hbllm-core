@@ -67,7 +67,9 @@ class CompetenceProfile:
     successes: int = 0
     failures: int = 0
     competence: float = 0.50
-    epistemic_maturity: EpistemicMaturity = EpistemicMaturity.NOVICE  # NOVICE -> CALIBRATING -> MATURE
+    epistemic_maturity: EpistemicMaturity = (
+        EpistemicMaturity.NOVICE
+    )  # NOVICE -> CALIBRATING -> MATURE
     known_competent_conditions: list[dict[str, Any]] = field(default_factory=list)
     uncalibrated_conditions: list[dict[str, Any]] = field(default_factory=list)
     evidences: list[SelfModelEvidence] = field(default_factory=list)
