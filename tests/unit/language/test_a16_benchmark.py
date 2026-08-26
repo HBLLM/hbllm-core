@@ -425,30 +425,38 @@ class TestZeroLLM:
     """Entire A16 runtime operates without any external neural or LLM calls."""
 
     def test_no_llm_imports(self) -> None:
-        llm_markers = [
-            "openai",
-            "anthropic",
-            "litellm",
-            "langchain",
-            "transformers",
-        ]
+        import subprocess
+        import sys
 
-        import hbllm.brain.language.core.epistemic_policy  # noqa: F401
-        import hbllm.brain.language.core.gateway  # noqa: F401
-        import hbllm.brain.language.core.grounding  # noqa: F401
-        import hbllm.brain.language.core.protocol  # noqa: F401
-        import hbllm.brain.language.core.reference  # noqa: F401
-        import hbllm.brain.language.core.semantic_frame  # noqa: F401
-        import hbllm.brain.language.english.lexicon  # noqa: F401
-        import hbllm.brain.language.english.morphology  # noqa: F401
-        import hbllm.brain.language.english.parser  # noqa: F401
-        import hbllm.brain.language.english.realizer  # noqa: F401
-        import hbllm.brain.language.english.syntax  # noqa: F401
-        import hbllm.brain.language.runtime  # noqa: F401
-        import hbllm.brain.language.sinhala.lexicon  # noqa: F401
-        import hbllm.brain.language.sinhala.parser  # noqa: F401
-        import hbllm.brain.language.sinhala.realizer  # noqa: F401
+        check_code = """
+import sys
+import hbllm.brain.language.core.epistemic_policy
+import hbllm.brain.language.core.gateway
+import hbllm.brain.language.core.grounding
+import hbllm.brain.language.core.protocol
+import hbllm.brain.language.core.reference
+import hbllm.brain.language.core.semantic_frame
+import hbllm.brain.language.english.lexicon
+import hbllm.brain.language.english.morphology
+import hbllm.brain.language.english.parser
+import hbllm.brain.language.english.realizer
+import hbllm.brain.language.english.syntax
+import hbllm.brain.language.runtime
+import hbllm.brain.language.sinhala.lexicon
+import hbllm.brain.language.sinhala.parser
+import hbllm.brain.language.sinhala.realizer
 
-        loaded = set(sys.modules.keys())
-        for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded: {marker}"
+llm_markers = [
+    "openai",
+    "anthropic",
+    "litellm",
+    "langchain",
+    "transformers",
+]
+
+loaded = set(sys.modules.keys())
+for marker in llm_markers:
+    assert marker not in loaded, f"LLM module loaded: {marker}"
+"""
+        res = subprocess.run([sys.executable, "-c", check_code], capture_output=True, text=True)
+        assert res.returncode == 0, f"Zero-LLM verification failed:\n{res.stderr}"
