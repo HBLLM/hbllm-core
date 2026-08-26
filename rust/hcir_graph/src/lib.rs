@@ -17,6 +17,12 @@ pub struct PyNativeGraph {
     pub state: RwLock<GraphState>,
 }
 
+impl Default for PyNativeGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl PyNativeGraph {
     #[new]
@@ -69,6 +75,7 @@ impl PyNativeGraph {
         *state = state.with_node_added(node);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_edge(
         &self,
         id: String,
@@ -128,14 +135,15 @@ impl PyNativeGraph {
         let state = self.state.read();
         let edges = state.edges_from(node_id);
         let list = PyList::empty(py);
-        for edge in edges {
+        for e in edges {
             let dict = PyDict::new(py);
-            dict.set_item("id", &edge.id)?;
-            dict.set_item("edge_type", &edge.edge_type)?;
-            dict.set_item("sources", &edge.sources)?;
-            dict.set_item("targets", &edge.targets)?;
-            dict.set_item("weight", edge.weight)?;
-            dict.set_item("properties", &edge.properties)?;
+            dict.set_item("id", &e.id)?;
+            dict.set_item("edge_type", &e.edge_type)?;
+            dict.set_item("sources", &e.sources)?;
+            dict.set_item("targets", &e.targets)?;
+            dict.set_item("weight", e.weight)?;
+            dict.set_item("properties", &e.properties)?;
+            dict.set_item("created_at", e.created_at)?;
             list.append(dict)?;
         }
         Ok(list)
@@ -145,14 +153,15 @@ impl PyNativeGraph {
         let state = self.state.read();
         let edges = state.edges_to(node_id);
         let list = PyList::empty(py);
-        for edge in edges {
+        for e in edges {
             let dict = PyDict::new(py);
-            dict.set_item("id", &edge.id)?;
-            dict.set_item("edge_type", &edge.edge_type)?;
-            dict.set_item("sources", &edge.sources)?;
-            dict.set_item("targets", &edge.targets)?;
-            dict.set_item("weight", edge.weight)?;
-            dict.set_item("properties", &edge.properties)?;
+            dict.set_item("id", &e.id)?;
+            dict.set_item("edge_type", &e.edge_type)?;
+            dict.set_item("sources", &e.sources)?;
+            dict.set_item("targets", &e.targets)?;
+            dict.set_item("weight", e.weight)?;
+            dict.set_item("properties", &e.properties)?;
+            dict.set_item("created_at", e.created_at)?;
             list.append(dict)?;
         }
         Ok(list)
@@ -162,12 +171,13 @@ impl PyNativeGraph {
         let state = self.state.read();
         let nodes = state.nodes_of_type(node_type);
         let list = PyList::empty(py);
-        for node in nodes {
+        for n in nodes {
             let dict = PyDict::new(py);
-            dict.set_item("id", &node.id)?;
-            dict.set_item("node_type", &node.node_type)?;
-            dict.set_item("lifecycle", &node.lifecycle)?;
-            dict.set_item("properties", &node.properties)?;
+            dict.set_item("id", &n.id)?;
+            dict.set_item("node_type", &n.node_type)?;
+            dict.set_item("lifecycle", &n.lifecycle)?;
+            dict.set_item("properties", &n.properties)?;
+            dict.set_item("created_at", n.created_at)?;
             list.append(dict)?;
         }
         Ok(list)
@@ -195,6 +205,7 @@ impl PyNativeGraph {
             dict.set_item("node_type", &n.node_type)?;
             dict.set_item("lifecycle", &n.lifecycle)?;
             dict.set_item("properties", &n.properties)?;
+            dict.set_item("created_at", n.created_at)?;
             py_nodes.append(dict)?;
         }
 
@@ -207,10 +218,11 @@ impl PyNativeGraph {
             dict.set_item("targets", &e.targets)?;
             dict.set_item("weight", e.weight)?;
             dict.set_item("properties", &e.properties)?;
+            dict.set_item("created_at", e.created_at)?;
             py_edges.append(dict)?;
         }
 
-        Ok(PyTuple::new(py, &[py_nodes, py_edges]))
+        Ok(PyTuple::new(py, [py_nodes, py_edges]))
     }
 
     pub fn canonical_hash(&self) -> String {
