@@ -87,6 +87,12 @@ pub struct NativeCognitiveRuntime {
     transition_cache: Arc<RwLock<HashMap<(String, String), TransitionRecord>>>,
 }
 
+impl Default for NativeCognitiveRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NativeCognitiveRuntime {
     pub fn new() -> Self {
         Self {
@@ -126,6 +132,7 @@ impl NativeCognitiveRuntime {
         *state = state.with_node_added(node);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_edge(
         &self,
         id: String,

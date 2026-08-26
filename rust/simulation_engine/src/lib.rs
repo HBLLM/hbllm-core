@@ -19,6 +19,12 @@ pub struct NativeCognitiveRuntime {
     inner: RustRuntime,
 }
 
+impl Default for NativeCognitiveRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[pymethods]
 impl NativeCognitiveRuntime {
     #[new]
@@ -52,6 +58,7 @@ impl NativeCognitiveRuntime {
             .add_node(id, node_type, lifecycle, properties, created_at);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_edge(
         &self,
         id: String,

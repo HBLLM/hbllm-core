@@ -59,18 +59,22 @@ pub fn match_relational_schema(
         target_edges_set.insert((e.rel_type.clone(), e.source.clone(), e.target.clone()));
     }
 
+    let ctx = MatchContext {
+        pattern,
+        target,
+        target_edges_set: &target_edges_set,
+        min_systematicity,
+    };
+
     let mut candidate_alignments = Vec::new();
     let mut current_mapping = HashMap::new();
     let mut used_target_nodes = HashSet::new();
 
     backtrack_match(
         0,
-        pattern,
-        target,
-        &target_edges_set,
+        &ctx,
         &mut current_mapping,
         &mut used_target_nodes,
-        min_systematicity,
         &mut candidate_alignments,
     );
 
@@ -84,27 +88,31 @@ pub fn match_relational_schema(
     candidate_alignments
 }
 
+struct MatchContext<'a> {
+    pattern: &'a Pattern,
+    target: &'a TargetGraph,
+    target_edges_set: &'a HashSet<(String, String, String)>,
+    min_systematicity: f64,
+}
+
 fn backtrack_match(
     var_idx: usize,
-    pattern: &Pattern,
-    target: &TargetGraph,
-    target_edges_set: &HashSet<(String, String, String)>,
+    ctx: &MatchContext<'_>,
     current_mapping: &mut HashMap<String, String>,
     used_target_nodes: &mut HashSet<String>,
-    min_systematicity: f64,
     results: &mut Vec<CandidateAlignment>,
 ) {
-    if var_idx == pattern.variables.len() {
+    if var_idx == ctx.pattern.variables.len() {
         // Complete assignment — evaluate systematicity
         let mut matched_count = 0usize;
-        let total_count = pattern.edges.len();
+        let total_count = ctx.pattern.edges.len();
 
-        for pe in &pattern.edges {
+        for pe in &ctx.pattern.edges {
             if let (Some(src_node), Some(tgt_node)) = (
                 current_mapping.get(&pe.source_var),
                 current_mapping.get(&pe.target_var),
             ) {
-                if target_edges_set.contains(&(
+                if ctx.target_edges_set.contains(&(
                     pe.rel_type.clone(),
                     src_node.clone(),
                     tgt_node.clone(),
@@ -120,7 +128,7 @@ fn backtrack_match(
             0.0
         };
 
-        if systematicity >= min_systematicity && matched_count > 0 {
+        if systematicity >= ctx.min_systematicity && matched_count > 0 {
             results.push(CandidateAlignment {
                 mapping: current_mapping.clone(),
                 systematicity_score: systematicity,
@@ -133,9 +141,9 @@ fn backtrack_match(
         return;
     }
 
-    let var_name = &pattern.variables[var_idx];
+    let var_name = &ctx.pattern.variables[var_idx];
 
-    for node in &target.nodes {
+    for node in &ctx.target.nodes {
         if !used_target_nodes.contains(node) {
             // Assign var -> node
             current_mapping.insert(var_name.clone(), node.clone());
@@ -143,12 +151,9 @@ fn backtrack_match(
 
             backtrack_match(
                 var_idx + 1,
-                pattern,
-                target,
-                target_edges_set,
+                ctx,
                 current_mapping,
                 used_target_nodes,
-                min_systematicity,
                 results,
             );
 
