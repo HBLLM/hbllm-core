@@ -19,8 +19,6 @@ about a world that continues to exist when sensors are not observing it.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from hbllm.brain.world.entity_registry import EntityRegistry
@@ -45,14 +43,10 @@ from hbllm.brain.world.spatial_ontology import (
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
-    EventNode,
     HCIREdge,
     HCIREdgeType,
-    HCIRNodeType,
     ObservationNode,
-    PhysicalEntityNode,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Fixtures — shared world model setup
@@ -185,7 +179,6 @@ class TestMultiDimensionalPermanence:
     """Occlude entity → verify 4 prediction types → partial invalidation."""
 
     def test_multi_dimensional_predictions(self, world):
-        graph = world["graph"]
         registry = world["registry"]
         permanence = world["permanence"]
 
@@ -239,7 +232,6 @@ class TestMultiDimensionalPermanence:
 
     def test_partial_invalidation(self, world):
         """Location wrong, but existence still valid."""
-        graph = world["graph"]
         registry = world["registry"]
         permanence = world["permanence"]
 
@@ -287,7 +279,6 @@ class TestSpatialReasoning:
 
     def test_transitive_containment(self, world):
         """Ball LOCATED_IN box, box LOCATED_IN room → ball transitively in room."""
-        graph = world["graph"]
         ontology = world["ontology"]
         registry = world["registry"]
 
@@ -380,7 +371,6 @@ class TestEventChronicle:
     """Temporal history with causal chains."""
 
     def test_event_recording_and_timeline(self, world):
-        graph = world["graph"]
         chronicle = world["chronicle"]
         registry = world["registry"]
 
@@ -487,7 +477,7 @@ class TestIdentityHypothesis:
         graph.add_node(obs)
 
         # Propose as identity candidate (hypothesis, NOT merge)
-        candidate = registry.propose_reidentification(
+        registry.propose_reidentification(
             observation_id=obs.id,
             candidate_entity_id=entity_id,
             similarity_score=0.65,
