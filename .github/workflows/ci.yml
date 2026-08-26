@@ -81,8 +81,12 @@ jobs:
       - name: Build Rust extensions
         run: |
           pip install maturin
-          maturin build --manifest-path rust/perception/Cargo.toml --release --out dist
-          pip install dist/*.whl
+          for crate in rust/*/; do
+            if [ -f "$crate/Cargo.toml" ]; then
+              echo "Building $crate..."
+              maturin develop --manifest-path "$crate/Cargo.toml" --release
+            fi
+          done
 
       - name: Run unit tests
         run: |

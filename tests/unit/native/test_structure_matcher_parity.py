@@ -6,7 +6,14 @@ Verifies:
 3. Distractor Invariance: Structural alignment dominates over surface attributes.
 """
 
+import pytest
+
 from hbllm.native.registry import native
+
+pytestmark = pytest.mark.skipif(
+    not native.available("structure_matcher"),
+    reason="hbllm_structure_matcher native extension not compiled",
+)
 
 
 class TestStructureMatcherParityOracle:

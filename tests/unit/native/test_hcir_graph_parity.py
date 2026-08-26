@@ -9,12 +9,19 @@ Verifies:
 
 import random
 
+import pytest
+
 from hbllm.hcir.graph import (
     HCIREdgeType,
     HCIRNodeType,
 )
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.native.registry import native
+
+pytestmark = pytest.mark.skipif(
+    not native.available("hcir_graph"),
+    reason="hbllm_hcir_graph native extension not compiled",
+)
 
 
 class TestNativeGraphParityOracle:
