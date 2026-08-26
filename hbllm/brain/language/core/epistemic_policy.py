@@ -17,12 +17,14 @@ logger = logging.getLogger(__name__)
 class EpistemicVerbalizationLevel(StrEnum):
     """Calibrated levels of epistemic certainty for surface verbalization."""
 
-    CERTAIN = "certain"                  # Direct assertion ("The cup is on the table.")
-    PROBABLE = "probable"                # Probable hedge ("The cup is probably on the table.")
-    PLAUSIBLE = "plausible"              # Plausible hedge ("I think the cup may be on the table.")
-    UNCERTAIN = "uncertain"              # Explicit uncertainty ("I am not certain, but it might be on the table.")
-    CONTRADICTED = "contradicted"        # Expressing conflict ("There is conflicting evidence about whether the cup is on the table.")
-    INSUFFICIENT_EVIDENCE = "unknown"    # Complete knowledge gap ("I do not have enough evidence to determine whether the cup is on the table.")
+    CERTAIN = "certain"  # Direct assertion ("The cup is on the table.")
+    PROBABLE = "probable"  # Probable hedge ("The cup is probably on the table.")
+    PLAUSIBLE = "plausible"  # Plausible hedge ("I think the cup may be on the table.")
+    UNCERTAIN = (
+        "uncertain"  # Explicit uncertainty ("I am not certain, but it might be on the table.")
+    )
+    CONTRADICTED = "contradicted"  # Expressing conflict ("There is conflicting evidence about whether the cup is on the table.")
+    INSUFFICIENT_EVIDENCE = "unknown"  # Complete knowledge gap ("I do not have enough evidence to determine whether the cup is on the table.")
 
 
 @dataclass
@@ -32,13 +34,13 @@ class CognitiveEpistemicState:
     target_predicate: str
     target_subject: str
     target_object: str | None = None
-    confidence: float = 0.0          # 0.0 to 1.0
-    uncertainty: float = 1.0         # 0.0 to 1.0
-    support_count: int = 0           # Number of supporting evidence nodes
-    contradiction_count: int = 0     # Number of contradicting evidence nodes
-    freshness: float = 1.0           # 0.0 to 1.0 (recency of evidence)
-    source_quality: float = 1.0      # Provider reliability score
-    is_known: bool = True            # False if knowledge gap / unobserved
+    confidence: float = 0.0  # 0.0 to 1.0
+    uncertainty: float = 1.0  # 0.0 to 1.0
+    support_count: int = 0  # Number of supporting evidence nodes
+    contradiction_count: int = 0  # Number of contradicting evidence nodes
+    freshness: float = 1.0  # 0.0 to 1.0 (recency of evidence)
+    source_quality: float = 1.0  # Provider reliability score
+    is_known: bool = True  # False if knowledge gap / unobserved
     raw_belief_value: Any = None
     provenance: str = ""
 

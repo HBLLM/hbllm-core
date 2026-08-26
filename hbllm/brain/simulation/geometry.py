@@ -14,10 +14,10 @@ from typing import Any
 class SurfaceGeometry(str, Enum):
     """Surface curvature and geometric contact characteristics."""
 
-    FLAT = "flat"          # Stable support (e.g. table, box top, floor)
-    CONVEX = "convex"      # Unstable support, prone to roll/fall (e.g. sphere, ball, cylinder side)
-    CONCAVE = "concave"    # Container interior / cradle (e.g. bowl, hollow cavity)
-    IRREGULAR = "irregular"# Variable support
+    FLAT = "flat"  # Stable support (e.g. table, box top, floor)
+    CONVEX = "convex"  # Unstable support, prone to roll/fall (e.g. sphere, ball, cylinder side)
+    CONCAVE = "concave"  # Container interior / cradle (e.g. bowl, hollow cavity)
+    IRREGULAR = "irregular"  # Variable support
 
 
 @dataclass
@@ -49,7 +49,9 @@ class BoundingBox:
         )
 
 
-def derive_surface_geometry(properties: dict[str, Any], entity_type: str = "") -> SurfaceGeometry | None:
+def derive_surface_geometry(
+    properties: dict[str, Any], entity_type: str = ""
+) -> SurfaceGeometry | None:
     """Infer surface geometry from entity properties and prototype shapes."""
     geom_str = str(properties.get("geometry", properties.get("surface", ""))).lower()
     if geom_str in ("flat", "planar"):

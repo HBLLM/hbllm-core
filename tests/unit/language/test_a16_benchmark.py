@@ -349,7 +349,9 @@ class TestInterlingualTransfer:
         runtime = MultilingualLanguageRuntime(graph)
 
         # English -> Sinhala
-        si_text = runtime.translate("The red ball is on the table.", source_lang="en", target_lang="si")
+        si_text = runtime.translate(
+            "The red ball is on the table.", source_lang="en", target_lang="si"
+        )
         assert "රතු" in si_text
         assert "බෝලය" in si_text
         assert "මේසය" in si_text

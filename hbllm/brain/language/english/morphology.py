@@ -100,29 +100,44 @@ class EnglishMorphology:
         if word.endswith("es") and len(word) > 3:
             stem = word[:-2]
             if self._lexicon.has_word(stem):
-                return MorphToken(surface=token, lemma=stem, pos=EnglishPOS.NOUN, features={"number": "plural"})
+                return MorphToken(
+                    surface=token, lemma=stem, pos=EnglishPOS.NOUN, features={"number": "plural"}
+                )
             stem_e = word[:-1]
             if self._lexicon.has_word(stem_e):
-                return MorphToken(surface=token, lemma=stem_e, pos=EnglishPOS.NOUN, features={"number": "plural"})
+                return MorphToken(
+                    surface=token, lemma=stem_e, pos=EnglishPOS.NOUN, features={"number": "plural"}
+                )
         elif word.endswith("s") and len(word) > 2:
             stem = word[:-1]
             if self._lexicon.has_word(stem):
-                return MorphToken(surface=token, lemma=stem, pos=EnglishPOS.NOUN, features={"number": "plural"})
+                return MorphToken(
+                    surface=token, lemma=stem, pos=EnglishPOS.NOUN, features={"number": "plural"}
+                )
 
         # Rule-based verb past tense: -ed
         if word.endswith("ed") and len(word) > 3:
             stem = word[:-2]
             if self._lexicon.has_word(stem):
-                return MorphToken(surface=token, lemma=stem, pos=EnglishPOS.VERB, features={"tense": "past"})
+                return MorphToken(
+                    surface=token, lemma=stem, pos=EnglishPOS.VERB, features={"tense": "past"}
+                )
             stem_d = word[:-1]
             if self._lexicon.has_word(stem_d):
-                return MorphToken(surface=token, lemma=stem_d, pos=EnglishPOS.VERB, features={"tense": "past"})
+                return MorphToken(
+                    surface=token, lemma=stem_d, pos=EnglishPOS.VERB, features={"tense": "past"}
+                )
 
         # Rule-based 3rd person singular verb: -s
         if word.endswith("s") and len(word) > 2:
             stem = word[:-1]
             if self._lexicon.has_word(stem):
-                return MorphToken(surface=token, lemma=stem, pos=EnglishPOS.VERB, features={"tense": "present", "person": "3s"})
+                return MorphToken(
+                    surface=token,
+                    lemma=stem,
+                    pos=EnglishPOS.VERB,
+                    features={"tense": "present", "person": "3s"},
+                )
 
         # Unknown word fallback -> treat as noun
         return MorphToken(surface=token, lemma=word, pos=EnglishPOS.NOUN, features={})

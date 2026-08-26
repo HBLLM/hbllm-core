@@ -155,7 +155,8 @@ class TestEntityLifecycle:
 
         # Step 6: Verify re-identification was recorded as an EVENT, not a state
         events = chronicle.events_for_entity(
-            entity_id, event_kind=WorldEventKind.ENTITY_RE_IDENTIFIED,
+            entity_id,
+            event_kind=WorldEventKind.ENTITY_RE_IDENTIFIED,
         )
         assert len(events) >= 1
 
@@ -217,10 +218,14 @@ class TestMultiDimensionalPermanence:
         t_check = t0 + 110  # 100 seconds after occlusion
 
         existence_conf = permanence.current_confidence(
-            entity_id, PersistenceDimension.EXISTENCE, t_check,
+            entity_id,
+            PersistenceDimension.EXISTENCE,
+            t_check,
         )
         location_conf = permanence.current_confidence(
-            entity_id, PersistenceDimension.LOCATION, t_check,
+            entity_id,
+            PersistenceDimension.LOCATION,
+            t_check,
         )
 
         # Existence should decay slower than location
@@ -327,11 +332,13 @@ class TestSpatialReasoning:
         garage_id = ontology.create_region("garage")
 
         # Wheel PART_OF car (composition — NOT spatial containment)
-        graph.add_edge(HCIREdge(
-            edge_type=HCIREdgeType.PART_OF,
-            sources=[wheel_id],
-            targets=[car_id],
-        ))
+        graph.add_edge(
+            HCIREdge(
+                edge_type=HCIREdgeType.PART_OF,
+                sources=[wheel_id],
+                targets=[car_id],
+            )
+        )
 
         # Car LOCATED_IN garage (spatial containment)
         ontology.assert_relation(car_id, HCIREdgeType.LOCATED_IN, garage_id)
@@ -379,31 +386,37 @@ class TestEventChronicle:
         entity_id = registry.discover("door", "fixture", timestamp=t0)
 
         # Record a sequence of events
-        e1 = chronicle.record(ChronicleEvent(
-            event_kind="door_opened",
-            subject_entity_id=entity_id,
-            timestamp=t0 + 10,
-            state_before={"state": "closed"},
-            state_after={"state": "open"},
-        ))
+        e1 = chronicle.record(
+            ChronicleEvent(
+                event_kind="door_opened",
+                subject_entity_id=entity_id,
+                timestamp=t0 + 10,
+                state_before={"state": "closed"},
+                state_after={"state": "open"},
+            )
+        )
 
-        e2 = chronicle.record(ChronicleEvent(
-            event_kind="airflow_changed",
-            subject_entity_id=entity_id,
-            timestamp=t0 + 11,
-            state_before={"airflow": "still"},
-            state_after={"airflow": "moving"},
-            cause_event_id=e1,
-        ))
+        e2 = chronicle.record(
+            ChronicleEvent(
+                event_kind="airflow_changed",
+                subject_entity_id=entity_id,
+                timestamp=t0 + 11,
+                state_before={"airflow": "still"},
+                state_after={"airflow": "moving"},
+                cause_event_id=e1,
+            )
+        )
 
-        e3 = chronicle.record(ChronicleEvent(
-            event_kind="temperature_dropped",
-            subject_entity_id=entity_id,
-            timestamp=t0 + 12,
-            state_before={"temp": 22},
-            state_after={"temp": 20},
-            cause_event_id=e2,
-        ))
+        e3 = chronicle.record(
+            ChronicleEvent(
+                event_kind="temperature_dropped",
+                subject_entity_id=entity_id,
+                timestamp=t0 + 12,
+                state_before={"temp": 22},
+                state_after={"temp": 20},
+                cause_event_id=e2,
+            )
+        )
 
         # Query timeline
         events = chronicle.events_for_entity(entity_id)
@@ -426,16 +439,20 @@ class TestEventChronicle:
 
         # Create a repeating pattern: A → B → A → B → A → B
         for i in range(3):
-            chronicle.record(ChronicleEvent(
-                event_kind="reading_high",
-                subject_entity_id=entity_id,
-                timestamp=t0 + (i * 20),
-            ))
-            chronicle.record(ChronicleEvent(
-                event_kind="reading_low",
-                subject_entity_id=entity_id,
-                timestamp=t0 + (i * 20) + 10,
-            ))
+            chronicle.record(
+                ChronicleEvent(
+                    event_kind="reading_high",
+                    subject_entity_id=entity_id,
+                    timestamp=t0 + (i * 20),
+                )
+            )
+            chronicle.record(
+                ChronicleEvent(
+                    event_kind="reading_low",
+                    subject_entity_id=entity_id,
+                    timestamp=t0 + (i * 20) + 10,
+                )
+            )
 
         patterns = chronicle.detect_sequences(entity_id, min_occurrences=2, window_size=2)
         assert len(patterns) > 0
@@ -486,8 +503,7 @@ class TestIdentityHypothesis:
 
         # Verify POTENTIAL_SAME_AS edge exists (not IDENTIFIES yet)
         potential_edges = [
-            e for e in graph.edges_from(obs.id)
-            if e.edge_type == HCIREdgeType.POTENTIAL_SAME_AS
+            e for e in graph.edges_from(obs.id) if e.edge_type == HCIREdgeType.POTENTIAL_SAME_AS
         ]
         assert len(potential_edges) == 1
 
@@ -496,14 +512,12 @@ class TestIdentityHypothesis:
 
         # POTENTIAL_SAME_AS should be removed, IDENTIFIES should exist
         potential_edges_after = [
-            e for e in graph.edges_from(obs.id)
-            if e.edge_type == HCIREdgeType.POTENTIAL_SAME_AS
+            e for e in graph.edges_from(obs.id) if e.edge_type == HCIREdgeType.POTENTIAL_SAME_AS
         ]
         assert len(potential_edges_after) == 0
 
         identifies_edges = [
-            e for e in graph.edges_from(obs.id)
-            if e.edge_type == HCIREdgeType.IDENTIFIES
+            e for e in graph.edges_from(obs.id) if e.edge_type == HCIREdgeType.IDENTIFIES
         ]
         assert len(identifies_edges) == 1
 
@@ -610,9 +624,7 @@ class TestWorldReconciliation:
         assert result.matched_entity_id == entity_id
 
         # Should have a state transition delta
-        transition_deltas = [
-            d for d in result.deltas if d.delta_type == DeltaType.STATE_TRANSITION
-        ]
+        transition_deltas = [d for d in result.deltas if d.delta_type == DeltaType.STATE_TRANSITION]
         assert len(transition_deltas) >= 1
 
     def test_permanence_error_detection(self, world):
@@ -708,16 +720,20 @@ class TestLongGapPersistence:
         # t3: Multiple events for OTHER entities
         other_id = registry.discover("plate", "dishware", timestamp=t0 + 100)
         registry.track(other_id, timestamp=t0 + 101)
-        chronicle.record(ChronicleEvent(
-            event_kind="moved",
-            subject_entity_id=other_id,
-            timestamp=t0 + 200,
-        ))
-        chronicle.record(ChronicleEvent(
-            event_kind="washed",
-            subject_entity_id=other_id,
-            timestamp=t0 + 300,
-        ))
+        chronicle.record(
+            ChronicleEvent(
+                event_kind="moved",
+                subject_entity_id=other_id,
+                timestamp=t0 + 200,
+            )
+        )
+        chronicle.record(
+            ChronicleEvent(
+                event_kind="washed",
+                subject_entity_id=other_id,
+                timestamp=t0 + 300,
+            )
+        )
 
         # t5: Query scene — E17 should still be present (occluded)
         snapshot = scene_graph.snapshot(current_time=t0 + 500)

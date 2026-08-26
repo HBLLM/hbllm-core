@@ -22,33 +22,33 @@ class FrameType(StrEnum):
     """Primary intent/illocutionary category of the utterance."""
 
     ASSERTION = "assertion"  # Stating a fact/observation ("The ball is on the table")
-    QUERY = "query"          # Inquiring about state ("Where is the ball?", "Is the cup red?")
-    COMMAND = "command"      # Action directive ("Move the box to the table")
-    RESPONSE = "response"    # Cognitive answer to a query
-    ERROR = "error"          # Unresolvable/ambiguous language state
+    QUERY = "query"  # Inquiring about state ("Where is the ball?", "Is the cup red?")
+    COMMAND = "command"  # Action directive ("Move the box to the table")
+    RESPONSE = "response"  # Cognitive answer to a query
+    ERROR = "error"  # Unresolvable/ambiguous language state
 
 
 class ThematicRole(StrEnum):
     """Language-independent thematic roles (Fillmore case grammar)."""
 
-    AGENT = "agent"              # Initiator of action ("The robot pushed the box")
-    PATIENT = "patient"          # Entity undergoing change ("The robot pushed the box")
-    THEME = "theme"              # Entity whose state/location is described ("The ball is on the table")
-    RECIPIENT = "recipient"      # Target receiver ("Give the ball to John")
-    SOURCE = "source"            # Origin location ("The ball fell from the table")
+    AGENT = "agent"  # Initiator of action ("The robot pushed the box")
+    PATIENT = "patient"  # Entity undergoing change ("The robot pushed the box")
+    THEME = "theme"  # Entity whose state/location is described ("The ball is on the table")
+    RECIPIENT = "recipient"  # Target receiver ("Give the ball to John")
+    SOURCE = "source"  # Origin location ("The ball fell from the table")
     DESTINATION = "destination"  # Target location ("Put the cup on the shelf")
-    LOCATION = "location"        # Spatial setting ("The ball is on the table")
-    INSTRUMENT = "instrument"    # Tool used ("Pushed with a stick")
+    LOCATION = "location"  # Spatial setting ("The ball is on the table")
+    INSTRUMENT = "instrument"  # Tool used ("Pushed with a stick")
 
 
 class LanguageErrorType(StrEnum):
     """Explicit epistemic error states when parsing/grounding cannot be completed."""
 
-    UNRESOLVED_LANGUAGE = "unresolved_language"            # Sentence cannot be syntactically parsed
-    GROUNDING_FAILED = "grounding_failed"                  # Specified entity does not exist in HCIR
-    AMBIGUOUS_REFERENCE = "ambiguous_reference"            # Multiple candidate entities match
+    UNRESOLVED_LANGUAGE = "unresolved_language"  # Sentence cannot be syntactically parsed
+    GROUNDING_FAILED = "grounding_failed"  # Specified entity does not exist in HCIR
+    AMBIGUOUS_REFERENCE = "ambiguous_reference"  # Multiple candidate entities match
     UNSUPPORTED_CONSTRUCTION = "unsupported_construction"  # Grammatical pattern not supported
-    UNSUPPORTED_LANGUAGE = "unsupported_language"          # Language code not recognized
+    UNSUPPORTED_LANGUAGE = "unsupported_language"  # Language code not recognized
 
 
 @dataclass(frozen=True)

@@ -107,21 +107,34 @@ class EpistemicGap:
 class EpistemicGapScanner:
     """Scans canonical HCIR CognitiveGraph to identify epistemic gaps and uncertainties."""
 
-    def scan_graph(self, graph: CognitiveGraph, active_goal_nodes: list[str] | None = None) -> list[EpistemicGap]:
+    def scan_graph(
+        self, graph: CognitiveGraph, active_goal_nodes: list[str] | None = None
+    ) -> list[EpistemicGap]:
         """Identify entities with ungrounded geometry, occluded contents, or tentative states."""
         gaps: list[EpistemicGap] = []
         active_goals = set(active_goal_nodes or [])
 
         for node in graph.all_nodes():
             if isinstance(node, PhysicalEntityNode):
-                props = getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {}
+                props = (
+                    getattr(node, "properties", None)
+                    or getattr(node, "observed_properties", {})
+                    or {}
+                )
 
                 # 1. Geometry / Shape uncertainty (only if shape is explicitly unknown, or missing on non-standard object)
                 shape = props.get("shape", "")
                 is_unknown_geom = (
                     "geometry" not in props
                     and "surface" not in props
-                    and (shape == "unknown" or (not shape and node.entity_type not in ("box", "table", "shelf", "tray", "floor", "cube", "block")))
+                    and (
+                        shape == "unknown"
+                        or (
+                            not shape
+                            and node.entity_type
+                            not in ("box", "table", "shelf", "tray", "floor", "cube", "block")
+                        )
+                    )
                 )
                 if is_unknown_geom:
                     relevance = 0.95 if node.id in active_goals else 0.50
@@ -162,14 +175,20 @@ class EpistemicGapScanner:
                                 hypothesis_id=f"{node.id}_open",
                                 label="OPEN",
                                 prior=0.5,
-                                predicted_observations={"interior_visible": 0.90, "lid_detected": 0.10},
+                                predicted_observations={
+                                    "interior_visible": 0.90,
+                                    "lid_detected": 0.10,
+                                },
                                 grounded_properties={"is_closed": False},
                             ),
                             HypothesisOption(
                                 hypothesis_id=f"{node.id}_closed",
                                 label="CLOSED",
                                 prior=0.5,
-                                predicted_observations={"interior_visible": 0.05, "lid_detected": 0.95},
+                                predicted_observations={
+                                    "interior_visible": 0.05,
+                                    "lid_detected": 0.95,
+                                },
                                 grounded_properties={"is_closed": True},
                             ),
                         ],

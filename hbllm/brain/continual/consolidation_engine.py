@@ -48,12 +48,12 @@ class LifelongRetentionAudit:
     """Comprehensive multi-dimensional knowledge integrity audit across lifelong curricula."""
 
     curriculum_tasks: list[str]
-    behavioral_retention_bwt: float       # BWT >= 0.0
-    forward_transfer_fwt: float           # FWT > 0.0
-    conceptual_retention_score: float     # A15 concepts intact
-    lexical_retention_score: float        # A17 lexicon uncorrupted
-    relational_schema_score: float        # A20 schemas intact
-    metacognitive_calibration_score: float # A21 calibration preserved
+    behavioral_retention_bwt: float  # BWT >= 0.0
+    forward_transfer_fwt: float  # FWT > 0.0
+    conceptual_retention_score: float  # A15 concepts intact
+    lexical_retention_score: float  # A17 lexicon uncorrupted
+    relational_schema_score: float  # A20 schemas intact
+    metacognitive_calibration_score: float  # A21 calibration preserved
     zero_catastrophic_forgetting: bool = True
 
 
@@ -103,7 +103,9 @@ class SleepConsolidationEngine:
             compaction_reports.append(comp_report)
 
             # Check if any contrastive replay in this domain isolated a boundary constraint
-            contrastive_replays = [r for r in replays if r.domain == domain and r.kind == ReplayKind.CONTRASTIVE_REPLAY]
+            contrastive_replays = [
+                r for r in replays if r.domain == domain and r.kind == ReplayKind.CONTRASTIVE_REPLAY
+            ]
             is_spec = len(contrastive_replays) > 0
             if is_spec and contrastive_replays[0].contrastive_pair:
                 delta = contrastive_replays[0].contrastive_pair.isolated_delta
@@ -132,7 +134,10 @@ class SleepConsolidationEngine:
         cleared_count = self.memory.clear_fast_buffer()
 
         all_inv_ok = all(
-            r.behavioral_invariants_preserved and r.predictive_invariants_preserved and r.causal_invariants_preserved and r.provenance_preserved
+            r.behavioral_invariants_preserved
+            and r.predictive_invariants_preserved
+            and r.causal_invariants_preserved
+            and r.provenance_preserved
             for r in compaction_reports
         )
 
@@ -153,7 +158,9 @@ class LifelongLearningLoop:
     def __init__(self, consolidation_engine: SleepConsolidationEngine | None = None) -> None:
         self.engine = consolidation_engine or SleepConsolidationEngine()
         self.completed_curriculum: list[str] = []
-        self.historical_domain_scores: dict[str, list[float]] = {}  # domain -> [score_after_t1, score_after_t2, ...]
+        self.historical_domain_scores: dict[
+            str, list[float]
+        ] = {}  # domain -> [score_after_t1, score_after_t2, ...]
 
     def record_task_experience(
         self,

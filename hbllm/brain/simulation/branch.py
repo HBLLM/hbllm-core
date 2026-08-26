@@ -45,7 +45,7 @@ class SimulationBranch:
     @property
     def confidence(self) -> float:
         """Effective confidence decayed by rollout depth."""
-        return max(0.10, min(1.0, (self.confidence_decay_rate ** self.depth)))
+        return max(0.10, min(1.0, (self.confidence_decay_rate**self.depth)))
 
     @property
     def events(self) -> list[SimulationEvent]:
@@ -118,8 +118,11 @@ class SimulationBranch:
         """Mark an edge as removed in simulation overlay."""
         self._removed_edges.add((source_id, edge_type, target_id))
         self._added_edges = [
-            e for e in self._added_edges
-            if not (source_id in e.sources and target_id in e.targets and e.edge_type.value == edge_type)
+            e
+            for e in self._added_edges
+            if not (
+                source_id in e.sources and target_id in e.targets and e.edge_type.value == edge_type
+            )
         ]
 
     def all_edges(self) -> list[HCIREdge]:

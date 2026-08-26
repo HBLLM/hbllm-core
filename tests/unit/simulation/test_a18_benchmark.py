@@ -74,13 +74,17 @@ class TestNestedBranches:
         b1a = b1.fork_child("b1a")
         b1b = b1.fork_child("b1b")
 
-        sandbox.simulate_action(b1a, "PUSH", {"target_id": "cup_1", "dx": 3.0, "dy": 0.0})  # x becomes 5.0
-        sandbox.simulate_action(b1b, "PUSH", {"target_id": "cup_1", "dx": -1.0, "dy": 0.0}) # x becomes 1.0
+        sandbox.simulate_action(
+            b1a, "PUSH", {"target_id": "cup_1", "dx": 3.0, "dy": 0.0}
+        )  # x becomes 5.0
+        sandbox.simulate_action(
+            b1b, "PUSH", {"target_id": "cup_1", "dx": -1.0, "dy": 0.0}
+        )  # x becomes 1.0
 
         assert b1a.get_node("cup_1").properties["x"] == 5.0  # type: ignore[union-attr]
         assert b1b.get_node("cup_1").properties["x"] == 1.0  # type: ignore[union-attr]
-        assert b1.get_node("cup_1").properties["x"] == 2.0   # type: ignore[union-attr]
-        assert graph.get_node("cup_1").properties["x"] == 0.0# type: ignore[union-attr]
+        assert b1.get_node("cup_1").properties["x"] == 2.0  # type: ignore[union-attr]
+        assert graph.get_node("cup_1").properties["x"] == 0.0  # type: ignore[union-attr]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -95,7 +99,9 @@ class TestDeterministicReplay:
         def _run_sim() -> str:
             g = CognitiveGraph()
             box = PhysicalEntityNode(id="b_1", entity_type="box", properties={"x": 1.0, "y": 2.0})
-            table = PhysicalEntityNode(id="t_1", entity_type="table", properties={"x": 0.0, "y": 0.0})
+            table = PhysicalEntityNode(
+                id="t_1", entity_type="table", properties={"x": 0.0, "y": 0.0}
+            )
             g.add_node(box)
             g.add_node(table)
 
@@ -129,7 +135,9 @@ class TestSpatialTransition:
 
         sandbox = MentalSandbox()
         branch = sandbox.fork_branch(graph)
-        res = sandbox.simulate_action(branch, "PUSH", {"target_id": "ball_1", "dx": -4.0, "dy": 3.0})
+        res = sandbox.simulate_action(
+            branch, "PUSH", {"target_id": "ball_1", "dx": -4.0, "dy": 3.0}
+        )
 
         assert res.is_success
         node = branch.get_node("ball_1")
@@ -149,7 +157,9 @@ class TestSupportStability:
     def test_geometric_stability_box_vs_ball(self) -> None:
         graph = CognitiveGraph()
         cup = PhysicalEntityNode(id="cup_1", entity_type="cup", properties={"shape": "cylinder"})
-        table = PhysicalEntityNode(id="table_1", entity_type="table", properties={"geometry": "flat"})
+        table = PhysicalEntityNode(
+            id="table_1", entity_type="table", properties={"geometry": "flat"}
+        )
         ball = PhysicalEntityNode(id="ball_1", entity_type="ball", properties={"shape": "sphere"})
         graph.add_node(cup)
         graph.add_node(table)
@@ -159,13 +169,17 @@ class TestSupportStability:
 
         # Branch 1: Stack cup on flat table -> STABLE
         b_flat = sandbox.fork_branch(graph, "b_flat")
-        res_flat = sandbox.simulate_action(b_flat, "STACK", {"item_id": "cup_1", "base_id": "table_1"})
+        res_flat = sandbox.simulate_action(
+            b_flat, "STACK", {"item_id": "cup_1", "base_id": "table_1"}
+        )
         assert res_flat.is_success
         assert res_flat.risk < 0.10
 
         # Branch 2: Stack cup on convex ball -> UNSTABLE / FALL
         b_curved = sandbox.fork_branch(graph, "b_curved")
-        res_curved = sandbox.simulate_action(b_curved, "STACK", {"item_id": "cup_1", "base_id": "ball_1"})
+        res_curved = sandbox.simulate_action(
+            b_curved, "STACK", {"item_id": "cup_1", "base_id": "ball_1"}
+        )
         assert not res_curved.is_success
         assert "unstable_support_fall" in res_curved.violations
         assert res_curved.risk >= 0.80
@@ -182,8 +196,12 @@ class TestContainmentReasoning:
     def test_put_in_and_closed_container_rejection(self) -> None:
         graph = CognitiveGraph()
         ball = PhysicalEntityNode(id="ball_1", entity_type="ball")
-        open_box = PhysicalEntityNode(id="box_open", entity_type="box", properties={"is_closed": False})
-        closed_box = PhysicalEntityNode(id="box_closed", entity_type="box", properties={"is_closed": True})
+        open_box = PhysicalEntityNode(
+            id="box_open", entity_type="box", properties={"is_closed": False}
+        )
+        closed_box = PhysicalEntityNode(
+            id="box_closed", entity_type="box", properties={"is_closed": True}
+        )
         graph.add_node(ball)
         graph.add_node(open_box)
         graph.add_node(closed_box)
@@ -192,12 +210,16 @@ class TestContainmentReasoning:
 
         # Open box -> success
         b1 = sandbox.fork_branch(graph)
-        res_open = sandbox.simulate_action(b1, "PUT_IN", {"item_id": "ball_1", "container_id": "box_open"})
+        res_open = sandbox.simulate_action(
+            b1, "PUT_IN", {"item_id": "ball_1", "container_id": "box_open"}
+        )
         assert res_open.is_success
 
         # Closed box -> rejected precondition
         b2 = sandbox.fork_branch(graph)
-        res_closed = sandbox.simulate_action(b2, "PUT_IN", {"item_id": "ball_1", "container_id": "box_closed"})
+        res_closed = sandbox.simulate_action(
+            b2, "PUT_IN", {"item_id": "ball_1", "container_id": "box_closed"}
+        )
         assert not res_closed.is_success
         assert "container_closed" in res_closed.violations
 
@@ -231,7 +253,9 @@ class TestDerivedConsequences:
     def test_unstable_curvature_triggers_fall(self) -> None:
         graph = CognitiveGraph()
         cup = PhysicalEntityNode(id="cup", entity_type="cup")
-        sphere = PhysicalEntityNode(id="sphere", entity_type="ball", properties={"surface": "convex"})
+        sphere = PhysicalEntityNode(
+            id="sphere", entity_type="ball", properties={"surface": "convex"}
+        )
         graph.add_node(cup)
         graph.add_node(sphere)
 
@@ -256,7 +280,9 @@ class TestMultiStepRollout:
     def test_multi_step_trajectory_projection(self) -> None:
         graph = CognitiveGraph()
         box = PhysicalEntityNode(id="box_1", entity_type="box", properties={"x": 0.0, "y": 0.0})
-        table = PhysicalEntityNode(id="table_1", entity_type="table", properties={"geometry": "flat"})
+        table = PhysicalEntityNode(
+            id="table_1", entity_type="table", properties={"geometry": "flat"}
+        )
         graph.add_node(box)
         graph.add_node(table)
 
@@ -356,7 +382,9 @@ class TestMultiBranchSearch:
         def goal_stacked(b: SimulationBranch) -> bool:
             return len(b.edges_from("cup")) > 0 and b.accumulated_risk < 0.2
 
-        winner, all_res = sandbox.multi_branch_search(graph, trajectories, goal_predicate=goal_stacked)
+        winner, all_res = sandbox.multi_branch_search(
+            graph, trajectories, goal_predicate=goal_stacked
+        )
         assert winner is not None
         assert winner.branch_id == "plan_b2"
         assert winner.risk_score < 0.10
@@ -467,7 +495,9 @@ class TestObstacleCourseCounterfactual:
             entity_type="wall",
             properties={"x": 4.0, "y": 0.0, "width": 2.0, "depth": 6.0, "is_obstacle": True},
         )
-        target = PhysicalEntityNode(id="target_zone", entity_type="zone", properties={"x": 10.0, "y": 0.0})
+        target = PhysicalEntityNode(
+            id="target_zone", entity_type="zone", properties={"x": 10.0, "y": 0.0}
+        )
         graph.add_node(agent)
         graph.add_node(wall)
         graph.add_node(target)
@@ -490,8 +520,10 @@ class TestObstacleCourseCounterfactual:
             node = b.get_node("agent")
             if not isinstance(node, PhysicalEntityNode):
                 return False
-            props = getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {}
-            return (props.get("x", 0.0) == 10.0 and props.get("y", 0.0) == 0.0)
+            props = (
+                getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {}
+            )
+            return props.get("x", 0.0) == 10.0 and props.get("y", 0.0) == 0.0
 
         winner, all_results = sandbox.multi_branch_search(
             graph,
@@ -547,12 +579,16 @@ class TestSimulationRealityNonEquivalence:
         graph.add_node(cup)
         graph.add_node(table)
         graph.add_node(ball)
-        init_edge = HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id])
+        init_edge = HCIREdge(
+            edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id]
+        )
         graph.add_edge(init_edge)
 
         sandbox = MentalSandbox()
         # Simulated hypothetical: what if cup was stacked on ball?
-        res = sandbox.evaluate_counterfactual(graph, [("STACK", {"item_id": "cup", "base_id": "ball"})])
+        res = sandbox.evaluate_counterfactual(
+            graph, [("STACK", {"item_id": "cup", "base_id": "ball"})]
+        )
 
         # Simulation predicts fall
         assert not res.goal_achieved

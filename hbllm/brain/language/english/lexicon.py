@@ -86,7 +86,9 @@ class EnglishLexicon:
             "into": "into",
         }
         for prep, pred in preps.items():
-            self.add_entry(EnglishLexicalEntry(lemma=prep, pos=EnglishPOS.PREP, semantic_predicate=pred))
+            self.add_entry(
+                EnglishLexicalEntry(lemma=prep, pos=EnglishPOS.PREP, semantic_predicate=pred)
+            )
 
         # Nouns (Physical entities & concepts)
         nouns = {
@@ -104,7 +106,9 @@ class EnglishLexicon:
             "location": "location",
         }
         for noun, pred in nouns.items():
-            self.add_entry(EnglishLexicalEntry(lemma=noun, pos=EnglishPOS.NOUN, semantic_predicate=pred))
+            self.add_entry(
+                EnglishLexicalEntry(lemma=noun, pos=EnglishPOS.NOUN, semantic_predicate=pred)
+            )
 
         # Adjectives (Properties)
         adjs = {
@@ -133,4 +137,6 @@ class EnglishLexicon:
             "support": "supports",
         }
         for verb, pred in verbs.items():
-            self.add_entry(EnglishLexicalEntry(lemma=verb, pos=EnglishPOS.VERB, semantic_predicate=pred))
+            self.add_entry(
+                EnglishLexicalEntry(lemma=verb, pos=EnglishPOS.VERB, semantic_predicate=pred)
+            )

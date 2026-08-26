@@ -62,11 +62,15 @@ class GroundedLexicon:
         # (language, target_type, target_id) -> list[sense_id] for realization
         self._target_to_senses: dict[tuple[str, str, str], list[str]] = {}
 
-    def get_or_create_hypothesis_set(self, token: str, language: str = "en") -> LexicalHypothesisSet:
+    def get_or_create_hypothesis_set(
+        self, token: str, language: str = "en"
+    ) -> LexicalHypothesisSet:
         """Get or initialize the competing hypothesis set for a token."""
         key = f"{token.lower()}:{language}"
         if key not in self._hypothesis_sets:
-            self._hypothesis_sets[key] = LexicalHypothesisSet(token=token.lower(), language=language)
+            self._hypothesis_sets[key] = LexicalHypothesisSet(
+                token=token.lower(), language=language
+            )
         return self._hypothesis_sets[key]
 
     def all_hypothesis_sets(self) -> list[LexicalHypothesisSet]:
@@ -116,7 +120,13 @@ class GroundedLexicon:
         if sense.id not in self._target_to_senses[rel_key]:
             self._target_to_senses[rel_key].append(sense.id)
 
-        logger.debug("GroundedLexicon: Committed sense %s ('%s' -> %s:%s)", sense.id, token, target_type.value, target_id)
+        logger.debug(
+            "GroundedLexicon: Committed sense %s ('%s' -> %s:%s)",
+            sense.id,
+            token,
+            target_type.value,
+            target_id,
+        )
         return sense
 
     # ── Lexical Grounding (Comprehension: Token -> Meaning) ───────────
@@ -132,8 +142,11 @@ class GroundedLexicon:
 
         # 1. First check committed senses
         matching_senses = [
-            s for s in self._committed_senses.values()
-            if s.token == norm_token and s.language == language and s.status == LexicalCandidateStatus.GROUNDED
+            s
+            for s in self._committed_senses.values()
+            if s.token == norm_token
+            and s.language == language
+            and s.status == LexicalCandidateStatus.GROUNDED
         ]
 
         if matching_senses:
@@ -243,7 +256,10 @@ class GroundedLexicon:
                 continue
             winner = hyp_set.winner
             if winner and winner.target_type == target_type and winner.target_id == target_id:
-                if winner.confidence >= min_confidence and winner.status in (LexicalCandidateStatus.GROUNDED, LexicalCandidateStatus.TENTATIVE):
+                if winner.confidence >= min_confidence and winner.status in (
+                    LexicalCandidateStatus.GROUNDED,
+                    LexicalCandidateStatus.TENTATIVE,
+                ):
                     return RealizationResult(
                         target_id=target_id,
                         token=hyp_set.token,

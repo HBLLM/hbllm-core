@@ -47,7 +47,9 @@ class ActionOperator(ABC):
         pass
 
     @abstractmethod
-    def execute(self, branch: SimulationBranch, params: dict[str, Any], step: int = 0) -> OperatorExecutionResult:
+    def execute(
+        self, branch: SimulationBranch, params: dict[str, Any], step: int = 0
+    ) -> OperatorExecutionResult:
         pass
 
 
@@ -61,7 +63,9 @@ class PushOperator(ActionOperator):
     def name(self) -> str:
         return "PUSH"
 
-    def execute(self, branch: SimulationBranch, params: dict[str, Any], step: int = 0) -> OperatorExecutionResult:
+    def execute(
+        self, branch: SimulationBranch, params: dict[str, Any], step: int = 0
+    ) -> OperatorExecutionResult:
         pre_hash = branch.compute_current_state_hash()
         target_id = str(params.get("target_id", ""))
         dx = float(params.get("dx", 0.0))
@@ -79,7 +83,11 @@ class PushOperator(ActionOperator):
                 reason=f"Target entity {target_id} not found",
             )
 
-        props = dict(entity.properties if hasattr(entity, "properties") and isinstance(entity.properties, dict) else entity.observed_properties)
+        props = dict(
+            entity.properties
+            if hasattr(entity, "properties") and isinstance(entity.properties, dict)
+            else entity.observed_properties
+        )
         curr_x = float(props.get("x", 0.0))
         curr_y = float(props.get("y", 0.0))
         new_x = curr_x + dx
@@ -89,8 +97,16 @@ class PushOperator(ActionOperator):
         obstacles: list[tuple[str, BoundingBox]] = []
         for node in branch.all_nodes():
             if node.id != target_id and isinstance(node, PhysicalEntityNode):
-                nprops = getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {}
-                if nprops.get("is_obstacle", False) or node.entity_type in ("wall", "obstacle", "barrier"):
+                nprops = (
+                    getattr(node, "properties", None)
+                    or getattr(node, "observed_properties", {})
+                    or {}
+                )
+                if nprops.get("is_obstacle", False) or node.entity_type in (
+                    "wall",
+                    "obstacle",
+                    "barrier",
+                ):
                     ox = float(nprops.get("x", 0.0))
                     oy = float(nprops.get("y", 0.0))
                     w = float(nprops.get("width", 1.0))
@@ -151,7 +167,9 @@ class StackOperator(ActionOperator):
     def name(self) -> str:
         return "STACK"
 
-    def execute(self, branch: SimulationBranch, params: dict[str, Any], step: int = 0) -> OperatorExecutionResult:
+    def execute(
+        self, branch: SimulationBranch, params: dict[str, Any], step: int = 0
+    ) -> OperatorExecutionResult:
         pre_hash = branch.compute_current_state_hash()
         item_id = str(params.get("item_id", ""))
         base_id = str(params.get("base_id", ""))
@@ -170,8 +188,12 @@ class StackOperator(ActionOperator):
                 reason="Item or base entity not found",
             )
 
-        item_props = getattr(item, "properties", None) or getattr(item, "observed_properties", {}) or {}
-        base_props = getattr(base, "properties", None) or getattr(base, "observed_properties", {}) or {}
+        item_props = (
+            getattr(item, "properties", None) or getattr(item, "observed_properties", {}) or {}
+        )
+        base_props = (
+            getattr(base, "properties", None) or getattr(base, "observed_properties", {}) or {}
+        )
 
         # Evaluate support geometry stability
         is_stable, stability_score, reason = evaluate_support_stability(
@@ -233,7 +255,9 @@ class PutInOperator(ActionOperator):
     def name(self) -> str:
         return "PUT_IN"
 
-    def execute(self, branch: SimulationBranch, params: dict[str, Any], step: int = 0) -> OperatorExecutionResult:
+    def execute(
+        self, branch: SimulationBranch, params: dict[str, Any], step: int = 0
+    ) -> OperatorExecutionResult:
         pre_hash = branch.compute_current_state_hash()
         item_id = str(params.get("item_id", ""))
         container_id = str(params.get("container_id", ""))
@@ -241,7 +265,9 @@ class PutInOperator(ActionOperator):
         item = branch.get_node(item_id)
         container = branch.get_node(container_id)
 
-        if not isinstance(item, PhysicalEntityNode) or not isinstance(container, PhysicalEntityNode):
+        if not isinstance(item, PhysicalEntityNode) or not isinstance(
+            container, PhysicalEntityNode
+        ):
             return OperatorExecutionResult(
                 operator_name=self.name,
                 is_success=False,
@@ -252,7 +278,11 @@ class PutInOperator(ActionOperator):
                 reason="Item or container entity not found",
             )
 
-        cont_props = getattr(container, "properties", None) or getattr(container, "observed_properties", {}) or {}
+        cont_props = (
+            getattr(container, "properties", None)
+            or getattr(container, "observed_properties", {})
+            or {}
+        )
         # Precondition check: container must be open
         is_closed = cont_props.get("is_closed", False)
         if is_closed:
@@ -267,7 +297,9 @@ class PutInOperator(ActionOperator):
             )
 
         # Apply containment edge
-        edge = HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[item_id], targets=[container_id])
+        edge = HCIREdge(
+            edge_type=HCIREdgeType.LOCATED_IN, sources=[item_id], targets=[container_id]
+        )
         branch.add_edge(edge)
 
         post_hash = branch.compute_current_state_hash()
@@ -306,7 +338,9 @@ class MoveOperator(ActionOperator):
     def name(self) -> str:
         return "MOVE"
 
-    def execute(self, branch: SimulationBranch, params: dict[str, Any], step: int = 0) -> OperatorExecutionResult:
+    def execute(
+        self, branch: SimulationBranch, params: dict[str, Any], step: int = 0
+    ) -> OperatorExecutionResult:
         pre_hash = branch.compute_current_state_hash()
         entity_id = str(params.get("entity_id", "agent"))
         target_pos = (float(params.get("target_x", 0.0)), float(params.get("target_y", 0.0)))
@@ -314,18 +348,30 @@ class MoveOperator(ActionOperator):
         entity = branch.get_node(entity_id)
         if not isinstance(entity, PhysicalEntityNode):
             # Create agent proxy if moving self
-            entity = PhysicalEntityNode(id=entity_id, entity_type="agent", properties={"x": 0.0, "y": 0.0})
+            entity = PhysicalEntityNode(
+                id=entity_id, entity_type="agent", properties={"x": 0.0, "y": 0.0}
+            )
             branch.upsert_node(entity)
 
-        props = dict(getattr(entity, "properties", None) or getattr(entity, "observed_properties", {}) or {})
+        props = dict(
+            getattr(entity, "properties", None) or getattr(entity, "observed_properties", {}) or {}
+        )
         start_pos = (float(props.get("x", 0.0)), float(props.get("y", 0.0)))
 
         # Collect obstacles in simulation branch
         obstacles: list[tuple[str, BoundingBox]] = []
         for node in branch.all_nodes():
             if node.id != entity_id and isinstance(node, PhysicalEntityNode):
-                nprops = getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {}
-                if nprops.get("is_obstacle", True) and node.entity_type in ("wall", "box", "obstacle"):
+                nprops = (
+                    getattr(node, "properties", None)
+                    or getattr(node, "observed_properties", {})
+                    or {}
+                )
+                if nprops.get("is_obstacle", True) and node.entity_type in (
+                    "wall",
+                    "box",
+                    "obstacle",
+                ):
                     ox = float(nprops.get("x", 0.0))
                     oy = float(nprops.get("y", 0.0))
                     w = float(nprops.get("width", 1.0))

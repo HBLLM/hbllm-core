@@ -152,7 +152,9 @@ class EnglishParser:
         # 3. IMPERATIVE COMMANDS ("Move the red ball to the table", "Push the box")
         elif ast.construction == ConstructionType.IMPERATIVE:
             verb_pred = ast.verb_phrase.head_verb.lemma if ast.verb_phrase else "act"
-            patient_ref = self._np_to_reference(ast.verb_phrase.direct_object) if ast.verb_phrase else None
+            patient_ref = (
+                self._np_to_reference(ast.verb_phrase.direct_object) if ast.verb_phrase else None
+            )
 
             frame = SemanticFrame(
                 frame_type=FrameType.COMMAND,
@@ -171,7 +173,11 @@ class EnglishParser:
             return frame
 
         # 4. DECLARATIVE / COPULAR ASSERTIONS ("The red ball is on the table", "The ball is red")
-        elif ast.construction in (ConstructionType.DECLARATIVE, ConstructionType.COPULAR, ConstructionType.EXISTENTIAL):
+        elif ast.construction in (
+            ConstructionType.DECLARATIVE,
+            ConstructionType.COPULAR,
+            ConstructionType.EXISTENTIAL,
+        ):
             subject_ref = self._np_to_reference(ast.subject)
 
             # Spatial assertion: "The ball is on the table"
@@ -195,7 +201,9 @@ class EnglishParser:
             if ast.verb_phrase and ast.verb_phrase.adjective_complement:
                 adj_tok = ast.verb_phrase.adjective_complement
                 adj_props = self._get_properties_for_adj(adj_tok.lemma)
-                prop_ref = EntityReference(properties=adj_props, raw_text=adj_tok.surface, specifier="generic")
+                prop_ref = EntityReference(
+                    properties=adj_props, raw_text=adj_tok.surface, specifier="generic"
+                )
 
                 frame = SemanticFrame(
                     frame_type=FrameType.ASSERTION,

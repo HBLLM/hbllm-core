@@ -86,10 +86,14 @@ class TestStructureMappingAlignment:
         schema = RelationalSchema(
             name="Support-Chain",
             roles=[SchemaRole(role_id="Base"), SchemaRole(role_id="Payload")],
-            constraints=[SchemaConstraint(role_id="Base", property_key="geometry", expected_value="flat")],
+            constraints=[
+                SchemaConstraint(role_id="Base", property_key="geometry", expected_value="flat")
+            ],
         )
         target_graph = CognitiveGraph()
-        platform = PhysicalEntityNode(id="platform_x", entity_type="platform", properties={"geometry": "flat"})
+        platform = PhysicalEntityNode(
+            id="platform_x", entity_type="platform", properties={"geometry": "flat"}
+        )
         block = PhysicalEntityNode(id="block_y", entity_type="block", properties={})
         target_graph.add_node(platform)
         target_graph.add_node(block)
@@ -150,13 +154,20 @@ class TestAttributeInvariance:
         schema = RelationalSchema(
             name="Support-Chain",
             roles=[SchemaRole(role_id="Base"), SchemaRole(role_id="Payload")],
-            constraints=[SchemaConstraint(role_id="Base", property_key="geometry", expected_value="flat")],
+            constraints=[
+                SchemaConstraint(role_id="Base", property_key="geometry", expected_value="flat")
+            ],
         )
         target_graph = CognitiveGraph()
         steel_plate = PhysicalEntityNode(
             id="steel_plate",
             entity_type="plate",
-            properties={"color": "dark_grey", "material": "steel", "size": "large", "geometry": "flat"},
+            properties={
+                "color": "dark_grey",
+                "material": "steel",
+                "size": "large",
+                "geometry": "flat",
+            },
         )
         plastic_sensor = PhysicalEntityNode(
             id="plastic_sensor",
@@ -188,7 +199,9 @@ class TestCrossDomainSupportTransfer:
 
         engine = AnalogicalTransferEngine(extractor=extractor)
         target_graph = CognitiveGraph()
-        bed = PhysicalEntityNode(id="work_bed", entity_type="machine_bed", properties={"geometry": "flat"})
+        bed = PhysicalEntityNode(
+            id="work_bed", entity_type="machine_bed", properties={"geometry": "flat"}
+        )
         motor = PhysicalEntityNode(id="motor_assembly", entity_type="motor", properties={})
         target_graph.add_node(bed)
         target_graph.add_node(motor)
@@ -199,7 +212,10 @@ class TestCrossDomainSupportTransfer:
         assert mapping.status == MappingStatus.APPLICABLE
         assert transfer.role_mapping["Base"] == "work_bed"
         assert transfer.role_mapping["Payload"] == "motor_assembly"
-        assert transfer.candidate_actions[0] == ("STACK", {"item_id": "motor_assembly", "base_id": "work_bed"})
+        assert transfer.candidate_actions[0] == (
+            "STACK",
+            {"item_id": "motor_assembly", "base_id": "work_bed"},
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -216,7 +232,9 @@ class TestCrossDomainContainmentTransfer:
 
         engine = AnalogicalTransferEngine(extractor=extractor)
         target_graph = CognitiveGraph()
-        bin_obj = PhysicalEntityNode(id="storage_hopper", entity_type="hopper", properties={"is_closed": False})
+        bin_obj = PhysicalEntityNode(
+            id="storage_hopper", entity_type="hopper", properties={"is_closed": False}
+        )
         valve = PhysicalEntityNode(id="valve_part", entity_type="part", properties={})
         target_graph.add_node(bin_obj)
         target_graph.add_node(valve)
@@ -225,7 +243,10 @@ class TestCrossDomainContainmentTransfer:
 
         assert transfer is not None
         assert mapping.status == MappingStatus.APPLICABLE
-        assert transfer.candidate_actions[0] == ("PUT_IN", {"item_id": "valve_part", "container_id": "storage_hopper"})
+        assert transfer.candidate_actions[0] == (
+            "PUT_IN",
+            {"item_id": "valve_part", "container_id": "storage_hopper"},
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -270,7 +291,9 @@ class TestNegativeTransferCurvedBase:
 
         engine = AnalogicalTransferEngine(extractor=extractor)
         target_graph = CognitiveGraph()
-        curved_pipe = PhysicalEntityNode(id="pipe_1", entity_type="pipe", properties={"geometry": "convex"})
+        curved_pipe = PhysicalEntityNode(
+            id="pipe_1", entity_type="pipe", properties={"geometry": "convex"}
+        )
         tool = PhysicalEntityNode(id="wrench", entity_type="tool", properties={})
         target_graph.add_node(curved_pipe)
         target_graph.add_node(tool)
@@ -296,7 +319,9 @@ class TestNegativeTransferClosedContainer:
 
         engine = AnalogicalTransferEngine(extractor=extractor)
         target_graph = CognitiveGraph()
-        sealed_safe = PhysicalEntityNode(id="safe_box", entity_type="safe", properties={"is_closed": True})
+        sealed_safe = PhysicalEntityNode(
+            id="safe_box", entity_type="safe", properties={"is_closed": True}
+        )
         key = PhysicalEntityNode(id="keycard", entity_type="key", properties={})
         target_graph.add_node(sealed_safe)
         target_graph.add_node(key)
@@ -375,7 +400,9 @@ class TestA18SimulationVerification:
 
         engine = AnalogicalTransferEngine(extractor=extractor)
         target_graph = CognitiveGraph()
-        fixture = PhysicalEntityNode(id="fixture_base", entity_type="fixture", properties={"geometry": "flat"})
+        fixture = PhysicalEntityNode(
+            id="fixture_base", entity_type="fixture", properties={"geometry": "flat"}
+        )
         bracket = PhysicalEntityNode(id="bracket_payload", entity_type="bracket", properties={})
         target_graph.add_node(fixture)
         target_graph.add_node(bracket)
@@ -428,8 +455,14 @@ class TestPartialMappingEpistemicState:
     def test_missing_role_produces_conditional_hypothesis(self) -> None:
         schema = RelationalSchema(
             name="3-Tier Support",
-            roles=[SchemaRole(role_id="Base"), SchemaRole(role_id="Mid"), SchemaRole(role_id="Top")],
-            constraints=[SchemaConstraint(role_id="Base", property_key="geometry", expected_value="flat")],
+            roles=[
+                SchemaRole(role_id="Base"),
+                SchemaRole(role_id="Mid"),
+                SchemaRole(role_id="Top"),
+            ],
+            constraints=[
+                SchemaConstraint(role_id="Base", property_key="geometry", expected_value="flat")
+            ],
         )
         target_graph = CognitiveGraph()
         p1 = PhysicalEntityNode(id="p1", entity_type="platform", properties={"geometry": "flat"})
@@ -516,8 +549,12 @@ class TestFlagshipCrossDomainTransfer:
 
         # 2. Target Domain: Unfamiliar industrial equipment (Zero vocabulary overlap!)
         target_graph = CognitiveGraph()
-        platform = PhysicalEntityNode(id="industrial_gantry_bed", entity_type="gantry_bed", properties={"geometry": "flat"})
-        rotor = PhysicalEntityNode(id="high_torque_turbine_rotor", entity_type="rotor", properties={})
+        platform = PhysicalEntityNode(
+            id="industrial_gantry_bed", entity_type="gantry_bed", properties={"geometry": "flat"}
+        )
+        rotor = PhysicalEntityNode(
+            id="high_torque_turbine_rotor", entity_type="rotor", properties={}
+        )
         target_graph.add_node(platform)
         target_graph.add_node(rotor)
 
@@ -573,7 +610,9 @@ class TestMultiSchemaCompetition:
 
         # Target has open container hopper and a part -> should match ContainmentSchema
         target_graph = CognitiveGraph()
-        hopper = PhysicalEntityNode(id="hopper", entity_type="hopper", properties={"is_closed": False})
+        hopper = PhysicalEntityNode(
+            id="hopper", entity_type="hopper", properties={"is_closed": False}
+        )
         pellet = PhysicalEntityNode(id="pellet", entity_type="pellet", properties={})
         target_graph.add_node(hopper)
         target_graph.add_node(pellet)
@@ -614,7 +653,9 @@ class TestAnalogicalPredictionBeforeAction:
 
         engine = AnalogicalTransferEngine(extractor=extractor)
         target_graph = CognitiveGraph()
-        platform = PhysicalEntityNode(id="gantry", entity_type="gantry", properties={"geometry": "flat"})
+        platform = PhysicalEntityNode(
+            id="gantry", entity_type="gantry", properties={"geometry": "flat"}
+        )
         gear = PhysicalEntityNode(id="cog", entity_type="cog", properties={})
         target_graph.add_node(platform)
         target_graph.add_node(gear)

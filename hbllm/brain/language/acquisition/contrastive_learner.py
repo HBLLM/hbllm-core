@@ -24,7 +24,7 @@ class ContrastiveRelation:
 
     source_token: str
     target_token: str
-    relation_type: str                   # "DIFFERENT_FROM" | "SIMILAR_TO"
+    relation_type: str  # "DIFFERENT_FROM" | "SIMILAR_TO"
     distinguishing_features: dict[str, tuple[Any, Any]] = field(default_factory=dict)
     confidence: float = 0.8
     timestamp: float = 0.0
@@ -90,6 +90,5 @@ class ContrastiveLearner:
     def get_contrasts_for_token(self, token: str) -> list[ContrastiveRelation]:
         """Find all recorded contrasts for a given lexical token."""
         return [
-            r for r in self._contrast_graph
-            if r.source_token == token or r.target_token == token
+            r for r in self._contrast_graph if r.source_token == token or r.target_token == token
         ]

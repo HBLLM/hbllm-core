@@ -210,8 +210,11 @@ class FeatureAccumulator:
 
         spatial: dict[str, int] = {}
         spatial_types = {
-            HCIREdgeType.LOCATED_IN, HCIREdgeType.ABOVE, HCIREdgeType.BELOW,
-            HCIREdgeType.NEAR, HCIREdgeType.TOUCHING,
+            HCIREdgeType.LOCATED_IN,
+            HCIREdgeType.ABOVE,
+            HCIREdgeType.BELOW,
+            HCIREdgeType.NEAR,
+            HCIREdgeType.TOUCHING,
         }
 
         for edge in self._graph.edges_from(entity.id):
@@ -297,7 +300,8 @@ class FeatureAccumulator:
             shared = a_props & b_props
             if shared:
                 matching = sum(
-                    1 for k in shared
+                    1
+                    for k in shared
                     if a.appearance.properties.get(k) == b.appearance.properties.get(k)
                 )
                 val_sim = matching / len(shared)
@@ -313,8 +317,8 @@ class FeatureAccumulator:
         all_events = set(a_events.keys()) | set(b_events.keys())
         if all_events:
             dot = sum(a_events.get(e, 0) * b_events.get(e, 0) for e in all_events)
-            norm_a = math.sqrt(sum(v ** 2 for v in a_events.values())) or 1
-            norm_b = math.sqrt(sum(v ** 2 for v in b_events.values())) or 1
+            norm_a = math.sqrt(sum(v**2 for v in a_events.values())) or 1
+            norm_b = math.sqrt(sum(v**2 for v in b_events.values())) or 1
             cosine = dot / (norm_a * norm_b)
             distances["behavior"] = 1.0 - max(0, cosine)
         else:
@@ -330,9 +334,9 @@ class FeatureAccumulator:
 
         # Temporal: persistence similarity
         max_p = max(a.temporal.persistence_duration, b.temporal.persistence_duration, 1)
-        distances["temporal"] = abs(
-            a.temporal.persistence_duration - b.temporal.persistence_duration
-        ) / max_p
+        distances["temporal"] = (
+            abs(a.temporal.persistence_duration - b.temporal.persistence_duration) / max_p
+        )
 
         # Epistemic: prediction accuracy similarity
         distances["epistemic"] = abs(

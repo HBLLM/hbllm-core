@@ -279,8 +279,7 @@ class CognitiveAdaptationLoop:
         self._accumulator.clear_evidence(model_id)
 
         logger.debug(
-            "CognitiveAdaptationLoop: adapted model %s "
-            "(accuracy %.2f → %.2f, lr=%.4f)",
+            "CognitiveAdaptationLoop: adapted model %s (accuracy %.2f → %.2f, lr=%.4f)",
             model_id,
             accuracy_before,
             model.accuracy,

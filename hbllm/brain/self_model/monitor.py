@@ -20,15 +20,15 @@ logger = logging.getLogger(__name__)
 class MetacognitiveState(str, Enum):
     """State machine for metacognitive monitoring and strategic control."""
 
-    NORMAL = "normal"                          # Routine nominal execution
-    PREDICTION_ERROR = "prediction_error"      # Single prediction error detected
-    RETRY_ALLOWED = "retry_allowed"            # Allowed single quick retry if error was minor
-    DIAGNOSE = "diagnose"                      # Root-cause diagnostic analysis triggered
-    PROBE = "probe"                            # Switched to A19 epistemic probe
-    SPECIALIZE = "specialize"                  # Switched to A20 schema boundary specialization
-    LEARN = "learn"                            # Switched to A14 predictive parameter adaptation
-    ADJUST_BUDGET = "adjust_budget"            # Switched to cognitive resource budget expansion
-    RE_EVALUATE = "re_evaluate"                # Post-correction verification and resumption
+    NORMAL = "normal"  # Routine nominal execution
+    PREDICTION_ERROR = "prediction_error"  # Single prediction error detected
+    RETRY_ALLOWED = "retry_allowed"  # Allowed single quick retry if error was minor
+    DIAGNOSE = "diagnose"  # Root-cause diagnostic analysis triggered
+    PROBE = "probe"  # Switched to A19 epistemic probe
+    SPECIALIZE = "specialize"  # Switched to A20 schema boundary specialization
+    LEARN = "learn"  # Switched to A14 predictive parameter adaptation
+    ADJUST_BUDGET = "adjust_budget"  # Switched to cognitive resource budget expansion
+    RE_EVALUATE = "re_evaluate"  # Post-correction verification and resumption
 
 
 class MetacognitiveEventType(str, Enum):
@@ -47,10 +47,10 @@ class FailureCause(str, Enum):
     """Diagnosed root cause of an action or reasoning failure."""
 
     INSUFFICIENT_KNOWLEDGE = "insufficient_knowledge"  # Missing properties / ungrounded state
-    INCORRECT_SCHEMA = "incorrect_schema"              # Applied wrong analogical schema
-    MODEL_INADEQUACY = "model_inadequacy"              # Current representation has flawed physics/assumptions
-    BUDGET_EXHAUSTION = "budget_exhaustion"            # Insufficient simulation depth/time
-    RANDOM_NOISE = "random_noise"                      # Minor aleatoric disturbance
+    INCORRECT_SCHEMA = "incorrect_schema"  # Applied wrong analogical schema
+    MODEL_INADEQUACY = "model_inadequacy"  # Current representation has flawed physics/assumptions
+    BUDGET_EXHAUSTION = "budget_exhaustion"  # Insufficient simulation depth/time
+    RANDOM_NOISE = "random_noise"  # Minor aleatoric disturbance
 
 
 class StrategyAction(str, Enum):
@@ -154,7 +154,9 @@ class MetacognitiveMonitor:
         severity = 0.85 if is_surprise else 0.50
 
         self.emit_event(
-            MetacognitiveEventType.PREDICTION_ERROR_HIGH if is_surprise else MetacognitiveEventType.REPEATED_FAILURE,
+            MetacognitiveEventType.PREDICTION_ERROR_HIGH
+            if is_surprise
+            else MetacognitiveEventType.REPEATED_FAILURE,
             domain=domain,
             details={"fail_count": fail_count, "predicted_confidence": predicted_confidence},
             severity=severity,

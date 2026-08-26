@@ -49,7 +49,9 @@ class SinhalaParser:
 
         # 1. Wh-Question: "බෝලය කොහෙද?" / "බෝලය කොහෙද තියෙන්නේ?" (Where is the ball?)
         if "කොහෙද" in clean_tokens:
-            subj_tokens = [t for t in clean_tokens if t not in ("කොහෙද", "තියෙන්නේ", "තිබෙන්නේ", "තියෙනවා")]
+            subj_tokens = [
+                t for t in clean_tokens if t not in ("කොහෙද", "තියෙන්නේ", "තිබෙන්නේ", "තියෙනවා")
+            ]
             subject_ref = self._extract_entity_ref(subj_tokens)
 
             frame = SemanticFrame(
@@ -87,7 +89,9 @@ class SinhalaParser:
             if "තල්ලු" in text or "තල්ලු කරන්න" in text:
                 action_verb = "push"
 
-            target_tokens = [t for t in clean_tokens if t not in ("ගෙනයන්න", "දමන්න", "තල්ලු", "කරන්න", "මතට", "වෙත")]
+            target_tokens = [
+                t for t in clean_tokens if t not in ("ගෙනයන්න", "දමන්න", "තල්ලු", "කරන්න", "මතට", "වෙත")
+            ]
             patient_ref = self._extract_entity_ref(target_tokens[:1])
 
             frame = SemanticFrame(
@@ -125,7 +129,14 @@ class SinhalaParser:
 
     def _extract_spatial_components(self, tokens: list[str]) -> tuple[list[str], list[str], str]:
         """Split tokens into theme, location, and postposition predicate."""
-        postpositions = {"මත": "located_on", "උඩ": "located_on", "තුළ": "located_in", "ඇතුලේ": "located_in", "යට": "below", "ළඟ": "near"}
+        postpositions = {
+            "මත": "located_on",
+            "උඩ": "located_on",
+            "තුළ": "located_in",
+            "ඇතුලේ": "located_in",
+            "යට": "below",
+            "ළඟ": "near",
+        }
         theme_tokens: list[str] = []
         loc_tokens: list[str] = []
         predicate = "located_on"

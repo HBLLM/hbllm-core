@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 class CandidateKind(str, Enum):
     """The purposeful origin of a decision candidate."""
 
-    GOAL_ACTION = "goal_action"        # Direct progress toward extrinsic task
-    EPISTEMIC_PROBE = "epistemic_probe"# Information-seeking probe to resolve uncertainty
-    CLARIFICATION = "clarification"    # Linguistic dialog probe
-    WAIT = "wait"                      # Temporary delay / wait for environment
+    GOAL_ACTION = "goal_action"  # Direct progress toward extrinsic task
+    EPISTEMIC_PROBE = "epistemic_probe"  # Information-seeking probe to resolve uncertainty
+    CLARIFICATION = "clarification"  # Linguistic dialog probe
+    WAIT = "wait"  # Temporary delay / wait for environment
 
 
 class DecisionType(str, Enum):
@@ -47,12 +47,12 @@ class DecisionCandidate:
     target_gap_ids: list[str] = field(default_factory=list)
 
     # Multi-criteria valuation metrics (0.0 to 1.0)
-    goal_progress: float = 0.0      # G(a)
-    information_gain: float = 0.0   # IG(a)
-    value_of_information: float = 0.0 # VoI(a)
-    predicted_risk: float = 0.0     # R(a)
-    action_cost: float = 0.0        # C(a)
-    reversibility: float = 1.0      # V(a)
+    goal_progress: float = 0.0  # G(a)
+    information_gain: float = 0.0  # IG(a)
+    value_of_information: float = 0.0  # VoI(a)
+    predicted_risk: float = 0.0  # R(a)
+    action_cost: float = 0.0  # C(a)
+    reversibility: float = 1.0  # V(a)
 
     expected_utility: float = 0.0
 
@@ -93,7 +93,11 @@ class DecisionEngine:
         EU(a) = (w_g * G + w_i * VoI) * (1 + w_v * V) - w_r * R - w_c * C * (2 - V)
         """
         # VoI takes precedence over raw IG if present
-        info_val = candidate.value_of_information if candidate.value_of_information > 0.0 else candidate.information_gain
+        info_val = (
+            candidate.value_of_information
+            if candidate.value_of_information > 0.0
+            else candidate.information_gain
+        )
         base_value = (self.w_g * candidate.goal_progress) + (self.w_i * info_val)
 
         if base_value > 0.02:
@@ -104,7 +108,11 @@ class DecisionEngine:
             )
         else:
             # Action with negligible/zero info or goal progress can only have zero or negative utility
-            eu = base_value - (self.w_r * candidate.predicted_risk) - (self.w_c * candidate.action_cost)
+            eu = (
+                base_value
+                - (self.w_r * candidate.predicted_risk)
+                - (self.w_c * candidate.action_cost)
+            )
 
         candidate.expected_utility = round(eu, 4)
         return candidate.expected_utility

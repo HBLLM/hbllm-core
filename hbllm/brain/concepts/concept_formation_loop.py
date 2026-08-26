@@ -189,11 +189,7 @@ class ConceptFormationLoop:
 
         # Step 3: Consolidate each hypothesis
         for hypothesis in hypotheses:
-            utility = (
-                utility_tests.get(hypothesis.hypothesis_id)
-                if utility_tests
-                else None
-            )
+            utility = utility_tests.get(hypothesis.hypothesis_id) if utility_tests else None
 
             if utility is None:
                 # Default: defer if no utility test provided

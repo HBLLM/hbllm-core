@@ -244,10 +244,7 @@ class ObjectPermanence:
         # 4. Relation predictions
         if relation_context:
             rel_state = {
-                "relations": [
-                    {"type": rtype, "entity": eid}
-                    for rtype, eid in relation_context
-                ]
+                "relations": [{"type": rtype, "entity": eid} for rtype, eid in relation_context]
             }
             rel_pred = self._make_prediction(
                 entity_id=entity_id,
@@ -352,8 +349,11 @@ class ObjectPermanence:
 
         for pred in predictions:
             error_node = self._check_single_prediction(
-                pred, observed_properties, observed_location,
-                observed_relations, now,
+                pred,
+                observed_properties,
+                observed_location,
+                observed_relations,
+                now,
             )
             if error_node is not None:
                 errors.append(error_node)
@@ -475,9 +475,7 @@ class ObjectPermanence:
             return None
 
         # Create PredictionErrorNode
-        delta = self.current_confidence(
-            pred.entity_id, pred.dimension, observation_time
-        )
+        delta = self.current_confidence(pred.entity_id, pred.dimension, observation_time)
 
         error_node = PredictionErrorNode(
             prediction_id=pred.prediction_node_id or "",

@@ -89,13 +89,15 @@ class ExperimentRunner:
             e4 = E4_EpistemicCalibrationTask().evaluate(a)
             e7 = E7_LifelongCurriculumTask().evaluate(a)
 
-            ablation_matrix.append({
-                "variant": a.cohort_id,
-                "n_tau": f"{e1.episodes_to_threshold} eps",
-                "sim_error": f"{e3.simulation_error:.2f}",
-                "brier": f"{e4.brier_score:.2f}",
-                "bwt": f"{e7.bwt:+.2f}",
-            })
+            ablation_matrix.append(
+                {
+                    "variant": a.cohort_id,
+                    "n_tau": f"{e1.episodes_to_threshold} eps",
+                    "sim_error": f"{e3.simulation_error:.2f}",
+                    "brier": f"{e4.brier_score:.2f}",
+                    "bwt": f"{e7.bwt:+.2f}",
+                }
+            )
 
         # 4. Construct Primary Endpoints Summary Table
         primary_table = [

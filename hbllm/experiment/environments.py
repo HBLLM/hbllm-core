@@ -119,9 +119,24 @@ class CanonicalTaskEnvironment:
         """Build initial true hidden physical state."""
         return PhysicalEnvironmentState(
             entities={
-                "obj_support": {"id": "obj_support", "surface_geometry": "flat", "is_rigid": True, "color": "blue"},
-                "obj_payload": {"id": "obj_payload", "surface_geometry": "flat", "is_rigid": True, "color": "red"},
-                "obj_curved": {"id": "obj_curved", "surface_geometry": "curved", "is_rigid": True, "color": "green"},
+                "obj_support": {
+                    "id": "obj_support",
+                    "surface_geometry": "flat",
+                    "is_rigid": True,
+                    "color": "blue",
+                },
+                "obj_payload": {
+                    "id": "obj_payload",
+                    "surface_geometry": "flat",
+                    "is_rigid": True,
+                    "color": "red",
+                },
+                "obj_curved": {
+                    "id": "obj_curved",
+                    "surface_geometry": "curved",
+                    "is_rigid": True,
+                    "color": "green",
+                },
             },
             physics_rules={"gravity": 9.81, "friction": 0.5},
             target_goal={"type": "STABLE_SUPPORT", "target": "obj_payload", "base": "obj_support"},
@@ -134,7 +149,9 @@ class CanonicalTaskEnvironment:
         self.state = self._initialize_state()
         return self._build_canonical_observation()
 
-    def step(self, action: dict[str, Any]) -> tuple[EnvironmentObservation, float, bool, dict[str, Any]]:
+    def step(
+        self, action: dict[str, Any]
+    ) -> tuple[EnvironmentObservation, float, bool, dict[str, Any]]:
         """Execute action, advance environment state, and return observation, reward, done, info."""
         self.step_count += 1
         reward = self.oracle.evaluate_true_action_utility(action, self.state)
@@ -174,9 +191,22 @@ class CanonicalTaskEnvironment:
             {"subject": "obj_payload", "relation": "ON", "object": "table"},
         ]
         actions = [
-            {"name": "STACK", "parameters": {"item": "obj_payload", "base": "obj_support"}, "cost": 1.0},
-            {"name": "STACK", "parameters": {"item": "obj_payload", "base": "obj_curved"}, "cost": 1.0},
-            {"name": "GENTLE_TAP_PROBE", "parameters": {"target": "obj_support"}, "cost": 0.2, "discriminative_power": 0.8},
+            {
+                "name": "STACK",
+                "parameters": {"item": "obj_payload", "base": "obj_support"},
+                "cost": 1.0,
+            },
+            {
+                "name": "STACK",
+                "parameters": {"item": "obj_payload", "base": "obj_curved"},
+                "cost": 1.0,
+            },
+            {
+                "name": "GENTLE_TAP_PROBE",
+                "parameters": {"target": "obj_support"},
+                "cost": 0.2,
+                "discriminative_power": 0.8,
+            },
             {"name": "ABSTAIN", "parameters": {}, "cost": 0.0},
         ]
         return EnvironmentObservation(

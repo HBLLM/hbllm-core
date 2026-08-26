@@ -90,17 +90,22 @@ class GroundedConceptRegistry:
         # Create INSTANCE_OF edges (validated — passed predictive utility test)
         for member_id in member_ids:
             if self._graph.get_node(member_id) is not None:
-                self._graph.add_edge(HCIREdge(
-                    edge_type=HCIREdgeType.INSTANCE_OF,
-                    sources=[member_id],
-                    targets=[concept.id],
-                ))
+                self._graph.add_edge(
+                    HCIREdge(
+                        edge_type=HCIREdgeType.INSTANCE_OF,
+                        sources=[member_id],
+                        targets=[concept.id],
+                    )
+                )
 
         self._prediction_history[concept.id] = []
 
         logger.debug(
             "GroundedConceptRegistry: registered concept %s (%s, %d members, Δ=%.3f)",
-            concept.id, name, len(member_ids), utility_delta,
+            concept.id,
+            name,
+            len(member_ids),
+            utility_delta,
         )
 
         return concept.id
@@ -135,9 +140,7 @@ class GroundedConceptRegistry:
         # Update prediction accuracy (exponential moving average)
         alpha = 0.15
         outcome = 1.0 if correct else 0.0
-        concept.prediction_accuracy = (
-            concept.prediction_accuracy * (1 - alpha) + outcome * alpha
-        )
+        concept.prediction_accuracy = concept.prediction_accuracy * (1 - alpha) + outcome * alpha
 
         # Update confidence from prediction performance
         recent = self._prediction_history[concept_id][-20:]
@@ -166,7 +169,8 @@ class GroundedConceptRegistry:
     def all_concepts(self) -> list[GroundedConceptNode]:
         """Return all grounded concepts."""
         return [
-            node for node in self._graph.nodes_by_type(HCIRNodeType.GROUNDED_CONCEPT)
+            node
+            for node in self._graph.nodes_by_type(HCIRNodeType.GROUNDED_CONCEPT)
             if isinstance(node, GroundedConceptNode)
         ]
 

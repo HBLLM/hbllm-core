@@ -63,8 +63,12 @@ class HCIRGateway:
         subject_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
         object_ref = frame.get_role(ThematicRole.LOCATION) or frame.get_role(ThematicRole.PATIENT)
 
-        subject_name: str = subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
-        target_entity_id = grounded.grounded_entities.get(ThematicRole.THEME) or grounded.grounded_entities.get(ThematicRole.AGENT)
+        subject_name: str = (
+            subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+        )
+        target_entity_id = grounded.grounded_entities.get(
+            ThematicRole.THEME
+        ) or grounded.grounded_entities.get(ThematicRole.AGENT)
 
         obj_desc = ""
         if object_ref:
@@ -93,7 +97,11 @@ class HCIRGateway:
         if target_entity_id:
             ent = self._graph.get_node(target_entity_id)
             if isinstance(ent, PhysicalEntityNode):
-                target_dict = ent.properties if hasattr(ent, "properties") and isinstance(ent.properties, dict) else ent.observed_properties
+                target_dict = (
+                    ent.properties
+                    if hasattr(ent, "properties") and isinstance(ent.properties, dict)
+                    else ent.observed_properties
+                )
                 if subject_ref and subject_ref.properties:
                     target_dict.update(subject_ref.properties)
                 if object_ref and object_ref.properties:
@@ -112,11 +120,17 @@ class HCIRGateway:
     def process_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
         """Query HCIR world model and epistemics for a grounded question."""
         frame = grounded.frame
-        target_role = ThematicRole.THEME if ThematicRole.THEME in grounded.grounded_entities else ThematicRole.AGENT
+        target_role = (
+            ThematicRole.THEME
+            if ThematicRole.THEME in grounded.grounded_entities
+            else ThematicRole.AGENT
+        )
         entity_id = grounded.grounded_entities.get(target_role)
 
         subject_ref = frame.get_role(target_role)
-        subject_name: str = subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+        subject_name: str = (
+            subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+        )
 
         # If entity could not be grounded, return insufficient evidence
         if not entity_id:
@@ -133,7 +147,11 @@ class HCIRGateway:
         ent_node = self._graph.get_node(entity_id)
         ent_props: dict[str, Any] = {}
         if isinstance(ent_node, PhysicalEntityNode):
-            ent_props = ent_node.properties if hasattr(ent_node, "properties") and isinstance(ent_node.properties, dict) else ent_node.observed_properties
+            ent_props = (
+                ent_node.properties
+                if hasattr(ent_node, "properties") and isinstance(ent_node.properties, dict)
+                else ent_node.observed_properties
+            )
 
         freshness_val = float(ent_props.get("freshness", 1.0))
 
@@ -174,7 +192,10 @@ class HCIRGateway:
                 concept_id = grounded.grounded_concepts.get(target_role)
                 if concept_id:
                     concept_node = self._graph.get_node(concept_id)
-                    if isinstance(concept_node, GroundedConceptNode) and "location" in concept_node.feature_prototype:
+                    if (
+                        isinstance(concept_node, GroundedConceptNode)
+                        and "location" in concept_node.feature_prototype
+                    ):
                         default_loc = str(concept_node.feature_prototype["location"])
                         return CognitiveEpistemicState(
                             target_predicate="located_on",
@@ -202,8 +223,10 @@ class HCIRGateway:
 
             # Check for conflicting language evidence in the graph
             evidence_nodes = [
-                n for n in self._graph.nodes_by_type(HCIRNodeType.EVIDENCE)
-                if isinstance(n, EvidenceNode) and ("language_evidence" in n.tags and subject_name in n.tags)
+                n
+                for n in self._graph.nodes_by_type(HCIRNodeType.EVIDENCE)
+                if isinstance(n, EvidenceNode)
+                and ("language_evidence" in n.tags and subject_name in n.tags)
             ]
             distinct_claims = {ev.methodology for ev in evidence_nodes if ev.methodology}
             if len(distinct_claims) > 1:
@@ -235,7 +258,11 @@ class HCIRGateway:
 
         # 3. Verification / Yes-No Query ("Is the ball on the table?")
         elif frame.query_target == "verification":
-            object_role = ThematicRole.LOCATION if ThematicRole.LOCATION in grounded.grounded_entities else ThematicRole.PATIENT
+            object_role = (
+                ThematicRole.LOCATION
+                if ThematicRole.LOCATION in grounded.grounded_entities
+                else ThematicRole.PATIENT
+            )
             object_id = grounded.grounded_entities.get(object_role)
             object_ref = frame.get_role(object_role)
             expected_object_name = object_ref.concept_name if object_ref else ""
@@ -248,7 +275,10 @@ class HCIRGateway:
                     break
                 for target_id in edge.targets:
                     target_node = self._graph.get_node(target_id)
-                    if isinstance(target_node, PhysicalEntityNode) and target_node.entity_type == expected_object_name:
+                    if (
+                        isinstance(target_node, PhysicalEntityNode)
+                        and target_node.entity_type == expected_object_name
+                    ):
                         is_connected = True
                         break
 
@@ -294,7 +324,9 @@ class HCIRGateway:
         frame = grounded.frame
         action_verb = frame.predicate
         patient_ref = frame.get_role(ThematicRole.PATIENT) or frame.get_role(ThematicRole.THEME)
-        destination_ref = frame.get_role(ThematicRole.DESTINATION) or frame.get_role(ThematicRole.LOCATION)
+        destination_ref = frame.get_role(ThematicRole.DESTINATION) or frame.get_role(
+            ThematicRole.LOCATION
+        )
 
         patient_name = patient_ref.concept_name if patient_ref else "object"
         dest_name = destination_ref.concept_name if destination_ref else ""

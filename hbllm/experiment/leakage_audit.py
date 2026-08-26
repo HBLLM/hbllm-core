@@ -55,23 +55,36 @@ class LeakageAuditor:
         """Verify that a cohort received strictly the canonical observation with no hidden state."""
         violations = []
         # Check for hidden simulator fields that should never be present in observations
-        hidden_fields = {"_true_mass", "_internal_friction_coeff", "_oracle_optimal_action", "_true_hidden_class"}
+        hidden_fields = {
+            "_true_mass",
+            "_internal_friction_coeff",
+            "_oracle_optimal_action",
+            "_true_hidden_class",
+        }
         for k in received_observation.keys():
             if k in hidden_fields:
-                violations.append(f"Cohort '{cohort_id}' received forbidden hidden environment field: '{k}'")
+                violations.append(
+                    f"Cohort '{cohort_id}' received forbidden hidden environment field: '{k}'"
+                )
 
         if canonical_observation != received_observation:
-            violations.append(f"Cohort '{cohort_id}' observation deviated from canonical environment observation.")
+            violations.append(
+                f"Cohort '{cohort_id}' observation deviated from canonical environment observation."
+            )
 
         return violations
 
-    def audit_initial_knowledge(self, cohort_id: str, initial_knowledge: dict[str, Any]) -> list[str]:
+    def audit_initial_knowledge(
+        self, cohort_id: str, initial_knowledge: dict[str, Any]
+    ) -> list[str]:
         """Audit cohort's preloaded state to ensure no task-specific solutions are hardcoded."""
         violations = []
         knowledge_keys = set(str(k).lower() for k in initial_knowledge.keys())
         for prohibited in self.prohibited_preloads:
             if prohibited in knowledge_keys:
-                violations.append(f"Cohort '{cohort_id}' has prohibited task-specific preload: '{prohibited}'")
+                violations.append(
+                    f"Cohort '{cohort_id}' has prohibited task-specific preload: '{prohibited}'"
+                )
         return violations
 
     def run_full_audit(
@@ -99,7 +112,9 @@ class LeakageAuditor:
 
         is_clean = len(all_violations) == 0
         if not is_clean:
-            logger.warning("Leakage audit failed with %d violations: %s", len(all_violations), all_violations)
+            logger.warning(
+                "Leakage audit failed with %d violations: %s", len(all_violations), all_violations
+            )
 
         return LeakageAuditReport(
             is_clean=is_clean,

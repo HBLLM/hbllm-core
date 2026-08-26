@@ -456,8 +456,7 @@ class SpatialOntology:
             if rel == HCIREdgeType.LOCATED_IN:
                 if (obj, subj) in containment_pairs:
                     issues.append(
-                        f"Mutual containment: {subj} LOCATED_IN {obj} "
-                        f"AND {obj} LOCATED_IN {subj}"
+                        f"Mutual containment: {subj} LOCATED_IN {obj} AND {obj} LOCATED_IN {subj}"
                     )
                 containment_pairs.add((subj, obj))
 
@@ -469,10 +468,7 @@ class SpatialOntology:
         for rel_a, rel_b in CONTRADICTORY_PAIRS:
             for subj, obj, rel in relation_set:
                 if rel == rel_a and (subj, obj, rel_b) in relation_set:
-                    issues.append(
-                        f"Contradiction: {subj} {rel_a} {obj} "
-                        f"AND {subj} {rel_b} {obj}"
-                    )
+                    issues.append(f"Contradiction: {subj} {rel_a} {obj} AND {subj} {rel_b} {obj}")
 
         return issues
 

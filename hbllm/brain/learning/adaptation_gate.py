@@ -140,17 +140,13 @@ class ErrorEvidenceAccumulator:
         # Update running averages
         n = ev.occurrences
         ev.avg_model_error_prob = (
-            (ev.avg_model_error_prob * (n - 1) + classification.model_error) / n
-        )
+            ev.avg_model_error_prob * (n - 1) + classification.model_error
+        ) / n
         ev.avg_env_change_prob = (
-            (ev.avg_env_change_prob * (n - 1) + classification.environment_change) / n
-        )
-        ev.avg_noise_prob = (
-            (ev.avg_noise_prob * (n - 1) + classification.noise) / n
-        )
-        ev.avg_novelty_prob = (
-            (ev.avg_novelty_prob * (n - 1) + classification.novelty) / n
-        )
+            ev.avg_env_change_prob * (n - 1) + classification.environment_change
+        ) / n
+        ev.avg_noise_prob = (ev.avg_noise_prob * (n - 1) + classification.noise) / n
+        ev.avg_novelty_prob = (ev.avg_novelty_prob * (n - 1) + classification.novelty) / n
         ev.max_model_error_prob = max(ev.max_model_error_prob, classification.model_error)
 
         # Recency-weighted magnitude (exponential decay)
@@ -164,9 +160,7 @@ class ErrorEvidenceAccumulator:
 
         # Count recent adaptations
         adapt_times = self._adaptation_timestamps.get(model_id, [])
-        ev.recent_adaptation_count = sum(
-            1 for t in adapt_times if (now - t) < self._recency_window
-        )
+        ev.recent_adaptation_count = sum(1 for t in adapt_times if (now - t) < self._recency_window)
 
         return ev
 
@@ -261,11 +255,10 @@ class AdaptationGate:
             )
 
         # Anti-oscillation: tighten threshold if recently adapted
-        threshold_boost = (
-            evidence.recent_adaptation_count * self._oscillation_penalty
-        )
+        threshold_boost = evidence.recent_adaptation_count * self._oscillation_penalty
         effective_model_threshold = min(
-            self._model_error_threshold + threshold_boost, 0.95,
+            self._model_error_threshold + threshold_boost,
+            0.95,
         )
 
         # Decision 1: REJECT if noise dominates
@@ -315,8 +308,7 @@ class AdaptationGate:
                 evidence_count=evidence.occurrences,
                 dominant_classification="model_error",
                 reasoning=(
-                    f"Only {evidence.occurrences} errors accumulated, "
-                    f"need {self._min_evidence}"
+                    f"Only {evidence.occurrences} errors accumulated, need {self._min_evidence}"
                 ),
             )
 

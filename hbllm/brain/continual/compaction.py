@@ -49,7 +49,9 @@ class ProvenancePreservingCompactor:
             ), {}
 
         # 1. Count original episodic nodes / action elements
-        original_node_count = sum(len(t.actions) + len(t.outcomes) + len(t.context_props) for t in traces)
+        original_node_count = sum(
+            len(t.actions) + len(t.outcomes) + len(t.context_props) for t in traces
+        )
 
         # 2. Extract shared invariant action sequence and context constraints
         action_names = [a[0] for t in traces for a in t.actions]
@@ -116,6 +118,9 @@ class ProvenancePreservingCompactor:
 
         logger.info(
             "Compacted domain '%s': %d nodes -> %d nodes (ratio: %.2f%%)",
-            domain, original_node_count, compacted_node_count, comp_ratio * 100.0
+            domain,
+            original_node_count,
+            compacted_node_count,
+            comp_ratio * 100.0,
         )
         return report, compact_schema_content

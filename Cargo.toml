@@ -10,5 +10,8 @@ members = [
     "rust/network_utils",
     "rust/concept_extract",
     "rust/perception",
+    "rust/hcir_graph",
+    "rust/simulation_engine",
+    "rust/structure_matcher",
 ]
 resolver = "2"

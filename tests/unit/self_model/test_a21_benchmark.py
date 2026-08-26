@@ -168,7 +168,9 @@ class TestAleatoricUncertaintyQuantification:
 
     def test_inherent_variance_quantified(self) -> None:
         profile_50 = CompetenceProfile(domain="noisy_domain", attempts=10, successes=5, failures=5)
-        profile_100 = CompetenceProfile(domain="deterministic_domain", attempts=10, successes=10, failures=0)
+        profile_100 = CompetenceProfile(
+            domain="deterministic_domain", attempts=10, successes=10, failures=0
+        )
 
         u_noisy = profile_50.evaluate_context_uncertainty({})
         u_det = profile_100.evaluate_context_uncertainty({})
@@ -205,7 +207,9 @@ class TestCognitiveBudgetRepresentation:
 
     def test_budget_parameters_and_allocation(self) -> None:
         manager = CognitiveBudgetManager()
-        decision = manager.allocate_simulation_budget(requested_depth=5, requested_branches=8, task_stake=0.5)
+        decision = manager.allocate_simulation_budget(
+            requested_depth=5, requested_branches=8, task_stake=0.5
+        )
 
         assert decision.allocated_depth == 5
         assert decision.allocated_branches == 8
@@ -225,7 +229,9 @@ class TestSimulationThrottlingUncertaintyPenalty:
         manager = CognitiveBudgetManager()
         manager.set_load(0.85)  # Heavy cognitive load
 
-        decision = manager.allocate_simulation_budget(requested_depth=5, requested_branches=8, task_stake=0.4)
+        decision = manager.allocate_simulation_budget(
+            requested_depth=5, requested_branches=8, task_stake=0.4
+        )
         assert decision.truncated
         assert decision.allocated_depth < 5
         assert decision.uncertainty_penalty >= 0.20
@@ -270,7 +276,9 @@ class TestCircularSearchCycleDetection:
 
         assert cycle_detected
         assert monitor.state == MetacognitiveState.DIAGNOSE
-        assert any(e.event_type == MetacognitiveEventType.SEARCH_CYCLE_DETECTED for e in monitor.events)
+        assert any(
+            e.event_type == MetacognitiveEventType.SEARCH_CYCLE_DETECTED for e in monitor.events
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -506,7 +514,9 @@ class TestEpistemicMaturityTransition:
 class TestCompetenceCalibrationDissociation:
     """Explicitly disentangles low-competence/well-calibrated vs high-competence/poorly-calibrated."""
 
-    def test_disentangles_low_competence_well_calibrated_vs_high_competence_poorly_calibrated(self) -> None:
+    def test_disentangles_low_competence_well_calibrated_vs_high_competence_poorly_calibrated(
+        self,
+    ) -> None:
         calibrator = EpistemicCalibrator()
 
         # Domain A: Low competence (50% success), but WELL calibrated (predicted 0.50)

@@ -81,10 +81,7 @@ class ReferenceResolver:
             if ref.concept_name and ref.concept_name != item.concept_name:
                 continue
             if ref.properties:
-                props_match = all(
-                    item.properties.get(k) == v
-                    for k, v in ref.properties.items()
-                )
+                props_match = all(item.properties.get(k) == v for k, v in ref.properties.items())
                 if not props_match:
                     continue
             return item

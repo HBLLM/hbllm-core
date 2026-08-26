@@ -38,7 +38,7 @@ class MetacognitiveSelfModel:
         self.monitor = monitor or MetacognitiveMonitor()
 
         # Modulation hyperparameters
-        self.lambda_model_risk: float = 0.50     # Weight for model uncertainty on effective risk
+        self.lambda_model_risk: float = 0.50  # Weight for model uncertainty on effective risk
         self.lambda_epistemic_voi: float = 1.00  # Weight for epistemic uncertainty on effective VoI
 
     def get_or_create_profile(self, domain: str) -> CompetenceProfile:
@@ -90,12 +90,16 @@ class MetacognitiveSelfModel:
         uncertainty = profile.evaluate_context_uncertainty(context)
 
         # Monotonic, bounded modulation
-        r_eff = min(1.0, max(0.0, simulated_risk + (self.lambda_model_risk * uncertainty.structural_model)))
+        r_eff = min(
+            1.0, max(0.0, simulated_risk + (self.lambda_model_risk * uncertainty.structural_model))
+        )
         voi_eff = max(0.0, base_voi * (1.0 + (self.lambda_epistemic_voi * uncertainty.epistemic)))
 
         return round(r_eff, 4), round(voi_eff, 4), uncertainty
 
-    def generate_verbalizable_self_report(self, domain: str, context_props: dict[str, Any] | None = None) -> str:
+    def generate_verbalizable_self_report(
+        self, domain: str, context_props: dict[str, Any] | None = None
+    ) -> str:
         """Formulate an honest, linguistically grounded self-assessment for A16 language runtime."""
         profile = self.get_or_create_profile(domain)
         context = context_props or {}

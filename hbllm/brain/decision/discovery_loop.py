@@ -123,13 +123,21 @@ class ActiveDiscoveryLoop:
                 target_id = gap.source_node_ids[0]
                 node = graph.get_node(target_id)
                 if isinstance(node, PhysicalEntityNode):
-                    props = dict(getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {})
+                    props = dict(
+                        getattr(node, "properties", None)
+                        or getattr(node, "observed_properties", {})
+                        or {}
+                    )
                     # Update properties with grounded properties from winning hypothesis
                     props.update(leading.grounded_properties)
                     node.properties = props
                     graph.upsert_node(node)  # Update canonical graph node
                     gap.status = "COMMITTED"
-                    logger.info("Committed resolved epistemic hypothesis %s to node %s", leading.label, target_id)
+                    logger.info(
+                        "Committed resolved epistemic hypothesis %s to node %s",
+                        leading.label,
+                        target_id,
+                    )
                     return True
 
         return False

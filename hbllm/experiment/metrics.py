@@ -34,7 +34,9 @@ class ExperimentMetricsCalculator:
         if not predictions or len(predictions) != len(outcomes):
             return 0.0
         n = len(predictions)
-        return round(sum((p - (1.0 if o else 0.0)) ** 2 for p, o in zip(predictions, outcomes)) / n, 4)
+        return round(
+            sum((p - (1.0 if o else 0.0)) ** 2 for p, o in zip(predictions, outcomes)) / n, 4
+        )
 
     @staticmethod
     def calculate_ece(predictions: list[float], outcomes: list[bool], num_bins: int = 5) -> float:
@@ -46,7 +48,11 @@ class ExperimentMetricsCalculator:
         for b in range(num_bins):
             b_min = b / num_bins
             b_max = (b + 1) / num_bins
-            bin_items = [(p, o) for p, o in zip(predictions, outcomes) if b_min <= p < b_max or (b == num_bins - 1 and p == b_max)]
+            bin_items = [
+                (p, o)
+                for p, o in zip(predictions, outcomes)
+                if b_min <= p < b_max or (b == num_bins - 1 and p == b_max)
+            ]
             if not bin_items:
                 continue
             bin_size = len(bin_items)
@@ -68,7 +74,9 @@ class ExperimentMetricsCalculator:
         return round(bwt_sum / float(t - 1), 4)
 
     @staticmethod
-    def calculate_fwt_from_matrix(r_matrix: list[list[float]], random_baselines: list[float] | None = None) -> float:
+    def calculate_fwt_from_matrix(
+        r_matrix: list[list[float]], random_baselines: list[float] | None = None
+    ) -> float:
         """Compute Forward Transfer (FWT) from full R_{i,j} matrix:
 
         FWT = (1 / (T - 1)) * sum_{j=2}^{T} (R_{j-1, j} - b_j).

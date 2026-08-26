@@ -239,9 +239,7 @@ class TestNoveltyDetection:
         c = classifier.classify(ctx)
 
         # Novelty should have a meaningful probability
-        assert c.novelty > 0.1, (
-            f"Novel error should have P(novelty) > 0.1, got {c.novelty:.2f}"
-        )
+        assert c.novelty > 0.1, f"Novel error should have P(novelty) > 0.1, got {c.novelty:.2f}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -262,8 +260,10 @@ class TestAdaptationGateStability:
                 model_id="model_001",
                 error_id=f"err_{i}",
                 classification=ErrorClassification(
-                    model_error=0.8, environment_change=0.1,
-                    noise=0.05, novelty=0.05,
+                    model_error=0.8,
+                    environment_change=0.1,
+                    noise=0.05,
+                    novelty=0.05,
                 ),
                 error_magnitude=0.5,
             )
@@ -285,16 +285,17 @@ class TestAdaptationGateStability:
                 model_id="model_001",
                 error_id=f"err_{i}",
                 classification=ErrorClassification(
-                    model_error=0.8, environment_change=0.1,
-                    noise=0.05, novelty=0.05,
+                    model_error=0.8,
+                    environment_change=0.1,
+                    noise=0.05,
+                    novelty=0.05,
                 ),
                 error_magnitude=0.5,
             )
 
         verdict = gate.evaluate("model_001")
         assert verdict.decision == GateDecision.ADAPT, (
-            f"Should ADAPT with sufficient evidence, got {verdict.decision}: "
-            f"{verdict.reasoning}"
+            f"Should ADAPT with sufficient evidence, got {verdict.decision}: {verdict.reasoning}"
         )
 
     def test_anti_oscillation_tightens_threshold(self) -> None:
@@ -316,16 +317,17 @@ class TestAdaptationGateStability:
                 model_id="model_001",
                 error_id=f"err_{i}",
                 classification=ErrorClassification(
-                    model_error=0.75, environment_change=0.15,
-                    noise=0.05, novelty=0.05,
+                    model_error=0.75,
+                    environment_change=0.15,
+                    noise=0.05,
+                    novelty=0.05,
                 ),
                 error_magnitude=0.4,
             )
 
         verdict = gate.evaluate("model_001")
         assert verdict.decision == GateDecision.DEFER, (
-            f"Anti-oscillation should DEFER, got {verdict.decision}: "
-            f"{verdict.reasoning}"
+            f"Anti-oscillation should DEFER, got {verdict.decision}: {verdict.reasoning}"
         )
 
 
@@ -398,8 +400,10 @@ class TestRuleExtraction:
                 model_id=model_id,
                 error_id=eid,
                 classification=ErrorClassification(
-                    model_error=0.8, environment_change=0.1,
-                    noise=0.05, novelty=0.05,
+                    model_error=0.8,
+                    environment_change=0.1,
+                    noise=0.05,
+                    novelty=0.05,
                 ),
                 error_magnitude=0.5,
             )
@@ -423,9 +427,7 @@ class TestRuleExtraction:
 
         # Verify provenance edges exist (LEARNED_FROM)
         edges = graph.edges_from(rule_id)
-        learned_from_edges = [
-            e for e in edges if e.edge_type == HCIREdgeType.LEARNED_FROM
-        ]
+        learned_from_edges = [e for e in edges if e.edge_type == HCIREdgeType.LEARNED_FROM]
         assert len(learned_from_edges) > 0, (
             "LearnedRuleNode should have LEARNED_FROM edges to errors"
         )
@@ -528,9 +530,7 @@ class TestPlasticityStability:
         )
 
         assert result.outcome == AdaptationOutcome.IMPROVED
-        assert result.cross_domain_impact["social"] < 0, (
-            "Should detect social domain degradation"
-        )
+        assert result.cross_domain_impact["social"] < 0, "Should detect social domain degradation"
         assert result.cross_domain_impact["physics"] > 0
 
 

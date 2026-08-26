@@ -16,11 +16,11 @@ from typing import Any
 class SchemaLifecycleStatus(str, Enum):
     """Lifecycle maturity of an induced relational schema."""
 
-    CANDIDATE = "candidate"        # Proposed from recurring subgraph observation
-    VERIFIED = "verified"          # Confirmed predictive validity in source domain
+    CANDIDATE = "candidate"  # Proposed from recurring subgraph observation
+    VERIFIED = "verified"  # Confirmed predictive validity in source domain
     TRANSFERABLE = "transferable"  # Sufficiently validated for cross-domain transfer
-    SPECIALIZED = "specialized"    # Boundary constraints narrowed after negative outcome
-    DEPRECATED = "deprecated"      # High contradiction rate, retired from transfer
+    SPECIALIZED = "specialized"  # Boundary constraints narrowed after negative outcome
+    DEPRECATED = "deprecated"  # High contradiction rate, retired from transfer
 
 
 @dataclass
@@ -84,7 +84,7 @@ class RelationalSchema:
     # Provenance & evidence tracking
     source_episode_ids: list[str] = field(default_factory=list)
     alpha_success: float = 3.0  # Beta prior α
-    beta_failure: float = 1.0   # Beta prior β
+    beta_failure: float = 1.0  # Beta prior β
     status: SchemaLifecycleStatus = SchemaLifecycleStatus.TRANSFERABLE
     specialization_rules: list[str] = field(default_factory=list)
 
@@ -96,9 +96,19 @@ class RelationalSchema:
 
     @property
     def is_transferable(self) -> bool:
-        return self.status in (SchemaLifecycleStatus.VERIFIED, SchemaLifecycleStatus.TRANSFERABLE, SchemaLifecycleStatus.SPECIALIZED) and self.confidence >= 0.60
+        return (
+            self.status
+            in (
+                SchemaLifecycleStatus.VERIFIED,
+                SchemaLifecycleStatus.TRANSFERABLE,
+                SchemaLifecycleStatus.SPECIALIZED,
+            )
+            and self.confidence >= 0.60
+        )
 
-    def evaluate_constraint_compatibility(self, entity_properties_map: dict[str, dict[str, Any]]) -> tuple[bool, list[str]]:
+    def evaluate_constraint_compatibility(
+        self, entity_properties_map: dict[str, dict[str, Any]]
+    ) -> tuple[bool, list[str]]:
         """Verify that bound target entity properties satisfy schema physical constraints.
 
         Args:

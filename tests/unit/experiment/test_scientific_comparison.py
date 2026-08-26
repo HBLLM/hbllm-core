@@ -86,7 +86,12 @@ class TestCohortsInterface:
         env = CanonicalTaskEnvironment(domain="test_env")
         obs = env.reset()
 
-        cohorts = [HBLLMCoreCohort(), HBLLMPlusLLMCohort(), LLMOnlyCohort(), AblatedHBLLMCohort("A18")]
+        cohorts = [
+            HBLLMCoreCohort(),
+            HBLLMPlusLLMCohort(),
+            LLMOnlyCohort(),
+            AblatedHBLLMCohort("A18"),
+        ]
         for c in cohorts:
             output = c.process_observation(obs)
             assert isinstance(output.prediction, str)

@@ -142,7 +142,9 @@ class AdaptationEngine:
 
         # Compute parameter deltas from evidence
         params_after = self._compute_parameter_update(
-            model_node, evidence, lr,
+            model_node,
+            evidence,
+            lr,
         )
 
         # Apply update to model node
@@ -175,27 +177,33 @@ class AdaptationEngine:
         self._graph.add_node(event_node)
 
         # ADAPTS edge: AdaptationEvent → PredictiveModel
-        self._graph.add_edge(HCIREdge(
-            edge_type=HCIREdgeType.ADAPTS,
-            sources=[event_node.id],
-            targets=[model_node.id],
-        ))
+        self._graph.add_edge(
+            HCIREdge(
+                edge_type=HCIREdgeType.ADAPTS,
+                sources=[event_node.id],
+                targets=[model_node.id],
+            )
+        )
 
         # ADAPTED_BY edge: PredictiveModel → AdaptationEvent
-        self._graph.add_edge(HCIREdge(
-            edge_type=HCIREdgeType.ADAPTED_BY,
-            sources=[model_node.id],
-            targets=[event_node.id],
-        ))
+        self._graph.add_edge(
+            HCIREdge(
+                edge_type=HCIREdgeType.ADAPTED_BY,
+                sources=[model_node.id],
+                targets=[event_node.id],
+            )
+        )
 
         # LEARNED_FROM edges: AdaptationEvent → PredictionErrors
         for error_id in evidence.error_ids:
             if self._graph.get_node(error_id) is not None:
-                self._graph.add_edge(HCIREdge(
-                    edge_type=HCIREdgeType.LEARNED_FROM,
-                    sources=[event_node.id],
-                    targets=[error_id],
-                ))
+                self._graph.add_edge(
+                    HCIREdge(
+                        edge_type=HCIREdgeType.LEARNED_FROM,
+                        sources=[event_node.id],
+                        targets=[error_id],
+                    )
+                )
 
         logger.debug(
             "AdaptationEngine: adapted model %s (lr=%.4f, evidence=%d)",
@@ -261,17 +269,21 @@ class AdaptationEngine:
         # LEARNED_FROM edges: LearnedRule → PredictionErrors
         for error_id in evidence.error_ids:
             if self._graph.get_node(error_id) is not None:
-                self._graph.add_edge(HCIREdge(
-                    edge_type=HCIREdgeType.LEARNED_FROM,
-                    sources=[rule.id],
-                    targets=[error_id],
-                ))
+                self._graph.add_edge(
+                    HCIREdge(
+                        edge_type=HCIREdgeType.LEARNED_FROM,
+                        sources=[rule.id],
+                        targets=[error_id],
+                    )
+                )
                 # Bidirectional: CONTRIBUTED_TO
-                self._graph.add_edge(HCIREdge(
-                    edge_type=HCIREdgeType.CONTRIBUTED_TO,
-                    sources=[error_id],
-                    targets=[rule.id],
-                ))
+                self._graph.add_edge(
+                    HCIREdge(
+                        edge_type=HCIREdgeType.CONTRIBUTED_TO,
+                        sources=[error_id],
+                        targets=[rule.id],
+                    )
+                )
 
         # Record extraction as an AdaptationEventNode
         event_node = AdaptationEventNode(
@@ -322,11 +334,7 @@ class AdaptationEngine:
         stability = 1.0 / (1.0 + 0.5 * evidence.recent_adaptation_count)
 
         effective_lr = (
-            self._base_lr
-            * error_surprise
-            * model_uncertainty
-            * evidence_quality
-            * stability
+            self._base_lr * error_surprise * model_uncertainty * evidence_quality * stability
         )
 
         return max(self._min_lr, min(self._max_lr, effective_lr))
@@ -362,8 +370,7 @@ class AdaptationEngine:
                             if max_prob > 0.7:
                                 for target in probs:
                                     probs[target] = (
-                                        probs[target] * (1 - lr)
-                                        + (1.0 / max(1, len(probs))) * lr
+                                        probs[target] * (1 - lr) + (1.0 / max(1, len(probs))) * lr
                                     )
             params["transitions"] = transitions
 
@@ -371,9 +378,7 @@ class AdaptationEngine:
         elif model.model_type == "permanence":
             decay_rates = params.get("decay_rates", {})
             avg_magnitude = (
-                evidence.total_magnitude / evidence.occurrences
-                if evidence.occurrences > 0
-                else 0.0
+                evidence.total_magnitude / evidence.occurrences if evidence.occurrences > 0 else 0.0
             )
             # If errors are large, decay is too slow (increase rate)
             # If errors are small, decay may be too fast (decrease rate)
@@ -395,9 +400,7 @@ class AdaptationEngine:
         # Generic: adjust base confidence
         base_conf = params.get("base_confidence", 0.5)
         avg_error = (
-            evidence.total_magnitude / evidence.occurrences
-            if evidence.occurrences > 0
-            else 0.0
+            evidence.total_magnitude / evidence.occurrences if evidence.occurrences > 0 else 0.0
         )
         params["base_confidence"] = base_conf * (1 - lr * avg_error)
 
