@@ -69,7 +69,11 @@ impl<V: Clone> ChunkedStore<V> {
 
         Self {
             chunks: new_chunks,
-            total_count: if is_new { self.total_count + 1 } else { self.total_count },
+            total_count: if is_new {
+                self.total_count + 1
+            } else {
+                self.total_count
+            },
         }
     }
 

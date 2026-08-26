@@ -162,7 +162,10 @@ impl GraphState {
 
     pub fn edges_from(&self, node_id: &str) -> Vec<&FastEdge> {
         if let Some(edge_ids) = self.outgoing_index.get(node_id) {
-            edge_ids.iter().filter_map(|eid| self.edges.get(eid)).collect()
+            edge_ids
+                .iter()
+                .filter_map(|eid| self.edges.get(eid))
+                .collect()
         } else {
             Vec::new()
         }
@@ -170,7 +173,10 @@ impl GraphState {
 
     pub fn edges_to(&self, node_id: &str) -> Vec<&FastEdge> {
         if let Some(edge_ids) = self.incoming_index.get(node_id) {
-            edge_ids.iter().filter_map(|eid| self.edges.get(eid)).collect()
+            edge_ids
+                .iter()
+                .filter_map(|eid| self.edges.get(eid))
+                .collect()
         } else {
             Vec::new()
         }
@@ -178,7 +184,10 @@ impl GraphState {
 
     pub fn nodes_of_type(&self, node_type: &str) -> Vec<&FastNode> {
         if let Some(node_ids) = self.type_index.get(node_type) {
-            node_ids.iter().filter_map(|nid| self.nodes.get(nid)).collect()
+            node_ids
+                .iter()
+                .filter_map(|nid| self.nodes.get(nid))
+                .collect()
         } else {
             Vec::new()
         }
@@ -219,7 +228,11 @@ impl GraphState {
         Vec::new()
     }
 
-    pub fn subgraph_bfs(&self, center_id: &str, max_depth: usize) -> (Vec<FastNode>, Vec<FastEdge>) {
+    pub fn subgraph_bfs(
+        &self,
+        center_id: &str,
+        max_depth: usize,
+    ) -> (Vec<FastNode>, Vec<FastEdge>) {
         let mut visited_nodes: HashSet<String> = HashSet::new();
         let mut collected_edges: HashSet<String> = HashSet::new();
         let mut queue: VecDeque<(String, usize)> = VecDeque::new();
@@ -376,7 +389,9 @@ mod tests {
         n2.properties = props2;
 
         // Insert n1 then n2
-        let g1 = GraphState::new().with_node_added(n1.clone()).with_node_added(n2.clone());
+        let g1 = GraphState::new()
+            .with_node_added(n1.clone())
+            .with_node_added(n2.clone());
 
         // Insert n2 then n1 (reversed order)
         let g2 = GraphState::new().with_node_added(n2).with_node_added(n1);
@@ -402,4 +417,3 @@ mod tests {
         assert_eq!(sub_edges.len(), 2);
     }
 }
-

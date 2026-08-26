@@ -6,7 +6,9 @@ pub mod matcher;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use crate::matcher::{match_relational_schema as rust_match, Pattern, PatternEdge, TargetEdge, TargetGraph};
+use crate::matcher::{
+    match_relational_schema as rust_match, Pattern, PatternEdge, TargetEdge, TargetGraph,
+};
 
 #[pyfunction]
 pub fn match_relational_schema<'py>(
@@ -16,19 +18,39 @@ pub fn match_relational_schema<'py>(
     min_systematicity: Option<f64>,
 ) -> PyResult<&'py PyList> {
     // 1. Extract pattern
-    let py_vars: &PyList = pattern_dict.get_item("variables")?.map(|v| v.extract()).transpose()?.unwrap_or_else(|| PyList::empty(py));
+    let py_vars: &PyList = pattern_dict
+        .get_item("variables")?
+        .map(|v| v.extract())
+        .transpose()?
+        .unwrap_or_else(|| PyList::empty(py));
     let mut variables = Vec::with_capacity(py_vars.len());
     for v in py_vars.iter() {
         variables.push(v.extract::<String>()?);
     }
 
-    let py_edges: &PyList = pattern_dict.get_item("edges")?.map(|v| v.extract()).transpose()?.unwrap_or_else(|| PyList::empty(py));
+    let py_edges: &PyList = pattern_dict
+        .get_item("edges")?
+        .map(|v| v.extract())
+        .transpose()?
+        .unwrap_or_else(|| PyList::empty(py));
     let mut edges = Vec::with_capacity(py_edges.len());
     for e_item in py_edges.iter() {
         let e_dict: &PyDict = e_item.extract()?;
-        let rel_type: String = e_dict.get_item("rel_type")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-        let source_var: String = e_dict.get_item("source_var")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-        let target_var: String = e_dict.get_item("target_var")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
+        let rel_type: String = e_dict
+            .get_item("rel_type")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_default();
+        let source_var: String = e_dict
+            .get_item("source_var")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_default();
+        let target_var: String = e_dict
+            .get_item("target_var")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_default();
 
         edges.push(PatternEdge {
             rel_type,
@@ -44,19 +66,39 @@ pub fn match_relational_schema<'py>(
     };
 
     // 2. Extract target graph
-    let py_target_nodes: &PyList = target_dict.get_item("nodes")?.map(|v| v.extract()).transpose()?.unwrap_or_else(|| PyList::empty(py));
+    let py_target_nodes: &PyList = target_dict
+        .get_item("nodes")?
+        .map(|v| v.extract())
+        .transpose()?
+        .unwrap_or_else(|| PyList::empty(py));
     let mut target_nodes = Vec::with_capacity(py_target_nodes.len());
     for n in py_target_nodes.iter() {
         target_nodes.push(n.extract::<String>()?);
     }
 
-    let py_target_edges: &PyList = target_dict.get_item("edges")?.map(|v| v.extract()).transpose()?.unwrap_or_else(|| PyList::empty(py));
+    let py_target_edges: &PyList = target_dict
+        .get_item("edges")?
+        .map(|v| v.extract())
+        .transpose()?
+        .unwrap_or_else(|| PyList::empty(py));
     let mut target_edges = Vec::with_capacity(py_target_edges.len());
     for te_item in py_target_edges.iter() {
         let te_dict: &PyDict = te_item.extract()?;
-        let rel_type: String = te_dict.get_item("rel_type")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-        let source: String = te_dict.get_item("source")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-        let target: String = te_dict.get_item("target")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
+        let rel_type: String = te_dict
+            .get_item("rel_type")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_default();
+        let source: String = te_dict
+            .get_item("source")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_default();
+        let target: String = te_dict
+            .get_item("target")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_default();
 
         target_edges.push(TargetEdge {
             rel_type,

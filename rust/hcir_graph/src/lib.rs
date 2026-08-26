@@ -5,10 +5,10 @@ pub mod chunk;
 pub mod graph;
 pub mod hash;
 
-use std::collections::HashMap;
 use parking_lot::RwLock;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
+use std::collections::HashMap;
 
 use crate::graph::{FastEdge, FastNode, GraphState};
 
@@ -174,7 +174,9 @@ impl PyNativeGraph {
     }
 
     pub fn bfs_path(&self, start: &str, end: &str, max_depth: Option<usize>) -> Vec<String> {
-        self.state.read().bfs_path(start, end, max_depth.unwrap_or(10))
+        self.state
+            .read()
+            .bfs_path(start, end, max_depth.unwrap_or(10))
     }
 
     pub fn subgraph_bfs<'py>(
