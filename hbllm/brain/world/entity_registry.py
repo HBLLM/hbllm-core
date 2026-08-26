@@ -446,10 +446,7 @@ class EntityRegistry:
         # Remove POTENTIAL_SAME_AS edges between this observation and entity
         edges_to_remove: list[str] = []
         for edge in self._graph.edges_from(observation_id):
-            if (
-                edge.edge_type == HCIREdgeType.POTENTIAL_SAME_AS
-                and entity_id in edge.targets
-            ):
+            if edge.edge_type == HCIREdgeType.POTENTIAL_SAME_AS and entity_id in edge.targets:
                 edges_to_remove.append(edge.id)
 
         for eid in edges_to_remove:

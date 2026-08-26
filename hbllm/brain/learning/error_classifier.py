@@ -63,10 +63,7 @@ class ErrorClassification:
     def __post_init__(self) -> None:
         total = self.model_error + self.environment_change + self.noise + self.novelty
         if abs(total - 1.0) > 0.01:
-            msg = (
-                f"ErrorClassification probabilities must sum to ≈1.0, "
-                f"got {total:.4f}"
-            )
+            msg = f"ErrorClassification probabilities must sum to ≈1.0, got {total:.4f}"
             raise ValueError(msg)
 
     @property

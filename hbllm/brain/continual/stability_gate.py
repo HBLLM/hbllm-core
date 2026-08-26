@@ -20,10 +20,14 @@ logger = logging.getLogger(__name__)
 class GateVerdict(str, Enum):
     """The outcome decision of the Stability Gate."""
 
-    ACCEPTED = "accepted"                                  # Clean improvement without regression
-    EXPECTED_SPECIALIZATION = "expected_specialization"    # Deliberate narrowing of applicability boundary
-    BENEFICIAL_REVISION = "beneficial_revision"            # Correction of previously flawed knowledge
-    REJECTED_REGRESSION = "rejected_regression"            # Unacceptable collateral forgetting of unrelated domains
+    ACCEPTED = "accepted"  # Clean improvement without regression
+    EXPECTED_SPECIALIZATION = (
+        "expected_specialization"  # Deliberate narrowing of applicability boundary
+    )
+    BENEFICIAL_REVISION = "beneficial_revision"  # Correction of previously flawed knowledge
+    REJECTED_REGRESSION = (
+        "rejected_regression"  # Unacceptable collateral forgetting of unrelated domains
+    )
 
 
 @dataclass
@@ -56,9 +60,13 @@ class PlasticityStabilityEngine:
 
     def __init__(self, memory: DualStoreMemory | None = None) -> None:
         self.memory = memory or DualStoreMemory()
-        self.domain_benchmarks: dict[str, list[tuple[dict[str, Any], bool]]] = {}  # domain -> list of (test_props, expected_outcome)
+        self.domain_benchmarks: dict[
+            str, list[tuple[dict[str, Any], bool]]
+        ] = {}  # domain -> list of (test_props, expected_outcome)
 
-    def register_domain_benchmark(self, domain: str, test_cases: list[tuple[dict[str, Any], bool]]) -> None:
+    def register_domain_benchmark(
+        self, domain: str, test_cases: list[tuple[dict[str, Any], bool]]
+    ) -> None:
         """Register reference benchmark cases for a mature domain."""
         self.domain_benchmarks[domain] = test_cases
 

@@ -32,7 +32,9 @@ class AnalogicalTransfer:
     source_schema_id: str = ""
     source_schema_name: str = ""
     role_mapping: dict[str, str] = field(default_factory=dict)  # role_id -> target_node_id
-    projected_relations: list[tuple[str, str, str]] = field(default_factory=list)  # (src_node, edge_type, tgt_node)
+    projected_relations: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )  # (src_node, edge_type, tgt_node)
     projected_predictions: list[dict[str, Any]] = field(default_factory=list)
     candidate_actions: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     provenance_source: str = "ANALOGICAL_TRANSFER"
@@ -67,7 +69,9 @@ class AnalogicalTransferEngine:
         schema: RelationalSchema,
         target_graph: CognitiveGraph,
         candidate_node_ids: list[str] | None = None,
-    ) -> tuple[AnalogicalTransfer | None, ConditionalAnalogicalHypothesis | None, StructuralMappingResult]:
+    ) -> tuple[
+        AnalogicalTransfer | None, ConditionalAnalogicalHypothesis | None, StructuralMappingResult
+    ]:
         """Perform structure mapping and project analogical inferences onto target domain."""
         mapping_res = self.mapper.map_schema_to_target(
             schema=schema,

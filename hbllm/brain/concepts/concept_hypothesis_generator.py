@@ -122,16 +122,16 @@ class ConceptHypothesisGenerator:
         dimension_distances: dict[tuple[str, str], dict[str, float]] = {}
 
         for i, id_a in enumerate(entity_ids):
-            for id_b in entity_ids[i + 1:]:
+            for id_b in entity_ids[i + 1 :]:
                 distances = FeatureAccumulator.feature_distance(
-                    features[id_a], features[id_b],
+                    features[id_a],
+                    features[id_b],
                 )
                 dimension_distances[(id_a, id_b)] = distances
 
                 # Weighted similarity = 1 - weighted distance
                 weighted_dist = sum(
-                    self._weights.get(dim, 0) * dist
-                    for dim, dist in distances.items()
+                    self._weights.get(dim, 0) * dist for dim, dist in distances.items()
                 )
                 similarity = 1.0 - weighted_dist
                 similarity_matrix[(id_a, id_b)] = similarity
@@ -160,7 +160,8 @@ class ConceptHypothesisGenerator:
                         similarity_matrix.get(
                             (id_b, member),
                             similarity_matrix.get((member, id_b), 0),
-                        ) >= self._similarity_threshold
+                        )
+                        >= self._similarity_threshold
                         for member in cluster
                     )
                     if all_similar:
@@ -192,6 +193,7 @@ class ConceptHypothesisGenerator:
         # Prototype: most common value for each property
         for key, vals in all_props.items():
             from collections import Counter
+
             counts = Counter(vals)
             prototype[key] = counts.most_common(1)[0][0]
 
@@ -200,29 +202,25 @@ class ConceptHypothesisGenerator:
         pair_count = 0
 
         for i, id_a in enumerate(member_ids):
-            for id_b in member_ids[i + 1:]:
+            for id_b in member_ids[i + 1 :]:
                 pair_key: tuple[str, str] = (min(id_a, id_b), max(id_a, id_b))
                 distances: dict[str, float] = dimension_distances.get(pair_key, {})
                 for dim in coherence:
                     coherence[dim] -= distances.get(dim, 0.5) / max(
-                        len(member_ids) * (len(member_ids) - 1) / 2, 1,
+                        len(member_ids) * (len(member_ids) - 1) / 2,
+                        1,
                     )
                 pair_count += 1
 
         # Overall coherence = weighted
-        overall = sum(
-            self._weights.get(dim, 0) * score
-            for dim, score in coherence.items()
-        )
+        overall = sum(self._weights.get(dim, 0) * score for dim, score in coherence.items())
 
         # Behavioral regularities: shared event types
         event_sets = []
         for mid in member_ids:
             fv = features[mid]
             event_sets.append(set(fv.behavior.event_type_distribution.keys()))
-        shared_events = (
-            list(set.intersection(*event_sets)) if event_sets else []
-        )
+        shared_events = list(set.intersection(*event_sets)) if event_sets else []
 
         # Determine formation source
         max_dim = max(coherence, key=coherence.get)  # type: ignore[arg-type]

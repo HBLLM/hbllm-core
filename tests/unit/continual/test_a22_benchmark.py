@@ -229,7 +229,12 @@ class TestCandidateUpdateGeneration:
         engine = SleepConsolidationEngine()
         eid = engine.memory.append_immutable_event(ImmutableEvent(domain="stacking"))
         engine.memory.buffer_episodic_trace(
-            EpisodicTrace(domain="stacking", context_props={"surface": "flat"}, actions=[("STACK", {})], event_id=eid)
+            EpisodicTrace(
+                domain="stacking",
+                context_props={"surface": "flat"},
+                actions=[("STACK", {})],
+                event_id=eid,
+            )
         )
 
         summary = engine.run_sleep_consolidation()
@@ -287,7 +292,9 @@ class TestBackwardTransferQuantification:
             proposed_content={},
             source_event_ids=[],
         )
-        report = stability_engine.evaluate_candidate_update(update, {"domain_a": 1.0, "domain_b": 1.0})
+        report = stability_engine.evaluate_candidate_update(
+            update, {"domain_a": 1.0, "domain_b": 1.0}
+        )
 
         assert report.backward_transfer_bwt >= 0.0
 
@@ -303,11 +310,15 @@ class TestZeroCatastrophicForgetting:
     def test_task1_competence_retained_after_task2(self) -> None:
         loop = LifelongLearningLoop()
         # Task 1: Stacking
-        loop.record_task_experience("task1_stacking", [{"actions": [("STACK", {})], "is_success": True}])
+        loop.record_task_experience(
+            "task1_stacking", [{"actions": [("STACK", {})], "is_success": True}]
+        )
         loop.trigger_sleep_cycle()
 
         # Task 2: Containment
-        loop.record_task_experience("task2_containment", [{"actions": [("PUT_IN", {})], "is_success": True}])
+        loop.record_task_experience(
+            "task2_containment", [{"actions": [("PUT_IN", {})], "is_success": True}]
+        )
         loop.trigger_sleep_cycle()
 
         audit = loop.audit_lifelong_retention()
@@ -420,7 +431,11 @@ class TestFlagshipLifelongCurriculum:
         loop.record_task_experience(
             "T1_stacking",
             [
-                {"actions": [("STACK", {"item": "cup", "base": "box"})], "context_props": {"surface": "flat"}, "is_success": True}
+                {
+                    "actions": [("STACK", {"item": "cup", "base": "box"})],
+                    "context_props": {"surface": "flat"},
+                    "is_success": True,
+                }
                 for _ in range(5)
             ],
         )
@@ -431,7 +446,11 @@ class TestFlagshipLifelongCurriculum:
         loop.record_task_experience(
             "T2_containment",
             [
-                {"actions": [("PUT_IN", {"item": "ball", "container": "bin"})], "context_props": {"is_closed": False}, "is_success": True}
+                {
+                    "actions": [("PUT_IN", {"item": "ball", "container": "bin"})],
+                    "context_props": {"is_closed": False},
+                    "is_success": True,
+                }
                 for _ in range(5)
             ],
         )
@@ -442,7 +461,11 @@ class TestFlagshipLifelongCurriculum:
         loop.record_task_experience(
             "T3_tool_use",
             [
-                {"actions": [("PUSH", {"tool": "lever", "target": "crate"})], "context_props": {"is_rigid": True}, "is_success": True}
+                {
+                    "actions": [("PUSH", {"tool": "lever", "target": "crate"})],
+                    "context_props": {"is_rigid": True},
+                    "is_success": True,
+                }
                 for _ in range(5)
             ],
         )
@@ -453,7 +476,10 @@ class TestFlagshipLifelongCurriculum:
         loop.record_task_experience(
             "T4_language",
             [
-                {"actions": [("GROUND_TOKEN", {"token": "dax", "concept": "cylinder"})], "is_success": True}
+                {
+                    "actions": [("GROUND_TOKEN", {"token": "dax", "concept": "cylinder"})],
+                    "is_success": True,
+                }
                 for _ in range(5)
             ],
         )
@@ -464,7 +490,11 @@ class TestFlagshipLifelongCurriculum:
         loop.record_task_experience(
             "T5_industrial_transfer",
             [
-                {"actions": [("STACK", {"item": "rotor", "base": "gantry_bed"})], "context_props": {"surface": "flat"}, "is_success": True}
+                {
+                    "actions": [("STACK", {"item": "rotor", "base": "gantry_bed"})],
+                    "context_props": {"surface": "flat"},
+                    "is_success": True,
+                }
                 for _ in range(5)
             ],
         )
@@ -495,9 +525,13 @@ class TestContinualLexicalGrowth:
     def test_learns_novel_words_without_drift(self) -> None:
         memory = DualStoreMemory()
         # Word 1: "cup" -> Cylinder
-        memory.commit_consolidated_knowledge("word_cup", "lexicon", {"token": "cup", "concept": "cylinder"}, ["e1"])
+        memory.commit_consolidated_knowledge(
+            "word_cup", "lexicon", {"token": "cup", "concept": "cylinder"}, ["e1"]
+        )
         # Word 2: "koba" -> Cylinder
-        memory.commit_consolidated_knowledge("word_koba", "lexicon", {"token": "koba", "concept": "cylinder"}, ["e2"])
+        memory.commit_consolidated_knowledge(
+            "word_koba", "lexicon", {"token": "koba", "concept": "cylinder"}, ["e2"]
+        )
 
         assert memory.slow_store["word_cup"].content["token"] == "cup"
         assert memory.slow_store["word_koba"].content["token"] == "koba"
@@ -515,7 +549,9 @@ class TestZeroLLM:
         llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
         loaded = set(sys.modules.keys())
         for marker in llm_markers:
-            assert marker not in loaded, f"LLM module loaded in continual learning runtime: {marker}"
+            assert marker not in loaded, (
+                f"LLM module loaded in continual learning runtime: {marker}"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -528,9 +564,15 @@ class TestLifelongSchemaSpecialization:
 
     def test_accumulates_nuanced_boundary_rules(self) -> None:
         memory = DualStoreMemory()
-        memory.commit_consolidated_knowledge("schema_support", "schema", {"boundary": "flat"}, ["e1"], "init")
+        memory.commit_consolidated_knowledge(
+            "schema_support", "schema", {"boundary": "flat"}, ["e1"], "init"
+        )
         r2 = memory.commit_consolidated_knowledge(
-            "schema_support", "schema", {"boundary": "flat_and_rigid"}, ["e1", "e2"], "specialization"
+            "schema_support",
+            "schema",
+            {"boundary": "flat_and_rigid"},
+            ["e1", "e2"],
+            "specialization",
         )
 
         assert r2.revision == 2
@@ -548,7 +590,9 @@ class TestLongTermMemoryReconstruction:
 
     def test_reconstructs_cognitive_justification_from_immutable_log(self) -> None:
         memory = DualStoreMemory()
-        eid = memory.append_immutable_event(ImmutableEvent(domain="physics_stack", action_type="STACK"))
+        eid = memory.append_immutable_event(
+            ImmutableEvent(domain="physics_stack", action_type="STACK")
+        )
         memory.commit_consolidated_knowledge("schema_phys", "schema", {"valid": True}, [eid])
 
         events = memory.reconstruct_knowledge_justification("schema_phys")
@@ -571,8 +615,18 @@ class TestProvenancePreservingCompaction:
         eid2 = memory.append_immutable_event(ImmutableEvent(domain="stacking", action_type="STACK"))
 
         traces = [
-            EpisodicTrace(domain="stacking", context_props={"surface": "flat"}, actions=[("STACK", {})], event_id=eid1),
-            EpisodicTrace(domain="stacking", context_props={"surface": "flat"}, actions=[("STACK", {})], event_id=eid2),
+            EpisodicTrace(
+                domain="stacking",
+                context_props={"surface": "flat"},
+                actions=[("STACK", {})],
+                event_id=eid1,
+            ),
+            EpisodicTrace(
+                domain="stacking",
+                context_props={"surface": "flat"},
+                actions=[("STACK", {})],
+                event_id=eid2,
+            ),
         ]
 
         report, _ = compactor.compact_episodic_traces("stacking", traces, memory)
@@ -653,9 +707,13 @@ class TestRevisionWithoutCollateralForgetting:
     def test_revised_schema_preserves_unrelated_schemas_and_history(self) -> None:
         memory = DualStoreMemory()
         # 1. Store initial Revision 1
-        memory.commit_consolidated_knowledge("schema_support", "schema", {"rule": "support=flat"}, ["e1"], "initial")
+        memory.commit_consolidated_knowledge(
+            "schema_support", "schema", {"rule": "support=flat"}, ["e1"], "initial"
+        )
         # 2. Store unrelated schema
-        memory.commit_consolidated_knowledge("schema_containment", "schema", {"rule": "is_closed=False"}, ["e2"], "initial")
+        memory.commit_consolidated_knowledge(
+            "schema_containment", "schema", {"rule": "is_closed=False"}, ["e2"], "initial"
+        )
 
         # 3. Store Revision 2 for support schema
         memory.commit_consolidated_knowledge(

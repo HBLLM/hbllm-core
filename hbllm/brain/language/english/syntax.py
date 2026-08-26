@@ -88,11 +88,28 @@ class EnglishSyntaxParser:
             return self._parse_wh_question(clean_tokens)
 
         # 2. Check for Yes/No Questions ("Is the ball on the table?", "Did the robot push the box?")
-        if (clean_tokens[0].pos in (EnglishPOS.AUX, EnglishPOS.VERB) and clean_tokens[0].lemma in ("be", "do", "did", "does", "can", "is", "are", "was", "were")) or clean_tokens[0].surface.lower() in ("is", "are", "was", "were", "do", "did", "does", "can"):
+        if (
+            clean_tokens[0].pos in (EnglishPOS.AUX, EnglishPOS.VERB)
+            and clean_tokens[0].lemma
+            in ("be", "do", "did", "does", "can", "is", "are", "was", "were")
+        ) or clean_tokens[0].surface.lower() in (
+            "is",
+            "are",
+            "was",
+            "were",
+            "do",
+            "did",
+            "does",
+            "can",
+        ):
             return self._parse_yes_no_question(clean_tokens)
 
         # 3. Check for Existential ("There is a ball on the table")
-        if clean_tokens[0].lemma == "there" and len(clean_tokens) > 1 and clean_tokens[1].lemma == "be":
+        if (
+            clean_tokens[0].lemma == "there"
+            and len(clean_tokens) > 1
+            and clean_tokens[1].lemma == "be"
+        ):
             return self._parse_existential(clean_tokens)
 
         # 4. Check for Imperative ("Move the red ball to the table", "Push the box")
@@ -153,7 +170,9 @@ class EnglishSyntaxParser:
             prep = tokens[idx]
             nested_np, next_idx = self.parse_noun_phrase(tokens, idx + 1, allow_pp=True)
             if nested_np:
-                np.prepositional_phrases.append(PrepositionalPhrase(preposition=prep, noun_phrase=nested_np))
+                np.prepositional_phrases.append(
+                    PrepositionalPhrase(preposition=prep, noun_phrase=nested_np)
+                )
                 idx = next_idx
 
         return np, idx
@@ -180,7 +199,12 @@ class EnglishSyntaxParser:
             if idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADJ:
                 # Copular property: "The ball is red"
                 vp = VerbPhrase(head_verb=verb_tok, adjective_complement=tokens[idx])
-                return SentenceNode(construction=ConstructionType.COPULAR, subject=np, verb_phrase=vp, is_negated=is_negated)
+                return SentenceNode(
+                    construction=ConstructionType.COPULAR,
+                    subject=np,
+                    verb_phrase=vp,
+                    is_negated=is_negated,
+                )
 
             elif idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
                 # Spatial assertion: "The ball is on the table"
@@ -189,7 +213,12 @@ class EnglishSyntaxParser:
                 if target_np:
                     pp = PrepositionalPhrase(preposition=prep, noun_phrase=target_np)
                     vp = VerbPhrase(head_verb=verb_tok, prepositional_phrases=[pp])
-                    return SentenceNode(construction=ConstructionType.DECLARATIVE, subject=np, verb_phrase=vp, is_negated=is_negated)
+                    return SentenceNode(
+                        construction=ConstructionType.DECLARATIVE,
+                        subject=np,
+                        verb_phrase=vp,
+                        is_negated=is_negated,
+                    )
 
         if verb_tok.pos == EnglishPOS.VERB:
             # Standard SVO: "The robot pushed the box to the table"
@@ -207,7 +236,9 @@ class EnglishSyntaxParser:
                     break
 
             vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np, prepositional_phrases=pps)
-            return SentenceNode(construction=ConstructionType.DECLARATIVE, subject=np, verb_phrase=vp)
+            return SentenceNode(
+                construction=ConstructionType.DECLARATIVE, subject=np, verb_phrase=vp
+            )
 
         return None
 
@@ -272,7 +303,11 @@ class EnglishSyntaxParser:
         wh_prop: MorphToken | None = None
 
         # Check for property specification: "What color is the ball?"
-        if wh_tok.lemma == "what" and idx < len(tokens) and tokens[idx].lemma in ("color", "location", "shape", "size"):
+        if (
+            wh_tok.lemma == "what"
+            and idx < len(tokens)
+            and tokens[idx].lemma in ("color", "location", "shape", "size")
+        ):
             wh_prop = tokens[idx]
             idx += 1
 

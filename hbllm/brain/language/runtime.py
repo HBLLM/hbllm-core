@@ -50,7 +50,9 @@ class LanguageTurnResult:
     is_success: bool = True
     error_type: LanguageErrorType | None = None
     error_detail: str = ""
-    hcir_node_id: str | None = None  # EvidenceNode ID (for assertions) or GoalNode ID (for commands)
+    hcir_node_id: str | None = (
+        None  # EvidenceNode ID (for assertions) or GoalNode ID (for commands)
+    )
 
 
 class MultilingualLanguageRuntime:
@@ -154,7 +156,9 @@ class MultilingualLanguageRuntime:
             err_detail = grounded.grounding_error_detail
             resp = "I could not identify the entity you are referring to."
             if err_type == LanguageErrorType.AMBIGUOUS_REFERENCE:
-                resp = "There are multiple objects matching your description; please be more specific."
+                resp = (
+                    "There are multiple objects matching your description; please be more specific."
+                )
 
             return LanguageTurnResult(
                 raw_input=text,

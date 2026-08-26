@@ -151,7 +151,9 @@ class MentalSandbox:
         branch_id: str | None = None,
     ) -> CounterfactualResult:
         """Evaluate 'What would happen if I did actions X?'."""
-        branch, step_results = self.simulate_trajectory(base_graph, hypothetical_actions, branch_id=branch_id)
+        branch, step_results = self.simulate_trajectory(
+            base_graph, hypothetical_actions, branch_id=branch_id
+        )
 
         all_consequences: list[str] = []
         all_violations: list[str] = list(branch.violated_constraints)
@@ -217,7 +219,7 @@ class MentalSandbox:
                 base_graph,
                 actions,
                 goal_predicate=goal_predicate,
-                branch_id=f"plan_b{i+1}",
+                branch_id=f"plan_b{i + 1}",
             )
             results.append(res)
 
@@ -230,7 +232,9 @@ class MentalSandbox:
             return None, sorted_all
 
         # Rank valid by (lowest risk, highest confidence, shortest path)
-        sorted_valid = sorted(valid_candidates, key=lambda r: (r.risk_score, -r.confidence, len(r.actions)))
+        sorted_valid = sorted(
+            valid_candidates, key=lambda r: (r.risk_score, -r.confidence, len(r.actions))
+        )
         winner = sorted_valid[0]
         return winner, results
 

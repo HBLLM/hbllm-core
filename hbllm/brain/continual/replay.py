@@ -35,7 +35,9 @@ class ContrastivePair:
     domain: str = ""
     success_trace: EpisodicTrace | None = None
     failure_trace: EpisodicTrace | None = None
-    isolated_delta: dict[str, tuple[Any, Any]] = field(default_factory=dict)  # prop -> (success_val, failure_val)
+    isolated_delta: dict[str, tuple[Any, Any]] = field(
+        default_factory=dict
+    )  # prop -> (success_val, failure_val)
     salience_score: float = 0.90
 
 
@@ -83,7 +85,9 @@ class SleepReplayEngine:
             for s in succ_list:
                 for f in fail_list:
                     # Check if action sequences are identical/equivalent
-                    if len(s.actions) == len(f.actions) and [a[0] for a in s.actions] == [a[0] for a in f.actions]:
+                    if len(s.actions) == len(f.actions) and [a[0] for a in s.actions] == [
+                        a[0] for a in f.actions
+                    ]:
                         delta = self._isolate_context_delta(s.context_props, f.context_props)
                         if delta:
                             cp = ContrastivePair(

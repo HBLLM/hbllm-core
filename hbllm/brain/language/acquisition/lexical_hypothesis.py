@@ -15,12 +15,12 @@ from typing import Any
 class LexicalTargetType(str, Enum):
     """Semantic target categories for lexical hypotheses."""
 
-    CONCEPT = "concept"          # Category / Noun prototype (e.g. cylinder, cup)
-    INDIVIDUAL = "individual"    # Specific physical entity instance (e.g. instance_42)
-    PROPERTY = "property"        # Attribute / Adjective (e.g. color=red, size=large)
-    RELATION = "relation"        # Spatial / Prepositional link (e.g. ON, INSIDE, UNDER)
-    ACTION = "action"            # Agentive state transition (e.g. PUSH, LIFT, DROP)
-    EVENT = "event"              # Non-agentive state transition (e.g. FALL, COLLISION, RAIN)
+    CONCEPT = "concept"  # Category / Noun prototype (e.g. cylinder, cup)
+    INDIVIDUAL = "individual"  # Specific physical entity instance (e.g. instance_42)
+    PROPERTY = "property"  # Attribute / Adjective (e.g. color=red, size=large)
+    RELATION = "relation"  # Spatial / Prepositional link (e.g. ON, INSIDE, UNDER)
+    ACTION = "action"  # Agentive state transition (e.g. PUSH, LIFT, DROP)
+    EVENT = "event"  # Non-agentive state transition (e.g. FALL, COLLISION, RAIN)
 
 
 class LexicalCandidateStatus(str, Enum):
@@ -38,14 +38,14 @@ class LexicalCandidateStatus(str, Enum):
 class EvidenceSourceType(str, Enum):
     """Epistemic source types with calibrated epistemic weights."""
 
-    OSTENSIVE_POSITIVE = "ostensive_positive"    # Weight: 1.0 (Teacher: "This is a cup")
-    OSTENSIVE_NEGATIVE = "ostensive_negative"    # Weight: 1.2 (Teacher: "No, that is not an apple")
-    CROSS_SITUATIONAL = "cross_situational"      # Weight: 0.4 (Incidental multi-scene co-occurrence)
-    CONTRASTIVE = "contrastive"                  # Weight: 0.8 (Explicit contrast cup != bowl)
-    PREDICTIVE = "predictive"                    # Weight: 0.9 (Forward prediction verified)
-    ACTION_TRANSITION = "action_transition"      # Weight: 0.85 (Temporal delta s_t0 -> s_t1)
-    SPATIAL_RELATIONAL = "spatial_relational"    # Weight: 0.75 (Topological graph alignment)
-    CONTEXTUAL = "contextual"                    # Weight: 0.3 (Discourse context)
+    OSTENSIVE_POSITIVE = "ostensive_positive"  # Weight: 1.0 (Teacher: "This is a cup")
+    OSTENSIVE_NEGATIVE = "ostensive_negative"  # Weight: 1.2 (Teacher: "No, that is not an apple")
+    CROSS_SITUATIONAL = "cross_situational"  # Weight: 0.4 (Incidental multi-scene co-occurrence)
+    CONTRASTIVE = "contrastive"  # Weight: 0.8 (Explicit contrast cup != bowl)
+    PREDICTIVE = "predictive"  # Weight: 0.9 (Forward prediction verified)
+    ACTION_TRANSITION = "action_transition"  # Weight: 0.85 (Temporal delta s_t0 -> s_t1)
+    SPATIAL_RELATIONAL = "spatial_relational"  # Weight: 0.75 (Topological graph alignment)
+    CONTEXTUAL = "contextual"  # Weight: 0.3 (Discourse context)
 
 
 # Source weight mapping for deterministic scoring
@@ -97,11 +97,11 @@ class LexicalCandidate:
     """A single hypothesis within a competing hypothesis set."""
 
     target_type: LexicalTargetType
-    target_id: str                          # Concept ID, Entity ID, Property name, Action name, etc.
-    target_value: Any = None                # Specific prototype, property value, or state transition spec
+    target_id: str  # Concept ID, Entity ID, Property name, Action name, etc.
+    target_value: Any = None  # Specific prototype, property value, or state transition spec
     support_weight: float = 0.0
     contradiction_weight: float = 0.0
-    predictive_score: float = 0.5           # A15 predictive utility baseline
+    predictive_score: float = 0.5  # A15 predictive utility baseline
     evidence_ids: list[str] = field(default_factory=list)
     contradiction_ids: list[str] = field(default_factory=list)
     first_observed: float = 0.0
@@ -137,7 +137,9 @@ class LexicalHypothesisSet:
     language: str
     candidates: list[LexicalCandidate] = field(default_factory=list)
 
-    def get_candidate(self, target_type: LexicalTargetType, target_id: str) -> LexicalCandidate | None:
+    def get_candidate(
+        self, target_type: LexicalTargetType, target_id: str
+    ) -> LexicalCandidate | None:
         for c in self.candidates:
             if c.target_type == target_type and c.target_id == target_id:
                 return c

@@ -59,7 +59,9 @@ class TestEpistemicGapScanner:
 
     def test_scans_geometry_and_containment_gaps(self) -> None:
         graph = CognitiveGraph()
-        unknown_obj = PhysicalEntityNode(id="obj_unknown", entity_type="object", properties={"shape": "unknown"})
+        unknown_obj = PhysicalEntityNode(
+            id="obj_unknown", entity_type="object", properties={"shape": "unknown"}
+        )
         box = PhysicalEntityNode(id="box_1", entity_type="box", properties={})  # Missing is_closed
         graph.add_node(unknown_obj)
         graph.add_node(box)
@@ -83,8 +85,12 @@ class TestDecisionRelevance:
 
     def test_active_goal_node_boosts_relevance(self) -> None:
         graph = CognitiveGraph()
-        obj_goal = PhysicalEntityNode(id="obj_goal", entity_type="object", properties={"shape": "unknown"})
-        obj_distant = PhysicalEntityNode(id="obj_distant", entity_type="object", properties={"shape": "unknown"})
+        obj_goal = PhysicalEntityNode(
+            id="obj_goal", entity_type="object", properties={"shape": "unknown"}
+        )
+        obj_distant = PhysicalEntityNode(
+            id="obj_distant", entity_type="object", properties={"shape": "unknown"}
+        )
         graph.add_node(obj_goal)
         graph.add_node(obj_distant)
 
@@ -181,15 +187,35 @@ class TestValueOfInformation:
         gap_critical = EpistemicGap(
             decision_relevance=0.90,
             hypotheses=[
-                HypothesisOption(hypothesis_id="h1", label="FLAT", prior=0.5, predicted_observations={"roll": 0.05, "no_roll": 0.95}),
-                HypothesisOption(hypothesis_id="h2", label="CONVEX", prior=0.5, predicted_observations={"roll": 0.95, "no_roll": 0.05}),
+                HypothesisOption(
+                    hypothesis_id="h1",
+                    label="FLAT",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.05, "no_roll": 0.95},
+                ),
+                HypothesisOption(
+                    hypothesis_id="h2",
+                    label="CONVEX",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.95, "no_roll": 0.05},
+                ),
             ],
         )
         gap_irrelevant = EpistemicGap(
             decision_relevance=0.10,
             hypotheses=[
-                HypothesisOption(hypothesis_id="h1", label="FLAT", prior=0.5, predicted_observations={"roll": 0.05, "no_roll": 0.95}),
-                HypothesisOption(hypothesis_id="h2", label="CONVEX", prior=0.5, predicted_observations={"roll": 0.95, "no_roll": 0.05}),
+                HypothesisOption(
+                    hypothesis_id="h1",
+                    label="FLAT",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.05, "no_roll": 0.95},
+                ),
+                HypothesisOption(
+                    hypothesis_id="h2",
+                    label="CONVEX",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.95, "no_roll": 0.05},
+                ),
             ],
         )
 
@@ -407,7 +433,10 @@ class TestRationalInactionHighRisk:
         res = engine.select_best_decision([risky_cand])
         assert res.decision_type == DecisionType.INACTION
         assert res.selected_candidate is None
-        assert "excessive risk" in res.rationale or "insufficient net expected utility" in res.rationale
+        assert (
+            "excessive risk" in res.rationale
+            or "insufficient net expected utility" in res.rationale
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -466,8 +495,18 @@ class TestBayesianPosteriorUpdate:
         gap = EpistemicGap(
             domain="geometry",
             hypotheses=[
-                HypothesisOption(hypothesis_id="h1", label="FLAT", prior=0.5, predicted_observations={"roll": 0.05, "no_roll": 0.95}),
-                HypothesisOption(hypothesis_id="h2", label="CONVEX", prior=0.5, predicted_observations={"roll": 0.95, "no_roll": 0.05}),
+                HypothesisOption(
+                    hypothesis_id="h1",
+                    label="FLAT",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.05, "no_roll": 0.95},
+                ),
+                HypothesisOption(
+                    hypothesis_id="h2",
+                    label="CONVEX",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.95, "no_roll": 0.05},
+                ),
             ],
         )
         assert gap.entropy == 1.0
@@ -492,15 +531,29 @@ class TestGroundedHCIRCommitment:
 
     def test_resolved_gap_commits_property_to_canonical_graph(self) -> None:
         graph = CognitiveGraph()
-        node = PhysicalEntityNode(id="mystery_obj", entity_type="object", properties={"shape": "unknown"})
+        node = PhysicalEntityNode(
+            id="mystery_obj", entity_type="object", properties={"shape": "unknown"}
+        )
         graph.add_node(node)
 
         gap = EpistemicGap(
             domain="geometry",
             source_node_ids=["mystery_obj"],
             hypotheses=[
-                HypothesisOption(hypothesis_id="h1", label="FLAT", prior=0.5, predicted_observations={"roll": 0.05, "no_roll": 0.95}, grounded_properties={"geometry": "flat", "surface": "flat"}),
-                HypothesisOption(hypothesis_id="h2", label="CONVEX", prior=0.5, predicted_observations={"roll": 0.95, "no_roll": 0.05}, grounded_properties={"geometry": "convex", "surface": "convex"}),
+                HypothesisOption(
+                    hypothesis_id="h1",
+                    label="FLAT",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.05, "no_roll": 0.95},
+                    grounded_properties={"geometry": "flat", "surface": "flat"},
+                ),
+                HypothesisOption(
+                    hypothesis_id="h2",
+                    label="CONVEX",
+                    prior=0.5,
+                    predicted_observations={"roll": 0.95, "no_roll": 0.05},
+                    grounded_properties={"geometry": "convex", "surface": "convex"},
+                ),
             ],
         )
 
@@ -529,8 +582,16 @@ class TestFlagshipEpistemicDiscoveryTrial:
 
     def test_autonomous_epistemic_probe_and_goal_redirection(self) -> None:
         graph = CognitiveGraph()
-        cup = PhysicalEntityNode(id="cup", entity_type="cup", properties={"x": 0.0, "y": 0.0, "shape": "cylinder", "geometry": "flat"})
-        mystery_base = PhysicalEntityNode(id="mystery_base", entity_type="object", properties={"x": 2.0, "y": 0.0, "shape": "unknown"})
+        cup = PhysicalEntityNode(
+            id="cup",
+            entity_type="cup",
+            properties={"x": 0.0, "y": 0.0, "shape": "cylinder", "geometry": "flat"},
+        )
+        mystery_base = PhysicalEntityNode(
+            id="mystery_base",
+            entity_type="object",
+            properties={"x": 2.0, "y": 0.0, "shape": "unknown"},
+        )
         graph.add_node(cup)
         graph.add_node(mystery_base)
 
@@ -538,7 +599,10 @@ class TestFlagshipEpistemicDiscoveryTrial:
 
         # 1. Propose and decide: Blind stack vs Nudge probe
         goal_actions: list[tuple[str, list[tuple[str, dict[str, Any]]]]] = [
-            ("Stack Cup on Mystery Base", [("STACK", {"item_id": "cup", "base_id": "mystery_base"})])
+            (
+                "Stack Cup on Mystery Base",
+                [("STACK", {"item_id": "cup", "base_id": "mystery_base"})],
+            )
         ]
         decision, gaps = loop.propose_and_decide(
             graph,

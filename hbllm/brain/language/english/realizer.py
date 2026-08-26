@@ -95,7 +95,11 @@ class EnglishRealizer:
     def realize_frame(self, frame: SemanticFrame) -> str:
         """Realize a SemanticFrame directly into declarative English (for interlingual translation)."""
         theme_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
-        loc_ref = frame.get_role(ThematicRole.LOCATION) or frame.get_role(ThematicRole.DESTINATION) or frame.get_role(ThematicRole.PATIENT)
+        loc_ref = (
+            frame.get_role(ThematicRole.LOCATION)
+            or frame.get_role(ThematicRole.DESTINATION)
+            or frame.get_role(ThematicRole.PATIENT)
+        )
 
         subj = theme_ref.concept_name if theme_ref else "entity"
         obj = loc_ref.concept_name if loc_ref else "entity"

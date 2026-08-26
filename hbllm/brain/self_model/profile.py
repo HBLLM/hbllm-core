@@ -17,17 +17,17 @@ from typing import Any
 class UncertaintyType(str, Enum):
     """The nature of internal uncertainty."""
 
-    EPISTEMIC = "epistemic"          # Lack of observation data / sparse sample count
-    ALEATORIC = "aleatoric"          # Inherent physical environmental stochasticity
+    EPISTEMIC = "epistemic"  # Lack of observation data / sparse sample count
+    ALEATORIC = "aleatoric"  # Inherent physical environmental stochasticity
     STRUCTURAL_MODEL = "structural"  # Inadequate/missing model representation or wrong schema
 
 
 class EpistemicMaturity(str, Enum):
     """Maturity stage of the self-model's experience in a domain."""
 
-    NOVICE = "novice"            # Few or no historical samples (< 3)
+    NOVICE = "novice"  # Few or no historical samples (< 3)
     CALIBRATING = "calibrating"  # Moderate sample size (3 - 10)
-    MATURE = "mature"            # Robust sample history (> 10)
+    MATURE = "mature"  # Robust sample history (> 10)
 
 
 @dataclass
@@ -48,9 +48,9 @@ class SelfModelEvidence:
 class UncertaintyBreakdown:
     """Decomposed multi-signal uncertainty vector."""
 
-    epistemic: float = 0.0          # 0.0 (well sampled) to 1.0 (zero data)
-    aleatoric: float = 0.0          # 0.0 (deterministic) to 1.0 (pure coin toss)
-    structural_model: float = 0.0   # 0.0 (model accurate) to 1.0 (repeated model failure)
+    epistemic: float = 0.0  # 0.0 (well sampled) to 1.0 (zero data)
+    aleatoric: float = 0.0  # 0.0 (deterministic) to 1.0 (pure coin toss)
+    structural_model: float = 0.0  # 0.0 (model accurate) to 1.0 (repeated model failure)
 
     @property
     def total_uncertainty(self) -> float:
@@ -109,7 +109,7 @@ class CompetenceProfile:
         context = dict(context_props or {})
         outcome_val = 1.0 if actual_success else 0.0
         error = abs(predicted_confidence - outcome_val)
-        sq_err = error ** 2
+        sq_err = error**2
 
         self.attempts += 1
         if actual_success:
@@ -168,7 +168,9 @@ class CompetenceProfile:
             structural_model=structural,
         )
 
-    def compute_metacognitive_confidence(self, context_props: dict[str, Any], prior_confidence: float = 0.70) -> float:
+    def compute_metacognitive_confidence(
+        self, context_props: dict[str, Any], prior_confidence: float = 0.70
+    ) -> float:
         """Derive context-specific metacognitive confidence from competence, calibration, maturity, and uncertainty."""
         uncertainty = self.evaluate_context_uncertainty(context_props)
         comp = self.competence

@@ -336,9 +336,7 @@ class WorldStateReconciler:
 
         # Property overlap
         obs_props = {
-            k: v
-            for k, v in obs_payload.items()
-            if k not in ("entity_name", "entity_type")
+            k: v for k, v in obs_payload.items() if k not in ("entity_name", "entity_type")
         }
         if obs_props and entity.properties:
             total_factors += 1
@@ -445,9 +443,7 @@ class WorldStateReconciler:
     ) -> None:
         """Check permanence predictions against a re-observation."""
         obs_props = {
-            k: v
-            for k, v in observation.payload.items()
-            if k not in ("entity_name", "entity_type")
+            k: v for k, v in observation.payload.items() if k not in ("entity_name", "entity_type")
         }
 
         obs_location = observation.payload.get("location")
@@ -495,9 +491,7 @@ class WorldStateReconciler:
 
         # Create a new entity
         props = {
-            k: v
-            for k, v in observation.payload.items()
-            if k not in ("entity_name", "entity_type")
+            k: v for k, v in observation.payload.items() if k not in ("entity_name", "entity_type")
         }
 
         entity_id = self._registry.discover(

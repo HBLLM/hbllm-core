@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 class MappingStatus(str, Enum):
     """The structural and constraint validation status of an analogical mapping."""
 
-    APPLICABLE = "applicable"                      # Fully bound, all constraints satisfied
+    APPLICABLE = "applicable"  # Fully bound, all constraints satisfied
     PARTIALLY_APPLICABLE = "partially_applicable"  # Partially bound or conditional on missing state
-    REJECTED = "rejected"                          # Critical physical/geometric constraint violation
+    REJECTED = "rejected"  # Critical physical/geometric constraint violation
 
 
 @dataclass
@@ -38,7 +38,7 @@ class StructuralMappingResult:
     status: MappingStatus
     role_bindings: dict[str, str] = field(default_factory=dict)  # role_id -> target_node_id
     relational_alignment_score: float = 0.0  # 0.0 to 1.0
-    systematicity_score: float = 0.0         # Reward for connected higher-order relational chains
+    systematicity_score: float = 0.0  # Reward for connected higher-order relational chains
     violated_constraints: list[str] = field(default_factory=list)
     missing_roles: list[str] = field(default_factory=list)
     transferred_predictions: list[dict[str, Any]] = field(default_factory=list)
@@ -59,10 +59,12 @@ class StructureMappingEngine:
             if candidate_node_ids
             else target_graph.all_nodes()
         )
-        valid_nodes = [n for n in target_nodes if n is not None and isinstance(n, PhysicalEntityNode)]
+        valid_nodes = [
+            n for n in target_nodes if n is not None and isinstance(n, PhysicalEntityNode)
+        ]
 
         if len(valid_nodes) < len(schema.roles):
-            missing = [r.role_id for r in schema.roles[len(valid_nodes):]]
+            missing = [r.role_id for r in schema.roles[len(valid_nodes) :]]
             return StructuralMappingResult(
                 schema_id=schema.schema_id,
                 schema_name=schema.name,
@@ -86,7 +88,11 @@ class StructureMappingEngine:
             for role_id, nid in bindings.items():
                 node = target_graph.get_node(nid)
                 if node and isinstance(node, PhysicalEntityNode):
-                    p = getattr(node, "properties", None) or getattr(node, "observed_properties", {}) or {}
+                    p = (
+                        getattr(node, "properties", None)
+                        or getattr(node, "observed_properties", {})
+                        or {}
+                    )
                     props_map[role_id] = dict(p)
 
             # 2. Evaluate physical constraint compatibility
@@ -112,12 +118,14 @@ class StructureMappingEngine:
             transferred_preds: list[dict[str, Any]] = []
             if status != MappingStatus.REJECTED:
                 for c in schema.predicted_consequences:
-                    transferred_preds.append({
-                        "consequence_type": c.consequence_type,
-                        "predicted_edge_type": c.predicted_edge_type,
-                        "source_node": bindings.get(c.source_role, ""),
-                        "target_node": bindings.get(c.target_role, ""),
-                    })
+                    transferred_preds.append(
+                        {
+                            "consequence_type": c.consequence_type,
+                            "predicted_edge_type": c.predicted_edge_type,
+                            "source_node": bindings.get(c.source_role, ""),
+                            "target_node": bindings.get(c.target_role, ""),
+                        }
+                    )
 
             result = StructuralMappingResult(
                 schema_id=schema.schema_id,

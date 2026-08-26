@@ -221,14 +221,13 @@ class SceneGraph:
                 continue
 
             # Skip forgotten entities unless requested
-            if (
-                not include_forgotten
-                and node.entity_lifecycle == EntityLifecycle.FORGOTTEN
-            ):
+            if not include_forgotten and node.entity_lifecycle == EntityLifecycle.FORGOTTEN:
                 continue
 
             scene_entity = self._project_entity(
-                node, recent_events_limit, now,
+                node,
+                recent_events_limit,
+                now,
             )
             entities.append(scene_entity)
 
@@ -382,7 +381,9 @@ class SceneGraph:
         if node.entity_lifecycle == EntityLifecycle.OCCLUDED:
             for dim in PersistenceDimension:
                 conf = self._permanence.current_confidence(
-                    node.id, dim, current_time,
+                    node.id,
+                    dim,
+                    current_time,
                 )
                 if conf > 0.0:
                     perm_confs[str(dim)] = round(conf, 4)

@@ -62,7 +62,9 @@ class SinhalaLexicon:
             "රොබෝ": "robot",
         }
         for noun, pred in nouns.items():
-            self.add_entry(SinhalaLexicalEntry(lemma=noun, pos=SinhalaPOS.NOUN, semantic_predicate=pred))
+            self.add_entry(
+                SinhalaLexicalEntry(lemma=noun, pos=SinhalaPOS.NOUN, semantic_predicate=pred)
+            )
 
         # Adjectives (Properties)
         adjs = {
@@ -85,18 +87,22 @@ class SinhalaLexicon:
             "ළඟ": "near",
         }
         for postp, pred in postps.items():
-            self.add_entry(SinhalaLexicalEntry(lemma=postp, pos=SinhalaPOS.POSTP, semantic_predicate=pred))
+            self.add_entry(
+                SinhalaLexicalEntry(lemma=postp, pos=SinhalaPOS.POSTP, semantic_predicate=pred)
+            )
 
         # Verbs & Copula
         verbs = {
-            "තියෙනවා": "located_on",   # exists / is located
+            "තියෙනවා": "located_on",  # exists / is located
             "තිබේ": "located_on",
             "තල්ලු කළා": "push",
             "ගෙනයන්න": "move",
             "දමන්න": "put",
         }
         for verb, pred in verbs.items():
-            self.add_entry(SinhalaLexicalEntry(lemma=verb, pos=SinhalaPOS.VERB, semantic_predicate=pred))
+            self.add_entry(
+                SinhalaLexicalEntry(lemma=verb, pos=SinhalaPOS.VERB, semantic_predicate=pred)
+            )
 
         # Question words
         wh_words = {
@@ -105,4 +111,6 @@ class SinhalaLexicon:
             "තියෙනවද": "is_it",
         }
         for wh, pred in wh_words.items():
-            self.add_entry(SinhalaLexicalEntry(lemma=wh, pos=SinhalaPOS.WH, semantic_predicate=pred))
+            self.add_entry(
+                SinhalaLexicalEntry(lemma=wh, pos=SinhalaPOS.WH, semantic_predicate=pred)
+            )

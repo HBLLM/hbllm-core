@@ -123,28 +123,30 @@ class GroundingResolver:
                     # Ambiguous reference
                     grounded.grounding_success = False
                     grounded.grounding_error = LanguageErrorType.AMBIGUOUS_REFERENCE
-                    grounded.grounding_error_detail = (
-                        f"Reference '{ref.raw_text}' is ambiguous; matches {len(matching_entities)} entities."
-                    )
+                    grounded.grounding_error_detail = f"Reference '{ref.raw_text}' is ambiguous; matches {len(matching_entities)} entities."
                     return grounded
                 else:
                     chosen_entity = matching_entities[0]
                     grounded.grounded_entities[role] = chosen_entity.id
-                    new_mentions.append((
-                        chosen_entity.id,
-                        ref.concept_name or chosen_entity.entity_type,
-                        ref.properties,
-                    ))
+                    new_mentions.append(
+                        (
+                            chosen_entity.id,
+                            ref.concept_name or chosen_entity.entity_type,
+                            ref.properties,
+                        )
+                    )
 
             elif ref.specifier in ("indefinite", "generic"):  # "a ball" / "balls"
                 if matching_entities:
                     chosen_entity = matching_entities[0]
                     grounded.grounded_entities[role] = chosen_entity.id
-                    new_mentions.append((
-                        chosen_entity.id,
-                        ref.concept_name or chosen_entity.entity_type,
-                        ref.properties,
-                    ))
+                    new_mentions.append(
+                        (
+                            chosen_entity.id,
+                            ref.concept_name or chosen_entity.entity_type,
+                            ref.properties,
+                        )
+                    )
 
         # Register mentions in discourse only after all references in frame are resolved
         for ent_id, c_name, props in new_mentions:
@@ -170,7 +172,9 @@ class GroundingResolver:
                 return False
 
         # Property constraints (e.g., color="red")
-        props = getattr(entity, "properties", None) or getattr(entity, "observed_properties", {}) or {}
+        props = (
+            getattr(entity, "properties", None) or getattr(entity, "observed_properties", {}) or {}
+        )
         for prop_key, prop_val in ref.properties.items():
             ent_val = props.get(prop_key)
             if ent_val is None or str(ent_val).lower() != str(prop_val).lower():

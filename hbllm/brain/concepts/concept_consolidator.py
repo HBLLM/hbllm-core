@@ -217,8 +217,7 @@ class ConceptConsolidator:
                 decision=ConsolidationDecision.REJECT,
                 hypothesis_id=hypothesis.hypothesis_id,
                 reasoning=(
-                    f"Insufficient exemplars: {len(hypothesis.member_ids)} "
-                    f"< {self._min_exemplars}"
+                    f"Insufficient exemplars: {len(hypothesis.member_ids)} < {self._min_exemplars}"
                 ),
             )
 
@@ -242,9 +241,7 @@ class ConceptConsolidator:
                     return ConsolidationResult(
                         decision=ConsolidationDecision.MERGE,
                         hypothesis_id=hypothesis.hypothesis_id,
-                        reasoning=(
-                            f"Overlaps {overlap:.0%} with existing concept {concept_id}"
-                        ),
+                        reasoning=(f"Overlaps {overlap:.0%} with existing concept {concept_id}"),
                         merge_with_concept_id=concept_id,
                     )
 

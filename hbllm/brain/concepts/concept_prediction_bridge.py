@@ -108,22 +108,20 @@ class ConceptPredictionBridge:
         for concept in self._registry.all_concepts():
             members = self._registry.concept_members(concept.id)
 
-            target_members = (
-                [m for m in members if m in entity_ids]
-                if entity_ids
-                else members
-            )
+            target_members = [m for m in members if m in entity_ids] if entity_ids else members
 
             for member_id in target_members:
                 for behavior in concept.behavioral_regularities:
-                    specs.append(ConceptPredictionSpec(
-                        concept_id=concept.id,
-                        concept_name=concept.concept_name,
-                        target_entity_id=member_id,
-                        predicted_behavior=behavior,
-                        confidence=concept.confidence,
-                        domain=concept.domain,
-                    ))
+                    specs.append(
+                        ConceptPredictionSpec(
+                            concept_id=concept.id,
+                            concept_name=concept.concept_name,
+                            target_entity_id=member_id,
+                            predicted_behavior=behavior,
+                            confidence=concept.confidence,
+                            domain=concept.domain,
+                        )
+                    )
 
         return specs
 
@@ -152,13 +150,15 @@ class ConceptPredictionBridge:
                 continue
 
             for behavior in concept.behavioral_regularities:
-                specs.append(ConceptPredictionSpec(
-                    concept_id=concept.id,
-                    concept_name=concept.concept_name,
-                    target_entity_id=entity_id,
-                    predicted_behavior=behavior,
-                    confidence=concept.confidence,
-                    domain=concept.domain,
-                ))
+                specs.append(
+                    ConceptPredictionSpec(
+                        concept_id=concept.id,
+                        concept_name=concept.concept_name,
+                        target_entity_id=entity_id,
+                        predicted_behavior=behavior,
+                        confidence=concept.confidence,
+                        domain=concept.domain,
+                    )
+                )
 
         return specs

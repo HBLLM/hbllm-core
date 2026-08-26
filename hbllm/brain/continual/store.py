@@ -18,8 +18,8 @@ from typing import Any
 class MemoryLayer(str, Enum):
     """The three authoritative memory tiers."""
 
-    FAST_EPISODIC = "fast_episodic"            # Transient interaction buffer
-    SLOW_CONSOLIDATED = "slow_consolidated"    # Durable generalized knowledge
+    FAST_EPISODIC = "fast_episodic"  # Transient interaction buffer
+    SLOW_CONSOLIDATED = "slow_consolidated"  # Durable generalized knowledge
     IMMUTABLE_PROVENANCE = "immutable_provenance"  # Authoritative ground-truth event history
 
 
@@ -77,7 +77,9 @@ class DualStoreMemory:
         self.immutable_log: dict[str, ImmutableEvent] = {}
         self.fast_buffer: list[EpisodicTrace] = []
         self.slow_store: dict[str, VersionedKnowledgeRecord] = {}  # knowledge_id -> latest revision
-        self.revision_history: dict[str, list[VersionedKnowledgeRecord]] = {}  # knowledge_id -> [r1, r2, ...]
+        self.revision_history: dict[
+            str, list[VersionedKnowledgeRecord]
+        ] = {}  # knowledge_id -> [r1, r2, ...]
 
     def append_immutable_event(self, event: ImmutableEvent) -> str:
         """Commit an append-only event into the authoritative immutable log."""
@@ -129,4 +131,6 @@ class DualStoreMemory:
         record = self.slow_store.get(knowledge_id)
         if not record:
             return []
-        return [self.immutable_log[eid] for eid in record.source_event_ids if eid in self.immutable_log]
+        return [
+            self.immutable_log[eid] for eid in record.source_event_ids if eid in self.immutable_log
+        ]

@@ -182,12 +182,14 @@ class LearningSignalRouter:
                     if evidence and evidence.classifications
                     else ErrorClassification()
                 )
-                results.append(RoutingResult(
-                    action=action,
-                    classification=last_classification,
-                    gate_verdict=verdict,
-                    model_id=model_id,
-                ))
+                results.append(
+                    RoutingResult(
+                        action=action,
+                        classification=last_classification,
+                        gate_verdict=verdict,
+                        model_id=model_id,
+                    )
+                )
 
         return results
 

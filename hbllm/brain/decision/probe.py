@@ -105,7 +105,9 @@ class ProbeGenerator:
                     probe_id=f"probe_inspect_{target_box}",
                     target_gap_id=gap.gap_id,
                     description=f"Move near {target_box} to inspect interior",
-                    action_sequence=[("MOVE", {"entity_id": "agent", "target_x": 2.0, "target_y": 2.0})],
+                    action_sequence=[
+                        ("MOVE", {"entity_id": "agent", "target_x": 2.0, "target_y": 2.0})
+                    ],
                     possible_observations=["interior_visible", "lid_detected"],
                     cost=0.08,
                     risk=0.02,

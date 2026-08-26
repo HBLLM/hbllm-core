@@ -105,7 +105,10 @@ class HBLLMCoreCohort(BaseCohort):
                     break
         else:
             for act in observation.available_actions:
-                if act.get("name") == "STACK" and act.get("parameters", {}).get("base") == "obj_support":
+                if (
+                    act.get("name") == "STACK"
+                    and act.get("parameters", {}).get("base") == "obj_support"
+                ):
                     chosen_action = act
                     break
 
@@ -121,19 +124,26 @@ class HBLLMCoreCohort(BaseCohort):
             confidence=confidence,
             action=chosen_action,
             abstain=False,
-            resource_cost={"wall_clock_ms": elapsed_ms, "branches": float(len(observation.available_actions))},
+            resource_cost={
+                "wall_clock_ms": elapsed_ms,
+                "branches": float(len(observation.available_actions)),
+            },
         )
 
     def learn_from_feedback(self, observation: EnvironmentObservation, reward: float) -> None:
         # Buffer into Fast Episodic Buffer (A22)
         trace = EpisodicTrace(
             domain="spatial_stacking",
-            actions=[(self.last_action.get("name", "UNKNOWN"), self.last_action.get("parameters", {}))],
+            actions=[
+                (self.last_action.get("name", "UNKNOWN"), self.last_action.get("parameters", {}))
+            ],
             is_success=reward > 0.0,
             prediction_error=0.0 if reward > 0.0 else 0.80,
         )
         self.memory.buffer_episodic_trace(trace)
-        self.self_model.record_outcome("spatial_stacking", predicted_confidence=0.80, actual_success=reward > 0.0)
+        self.self_model.record_outcome(
+            "spatial_stacking", predicted_confidence=0.80, actual_success=reward > 0.0
+        )
 
 
 class HBLLMPlusLLMCohort(BaseCohort):

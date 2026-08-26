@@ -259,7 +259,9 @@ class TestCrossLingualDialogue:
         table = PhysicalEntityNode(entity_type="table")
         graph.add_node(cup)
         graph.add_node(table)
-        graph.add_edge(HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id]))
+        graph.add_edge(
+            HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id])
+        )
 
         # English query -> English answer
         q_en = runtime.process_utterance("Where is the cup?", language="en")
@@ -270,7 +272,9 @@ class TestCrossLingualDialogue:
         assert q_si.response_text == "කෝප්පය මේසය මත තියෙනවා."
 
         # Interlingual translation test
-        translation = runtime.translate("The cup is on the table.", source_lang="en", target_lang="si")
+        translation = runtime.translate(
+            "The cup is on the table.", source_lang="en", target_lang="si"
+        )
         assert "කෝප්පය මේසය මත තියෙනවා" in translation
 
 
@@ -293,8 +297,12 @@ class TestDeterministicSessionReplay:
             g.add_edge(HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[b.id], targets=[t.id]))
 
             responses = []
-            responses.append(r.process_utterance("Where is the red ball?", language="en").response_text)
-            responses.append(r.process_utterance("Move it to the table.", language="en").response_text)
+            responses.append(
+                r.process_utterance("Where is the red ball?", language="en").response_text
+            )
+            responses.append(
+                r.process_utterance("Move it to the table.", language="en").response_text
+            )
             responses.append(r.process_utterance("බෝලය කොහෙද?", language="si").response_text)
             return responses
 
@@ -326,7 +334,9 @@ class TestPredictionFailureAndSurprise:
         graph.add_node(table)
         graph.add_node(box)
         graph.add_node(ball)
-        init_edge = HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[ball.id], targets=[table.id])
+        init_edge = HCIREdge(
+            edge_type=HCIREdgeType.LOCATED_IN, sources=[ball.id], targets=[table.id]
+        )
         graph.add_edge(init_edge)
 
         # 2. Register concept with initial prediction accuracy
@@ -347,7 +357,7 @@ class TestPredictionFailureAndSurprise:
         # 4. Action attempted, but failed / blocked: ball remains ON table
         # (Actual observation contradicts prediction: observed "table" != expected "box")
         observed_destination = "table"
-        prediction_succeeded = (expected_destination == observed_destination)
+        prediction_succeeded = expected_destination == observed_destination
         assert not prediction_succeeded, "Prediction failed: ball did not move to box"
 
         # 5. A14/A15 records negative outcome: concept prediction accuracy drops
@@ -414,7 +424,9 @@ class TestStalePerceptionDecay:
         table = PhysicalEntityNode(entity_type="table")
         graph.add_node(cup)
         graph.add_node(table)
-        graph.add_edge(HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id]))
+        graph.add_edge(
+            HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[cup.id], targets=[table.id])
+        )
 
         # Query location -> System hedges due to staleness (0.96 * 0.55 = 0.528 -> PLAUSIBLE)
         res_q = runtime.process_utterance("Where is the cup?")
@@ -435,4 +447,3 @@ class TestZeroLLMIntegration:
         loaded = set(sys.modules.keys())
         for marker in llm_markers:
             assert marker not in loaded, f"LLM module loaded in integrated runtime: {marker}"
-

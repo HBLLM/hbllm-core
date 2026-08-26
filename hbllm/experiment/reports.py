@@ -41,35 +41,37 @@ class ScientificExperimentReport:
                 f"| **{row.get('dimension')}** | {row.get('HBLLM-Core', '-')} | {row.get('HBLLM+LLM', '-')} | {row.get('LLM-Only', '-')} | {row.get('Oracle', '-')} |"
             )
 
-        lines.extend([
-            "",
-            "## 2. Continual Learning Task Matrix ($R_{i,j}$)",
-            "",
-            "### HBLLM-Core ($BWT = 0.00$, Retention Preserved on Tested Sequence)",
-            "```text",
-            "         T1     T2     T3     T4     T5",
-            "Stage 1: 1.00   -      -      -      -",
-            "Stage 2: 1.00   0.98   -      -      -",
-            "Stage 3: 1.00   0.98   0.96   -      -",
-            "Stage 4: 1.00   0.98   0.96   0.95   -",
-            "Stage 5: 1.00   0.98   0.96   0.95   0.94",
-            "```",
-            "",
-            "### LLM-Only ($BWT = -0.30$, Performance Degradation on Sequential Curriculum)",
-            "```text",
-            "         T1     T2     T3     T4     T5",
-            "Stage 1: 0.85   -      -      -      -",
-            "Stage 2: 0.65   0.82   -      -      -",
-            "Stage 3: 0.50   0.60   0.80   -      -",
-            "Stage 4: 0.42   0.52   0.62   0.78   -",
-            "Stage 5: 0.35   0.45   0.55   0.68   0.75",
-            "```",
-            "",
-            "## 3. Ablation Analysis",
-            "",
-            "| Architecture Variant | Sample Eff ($N_\\tau$) | Sim Error ($E$) | Brier Score | BWT (Retention) |",
-            "| :--- | :---: | :---: | :---: | :---: |",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 2. Continual Learning Task Matrix ($R_{i,j}$)",
+                "",
+                "### HBLLM-Core ($BWT = 0.00$, Retention Preserved on Tested Sequence)",
+                "```text",
+                "         T1     T2     T3     T4     T5",
+                "Stage 1: 1.00   -      -      -      -",
+                "Stage 2: 1.00   0.98   -      -      -",
+                "Stage 3: 1.00   0.98   0.96   -      -",
+                "Stage 4: 1.00   0.98   0.96   0.95   -",
+                "Stage 5: 1.00   0.98   0.96   0.95   0.94",
+                "```",
+                "",
+                "### LLM-Only ($BWT = -0.30$, Performance Degradation on Sequential Curriculum)",
+                "```text",
+                "         T1     T2     T3     T4     T5",
+                "Stage 1: 0.85   -      -      -      -",
+                "Stage 2: 0.65   0.82   -      -      -",
+                "Stage 3: 0.50   0.60   0.80   -      -",
+                "Stage 4: 0.42   0.52   0.62   0.78   -",
+                "Stage 5: 0.35   0.45   0.55   0.68   0.75",
+                "```",
+                "",
+                "## 3. Ablation Analysis",
+                "",
+                "| Architecture Variant | Sample Eff ($N_\\tau$) | Sim Error ($E$) | Brier Score | BWT (Retention) |",
+                "| :--- | :---: | :---: | :---: | :---: |",
+            ]
+        )
 
         for abl in self.ablation_matrix:
             lines.append(

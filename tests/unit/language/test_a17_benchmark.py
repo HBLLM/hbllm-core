@@ -35,7 +35,9 @@ class TestNovelNounAcquisition:
         graph = CognitiveGraph()
         loop = LexiconAcquisitionLoop(graph)
 
-        cyl = PhysicalEntityNode(entity_type="cylinder", properties={"shape": "cylinder", "color": "blue"})
+        cyl = PhysicalEntityNode(
+            entity_type="cylinder", properties={"shape": "cylinder", "color": "blue"}
+        )
         graph.add_node(cyl)
 
         # Hear: "Look at the dax." in presence of cylinder
@@ -220,7 +222,12 @@ class TestNegativeCorrection:
         c_ball = hyp_set.add_or_get_candidate(LexicalTargetType.CONCEPT, "ball", timestamp=1.0)
         apply_evidence_to_candidate(
             c_ball,
-            LexicalEvidence(source_type=EvidenceSourceType.CROSS_SITUATIONAL, token="dax", is_positive=True, timestamp=1.0),
+            LexicalEvidence(
+                source_type=EvidenceSourceType.CROSS_SITUATIONAL,
+                token="dax",
+                is_positive=True,
+                timestamp=1.0,
+            ),
         )
         assert c_ball.support_weight > 0
 
@@ -335,8 +342,12 @@ class TestSpatialRelationAcquisition:
 
         # 'tul' observed when ball is INSIDE box
         spatial = [(ball.id, "INSIDE", box.id)]
-        loop.observe_scene(["tul"], visible_entity_ids=[ball.id, box.id], spatial_edges=spatial, timestamp=1.0)
-        loop.observe_scene(["tul"], visible_entity_ids=[ball.id, box.id], spatial_edges=spatial, timestamp=2.0)
+        loop.observe_scene(
+            ["tul"], visible_entity_ids=[ball.id, box.id], spatial_edges=spatial, timestamp=1.0
+        )
+        loop.observe_scene(
+            ["tul"], visible_entity_ids=[ball.id, box.id], spatial_edges=spatial, timestamp=2.0
+        )
 
         res = loop.understand("tul")
         assert res.target_type == LexicalTargetType.RELATION
@@ -386,9 +397,21 @@ class TestPolysemyResolution:
         lexicon = GroundedLexicon(graph)
 
         # Commit Sense 1: 'bank' -> financial_institution
-        lexicon.commit_sense("bank", LexicalTargetType.CONCEPT, "financial_institution", language="en", comprehension_confidence=0.9)
+        lexicon.commit_sense(
+            "bank",
+            LexicalTargetType.CONCEPT,
+            "financial_institution",
+            language="en",
+            comprehension_confidence=0.9,
+        )
         # Commit Sense 2: 'bank' -> river_bank
-        lexicon.commit_sense("bank", LexicalTargetType.CONCEPT, "river_bank", language="en", comprehension_confidence=0.85)
+        lexicon.commit_sense(
+            "bank",
+            LexicalTargetType.CONCEPT,
+            "river_bank",
+            language="en",
+            comprehension_confidence=0.85,
+        )
 
         # Query with context
         res1 = lexicon.ground_token("bank", language="en", context_sense="financial_institution")
@@ -444,7 +467,11 @@ class TestLexicalRevisionForgetting:
         for i in range(3):
             apply_evidence_to_candidate(
                 cand,
-                LexicalEvidence(source_type=EvidenceSourceType.OSTENSIVE_NEGATIVE, is_positive=False, timestamp=float(i)),
+                LexicalEvidence(
+                    source_type=EvidenceSourceType.OSTENSIVE_NEGATIVE,
+                    is_positive=False,
+                    timestamp=float(i),
+                ),
             )
 
         assert cand.status in (LexicalCandidateStatus.CONTRADICTED, LexicalCandidateStatus.REJECTED)
@@ -483,8 +510,12 @@ class TestLexicalPrediction:
         graph = CognitiveGraph()
         lexicon = GroundedLexicon(graph)
 
-        lexicon.commit_sense("cup", LexicalTargetType.CONCEPT, "cup", language="en", generation_confidence=0.88)
-        lexicon.commit_sense("කෝප්පය", LexicalTargetType.CONCEPT, "cup", language="si", generation_confidence=0.85)
+        lexicon.commit_sense(
+            "cup", LexicalTargetType.CONCEPT, "cup", language="en", generation_confidence=0.88
+        )
+        lexicon.commit_sense(
+            "කෝප්පය", LexicalTargetType.CONCEPT, "cup", language="si", generation_confidence=0.85
+        )
 
         prod_en = lexicon.realize_target("cup", LexicalTargetType.CONCEPT, language="en")
         prod_si = lexicon.realize_target("cup", LexicalTargetType.CONCEPT, language="si")
@@ -531,7 +562,9 @@ class TestDeterministicReplay:
             g = CognitiveGraph()
             loop = LexiconAcquisitionLoop(g)
             c1 = PhysicalEntityNode(id="cyl_1", entity_type="cylinder", properties={"color": "red"})
-            c2 = PhysicalEntityNode(id="cyl_2", entity_type="cylinder", properties={"color": "blue"})
+            c2 = PhysicalEntityNode(
+                id="cyl_2", entity_type="cylinder", properties={"color": "blue"}
+            )
             g.add_node(c1)
             g.add_node(c2)
 
@@ -540,7 +573,10 @@ class TestDeterministicReplay:
             loop.teach_ostensive("dax", entity_id=c1.id, timestamp=3.0)
 
             hyp_set = loop.lexicon.get_or_create_hypothesis_set("dax")
-            return [(c.target_id, c.target_type.value, round(c.total_score, 4)) for c in hyp_set.ranked_candidates()]
+            return [
+                (c.target_id, c.target_type.value, round(c.total_score, 4))
+                for c in hyp_set.ranked_candidates()
+            ]
 
         run1 = _run_acquisition()
         run2 = _run_acquisition()
@@ -583,13 +619,21 @@ class TestNovelLanguageExperiment:
 
         # 'zog' heard with push transitions
         delta_push = {"action": "push", "agentive": True, "target": c1.id}
-        loop.observe_scene(["zog"], visible_entity_ids=[c1.id], state_delta=delta_push, timestamp=6.0)
-        loop.observe_scene(["zog"], visible_entity_ids=[c2.id], state_delta=delta_push, timestamp=7.0)
+        loop.observe_scene(
+            ["zog"], visible_entity_ids=[c1.id], state_delta=delta_push, timestamp=6.0
+        )
+        loop.observe_scene(
+            ["zog"], visible_entity_ids=[c2.id], state_delta=delta_push, timestamp=7.0
+        )
 
         # 'tul' heard with inside spatial relation
         spatial_inside = [(c1.id, "INSIDE", b1.id)]
-        loop.observe_scene(["tul"], visible_entity_ids=[c1.id, b1.id], spatial_edges=spatial_inside, timestamp=8.0)
-        loop.observe_scene(["tul"], visible_entity_ids=[c2.id, b1.id], spatial_edges=spatial_inside, timestamp=9.0)
+        loop.observe_scene(
+            ["tul"], visible_entity_ids=[c1.id, b1.id], spatial_edges=spatial_inside, timestamp=8.0
+        )
+        loop.observe_scene(
+            ["tul"], visible_entity_ids=[c2.id, b1.id], spatial_edges=spatial_inside, timestamp=9.0
+        )
 
         # Verify groundings discovered
         assert loop.understand("dax").target_id == "cylinder"
@@ -624,10 +668,15 @@ class TestNovelLanguageExperiment:
         hyp_dax = loop.lexicon.get_or_create_hypothesis_set("dax")
         c_box = hyp_dax.get_candidate(LexicalTargetType.CONCEPT, "box")
         if c_box:
-            assert c_box.status in (LexicalCandidateStatus.CONTRADICTED, LexicalCandidateStatus.REJECTED)
+            assert c_box.status in (
+                LexicalCandidateStatus.CONTRADICTED,
+                LexicalCandidateStatus.REJECTED,
+            )
 
         # ── Phase 5: Surface Generation ───────────────────────────────
-        loop.lexicon.commit_sense("dax", LexicalTargetType.CONCEPT, "cylinder", generation_confidence=0.88)
+        loop.lexicon.commit_sense(
+            "dax", LexicalTargetType.CONCEPT, "cylinder", generation_confidence=0.88
+        )
         realized = loop.produce("cylinder", LexicalTargetType.CONCEPT)
         assert realized.token == "dax"
         assert realized.is_produced

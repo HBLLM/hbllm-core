@@ -388,10 +388,7 @@ class EventChronicle:
         for kinds, timestamps in sequence_occurrences.items():
             if len(timestamps) >= min_occurrences:
                 # Compute average interval
-                intervals = [
-                    timestamps[i + 1] - timestamps[i]
-                    for i in range(len(timestamps) - 1)
-                ]
+                intervals = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
                 avg_interval = sum(intervals) / len(intervals) if intervals else 0.0
 
                 patterns.append(

@@ -54,8 +54,12 @@ class SinhalaRealizer:
     ) -> str:
         """Verbalize CognitiveEpistemicState into calibrated Sinhala."""
         level = self._policy.evaluate(epistemic_state)
-        subj_sin = self._concept_map.get(epistemic_state.target_subject, epistemic_state.target_subject)
-        obj_sin = self._concept_map.get(epistemic_state.target_object or "", epistemic_state.target_object or "")
+        subj_sin = self._concept_map.get(
+            epistemic_state.target_subject, epistemic_state.target_subject
+        )
+        obj_sin = self._concept_map.get(
+            epistemic_state.target_object or "", epistemic_state.target_object or ""
+        )
         postp = self._postp_map.get(epistemic_state.target_predicate, "මත")
         if epistemic_state.target_predicate in ("located_in", "in"):
             postp = "මත" if obj_sin in ("මේසය", "මේසේ", "පුටුව", "බිම") else "තුළ"
@@ -95,8 +99,10 @@ class SinhalaRealizer:
         theme_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
         loc_ref = frame.get_role(ThematicRole.LOCATION) or frame.get_role(ThematicRole.DESTINATION)
 
-        subj_concept: str = (theme_ref.concept_name if (theme_ref and theme_ref.concept_name) else "entity")
-        obj_concept: str = (loc_ref.concept_name if (loc_ref and loc_ref.concept_name) else "entity")
+        subj_concept: str = (
+            theme_ref.concept_name if (theme_ref and theme_ref.concept_name) else "entity"
+        )
+        obj_concept: str = loc_ref.concept_name if (loc_ref and loc_ref.concept_name) else "entity"
 
         subj_sin = self._concept_map.get(subj_concept, subj_concept)
         obj_sin = self._concept_map.get(obj_concept, obj_concept)

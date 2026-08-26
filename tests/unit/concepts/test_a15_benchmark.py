@@ -204,9 +204,7 @@ class TestBehavioralRegularity:
         # Ball should NOT be in the same cluster
         if hypotheses:
             support_hyp = hypotheses[0]
-            assert "e3" not in support_hyp.member_ids, (
-                "Ball should not cluster with tables/chairs"
-            )
+            assert "e3" not in support_hyp.member_ids, "Ball should not cluster with tables/chairs"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -267,8 +265,7 @@ class TestPredictiveUtility:
 
         result = consolidator.consolidate(hypotheses[0], utility)
         assert result.decision == ConsolidationDecision.ACCEPT, (
-            f"High utility (Δ={utility.utility_delta:.2f}) should be accepted: "
-            f"{result.reasoning}"
+            f"High utility (Δ={utility.utility_delta:.2f}) should be accepted: {result.reasoning}"
         )
         assert result.utility_delta > 0.05
 
@@ -295,8 +292,7 @@ class TestPredictiveUtility:
 
         result = consolidator.consolidate(hypotheses[0], utility)
         assert result.decision == ConsolidationDecision.REJECT, (
-            f"Low utility (Δ={utility.utility_delta:.3f}) should be rejected: "
-            f"{result.reasoning}"
+            f"Low utility (Δ={utility.utility_delta:.3f}) should be rejected: {result.reasoning}"
         )
 
 
@@ -352,9 +348,7 @@ class TestInstanceOfEdges:
 
         # Check INSTANCE_OF edges exist
         edges_e1 = graph.edges_from(e1.id)
-        instance_edges = [
-            e for e in edges_e1 if e.edge_type == HCIREdgeType.INSTANCE_OF
-        ]
+        instance_edges = [e for e in edges_e1 if e.edge_type == HCIREdgeType.INSTANCE_OF]
         assert len(instance_edges) >= 1, "INSTANCE_OF edge should exist"
         assert concept_id in instance_edges[0].targets
 
@@ -489,8 +483,8 @@ class TestConceptRefinement:
 
         # Members with divergent prediction profiles
         member_outcomes = {
-            "e1": [True, True, True, True, False],   # 80% accuracy
-            "e2": [True, True, True, False, False],   # 60% accuracy
+            "e1": [True, True, True, True, False],  # 80% accuracy
+            "e2": [True, True, True, False, False],  # 60% accuracy
             "e3": [False, False, True, False, False],  # 20% accuracy
             "e4": [False, False, False, False, True],  # 20% accuracy
         }
@@ -502,9 +496,7 @@ class TestConceptRefinement:
 
         assert signal is not None, "Should detect heterogeneity"
         assert signal.concept_id == "c_001"
-        assert signal.divergence >= 0.2, (
-            f"Divergence should be >= threshold: {signal.divergence}"
-        )
+        assert signal.divergence >= 0.2, f"Divergence should be >= threshold: {signal.divergence}"
         assert len(signal.subgroup_a) > 0
         assert len(signal.subgroup_b) > 0
 
@@ -513,9 +505,9 @@ class TestConceptRefinement:
 
         # All members have similar accuracy
         member_outcomes = {
-            "e1": [True, True, False, True, True],   # 80%
-            "e2": [True, False, True, True, True],   # 80%
-            "e3": [True, True, True, False, True],   # 80%
+            "e1": [True, True, False, True, True],  # 80%
+            "e2": [True, False, True, True, True],  # 80%
+            "e3": [True, True, True, False, True],  # 80%
         }
 
         signal = consolidator.detect_heterogeneity(
