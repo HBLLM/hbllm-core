@@ -14,11 +14,11 @@ async def test_meta_reasoning_node_triggers_improvement(tmp_path):
     bus = InProcessBus()
     await bus.start()
 
-    meta_node = MetaReasoningNode(node_id="meta_test")
-    # Redirect reflection directory to pytest temp dir
-    meta_node.reflection_dir = str(tmp_path / "reflection")
-    os.makedirs(meta_node.reflection_dir, exist_ok=True)
-    meta_node.weakness_threshold = 2  # lower for test
+    meta_node = MetaReasoningNode(
+        node_id="meta_test",
+        weakness_threshold=2,
+        reflection_dir=str(tmp_path / "reflection"),
+    )
 
     await meta_node.start(bus)
     await asyncio.sleep(0.1)  # settling time

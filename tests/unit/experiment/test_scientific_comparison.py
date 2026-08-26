@@ -189,3 +189,14 @@ class TestMasterScientificExperiment:
         json_str = report.to_json()
         assert "experiment_id" in json_str
         assert "primary_endpoints_table" in json_str
+
+    def test_cohort_label_invariance(self) -> None:
+        """Verifies that changing the cohort_id string does not alter evaluation metrics."""
+        cohort_normal = LLMOnlyCohort(cohort_id="LLM-Only")
+        cohort_relabeled = LLMOnlyCohort(cohort_id="HBLLM-Core-Fake-Label")
+
+        res_normal = E4_EpistemicCalibrationTask().evaluate(cohort_normal)
+        res_relabeled = E4_EpistemicCalibrationTask().evaluate(cohort_relabeled)
+
+        assert res_normal.brier_score == res_relabeled.brier_score
+        assert res_normal.accuracy == res_relabeled.accuracy
