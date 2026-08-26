@@ -108,11 +108,12 @@ class IntentionalWorkspace:
         for goal_id, meta in list(self._goals_meta.items()):
             if meta["status"] == status:
                 node = self._ws.get_node(goal_id)
+                node_desc = node.description if node and node.description else ""
                 goal = Goal(
                     goal_id=goal_id,
-                    tenant_id=meta.get("tenant_id", "default"),
-                    name=meta.get("name", node.description if node else ""),
-                    description=meta.get("description", node.description if node else ""),
+                    tenant_id=str(meta.get("tenant_id") or "default"),
+                    name=str(meta.get("name") or node_desc),
+                    description=str(meta.get("description") or node_desc),
                     status=status,
                     priority=meta.get("priority", TaskPriority.NORMAL),
                     created_at=float(meta.get("created_at") or time.time()),
