@@ -80,14 +80,17 @@ jobs:
 
       - name: Build Rust extensions
         run: |
+          export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
           pip install maturin
+          DIST_DIR="$(pwd)/dist"
+          mkdir -p "$DIST_DIR"
           for crate in rust/*/; do
             if [ -f "$crate/Cargo.toml" ]; then
               echo "Building $crate..."
-              maturin build --manifest-path "$crate/Cargo.toml" --release --out dist
+              (cd "$crate" && maturin build --release --out "$DIST_DIR")
             fi
           done
-          pip install dist/*.whl
+          pip install "$DIST_DIR"/*.whl
 
       - name: Run unit tests
         run: |
