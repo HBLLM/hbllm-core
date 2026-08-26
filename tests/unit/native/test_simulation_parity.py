@@ -9,7 +9,14 @@ Verifies:
 
 import time
 
+import pytest
+
 from hbllm.native.registry import native
+
+pytestmark = pytest.mark.skipif(
+    not native.available("simulation"),
+    reason="hbllm_simulation_engine native extension not compiled",
+)
 
 
 class TestSimulationParityOracle:

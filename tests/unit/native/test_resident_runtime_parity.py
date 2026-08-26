@@ -6,7 +6,14 @@ Verifies:
 3. Cost-model adaptive dispatch routing logic.
 """
 
+import pytest
+
 from hbllm.native.registry import WorkloadProfile, native
+
+pytestmark = pytest.mark.skipif(
+    not native.available("simulation"),
+    reason="hbllm_simulation_engine native extension not compiled",
+)
 
 
 class TestResidentRuntimeParityOracle:
