@@ -102,7 +102,7 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 | **🎯 Goal Pursuit** | Decomposes objectives into persistent DAG tasks, retries failures, verifies outcomes | [Executive Brain](docs/architecture/executive-brain-layer.md) |
 | **🤝 Social Intelligence** | Relationship memory with sentiment tracking, interaction history, and notification priority | [Social Cognition](docs/architecture/social-cognition.md) |
 | **🌍 Unified World State** | RealityGraph merges KnowledgeGraph, BrainWorldState, and sensor data into one view | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
-| **🦀 10 Rust SIMD Crates** | Native AVX-512/NEON inference, BPE tokenization, MinHash LSH, vector search, and graph traversal | [Rust Kernels](docs/api/rust-kernels.md) |
+| **🦀 13 Rust Acceleration Crates** | Native AVX-512/NEON inference, BPE tokenization, MinHash LSH, vector search, persistent HCIR graph, simulation engine, and structure matcher | [Rust Kernels](docs/api/rust-kernels.md) |
 | **⚙️ Fully Local** | Runs on CPU-only machines — 125M model needs ~500MB RAM, 1.5B fits in 4GB with INT4 | [Benchmarks](docs/api/benchmarks.md) |
 | **🧪 Self-Personalizing** | SpawnerNode auto-creates 2MB LoRA adapters — the brain grows new specialist regions at runtime | [Zoning](docs/zoning/how-it-works.md) |
 | **🌐 Distributed** | Spans your devices via Ed25519 cryptographic trust — zero cloud required | [Adaptive Network](docs/architecture/adaptive-network.md) |

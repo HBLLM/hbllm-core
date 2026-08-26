@@ -294,3 +294,19 @@ if trace.proposed_transaction:
     for op in trace.proposed_transaction.operations:
         print(f"  - {op.op}: {op.edge_data.get('edge_type') if op.edge_data else op.node_id}")
 ```
+
+---
+
+## Native Hardware Acceleration
+
+For compute-intensive reasoning workloads, the runtime interfaces with native Rust acceleration crates:
+
+1. **Multi-Branch Simulation Engine (`hbllm_simulation_engine`)**:
+   - Executes hundreds of parallel counterfactual simulation branches simultaneously via Rayon.
+   - Resident native memory state prevents Python GIL contention and FFI crossing during step iterations.
+   - DAG transition memoization cache reuses evaluated branch states across exploration cycles.
+
+2. **Analogical Structure Matcher (`hbllm_structure_matcher`)**:
+   - Backtracking constraint-satisfaction graph isomorphism algorithm in Rust.
+   - Performs rapid variable-to-entity alignment scoring and extracts systematic relational schemas across domain graphs in sub-millisecond latencies.
+

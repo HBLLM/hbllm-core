@@ -234,6 +234,28 @@ The `CorrelationTransaction` atomically commits `CORRELATES_WITH` hyperedges wit
 
 ---
 
+## Native Persistent Graph Substrate (`NativeGraphAdapter`)
+
+To scale HCIR graph state to millions of active cognitive nodes without GC pauses or Python memory overhead, HBLLM provides a **chunked structural-sharing native Rust substrate** (`hbllm_hcir_graph` / `rust/hcir_graph`):
+
+```mermaid
+graph TD
+    P["Python HCIR Graph"] --> A["NativeGraphAdapter"]
+    A --> |"PyO3 FFI"| N["NativeGraph (Rust RwLock)"]
+    N --> S["GraphState (ChunkedStore)"]
+    S --> C1["Chunk 0 (Nodes 0..63)"]
+    S --> C2["Chunk 1 (Nodes 64..127)"]
+    S --> H["BLAKE3 Canonical Hash Engine"]
+```
+
+### Key Architectural Properties
+1. **$O(1)$ Root Snapshotting**: Instant branch clones for counterfactual simulation via chunk-granular pointer bumping.
+2. **Chunk-Level Structural Sharing**: Updates to a single node or hyperedge only copy the affected 64-item chunk rather than cloning the entire graph.
+3. **Canonical BLAKE3 Hashing**: Invariant-preserving canonical hash calculation across nodes and edges, providing instantaneous equality checks and deterministic state validation.
+4. **Transparent Python Interop**: `NativeGraphAdapter` implements the standard Python dictionary / HCIR graph interface with transparent fallback when native extensions are not compiled.
+
+---
+
 ## Brain Lifecycle Integration
 
 The HCIR Cognitive OS is wired into the Brain lifecycle via `BrainFactory`:
