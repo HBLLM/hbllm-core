@@ -90,8 +90,20 @@ And it has the **safety instincts of a responsible person** — it knows when it
 <p>Domain-neutral autonomous discovery: hypothesis generation, evidence evaluation, Bayesian belief revision, prediction tracking, counterfactual reasoning, and meta-epistemic self-calibration. The system reasons about its own reasoning. <a href="architecture/epistemics.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
-<h3>🧩 Cognitive Execution Runtime (A12)</h3>
+<h3>🧩 Cognitive Execution Runtime</h3>
 <p>13 composable reasoning operators (deduction, induction, abduction, temporal, spatial, analogy, causal, prediction, active inference, simulation, SNN) executing over immutable HCIR state with zero LLM dependency, strict resource budgets, and deterministic replay. <a href="architecture/cognitive-execution-runtime.md">Architecture &rarr;</a></p>
+</div>
+<div class="feature-card">
+<h3>🔄 Relational Transfer Engine</h3>
+<p>Deep analogical structure mapping across disparate domains. Extracts evidence-backed relational schemas and validates structural constraints while resisting surface attribute distraction.</p>
+</div>
+<div class="feature-card">
+<h3>🧭 Explicit Metacognitive Self-Model</h3>
+<p>Introspectively models system competence boundaries, quadratic Brier and ECE calibration, cognitive load throttling penalties, and event-driven strategy switching state machines. <a href="architecture/self-model.md">Architecture &rarr;</a></p>
+</div>
+<div class="feature-card">
+<h3>♾️ Lifelong Continual Learning Substrate</h3>
+<p>Three-layer memory hierarchy (Fast Episodic, Slow Consolidated, Immutable Provenance) with tri-modal sleep replay, provenance-preserving compaction, and stability gates for lifelong knowledge accumulation without catastrophic forgetting. <a href="architecture/sleep-cycle.md">Architecture &rarr;</a></p>
 </div>
 </div>
 

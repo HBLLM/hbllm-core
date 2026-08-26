@@ -1,155 +1,149 @@
----
-title: "Sleep Cycle & Continuous Learning"
-description: "How Human Brain LLM (HBLLM) uses biologically inspired sleep cycles to consolidate memory, prune noise, and strengthen neural patterns across sessions."
----
+# Lifelong Continual Learning & Sleep Consolidation Substrate
 
-# Sleep Cycle & Continuous Learning
+The **Lifelong Continual Learning Substrate** enables HBLLM to accumulate experience, concepts, vocabulary, and relational schemas across long operating lifetimes without catastrophic forgetting, representational drift, or unchecked graph entropy.
 
-In the **Human Brain LLM (HBLLM)** architecture, the **Sleep Cycle** is not just a background task — it is the fundamental mechanism for **Long-term Potentiation** and model refinement. 
-
-Unlike stateless LLMs that forget every interaction after the session ends, HBLLM uses designated "idle periods" to consolidate information, refine its reasoning, and grow its intelligence.
-
----
-
-## Biological Inspiration: The Multi-Stage Consolidation
-
-Human brains use sleep to move information from short-term hippocampus storage to long-term cortical networks. HBLLM mirrors this with a **multi-stage Sleep Cycle** orchestrated by the `SleepCycleNode`.
-
-### Stage 1: Memory Replay & Consolidation (NREM)
-**Code:** `_consolidate_memory()`
-
-During the day, raw interaction logs are stored as **EpisodeNode** entries in the HCIR Working Workspace Tier. During sleep:
-1.  **Selective Replay:** The system re-reads the most salient dialogue turns (`EpisodeNode`) from the active session.
-2.  **Semantic Synthesis:** The backbone synthesizes these into high-level **ConceptNode** entries in the HCIR Persistent Tier.
-3.  **GraphRAG Clustering:** Entities and relations are extracted and clustered into thematic **BeliefNode** communities in the HCIR graph workspace.
-4.  **Synaptic Pruning:** Low-salience or redundant nodes are archived, keeping the live graph space efficient.
-
-### Stage 1.6: Temporal Normalization
-**Code:** `_normalize_temporal_references()`
-
-Relative time references in stored memories become stale and misleading over time. During this sub-stage:
-- Episodic memory entries are scanned for temporal keywords ("yesterday", "last week", "recently").
-- Each relative reference is annotated with an absolute date (e.g., `yesterday (2026-05-06)`) based on the memory entry's original timestamp.
-- The `temporal-reasoning` plugin's parser (`parse_temporal_references()`) is reused for detection.
-
-### Stage 1.7: Contradiction Resolution
-**Code:** `_resolve_contradictions()`
-
-As the Knowledge Graph grows, contradictory facts can accumulate (e.g., "user prefers dark mode" vs "user prefers light mode"). This sub-stage:
-- Scans all KG relations grouped by `(source, relation_type)`.
-- Detects conflicts where inherently-exclusive relation types (`prefers`, `is_a`, `has`) have multiple targets from the same source.
-- Resolves by keeping the **most recently created** fact and pruning stale entries.
-
-### Stage 1.8: Knowledge Staleness Audit
-**Code:** `_audit_knowledge_staleness()`
-
-Scan web-sourced knowledge for entries past their Time-To-Live (TTL, e.g., 30 days).
-- Stale entries are flagged as obsolete on the bus.
-- This tells the cognitive loop to hedge or re-verify when using this old web context in active sessions.
-
-### Stage 1.9: Task Knowledge Promotion (T2 → T3)
-**Code:** `_promote_task_knowledge()`
-
-Scan episodic memory for task-scoped web research (Tier 2) that was accessed frequently across sessions (e.g., at least 3 times).
-- Promotes high-utility web context to core long-term knowledge (Tier 3) for permanent offline storage.
-- Ensures highly relevant search results are kept local for future sessions without re-searching.
-
-### Stage 2: Artificial Neuroplasticity (Continuous DPO) — REM
-**Code:** `_run_self_improvement()`
-
-This is where the brain's weights actually change.
-- **DPO Queue:** Feedback from the `CriticNode` and `ValueMemory` is collected into an atomic JSON queue throughout the day.
-- **Contrastive Learning:** The `LearnerNode` triggers a **Direct Preference Optimization (DPO)** loop, penalizing "rejected" (criticized) paths and strengthening "chosen" (validated) paths.
-- **Read-Only Preservation (Zero Catastrophic Forgetting):** To prevent breaking the core model, the base model and *all downloaded domain adapters* are kept strictly **read-only**.
-- **Isolation:** DPO training happens locally and exclusively on a dynamically created `personalization` adapter, ensuring that private learning never leaks to other users or corrupts established domains.
-
-### Stage 2b: Skill Optimization
-**Code:** `_optimize_skills()`
-
-Identify flaky, low-success, or inefficient procedural skills from active sessions.
-- Automatically re-plays and optimizes custom skills in the Skill Registry.
-- Allows the system to repair its code execution routines overnight.
-
-### Stage 3: Curiosity-Driven Exploration
-**Code:** `_replay_curiosity_goals()`
-
-If the `CuriosityNode` identified knowledge gaps or "exploratory goals" during the day, they are replayed here.
-- The system generates research queries based on these gaps.
-- It "imagines" potential scenarios or searches its internal Knowledge Graph to bridge conceptual distances.
-- Resulting insights are stored back in **Semantic Memory**, ready for the next active session.
-
-### Stage 4: Dream Journal
-**Code:** `_generate_dream_journal()`
-
-After all stages complete, the system generates a human-readable **Dream Journal** summarizing everything it learned:
-- How many memories were compressed into long-term storage
-- How many temporal references were normalized
-- How many contradictions were resolved
-- Whether DPO training ran and what it learned
-- How many custom skills were optimized
-- How many curiosity gaps were explored
-
-The Dream Journal is stored in episodic memory and included in the `system.sleep.report` event payload, enabling any UI to display a "here's what I learned while you were away" experience.
-
-### Stage 5: Proactive Memory Warming
-**Code:** `_warm_memory_cache()`
-
-To eliminate latency when a user begins a new active session:
-- Pre-loads recent conversation topics and the last session summary into the memory fast-path cache.
-- Ensures the system "remembers" context on wakeup immediately without waiting for standard retrieval queries.
+```text
+                                REAL-WORLD INTERACTION
+                                          │
+                                          ▼
+                               Fast Episodic Buffer (Fast)
+                                          │
+                                          ▼
+                         Metacognitive Salience Filter
+                                          │
+                                          ▼
+                             SLEEP CONSOLIDATION ENGINE
+                                          │
+                  ┌───────────────────────┼───────────────────────┐
+                  ▼                       ▼                       ▼
+             Error Replay           Success Replay        Contrastive Replay
+         (Discover boundaries)   (Consolidate schemas)   (Isolate critical deltas)
+                  │                       │                       │
+                  └───────────────────────┼───────────────────────┘
+                                          ▼
+                             Adaptive Semantic Folding
+                       (Provenance-Preserving Compaction)
+                                          │
+                                          ▼
+                               Candidate Knowledge Update
+                                          │
+                                    STABILITY GATE
+                                          │
+                    ┌─────────────────────┴─────────────────────┐
+                    ▼                                           ▼
+             Update Accepted                             Update Rejected
+                    │                                           │
+                    ▼                                           ▼
+         Slow Consolidated Store                     Preserve Mature State
+    (Concepts, Schemas, Lexicon, Profiles)
+                    │
+                    └─────────────────────┬─────────────────────┘
+                                          ▼
+                        IMMUTABLE EVIDENCE & PROVENANCE
+```
 
 ---
 
-## Execution & Triggers
+## 1. The Three-Layer Memory Model
 
-The Sleep Cycle can be triggered in three ways:
+The architecture enforces a strict three-tier memory separation:
 
-### 1. Auto-Trigger (Idle Timeout)
-The `SleepCycleNode` monitors the message bus. If no `router.query` is detected for a configurable duration (default: 6 hours), the system automatically enters deep sleep.
-- **Wake-on-Activity:** If a user query arrives during sleep, the system immediately aborts the cycle and wakes up to provide sub-millisecond response time.
+| Memory Layer | Storage Characteristics | Cognitive Role |
+| :--- | :--- | :--- |
+| **`FAST_EPISODIC`** | In-memory transient buffer, cleared post-consolidation | Captures high-resolution raw interaction traces, sensory observations, and immediate execution steps. |
+| **`SLOW_CONSOLIDATED`** | Durable, compacted knowledge store with semantic indexing | Houses generalized conceptual prototypes, relational schemas, grounded vocabulary, and competence profiles. |
+| **`IMMUTABLE_PROVENANCE`** | Append-only, cryptographically hashed event log | The ultimate authoritative source of truth; justifies consolidated knowledge and enables exact historical state reconstruction. |
 
-### 2. Manual Trigger via Bus (`/dream`)
-Any node or CLI can publish to `system.sleep.force` to trigger an immediate consolidation cycle:
+### The Epistemic Invariant: Compaction $\ne$ Forgetting
+Slow consolidated knowledge is an efficient cognitive summary; the immutable evidence log remains the epistemic justification:
+> *"A compact abstraction does not have to contain every original detail to remain explainable, because it retains explicit provenance pointers (`source_event_ids: [E1, E2, ...]`) back to immutable evidence."*
+
+---
+
+## 2. Tri-Modal Offline Sleep Replay (`SleepReplayEngine`)
+
+During offline sleep cycles, the replay engine executes non-destructive mental simulations across three complementary modalities:
+
+1. **Error Replay**:
+   - Replays episodes with high prediction error ($PE \ge 0.50$) to diagnose failure boundaries and identify missing physical constraints.
+2. **Success Replay**:
+   - Replays novel successful trajectories to synthesize generalized, reusable action schemas.
+3. **Contrastive Replay**:
+   - Pairs near-identical action sequences that produced divergent physical outcomes (e.g. stacking on flat support vs stacking on curved support) to isolate distinguishing structural invariants:
+     $$\text{Isolated Delta} = \Delta(\text{Success Context}, \text{Failure Context})$$
+
+---
+
+## 3. Provenance-Preserving Adaptive Compaction (`ProvenancePreservingCompactor`)
+
+Raw episodic graphs are folded into compact schemas under a strict four-part verification contract:
+
+1. **Behavioral Invariants Preserved**: Consolidated schemas faithfully reproduce successful episodic action plans.
+2. **Predictive Invariants Preserved**: Precondition constraints capture all necessary physical support conditions.
+3. **Causal Invariants Preserved**: Pre-state to post-state causal links remain intact.
+4. **Provenance Preserved**: Every source event ID is reachable in the authoritative immutable log.
+
+Compression ratios adapt dynamically to preserve all necessary invariants rather than enforcing a destructive fixed quota.
+
+---
+
+## 4. Dependency-Aware Stability Gate (`PlasticityStabilityEngine`)
+
+Before any candidate schema or concept update is committed to the slow consolidated store, the Stability Gate performs targeted dependency analysis:
+
+```text
+                  Candidate Knowledge Update
+                              │
+                              ▼
+                     Dependency Analysis
+                              │
+                     Targeted Regression
+                              │
+               ┌──────────────┼──────────────┐
+               ▼              ▼              ▼
+           ACCEPTED     SPECIALIZATION    REVISION
+         (Zero loss)  (Boundary narrow) (Error fix)
+               │              │              │
+               └──────────────┼──────────────┘
+                              ▼
+                     Commit to Slow Store
+```
+
+### Gate Decisions
+- **`ACCEPTED`**: Clean improvement preserving historical knowledge integrity.
+- **`EXPECTED_SPECIALIZATION`**: Legitimate boundary narrowing to exclude incompatible physical regimes.
+- **`BENEFICIAL_REVISION`**: Correction of previously flawed knowledge triggered by contradictory evidence.
+- **`REJECTED_REGRESSION`**: Collateral accuracy degradation on unrelated mature domains $\to$ Update rejected.
+
+---
+
+## 5. Versioned Knowledge Revisions
+
+Mature knowledge is never overwritten in place. Revisions are tracked monotonically with full rollback capabilities:
 
 ```python
-# Programmatic trigger (equivalent to Claude's /dream)
-await bus.publish(
-    "system.sleep.force",
-    Message(type=MessageType.QUERY, source_node_id="cli", topic="system.sleep.force", payload={}),
-)
-```
-
-### 3. REST API Trigger
-For SaaS platforms, you can manually trigger a consolidation cycle for a specific tenant:
-
-```bash
-# Example REST API Trigger
-curl -X POST "https://api.hbllm.ai/v1/system/sleep" \
-     -H "Authorization: Bearer <TOKEN>" \
-     -d '{"tenant_id": "tenant-001", "mode": "deep"}'
+@dataclass
+class VersionedKnowledgeRecord:
+    knowledge_id: str
+    knowledge_type: str
+    revision: int = 1
+    supersedes_revision: int | None = None
+    revision_reason: str = "initial_induction"
+    content: dict[str, Any] = field(default_factory=dict)
+    source_event_ids: list[str] = field(default_factory=list)
+    confidence: float = 0.75
+    created_at: float = field(default_factory=time.time)
 ```
 
 ---
 
-## Architectural Advantages
+## 6. Lifelong Multi-Task Retention Evaluation
 
-| Feature | Monolithic LLM (OpenAI/Claude) | HBLLM (Human Brain) |
-|---|---|---|
-| **Memory** | Flat text files (MEMORY.md) | **Structured GraphRAG + 5-tier Memory** |
-| **Learning** | None (no weight updates) | **Autonomous Continuous DPO** |
-| **Contradiction Resolution** | Text dedup only | **KG-level semantic resolution** |
-| **Temporal Normalization** | Relative → absolute dates | **Plugin-powered with absolute annotation** |
-| **Curiosity** | None | **Autonomous knowledge gap exploration** |
-| **Hardware** | Constant 80GB+ VRAM | **Low-VRAM (Inference) / Batch (Sleep)** |
-| **Privacy** | Shared Global Weights | **Per-Tenant Neural Isolation** |
-| **Observability** | `/dream` command | **Dream Journal with structured reporting** |
-| **Evolution** | Static until next release | **Grows smarter every sleep cycle** |
+Lifelong continual learning evaluates performance across sequential task curricula ($T_1 \to \dots \to T_N$) using the full task-performance matrix $R_{i,j}$:
 
----
+$$R_{i,j} = \text{Performance on task } j \text{ after learning task } i$$
 
-## Performance Considerations
-
-- **VRAM/CPU Offset:** Consolidation is a batch process. It is configured to run at low priority (nice level) to ensure it doesn't starve the host OS of resources.
-- **Incremental:** The system only processes *new* memories since the last sleep cycle, keeping each cycle duration predictable.
-- **Safety:** The `SentinelNode` monitors sleep-cycle training to ensure the model doesn't "drift" into unstable or unethical states during autonomous refinement.
-
+- **Backward Transfer ($\text{BWT}$)**: Quantifies retention of earlier tasks:
+  $$\text{BWT} = \frac{1}{T - 1} \sum_{j=1}^{T-1} (R_{T, j} - R_{j, j}) \ge 0.0$$
+- **Forward Transfer ($\text{FWT}$)**: Quantifies accelerated learning on novel tasks:
+  $$\text{FWT} = \frac{1}{T - 1} \sum_{j=2}^{T} (R_{j-1, j} - b_j) > 0.0$$

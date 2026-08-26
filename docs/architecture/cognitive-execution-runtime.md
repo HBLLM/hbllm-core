@@ -1,5 +1,5 @@
 ---
-title: "Cognitive Execution Runtime — Composable Reasoning Substrate (A12)"
+title: "Cognitive Execution Runtime — Composable Reasoning Substrate"
 description: "Architecture deep-dive into HBLLM's Cognitive Execution Runtime: 13 composable reasoning operators, immutable HCIR views, deterministic replay, resource budgets, and zero LLM dependency."
 ---
 
@@ -41,7 +41,7 @@ The **Cognitive Execution Runtime** (`hbllm.brain.reasoning`) is the CPU-like ex
 
 ## Architectural Principles & Invariants
 
-A12 establishes seven fundamental invariants that decouple reasoning execution from state ownership and large language model inference:
+The runtime establishes seven fundamental invariants that decouple reasoning execution from state ownership and large language model inference:
 
 ### 1. State Ownership Invariant
 > *"No intelligence subsystem owns reality. HCIR owns the canonical cognitive state."*
@@ -67,7 +67,7 @@ This guarantees **cognitive reproducibility**: given the exact same context hash
 Every operator declares `estimated_cost(problem, context)`. The `UnifiedReasoningRuntime` enforces monotonic budget decrements across wall-clock milliseconds, nodes read, edges traversed, and simulation steps. If a budget expires mid-pipeline, the runtime safely stops further operator dispatches and merges the partial conclusions reached so far.
 
 ### 4. Zero LLM Dependency (LLM-Free Cognitive Core)
-Every reasoning operator in the cognitive core is **Level 1 (L1) LLM-independent**:
+Every reasoning operator in the cognitive core is **LLM-independent**:
 - Formal logic, constraint solving, graph traversal, statistical induction, structure-mapping analogies, and neuromorphic SNN evaluation.
 - Static analysis and unit test suites enforce that zero LLM client libraries or models are imported or invoked by the core reasoning operators.
 
@@ -77,18 +77,18 @@ The semantic invariant is that **operators receive an immutable cognitive view**
 ### 6. Two-Dimensional Autonomy Matrix
 HBLLM distinguishes **LLM independence** from **cognitive autonomy**:
 
-| Dimension | Question | A12 Baseline | Target (A22) |
+| Dimension | Question | Core Baseline | Autonomous Substrate |
 |---|---|---|---|
-| **LLM Independence** | Can the subsystem operate without calling an LLM? | 100% (L1) | 100% (L1) |
-| **Cognitive Autonomy** | Can the system discover/learn representations without human hardcoding? | 20% (L2) | 100% (L7) |
+| **LLM Independence** | Can the subsystem operate without calling an LLM? | 100% | 100% |
+| **Cognitive Autonomy** | Can the system discover/learn representations without human hardcoding? | Grounded Operators | Autonomous Concept/Schema Discovery |
 
-A12 establishes complete LLM independence over structured problem classes; subsequent developmental phases (A13–A22) increase cognitive autonomy through grounded world modeling, predictive learning, and concept formation.
+The runtime establishes complete LLM independence over structured problem classes, scaling autonomy through grounded world modeling, predictive learning, and concept formation.
 
 ---
 
 ## The 13 Composable Reasoning Operators
 
-The runtime hosts 13 specialized operators split between new formal inference engines and wrapped legacy brain systems adapted to the A12 contract:
+The runtime hosts 13 specialized operators split between new formal inference engines and wrapped legacy brain systems adapted to the immutable runtime contract:
 
 ```mermaid
 graph TB
@@ -222,7 +222,7 @@ Scenario 2 — Temporal -> Causal Chain:
     Cycle 1 (Temporal): Event ordering [push, roll, collision, stop]
     Cycle 2 (Causal): Discovers multi-hop transitive chain (push causes stop, p=0.612) ✓
 
-Scenario 3 — Object Disappearance (proto-A13):
+Scenario 3 — Object Disappearance and Occlusion:
     Seed: ball visible -> predicted visible -> observed not_visible (PredictionError)
     Cycle 1 (Abduction): Generates occlusion/movement hypotheses (HCIR nodes: 7 -> 13)
     Cycle 2 (Prediction): Predicts next state conditioned on advanced hypotheses ✓

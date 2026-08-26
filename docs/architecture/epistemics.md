@@ -142,7 +142,7 @@ Provider reputation remains strictly **outside the internal belief feedback loop
 ```mermaid
 graph TB
     subgraph "Epistemic Runtime (brain/epistemics/)"
-        subgraph "Perceptual Epistemic Integration (Waves A9–A11)"
+        subgraph "Perceptual Epistemic Integration"
             PEE["PerceptualEvidenceEvaluator\n(signal quality & reliability)"]
             TEM["TemporalEvidenceModel\n(novelty & pattern classification)"]
             ELE["EpistemicLikelihoodEvaluator\n(odds-space LR_effective)"]
@@ -199,7 +199,7 @@ graph TB
 
 ## Module Inventory
 
-### Wave A9–A11: Perceptual Epistemics & Scalability
+### Perceptual Epistemics & Scalability
 
 | Module | Lines | Purpose |
 |---|---|---|
@@ -210,7 +210,7 @@ graph TB
 | `belief_manager.py` | 530 | Odds-space Bayesian revision, $(E, H)$ idempotency enforcement, `BeliefTransitionNode` creation. |
 | `reputation.py` | 370 | Three-dimensional source reputation (`signal_quality`, `concordance`, `empirical_accuracy`) with anti-circularity guard. |
 
-### Waves 1–3: Closed Discovery Loop & Meta-Cognition
+### Closed Discovery Loop & Meta-Cognition
 
 | Module | Lines | Purpose |
 |---|---|---|
