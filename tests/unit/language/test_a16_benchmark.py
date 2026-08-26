@@ -17,8 +17,6 @@
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.language.core.epistemic_policy import (
     CognitiveEpistemicState,
 )

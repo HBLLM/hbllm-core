@@ -7,8 +7,6 @@ and the Flagship 5-Stage Interleaved Curriculum Trial proving Zero Catastrophic 
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.continual import (
     CandidateUpdate,
     DualStoreMemory,

@@ -7,8 +7,6 @@ Metacognitive Monitoring State Machine, Strategy Switching, and the Flagship Beh
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.decision import CandidateKind, DecisionCandidate, DecisionEngine, DecisionType
 from hbllm.brain.self_model import (
     CognitiveBudgetManager,

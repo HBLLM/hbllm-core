@@ -7,7 +7,6 @@ multi-criteria DecisionEngine, rational inaction, and the Flagship Epistemic Dis
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from hbllm.brain.decision import (
