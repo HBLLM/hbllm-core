@@ -3,8 +3,8 @@
 //! Performs constraint-satisfaction graph isomorphism to find ranked candidate
 //! variable-to-entity alignments and systematicity scores for analogical transfer.
 
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PatternEdge {
@@ -104,7 +104,11 @@ fn backtrack_match(
                 current_mapping.get(&pe.source_var),
                 current_mapping.get(&pe.target_var),
             ) {
-                if target_edges_set.contains(&(pe.rel_type.clone(), src_node.clone(), tgt_node.clone())) {
+                if target_edges_set.contains(&(
+                    pe.rel_type.clone(),
+                    src_node.clone(),
+                    tgt_node.clone(),
+                )) {
                     matched_count += 1;
                 }
             }
@@ -181,7 +185,11 @@ mod tests {
 
         // Atom target domain: Nucleus, Electron, Wall
         let target = TargetGraph {
-            nodes: vec!["nucleus".to_string(), "electron".to_string(), "wall".to_string()],
+            nodes: vec![
+                "nucleus".to_string(),
+                "electron".to_string(),
+                "wall".to_string(),
+            ],
             edges: vec![
                 TargetEdge {
                     rel_type: "CENTRAL_TO".to_string(),

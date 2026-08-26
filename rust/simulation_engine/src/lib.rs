@@ -4,14 +4,14 @@
 pub mod geometry;
 pub mod rollout;
 
-use std::collections::HashMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use std::collections::HashMap;
 
 use crate::geometry::{evaluate_support_stability as rust_eval_support, FastAABB};
 use crate::rollout::{
-    evaluate_parallel_rollouts as rust_eval_rollouts,
-    ActionStep, BranchSpec, NativeCognitiveRuntime as RustRuntime,
+    evaluate_parallel_rollouts as rust_eval_rollouts, ActionStep, BranchSpec,
+    NativeCognitiveRuntime as RustRuntime,
 };
 
 #[pyclass]
@@ -48,7 +48,8 @@ impl NativeCognitiveRuntime {
         properties: HashMap<String, String>,
         created_at: f64,
     ) {
-        self.inner.add_node(id, node_type, lifecycle, properties, created_at);
+        self.inner
+            .add_node(id, node_type, lifecycle, properties, created_at);
     }
 
     pub fn add_edge(
@@ -61,7 +62,9 @@ impl NativeCognitiveRuntime {
         properties: HashMap<String, String>,
         created_at: f64,
     ) {
-        self.inner.add_edge(id, edge_type, sources, targets, weight, properties, created_at);
+        self.inner.add_edge(
+            id, edge_type, sources, targets, weight, properties, created_at,
+        );
     }
 
     pub fn clear_cache(&self) {
@@ -83,20 +86,56 @@ impl NativeCognitiveRuntime {
         let mut specs = Vec::with_capacity(branches.len());
         for item in branches.iter() {
             let dict: &PyDict = item.extract()?;
-            let branch_id: u32 = dict.get_item("branch_id")?.map(|v| v.extract()).transpose()?.unwrap_or(0);
-            let initial_risk: f64 = dict.get_item("initial_risk")?.map(|v| v.extract()).transpose()?.unwrap_or(0.0);
-            let initial_cost: f64 = dict.get_item("initial_cost")?.map(|v| v.extract()).transpose()?.unwrap_or(0.0);
-            let max_steps: u32 = dict.get_item("max_steps")?.map(|v| v.extract()).transpose()?.unwrap_or(20);
+            let branch_id: u32 = dict
+                .get_item("branch_id")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(0);
+            let initial_risk: f64 = dict
+                .get_item("initial_risk")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(0.0);
+            let initial_cost: f64 = dict
+                .get_item("initial_cost")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(0.0);
+            let max_steps: u32 = dict
+                .get_item("max_steps")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or(20);
 
-            let py_actions: &PyList = dict.get_item("actions")?.map(|v| v.extract()).transpose()?.unwrap_or_else(|| PyList::empty(py));
+            let py_actions: &PyList = dict
+                .get_item("actions")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or_else(|| PyList::empty(py));
             let mut actions = Vec::with_capacity(py_actions.len());
 
             for act_item in py_actions.iter() {
                 let act_dict: &PyDict = act_item.extract()?;
-                let operator: String = act_dict.get_item("operator")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-                let subject: String = act_dict.get_item("subject")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-                let target: String = act_dict.get_item("target")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-                let parameters: HashMap<String, f64> = act_dict.get_item("parameters")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
+                let operator: String = act_dict
+                    .get_item("operator")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or_default();
+                let subject: String = act_dict
+                    .get_item("subject")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or_default();
+                let target: String = act_dict
+                    .get_item("target")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or_default();
+                let parameters: HashMap<String, f64> = act_dict
+                    .get_item("parameters")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or_default();
 
                 actions.push(ActionStep {
                     operator,
@@ -117,9 +156,8 @@ impl NativeCognitiveRuntime {
 
         // 2. Release GIL and evaluate
         let runtime = self.inner.clone();
-        let (results, stats) = py.allow_threads(move || {
-            runtime.evaluate_rollouts(&specs, &seed_hash)
-        });
+        let (results, stats) =
+            py.allow_threads(move || runtime.evaluate_rollouts(&specs, &seed_hash));
 
         // 3. Convert results to Python
         let py_results = PyList::empty(py);
@@ -179,20 +217,56 @@ pub fn evaluate_parallel_rollouts<'py>(
     let mut specs = Vec::with_capacity(branches.len());
     for item in branches.iter() {
         let dict: &PyDict = item.extract()?;
-        let branch_id: u32 = dict.get_item("branch_id")?.map(|v| v.extract()).transpose()?.unwrap_or(0);
-        let initial_risk: f64 = dict.get_item("initial_risk")?.map(|v| v.extract()).transpose()?.unwrap_or(0.0);
-        let initial_cost: f64 = dict.get_item("initial_cost")?.map(|v| v.extract()).transpose()?.unwrap_or(0.0);
-        let max_steps: u32 = dict.get_item("max_steps")?.map(|v| v.extract()).transpose()?.unwrap_or(20);
+        let branch_id: u32 = dict
+            .get_item("branch_id")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(0);
+        let initial_risk: f64 = dict
+            .get_item("initial_risk")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(0.0);
+        let initial_cost: f64 = dict
+            .get_item("initial_cost")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(0.0);
+        let max_steps: u32 = dict
+            .get_item("max_steps")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(20);
 
-        let py_actions: &PyList = dict.get_item("actions")?.map(|v| v.extract()).transpose()?.unwrap_or_else(|| PyList::empty(py));
+        let py_actions: &PyList = dict
+            .get_item("actions")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or_else(|| PyList::empty(py));
         let mut actions = Vec::with_capacity(py_actions.len());
 
         for act_item in py_actions.iter() {
             let act_dict: &PyDict = act_item.extract()?;
-            let operator: String = act_dict.get_item("operator")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-            let subject: String = act_dict.get_item("subject")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-            let target: String = act_dict.get_item("target")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
-            let parameters: HashMap<String, f64> = act_dict.get_item("parameters")?.map(|v| v.extract()).transpose()?.unwrap_or_default();
+            let operator: String = act_dict
+                .get_item("operator")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or_default();
+            let subject: String = act_dict
+                .get_item("subject")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or_default();
+            let target: String = act_dict
+                .get_item("target")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or_default();
+            let parameters: HashMap<String, f64> = act_dict
+                .get_item("parameters")?
+                .map(|v| v.extract())
+                .transpose()?
+                .unwrap_or_default();
 
             actions.push(ActionStep {
                 operator,
@@ -211,9 +285,7 @@ pub fn evaluate_parallel_rollouts<'py>(
         });
     }
 
-    let results = py.allow_threads(move || {
-        rust_eval_rollouts(specs, &seed_hash)
-    });
+    let results = py.allow_threads(move || rust_eval_rollouts(specs, &seed_hash));
 
     let py_results = PyList::empty(py);
     for r in results {

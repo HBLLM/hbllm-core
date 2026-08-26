@@ -7,13 +7,13 @@
 //! 4. Deterministic execution order: results collected strictly in input branch order.
 //! 5. Comprehensive CacheStats tracking hits, misses, transitions, and reuses.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use parking_lot::RwLock;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use hbllm_hcir_graph::graph::{FastNode, FastEdge, GraphState, StateDelta};
+use hbllm_hcir_graph::graph::{FastEdge, FastNode, GraphState, StateDelta};
 use hbllm_hcir_graph::hash::compute_canonical_hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,7 +32,7 @@ impl ActionStep {
         hasher.update(self.subject.as_bytes());
         hasher.update(b":");
         hasher.update(self.target.as_bytes());
-        
+
         let mut sorted_params: Vec<(&String, &f64)> = self.parameters.iter().collect();
         sorted_params.sort_by_key(|(k, _)| *k);
         for (k, v) in sorted_params {
@@ -285,10 +285,7 @@ impl NativeCognitiveRuntime {
 }
 
 /// Standalone fallback function for stateless batch evaluation.
-pub fn evaluate_parallel_rollouts(
-    specs: Vec<BranchSpec>,
-    seed_hash: &str,
-) -> Vec<RolloutResult> {
+pub fn evaluate_parallel_rollouts(specs: Vec<BranchSpec>, seed_hash: &str) -> Vec<RolloutResult> {
     let runtime = NativeCognitiveRuntime::new();
     let (results, _) = runtime.evaluate_rollouts(&specs, seed_hash);
     results
@@ -352,15 +349,16 @@ mod tests {
         };
 
         // First pass (cold cache)
-        let (results_1, stats_1) = runtime.evaluate_rollouts(&[branch_a.clone(), branch_b.clone()], "SEED_1");
+        let (results_1, stats_1) =
+            runtime.evaluate_rollouts(&[branch_a.clone(), branch_b.clone()], "SEED_1");
         assert_eq!(results_1.len(), 2);
         assert_eq!(stats_1.cache_misses, 3); // Action 1 shared (1 miss), Action 2A (1 miss), Action 2B (1 miss)
-        assert_eq!(stats_1.cache_hits, 1);   // Action 1 in Branch B hits cache!
+        assert_eq!(stats_1.cache_hits, 1); // Action 1 in Branch B hits cache!
 
         // Second pass (warm cache)
         let (results_2, stats_2) = runtime.evaluate_rollouts(&[branch_a, branch_b], "SEED_1");
         assert_eq!(results_2.len(), 2);
-        assert_eq!(stats_2.cache_hits, 4);   // All 4 action transitions hit cache!
+        assert_eq!(stats_2.cache_hits, 4); // All 4 action transitions hit cache!
         assert_eq!(stats_2.cache_misses, 0); // Zero misses
     }
 }
