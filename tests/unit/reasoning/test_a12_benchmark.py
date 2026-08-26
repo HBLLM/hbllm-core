@@ -51,6 +51,7 @@ from hbllm.brain.reasoning.operators.analogy import AnalogyOperator
 from hbllm.brain.reasoning.operators.base import (
     OperatorTrace,
     ProblemType,
+    ReasoningOperator,
     ReasoningProblem,
     ResultStatus,
 )
@@ -92,7 +93,7 @@ from hbllm.hcir.types import UncertaintyVector
 def _make_runtime() -> UnifiedReasoningRuntime:
     """Construct a full runtime with all 13 operators registered."""
     registry = OperatorRegistry()
-    for op in [
+    ops: list[ReasoningOperator] = [
         DeductionOperator(),
         InductionOperator(),
         AbductionOperator(),
@@ -105,7 +106,8 @@ def _make_runtime() -> UnifiedReasoningRuntime:
         CausalOperator(),
         SimulationOperator(),
         SNNReasoningOperator(),
-    ]:
+    ]
+    for op in ops:
         registry.register(op)
     return UnifiedReasoningRuntime(registry)
 
@@ -220,7 +222,7 @@ class TestSpatialTransitivity:
             problem_type=ProblemType.SPATIAL,
             problem_id="spatial_transitivity",
             description="Where is ball relative to room?",
-            focus_node_ids=["ball_1", "room_1"],
+            focus_node_ids=("ball_1", "room_1"),
         )
 
         trace = runtime.reason(g, problem)
@@ -333,7 +335,7 @@ class TestTemporalCausalChain:
         causal_problem = ReasoningProblem(
             problem_type=ProblemType.CAUSAL,
             problem_id="causal_chain",
-            focus_node_ids=["evt_push"],
+            focus_node_ids=("evt_push",),
         )
         trace2 = runtime.reason(g, causal_problem)
 
@@ -439,7 +441,7 @@ class TestObjectDisappearance:
         explain_problem = ReasoningProblem(
             problem_type=ProblemType.EXPLANATION,
             problem_id="explain_disappearance",
-            focus_node_ids=[pe.id],
+            focus_node_ids=(pe.id,),
         )
         trace1 = runtime.reason(g, explain_problem)
 
@@ -641,7 +643,7 @@ class TestMultiOperatorPipeline:
             ReasoningProblem(
                 problem_type=ProblemType.CAUSAL,
                 problem_id="cycle_2_causal",
-                focus_node_ids=["evt_observe"],
+                focus_node_ids=("evt_observe",),
             ),
         )
         _apply_transaction(g, trace2)
