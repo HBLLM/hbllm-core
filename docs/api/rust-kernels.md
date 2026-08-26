@@ -1,17 +1,17 @@
 ---
 title: "Rust Kernels — SIMD-Accelerated Native Extensions"
-description: "API reference for all 10 HBLLM Rust-accelerated native crates — compute kernels, tokenizer, data tools, semantic search, knowledge graph, policy evaluation, perception, network utilities, concept extraction, and confidence calibration."
+description: "API reference for all 13 HBLLM Rust-accelerated native crates — compute kernels, tokenizer, data tools, semantic search, knowledge graph, policy evaluation, perception, network utilities, concept extraction, confidence calibration, HCIR graph substrate, simulation engine, and structure matcher."
 ---
 
 # Rust Kernels & SIMD Extensions
 
-HBLLM includes **10 native Rust crates** that provide SIMD-accelerated performance for CPU inference, data processing, tokenization, vector search, graph algorithms, and policy evaluation. These extensions are optional — pure Python fallbacks exist across all components, but the native Rust extensions provide 5× to 50× throughput gains on CPU-only deployments (workstations, Apple Silicon, edge servers).
+HBLLM includes **13 native Rust crates** that provide SIMD-accelerated performance for CPU inference, data processing, tokenization, vector search, graph algorithms, policy evaluation, persistent HCIR graph operations, parallel counterfactual simulation, and analogical structure mapping. These extensions are optional — pure Python fallbacks exist across all components, but the native Rust extensions provide 5× to 100× throughput gains on CPU deployments (workstations, Apple Silicon, edge servers).
 
 **Location:** `rust/`
 
 ---
 
-## 10 Native Crates Index
+## 13 Native Crates Index
 
 | Crate | Directory | Python Module | Purpose | Speedup vs Python |
 |---|---|---|---|---|
@@ -25,6 +25,9 @@ HBLLM includes **10 native Rust crates** that provide SIMD-accelerated performan
 | **`concept_extract`**| `rust/concept_extract/` | `hbllm_concept_extract` | Fast episodic text pattern clustering & rule mining | 8–15× |
 | **`perception`** | `rust/perception/` | `hbllm_perception_rs` | Audio frame preprocessing and vector projection | 12–25× |
 | **`network_utils`** | `rust/network_utils/` | `hbllm_network_utils` | High-throughput binary message framing & serialization | 15–30× |
+| **`hcir_graph`** | `rust/hcir_graph/` | `hbllm_hcir_graph` | Persistent chunked structural-sharing HCIR GraphState with BLAKE3 canonical hashing | 40–100× |
+| **`simulation_engine`** | `rust/simulation_engine/` | `hbllm_simulation_engine` | Resident state multi-branch counterfactual simulation & DAG transition cache | 25–80× |
+| **`structure_matcher`** | `rust/structure_matcher/` | `hbllm_structure_matcher` | Analogical constraint satisfaction mapping & systematicity scoring | 30–60× |
 
 ---
 
@@ -161,9 +164,78 @@ Zero-copy binary message framing, CRC32 checksumming, and protocol buffer serial
 
 ---
 
+## 11. HCIR Graph Substrate (`hbllm_hcir_graph`)
+
+Persistent, chunked structural-sharing graph state representation for HCIR. Provides $O(1)$ snapshots, sub-millisecond clone times, chunk-level copy-on-write isolation, and deterministic BLAKE3 canonical state hashing:
+
+```python
+from hbllm_hcir_graph import NativeGraph
+
+graph = NativeGraph()
+graph.add_node("node_1", "Entity", "ACTIVE", {"name": "ObjectA"}, 1000.0)
+graph.add_node("node_2", "Entity", "ACTIVE", {"name": "ObjectB"}, 1000.0)
+graph.add_edge("e1", "SUPPORTS", ["node_1"], ["node_2"], 1.0, {}, 1000.0)
+
+# O(1) immutable snapshot with chunked structural sharing
+snapshot = graph.snapshot()
+
+# Canonical BLAKE3 hash across nodes and hyperedges
+hash_val = graph.canonical_hash()
+```
+
+---
+
+## 12. Simulation Engine (`hbllm_simulation_engine`)
+
+Resident native cognitive runtime managing parallel multi-branch counterfactual simulation rollouts. Evaluates action sequences across isolated graph branches with zero Python FFI crossing per step, Rayon thread-pool parallelism, 3D bounding-box collision detection, and transition DAG memoization:
+
+```python
+from hbllm_simulation_engine import NativeCognitiveRuntime
+
+runtime = NativeCognitiveRuntime()
+# Run parallel branches across native CPU cores
+results = runtime.evaluate_rollout_branches(
+    branches=[
+        {
+            "branch_id": 1,
+            "actions": [
+                {
+                    "operator": "move",
+                    "subject": "block_a",
+                    "target": "table",
+                    "parameters": {"x": 1.0, "y": 2.0},
+                }
+            ],
+            "initial_risk": 0.0,
+            "initial_cost": 0.0,
+            "max_steps": 5,
+        }
+    ]
+)
+```
+
+---
+
+## 13. Structure Matcher (`hbllm_structure_matcher`)
+
+Analogical constraint-satisfaction graph isomorphism engine. Discovers systematic variable-to-entity mappings and structural alignment scores between source schemas and target domains with backtracking search:
+
+```python
+from hbllm_structure_matcher import match_structures
+
+match_result = match_structures(
+    pattern_edges=[{"rel_type": "REVOLVES_AROUND", "source_var": "planet", "target_var": "sun"}],
+    target_nodes=["electron", "nucleus"],
+    target_edges=[{"rel_type": "REVOLVES_AROUND", "source": "electron", "target": "nucleus"}],
+)
+# Returns mapping: {"planet": "electron", "sun": "nucleus"} with systematicity score
+```
+
+---
+
 ## Building All Crates
 
-Build all 10 Rust extensions using `maturin`:
+Build all 13 Rust extensions using `maturin`:
 
 ```bash
 cd HBLLM/core
