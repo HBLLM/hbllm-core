@@ -6,8 +6,6 @@ evidence, state transitions, contrastive differentiation, and teacher correction
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.language.acquisition import (
     ContrastiveLearner,
     EvidenceSourceType,

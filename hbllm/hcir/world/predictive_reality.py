@@ -69,9 +69,7 @@ class PredictiveRealityModel:
             )
             predictors_used = ["physics", "statistical", "snn", "neural", "llm"]
         else:
-            avg_confidence = (
-                p_conf * 0.42 + snn_conf * 0.32 + st_conf * 0.16 + neu_conf * 0.10
-            )
+            avg_confidence = p_conf * 0.42 + snn_conf * 0.32 + st_conf * 0.16 + neu_conf * 0.10
             predictors_used = ["physics", "statistical", "snn", "neural"]
 
         disagreement = self.disagreement_analyzer.analyze_disagreement(comp_results)

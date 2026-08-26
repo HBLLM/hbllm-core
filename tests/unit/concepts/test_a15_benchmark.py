@@ -20,8 +20,6 @@ All scenarios are zero-LLM.
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.concepts.concept_consolidator import (
     ConceptConsolidator,
     ConsolidationDecision,

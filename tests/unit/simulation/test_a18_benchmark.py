@@ -6,7 +6,6 @@ geometric support reasoning, multi-branch planning, and the flagship obstacle co
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from hbllm.brain.learning.error_classifier import ErrorClassifier, ErrorContext

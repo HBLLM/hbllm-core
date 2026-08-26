@@ -26,8 +26,6 @@ grounded cognitive substrate — running 100% deterministically with ZERO LLMs.
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.concepts.concept_prediction_bridge import ConceptPredictionBridge
 from hbllm.brain.concepts.grounded_concept_registry import GroundedConceptRegistry
 from hbllm.brain.language.core.reference import ReferenceResolver

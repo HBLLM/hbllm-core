@@ -7,8 +7,6 @@ schema Bayesian reinforcement/specialization, and the Flagship Cross-Domain Indu
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.decision import CandidateKind, DecisionCandidate, DecisionEngine, DecisionType
 from hbllm.brain.simulation import MentalSandbox
 from hbllm.brain.transfer import (

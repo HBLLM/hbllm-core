@@ -18,8 +18,6 @@ All scenarios are zero-LLM.
 
 from __future__ import annotations
 
-import sys
-
 from hbllm.brain.learning.adaptation_gate import (
     AdaptationGate,
     ErrorEvidenceAccumulator,
