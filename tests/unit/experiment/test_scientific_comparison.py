@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from hbllm.experiment import (
     AblatedHBLLMCohort,
+    ASTLeakageAuditor,
     CanonicalTaskEnvironment,
     E3_CounterfactualSimulationTask,
     E4_EpistemicCalibrationTask,
@@ -29,6 +30,45 @@ from hbllm.experiment import (
     LLMOnlyCohort,
     PhysicalEnvironmentState,
 )
+
+
+class TestASTLeakageAudit:
+    """Verifies static AST inspection of cognitive operators for hardcoded task heuristics."""
+
+    def test_ast_passes_on_clean_generic_code(self) -> None:
+        auditor = ASTLeakageAuditor()
+        clean_code = """
+def reason_over_supports(entities, relation_graph):
+    for e in entities:
+        if relation_graph.is_supported(e):
+            return "STABLE"
+    return "UNSTABLE"
+"""
+        violations = auditor.audit_source(clean_code, filename="generic_reasoner.py")
+        assert len(violations) == 0
+
+    def test_ast_catches_hardcoded_comparison_token(self) -> None:
+        auditor = ASTLeakageAuditor()
+        cheating_code = """
+def decide_shape(obj_name):
+    if obj_name == "mepo":
+        return "CYLINDER"
+    return "UNKNOWN"
+"""
+        violations = auditor.audit_source(cheating_code, filename="cheating_reasoner.py")
+        assert len(violations) > 0
+        assert any("mepo" in v for v in violations)
+
+    def test_ast_catches_hardcoded_constant_in_body(self) -> None:
+        auditor = ASTLeakageAuditor()
+        cheating_code = """
+def solve_scenario():
+    target = "hollow_cube"
+    return target
+"""
+        violations = auditor.audit_source(cheating_code, filename="hardcoded_target.py")
+        assert len(violations) > 0
+        assert any("hollow_cube" in v for v in violations)
 
 
 class TestLeakageAudit:

@@ -5,6 +5,7 @@ standardized tasks (E1-E7), metrics calculator, independent oracle, leakage audi
 and master report generators.
 """
 
+from hbllm.experiment.ast_audit import ASTLeakageAuditor, ASTViolation
 from hbllm.experiment.cohorts import (
     AblatedHBLLMCohort,
     BaseCohort,
@@ -37,6 +38,8 @@ from hbllm.experiment.tasks import (
 )
 
 __all__ = [
+    "ASTLeakageAuditor",
+    "ASTViolation",
     "AblatedHBLLMCohort",
     "BaseCohort",
     "CanonicalTaskEnvironment",
