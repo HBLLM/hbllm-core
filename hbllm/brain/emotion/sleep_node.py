@@ -70,6 +70,7 @@ class SleepCycleNode(Node):
         event_store: Any = None,  # MemoryEventStore
         belief_graph: Any = None,  # BeliefGraph
         goal_memory: Any = None,  # GoalMemory
+        brain: Any = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -95,6 +96,7 @@ class SleepCycleNode(Node):
         self.event_store = event_store
         self.belief_graph = belief_graph
         self.goal_memory = goal_memory
+        self.brain = brain
 
     @property
     def is_sleeping(self) -> bool:
@@ -580,15 +582,9 @@ class SleepCycleNode(Node):
         consolidated_total = 0
 
         # Find DecisionNode and its ExpressionStream
-        brain = None
-        if self._bus:
-            # Try to get brain reference from state
-            try:
-                from hbllm.serving.state import _state
-
-                brain = _state.get("brain")
-            except Exception as e:
-                logger.warning("[SleepNode] Non-critical error during consolidation phase: %s", e)
+        brain = self.brain
+        if not brain and self._bus and hasattr(self._bus, "_registry"):
+            brain = getattr(self._bus._registry, "brain", None)
 
         if not brain:
             logger.debug("[SleepNode] No brain reference available for SNN consolidation.")

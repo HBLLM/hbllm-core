@@ -13,7 +13,7 @@ description: "A continuously thinking, goal-driven cognitive brain that runs ent
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
 [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-2300%2B%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-6150%2B%20passing-brightgreen.svg)](#)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
