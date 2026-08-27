@@ -93,12 +93,16 @@ class LeakageAuditor:
 
     def __init__(self, prohibited_preloads: set[str] | None = None) -> None:
         self.prohibited_preloads: set[str] = (
-            set(prohibited_preloads) if prohibited_preloads is not None else set(PROHIBITED_TASK_PRELOADS)
+            set(prohibited_preloads)
+            if prohibited_preloads is not None
+            else set(PROHIBITED_TASK_PRELOADS)
         )
 
     def compute_knowledge_hash(self, initial_state: Any) -> str:
         """Compute a deterministic SHA-256 hash of a cohort's initial knowledge state."""
-        state_repr = json.dumps(self._extract_state_dict(initial_state), sort_keys=True, default=str)
+        state_repr = json.dumps(
+            self._extract_state_dict(initial_state), sort_keys=True, default=str
+        )
         return hashlib.sha256(state_repr.encode("utf-8")).hexdigest()
 
     def _extract_state_dict(self, target: Any) -> dict[str, Any]:
@@ -121,7 +125,9 @@ class LeakageAuditor:
                 extracted[attr] = val
             elif hasattr(val, "__dict__"):
                 extracted[attr] = {
-                    k: v for k, v in val.__dict__.items() if not k.startswith("_") and not callable(v)
+                    k: v
+                    for k, v in val.__dict__.items()
+                    if not k.startswith("_") and not callable(v)
                 }
         return extracted
 
@@ -177,18 +183,14 @@ class LeakageAuditor:
             canonical_observation
             if isinstance(canonical_observation, dict)
             else (
-                canonical_observation.__dict__
-                if hasattr(canonical_observation, "__dict__")
-                else {}
+                canonical_observation.__dict__ if hasattr(canonical_observation, "__dict__") else {}
             )
         )
         rec_dict = (
             received_observation
             if isinstance(received_observation, dict)
             else (
-                received_observation.__dict__
-                if hasattr(received_observation, "__dict__")
-                else {}
+                received_observation.__dict__ if hasattr(received_observation, "__dict__") else {}
             )
         )
 
@@ -202,9 +204,7 @@ class LeakageAuditor:
 
         return violations
 
-    def _check_hidden_fields(
-        self, cohort_id: str, data: Any, violations: list[str]
-    ) -> None:
+    def _check_hidden_fields(self, cohort_id: str, data: Any, violations: list[str]) -> None:
         """Recursively scan data structures for forbidden hidden fields."""
         if isinstance(data, dict):
             for k, v in data.items():

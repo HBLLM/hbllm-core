@@ -48,7 +48,9 @@ class TestLeakageAudit:
         canonical_obs = {"step": 1, "entities": [{"id": "e1", "props": {"color": "red"}}]}
         leaked_obs = {
             "step": 1,
-            "entities": [{"id": "e1", "props": {"color": "red", "_oracle_optimal_action": "STACK"}}],
+            "entities": [
+                {"id": "e1", "props": {"color": "red", "_oracle_optimal_action": "STACK"}}
+            ],
         }
 
         violations = auditor.audit_observation_parity("test_cohort", canonical_obs, leaked_obs)
