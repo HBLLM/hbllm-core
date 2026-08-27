@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 from hbllm.actions.tool_memory import ToolMemory
 from hbllm.brain.control.load_manager import LoadManager
 from hbllm.brain.core.provider_adapter import ProviderLLM
+from hbllm.brain.core.result import PipelineResult
 from hbllm.brain.emotion.goal_manager import GoalManager
 from hbllm.brain.emotion.reflection_node import ReflectionNode
 
@@ -67,7 +68,6 @@ from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.cognition_router import CognitionRouter
 from hbllm.network.node import HealthStatus, Node, NodeHealth
 from hbllm.network.registry import ServiceRegistry
-from hbllm.serving.pipeline import PipelineResult
 from hbllm.training.policy_optimizer import PolicyOptimizer
 from hbllm.training.reward_model import RewardModel
 
