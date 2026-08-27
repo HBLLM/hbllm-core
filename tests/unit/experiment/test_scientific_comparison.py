@@ -43,6 +43,18 @@ class TestLeakageAudit:
         assert len(violations) > 0
         assert any("_true_mass" in v for v in violations)
 
+    def test_audit_detects_nested_hidden_field_leakage(self) -> None:
+        auditor = LeakageAuditor()
+        canonical_obs = {"step": 1, "entities": [{"id": "e1", "props": {"color": "red"}}]}
+        leaked_obs = {
+            "step": 1,
+            "entities": [{"id": "e1", "props": {"color": "red", "_oracle_optimal_action": "STACK"}}],
+        }
+
+        violations = auditor.audit_observation_parity("test_cohort", canonical_obs, leaked_obs)
+        assert len(violations) > 0
+        assert any("_oracle_optimal_action" in v for v in violations)
+
     def test_audit_passes_on_clean_initial_state(self) -> None:
         auditor = LeakageAuditor()
         clean_state = {"generic_rules": ["gravity_exists"]}
@@ -50,6 +62,30 @@ class TestLeakageAudit:
         assert report.is_clean
         assert len(report.violations) == 0
         assert len(report.initial_knowledge_hash) == 64
+
+    def test_audit_live_cohort_instances_clean(self) -> None:
+        auditor = LeakageAuditor()
+        cohorts = [HBLLMCoreCohort(), HBLLMPlusLLMCohort(), LLMOnlyCohort()]
+        report = auditor.run_full_audit(cohorts)
+        assert report.is_clean
+        assert len(report.violations) == 0
+        assert len(report.audited_cohorts) == 3
+
+    def test_audit_catches_preloaded_task_token(self) -> None:
+        auditor = LeakageAuditor()
+        contaminated_cohort = HBLLMCoreCohort()
+        contaminated_cohort.concept_memory = {"mepo": "cube"}  # Cheat preload
+        report = auditor.run_full_audit([contaminated_cohort])
+        assert not report.is_clean
+        assert any("mepo" in v for v in report.violations)
+
+    def test_audit_catches_oracle_reference_on_cohort(self) -> None:
+        auditor = LeakageAuditor()
+        contaminated_cohort = HBLLMCoreCohort()
+        contaminated_cohort.oracle = IndependentEnvironmentOracle()  # Direct oracle cheat
+        report = auditor.run_full_audit([contaminated_cohort])
+        assert not report.is_clean
+        assert any("oracle" in v.lower() for v in report.violations)
 
 
 class TestIndependentOracle:

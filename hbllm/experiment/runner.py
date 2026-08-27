@@ -72,9 +72,14 @@ class ExperimentRunner:
 
         # 1. Pre-flight Leakage Audit
         cohort_instances = [fn() for fn in cohort_constructors.values()]
-        cohort_states = {c.cohort_id: {"memory_len": 0} for c in cohort_instances}
-        audit_report = self.auditor.run_full_audit(cohort_states, {})
+        audit_report = self.auditor.run_full_audit(cohort_instances, tasks)
         self.manifest.initial_knowledge_hash = audit_report.initial_knowledge_hash
+        if not audit_report.is_clean:
+            logger.warning(
+                "Pre-flight leakage audit found %d violations: %s",
+                len(audit_report.violations),
+                audit_report.violations,
+            )
 
         # 2. Execute Primary Cohort Tasks across seeds
         # seed -> cohort_id -> task_id -> TaskEvaluationResult

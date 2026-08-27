@@ -9,8 +9,8 @@
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
   [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-4200%2B%20passing-brightgreen.svg)](#)
-  [![Files](https://img.shields.io/badge/Source-674%20modules-purple.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-6150%2B%20passing-brightgreen.svg)](#)
+  [![Files](https://img.shields.io/badge/Source-840%2B%20modules-purple.svg)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
@@ -117,11 +117,11 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          HBLLM Core (421 files)                     │
+│                     HBLLM Core (848 modules, 1320 source files)     │
 │                                                                     │
 │  ┌──────────┐  ┌─────────────────┐  ┌───────────────────────────┐  │
 │  │Perception│  │   Message Bus   │  │     Security & Governance │  │
-│  │ (23 files│  │   (43 files)    │  │       (14 files)          │  │
+│  │ (38 files│  │   (48 files)    │  │       (24 files)          │  │
 │  │ STT,TTS, │  │ InProcess/Redis │  │ PII, VoiceAuth, Policy,  │  │
 │  │ Vision,  │  │ Trust,Registry  │  │ Audit, Tenant Guard      │  │
 │  │ Gesture) │  │                 │  │                           │  │
@@ -129,7 +129,7 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 │       │                │     │                                      │
 │       ▼                ▼     │                                      │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                    Brain Layer (166 files)                   │   │
+│  │                    Brain Layer (220+ files)                 │   │
 │  │                                                             │   │
 │  │  Cognitive Loop    SNN Stream       Autonomy & Executive    │   │
 │  │  ├─ Router         ├─ Comprehension ├─ AutonomyCore         │   │
@@ -150,7 +150,7 @@ A policy engine blocks harmful actions, every decision is audited, and the syste
 │       ▼                                                             │
 │  ┌────────────┐  ┌──────────┐  ┌─────────┐  ┌──────────────────┐  │
 │  │  Memory    │  │ Actions  │  │ Serving │  │  Model/Training  │  │
-│  │ (18 files) │  │(20 files)│  │(39 files│  │   (27 files)     │  │
+│  │ (45 files) │  │(32 files)│  │(58 files│  │   (42 files)     │  │
 │  │ 9 types   │  │ Sandbox, │  │ HTTP,WS,│  │ Transformer,     │  │
 │  │ + search  │  │ IoT,MCP, │  │ Studio, │  │ Quant, DPO,      │  │
 │  │ + compact │  │ Browser  │  │ SSE     │  │ Tokenizer        │  │
@@ -166,7 +166,7 @@ HBLLM Core is a **fully platform-independent cognitive library** with zero depen
 
 | Layer | Responsibility | Location |
 |-------|---------------|----------|
-| **Core** | Cognitive nodes, memory, bus, agent executor, plugins | `hbllm/` (421 files) |
+| **Core** | Cognitive nodes, memory, bus, agent executor, plugins | `hbllm/` (848 modules) |
 | **Platform Bridge** | UI, config, persistence, platform-specific tools | External (e.g. [Sentra](../sentra/)) |
 | **Plugins** | Modular cognitive extensions | `hbllm/plugins/` |
 
