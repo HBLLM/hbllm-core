@@ -355,17 +355,22 @@ mod tests {
             max_steps: 10,
         };
 
-        // First pass (cold cache)
-        let (results_1, stats_1) =
-            runtime.evaluate_rollouts(&[branch_a.clone(), branch_b.clone()], "SEED_1");
-        assert_eq!(results_1.len(), 2);
-        assert_eq!(stats_1.cache_misses, 3); // Action 1 shared (1 miss), Action 2A (1 miss), Action 2B (1 miss)
-        assert_eq!(stats_1.cache_hits, 1); // Action 1 in Branch B hits cache!
+        // Pass 1: Cold cache evaluation of branch_a
+        let (results_1, stats_1) = runtime.evaluate_rollouts(&[branch_a.clone()], "SEED_1");
+        assert_eq!(results_1.len(), 1);
+        assert_eq!(stats_1.cache_misses, 2); // Action 1 + Action 2A
+        assert_eq!(stats_1.cache_hits, 0);
 
-        // Second pass (warm cache)
-        let (results_2, stats_2) = runtime.evaluate_rollouts(&[branch_a, branch_b], "SEED_1");
-        assert_eq!(results_2.len(), 2);
-        assert_eq!(stats_2.cache_hits, 4); // All 4 action transitions hit cache!
-        assert_eq!(stats_2.cache_misses, 0); // Zero misses
+        // Pass 2: Branch B shares prefix Action 1 (MOVE) with branch_a
+        let (results_2, stats_2) = runtime.evaluate_rollouts(&[branch_b.clone()], "SEED_1");
+        assert_eq!(results_2.len(), 1);
+        assert_eq!(stats_2.cache_hits, 1); // Action 1 (MOVE) hits cache!
+        assert_eq!(stats_2.cache_misses, 1); // Action 2B (PROBE) is a miss
+
+        // Pass 3: Warm cache evaluation of both branches concurrently
+        let (results_3, stats_3) = runtime.evaluate_rollouts(&[branch_a, branch_b], "SEED_1");
+        assert_eq!(results_3.len(), 2);
+        assert_eq!(stats_3.cache_hits, 4); // All 4 action transitions hit cache!
+        assert_eq!(stats_3.cache_misses, 0); // Zero misses
     }
 }
