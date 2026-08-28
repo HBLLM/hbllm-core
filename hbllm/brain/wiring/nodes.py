@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.serving.provider import LLMProvider
 
 from hbllm.brain.core.provider_adapter import ProviderLLM
 from hbllm.brain.governance.policy_engine import PolicyEngine
 from hbllm.brain.skills.skill_registry import SkillRegistry
 from hbllm.brain.wiring.snn import wire_comprehension_stream, wire_expression_stream
 from hbllm.network.node import Node
-from hbllm.serving.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 

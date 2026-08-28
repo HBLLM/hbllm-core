@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Python bindings
-pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py311"] }
+pyo3 = { version = "0.20.0", features = ["abi3-py311"] }
 
 # ONNX Runtime
 ort = { version = "2.0.0-rc.9", features = ["load-dynamic", "ndarray"] }
@@ -23,3 +23,7 @@ ndarray = "0.17.2"
 
 # Parallelism
 rayon = "1.8.0"
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]

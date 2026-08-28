@@ -24,11 +24,13 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from hbllm.serving.provider import LLMProvider, LLMResponse
 
 from hbllm.runtime.providers.capability import ProviderCapability
 from hbllm.runtime.providers.cognition import CognitionRequest, ThoughtResult
-from hbllm.serving.provider import LLMProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
 

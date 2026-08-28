@@ -25,7 +25,6 @@ from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.network.cognition_router import CognitionRouter
 from hbllm.network.node import Node
 from hbllm.network.registry import ServiceRegistry
-from hbllm.serving.token_optimizer import TokenOptimizer
 from hbllm.training.policy_optimizer import PolicyOptimizer
 from hbllm.training.reward_model import RewardModel
 
@@ -157,6 +156,8 @@ async def wire_optional_subsystems(
         brain.cognitive_metrics = CognitiveMetrics(data_dir=cfg.data_dir)
 
     if cfg.inject_cost_optimizer:
+        from hbllm.serving.token_optimizer import TokenOptimizer
+
         brain.token_optimizer = TokenOptimizer()
 
     if cfg.inject_policy_engine:

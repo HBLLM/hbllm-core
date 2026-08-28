@@ -12,6 +12,7 @@ E7: Lifelong Continual Curriculum (Sequential T1..T5, Full 5x5 R_{i,j} Matrix)
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,25 +53,62 @@ class TaskEvaluationResult:
 class E1_ConceptAcquisitionTask:  # noqa: N801
     """E1: Grounded Concept Acquisition. Evaluates sample efficiency N_tau to achieve >= 0.80 accuracy."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
+        all_shapes = ["cylinder", "cube", "sphere", "cone", "pyramid", "torus"]
+        all_colors = ["blue", "red", "green", "yellow", "purple", "cyan"]
+
+        target_shape = rng.choice(all_shapes)
+        target_color = rng.choice(all_colors)
+
+        # Generate seed-dependent training and testing pools
         train_pool = [
-            {"id": "item_1", "shape": "cylinder", "color": "blue", "is_concept": True},
-            {"id": "item_2", "shape": "cube", "color": "blue", "is_concept": False},
-            {"id": "item_3", "shape": "cylinder", "color": "red", "is_concept": False},
-            {"id": "item_4", "shape": "sphere", "color": "green", "is_concept": False},
+            {
+                "id": f"tr_{i}",
+                "shape": s,
+                "color": c,
+                "is_concept": (s == target_shape and c == target_color),
+            }
+            for i, (s, c) in enumerate(
+                [
+                    (target_shape, target_color),
+                    (rng.choice([s for s in all_shapes if s != target_shape]), target_color),
+                    (target_shape, rng.choice([c for c in all_colors if c != target_color])),
+                    (
+                        rng.choice([s for s in all_shapes if s != target_shape]),
+                        rng.choice([c for c in all_colors if c != target_color]),
+                    ),
+                ]
+            )
         ]
         test_pool = [
-            {"id": "t1", "shape": "cylinder", "color": "blue", "is_concept": True},
-            {"id": "t2", "shape": "cylinder", "color": "blue", "is_concept": True},
-            {"id": "t3", "shape": "cube", "color": "blue", "is_concept": False},
-            {"id": "t4", "shape": "cylinder", "color": "green", "is_concept": False},
-            {"id": "t5", "shape": "sphere", "color": "blue", "is_concept": False},
+            {
+                "id": f"ts_{i}",
+                "shape": s,
+                "color": c,
+                "is_concept": (s == target_shape and c == target_color),
+            }
+            for i, (s, c) in enumerate(
+                [
+                    (target_shape, target_color),
+                    (target_shape, target_color),
+                    (rng.choice([s for s in all_shapes if s != target_shape]), target_color),
+                    (target_shape, rng.choice([c for c in all_colors if c != target_color])),
+                    (
+                        rng.choice([s for s in all_shapes if s != target_shape]),
+                        rng.choice([c for c in all_colors if c != target_color]),
+                    ),
+                ]
+            )
         ]
+
+        train_order = list(train_pool)
+        rng.shuffle(train_order)
 
         accuracies = []
         for ep in range(10):
-            train_item = train_pool[ep % len(train_pool)]
+            train_item = train_order[ep % len(train_order)]
             obs = EnvironmentObservation(
                 step_index=ep,
                 visible_entities=[
@@ -140,80 +178,87 @@ class E1_ConceptAcquisitionTask:  # noqa: N801
 class E2_LexicalAcquisitionTask:  # noqa: N801
     """E2: Artificial Lexical Acquisition. Fast-mapping novel artificial tokens ('mepo', 'dax')."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
+        token_pool = ["dax", "mepo", "blicket", "koba", "fep", "toma"]
+        chosen_tokens = rng.sample(token_pool, 2)
+        tok_1, tok_2 = chosen_tokens[0], chosen_tokens[1]
+
         scenes: list[dict[str, Any]] = [
             {
-                "token": "dax",
+                "token": tok_1,
                 "target": "cylinder",
                 "entities": [{"id": "e1", "type": "cylinder"}, {"id": "e2", "type": "cube"}],
             },
             {
-                "token": "mepo",
+                "token": tok_2,
                 "target": "cube",
                 "entities": [{"id": "e3", "type": "cube"}, {"id": "e4", "type": "sphere"}],
             },
             {
-                "token": "dax",
+                "token": tok_1,
                 "target": "cylinder",
                 "entities": [{"id": "e5", "type": "cylinder"}, {"id": "e6", "type": "cone"}],
             },
             {
-                "token": "mepo",
+                "token": tok_2,
                 "target": "cube",
                 "entities": [{"id": "e7", "type": "cube"}, {"id": "e8", "type": "pyramid"}],
             },
         ]
         test_items: list[dict[str, Any]] = [
             {
-                "token": "dax",
+                "token": tok_1,
                 "expected": "cylinder",
                 "entities": [{"id": "t1", "type": "cylinder"}, {"id": "t2", "type": "sphere"}],
             },
             {
-                "token": "mepo",
+                "token": tok_2,
                 "expected": "cube",
                 "entities": [{"id": "t3", "type": "cube"}, {"id": "t4", "type": "cone"}],
             },
         ]
 
+        scenes_order = rng.sample(scenes, len(scenes))
         accuracies = []
-        for idx, scene in enumerate(scenes):
+        for idx, scene in enumerate(scenes_order):
+            entities = rng.sample(scene["entities"], len(scene["entities"]))
             obs = EnvironmentObservation(
                 step_index=idx,
-                visible_entities=scene["entities"],
+                visible_entities=entities,
                 spatial_relations=[],
                 goal_description=f"lexical_grounding:{scene['token']}",
                 available_actions=[
-                    {"name": "SELECT", "parameters": {"target": e["id"]}} for e in scene["entities"]
+                    {"name": "SELECT", "parameters": {"target": e["id"]}} for e in entities
                 ],
                 interaction_history=[],
                 resource_budget={},
             )
             out = cohort.process_observation(obs)
             chosen_id = out.action.get("parameters", {}).get("target", "")
-            chosen_type = next((e["type"] for e in scene["entities"] if e["id"] == chosen_id), "")
+            chosen_type = next((e["type"] for e in entities if e["id"] == chosen_id), "")
             reward = 1.0 if chosen_type == scene["target"] else -1.0
             cohort.learn_from_feedback(obs, reward)
 
             # Test probe
             correct = 0
             for t_item in test_items:
+                t_entities = rng.sample(t_item["entities"], len(t_item["entities"]))
                 t_obs = EnvironmentObservation(
                     step_index=idx,
-                    visible_entities=t_item["entities"],
+                    visible_entities=t_entities,
                     spatial_relations=[],
                     goal_description=f"lexical_grounding:{t_item['token']}",
                     available_actions=[
-                        {"name": "SELECT", "parameters": {"target": e["id"]}}
-                        for e in t_item["entities"]
+                        {"name": "SELECT", "parameters": {"target": e["id"]}} for e in t_entities
                     ],
                     interaction_history=[],
                     resource_budget={},
                 )
                 t_out = cohort.process_observation(t_obs)
                 t_id = t_out.action.get("parameters", {}).get("target", "")
-                t_type = next((e["type"] for e in t_item["entities"] if e["id"] == t_id), "")
+                t_type = next((e["type"] for e in t_entities if e["id"] == t_id), "")
                 if t_type == t_item["expected"]:
                     correct += 1
             accuracies.append(correct / len(test_items))
@@ -234,8 +279,9 @@ class E2_LexicalAcquisitionTask:  # noqa: N801
 class E3_CounterfactualSimulationTask:  # noqa: N801
     """E3: Counterfactual Mental Simulation. Evaluates simulation fidelity vs planning regret."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
         env = CanonicalTaskEnvironment(domain="counterfactual_simulation")
         oracle = env.oracle
 
@@ -246,14 +292,17 @@ class E3_CounterfactualSimulationTask:  # noqa: N801
             {"base": "support_stable", "geom": "flat", "rigid": True, "goal": "STACK"},
             {"base": "support_dome", "geom": "curved", "rigid": True, "goal": "STACK"},
         ]
-
+        scenarios_order = rng.sample(scenarios, len(scenarios))
         sim_errors: list[float] = []
         regrets: list[float] = []
         successes: list[bool] = []
 
-        for idx, sc in enumerate(scenarios):
+        for idx, sc in enumerate(scenarios_order):
             true_state = PhysicalEnvironmentState(
-                entities={sc["base"]: {"surface_geometry": sc["geom"], "is_rigid": sc["rigid"]}},
+                entities={
+                    sc["base"]: {"surface_geometry": sc["geom"], "is_rigid": sc["rigid"]},
+                    "placed_block": {"surface_geometry": "flat", "is_rigid": True},
+                },
                 physics_rules={},
                 target_goal={"action": sc["goal"]},
             )
@@ -267,12 +316,24 @@ class E3_CounterfactualSimulationTask:  # noqa: N801
                             "surface_geometry": sc["geom"],
                             "is_rigid": sc["rigid"],
                         },
-                    }
+                    },
+                    {
+                        "id": "placed_block",
+                        "type": "block",
+                        "properties": {
+                            "surface_geometry": "flat",
+                            "is_rigid": True,
+                        },
+                    },
                 ],
                 spatial_relations=[],
                 goal_description="spatial_stacking",
                 available_actions=[
-                    {"name": "STACK", "parameters": {"base": sc["base"]}, "cost": 1.0},
+                    {
+                        "name": "STACK",
+                        "parameters": {"base_id": sc["base"], "item_id": "placed_block"},
+                        "cost": 1.0,
+                    },
                     {"name": "WAIT", "parameters": {}, "cost": 0.1},
                 ],
                 interaction_history=[],
@@ -281,9 +342,10 @@ class E3_CounterfactualSimulationTask:  # noqa: N801
             out = cohort.process_observation(obs)
 
             # Oracle optimal utility
+            is_physically_stable = sc["geom"] == "flat" and sc["rigid"]
             opt_act = (
-                {"name": "STACK", "parameters": {"base": sc["base"]}}
-                if (sc["geom"] == "flat" and sc["rigid"])
+                {"name": "STACK", "parameters": {"base_id": sc["base"], "item_id": "placed_block"}}
+                if is_physically_stable
                 else {"name": "WAIT", "parameters": {}}
             )
             opt_u = (
@@ -301,14 +363,16 @@ class E3_CounterfactualSimulationTask:  # noqa: N801
             regrets.append(regret)
 
             # Simulation fidelity
-            true_stable = 1.0 if (sc["geom"] == "flat" and sc["rigid"]) else 0.0
-            pred_stable = (
-                1.0
-                if out.prediction in ("stable", "stable_support")
-                else (
-                    0.0 if out.prediction in ("unstable", "abstain_uncertain") else out.confidence
-                )
-            )
+            true_stable = 1.0 if is_physically_stable else 0.0
+            if out.prediction in ("stable", "stable_support"):
+                pred_stable = 1.0
+            elif out.prediction in ("unstable", "abstain_uncertain"):
+                pred_stable = 0.0
+            elif out.prediction == "unsimulated_action":
+                pred_stable = 0.50
+            else:
+                pred_stable = float(out.confidence) if out.confidence is not None else 0.50
+
             sim_error = abs(pred_stable - true_stable)
             sim_errors.append(sim_error)
 
@@ -333,8 +397,9 @@ class E3_CounterfactualSimulationTask:  # noqa: N801
 class E4_EpistemicCalibrationTask:  # noqa: N801
     """E4: Epistemic Calibration. Evaluates Brier score, ECE, Coverage, and Selective Risk."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
 
         trials = [
             {"geom": "flat", "rigid": True, "label": True},
@@ -350,12 +415,13 @@ class E4_EpistemicCalibrationTask:  # noqa: N801
             {"geom": "non_euclidean_mesh", "rigid": True, "label": False},
             {"geom": "quantum_foam_base", "rigid": True, "label": False},
         ]
+        trials_order = rng.sample(trials, len(trials))
 
         confidences: list[float] = []
         outcomes: list[bool] = []
         abstentions: list[bool] = []
 
-        for idx, tr in enumerate(trials):
+        for idx, tr in enumerate(trials_order):
             obs = EnvironmentObservation(
                 step_index=idx,
                 visible_entities=[
@@ -405,8 +471,9 @@ class E4_EpistemicCalibrationTask:  # noqa: N801
 class E5_ActiveEpistemicDiscoveryTask:  # noqa: N801
     """E5: Active Epistemic Discovery. Evaluates Regret against independent oracle and Information Efficiency."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
         env = CanonicalTaskEnvironment(domain="active_discovery")
         oracle = env.oracle
 
@@ -422,17 +489,19 @@ class E5_ActiveEpistemicDiscoveryTask:  # noqa: N801
             },
             {"name": "solid_granite", "cost_probe": 0.10, "d_power": 0.95, "is_safe": True},
         ]
-
+        scenarios_order = rng.sample(scenarios, len(scenarios))
         probing_regrets: list[float] = []
         efficiencies: list[float] = []
         successes: list[bool] = []
 
-        for idx, sc in enumerate(scenarios):
+        for idx, sc in enumerate(scenarios_order):
+            cost_jitter = round(rng.uniform(-0.01, 0.01), 3)
+            actual_cost = max(0.05, float(sc["cost_probe"]) + cost_jitter)
             actions = [
                 {
                     "name": "PROBE_GENTLE_TAP",
                     "parameters": {"target": sc["name"]},
-                    "cost": sc["cost_probe"],
+                    "cost": actual_cost,
                     "discriminative_power": sc["d_power"],
                 },
                 {"name": "STACK", "parameters": {"base": sc["name"]}, "cost": 1.0},
@@ -452,7 +521,7 @@ class E5_ActiveEpistemicDiscoveryTask:  # noqa: N801
 
             out = cohort.process_observation(obs)
             if "PROBE" in out.action.get("name", ""):
-                achieved_eff = float(sc["d_power"]) / float(sc["cost_probe"])
+                achieved_eff = float(sc["d_power"]) / float(actual_cost)
                 regret = max(0.0, opt_eff - achieved_eff)
                 success = True
             else:
@@ -485,8 +554,9 @@ class E5_ActiveEpistemicDiscoveryTask:  # noqa: N801
 class E6_RelationalTransferTask:  # noqa: N801
     """E6: Relational Generalization. Evaluates 2x2 factorial structural vs surface transfer."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
 
         trials = [
             {
@@ -505,14 +575,25 @@ class E6_RelationalTransferTask:  # noqa: N801
                 "is_surface_distractor": True,
                 "target": "yellow_lamp_globe",
             },
+            {
+                "is_structural_match": True,
+                "is_surface_distractor": True,
+                "target": "solar_system_orbit",
+            },
+            {
+                "is_structural_match": False,
+                "is_surface_distractor": False,
+                "target": "unrelated_noise",
+            },
         ]
+        trials_order = rng.sample(trials, len(trials))
 
         structural_correct = 0
         surface_distracted = 0
         total_structural = 0
         total_surface = 0
 
-        for idx, tr in enumerate(trials):
+        for idx, tr in enumerate(trials_order):
             if tr["is_structural_match"]:
                 entities = [
                     {
@@ -527,7 +608,6 @@ class E6_RelationalTransferTask:  # noqa: N801
                     },
                 ]
                 relations = [{"source": "core", "target": "orbiter", "relation": "SUPPORTS"}]
-                actions = [{"name": "MAP_STRUCTURAL_CENTRAL"}, {"name": "MAP_SURFACE_COLOR"}]
                 total_structural += 1
             else:
                 entities = [
@@ -543,9 +623,11 @@ class E6_RelationalTransferTask:  # noqa: N801
                     },
                 ]
                 relations = []
-                actions = [{"name": "MAP_STRUCTURAL_CENTRAL"}, {"name": "MAP_SURFACE_COLOR"}]
                 total_surface += 1
 
+            actions = rng.sample(
+                [{"name": "MAP_STRUCTURAL_CENTRAL"}, {"name": "MAP_SURFACE_COLOR"}], 2
+            )
             obs = EnvironmentObservation(
                 step_index=idx,
                 visible_entities=entities,
@@ -561,7 +643,7 @@ class E6_RelationalTransferTask:  # noqa: N801
             if tr["is_structural_match"]:
                 if chosen_action == "MAP_STRUCTURAL_CENTRAL":
                     structural_correct += 1
-            elif tr["is_surface_distractor"]:
+            if tr["is_surface_distractor"]:
                 if chosen_action == "MAP_SURFACE_COLOR":
                     surface_distracted += 1
 
@@ -585,8 +667,9 @@ class E6_RelationalTransferTask:  # noqa: N801
 class E7_LifelongCurriculumTask:  # noqa: N801
     """E7: Lifelong Continual Curriculum. Evaluates 5-stage sequential curriculum and full 5x5 R_{i,j} matrix."""
 
-    def evaluate(self, cohort: BaseCohort) -> TaskEvaluationResult:
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
         cohort.reset()
+        rng = random.Random(seed)
 
         tasks = [
             "T1_SpatialStacking",
@@ -599,7 +682,9 @@ class E7_LifelongCurriculumTask:  # noqa: N801
         r_matrix = [[0.0] * n_tasks for _ in range(n_tasks)]
 
         for stage_i, t_train in enumerate(tasks):
-            for ep in range(3):
+            exemplars = [0, 1, 2]
+            rng.shuffle(exemplars)
+            for ep in exemplars:
                 obs = EnvironmentObservation(
                     step_index=ep,
                     visible_entities=[
@@ -652,5 +737,100 @@ class E7_LifelongCurriculumTask:  # noqa: N801
             bwt=bwt,
             fwt=fwt,
             accuracy=r_matrix[-1][-1],
+            resource_consumption=cohort.get_resource_usage(),
+        )
+
+
+class E8_CausalInterventionTask:  # noqa: N801
+    """E8: Causal Network Discovery & Counterfactual Interventions (Beyond Blocks-World).
+
+    Evaluates an agent's ability to distinguish true interventional causality from
+    spurious observational correlations across complex multi-variable gene regulatory networks.
+    """
+
+    def evaluate(self, cohort: BaseCohort, seed: int | None = None) -> TaskEvaluationResult:
+        from hbllm.experiment.domains.causal_network import CausalNetworkEnvironment
+
+        cohort.reset()
+        env = CausalNetworkEnvironment(seed=seed)
+        scenarios = env.generate_gene_network_scenarios(n_scenarios=5)
+
+        correct_causal_inferences = 0
+        total_trials = len(scenarios)
+        sim_errors: list[float] = []
+
+        for idx, sc in enumerate(scenarios):
+            entities = [
+                {
+                    "id": sc.intervention_var,
+                    "type": "causal_node",
+                    "properties": {
+                        "is_confounded": not sc.is_true_causal_cause,
+                        "observational_correlation": sc.observational_correlation,
+                    },
+                },
+                {
+                    "id": sc.target_gene,
+                    "type": "target_phenotype",
+                    "properties": {"target": True},
+                },
+            ]
+            relations = [
+                {
+                    "source": sc.intervention_var,
+                    "target": sc.target_gene,
+                    "relation": "CAUSES" if sc.is_true_causal_cause else "CORRELATED_WITH",
+                }
+            ]
+            actions = [
+                {
+                    "name": "PREDICT_CAUSAL_EFFECT",
+                    "parameters": {"variable": sc.intervention_var, "target": sc.target_gene},
+                },
+                {
+                    "name": "REJECT_SPURIOUS_CORRELATION",
+                    "parameters": {"variable": sc.intervention_var, "target": sc.target_gene},
+                },
+            ]
+            obs = EnvironmentObservation(
+                step_index=idx,
+                visible_entities=entities,
+                spatial_relations=relations,
+                goal_description=f"causal_intervention:{sc.scenario_id}",
+                available_actions=actions,
+                interaction_history=[],
+                resource_budget={},
+            )
+            out = cohort.process_observation(obs)
+            chosen_action = out.action.get("name", "")
+
+            # If true causal cause, correct action is PREDICT_CAUSAL_EFFECT
+            # If confounded/spurious, correct action is REJECT_SPURIOUS_CORRELATION
+            is_correct = (chosen_action == "PREDICT_CAUSAL_EFFECT" and sc.is_true_causal_cause) or (
+                chosen_action == "REJECT_SPURIOUS_CORRELATION" and not sc.is_true_causal_cause
+            )
+            if is_correct:
+                correct_causal_inferences += 1
+
+            # Simulation error against true interventional effect
+            pred_effect = (
+                out.confidence
+                if chosen_action == "PREDICT_CAUSAL_EFFECT"
+                else (1.0 - out.confidence)
+            )
+            sim_error = abs(pred_effect - sc.true_interventional_effect)
+            sim_errors.append(sim_error)
+
+            cohort.learn_from_feedback(obs, 1.0 if is_correct else -1.0)
+
+        causal_acc = correct_causal_inferences / max(1, total_trials)
+        mean_sim_error = sum(sim_errors) / max(1, len(sim_errors))
+
+        return TaskEvaluationResult(
+            task_id="E8_CausalIntervention",
+            cohort_id=cohort.cohort_id,
+            accuracy=round(causal_acc, 4),
+            simulation_error=round(mean_sim_error, 4),
+            structural_accuracy=round(causal_acc, 4),
             resource_consumption=cohort.get_resource_usage(),
         )

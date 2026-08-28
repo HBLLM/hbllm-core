@@ -9,8 +9,12 @@ name = "hbllm_hcir_graph"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py311"] }
+pyo3 = { version = "0.20.0", features = ["abi3-py311"] }
 blake3 = "1.5.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 parking_lot = "0.12.1"
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]

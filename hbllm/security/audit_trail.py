@@ -6,6 +6,10 @@ Records every action the system takes for:
     3. Debugging ("Why did the lights turn off?")
     4. Safety analysis ("How many Tier 3 actions were auto-approved?")
 
+Distinct from ``audit_log.py``:
+    - ``audit_trail.py``: Tracks WHAT actions the cognitive AI executed in the environment with SHA-256 hash-chaining (Safety Governance).
+    - ``audit_log.py``: Tracks WHO accessed or changed system configuration/data (Identity & Auth).
+
 Log entries are append-only SQLite with cryptographic hashing to
 detect tampering.
 

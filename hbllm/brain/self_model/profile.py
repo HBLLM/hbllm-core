@@ -61,12 +61,14 @@ class UncertaintyBreakdown:
 
 @dataclass
 class CompetenceProfile:
-    """Domain competence profile grounded strictly in historical empirical evidence."""
+    """Domain competence profile grounded in a Bayesian Beta-Binomial generative model."""
 
     domain: str
     attempts: int = 0
     successes: int = 0
     failures: int = 0
+    prior_alpha: float = 1.0  # Laplace uniform prior
+    prior_beta: float = 1.0
     brier_score_sum: float = 0.0
     squared_errors: list[float] = field(default_factory=list)
     evidences: list[SelfModelEvidence] = field(default_factory=list)
@@ -77,11 +79,28 @@ class CompetenceProfile:
     structural_failure_count: int = 0
 
     @property
+    def posterior_alpha(self) -> float:
+        """Bayesian posterior alpha parameter: alpha_0 + successes."""
+        return self.prior_alpha + float(self.successes)
+
+    @property
+    def posterior_beta(self) -> float:
+        """Bayesian posterior beta parameter: beta_0 + failures."""
+        return self.prior_beta + float(self.failures)
+
+    @property
     def competence(self) -> float:
-        """Historical empirical task success rate."""
-        if self.attempts == 0:
-            return 0.50
-        return round(self.successes / float(self.attempts), 4)
+        """Posterior predictive mean success probability: E[theta] = alpha / (alpha + beta)."""
+        a = self.posterior_alpha
+        b = self.posterior_beta
+        return round(a / (a + b), 4)
+
+    @property
+    def posterior_variance(self) -> float:
+        """Posterior parameter variance: Var(theta) = (alpha * beta) / ((alpha + beta)^2 * (alpha + beta + 1))."""
+        a = self.posterior_alpha
+        b = self.posterior_beta
+        return (a * b) / (((a + b) ** 2) * (a + b + 1.0))
 
     @property
     def brier_score(self) -> float:
@@ -137,14 +156,14 @@ class CompetenceProfile:
         return evidence
 
     def evaluate_context_uncertainty(self, context_props: dict[str, Any]) -> UncertaintyBreakdown:
-        """Compute decomposed uncertainty vector given specific context features."""
-        # 1. Epistemic uncertainty: high when sample count is sparse
-        if self.attempts == 0:
-            epistemic = 0.90
-        elif self.attempts < 5:
-            epistemic = round(max(0.20, 1.0 - (self.attempts * 0.18)), 4)
-        else:
-            epistemic = round(max(0.05, 0.30 - (self.attempts * 0.02)), 4)
+        """Compute decomposed uncertainty vector derived from Bayesian posterior statistics."""
+        import math
+
+        # 1. Epistemic uncertainty: normalized posterior standard deviation
+        # Max std for Beta(1,1) is sqrt(1/12) ~= 0.288675
+        max_std = math.sqrt(1.0 / 12.0)
+        curr_std = math.sqrt(self.posterior_variance)
+        epistemic = min(1.0, max(0.02, curr_std / max_std))
 
         # Contextual check: novel context props elevate epistemic uncertainty
         if context_props:
@@ -153,17 +172,17 @@ class CompetenceProfile:
                 for c in self.known_competent_conditions
             )
             if not is_known and self.attempts > 0:
-                epistemic = min(1.0, epistemic + 0.35)
+                epistemic = min(1.0, epistemic + 0.30)
 
-        # 2. Aleatoric uncertainty: empirical variance around base rate
+        # 2. Aleatoric uncertainty: normalized variance of the Bernoulli likelihood
         p = self.competence
-        aleatoric = round(4.0 * p * (1.0 - p) * 0.25, 4)  # Peaks at 0.25 when p = 0.50
+        aleatoric = round(4.0 * p * (1.0 - p) * 0.25, 4)
 
-        # 3. Structural model uncertainty: elevated by repeated unexpected failures
-        structural = round(min(1.0, self.structural_failure_count * 0.40), 4)
+        # 3. Structural model uncertainty: elevated by repeated model failures
+        structural = round(min(1.0, self.structural_failure_count * 0.35), 4)
 
         return UncertaintyBreakdown(
-            epistemic=epistemic,
+            epistemic=round(epistemic, 4),
             aleatoric=aleatoric,
             structural_model=structural,
         )
@@ -171,18 +190,12 @@ class CompetenceProfile:
     def compute_metacognitive_confidence(
         self, context_props: dict[str, Any], prior_confidence: float = 0.70
     ) -> float:
-        """Derive context-specific metacognitive confidence from competence, calibration, maturity, and uncertainty."""
+        """Derive context-specific metacognitive confidence from Bayesian posterior expectations."""
         uncertainty = self.evaluate_context_uncertainty(context_props)
-        comp = self.competence
-        calib_penalty = min(0.30, self.brier_score * 0.5)
+        p_mean = self.competence
+        calib_penalty = min(0.25, self.brier_score * 0.4)
 
-        # Base confidence blends empirical competence and prior
-        if self.attempts == 0:
-            base = 0.40  # Honest ungrounded baseline
-        else:
-            weight_emp = min(0.85, 0.3 + (self.attempts * 0.1))
-            base = (weight_emp * comp) + ((1.0 - weight_emp) * prior_confidence)
-
-        # Demote by total uncertainty and calibration penalty
-        final_conf = base * (1.0 - (uncertainty.total_uncertainty * 0.60)) - calib_penalty
-        return round(max(0.05, min(0.99, final_conf)), 4)
+        # Modulate posterior mean by epistemic & structural certainty
+        certainty = max(0.0, 1.0 - uncertainty.total_uncertainty)
+        modulated_conf = (p_mean * (0.3 + 0.7 * certainty)) - calib_penalty
+        return round(max(0.05, min(0.99, modulated_conf)), 4)

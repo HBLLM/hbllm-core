@@ -12,6 +12,7 @@ from hbllm.experiment.cohorts import (
     CohortOutput,
     HBLLMCoreCohort,
     HBLLMPlusLLMCohort,
+    HeuristicBaselineCohort,
     LLMOnlyCohort,
 )
 from hbllm.experiment.environments import (
@@ -34,6 +35,7 @@ from hbllm.experiment.tasks import (
     E5_ActiveEpistemicDiscoveryTask,
     E6_RelationalTransferTask,
     E7_LifelongCurriculumTask,
+    E8_CausalInterventionTask,
     TaskEvaluationResult,
 )
 
@@ -51,12 +53,14 @@ __all__ = [
     "E5_ActiveEpistemicDiscoveryTask",
     "E6_RelationalTransferTask",
     "E7_LifelongCurriculumTask",
+    "E8_CausalInterventionTask",
     "EnvironmentObservation",
     "ExperimentMetricsCalculator",
     "ExperimentRunner",
     "ExperimentStatistics",
     "HBLLMCoreCohort",
     "HBLLMPlusLLMCohort",
+    "HeuristicBaselineCohort",
     "IndependentEnvironmentOracle",
     "LLMOnlyCohort",
     "LeakageAuditReport",

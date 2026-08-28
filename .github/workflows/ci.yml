@@ -169,6 +169,9 @@ jobs:
       - name: Compile
         run: cargo check --workspace
 
+      - name: Run Rust tests
+        run: cargo test --workspace --no-default-features
+
   # ── Documentation Build ──────────────────────────────────────────────
   docs-build:
     name: "📚 Build Docs"
