@@ -223,8 +223,11 @@ class LeakageAuditor:
         sample_observations: dict[str, tuple[dict[str, Any], dict[str, Any]]]
         | list[Any]
         | None = None,
+        codebase_path: str | Any | None = None,
     ) -> LeakageAuditReport:
-        """Run complete leakage audit across all experimental cohorts and observations."""
+        """Run complete leakage audit across all experimental cohorts, observations, and reasoning ASTs."""
+        from pathlib import Path
+
         all_violations: list[str] = []
         audited_cohorts: list[str] = []
         combined_repr = []
@@ -251,6 +254,22 @@ class LeakageAuditor:
             for task in sample_observations:
                 if hasattr(task, "__dict__"):
                     self._check_hidden_fields(type(task).__name__, task.__dict__, all_violations)
+
+        # Audit reasoning codebase ASTs (scoped to cognitive kernels & cohorts)
+        target_codebase = codebase_path
+        if target_codebase is None:
+            this_file = Path(__file__).resolve()
+            # __file__ is core/hbllm/experiment/leakage_audit.py -> root is core/
+            target_codebase = this_file.parent.parent.parent
+
+        try:
+            from hbllm.experiment.ast_audit import ASTLeakageAuditor
+
+            ast_auditor = ASTLeakageAuditor(prohibited_tokens=self.prohibited_preloads)
+            ast_violations = ast_auditor.audit_reasoning_codebase(target_codebase)
+            all_violations.extend(ast_violations)
+        except Exception as e:
+            logger.debug("AST audit skipped or failed: %s", e)
 
         combined_hash = hashlib.sha256(
             json.dumps(combined_repr, sort_keys=True, default=str).encode("utf-8")

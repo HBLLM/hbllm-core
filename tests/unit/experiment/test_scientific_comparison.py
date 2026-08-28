@@ -47,32 +47,51 @@ def reason_over_supports(entities, relation_graph):
         violations = auditor.audit_source(clean_code, filename="generic_reasoner.py")
         assert len(violations) == 0
 
-    def test_ast_catches_hardcoded_comparison_token(self) -> None:
+    def test_ast_catches_hardcoded_entity_id_comparison(self) -> None:
         auditor = ASTLeakageAuditor()
-        cheating_code = """
-def decide_shape(obj_name):
-    if obj_name == "mepo":
-        return "CYLINDER"
-    return "UNKNOWN"
+        cheating_operator = """
+def execute_stack(base, item):
+    if base == "obj_support":
+        return {"action": "PLACE_ON_TOP", "confidence": 1.0}
+    return {"action": "ABSTAIN", "confidence": 0.0}
 """
-        violations = auditor.audit_source(cheating_code, filename="cheating_reasoner.py")
+        violations = auditor.audit_source(cheating_operator, filename="stack_operator.py")
         assert len(violations) > 0
-        assert any("mepo" in v for v in violations)
+        assert any("obj_support" in v for v in violations)
 
-    def test_ast_catches_hardcoded_constant_in_body(self) -> None:
+    def test_ast_catches_reverse_entity_id_comparison(self) -> None:
         auditor = ASTLeakageAuditor()
-        cheating_code = """
-def solve_scenario():
-    target = "hollow_cube"
-    return target
+        cheating_operator = """
+def check_support(support_id):
+    if "support_flat" == support_id:
+        return True
+    return False
 """
-        violations = auditor.audit_source(cheating_code, filename="hardcoded_target.py")
+        violations = auditor.audit_source(cheating_operator, filename="check_support.py")
         assert len(violations) > 0
-        assert any("hollow_cube" in v for v in violations)
+        assert any("support_flat" in v for v in violations)
+
+    def test_ast_reasoning_scoping_ignores_task_definitions(self) -> None:
+        from pathlib import Path
+
+        auditor = ASTLeakageAuditor()
+        core_path = Path(__file__).resolve().parent.parent.parent
+        violations = auditor.audit_reasoning_codebase(core_path)
+        assert len(violations) == 0, f"Reasoning codebase contains AST violations: {violations}"
 
 
 class TestLeakageAudit:
     """Verifies that no hidden simulator state, labels, or preloaded task solutions are leaked."""
+
+    def test_full_leakage_audit_runs_ast_reasoning_checks(self) -> None:
+        from pathlib import Path
+
+        auditor = LeakageAuditor()
+        cohort = HBLLMCoreCohort()
+        core_path = Path(__file__).resolve().parent.parent.parent
+        report = auditor.run_full_audit(cohorts=[cohort], codebase_path=core_path)
+        assert report.is_clean
+        assert len(report.violations) == 0
 
     def test_audit_detects_hidden_field_leakage(self) -> None:
         auditor = LeakageAuditor()
@@ -179,6 +198,8 @@ class TestCohortsInterface:
             resources = c.get_resource_usage()
             assert "wall_clock_ms" in resources
             assert "cpu_time_ms" in resources
+            assert "peak_ram_mb" in resources
+            assert resources["peak_ram_mb"] > 0.0
 
 
 class TestTaskParityAndMetrics:

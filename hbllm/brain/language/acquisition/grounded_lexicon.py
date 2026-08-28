@@ -285,8 +285,8 @@ class GroundedLexicon:
     ) -> dict[str, Any]:
         """Compose multiple learned lexical items into a structured semantic representation.
 
-        Example: ['red', 'dax'] -> {'modifier': 'property:color:red', 'head': 'cylinder'}
-                 ['zog', 'the', 'dax'] -> {'action': 'transition:push', 'theme': 'cylinder'}
+        Example: ['red', 'block'] -> {'modifier': 'property:color:red', 'head': 'cylinder'}
+                 ['push', 'the', 'block'] -> {'action': 'transition:push', 'theme': 'cylinder'}
         """
         parsed_components: dict[str, Any] = {
             "modifiers": [],

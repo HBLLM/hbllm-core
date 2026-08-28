@@ -57,6 +57,31 @@ class CohortOutput:
     resource_cost: dict[str, float] = field(default_factory=dict)
 
 
+def _get_current_peak_ram_mb() -> float:
+    """Measure the current process peak RSS memory in MB across platforms."""
+    import sys
+
+    try:
+        import resource
+
+        rusage = resource.getrusage(resource.RUSAGE_SELF)
+        # On macOS (Darwin), ru_maxrss is in bytes; on Linux, in kilobytes (KB).
+        if sys.platform == "darwin":
+            return round(rusage.ru_maxrss / (1024.0 * 1024.0), 2)
+        else:
+            return round(rusage.ru_maxrss / 1024.0, 2)
+    except Exception:
+        try:
+            import tracemalloc
+
+            if not tracemalloc.is_tracing():
+                tracemalloc.start()
+            _, peak = tracemalloc.get_traced_memory()
+            return round(peak / (1024.0 * 1024.0), 2)
+        except Exception:
+            return 0.0
+
+
 class BaseCohort(ABC):
     """Abstract interface for all experimental cohorts."""
 
@@ -69,7 +94,7 @@ class BaseCohort(ABC):
 
     @abstractmethod
     def reset(self) -> None:
-        """Reset internal state between experimental trials."""
+        """Reset internal memory and transient representations."""
         ...
 
     @abstractmethod
@@ -83,13 +108,13 @@ class BaseCohort(ABC):
         ...
 
     def get_resource_usage(self) -> dict[str, float]:
-        """Return cumulative resource consumption."""
+        """Return cumulative resource consumption with measured peak RAM."""
         return {
             "tokens_generated": float(self.total_tokens_generated),
             "simulation_branches": float(self.total_simulation_branches),
             "wall_clock_ms": round(self.total_wall_clock_ms, 2),
             "cpu_time_ms": round(self.total_cpu_time_ms, 2),
-            "peak_ram_mb": 45.0,
+            "peak_ram_mb": _get_current_peak_ram_mb(),
         }
 
 
