@@ -57,7 +57,7 @@ clean: ## Remove build artifacts and caches
 ## ── Rust ─────────────────────────────────────────────────────────────────
 
 rust-test: ## Run all Rust unit tests
-	cargo test --workspace --lib
+	cargo test --workspace --no-default-features
 
 rust-clippy: ## Run clippy with deny warnings across all crates
 	cargo clippy --workspace --lib -- -D warnings

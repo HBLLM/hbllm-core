@@ -171,13 +171,17 @@ class StackOperator(ActionOperator):
         self, branch: SimulationBranch, params: dict[str, Any], step: int = 0
     ) -> OperatorExecutionResult:
         pre_hash = branch.compute_current_state_hash()
-        item_id = str(params.get("item_id", ""))
-        base_id = str(params.get("base_id", ""))
+        base_id = str(params.get("base_id") or params.get("base") or params.get("target_id") or "")
+        item_id = str(params.get("item_id") or params.get("item") or "")
 
-        item = branch.get_node(item_id)
-        base = branch.get_node(base_id)
+        base = branch.get_node(base_id) if base_id else None
+        item = branch.get_node(item_id) if item_id else None
 
-        if not isinstance(item, PhysicalEntityNode) or not isinstance(base, PhysicalEntityNode):
+        if base is None and item is not None:
+            base = item
+            item = None
+
+        if not isinstance(base, PhysicalEntityNode):
             return OperatorExecutionResult(
                 operator_name=self.name,
                 is_success=False,
@@ -185,11 +189,13 @@ class StackOperator(ActionOperator):
                 post_state_hash=pre_hash,
                 violations=["entity_not_found"],
                 risk=0.9,
-                reason="Item or base entity not found",
+                reason=f"Base entity '{base_id}' not found",
             )
 
         item_props = (
-            getattr(item, "properties", None) or getattr(item, "observed_properties", {}) or {}
+            (getattr(item, "properties", None) or getattr(item, "observed_properties", {}) or {})
+            if isinstance(item, PhysicalEntityNode)
+            else {"surface_geometry": "flat", "is_rigid": True}
         )
         base_props = (
             getattr(base, "properties", None) or getattr(base, "observed_properties", {}) or {}
@@ -206,15 +212,19 @@ class StackOperator(ActionOperator):
         violations = []
         risk = 0.05
 
+        src_id = item_id if item_id else "placed_item"
         if is_stable:
             # Add spatial support edge
-            edge = HCIREdge(edge_type=HCIREdgeType.LOCATED_IN, sources=[item_id], targets=[base_id])
-            branch.add_edge(edge)
-            consequences.append(f"{item_id}_stable_on_{base_id}")
+            if item_id and base_id:
+                edge = HCIREdge(
+                    edge_type=HCIREdgeType.LOCATED_IN, sources=[item_id], targets=[base_id]
+                )
+                branch.add_edge(edge)
+            consequences.append(f"{src_id}_stable_on_{base_id}")
         else:
             # Derived consequence: object rolls/falls off unstable curved surface
             violations.append("unstable_support_fall")
-            consequences.append(f"{item_id}_fell_off_{base_id}")
+            consequences.append(f"{src_id}_fell_off_{base_id}")
             risk = 0.92  # High risk of falling
 
         post_hash = branch.compute_current_state_hash()

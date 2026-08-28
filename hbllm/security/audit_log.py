@@ -1,5 +1,5 @@
 """
-Security Audit Log — Unified audit trail for all security-sensitive operations.
+Security Compliance Audit Log — Unified audit log for administrative & security operations.
 
 Captures every significant action for SOC2/GDPR compliance:
   - Authentication (login, failed, logout, token refresh)
@@ -7,6 +7,10 @@ Captures every significant action for SOC2/GDPR compliance:
   - Admin operations (tenant management, policy changes)
   - Access events (who accessed what data, when)
   - Edge device events (connect, disconnect, capability registration)
+
+Distinct from ``audit_trail.py``:
+  - ``audit_log.py``: Tracks WHO accessed or changed system configuration/data (Identity & Auth).
+  - ``audit_trail.py``: Tracks WHAT actions the cognitive AI executed in the environment with SHA-256 hash-chaining (Safety Governance).
 
 Every entry is immutable once written (append-only log).
 Identity-aware: captures the full (tenant_id, user_id, device_id) triplet.

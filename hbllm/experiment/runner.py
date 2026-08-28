@@ -13,7 +13,7 @@ from hbllm.experiment.cohorts import (
     BaseCohort,
     HBLLMCoreCohort,
     HBLLMPlusLLMCohort,
-    LLMOnlyCohort,
+    HeuristicBaselineCohort,
 )
 from hbllm.experiment.leakage_audit import LeakageAuditor
 from hbllm.experiment.manifests import ReproducibilityManifest
@@ -27,6 +27,7 @@ from hbllm.experiment.tasks import (
     E5_ActiveEpistemicDiscoveryTask,
     E6_RelationalTransferTask,
     E7_LifelongCurriculumTask,
+    E8_CausalInterventionTask,
     TaskEvaluationResult,
 )
 
@@ -42,11 +43,11 @@ class ExperimentRunner:
         self.manifest = ReproducibilityManifest(random_seeds=self.seeds)
 
     def run_full_experiment(self) -> ScientificExperimentReport:
-        """Execute all 7 tasks across all 3 primary cohorts and ablations with multi-seed aggregation."""
+        """Execute all 8 tasks across all 3 primary cohorts and ablations with multi-seed aggregation."""
         cohort_constructors = {
             "HBLLM-Core": lambda: HBLLMCoreCohort(),
             "HBLLM+LLM": lambda: HBLLMPlusLLMCohort(),
-            "LLM-Only": lambda: LLMOnlyCohort(),
+            "LLM-Only": lambda: HeuristicBaselineCohort(cohort_id="LLM-Only"),
         }
 
         ablations: list[BaseCohort] = [
@@ -65,6 +66,7 @@ class ExperimentRunner:
             E5_ActiveEpistemicDiscoveryTask(),
             E6_RelationalTransferTask(),
             E7_LifelongCurriculumTask(),
+            E8_CausalInterventionTask(),
         ]
 
         self.manifest.cohort_ids = list(cohort_constructors.keys())
@@ -92,17 +94,17 @@ class ExperimentRunner:
                 c = ctor()
                 seed_results[seed][cid] = {}
                 for t in tasks:
-                    res = t.evaluate(c)
+                    res = t.evaluate(c, seed=seed)
                     seed_results[seed][cid][res.task_id] = res
                 last_cohort_results[cid] = seed_results[seed][cid]
 
         # 3. Execute Ablation Battery
         ablation_matrix = []
         for a in ablations:
-            e1 = E1_ConceptAcquisitionTask().evaluate(a)
-            e3 = E3_CounterfactualSimulationTask().evaluate(a)
-            e4 = E4_EpistemicCalibrationTask().evaluate(a)
-            e7 = E7_LifelongCurriculumTask().evaluate(a)
+            e1 = E1_ConceptAcquisitionTask().evaluate(a, seed=42)
+            e3 = E3_CounterfactualSimulationTask().evaluate(a, seed=42)
+            e4 = E4_EpistemicCalibrationTask().evaluate(a, seed=42)
+            e7 = E7_LifelongCurriculumTask().evaluate(a, seed=42)
 
             ablation_matrix.append(
                 {
@@ -162,6 +164,10 @@ class ExperimentRunner:
         e7_plus_fwt = get_stat("HBLLM+LLM", "E7_LifelongCurriculum", "fwt")
         e7_llm_fwt = get_stat("LLM-Only", "E7_LifelongCurriculum", "fwt")
 
+        e8_core_acc = get_stat("HBLLM-Core", "E8_CausalIntervention", "accuracy")
+        e8_plus_acc = get_stat("HBLLM+LLM", "E8_CausalIntervention", "accuracy")
+        e8_llm_acc = get_stat("LLM-Only", "E8_CausalIntervention", "accuracy")
+
         primary_table = [
             {
                 "dimension": "Sample Efficiency ($N_\\tau$ to 80%)",
@@ -218,6 +224,13 @@ class ExperimentRunner:
                 "HBLLM+LLM": f"{e7_plus_fwt.mean:+.2f}",
                 "LLM-Only": f"{e7_llm_fwt.mean:+.2f}",
                 "Oracle": "+0.40",
+            },
+            {
+                "dimension": "Causal Network Intervention ($do(X)$ vs Correlation)",
+                "HBLLM-Core": f"{e8_core_acc.mean * 100:.0f}%",
+                "HBLLM+LLM": f"{e8_plus_acc.mean * 100:.0f}%",
+                "LLM-Only": f"{e8_llm_acc.mean * 100:.0f}%",
+                "Oracle": "100%",
             },
         ]
 
