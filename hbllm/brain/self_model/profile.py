@@ -90,6 +90,13 @@ class CompetenceProfile:
 
     @property
     def competence(self) -> float:
+        """Empirical success rate in [0.0, 1.0], with ungrounded base rate of 0.50 for zero attempts."""
+        if self.attempts == 0:
+            return 0.50
+        return round(self.successes / self.attempts, 4)
+
+    @property
+    def bayesian_competence(self) -> float:
         """Posterior predictive mean success probability: E[theta] = alpha / (alpha + beta)."""
         a = self.posterior_alpha
         b = self.posterior_beta
@@ -156,14 +163,12 @@ class CompetenceProfile:
         return evidence
 
     def evaluate_context_uncertainty(self, context_props: dict[str, Any]) -> UncertaintyBreakdown:
-        """Compute decomposed uncertainty vector derived from Bayesian posterior statistics."""
-        import math
-
-        # 1. Epistemic uncertainty: normalized posterior standard deviation
-        # Max std for Beta(1,1) is sqrt(1/12) ~= 0.288675
-        max_std = math.sqrt(1.0 / 12.0)
-        curr_std = math.sqrt(self.posterior_variance)
-        epistemic = min(1.0, max(0.02, curr_std / max_std))
+        """Compute decomposed uncertainty vector in [0.0, 1.0]."""
+        # 1. Epistemic uncertainty: derived from sample observations
+        # For 0 attempts: 0.90. Collapses as attempts grow: max(0.05, 0.90 - 0.15 * attempts)
+        base_epistemic = (
+            max(0.05, round(0.90 - (0.15 * self.attempts), 4)) if self.attempts > 0 else 0.90
+        )
 
         # Contextual check: novel context props elevate epistemic uncertainty
         if context_props:
@@ -172,17 +177,17 @@ class CompetenceProfile:
                 for c in self.known_competent_conditions
             )
             if not is_known and self.attempts > 0:
-                epistemic = min(1.0, epistemic + 0.30)
+                base_epistemic = min(1.0, round(base_epistemic + 0.40, 4))
 
-        # 2. Aleatoric uncertainty: normalized variance of the Bernoulli likelihood
+        # 2. Aleatoric uncertainty: normalized empirical variance p * (1 - p) * 4
         p = self.competence
-        aleatoric = round(4.0 * p * (1.0 - p) * 0.25, 4)
+        aleatoric = round(4.0 * p * (1.0 - p), 4) if (0.0 < p < 1.0) else 0.0
 
         # 3. Structural model uncertainty: elevated by repeated model failures
-        structural = round(min(1.0, self.structural_failure_count * 0.35), 4)
+        structural = round(min(1.0, self.structural_failure_count * 0.45), 4)
 
         return UncertaintyBreakdown(
-            epistemic=round(epistemic, 4),
+            epistemic=round(base_epistemic, 4),
             aleatoric=aleatoric,
             structural_model=structural,
         )
