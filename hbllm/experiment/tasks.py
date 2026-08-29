@@ -664,6 +664,199 @@ class E6_RelationalTransferTask:  # noqa: N801
         )
 
 
+def _build_curriculum_observation(
+    task_name: str, prefix: str, step_index: int = 0
+) -> EnvironmentObservation:
+    """Construct grounded physical entities, spatial and functional relations for a curriculum stage."""
+    entities: list[dict[str, Any]] = []
+    relations: list[dict[str, str]] = []
+
+    if task_name == "T1_SpatialStacking":
+        entities = [
+            {
+                "id": f"{prefix}_base",
+                "type": "physical_entity",
+                "properties": {"rigidity": "rigid", "surface": "flat", "stable": True},
+            },
+            {
+                "id": f"{prefix}_payload",
+                "type": "physical_entity",
+                "properties": {"stable": True, "mass": 1.0},
+            },
+        ]
+        relations = [
+            {"source": f"{prefix}_base", "target": f"{prefix}_payload", "relation": "SUPPORTS"},
+            {"source": f"{prefix}_base", "target": f"{prefix}_payload", "relation": "STABLE_FOR"},
+            {"source": f"{prefix}_payload", "target": f"{prefix}_base", "relation": "ABOVE"},
+        ]
+    elif task_name == "T2_ContainerPacking":
+        entities = [
+            {
+                "id": f"{prefix}_container",
+                "type": "physical_entity",
+                "properties": {"open": True, "has_cavity": True, "rigidity": "rigid"},
+            },
+            {
+                "id": f"{prefix}_item",
+                "type": "physical_entity",
+                "properties": {"fits_inside": True, "stable": True},
+            },
+            {
+                "id": f"{prefix}_interior",
+                "type": "physical_entity",
+                "properties": {"is_space": True},
+            },
+        ]
+        relations = [
+            {"source": f"{prefix}_container", "target": f"{prefix}_item", "relation": "SUPPORTS"},
+            {"source": f"{prefix}_container", "target": f"{prefix}_item", "relation": "CONTAINS"},
+            {
+                "source": f"{prefix}_container",
+                "target": f"{prefix}_interior",
+                "relation": "HAS_CAVITY",
+            },
+            {
+                "source": f"{prefix}_item",
+                "target": f"{prefix}_container",
+                "relation": "FITS_INSIDE",
+            },
+        ]
+    elif task_name == "T3_BalanceBeam":
+        entities = [
+            {
+                "id": f"{prefix}_fulcrum",
+                "type": "physical_entity",
+                "properties": {"is_pivot": True, "stable": True},
+            },
+            {
+                "id": f"{prefix}_beam",
+                "type": "physical_entity",
+                "properties": {"is_level": True, "rigidity": "rigid"},
+            },
+            {
+                "id": f"{prefix}_weight_a",
+                "type": "physical_entity",
+                "properties": {"mass": 1.0, "stable": True},
+            },
+            {
+                "id": f"{prefix}_weight_b",
+                "type": "physical_entity",
+                "properties": {"mass": 1.0, "stable": True},
+            },
+            {
+                "id": f"{prefix}_pos_a",
+                "type": "physical_entity",
+                "properties": {"is_anchor": True},
+            },
+            {
+                "id": f"{prefix}_pos_b",
+                "type": "physical_entity",
+                "properties": {"is_anchor": True},
+            },
+        ]
+        relations = [
+            {"source": f"{prefix}_fulcrum", "target": f"{prefix}_beam", "relation": "SUPPORTS"},
+            {
+                "source": f"{prefix}_beam",
+                "target": f"{prefix}_fulcrum",
+                "relation": "PIVOTS_AROUND",
+            },
+            {"source": f"{prefix}_beam", "target": f"{prefix}_weight_a", "relation": "SUPPORTS"},
+            {"source": f"{prefix}_beam", "target": f"{prefix}_weight_b", "relation": "SUPPORTS"},
+            {"source": f"{prefix}_weight_a", "target": f"{prefix}_pos_a", "relation": "LOCATED_AT"},
+            {"source": f"{prefix}_weight_b", "target": f"{prefix}_pos_b", "relation": "LOCATED_AT"},
+        ]
+    elif task_name == "T4_ObstacleNav":
+        entities = [
+            {
+                "id": f"{prefix}_navigator",
+                "type": "physical_entity",
+                "properties": {"is_mobile": True},
+            },
+            {
+                "id": f"{prefix}_path",
+                "type": "physical_entity",
+                "properties": {"is_passable": True},
+            },
+            {
+                "id": f"{prefix}_start",
+                "type": "physical_entity",
+                "properties": {"is_origin": True},
+            },
+            {
+                "id": f"{prefix}_goal",
+                "type": "physical_entity",
+                "properties": {"is_destination": True},
+            },
+            {
+                "id": f"{prefix}_obstacle",
+                "type": "physical_entity",
+                "properties": {"blocks_path": True},
+            },
+        ]
+        relations = [
+            {
+                "source": f"{prefix}_navigator",
+                "target": f"{prefix}_path",
+                "relation": "TRAVELS_ALONG",
+            },
+            {"source": f"{prefix}_path", "target": f"{prefix}_start", "relation": "CONNECTS"},
+            {"source": f"{prefix}_path", "target": f"{prefix}_goal", "relation": "CONNECTS"},
+            {"source": f"{prefix}_path", "target": f"{prefix}_obstacle", "relation": "BLOCKED_BY"},
+            {"source": f"{prefix}_navigator", "target": f"{prefix}_obstacle", "relation": "AVOIDS"},
+        ]
+    elif task_name == "T5_ToolAffordance":
+        entities = [
+            {
+                "id": f"{prefix}_agent",
+                "type": "physical_entity",
+                "properties": {"is_actor": True},
+            },
+            {
+                "id": f"{prefix}_tool",
+                "type": "physical_entity",
+                "properties": {"is_graspable": True, "affords_reach": True},
+            },
+            {
+                "id": f"{prefix}_action",
+                "type": "physical_entity",
+                "properties": {"is_executable": True},
+            },
+            {
+                "id": f"{prefix}_target",
+                "type": "physical_entity",
+                "properties": {"is_reachable_with_tool": True},
+            },
+        ]
+        relations = [
+            {"source": f"{prefix}_agent", "target": f"{prefix}_tool", "relation": "HOLDS"},
+            {"source": f"{prefix}_tool", "target": f"{prefix}_action", "relation": "AFFORDS"},
+            {
+                "source": f"{prefix}_tool",
+                "target": f"{prefix}_target",
+                "relation": "TRANSMITS_FORCE_TO",
+            },
+            {
+                "source": f"{prefix}_action",
+                "target": f"{prefix}_target",
+                "relation": "CHANGES_STATE_OF",
+            },
+        ]
+    else:
+        entities = [{"id": f"{prefix}_obj", "type": task_name, "properties": {"stable": True}}]
+        relations = []
+
+    return EnvironmentObservation(
+        step_index=step_index,
+        visible_entities=entities,
+        spatial_relations=relations,
+        goal_description=task_name,
+        available_actions=[{"name": "EXECUTE_SKILL", "parameters": {"task": task_name}}],
+        interaction_history=[],
+        resource_budget={},
+    )
+
+
 class E7_LifelongCurriculumTask:  # noqa: N801
     """E7: Lifelong Continual Curriculum. Evaluates 5-stage sequential curriculum and full 5x5 R_{i,j} matrix."""
 
@@ -685,20 +878,8 @@ class E7_LifelongCurriculumTask:  # noqa: N801
             exemplars = [0, 1, 2]
             rng.shuffle(exemplars)
             for ep in exemplars:
-                obs = EnvironmentObservation(
-                    step_index=ep,
-                    visible_entities=[
-                        {
-                            "id": f"obj_{stage_i}_{ep}",
-                            "type": t_train,
-                            "properties": {"stable": True},
-                        }
-                    ],
-                    spatial_relations=[],
-                    goal_description=t_train,
-                    available_actions=[{"name": "EXECUTE_SKILL", "parameters": {"task": t_train}}],
-                    interaction_history=[],
-                    resource_budget={},
+                obs = _build_curriculum_observation(
+                    t_train, prefix=f"train_{stage_i}_{ep}", step_index=ep
                 )
                 _ = cohort.process_observation(obs)
                 cohort.learn_from_feedback(obs, 1.0)
@@ -706,20 +887,8 @@ class E7_LifelongCurriculumTask:  # noqa: N801
             eval_upper_bound = min(stage_i + 2, n_tasks)
             for stage_j in range(eval_upper_bound):
                 t_eval = tasks[stage_j]
-                eval_obs = EnvironmentObservation(
-                    step_index=0,
-                    visible_entities=[
-                        {
-                            "id": f"test_{stage_j}",
-                            "type": t_eval,
-                            "properties": {"stable": True},
-                        }
-                    ],
-                    spatial_relations=[],
-                    goal_description=t_eval,
-                    available_actions=[{"name": "EXECUTE_SKILL", "parameters": {"task": t_eval}}],
-                    interaction_history=[],
-                    resource_budget={},
+                eval_obs = _build_curriculum_observation(
+                    t_eval, prefix=f"eval_{stage_j}", step_index=0
                 )
                 eval_out = cohort.process_observation(eval_obs)
                 score = (

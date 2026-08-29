@@ -46,8 +46,10 @@ class SchemaConstraint:
     """A physical, geometric, or state precondition required for schema applicability."""
 
     role_id: str
-    property_key: str  # e.g. "geometry", "surface", "is_closed"
-    expected_value: Any  # e.g. "flat", False
+    property_key: str  # e.g. "rigidity", "open", "is_mobile", "is_pivot"
+    expected_value: Any  # e.g. "rigid", True
+    operator: str = "eq"  # "eq", "neq", "gte", "lte", "in"
+    is_required: bool = True
 
 
 @dataclass
@@ -121,9 +123,33 @@ class RelationalSchema:
         for c in self.constraints:
             props = entity_properties_map.get(c.role_id, {})
             actual_val = props.get(c.property_key)
-            if actual_val is None or str(actual_val).lower() != str(c.expected_value).lower():
+            if actual_val is None:
+                if c.is_required:
+                    violations.append(
+                        f"Missing required property '{c.property_key}' on role '{c.role_id}'"
+                    )
+                continue
+
+            try:
+                if c.operator == "eq":
+                    matched = str(actual_val).lower() == str(c.expected_value).lower()
+                elif c.operator == "neq":
+                    matched = str(actual_val).lower() != str(c.expected_value).lower()
+                elif c.operator == "gte":
+                    matched = float(actual_val) >= float(c.expected_value)
+                elif c.operator == "lte":
+                    matched = float(actual_val) <= float(c.expected_value)
+                elif c.operator == "in":
+                    matched = actual_val in c.expected_value
+                else:
+                    matched = actual_val == c.expected_value
+            except (ValueError, TypeError):
+                matched = False
+
+            if not matched:
+                op_str = "=" if c.operator == "eq" else f" {c.operator} "
                 violations.append(
-                    f"Constraint violation on role '{c.role_id}': expected {c.property_key}={c.expected_value}, got {actual_val}"
+                    f"Constraint violation on role '{c.role_id}': expected {c.property_key}{op_str}{c.expected_value}, got {actual_val}"
                 )
 
         return len(violations) == 0, violations

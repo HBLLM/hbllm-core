@@ -191,6 +191,27 @@ class HCIREdgeType(StrEnum):
     GENERALIZES = "generalizes"  # GroundedConcept (specific) → GroundedConcept (abstract)
     EXEMPLAR_OF = "exemplar_of"  # Entity → GroundedConcept (candidate, pre-validation)
 
+    # A20: Functional, Spatial & Causal/Transitional Schema Relations
+    # --- Spatial Relations ---
+    LOCATED_AT = "located_at"  # Entity located at discrete coordinate/anchor
+    CONTAINS = "contains"  # Container contains item
+    HAS_CAVITY = "has_cavity"  # Container has interior cavity
+    FITS_INSIDE = "fits_inside"  # Item satisfies geometric fit into container
+
+    # --- Functional & Physical Relations ---
+    STABLE_FOR = "stable_for"  # Base is structurally stable for payload
+    PIVOTS_AROUND = "pivots_around"  # Lever/beam pivots on fulcrum
+    AFFORDS = "affords"  # Object/tool affords specific action
+    TRANSMITS_FORCE_TO = "transmits_force_to"  # Tool transmits kinetic force to target
+
+    # --- Causal, Transitional & Agentive Relations ---
+    TRAVELS_ALONG = "travels_along"  # Agent/navigator traverses path
+    CONNECTS = "connects"  # Path connects start and goal
+    BLOCKED_BY = "blocked_by"  # Path or transition obstructed by obstacle
+    AVOIDS = "avoids"  # Agent detours or prevents collision with obstacle
+    HOLDS = "holds"  # Agent grasps tool/object
+    CHANGES_STATE_OF = "changes_state_of"  # Action produces state mutation in target
+
 
 class CognitiveCategory(StrEnum):
     """High-level cognitive function classification.

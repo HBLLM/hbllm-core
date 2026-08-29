@@ -31,6 +31,7 @@ from hbllm.brain.self_model.calibrator import EpistemicCalibrator
 from hbllm.brain.self_model.metacognitive_self_model import MetacognitiveSelfModel
 from hbllm.brain.simulation.counterfactual_engine import MentalSandbox
 from hbllm.brain.transfer.engine import AnalogicalTransferEngine
+from hbllm.brain.transfer.extractor import RelationalSchemaExtractor
 from hbllm.brain.transfer.mapper import MappingStatus, StructureMappingEngine
 from hbllm.brain.transfer.schema import (
     RelationalSchema,
@@ -138,6 +139,7 @@ class HBLLMCoreCohort(BaseCohort):
         self.decision_engine = DecisionEngine()
         self.transfer_engine = AnalogicalTransferEngine()
         self.structure_mapper = StructureMappingEngine()
+        self.extractor = RelationalSchemaExtractor()
         self.self_model = MetacognitiveSelfModel()
         self.calibrator = EpistemicCalibrator()
         self.memory = DualStoreMemory()
@@ -153,6 +155,7 @@ class HBLLMCoreCohort(BaseCohort):
         # A15 Concept state
         self.positive_concept_features: set[tuple[str, Any]] = set()
         self.negative_concept_features: set[tuple[tuple[str, Any], ...]] = set()
+        self.consolidated_schemas: dict[str, RelationalSchema] = {}
 
         # A20 Relational Schema for structural systems
         self.central_schema = RelationalSchema(
@@ -178,6 +181,7 @@ class HBLLMCoreCohort(BaseCohort):
         self.last_visible_entities = []
         self.positive_concept_features.clear()
         self.negative_concept_features.clear()
+        self.consolidated_schemas.clear()
 
     def _sync_observation_to_graph(self, observation: EnvironmentObservation) -> None:
         """Populate current HCIR graph with observed entities and relations."""
@@ -311,31 +315,56 @@ class HBLLMCoreCohort(BaseCohort):
             observation.available_actions
             and observation.available_actions[0].get("name") == "EXECUTE_SKILL"
         ):
-            # ── A22 Continual Skill Retention ──────────────────────────────
+            # ── A22 Continual Skill Retention & A20 Zero-Shot Forward Transfer ───────────
             act = observation.available_actions[0]
             task_name = act.get("parameters", {}).get("task", domain)
             chosen_action = act
 
-            # Check if skill was consolidated in slow memory
-            is_consolidated = f"consolidated_schema_{task_name}" in self.memory.slow_store or any(
-                r.content.get("domain") == task_name for r in self.memory.slow_store.values()
+            # Check if skill was already consolidated in slow memory
+            is_consolidated = (
+                task_name in self.consolidated_schemas
+                or f"consolidated_schema_{task_name}" in self.memory.slow_store
+                or any(
+                    r.content.get("domain") == task_name for r in self.memory.slow_store.values()
+                )
             )
             if is_consolidated:
                 calibrated_conf = 0.98
             else:
-                # In fast buffer only: skill recency degrades as newer tasks arrive without consolidation
-                matching_traces = [
-                    (idx, t)
-                    for idx, t in enumerate(self.memory.fast_buffer)
-                    if t.domain == task_name
-                ]
-                if matching_traces:
-                    latest_idx = matching_traces[-1][0]
-                    # How many subsequent tasks/traces have been added since this task was buffered
-                    interfering = len(self.memory.fast_buffer) - 1 - latest_idx
-                    calibrated_conf = max(0.30, round(0.85 - (0.05 * interfering), 4))
+                # Untrained/novel skill: dynamically query StructureMappingEngine against consolidated schemas
+                best_mapping_score = 0.0
+                curr_node_ids = (
+                    [e["id"] for e in observation.visible_entities]
+                    if observation.visible_entities
+                    else None
+                )
+                if self.consolidated_schemas:
+                    for schema in self.consolidated_schemas.values():
+                        mapping_res = self.structure_mapper.map_schema_to_target(
+                            schema=schema,
+                            target_graph=self.graph,
+                            candidate_node_ids=curr_node_ids,
+                        )
+                        if mapping_res.relational_alignment_score > best_mapping_score:
+                            best_mapping_score = mapping_res.relational_alignment_score
+
+                if best_mapping_score > 0.0:
+                    # Dynamically discovered structural transfer confidence
+                    calibrated_conf = max(0.15, min(0.95, round(best_mapping_score, 4)))
                 else:
-                    calibrated_conf = 0.35
+                    # In fast buffer only: skill recency degrades as newer tasks arrive without consolidation
+                    matching_traces = [
+                        (idx, t)
+                        for idx, t in enumerate(self.memory.fast_buffer)
+                        if t.domain == task_name
+                    ]
+                    if matching_traces:
+                        latest_idx = matching_traces[-1][0]
+                        # How many subsequent tasks/traces have been added since this task was buffered
+                        interfering = len(self.memory.fast_buffer) - 1 - latest_idx
+                        calibrated_conf = max(0.30, round(0.85 - (0.05 * interfering), 4))
+                    else:
+                        calibrated_conf = 0.20
 
         else:
             # ── A18 Simulation & A19 Decision Engine ────────────────────────
@@ -494,6 +523,13 @@ class HBLLMCoreCohort(BaseCohort):
                 )
             elif not success and chosen_type:
                 self.lexicon_loop.correct_mistake(token, incorrect_target=chosen_type)
+
+        # ── Relational Schema Induction from Grounded Feedback (A20 / A22) ─
+        if success and observation.visible_entities:
+            induced_schema = self.extractor.extract_schema_from_observation(
+                observation, name=self.last_domain
+            )
+            self.consolidated_schemas[self.last_domain] = induced_schema
 
         # ── Metacognitive Self-Model Update (A21) ──────────────────────
         self.self_model.record_outcome(

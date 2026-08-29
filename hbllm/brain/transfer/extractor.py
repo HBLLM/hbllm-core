@@ -183,3 +183,148 @@ class RelationalSchemaExtractor:
         )
         self.register_schema(schema)
         return schema
+
+    def extract_schema_from_graph(
+        self, graph: CognitiveGraph, name: str = "induced_schema", episode_id: str = ""
+    ) -> RelationalSchema:
+        """Induce a generalized relational schema from an observed CognitiveGraph."""
+        nodes = graph.all_nodes()
+        roles: list[SchemaRole] = []
+        constraints: list[SchemaConstraint] = []
+        role_map: dict[str, str] = {}
+
+        functional_invariants = {
+            "rigidity",
+            "is_rigid",
+            "open",
+            "is_open",
+            "has_cavity",
+            "is_pivot",
+            "is_level",
+            "is_mobile",
+            "blocks_path",
+            "is_graspable",
+        }
+
+        for idx, node in enumerate(nodes):
+            role_id = f"Role_{idx}_{node.id.split('_')[-1]}"
+            role_map[node.id] = role_id
+            props = dict(getattr(node, "properties", {}) or {})
+            roles.append(
+                SchemaRole(
+                    role_id=role_id,
+                    type_requirement=getattr(node, "entity_type", "physical_entity"),
+                    required_properties={},
+                )
+            )
+            for k, v in props.items():
+                if k in functional_invariants:
+                    constraints.append(
+                        SchemaConstraint(role_id=role_id, property_key=k, expected_value=v)
+                    )
+
+        relations: list[SchemaRelation] = []
+        for edge in graph.all_edges():
+            for src in edge.sources:
+                for tgt in edge.targets:
+                    src_role = role_map.get(src)
+                    tgt_role = role_map.get(tgt)
+                    if src_role and tgt_role:
+                        etype_str = str(
+                            edge.edge_type.value
+                            if hasattr(edge.edge_type, "value")
+                            else edge.edge_type
+                        )
+                        relations.append(
+                            SchemaRelation(
+                                source_role=src_role,
+                                edge_type=etype_str,
+                                target_role=tgt_role,
+                            )
+                        )
+
+        schema = RelationalSchema(
+            schema_id=f"schema_induced_{uuid.uuid4().hex[:6]}",
+            name=name,
+            roles=roles,
+            relations=relations,
+            constraints=constraints,
+            source_episode_ids=[episode_id] if episode_id else [],
+            status=SchemaLifecycleStatus.TRANSFERABLE,
+            alpha_success=4.0,
+            beta_failure=1.0,
+        )
+        self.register_schema(schema)
+        return schema
+
+    def extract_schema_from_observation(
+        self, observation: Any, name: str = "induced_schema", episode_id: str = ""
+    ) -> RelationalSchema:
+        """Induce a generalized relational schema directly from an EnvironmentObservation."""
+        entities = getattr(observation, "visible_entities", []) or []
+        spatial_rels = getattr(observation, "spatial_relations", []) or []
+
+        roles: list[SchemaRole] = []
+        constraints: list[SchemaConstraint] = []
+        role_map: dict[str, str] = {}
+
+        functional_invariants = {
+            "rigidity",
+            "is_rigid",
+            "open",
+            "is_open",
+            "has_cavity",
+            "is_pivot",
+            "is_level",
+            "is_mobile",
+            "blocks_path",
+            "is_graspable",
+        }
+
+        for idx, ent in enumerate(entities):
+            ent_id = ent.get("id", f"ent_{idx}")
+            role_id = f"Role_{idx}_{ent_id.split('_')[-1]}"
+            role_map[ent_id] = role_id
+            props = dict(ent.get("properties", {}) or {})
+            roles.append(
+                SchemaRole(
+                    role_id=role_id,
+                    type_requirement=ent.get("type", "physical_entity"),
+                    required_properties={},
+                )
+            )
+            for k, v in props.items():
+                if k in functional_invariants:
+                    constraints.append(
+                        SchemaConstraint(role_id=role_id, property_key=k, expected_value=v)
+                    )
+
+        relations: list[SchemaRelation] = []
+        for rel in spatial_rels:
+            src = rel.get("source", "")
+            tgt = rel.get("target", "")
+            rtype_str = rel.get("relation", "SUPPORTS")
+            src_role = role_map.get(src)
+            tgt_role = role_map.get(tgt)
+            if src_role and tgt_role:
+                relations.append(
+                    SchemaRelation(
+                        source_role=src_role,
+                        edge_type=str(rtype_str),
+                        target_role=tgt_role,
+                    )
+                )
+
+        schema = RelationalSchema(
+            schema_id=f"schema_induced_{uuid.uuid4().hex[:6]}",
+            name=name,
+            roles=roles,
+            relations=relations,
+            constraints=constraints,
+            source_episode_ids=[episode_id] if episode_id else [],
+            status=SchemaLifecycleStatus.TRANSFERABLE,
+            alpha_success=4.0,
+            beta_failure=1.0,
+        )
+        self.register_schema(schema)
+        return schema

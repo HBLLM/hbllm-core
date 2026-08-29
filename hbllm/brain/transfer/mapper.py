@@ -44,6 +44,16 @@ class StructuralMappingResult:
     transferred_predictions: list[dict[str, Any]] = field(default_factory=list)
 
 
+# Functional compatibility clusters for analogical mapping
+_FUNCTIONAL_COMPATIBILITY_CLUSTERS: list[set[str]] = [
+    {"supports", "stable_for", "rests_on", "above", "below"},
+    {"contains", "located_in", "has_cavity", "fits_inside", "part_of"},
+    {"transmits_force_to", "changes_state_of", "affords", "causes", "acts_on"},
+    {"travels_along", "connects", "path_to", "near"},
+    {"avoids", "blocked_by", "contradicts"},
+]
+
+
 class StructureMappingEngine:
     """Deterministic structure-mapping algorithm over HCIR graphs."""
 
@@ -63,14 +73,24 @@ class StructureMappingEngine:
             n for n in target_nodes if n is not None and isinstance(n, PhysicalEntityNode)
         ]
 
+        if not valid_nodes or not schema.roles:
+            return StructuralMappingResult(
+                schema_id=schema.schema_id,
+                schema_name=schema.name,
+                status=MappingStatus.REJECTED,
+                violated_constraints=["Target graph contains no physical entities"],
+            )
+
         if len(valid_nodes) < len(schema.roles):
             missing = [r.role_id for r in schema.roles[len(valid_nodes) :]]
+            coverage = len(valid_nodes) / float(len(schema.roles))
             return StructuralMappingResult(
                 schema_id=schema.schema_id,
                 schema_name=schema.name,
                 status=MappingStatus.PARTIALLY_APPLICABLE,
                 missing_roles=missing,
-                relational_alignment_score=0.30,
+                relational_alignment_score=round(0.25 * coverage, 4),
+                systematicity_score=0.20,
             )
 
         best_result: StructuralMappingResult | None = None
@@ -103,18 +123,24 @@ class StructureMappingEngine:
                 schema, target_graph, bindings
             )
 
-            # 4. Classify status
+            # 4. Compute composite structural mapping score
+            constraint_factor = 1.0 if is_valid_constraints else 0.0
+            coverage = len(bindings) / float(len(schema.roles))
+            composite_score = (
+                ((alignment_score * 0.70) + (systematicity * 0.30)) * constraint_factor * coverage
+            )
+
+            # 5. Classify status
             if not is_valid_constraints:
                 status = MappingStatus.REJECTED
-                total_score = 0.10
-            elif alignment_score >= 0.70:
+            elif composite_score >= 0.40 and alignment_score >= 0.30:
                 status = MappingStatus.APPLICABLE
-                total_score = (alignment_score * 0.7) + (systematicity * 0.3)
-            else:
+            elif composite_score >= 0.20:
                 status = MappingStatus.PARTIALLY_APPLICABLE
-                total_score = (alignment_score * 0.7) + (systematicity * 0.3)
+            else:
+                status = MappingStatus.REJECTED
 
-            # 5. Build transferred predictions
+            # 6. Build transferred predictions
             transferred_preds: list[dict[str, Any]] = []
             if status != MappingStatus.REJECTED:
                 for c in schema.predicted_consequences:
@@ -132,14 +158,14 @@ class StructureMappingEngine:
                 schema_name=schema.name,
                 status=status,
                 role_bindings=bindings,
-                relational_alignment_score=round(alignment_score, 4),
+                relational_alignment_score=round(composite_score, 4),
                 systematicity_score=round(systematicity, 4),
                 violated_constraints=violations,
                 transferred_predictions=transferred_preds,
             )
 
-            if total_score > best_score:
-                best_score = total_score
+            if composite_score > best_score:
+                best_score = composite_score
                 best_result = result
 
         return best_result or StructuralMappingResult(
@@ -155,27 +181,62 @@ class StructureMappingEngine:
         target_graph: CognitiveGraph,
         bindings: dict[str, str],
     ) -> tuple[float, float]:
-        """Compute relational topological alignment and systematicity bonus."""
-        if not schema.relations:
-            return 1.0, 0.5
+        """Compute relational topological alignment and systematicity bonus.
 
-        matched_relations = 0
+        Evaluates exact relation matches, functional cluster correspondences,
+        zero-shot affordance projection, and multi-hop connected relational chains.
+        """
+        if not schema.relations:
+            systematicity = 0.50 + (0.15 * min(3, len(schema.roles) - 1))
+            return 1.0, systematicity
+
+        matched_relation_score = 0.0
         total_relations = len(schema.relations)
+        has_contradiction = False
 
         for rel in schema.relations:
             src_nid = bindings.get(rel.source_role)
             tgt_nid = bindings.get(rel.target_role)
-            if src_nid and tgt_nid:
-                # Check if edge exists or is geometrically compatible
-                edges = target_graph.edges_from(src_nid)
-                if any(rel.edge_type in str(e.edge_type) and tgt_nid in e.targets for e in edges):
-                    matched_relations += 1
-                else:
-                    # Potential candidate action relation
-                    matched_relations += 0.8  # High relational potential
+            if not src_nid or not tgt_nid:
+                continue
 
-        alignment = matched_relations / float(total_relations)
+            rel_type_str = rel.edge_type.lower()
+            edges_from_src = target_graph.edges_from(src_nid)
+            edges_to_tgt = [e for e in edges_from_src if tgt_nid in e.targets]
 
-        # Systematicity: bonus for higher-order connected graphs (roles > 2 or chains)
-        systematicity = 0.5 + (0.15 * min(3, len(schema.roles) - 1))
+            edges_from_tgt = target_graph.edges_from(tgt_nid)
+            edges_from_tgt_to_src = [e for e in edges_from_tgt if src_nid in e.targets]
+
+            all_candidate_edges = edges_to_tgt + edges_from_tgt_to_src
+
+            if not all_candidate_edges:
+                # Zero-shot affordance projection: entities are present and satisfy physical constraints
+                matched_relation_score += 0.80
+            else:
+                edge_score = 0.0
+                for edge in all_candidate_edges:
+                    edge_type_name = str(edge.edge_type).lower()
+                    if "contradicts" in edge_type_name:
+                        has_contradiction = True
+                        edge_score = 0.0
+                        break
+                    elif rel_type_str == edge_type_name or rel_type_str in edge_type_name:
+                        edge_score = max(edge_score, 1.0)
+                    elif any(
+                        rel_type_str in cluster
+                        and any(e_name in cluster for e_name in [edge_type_name])
+                        for cluster in _FUNCTIONAL_COMPATIBILITY_CLUSTERS
+                    ):
+                        edge_score = max(edge_score, 0.50)
+
+                matched_relation_score += edge_score
+
+        alignment = 0.0 if has_contradiction else (matched_relation_score / float(total_relations))
+
+        # Compute systematicity: reward higher-order multi-role systems
+        if has_contradiction:
+            systematicity = 0.15
+        else:
+            systematicity = min(0.95, 0.50 + (0.15 * min(3, len(schema.roles) - 1)))
+
         return alignment, systematicity
