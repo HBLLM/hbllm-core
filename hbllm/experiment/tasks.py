@@ -703,7 +703,8 @@ class E7_LifelongCurriculumTask:  # noqa: N801
                 _ = cohort.process_observation(obs)
                 cohort.learn_from_feedback(obs, 1.0)
 
-            for stage_j in range(stage_i + 1):
+            eval_upper_bound = min(stage_i + 2, n_tasks)
+            for stage_j in range(eval_upper_bound):
                 t_eval = tasks[stage_j]
                 eval_obs = EnvironmentObservation(
                     step_index=0,
