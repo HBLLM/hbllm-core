@@ -372,16 +372,19 @@ class AuditTrail:
             logger.info("Pruned %d audit entries older than %d days", pruned, self.max_age_days)
         return pruned
 
-    def verify_integrity(self, limit: int = 100) -> dict[str, Any]:
-        """Verify the hash chain integrity of recent entries.
+    def verify_integrity(self, limit: int = 1000) -> dict[str, Any]:
+        """Verify the cryptographic hash chain integrity across stored entries.
 
-        Returns verification result with any broken chain links.
+        Traverses entries in ascending chronological order and re-computes each
+        SHA-256 hash using the previous entry's hash as input.
+
+        Returns verification result with details of any tampered or broken links.
         """
         conn = sqlite3.connect(self.db_path)
         try:
             cursor = conn.execute(
                 "SELECT id, timestamp, tenant_id, action, target, result, entry_hash "
-                "FROM audit_trail ORDER BY id DESC LIMIT ?",
+                "FROM audit_trail ORDER BY id ASC LIMIT ?",
                 (limit,),
             )
             rows = list(cursor.fetchall())
@@ -389,17 +392,46 @@ class AuditTrail:
             conn.close()
 
         if not rows:
-            return {"status": "empty", "entries_checked": 0}
+            return {"status": "empty", "entries_checked": 0, "is_valid": True, "broken_links": []}
 
-        # Note: Full chain verification requires sequential prev_hash tracking
-        # which we store implicitly. Here we just verify hashes exist.
-        entries_checked = len(rows)
+        prev_hash = "genesis"
+        broken_links: list[dict[str, Any]] = []
+
+        for row in rows:
+            row_id, timestamp, tenant_id, action, target, result, entry_hash = row
+            payload = json.dumps(
+                {
+                    "prev": prev_hash,
+                    "time": timestamp,
+                    "action": action,
+                    "tenant": tenant_id,
+                    "target": target,
+                    "result": result,
+                },
+                sort_keys=True,
+            )
+            expected_hash = hashlib.sha256(payload.encode()).hexdigest()
+
+            if entry_hash != expected_hash:
+                broken_links.append(
+                    {
+                        "entry_id": row_id,
+                        "action": action,
+                        "expected_hash": expected_hash,
+                        "actual_hash": entry_hash,
+                        "reason": "Hash mismatch: row content or previous link modified",
+                    }
+                )
+            prev_hash = entry_hash
+
         missing_hashes = sum(1 for r in rows if not r[6])
-
+        is_valid = len(broken_links) == 0 and missing_hashes == 0
         return {
-            "status": "ok" if missing_hashes == 0 else "degraded",
-            "entries_checked": entries_checked,
+            "status": "ok" if is_valid else "tampered",
+            "is_valid": is_valid,
+            "entries_checked": len(rows),
             "missing_hashes": missing_hashes,
+            "broken_links": broken_links,
             "total_entries": self._total_entries,
         }
 
