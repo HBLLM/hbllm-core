@@ -538,3 +538,53 @@ class TestGovernanceEngineKernelGate:
         assert integrity["is_valid"] is True
         assert integrity["status"] == "ok"
         assert integrity["entries_checked"] == 2
+
+    def test_evasion_attempts_blocked_by_structured_intent_analysis(self) -> None:
+        """Adversarial reordering and synonym evasions must be caught by structured intent analysis."""
+        gov = GovernanceEngine()
+
+        # Evasion 1: Generic capability name with reverse argument ordering (target before action)
+        res_reordered = gov.evaluate_execution(
+            "adjust_settings",
+            {"target": "front_door", "action": "unlock", "authorized": False},
+        )
+        assert not res_reordered.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_reordered.violations
+        )
+
+        # Evasion 2: Robotic arm motion with synonym proximity flag ('person_nearby')
+        res_synonym = gov.evaluate_execution(
+            "swing_robot_arm",
+            {"person_nearby": True},
+        )
+        assert not res_synonym.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_synonym.violations)
+
+        # Evasion 3: Subtle authorization key variance ('authorized_user=False') + override token
+        res_auth_var = gov.evaluate_execution(
+            "unlock_front_door",
+            {"authorized_user": False, "override": True},
+        )
+        assert not res_auth_var.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_auth_var.violations
+        )
+
+    def test_fail_closed_authorization_on_sensitive_perimeter_targets(self) -> None:
+        """Sensitive physical perimeter capabilities must fail closed when authorization is omitted."""
+        gov = GovernanceEngine()
+
+        # Omitted authorization on perimeter gate -> Fail closed (Denied)
+        res_omitted = gov.evaluate_execution(
+            "open_perimeter_gate",
+            {},
+        )
+        assert not res_omitted.allowed
+
+        # Explicit affirmative authorization -> Allowed
+        res_authorized = gov.evaluate_execution(
+            "open_perimeter_gate",
+            {"authorized": True},
+        )
+        assert res_authorized.allowed
