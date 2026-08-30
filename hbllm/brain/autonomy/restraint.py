@@ -148,9 +148,11 @@ class RestraintEngine:
         quiet_hours: tuple[int, int] | None = None,
         backoff_base_s: float | None = None,
         max_suggestions_per_hour: int | None = None,
+        current_hour_fn: Any | None = None,
     ) -> None:
         self.config = config or RestraintConfig()
         self.bus = bus
+        self._current_hour_fn = current_hour_fn or _current_hour
 
         # Allow keyword overrides
         if quiet_hours is not None:
@@ -198,7 +200,7 @@ class RestraintEngine:
         is_reversible = proposal.is_reversible
         category = proposal.category
         tenant_id = proposal.tenant_id
-        hour = _current_hour()
+        hour = self._current_hour_fn()
 
         # Critical priority bypasses all checks
         if priority == "critical":
@@ -389,6 +391,8 @@ class RestraintEngine:
         """Check if current hour falls in quiet hours."""
         start = self.config.quiet_hours_start
         end = self.config.quiet_hours_end
+        if start == end:
+            return False
         if start > end:
             # Wraps midnight: e.g. 22-7
             return hour >= start or hour < end

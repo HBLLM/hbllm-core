@@ -9,6 +9,11 @@ from hbllm.brain.autonomy.restraint import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_default_hour(monkeypatch):
+    monkeypatch.setattr("hbllm.brain.autonomy.restraint._current_hour", lambda: 12)
+
+
 class TestRestraintBasics:
     """Tests for basic restraint decisions."""
 

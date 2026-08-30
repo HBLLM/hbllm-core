@@ -10,9 +10,13 @@ from hbllm.brain.autonomy.restraint import (
 )
 
 
-@pytest.fixture
-def engine(monkeypatch):
+@pytest.fixture(autouse=True)
+def mock_default_hour(monkeypatch):
     monkeypatch.setattr("hbllm.brain.autonomy.restraint._current_hour", lambda: 12)
+
+
+@pytest.fixture
+def engine():
     return RestraintEngine(quiet_hours=(2, 3))
 
 
