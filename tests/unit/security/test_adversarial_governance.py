@@ -588,3 +588,44 @@ class TestGovernanceEngineKernelGate:
             {"authorized": True},
         )
         assert res_authorized.allowed
+
+    def test_recursive_intent_extraction_and_semantic_generalization(self) -> None:
+        """Verify semantic proximity generalization, recursive argument scanning, and operation synonyms."""
+        gov = GovernanceEngine()
+
+        # 1. Proximity synonym generalization: 'occupant_detected'
+        res_occupant = gov.evaluate_execution(
+            "rotate_arm_assembly",
+            {"occupant_detected": True},
+        )
+        assert not res_occupant.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_occupant.violations)
+
+        # 2. Deeply nested argument extraction: safety_context -> human_in_workspace
+        res_nested = gov.evaluate_execution(
+            "actuate_gripper",
+            {"safety_context": {"human_in_workspace": True}},
+        )
+        assert not res_nested.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_nested.violations)
+
+        # 3. Action-verb synonym: operation='open' + component='main_entrance' + authorized=False
+        res_op_verb = gov.evaluate_execution(
+            "perform_maintenance_task",
+            {"component": "main_entrance", "operation": "open", "authorized": False},
+        )
+        assert not res_op_verb.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_op_verb.violations
+        )
+
+        # 4. Action-verb synonym with omitted authorization (fail-closed)
+        res_op_omitted = gov.evaluate_execution(
+            "perform_maintenance_task",
+            {"component": "main_entrance", "operation": "open"},
+        )
+        assert not res_op_omitted.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v
+            for v in res_op_omitted.violations
+        )

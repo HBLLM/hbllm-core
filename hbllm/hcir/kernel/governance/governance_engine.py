@@ -30,23 +30,66 @@ logger = logging.getLogger(__name__)
 
 # ── Semantic Synonym & Domain Dictionaries ────────────────────────────────────
 
-_HUMAN_PROXIMITY_KEYS = {
-    "human_in_workspace",
-    "human_present",
-    "person_nearby",
-    "person_present",
-    "bystander_present",
-    "human_in_room",
-    "person_in_workspace",
-    "human_near",
-    "nearby_human",
-    "proximity_alert",
-    "child_present",
-    "baby_present",
-    "human_detected",
+_VERB_ARGUMENT_KEYS = {
+    "action",
+    "operation",
+    "op",
+    "command",
+    "verb",
+    "task",
+    "method",
+    "mode",
+    "instruction",
+    "function",
+    "intent",
+    "step",
+    "activity",
+    "subaction",
+    "procedure",
+    "directive",
 }
 
-_UNATTENDED_KEYS = {
+_TARGET_ARGUMENT_KEYS = {
+    "target",
+    "device",
+    "component",
+    "object",
+    "item",
+    "entity",
+    "resource",
+    "system",
+    "appliance",
+    "fixture",
+    "asset",
+    "element",
+    "subject",
+    "unit",
+    "subsystem",
+    "module",
+    "actuator_target",
+}
+
+_HUMAN_PROXIMITY_PATTERNS = (
+    "human",
+    "person",
+    "occupant",
+    "bystander",
+    "operator",
+    "worker",
+    "pedestrian",
+    "user_present",
+    "presence",
+    "proximity",
+    "body",
+    "face",
+    "motion_detected",
+    "obstacle",
+    "living_being",
+    "someone_near",
+    "people",
+)
+
+_UNATTENDED_PATTERNS = (
     "unattended",
     "unmonitored",
     "alone",
@@ -54,9 +97,9 @@ _UNATTENDED_KEYS = {
     "unsupervised",
     "no_human_supervision",
     "without_supervision",
-}
+)
 
-_AUTH_POSITIVE_KEYS = {
+_AUTH_POSITIVE_PATTERNS = (
     "authorized",
     "is_authorized",
     "authorized_user",
@@ -66,17 +109,21 @@ _AUTH_POSITIVE_KEYS = {
     "has_permission",
     "permitted",
     "allow_access",
-}
+    "access_granted",
+    "has_access",
+)
 
-_AUTH_NEGATIVE_KEYS = {
+_AUTH_NEGATIVE_PATTERNS = (
     "unauthorized",
     "is_unauthorized",
     "unauthenticated",
     "not_authorized",
     "disallowed",
-}
+    "access_denied",
+    "no_access",
+)
 
-_OVERRIDE_KEYS = {
+_OVERRIDE_PATTERNS = (
     "override",
     "force",
     "bypass",
@@ -84,7 +131,7 @@ _OVERRIDE_KEYS = {
     "developer_mode",
     "disregard_rules",
     "ignore_safety",
-}
+)
 
 _LIFE_SAFETY_TARGETS = {
     "smoke_detector",
@@ -115,6 +162,11 @@ _PERIMETER_TARGETS = {
     "exterior_door",
     "patio_door",
     "entrance",
+    "barrier",
+    "turnstile",
+    "portal",
+    "dock",
+    "entry",
 }
 
 _ROBOTIC_ACTUATOR_TARGETS = {
@@ -128,6 +180,10 @@ _ROBOTIC_ACTUATOR_TARGETS = {
     "servo",
     "motor",
     "robot",
+    "arm_assembly",
+    "cutter",
+    "welder",
+    "press",
 }
 
 _THERMAL_TARGETS = {
@@ -142,6 +198,80 @@ _THERMAL_TARGETS = {
     "heater",
     "cooktop",
 }
+
+_UNLOCK_ACTION_SYNONYMS = {
+    "unlock",
+    "open",
+    "disarm",
+    "grant",
+    "unlatch",
+    "release",
+    "access",
+    "permit_entry",
+    "allow_entry",
+}
+
+_ACTUATE_ACTION_SYNONYMS = {
+    "move",
+    "actuate",
+    "drive",
+    "swing",
+    "lift",
+    "punch",
+    "weld",
+    "cut",
+    "rotate",
+    "accelerate",
+    "force",
+    "set_torque",
+    "extend",
+    "retract",
+    "grip",
+    "close_gripper",
+    "open_gripper",
+    "robot_arm",
+    "operate",
+    "swing_robot_arm",
+}
+
+
+def _flatten_mapping(data: Any, prefix: str = "", max_depth: int = 10) -> dict[str, Any]:
+    """Recursively flatten arbitrary nested dictionaries, lists, and dataclasses into key-value map."""
+    flattened: dict[str, Any] = {}
+    if max_depth <= 0 or data is None:
+        return flattened
+
+    if isinstance(data, dict):
+        for k, v in data.items():
+            k_str = str(k).lower()
+            flattened[k_str] = v
+            if prefix:
+                flattened[f"{prefix}.{k_str}"] = v
+            if isinstance(v, (dict, list, tuple, set)) or hasattr(v, "__dict__"):
+                flattened.update(
+                    _flatten_mapping(
+                        v, prefix=f"{prefix}.{k_str}" if prefix else k_str, max_depth=max_depth - 1
+                    )
+                )
+    elif isinstance(data, (list, tuple, set)):
+        for idx, item in enumerate(data):
+            if isinstance(item, (dict, list, tuple, set)) or hasattr(item, "__dict__"):
+                flattened.update(
+                    _flatten_mapping(
+                        item,
+                        prefix=f"{prefix}[{idx}]" if prefix else f"[{idx}]",
+                        max_depth=max_depth - 1,
+                    )
+                )
+    elif hasattr(data, "__dict__"):
+        flattened.update(
+            _flatten_mapping(
+                {k: v for k, v in data.__dict__.items() if not k.startswith("_")},
+                prefix=prefix,
+                max_depth=max_depth - 1,
+            )
+        )
+    return flattened
 
 
 @dataclass
@@ -245,7 +375,7 @@ class GovernanceEngine:
             Policy(
                 name="human_in_workspace_actuator_hazard",
                 type=PolicyType.DENY,
-                pattern=r"(?:move|actuate|drive|swing|lift|punch|weld|cut|rotate|accelerate|force|set_torque|robot_arm|arm|manipulator)",
+                pattern=r"(?:move|actuate|drive|swing|lift|punch|weld|cut|rotate|accelerate|force|set_torque|robot_arm|arm|manipulator|gripper)",
                 action=PolicyAction.BLOCK,
                 conditions=[PolicyCondition(key="human_in_workspace", operator="eq", value=True)],
                 description="Block high-energy or hazardous actuator motions when human presence is detected in workspace",
@@ -289,47 +419,72 @@ class GovernanceEngine:
         arguments: dict[str, Any],
         context: dict[str, Any],
     ) -> StructuredIntent:
-        """Extract and normalize structured semantic intent from arbitrary capability calls."""
+        """Extract and normalize structured semantic intent recursively from arbitrary capability calls."""
         intent = StructuredIntent()
 
-        # 1. Action resolution
-        # Check explicit action argument first, then split capability_name
-        raw_action = str(arguments.get("action", "")).lower()
-        if not raw_action:
-            parts = capability_name.lower().split(".")[-1].split("_")
-            raw_action = parts[0] if parts else capability_name.lower()
-        intent.action = raw_action
+        # Build comprehensive recursive argument map
+        flat_args = _flatten_mapping(arguments)
+        flat_ctx = _flatten_mapping(context)
+        all_flattened = {**flat_ctx, **flat_args}
 
-        # 2. Target resolution
-        raw_target = str(
-            arguments.get("target")
-            or arguments.get("device")
-            or arguments.get("component")
-            or arguments.get("object")
-            or ""
-        ).lower()
-        if not raw_target:
+        # 1. Action Verb resolution (recursively scanning verb keys)
+        detected_action = ""
+        for verb_key in _VERB_ARGUMENT_KEYS:
+            if verb_key in all_flattened and all_flattened[verb_key]:
+                val = str(all_flattened[verb_key]).lower().strip()
+                if val:
+                    detected_action = val
+                    break
+
+        if not detected_action:
+            parts = capability_name.lower().split(".")[-1].split("_")
+            detected_action = parts[0] if parts else capability_name.lower()
+
+        intent.action = detected_action
+
+        # 2. Target resolution (recursively scanning target keys)
+        detected_target = ""
+        for target_key in _TARGET_ARGUMENT_KEYS:
+            if target_key in all_flattened and all_flattened[target_key]:
+                val = str(all_flattened[target_key]).lower().strip()
+                if val:
+                    detected_target = val
+                    break
+
+        if not detected_target:
             parts = capability_name.lower().split(".")[-1].split("_")
             if len(parts) > 1:
-                raw_target = "_".join(parts[1:])
+                detected_target = "_".join(parts[1:])
             else:
-                raw_target = parts[0]
-        intent.target = raw_target
+                detected_target = parts[0]
 
-        # 3. Proximity / Collision detection (Synonym normalization)
-        for k in _HUMAN_PROXIMITY_KEYS:
-            if arguments.get(k) is True or context.get(k) is True:
-                intent.human_in_workspace = True
-                break
+        intent.target = detected_target
 
-        # 4. Unattended / Supervision state
-        for k in _UNATTENDED_KEYS:
-            if arguments.get(k) is True or context.get(k) is True:
-                intent.is_unattended = True
-                break
+        # 3. Proximity / Human Presence detection (Semantic scanning across all keys and nested structures)
+        for k, v in all_flattened.items():
+            k_clean = k.lower().replace("-", "_")
+            if any(p in k_clean for p in _HUMAN_PROXIMITY_PATTERNS):
+                if v is True or str(v).lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                    "detected",
+                    "present",
+                    "active",
+                ):
+                    intent.human_in_workspace = True
+                    break
 
-        # 5. Force / Torque scanning
-        for k, v in arguments.items():
+        # 4. Unattended / Supervision state (Semantic scanning)
+        for k, v in all_flattened.items():
+            k_clean = k.lower().replace("-", "_")
+            if any(p in k_clean for p in _UNATTENDED_PATTERNS):
+                if v is True or str(v).lower() in ("true", "1", "yes", "active"):
+                    intent.is_unattended = True
+                    break
+
+        # 5. Force / Torque scanning (recursive)
+        for k, v in all_flattened.items():
             k_lower = k.lower()
             if any(term in k_lower for term in ("force", "torque", "thrust", "power_n", "nm")):
                 try:
@@ -337,56 +492,65 @@ class GovernanceEngine:
                 except (ValueError, TypeError):
                     pass
 
-        # 6. Thermal / Power / Duration scanning
-        power = str(arguments.get("power", arguments.get("heat", ""))).lower()
-        if "max" in power or "high" in power or "100" in power:
+        # 6. Thermal / Power / Duration scanning (recursive)
+        power_val = str(all_flattened.get("power", all_flattened.get("heat", ""))).lower()
+        if "max" in power_val or "high" in power_val or "100" in power_val:
             intent.power_level = "max"
 
-        for k, v in arguments.items():
+        for k, v in all_flattened.items():
             if "duration" in k.lower() or "time" in k.lower():
                 try:
                     intent.duration_minutes = max(intent.duration_minutes, float(v))
                 except (ValueError, TypeError):
                     pass
 
-        # 7. Authorization scanning
+        # 7. Authorization scanning (Semantic & Fail-Closed)
         # Check explicit negative authorization keys
-        for k in _AUTH_NEGATIVE_KEYS:
-            if arguments.get(k) is True or context.get(k) is True:
-                intent.is_authorized = False
-                break
+        for k, v in all_flattened.items():
+            k_clean = k.lower().replace("-", "_")
+            if any(p in k_clean for p in _AUTH_NEGATIVE_PATTERNS):
+                if v is True or str(v).lower() in ("true", "1", "yes"):
+                    intent.is_authorized = False
+                    break
 
         # Check positive authorization keys
         if intent.is_authorized is None:
-            for k in _AUTH_POSITIVE_KEYS:
-                if k in arguments:
-                    val = arguments[k]
-                    if val is False or str(val).lower() in ("false", "0", "no", "none"):
+            for k, v in all_flattened.items():
+                k_clean = k.lower().replace("-", "_")
+                if any(p == k_clean or f".{p}" in k_clean for p in _AUTH_POSITIVE_PATTERNS):
+                    if v is False or str(v).lower() in (
+                        "false",
+                        "0",
+                        "no",
+                        "none",
+                        "denied",
+                        "disabled",
+                    ):
                         intent.is_authorized = False
                         break
-                    elif val is True or str(val).lower() in ("true", "1", "yes"):
-                        intent.is_authorized = True
-                        break
-                elif k in context:
-                    val = context[k]
-                    if val is False or str(val).lower() in ("false", "0", "no", "none"):
-                        intent.is_authorized = False
-                        break
-                    elif val is True or str(val).lower() in ("true", "1", "yes"):
+                    elif v is True or str(v).lower() in ("true", "1", "yes", "granted", "enabled"):
                         intent.is_authorized = True
                         break
 
-        # 8. Override / Prompt Injection scanning
-        for k in _OVERRIDE_KEYS:
-            if arguments.get(k) is True or context.get(k) is True:
-                intent.is_override_attempt = True
-                break
-        for v in list(arguments.values()) + [capability_name]:
+        # 8. Override / Prompt Injection scanning (recursive)
+        for k, v in all_flattened.items():
+            k_clean = k.lower().replace("-", "_")
+            if any(p in k_clean for p in _OVERRIDE_PATTERNS):
+                if v is True or str(v).lower() in ("true", "1", "yes"):
+                    intent.is_override_attempt = True
+                    break
             if isinstance(v, str) and re.search(
                 r"(?:override|disregard|developer_mode|bypass|ignore_safety)", v, re.IGNORECASE
             ):
                 intent.is_override_attempt = True
                 break
+
+        if re.search(
+            r"(?:override|disregard|developer_mode|bypass|ignore_safety)",
+            capability_name,
+            re.IGNORECASE,
+        ):
+            intent.is_override_attempt = True
 
         return intent
 
@@ -432,14 +596,18 @@ class GovernanceEngine:
                 )
 
         # 2. Unauthorized Perimeter Door / Gate Unlock (Fail-Closed)
-        if any(door in intent.target for door in _PERIMETER_TARGETS) or any(
+        is_perimeter_target = any(door in intent.target for door in _PERIMETER_TARGETS) or any(
             door in intent.action for door in _PERIMETER_TARGETS
-        ):
-            if any(act in intent.action for act in ("unlock", "open", "disarm", "grant")):
-                if eval_context.get("authorized") is not True:
-                    violations.append(
-                        "[HIGH] unauthorized_door_unlock_and_perimeter_security: Prohibit unauthorized physical perimeter door or vault unlock commands"
-                    )
+        )
+        is_unlock_action = any(act in intent.action for act in _UNLOCK_ACTION_SYNONYMS) or any(
+            act in intent.target for act in _UNLOCK_ACTION_SYNONYMS
+        )
+
+        if is_perimeter_target and is_unlock_action:
+            if eval_context.get("authorized") is not True:
+                violations.append(
+                    "[HIGH] unauthorized_door_unlock_and_perimeter_security: Prohibit unauthorized physical perimeter door or vault unlock commands"
+                )
 
         # 3. Actuator Force & Torque Limits
         if intent.force_torque_value > 500.0:
@@ -447,30 +615,14 @@ class GovernanceEngine:
                 f"[HIGH] actuator_force_torque_limit: Block excessive actuator force (>500N) or torque commands exceeding physical safety limits (received {intent.force_torque_value})"
             )
 
-        # 4. Human in Workspace Actuator Hazard
+        # 4. Human in Workspace Actuator Hazard (Fail-Closed Caution)
+        is_actuator_target = any(act in intent.target for act in _ROBOTIC_ACTUATOR_TARGETS) or any(
+            act in intent.action for act in _ROBOTIC_ACTUATOR_TARGETS
+        )
+        is_actuator_action = any(act in intent.action for act in _ACTUATE_ACTION_SYNONYMS)
+
         if eval_context.get("human_in_workspace") is True:
-            if (
-                any(act in intent.target for act in _ROBOTIC_ACTUATOR_TARGETS)
-                or any(act in intent.action for act in _ROBOTIC_ACTUATOR_TARGETS)
-                or any(
-                    act in intent.action
-                    for act in (
-                        "move",
-                        "actuate",
-                        "drive",
-                        "swing",
-                        "lift",
-                        "punch",
-                        "weld",
-                        "cut",
-                        "rotate",
-                        "accelerate",
-                        "force",
-                        "set_torque",
-                        "robot_arm",
-                    )
-                )
-            ):
+            if is_actuator_target or is_actuator_action:
                 violations.append(
                     "[CRITICAL] human_in_workspace_actuator_hazard: Block high-energy or hazardous actuator motions when human presence is detected in workspace"
                 )
