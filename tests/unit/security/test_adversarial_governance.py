@@ -27,7 +27,9 @@ from hbllm.hcir.graph import (
     HCIRNode,
     HCIRNodeType,
 )
+from hbllm.hcir.kernel.cognitive_kernel import CognitiveKernel
 from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
 from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionOp,
@@ -388,3 +390,151 @@ class TestCryptographicAuditTrailTamperDetection:
         assert integrity["status"] == "tampered"
         # Row 3 should fail verification because its prev_hash pointed to deleted row 2
         assert any(link["entry_id"] == 3 for link in integrity["broken_links"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Live Kernel Gate & GovernanceEngine Execution Path Verification
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestGovernanceEngineKernelGate:
+    """Verifies that GovernanceEngine and CognitiveKernel strictly enforce safety in the live execution path."""
+
+    def test_unsafe_requests_blocked_at_governance_engine_evaluation(self) -> None:
+        """The canonical unsafe commands must be deterministically blocked by GovernanceEngine."""
+        gov = GovernanceEngine()
+
+        # 1. Unauthorized front door unlock with override attempt
+        res_door = gov.evaluate_execution(
+            "unlock_front_door",
+            {"unauthorized": True, "override": True},
+        )
+        assert not res_door.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_door.violations
+        )
+
+        # 2. Disabling smoke detector
+        res_smoke = gov.evaluate_execution(
+            "disable_smoke_detector",
+            {},
+        )
+        assert not res_smoke.allowed
+        assert any("life_safety_critical_device_protection" in v for v in res_smoke.violations)
+
+        # 3. Setting stove burner to max unattended for 999 minutes
+        res_stove = gov.evaluate_execution(
+            "set_stove_burner",
+            {"power": "max", "unattended": True, "duration_minutes": 999},
+        )
+        assert not res_stove.allowed
+        assert any("unattended_thermal_fire_hazard" in v for v in res_stove.violations)
+
+        # 4. Actuating robot arm with extreme force and human in workspace
+        res_arm = gov.evaluate_execution(
+            "actuate_robot_arm",
+            {"force": 99999.0, "human_in_workspace": True},
+        )
+        assert not res_arm.allowed
+        assert any(
+            name in viol
+            for viol in res_arm.violations
+            for name in ("actuator_force_torque_limit", "human_in_workspace_actuator_hazard")
+        )
+
+    def test_cognitive_kernel_execution_raises_permission_error_on_unsafe_requests(self) -> None:
+        """CognitiveKernel.execute() must raise PermissionError and halt execution on any unsafe capability request."""
+        ws = HCIRWorkspaceState()
+        gov = GovernanceEngine()
+        kernel = CognitiveKernel(workspace=ws, governance_engine=gov)
+
+        # 1. Unlock front door unauthorized
+        with pytest.raises(PermissionError) as exc_door:
+            kernel.execute("unlock_front_door", {"unauthorized": True, "override": True})
+        assert "governance blocked capability 'unlock_front_door'" in str(exc_door.value)
+
+        # 2. Disable smoke detector
+        with pytest.raises(PermissionError) as exc_smoke:
+            kernel.execute("disable_smoke_detector", {})
+        assert "governance blocked capability 'disable_smoke_detector'" in str(exc_smoke.value)
+
+        # 3. Unattended max stove burner
+        with pytest.raises(PermissionError) as exc_stove:
+            kernel.execute(
+                "set_stove_burner",
+                {"power": "max", "unattended": True, "duration_minutes": 999},
+            )
+        assert "governance blocked capability 'set_stove_burner'" in str(exc_stove.value)
+
+        # 4. High-force robot arm actuation near human
+        with pytest.raises(PermissionError) as exc_arm:
+            kernel.execute(
+                "actuate_robot_arm",
+                {"force": 99999.0, "human_in_workspace": True},
+            )
+        assert "governance blocked capability 'actuate_robot_arm'" in str(exc_arm.value)
+
+    def test_safe_capability_executions_authorized_cleanly(self) -> None:
+        """Safe non-hazardous capability executions pass cleanly through the kernel pipeline."""
+        ws = HCIRWorkspaceState()
+        gov = GovernanceEngine()
+        kernel = CognitiveKernel(workspace=ws, governance_engine=gov)
+
+        receipt = kernel.execute(
+            "sensor.read_temperature",
+            {"room": "living_room", "unit": "celsius"},
+        )
+        assert receipt.status == "SUCCESS"
+        assert receipt.governance_decision is not None
+        assert receipt.governance_decision.allowed is True
+
+    def test_owner_rules_dynamically_enforced_in_kernel_gate(self, tmp_path: Any) -> None:
+        """Custom owner rules registered in OwnerRuleStore are enforced by GovernanceEngine during kernel execution."""
+        store = OwnerRuleStore(db_path=tmp_path / "custom_rules.db")
+        store.add_rule(
+            tenant_id="home_1",
+            text="Never play loud music when the baby is sleeping",
+        )
+
+        gov = GovernanceEngine()
+        gov.attach_owner_rule_store(store, tenant_id="home_1")
+
+        # When baby is awake -> allowed
+        res_awake = gov.evaluate_execution(
+            "play_loud_music",
+            {"volume": 80},
+            context={"baby": "awake", "tenant_id": "home_1"},
+        )
+        assert res_awake.allowed
+
+        # When baby is sleeping -> blocked
+        res_sleeping = gov.evaluate_execution(
+            "play_loud_music",
+            {"volume": 80},
+            context={"baby": "sleeping", "tenant_id": "home_1"},
+        )
+        assert not res_sleeping.allowed
+
+    @pytest.mark.asyncio
+    async def test_audit_trail_cryptographically_logs_kernel_decisions(self, tmp_path: Any) -> None:
+        """All authorized and denied execution decisions are written to AuditTrail with intact hash chains."""
+        db_file = tmp_path / "kernel_audit.db"
+        audit = AuditTrail(db_path=db_file)
+        await audit.init_db()
+
+        gov = GovernanceEngine(audit_trail=audit)
+        ws = HCIRWorkspaceState()
+        kernel = CognitiveKernel(workspace=ws, governance_engine=gov)
+
+        # 1. Execute authorized request
+        kernel.execute("sensor.read_temperature", {"room": "kitchen"})
+
+        # 2. Attempt denied request
+        with pytest.raises(PermissionError):
+            kernel.execute("disable_smoke_detector", {})
+
+        # Verify hash chain integrity
+        integrity = audit.verify_integrity()
+        assert integrity["is_valid"] is True
+        assert integrity["status"] == "ok"
+        assert integrity["entries_checked"] == 2
