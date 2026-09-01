@@ -2014,13 +2014,18 @@ class BrainFactory:
         )
         await proactive.start(message_bus)
 
-        # Route autonomy actions through the bus for proactive processing
-        autonomy.set_action_handler(lambda msg: message_bus.publish(msg.topic, msg))
-
         brain.notification_gateway = gateway
         brain.proactive_processor = proactive
         brain.sse_channel = sse
         logger.info("ProactiveProcessor wired — notifications active")
+
+        # ── Restraint & Intent Integrity (Safety Gating) ──────────
+        from hbllm.brain.autonomy.restraint import RestraintEngine
+        from hbllm.brain.control.guard import IntentIntegrityEngine
+
+        brain.restraint_engine = RestraintEngine()
+        brain.intent_guard = IntentIntegrityEngine()
+        logger.info("RestraintEngine & IntentIntegrityEngine wired — adaptive restraint active")
 
         # ── Cognitive Subsystems ────────────────────────────────────
 

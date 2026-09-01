@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
 from hbllm.hcir.kernel.executor import KernelExecutor
 from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
 from hbllm.hcir.kernel.runtime_state import RuntimeState
@@ -53,6 +54,7 @@ class KernelServices:
     executor: KernelExecutor | None = None
     persistence: PersistenceService | None = None
     telemetry: KernelTelemetry | None = None
+    sandbox_manager: CapabilitySandboxManager | None = None
 
     # ── HCIR Cognitive OS extensions ──
     tiered_workspace: Any = None  # TieredWorkspace (lazy import to avoid circular)

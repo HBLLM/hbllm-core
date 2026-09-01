@@ -211,6 +211,7 @@ class BootOrchestrator:
         try:
             from hbllm.hcir.adapters.node_adapter import NodeAdapter
             from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+            from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
             from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
             from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
             from hbllm.hcir.kernel.services import KernelServices
@@ -223,7 +224,8 @@ class BootOrchestrator:
                 else HCIRWorkspaceState()
             )
             tx_mgr = TransactionManager(hcir_ws)
-            resolver = CapabilityResolver()
+            sandbox_mgr = CapabilitySandboxManager()
+            resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
             hcir_sched = KernelInstructionScheduler()
 
             ctx.kernel_services = KernelServices(
@@ -231,6 +233,7 @@ class BootOrchestrator:
                 transaction_manager=tx_mgr,
                 capability_resolver=resolver,
                 scheduler=hcir_sched,
+                sandbox_manager=sandbox_mgr,
             )
             ctx.executive_runtime = ExecutiveRuntime(ctx.kernel_services)
             await ctx.executive_runtime.start()

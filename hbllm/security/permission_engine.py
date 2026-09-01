@@ -148,8 +148,8 @@ class PermissionEngine:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._default_policy = default_policy
 
-        # In-memory cache for fast lookups
-        self._cache: dict[tuple[str, str], GrantStatus] = {}
+        # In-memory cache for fast lookups: (tenant_id, principal, scope) -> GrantStatus
+        self._cache: dict[tuple[str, str, str], GrantStatus] = {}
 
         # Audit ring buffer (last 200 checks)
         self._audit: list[PermissionAuditEntry] = []
@@ -213,7 +213,7 @@ class PermissionEngine:
             True if the action is allowed.
         """
         # Check cache first
-        cache_key = (principal, scope)
+        cache_key = (tenant_id, principal, scope)
         cached = self._cache.get(cache_key)
 
         if cached is not None:
@@ -236,7 +236,8 @@ class PermissionEngine:
 
         if not allowed:
             logger.debug(
-                "Permission DENIED: %s → %s (context=%s)",
+                "Permission DENIED: [%s] %s → %s (context=%s)",
+                tenant_id,
                 principal,
                 scope,
                 context,
@@ -244,12 +245,12 @@ class PermissionEngine:
 
         return allowed
 
-    def is_allowed(self, principal: str, scope: str) -> bool:
+    def is_allowed(self, principal: str, scope: str, *, tenant_id: str = "default") -> bool:
         """Synchronous check (uses cache only).
 
         For use in hot paths where async overhead is unacceptable.
         """
-        cache_key = (principal, scope)
+        cache_key = (tenant_id, principal, scope)
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached == GrantStatus.GRANTED
@@ -296,14 +297,15 @@ class PermissionEngine:
                     """,
                     (grant_id, principal, scope, granted_by, reason, now, expires, tenant_id),
                 )
-                self._cache[(principal, scope)] = GrantStatus.GRANTED
+                self._cache[(tenant_id, principal, scope)] = GrantStatus.GRANTED
                 count += 1
             conn.commit()
 
         logger.info(
-            "Granted %d permissions to '%s': %s",
+            "Granted %d permissions to '%s' [tenant=%s]: %s",
             count,
             principal,
+            tenant_id,
             scopes,
         )
         return count
@@ -332,11 +334,13 @@ class PermissionEngine:
                     """,
                     (grant_id, principal, scope, reason, now, tenant_id),
                 )
-                self._cache[(principal, scope)] = GrantStatus.DENIED
+                self._cache[(tenant_id, principal, scope)] = GrantStatus.DENIED
                 count += 1
             conn.commit()
 
-        logger.info("Denied %d permissions for '%s': %s", count, principal, scopes)
+        logger.info(
+            "Denied %d permissions for '%s' [tenant=%s]: %s", count, principal, tenant_id, scopes
+        )
         return count
 
     async def revoke(
@@ -361,14 +365,16 @@ class PermissionEngine:
             conn.commit()
             removed = cursor.rowcount > 0
 
-        self._cache.pop((principal, scope), None)
+        self._cache.pop((tenant_id, principal, scope), None)
 
         if removed:
-            logger.info("Revoked '%s' permission from '%s'", scope, principal)
+            logger.info(
+                "Revoked '%s' permission from '%s' [tenant=%s]", scope, principal, tenant_id
+            )
         return removed
 
     async def revoke_all(self, principal: str, *, tenant_id: str = "default") -> int:
-        """Revoke all permissions for a principal."""
+        """Revoke all permissions for a principal within a tenant."""
         with sqlite3.connect(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "DELETE FROM permission_grants WHERE principal = ? AND tenant_id = ?",
@@ -377,12 +383,12 @@ class PermissionEngine:
             conn.commit()
             count = cursor.rowcount
 
-        # Clear cache
-        keys_to_remove = [k for k in self._cache if k[0] == principal]
-        for k in keys_to_remove:
-            del self._cache[k]
+        # Clear tenant-specific cache entries for principal
+        self._cache = {
+            k: v for k, v in self._cache.items() if not (k[0] == tenant_id and k[1] == principal)
+        }
 
-        logger.info("Revoked all %d permissions from '%s'", count, principal)
+        logger.info("Revoked all %d permissions from '%s' [tenant=%s]", count, principal, tenant_id)
         return count
 
     # ── Introspection ────────────────────────────────────────────────────
@@ -477,10 +483,12 @@ class PermissionEngine:
     async def _warm_cache(self) -> None:
         """Load all grants into memory cache."""
         with sqlite3.connect(str(self._db_path)) as conn:
-            rows = conn.execute("SELECT principal, scope, status FROM permission_grants").fetchall()
+            rows = conn.execute(
+                "SELECT tenant_id, principal, scope, status FROM permission_grants"
+            ).fetchall()
 
-        for principal, scope, status in rows:
-            self._cache[(principal, scope)] = GrantStatus(status)
+        for tenant_id, principal, scope, status in rows:
+            self._cache[(tenant_id, principal, scope)] = GrantStatus(status)
 
         logger.debug("Warmed permission cache with %d entries", len(self._cache))
 

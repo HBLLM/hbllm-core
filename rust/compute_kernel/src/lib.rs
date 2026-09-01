@@ -54,47 +54,51 @@ impl UniversalEngine {
         let in_features = packed_in * 2; // 4-bit: 2 weights per byte
         let total = out_features * in_features;
 
-        let mut out = vec![0.0f32; total];
+        let out = py.allow_threads(|| {
+            let mut out = vec![0.0f32; total];
 
-        for row in 0..out_features {
-            let row_packed = packed.row(row);
-            let row_scale = scale.row(row);
-            let row_bias = bias.row(row);
-            let out_offset = row * in_features;
+            for row in 0..out_features {
+                let row_packed = packed.row(row);
+                let row_scale = scale.row(row);
+                let row_bias = bias.row(row);
+                let out_offset = row * in_features;
 
-            #[cfg(target_arch = "aarch64")]
-            unsafe {
-                Self::dequantize_row_neon(
-                    row_packed.as_slice().unwrap(),
-                    &mut out[out_offset..out_offset + in_features],
-                    row_scale.as_slice().unwrap(),
-                    row_bias.as_slice().unwrap(),
-                    group_size,
-                );
+                #[cfg(target_arch = "aarch64")]
+                unsafe {
+                    Self::dequantize_row_neon(
+                        row_packed.as_slice().unwrap(),
+                        &mut out[out_offset..out_offset + in_features],
+                        row_scale.as_slice().unwrap(),
+                        row_bias.as_slice().unwrap(),
+                        group_size,
+                    );
+                }
+
+                #[cfg(target_arch = "x86_64")]
+                unsafe {
+                    Self::dequantize_row_x86(
+                        row_packed.as_slice().unwrap(),
+                        &mut out[out_offset..out_offset + in_features],
+                        row_scale.as_slice().unwrap(),
+                        row_bias.as_slice().unwrap(),
+                        group_size,
+                    );
+                }
+
+                #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+                {
+                    Self::dequantize_row_scalar(
+                        row_packed.as_slice().unwrap(),
+                        &mut out[out_offset..out_offset + in_features],
+                        row_scale.as_slice().unwrap(),
+                        row_bias.as_slice().unwrap(),
+                        group_size,
+                    );
+                }
             }
 
-            #[cfg(target_arch = "x86_64")]
-            unsafe {
-                Self::dequantize_row_x86(
-                    row_packed.as_slice().unwrap(),
-                    &mut out[out_offset..out_offset + in_features],
-                    row_scale.as_slice().unwrap(),
-                    row_bias.as_slice().unwrap(),
-                    group_size,
-                );
-            }
-
-            #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-            {
-                Self::dequantize_row_scalar(
-                    row_packed.as_slice().unwrap(),
-                    &mut out[out_offset..out_offset + in_features],
-                    row_scale.as_slice().unwrap(),
-                    row_bias.as_slice().unwrap(),
-                    group_size,
-                );
-            }
-        }
+            out
+        });
 
         Ok(PyArray1::from_vec(py, out))
     }
@@ -130,8 +134,6 @@ impl UniversalEngine {
         let packed_in = packed.shape()[1];
         let in_features = packed_in * 2; // 4-bit: 2 weights per byte
 
-        let mut out = vec![0.0f32; out_features];
-
         if x.len() != in_features {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Dimension mismatch: x length ({}) must equal in_features ({})",
@@ -140,48 +142,54 @@ impl UniversalEngine {
             )));
         }
 
-        for (row, out_val) in out.iter_mut().enumerate() {
-            let row_packed = packed.row(row);
-            let row_scale = scale.row(row);
-            let row_bias = bias.row(row);
+        let out = py.allow_threads(|| {
+            let mut out = vec![0.0f32; out_features];
 
-            let sum = {
-                #[cfg(target_arch = "aarch64")]
-                unsafe {
-                    Self::gemv_row_neon(
-                        x.as_slice().unwrap(),
-                        row_packed.as_slice().unwrap(),
-                        row_scale.as_slice().unwrap(),
-                        row_bias.as_slice().unwrap(),
-                        group_size,
-                    )
-                }
+            for (row, out_val) in out.iter_mut().enumerate() {
+                let row_packed = packed.row(row);
+                let row_scale = scale.row(row);
+                let row_bias = bias.row(row);
 
-                #[cfg(target_arch = "x86_64")]
-                unsafe {
-                    Self::gemv_row_x86(
-                        x.as_slice().unwrap(),
-                        row_packed.as_slice().unwrap(),
-                        row_scale.as_slice().unwrap(),
-                        row_bias.as_slice().unwrap(),
-                        group_size,
-                    )
-                }
+                let sum = {
+                    #[cfg(target_arch = "aarch64")]
+                    unsafe {
+                        Self::gemv_row_neon(
+                            x.as_slice().unwrap(),
+                            row_packed.as_slice().unwrap(),
+                            row_scale.as_slice().unwrap(),
+                            row_bias.as_slice().unwrap(),
+                            group_size,
+                        )
+                    }
 
-                #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-                {
-                    Self::gemv_row_scalar(
-                        x.as_slice().unwrap(),
-                        row_packed.as_slice().unwrap(),
-                        row_scale.as_slice().unwrap(),
-                        row_bias.as_slice().unwrap(),
-                        group_size,
-                    )
-                }
-            };
+                    #[cfg(target_arch = "x86_64")]
+                    unsafe {
+                        Self::gemv_row_x86(
+                            x.as_slice().unwrap(),
+                            row_packed.as_slice().unwrap(),
+                            row_scale.as_slice().unwrap(),
+                            row_bias.as_slice().unwrap(),
+                            group_size,
+                        )
+                    }
 
-            *out_val = sum;
-        }
+                    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+                    {
+                        Self::gemv_row_scalar(
+                            x.as_slice().unwrap(),
+                            row_packed.as_slice().unwrap(),
+                            row_scale.as_slice().unwrap(),
+                            row_bias.as_slice().unwrap(),
+                            group_size,
+                        )
+                    }
+                };
+
+                *out_val = sum;
+            }
+
+            out
+        });
 
         Ok(PyArray1::from_vec(py, out))
     }

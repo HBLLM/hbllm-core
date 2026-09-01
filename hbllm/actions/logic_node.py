@@ -194,14 +194,25 @@ class LogicNode(Node):
                     logger.error("[LogicNode] Blocked dunder access: %s", node.attr)
                     return None
 
-            # Sandboxed execution: AST is pre-validated above
-            exec(z3_code, sandbox_globals, sandbox_locals)  # noqa: S102 # nosec B102
+            import concurrent.futures
+
+            # Sandboxed execution: AST is pre-validated above and run in worker thread with timeout
+            def _run_exec() -> None:
+                exec(z3_code, sandbox_globals, sandbox_locals)  # noqa: S102 # nosec B102
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_run_exec)
+                future.result(timeout=5.0)
+
             result = sandbox_locals.get("result")
             if result is not None:
                 return str(result)
             else:
                 logger.warning("[LogicNode] Z3 code executed but no 'result' variable found.")
                 return None
+        except TimeoutError:
+            logger.error("[LogicNode] Z3 execution timed out after 5.0s")
+            return None
         except (RuntimeError, ValueError, TypeError, OSError, KeyError, ConnectionError) as e:
             logger.error("[LogicNode] Z3 sandbox execution failed: %s", e)
             return None
