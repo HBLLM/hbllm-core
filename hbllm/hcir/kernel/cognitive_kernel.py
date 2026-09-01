@@ -1,5 +1,12 @@
 """
-Cognitive Kernel — Single Public Execution Boundary for HCIR Cognitive OS.
+Cognitive Kernel — Lightweight Public Execution Boundary & Facade for HCIR.
+
+Note on Architecture:
+    - ``CognitiveKernel`` serves as a lightweight facade and test/migration harness
+      implementing ``CognitiveKernelProtocol``.
+    - For full production runtime execution, ``KernelServices`` (the dependency
+      injection container in ``services.py``) coupled with ``ExecutiveRuntime``
+      in ``executive_runtime.py`` is the canonical engine booted by ``serving/boot.py``.
 
 Orchestrates the 9-stage instruction execution pipeline:
  1. Envelope creation
@@ -18,11 +25,14 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.kernel.contracts import CognitiveKernelProtocol
 from hbllm.hcir.kernel.governance.governance_engine import GovernanceDecision, GovernanceEngine
 from hbllm.hcir.workspace import HCIRWorkspaceState
+
+if TYPE_CHECKING:
+    from hbllm.hcir.kernel.services import KernelServices
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +51,23 @@ class KernelExecutionReceipt:
 
 
 class CognitiveKernel(CognitiveKernelProtocol):
-    """The central execution boundary for the HCIR Cognitive OS Kernel."""
+    """Lightweight execution facade for the HCIR Cognitive OS Kernel."""
 
     def __init__(
         self,
         workspace: HCIRWorkspaceState,
         governance_engine: GovernanceEngine | None = None,
+        services: KernelServices | None = None,
     ) -> None:
         self._workspace = workspace
         self._governance = governance_engine or GovernanceEngine()
+        self._services = services
         self._execution_count = 0
+
+    @property
+    def services(self) -> KernelServices | None:
+        """The underlying full KernelServices container if attached."""
+        return self._services
 
     @property
     def workspace(self) -> HCIRWorkspaceState:

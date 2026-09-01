@@ -14,9 +14,13 @@ Selection is based on priority, availability, and resource cost.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +93,11 @@ class CapabilityResolver:
         result = await executor.execute({"code": "print('hello')"})
     """
 
-    def __init__(self) -> None:
+    def __init__(self, sandbox_manager: CapabilitySandboxManager | None = None) -> None:
         # capability_name → list of implementations (sorted by priority desc)
         self._registry: dict[str, list[CapabilityImplementation]] = {}
         self._total_cost: int = 0
+        self.sandbox_manager = sandbox_manager
 
     def register(self, impl: CapabilityImplementation) -> None:
         """Register a capability implementation."""
@@ -116,21 +121,28 @@ class CapabilityResolver:
                 return True
         return False
 
+    def resolve_implementation(self, capability_name: str) -> CapabilityImplementation | None:
+        """Resolve a capability to its best available implementation object."""
+        impls = self._registry.get(capability_name, [])
+        for impl in impls:
+            if impl.executor.is_available:
+                return impl
+        return None
+
     async def resolve(self, capability_name: str) -> ICapabilityExecutor | None:
         """Resolve a capability to its best available executor.
 
         Selects the highest-priority implementation that reports
         itself as available.
         """
-        impls = self._registry.get(capability_name, [])
-        for impl in impls:
-            if impl.executor.is_available:
-                logger.debug(
-                    "Resolved capability '%s' → '%s'",
-                    capability_name,
-                    impl.implementation_id,
-                )
-                return impl.executor
+        impl = self.resolve_implementation(capability_name)
+        if impl is not None:
+            logger.debug(
+                "Resolved capability '%s' → '%s'",
+                capability_name,
+                impl.implementation_id,
+            )
+            return impl.executor
 
         logger.warning("No available executor for capability '%s'", capability_name)
         return None
@@ -165,10 +177,12 @@ class CapabilityResolver:
         capability_name: str,
         params: dict[str, Any],
         budget: int | None = None,
+        required_permissions: set[str] | list[str] | None = None,
+        timeout_override: float | None = None,
     ) -> dict[str, Any]:
-        """Resolve and execute a capability in a single call.
+        """Resolve and execute a capability in a single call with sandbox enforcement.
 
-        Combines resolution + execution for convenience.
+        Combines resolution + sandbox policy checks + execution timeout.
         Tracks budget consumption if a budget is provided.
 
         Returns:
@@ -180,21 +194,58 @@ class CapabilityResolver:
                 return {
                     "error": f"No implementation for '{capability_name}' within budget {budget}"
                 }
-            try:
-                result = await impl.executor.execute(params)
-                self._total_cost += impl.estimated_cost
-                return result
-            except Exception as exc:
-                return {"error": f"Execution failed: {exc}"}
         else:
-            executor = await self.resolve(capability_name)
-            if executor is None:
+            impl = self.resolve_implementation(capability_name)
+            if impl is None:
                 return {"error": f"No available executor for '{capability_name}'"}
-            try:
-                result = await executor.execute(params)
-                return result
-            except Exception as exc:
-                return {"error": f"Execution failed: {exc}"}
+
+        # ── Sandbox Policy Enforcement ──
+        timeout = timeout_override
+        if self.sandbox_manager is not None:
+            # Check requested permissions
+            if required_permissions:
+                for perm in required_permissions:
+                    if not self.sandbox_manager.check_permission(
+                        capability_name, impl.implementation_id, perm
+                    ):
+                        logger.warning(
+                            "Sandbox violation: permission '%s' denied for '%s:%s'",
+                            perm,
+                            capability_name,
+                            impl.implementation_id,
+                        )
+                        return {
+                            "error": f"Sandbox policy violation: permission '{perm}' denied for '{capability_name}:{impl.implementation_id}'"
+                        }
+
+            # Extract resource limit timeout if not explicitly overridden
+            policy = self.sandbox_manager.get_policy(capability_name, impl.implementation_id)
+            if (
+                timeout is None
+                and policy is not None
+                and policy.resource_limits.timeout_seconds > 0
+            ):
+                timeout = policy.resource_limits.timeout_seconds
+
+        try:
+            if timeout is not None and timeout > 0:
+                result = await asyncio.wait_for(impl.executor.execute(params), timeout=timeout)
+            else:
+                result = await impl.executor.execute(params)
+
+            if budget is not None:
+                self._total_cost += impl.estimated_cost
+            return result
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "Execution of '%s:%s' timed out after %.1fs",
+                capability_name,
+                impl.implementation_id,
+                timeout or 0.0,
+            )
+            return {"error": f"Capability execution timed out after {timeout}s"}
+        except Exception as exc:
+            return {"error": f"Execution failed: {exc}"}
 
     def list_capabilities(self) -> list[str]:
         """Return all registered capability names."""

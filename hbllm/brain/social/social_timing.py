@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -331,11 +331,12 @@ class SocialTimingEngine:
         dt = datetime.fromtimestamp(now, tz=timezone.utc)
         if dt.hour < self.quiet_end:
             # Same day
-            target = dt.replace(hour=self.quiet_end, minute=0, second=0)
+            target = dt.replace(hour=self.quiet_end, minute=0, second=0, microsecond=0)
         else:
-            # Next day
-            target = dt.replace(hour=self.quiet_end, minute=0, second=0)
-            target = target.replace(day=target.day + 1)
+            # Next day (safe across month/year boundaries)
+            target = (dt + timedelta(days=1)).replace(
+                hour=self.quiet_end, minute=0, second=0, microsecond=0
+            )
         return target.timestamp()
 
     def stats(self) -> dict[str, Any]:
