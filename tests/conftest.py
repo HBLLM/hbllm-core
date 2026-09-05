@@ -23,27 +23,127 @@ for lib_path in llama_venv_libs:
 # Conditionally mock torch/onnxruntime ONLY when they aren't genuinely installed.
 # If real packages exist, let them be imported normally so ML tests can run.
 import importlib.machinery
+from typing import Any
 from unittest.mock import MagicMock
 
 _torch_available = False
 try:
+    if os.getenv("HBLLM_FORCE_MOCK_TORCH") == "1":
+        raise ImportError("Forced mock torch")
     import torch as _torch_probe  # noqa: F401
 
     _torch_available = True
 except ImportError:
+
+    class _MockModule:
+        """Mock base class for torch.nn.Module when PyTorch is not installed.
+
+        Prevents MagicMock from being used as a base class metaclass, which turns
+        derived classes (e.g. HBLLMForCausalLM) into MagicMock instances with
+        exhaustible 1-item side_effect iterators raising StopIteration on subsequent calls.
+        """
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __getattr__(self, name: str) -> Any:
+            if name.startswith("_"):
+                raise AttributeError(name)
+            val = MagicMock()
+            setattr(self, name, val)
+            return val
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            return MagicMock()
+
+        def to(self, *args: Any, **kwargs: Any) -> _MockModule:
+            return self
+
+        def eval(self) -> _MockModule:
+            return self
+
+        def train(self, mode: bool = True) -> _MockModule:
+            return self
+
+        def parameters(self) -> list[Any]:
+            return []
+
+        def named_parameters(self) -> list[tuple[str, Any]]:
+            return []
+
+        def modules(self) -> list[Any]:
+            return [self]
+
+        def named_modules(self) -> list[tuple[str, Any]]:
+            return [("", self)]
+
+        def state_dict(self) -> dict[str, Any]:
+            return {}
+
+        def load_state_dict(self, state_dict: Any, strict: bool = True) -> Any:
+            return MagicMock()
+
+        def apply(self, fn: Any) -> _MockModule:
+            return self
+
+        def register_buffer(self, name: str, tensor: Any, persistent: bool = True) -> None:
+            setattr(self, name, tensor)
+
+        def register_parameter(self, name: str, param: Any) -> None:
+            setattr(self, name, param)
+
+        def forward(self, *args: Any, **kwargs: Any) -> Any:
+            return MagicMock()
+
+    class _MockLinear(_MockModule):
+        pass
+
+    class _MockEmbedding(_MockModule):
+        pass
+
+    class _MockTensor:
+        pass
+
+    class _MockDtype:
+        pass
+
+    class _MockDevice:
+        pass
+
     spec = importlib.machinery.ModuleSpec("torch", None)
-    for mod in [
-        "torch",
-        "torch.nn",
-        "torch.nn.functional",
-        "torch.utils",
-        "torch.utils.data",
-        "torch.optim",
-        "torch.optim.lr_scheduler",
-    ]:
-        mock = MagicMock()
-        mock.__spec__ = spec
-        sys.modules[mod] = mock
+
+    torch_mock = MagicMock()
+    torch_mock.__spec__ = spec
+    torch_mock.cuda.is_available.return_value = False
+    torch_mock.backends.mps.is_available.return_value = False
+    torch_mock.Tensor = _MockTensor
+    torch_mock.dtype = _MockDtype
+    torch_mock.device = _MockDevice
+    torch_mock.float32 = _MockDtype()
+    torch_mock.bfloat16 = _MockDtype()
+    torch_mock.float16 = _MockDtype()
+    torch_mock.int8 = _MockDtype()
+    torch_mock.uint8 = _MockDtype()
+
+    nn_mock = MagicMock()
+    nn_mock.__spec__ = spec
+    nn_mock.Module = _MockModule
+    nn_mock.Linear = _MockLinear
+    nn_mock.Embedding = _MockEmbedding
+    torch_mock.nn = nn_mock
+
+    sys.modules["torch"] = torch_mock
+    sys.modules["torch.nn"] = nn_mock
+    sys.modules["torch.nn.functional"] = MagicMock()
+    torch_mock.nn.functional = sys.modules["torch.nn.functional"]
+    sys.modules["torch.utils"] = MagicMock()
+    torch_mock.utils = sys.modules["torch.utils"]
+    sys.modules["torch.utils.data"] = MagicMock()
+    torch_mock.utils.data = sys.modules["torch.utils.data"]
+    sys.modules["torch.optim"] = MagicMock()
+    torch_mock.optim = sys.modules["torch.optim"]
+    sys.modules["torch.optim.lr_scheduler"] = MagicMock()
+    torch_mock.optim.lr_scheduler = sys.modules["torch.optim.lr_scheduler"]
 
 _onnx_available = False
 try:
