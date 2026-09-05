@@ -196,19 +196,44 @@ class SpatialOperator:
         all_facts = known_facts + inferred
 
         # ── Build result ─────────────────────────────────────────────
+        # Collect existing graph edges between physical entities to avoid duplicates
+        existing_edges: set[tuple[str, HCIREdgeType, str]] = set()
+        entity_ids = {n.id for n in view.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)}
+        for nid in entity_ids:
+            for edge in view.edges_from(nid):
+                for tgt in edge.targets:
+                    if tgt in entity_ids:
+                        existing_edges.add((nid, edge.edge_type, tgt))
+
         proposed_ops: list[TransactionOperation] = []
+        proposed_edges: set[tuple[str, HCIREdgeType, str]] = set()
 
         for fact in inferred:
+            spec = self._fact_to_edge_spec(fact)
+            if spec is None:
+                continue
+            src, edge_type, tgt = spec
+
+            # Never re-propose an existing edge or duplicate in this batch
+            if (src, edge_type, tgt) in existing_edges or (src, edge_type, tgt) in proposed_edges:
+                continue
+
+            # For symmetric relations, avoid redundant reciprocal edge if already present
+            if fact.relation in _SYMMETRIC_RELATIONS and (tgt, edge_type, src) in existing_edges:
+                continue
+
+            proposed_edges.add((src, edge_type, tgt))
+
             edge = HCIREdge(
-                edge_type=self._relation_to_edge_type(fact.relation),
-                sources=[fact.entity_a],
-                targets=[fact.entity_b],
+                edge_type=edge_type,
+                sources=[src],
+                targets=[tgt],
                 weight=fact.confidence,
                 properties={"spatial_relation": fact.relation},
                 provenance=Provenance(
                     created_by=self.operator_id,
                     source_type="inferred",
-                    reason=f"Spatial inference: {fact.entity_a} {fact.relation} {fact.entity_b}",
+                    reason=f"Spatial inference: {src} {edge_type} {tgt} (derived via {fact.relation})",
                 ),
             )
             proposed_ops.append(
@@ -388,8 +413,33 @@ class SpatialOperator:
         return inferred
 
     @staticmethod
+    def _fact_to_edge_spec(fact: SpatialFact) -> tuple[str, HCIREdgeType, str] | None:
+        """Map a spatial fact to canonical (source_id, edge_type, target_id).
+
+        Preserves asymmetric edge directionality in HCIR:
+          - A INSIDE B        => source=A, edge=PART_OF, target=B       [A is part of B]
+          - A CONTAINS B      => source=B, edge=PART_OF, target=A       [B is part of A]
+          - A SUPPORTS B      => source=A, edge=SUPPORTS, target=B      [A supports B]
+          - A SUPPORTED_BY B  => source=B, edge=SUPPORTS, target=A      [B supports A]
+          - A ON_TOP_OF B     => source=B, edge=SUPPORTS, target=A      [B supports A]
+          - A ADJACENT_TO B   => source=A, edge=CORRELATES_WITH, target=B [symmetric]
+          - A NEAR B          => source=A, edge=CORRELATES_WITH, target=B [symmetric]
+        """
+        if fact.relation == SpatialRelation.INSIDE:
+            return (fact.entity_a, HCIREdgeType.PART_OF, fact.entity_b)
+        elif fact.relation == SpatialRelation.CONTAINS:
+            return (fact.entity_b, HCIREdgeType.PART_OF, fact.entity_a)
+        elif fact.relation == SpatialRelation.SUPPORTS:
+            return (fact.entity_a, HCIREdgeType.SUPPORTS, fact.entity_b)
+        elif fact.relation in (SpatialRelation.SUPPORTED_BY, SpatialRelation.ON_TOP_OF):
+            return (fact.entity_b, HCIREdgeType.SUPPORTS, fact.entity_a)
+        elif fact.relation in (SpatialRelation.ADJACENT_TO, SpatialRelation.NEAR):
+            return (fact.entity_a, HCIREdgeType.CORRELATES_WITH, fact.entity_b)
+        return None
+
+    @staticmethod
     def _relation_to_edge_type(relation: SpatialRelation) -> HCIREdgeType:
-        """Map spatial relation to HCIR edge type."""
+        """Map spatial relation to default HCIR edge type."""
         mapping: dict[SpatialRelation, HCIREdgeType] = {
             SpatialRelation.CONTAINS: HCIREdgeType.PART_OF,
             SpatialRelation.INSIDE: HCIREdgeType.PART_OF,
@@ -399,3 +449,4 @@ class SpatialOperator:
             SpatialRelation.NEAR: HCIREdgeType.CORRELATES_WITH,
         }
         return mapping.get(relation, HCIREdgeType.CORRELATES_WITH)
+
