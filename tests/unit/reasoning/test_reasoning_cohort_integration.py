@@ -117,15 +117,15 @@ def test_spatial_operator_infers_transitive_containment_in_cohort() -> None:
         )
     )
 
-    # Observation introduces ball_1 on table_1
+    # Observation introduces ball_1 inside/part_of table_1
     obs = EnvironmentObservation(
         step_index=1,
         visible_entities=[
             {"id": "ball_1", "type": "ball", "properties": {"color": "blue"}},
             {"id": "table_1", "type": "table", "properties": {"color": "brown"}},
         ],
-        spatial_relations=[{"source": "ball_1", "target": "table_1", "relation": "SUPPORTS"}],
-        goal_description="spatial_stacking",
+        spatial_relations=[{"source": "ball_1", "target": "table_1", "relation": "PART_OF"}],
+        goal_description="spatial_containment",
         available_actions=[{"name": "ALIGN", "parameters": {"target": "ball_1"}}],
         interaction_history=[],
         resource_budget={},
@@ -133,7 +133,33 @@ def test_spatial_operator_infers_transitive_containment_in_cohort() -> None:
 
     cohort.process_observation(obs)
 
-    # Graph now contains ball_1, table_1, room_1
+    # 1. Graph contains all entities
     assert cohort.graph.has_node("ball_1")
     assert cohort.graph.has_node("table_1")
     assert cohort.graph.has_node("room_1")
+
+    # 2. Forward transitive containment genuinely inferred and committed: ball_1 --PART_OF--> room_1
+    transitive_edges = [
+        e for e in cohort.graph.edges_from("ball_1")
+        if e.edge_type == HCIREdgeType.PART_OF and "room_1" in e.targets
+    ]
+    assert len(transitive_edges) == 1, (
+        f"Transitive containment ball_1 --PART_OF--> room_1 must be inferred. "
+        f"Found: {cohort.graph.edges_from('ball_1')}"
+    )
+
+    # 3. Asymmetry invariant: NO reverse / backwards containment edges
+    # room_1 must NEVER be part of table_1 or ball_1
+    room_outgoing = [
+        e for e in cohort.graph.edges_from("room_1")
+        if e.edge_type == HCIREdgeType.PART_OF
+    ]
+    assert len(room_outgoing) == 0, f"Backwards containment from room_1 detected: {room_outgoing}"
+
+    # table_1 must NEVER be part of ball_1
+    table_to_ball = [
+        e for e in cohort.graph.edges_from("table_1")
+        if e.edge_type == HCIREdgeType.PART_OF and "ball_1" in e.targets
+    ]
+    assert len(table_to_ball) == 0, f"Backwards containment table_1 -> ball_1 detected: {table_to_ball}"
+
