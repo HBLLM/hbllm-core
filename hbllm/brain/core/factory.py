@@ -610,9 +610,19 @@ class Brain:
                 logger.info("[Brain] HCIR session ended, archived %d nodes", archived)
             except Exception:
                 logger.debug("Error stopping HCIR runtime during shutdown", exc_info=True)
+        # Stop epistemic loop
+        if self.epistemic_loop and hasattr(self.epistemic_loop, "close"):
+            try:
+                self.epistemic_loop.close()
+            except Exception:
+                logger.debug("Error closing epistemic loop during shutdown", exc_info=True)
         await self.registry.stop()
         await self.bus.stop()
         logger.info("Brain shutdown complete")
+
+    async def stop(self, drain_timeout: float = 30.0) -> None:
+        """Stop all brain subsystems and release resources (alias for shutdown)."""
+        await self.shutdown(drain_timeout=drain_timeout)
 
     @property
     def usage(self) -> dict[str, int]:

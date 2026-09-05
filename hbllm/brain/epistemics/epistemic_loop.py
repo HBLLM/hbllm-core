@@ -580,3 +580,11 @@ class EpistemicLoop:
                     )
         except Exception as exc:
             logger.debug("Memory recording failed: %s", exc)
+
+    def close(self) -> None:
+        """Close persistent epistemic resources (e.g. SQLite memory connections)."""
+        if hasattr(self, "_memory") and self._memory is not None:
+            try:
+                self._memory.close()
+            except Exception:
+                pass

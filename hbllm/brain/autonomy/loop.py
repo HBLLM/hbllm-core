@@ -169,6 +169,7 @@ class AutonomyCore:
         # Event loop control
         self._running = False
         self._tick_task: asyncio.Task[None] | None = None
+        self._recovery_task: asyncio.Task[None] | None = None
         self._fast_path_event: asyncio.Event = asyncio.Event()
 
         # Fast-path topics
@@ -230,7 +231,7 @@ class AutonomyCore:
         self.state_machine.transition_to(CognitiveState.OBSERVING, reason="autonomy_boot")
 
         # Run startup recovery
-        asyncio.create_task(self._recover_active_goals())
+        self._recovery_task = asyncio.create_task(self._recover_active_goals())
 
         logger.info(
             "AutonomyCore started. Fast-path topics: %s, tick=%.1fs",
@@ -280,6 +281,13 @@ class AutonomyCore:
             self._tick_task.cancel()
             try:
                 await self._tick_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._recovery_task and not self._recovery_task.done():
+            self._recovery_task.cancel()
+            try:
+                await self._recovery_task
             except asyncio.CancelledError:
                 pass
 

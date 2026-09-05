@@ -9,6 +9,7 @@ Verifies:
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from unittest.mock import MagicMock
 
@@ -53,8 +54,7 @@ async def test_brain_factory_wires_epistemic_runtime_into_autonomy() -> None:
             assert "deduction" in brain.reasoning_registry.operator_ids
             assert "spatial" in brain.reasoning_registry.operator_ids
         finally:
-            if brain.autonomy_core is not None:
-                await brain.autonomy_core.stop()
+            await brain.shutdown()
 
 
 @pytest.mark.asyncio
@@ -65,34 +65,34 @@ async def test_boot_sequence_does_not_clobber_configured_autonomy_core() -> None
         brain_cfg = BrainConfig(data_dir=td)
         brain = await BrainFactory.create_local(config=brain_cfg, bus=bus)
 
-        original_autonomy = brain.autonomy_core
-        original_epistemic = brain.epistemic_loop
+        try:
+            original_autonomy = brain.autonomy_core
+            original_epistemic = brain.epistemic_loop
 
-        assert original_autonomy is not None
-        assert original_epistemic is not None
+            assert original_autonomy is not None
+            assert original_epistemic is not None
 
-        # Run boot core step simulation
-        ctx = BootContext()
-        ctx.brain = brain
-        ctx.profile = MagicMock()
-        ctx.profile.features.autonomy_core = True
+            # Run boot core step simulation
+            ctx = BootContext()
+            ctx.brain = brain
+            ctx.profile = MagicMock()
+            ctx.profile.features.autonomy_core = True
 
-        # Execute step 8 logic directly
-        if ctx.brain.autonomy_core is not None:
-            ctx.autonomy = ctx.brain.autonomy_core
-        else:
-            ctx.autonomy = AutonomyCore()
-            await ctx.autonomy.start(ctx.brain.bus)
-            ctx.brain.autonomy_core = ctx.autonomy
+            # Execute step 8 logic directly
+            if ctx.brain.autonomy_core is not None:
+                ctx.autonomy = ctx.brain.autonomy_core
+            else:
+                ctx.autonomy = AutonomyCore()
+                await ctx.autonomy.start(ctx.brain.bus)
+                ctx.brain.autonomy_core = ctx.autonomy
 
-        # The autonomy core must NOT have been replaced by an unconfigured instance
-        assert ctx.autonomy is original_autonomy
-        assert ctx.brain.autonomy_core is original_autonomy
-        assert ctx.brain.epistemic_loop is original_epistemic
-        assert "epistemic" in ctx.autonomy._proactive_handlers
-
-        if brain.autonomy_core is not None:
-            await brain.autonomy_core.stop()
+            # The autonomy core must NOT have been replaced by an unconfigured instance
+            assert ctx.autonomy is original_autonomy
+            assert ctx.brain.autonomy_core is original_autonomy
+            assert ctx.brain.epistemic_loop is original_epistemic
+            assert "epistemic" in ctx.autonomy._proactive_handlers
+        finally:
+            await brain.shutdown()
 
 
 @pytest.mark.asyncio
@@ -106,7 +106,19 @@ async def test_live_cognitive_tick_fires_epistemic_cycle() -> None:
         try:
             loop: EpistemicLoop = brain.epistemic_loop
             core: AutonomyCore = brain.autonomy_core
+            assert loop is not None
+            assert core is not None
+
+            # Stop the background tick loop so it cannot race with our manual tick assertions
+            if core._tick_task and not core._tick_task.done():
+                core._tick_task.cancel()
+                try:
+                    await core._tick_task
+                except asyncio.CancelledError:
+                    pass
+
             initial_cycles = loop.cycle_count
+            initial_ticks = core._ticks_completed
 
             # Add an observation and conflicting belief to graph to give epistemic loop work
             graph: CognitiveGraph = loop._graph
@@ -128,7 +140,8 @@ async def test_live_cognitive_tick_fires_epistemic_cycle() -> None:
 
             # Verify that EpistemicLoop.run_cycle() executed
             assert loop.cycle_count > initial_cycles
-            assert core._ticks_completed == 0  # ticks_completed is incremented in run_loop
+            assert (
+                core._ticks_completed == initial_ticks
+            )  # manual _cognitive_tick does not increment run_loop counter
         finally:
-            if brain.autonomy_core is not None:
-                await brain.autonomy_core.stop()
+            await brain.shutdown()
