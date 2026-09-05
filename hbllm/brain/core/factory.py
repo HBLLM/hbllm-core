@@ -308,6 +308,8 @@ class Brain:
 
         # ── v4: Composite nodes ────────────────────────────────────
         self.reasoning_core: Any = None  # ReasoningCore
+        self.reasoning_registry: Any = None  # OperatorRegistry
+        self.reasoning_runtime: Any = None  # UnifiedReasoningRuntime
         self.memory_system: Any = None  # MemorySystem
         self.meta_cognition: Any = None  # MetaCognition
         self.skill_engine: Any = None  # SkillEngine
@@ -318,6 +320,7 @@ class Brain:
 
         # ── Autonomy subsystem (cognitive heartbeat) ──────────────
         self.autonomy_core: Any = None  # AutonomyCore
+        self.epistemic_loop: Any = None  # EpistemicLoop
         self.notification_gateway: Any = None  # NotificationGateway
         self.proactive_processor: Any = None  # ProactiveProcessor
         self.sse_channel: Any = None  # SSEChannel
@@ -2000,6 +2003,48 @@ class BrainFactory:
         await autonomy.start(message_bus)
         brain.autonomy_core = autonomy
         logger.info("AutonomyCore started — cognitive heartbeat active")
+
+        # ── Epistemic Runtime (hypothesis, discovery, calibration) ──
+        try:
+            from hbllm.brain.epistemics.integration import wire_epistemics
+            from hbllm.hcir.graph import CognitiveGraph as HCIRCognitiveGraph
+
+            hcir_graph: HCIRCognitiveGraph | None = None
+            if brain.hcir_services and hasattr(brain.hcir_services, "workspace"):
+                candidate = getattr(brain.hcir_services.workspace, "graph", None)
+                if isinstance(candidate, HCIRCognitiveGraph):
+                    hcir_graph = candidate
+
+            if hcir_graph is None:
+                hcir_graph = HCIRCognitiveGraph()
+
+            data_dir = getattr(cfg, "data_dir", "data")
+            brain.epistemic_loop = wire_epistemics(
+                autonomy_core=autonomy,
+                graph=hcir_graph,
+                data_dir=data_dir,
+                llm=getattr(brain, "llm", None),
+            )
+            logger.info("Epistemic runtime wired into AutonomyCore")
+        except Exception as e:
+            logger.warning("Epistemic runtime failed to wire: %s", e)
+
+        # ── Unified Reasoning Runtime (A12) ───────────────────────
+        try:
+            from hbllm.brain.reasoning.operators.registry import (
+                create_default_operator_registry,
+            )
+            from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+
+            reasoning_reg = create_default_operator_registry()
+            reasoning_rt = UnifiedReasoningRuntime(reasoning_reg)
+            brain.reasoning_registry = reasoning_reg
+            brain.reasoning_runtime = reasoning_rt
+            if brain.reasoning_core is None:
+                brain.reasoning_core = reasoning_rt
+            logger.info("UnifiedReasoningRuntime wired — classical reasoning CPU active")
+        except Exception as e:
+            logger.warning("UnifiedReasoningRuntime failed to wire: %s", e)
 
         # ── Proactive Output (autonomy → notifications) ──────────
         from hbllm.serving.notifications import NotificationGateway

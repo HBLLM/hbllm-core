@@ -89,8 +89,9 @@ class HCIRWorkspaceState:
         event_store: IEventStore | None = None,
         branch_mode: BranchMode = BranchMode.LIVE,
         branch_name: str = "main",
+        graph: CognitiveGraph | None = None,
     ) -> None:
-        self._graph = CognitiveGraph()
+        self._graph = graph if graph is not None else CognitiveGraph()
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
         self._query_engine = InMemoryQueryEngine(self._graph)

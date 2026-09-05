@@ -27,6 +27,9 @@ from hbllm.brain.language.acquisition import (
     LexicalTargetType,
     LexiconAcquisitionLoop,
 )
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.brain.self_model.calibrator import EpistemicCalibrator
 from hbllm.brain.self_model.metacognitive_self_model import MetacognitiveSelfModel
 from hbllm.brain.simulation.counterfactual_engine import MentalSandbox
@@ -45,6 +48,8 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     PhysicalEntityNode,
 )
+from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
 @dataclass
@@ -146,6 +151,10 @@ class HBLLMCoreCohort(BaseCohort):
         self.consolidation_engine = SleepConsolidationEngine(memory=self.memory)
         self.lexicon_loop = LexiconAcquisitionLoop(self.graph)
         self.concepts = GroundedConceptRegistry(self.graph)
+        self.workspace = HCIRWorkspaceState(graph=self.graph)
+        self.tx_manager = TransactionManager(self.workspace)
+        self.reasoning_registry = create_default_operator_registry()
+        self.reasoning_runtime = UnifiedReasoningRuntime(self.reasoning_registry)
 
         self.last_action: dict[str, Any] = {}
         self.last_domain: str = "default"
@@ -173,6 +182,10 @@ class HBLLMCoreCohort(BaseCohort):
 
     def reset(self) -> None:
         self.graph = CognitiveGraph()
+        self.workspace = HCIRWorkspaceState(graph=self.graph)
+        self.tx_manager = TransactionManager(self.workspace)
+        self.reasoning_registry = create_default_operator_registry()
+        self.reasoning_runtime = UnifiedReasoningRuntime(self.reasoning_registry)
         self.lexicon_loop = LexiconAcquisitionLoop(self.graph)
         self.concepts = GroundedConceptRegistry(self.graph)
         self.last_action = {}
@@ -227,6 +240,29 @@ class HBLLMCoreCohort(BaseCohort):
 
         # 1. Sync observation into HCIR graph
         self._sync_observation_to_graph(observation)
+
+        # 1b. Classical Reasoning Pass (A12 Unified Reasoning Runtime)
+        prob_type = ProblemType.SPATIAL
+        if "causal" in domain:
+            prob_type = ProblemType.CAUSAL
+        elif "concept" in domain:
+            prob_type = ProblemType.CLASSIFICATION
+        elif "temporal" in domain:
+            prob_type = ProblemType.TEMPORAL
+        elif "transfer" in domain:
+            prob_type = ProblemType.ANALOGY
+
+        ent_ids = tuple(e.get("id", "") for e in observation.visible_entities if e.get("id"))
+        problem = ReasoningProblem(
+            problem_type=prob_type,
+            description=f"Reason about {domain} over visible entities",
+            focus_node_ids=ent_ids,
+            evidence_node_ids=ent_ids,
+        )
+        reasoning_trace = self.reasoning_runtime.reason(self.graph, problem)
+
+        if reasoning_trace.proposed_transaction:
+            self.tx_manager.commit(reasoning_trace.proposed_transaction)
 
         # 2. Epistemic Self-Model Assessment (A21)
         profile = self.self_model.get_or_create_profile(domain)

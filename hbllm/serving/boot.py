@@ -313,12 +313,18 @@ class BootOrchestrator:
         # ── 8. Start AutonomyCore ────────────────────────────────────
         if cfg.enable_autonomy and ctx.profile.features.autonomy_core:
             try:
-                from hbllm.brain.autonomy.loop import AutonomyCore
+                if ctx.brain.autonomy_core is not None:
+                    ctx.autonomy = ctx.brain.autonomy_core
+                    logger.info(
+                        "AutonomyCore active — reused configured instance from BrainFactory"
+                    )
+                else:
+                    from hbllm.brain.autonomy.loop import AutonomyCore
 
-                ctx.autonomy = AutonomyCore()
-                await ctx.autonomy.start(ctx.brain.bus)
-                ctx.brain.autonomy_core = ctx.autonomy
-                logger.info("AutonomyCore started — cognitive heartbeat active")
+                    ctx.autonomy = AutonomyCore()
+                    await ctx.autonomy.start(ctx.brain.bus)
+                    ctx.brain.autonomy_core = ctx.autonomy
+                    logger.info("AutonomyCore started — cognitive heartbeat active")
             except Exception as e:
                 logger.warning("AutonomyCore failed to start: %s", e)
 

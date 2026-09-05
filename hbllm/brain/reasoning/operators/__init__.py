@@ -67,7 +67,10 @@ from hbllm.brain.reasoning.operators.induction import InductionOperator
 
 # ── Phase 8: Wrapped Existing Components ─────────────────────────────
 from hbllm.brain.reasoning.operators.prediction import PredictionOperator
-from hbllm.brain.reasoning.operators.registry import OperatorRegistry
+from hbllm.brain.reasoning.operators.registry import (
+    OperatorRegistry,
+    create_default_operator_registry,
+)
 from hbllm.brain.reasoning.operators.simulation import SimulationOperator
 from hbllm.brain.reasoning.operators.snn_reasoning import SNNReasoningOperator
 from hbllm.brain.reasoning.operators.spatial import SpatialOperator
@@ -80,6 +83,7 @@ __all__ = [
     "FrozenGraphView",
     "OperatorInvocation",
     "OperatorRegistry",
+    "create_default_operator_registry",
     "OperatorSelectionScore",
     "OperatorTrace",
     "ProblemType",

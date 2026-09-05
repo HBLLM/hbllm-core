@@ -297,3 +297,34 @@ class OperatorRegistry:
         base += 0.1 * (context.budget.uncertainty_tolerance - 0.5)
 
         return max(0.0, min(1.0, base))
+
+
+def create_default_operator_registry() -> OperatorRegistry:
+    """Create and return an OperatorRegistry pre-loaded with standard reasoning operators."""
+    from hbllm.brain.reasoning.operators.abduction import AbductionOperator
+    from hbllm.brain.reasoning.operators.active_inference import ActiveInferenceOperator
+    from hbllm.brain.reasoning.operators.analogy import AnalogyOperator
+    from hbllm.brain.reasoning.operators.causal import CausalOperator
+    from hbllm.brain.reasoning.operators.contradiction import ContradictionOperator
+    from hbllm.brain.reasoning.operators.counterfactual import CounterfactualOperator
+    from hbllm.brain.reasoning.operators.deduction import DeductionOperator
+    from hbllm.brain.reasoning.operators.induction import InductionOperator
+    from hbllm.brain.reasoning.operators.prediction import PredictionOperator
+    from hbllm.brain.reasoning.operators.simulation import SimulationOperator
+    from hbllm.brain.reasoning.operators.spatial import SpatialOperator
+    from hbllm.brain.reasoning.operators.temporal import TemporalOperator
+
+    registry = OperatorRegistry()
+    registry.register(DeductionOperator())
+    registry.register(InductionOperator())
+    registry.register(AbductionOperator())
+    registry.register(SpatialOperator())
+    registry.register(TemporalOperator())
+    registry.register(CausalOperator())
+    registry.register(AnalogyOperator())
+    registry.register(CounterfactualOperator())
+    registry.register(ContradictionOperator())
+    registry.register(PredictionOperator())
+    registry.register(SimulationOperator())
+    registry.register(ActiveInferenceOperator())
+    return registry
