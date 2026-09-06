@@ -102,13 +102,56 @@ except ImportError:
         pass
 
     class _MockTensor:
-        pass
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            return self
 
     class _MockDtype:
-        pass
+        def __init__(self, name: str = "float32", *args: Any, **kwargs: Any) -> None:
+            self.name = name
+
+        def __repr__(self) -> str:
+            return f"torch.{self.name}"
+
+        def __str__(self) -> str:
+            return f"torch.{self.name}"
+
+        def __eq__(self, other: Any) -> bool:
+            if isinstance(other, _MockDtype):
+                return self.name == other.name
+            return self.name == str(other) or str(self) == str(other)
 
     class _MockDevice:
-        pass
+        def __init__(self, device: Any = "cpu", *args: Any, **kwargs: Any) -> None:
+            if isinstance(device, _MockDevice):
+                self.type = device.type
+                self.index = device.index
+            elif isinstance(device, str):
+                parts = device.split(":")
+                self.type = parts[0]
+                self.index = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+            else:
+                self.type = str(device) if device is not None else "cpu"
+                self.index = None
+
+        def __repr__(self) -> str:
+            if self.index is not None:
+                return f"device(type='{self.type}', index={self.index})"
+            return f"device(type='{self.type}')"
+
+        def __str__(self) -> str:
+            if self.index is not None:
+                return f"{self.type}:{self.index}"
+            return self.type
+
+        def __eq__(self, other: Any) -> bool:
+            if isinstance(other, _MockDevice):
+                return self.type == other.type and self.index == other.index
+            if isinstance(other, str):
+                return str(self) == other or self.type == other
+            return False
 
     spec = importlib.machinery.ModuleSpec("torch", None)
 
@@ -119,11 +162,15 @@ except ImportError:
     torch_mock.Tensor = _MockTensor
     torch_mock.dtype = _MockDtype
     torch_mock.device = _MockDevice
-    torch_mock.float32 = _MockDtype()
-    torch_mock.bfloat16 = _MockDtype()
-    torch_mock.float16 = _MockDtype()
-    torch_mock.int8 = _MockDtype()
-    torch_mock.uint8 = _MockDtype()
+    torch_mock.float32 = _MockDtype("float32")
+    torch_mock.bfloat16 = _MockDtype("bfloat16")
+    torch_mock.float16 = _MockDtype("float16")
+    torch_mock.int8 = _MockDtype("int8")
+    torch_mock.uint8 = _MockDtype("uint8")
+    torch_mock.int32 = _MockDtype("int32")
+    torch_mock.int64 = _MockDtype("int64")
+    torch_mock.long = _MockDtype("long")
+    torch_mock.bool = _MockDtype("bool")
 
     nn_mock = MagicMock()
     nn_mock.__spec__ = spec
