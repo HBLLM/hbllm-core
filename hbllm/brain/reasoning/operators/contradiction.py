@@ -22,6 +22,10 @@ import logging
 import time
 from typing import Any
 
+from hbllm.brain.reasoning.contradiction_utils import (
+    MODAL_NEGATION_PAIRS,
+    detect_structural_contradiction,
+)
 from hbllm.brain.reasoning.operators.base import (
     CognitiveContext,
     CognitiveResult,
@@ -44,16 +48,8 @@ from hbllm.hcir.types import Provenance
 
 logger = logging.getLogger(__name__)
 
-# Negation markers for simple structural negation detection
-_NEGATION_PAIRS = [
-    ("is ", "is not "),
-    ("can ", "cannot "),
-    ("has ", "has no "),
-    ("will ", "will not "),
-    ("does ", "does not "),
-    ("are ", "are not "),
-    ("was ", "was not "),
-]
+# Negation markers (backward-compatible alias)
+_NEGATION_PAIRS = MODAL_NEGATION_PAIRS
 
 
 class ContradictionOperator:
@@ -266,52 +262,22 @@ class ContradictionOperator:
                 if pair in seen:
                     continue
 
-                # Check for negation patterns
-                for pos, neg in _NEGATION_PAIRS:
-                    if pos in claim_a and neg in claim_b:
-                        # Check if the rest matches
-                        base_a = claim_a.replace(pos, "", 1).strip()
-                        base_b = claim_b.replace(neg, "", 1).strip()
-                        if (
-                            base_a
-                            and base_b
-                            and (base_a == base_b or base_a in base_b or base_b in base_a)
-                        ):
-                            seen.add(pair)
-                            results.append(
-                                {
-                                    "description": (
-                                        f"Negation contradiction: '{claim_a}' vs '{claim_b}'"
-                                    ),
-                                    "severity": 0.8,
-                                    "strategy": "negation_pattern",
-                                    "node_a": id_a,
-                                    "node_b": id_b,
-                                }
-                            )
-                            break
-
-                    elif neg in claim_a and pos in claim_b:
-                        base_a = claim_a.replace(neg, "", 1).strip()
-                        base_b = claim_b.replace(pos, "", 1).strip()
-                        if (
-                            base_a
-                            and base_b
-                            and (base_a == base_b or base_a in base_b or base_b in base_a)
-                        ):
-                            seen.add(pair)
-                            results.append(
-                                {
-                                    "description": (
-                                        f"Negation contradiction: '{claim_a}' vs '{claim_b}'"
-                                    ),
-                                    "severity": 0.8,
-                                    "strategy": "negation_pattern",
-                                    "node_a": id_a,
-                                    "node_b": id_b,
-                                }
-                            )
-                            break
+                is_conflict, explanation, conf = detect_structural_contradiction(
+                    claim_a, claim_b
+                )
+                if is_conflict:
+                    seen.add(pair)
+                    results.append(
+                        {
+                            "description": (
+                                f"Negation contradiction: '{claim_a}' vs '{claim_b}'"
+                            ),
+                            "severity": conf,
+                            "strategy": "negation_pattern",
+                            "node_a": id_a,
+                            "node_b": id_b,
+                        }
+                    )
 
         return results
 

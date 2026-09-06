@@ -629,3 +629,118 @@ class TestGovernanceEngineKernelGate:
             "unauthorized_door_unlock_and_perimeter_security" in v
             for v in res_op_omitted.violations
         )
+
+    def test_fail_closed_proximity_interlock_on_actuators(self) -> None:
+        """Physical actuator capabilities must fail closed when workspace clearance is unverified or None."""
+        gov = GovernanceEngine()
+
+        # 1. person_nearby=None -> Blocked (unverified proximity)
+        res_none = gov.evaluate_execution(
+            "rotate_arm_assembly",
+            {"person_nearby": None},
+        )
+        assert not res_none.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_none.violations)
+
+        # 2. workspace_cleared=False -> Blocked
+        res_uncleared = gov.evaluate_execution(
+            "swing_robot_arm",
+            {"workspace_cleared": False},
+        )
+        assert not res_uncleared.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_uncleared.violations)
+
+        # 3. Explicitly cleared proximity -> Allowed
+        res_cleared = gov.evaluate_execution(
+            "rotate_arm_assembly",
+            {"person_nearby": False, "workspace_cleared": True},
+        )
+        assert res_cleared.allowed
+
+    def test_multilingual_and_allowlist_inversion_fail_closed_governance(self) -> None:
+        """Verify allowlist inversion for perimeter targets and actuators across multiple languages."""
+        gov = GovernanceEngine()
+
+        # 1. Sinhala unauthorized perimeter unlock -> Blocked
+        res_si = gov.evaluate_execution(
+            "perform_task",
+            {"target": "front_door", "action": "ඇරගන්න", "authorized": False},
+        )
+        assert not res_si.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_si.violations
+        )
+
+        # 2. Tamil unauthorized perimeter unlock -> Blocked
+        res_ta = gov.evaluate_execution(
+            "perform_task",
+            {"target": "front_door", "action": "திறக்க", "authorized": False},
+        )
+        assert not res_ta.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_ta.violations
+        )
+
+        # 3. Completely unrecognized/novel verb on perimeter -> Fails Closed
+        res_novel = gov.evaluate_execution(
+            "perform_task",
+            {"target": "front_door", "action": "xyz_alien_verb", "authorized": False},
+        )
+        assert not res_novel.allowed
+        assert any(
+            "unauthorized_door_unlock_and_perimeter_security" in v for v in res_novel.violations
+        )
+
+        # 4. Safe read-only status query on perimeter -> Allowed even if unauthorized
+        res_safe_query = gov.evaluate_execution(
+            "perform_task",
+            {"target": "front_door", "action": "check_status", "authorized": False},
+        )
+        assert res_safe_query.allowed
+
+        # 5. Authorized perimeter unlock in Sinhala -> Allowed
+        res_auth_si = gov.evaluate_execution(
+            "perform_task",
+            {"target": "front_door", "action": "ඇරගන්න", "authorized": True},
+        )
+        assert res_auth_si.allowed
+
+        # 6. Actuator in Sinhala with unknown proximity -> Blocked
+        res_act_si = gov.evaluate_execution(
+            "perform_task",
+            {"target": "robot_arm", "action": "කරකවන්න"},
+        )
+        assert not res_act_si.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_act_si.violations)
+
+        # 7. Actuator in Tamil with unknown proximity -> Blocked
+        res_act_ta = gov.evaluate_execution(
+            "perform_task",
+            {"target": "robot_arm", "action": "சுழற்றவும்"},
+        )
+        assert not res_act_ta.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_act_ta.violations)
+
+        # 8. Actuator with occupant_detected=True -> Blocked
+        res_occ = gov.evaluate_execution(
+            "rotate_arm_assembly",
+            {"occupant_detected": True},
+        )
+        assert not res_occ.allowed
+        assert any("human_in_workspace_actuator_hazard" in v for v in res_occ.violations)
+
+        # 9. Actuator with affirmative clearance -> Allowed
+        res_act_cleared = gov.evaluate_execution(
+            "perform_task",
+            {"target": "robot_arm", "action": "rotate", "workspace_cleared": True},
+        )
+        assert res_act_cleared.allowed
+
+        # 10. Actuator safe telemetry query without clearance info -> Allowed
+        res_act_telemetry = gov.evaluate_execution(
+            "perform_task",
+            {"target": "robot_arm", "action": "get_position"},
+        )
+        assert res_act_telemetry.allowed
+
+

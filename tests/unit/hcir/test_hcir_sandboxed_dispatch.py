@@ -164,3 +164,62 @@ async def test_kernel_services_container_wiring():
 
     assert services.sandbox_manager is sandbox_mgr
     assert services.capability_resolver.sandbox_manager is sandbox_mgr
+
+
+@pytest.mark.asyncio
+async def test_unregistered_capability_fails_closed_when_sandboxed():
+    """An unverified capability with no registered policy fails closed under sandbox manager."""
+    sandbox_mgr = CapabilitySandboxManager()
+    resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
+    executor = MockExecutor()
+
+    # Register arbitrary capability without any sandbox policy
+    resolver.register(
+        CapabilityImplementation(
+            capability_name="adjust_settings",
+            implementation_id="settings_impl",
+            executor=executor,
+        )
+    )
+
+    result = await resolver.resolve_and_execute("adjust_settings", {"setting": "volume", "value": 10})
+    assert "error" in result
+    assert "Sandbox policy violation" in result["error"]
+    assert "no registered security policy" in result["error"]
+    assert executor.executed_count == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_inferred_permissions_when_sandboxed():
+    """Permissions are auto-derived from capability name when omitted by caller."""
+    sandbox_mgr = CapabilitySandboxManager()
+    policy = SandboxedCapabilityPolicy(
+        capability_name="execute_python",
+        provider_id="python_worker",
+        trust_level=TrustLevel.VERIFIED,
+        permissions=CapabilityPermissions(
+            allow_subprocess=False,  # Subprocess denied
+        ),
+    )
+    sandbox_mgr.register_policy(policy)
+
+    resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
+    executor = MockExecutor()
+    resolver.register(
+        CapabilityImplementation(
+            capability_name="execute_python",
+            implementation_id="python_worker",
+            executor=executor,
+        )
+    )
+
+    # Caller omits required_permissions, resolver auto-derives 'subprocess' from capability name
+    result = await resolver.resolve_and_execute(
+        "execute_python",
+        {"code": "import os; os.system('echo hi')"},
+    )
+    assert "error" in result
+    assert "Sandbox policy violation" in result["error"]
+    assert "subprocess" in result["error"]
+    assert executor.executed_count == 0
+

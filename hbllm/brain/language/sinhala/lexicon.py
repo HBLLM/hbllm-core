@@ -60,6 +60,13 @@ class SinhalaLexicon:
             "කොටුව": "box",
             "කෝප්පය": "cup",
             "රොබෝ": "robot",
+            "දොර": "door",
+            "දොරවල්": "door",
+            "ඉදිරිපස දොර": "front_door",
+            "පසුපස දොර": "back_door",
+            "ගේට්ටුව": "gate",
+            "අත": "arm",
+            "රොබෝ අත": "robot_arm",
         }
         for noun, pred in nouns.items():
             self.add_entry(
@@ -98,6 +105,20 @@ class SinhalaLexicon:
             "තල්ලු කළා": "push",
             "ගෙනයන්න": "move",
             "දමන්න": "put",
+            "අරින්න": "open",
+            "ඇරගන්න": "open",
+            "අරින්නට": "open",
+            "විවෘත කරන්න": "open",
+            "අගුළුහරින්න": "unlock",
+            "අගුළු අරින්න": "unlock",
+            "වහන්න": "close",
+            "පියවන්න": "close",
+            "අගුළුලන්න": "lock",
+            "අගුළු දමන්න": "lock",
+            "කරකවන්න": "rotate",
+            "නවතන්න": "stop",
+            "තත්ත්වය": "status",
+            "පරීක්ෂා කරන්න": "inspect",
         }
         for verb, pred in verbs.items():
             self.add_entry(
