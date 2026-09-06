@@ -515,9 +515,7 @@ class ContradictionEngine:
                 b2 = candidate_beliefs[j]
 
                 # Deterministic structural / semantic contradiction detection without LLM
-                is_conflict, explanation, conf = detect_structural_contradiction(
-                    b1.claim, b2.claim
-                )
+                is_conflict, explanation, conf = detect_structural_contradiction(b1.claim, b2.claim)
 
                 if not is_conflict and self._llm is not None:
                     # Optional LLM fallback
@@ -527,7 +525,9 @@ class ContradictionEngine:
                         conf = 0.7
 
                 if is_conflict:
-                    priority = max(self._get_belief_confidence(b1), self._get_belief_confidence(b2)) * conf
+                    priority = (
+                        max(self._get_belief_confidence(b1), self._get_belief_confidence(b2)) * conf
+                    )
                     reports.append(
                         ContradictionReport(
                             claim_a_id=b1.id,
@@ -547,9 +547,15 @@ class ContradictionEngine:
     @staticmethod
     def _get_belief_confidence(node: BeliefNode) -> float:
         """Extract confidence score from belief_confidence or uncertainty vector."""
-        if hasattr(node, "belief_confidence") and getattr(node.belief_confidence, "confidence", None) is not None:
+        if (
+            hasattr(node, "belief_confidence")
+            and getattr(node.belief_confidence, "confidence", None) is not None
+        ):
             return float(node.belief_confidence.confidence)
-        if hasattr(node, "uncertainty") and getattr(node.uncertainty, "confidence", None) is not None:
+        if (
+            hasattr(node, "uncertainty")
+            and getattr(node.uncertainty, "confidence", None) is not None
+        ):
             return float(node.uncertainty.confidence)
         return 0.5
 

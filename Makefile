@@ -4,7 +4,7 @@ PIP := $(PYTHON) -m pip
 PYTEST := $(PYTHON) -m pytest
 
 .PHONY: test test-v test-fast test-unit test-integration lint format typecheck install clean \
-       rust-test rust-clippy rust-build test-all \
+       rust-test rust-clippy rust-build test-all pre-commit install-hooks \
        db-migrate db-upgrade db-downgrade db-history \
        docker-build docker-up docker-down
 
@@ -40,6 +40,31 @@ format: ## Auto-format code and docs
 
 typecheck: ## Run mypy type checking
 	$(PYTHON) -m mypy hbllm/
+
+## ── Git & Pre-commit ─────────────────────────────────────────────────────
+
+pre-commit: ## Run all pre-commit quality gates (Ruff & Cargo)
+	@echo "🔍 Running Ruff linter..."
+	@if [ -x "$(PYTHON)" ]; then $(PYTHON) -m ruff check .; else ruff check .; fi
+	@echo "🎨 Running Ruff formatter check..."
+	@if [ -x "$(PYTHON)" ]; then $(PYTHON) -m ruff format --check .; else ruff format --check .; fi
+	@echo "🦀 Checking Cargo formatting..."
+	@cargo fmt --all -- --check
+	@echo "🦀 Checking Cargo compilation..."
+	@cargo check --workspace
+	@echo "🦀 Running Cargo Clippy..."
+	@cargo clippy --workspace -- -D warnings
+	@echo "✅ All pre-commit quality gates passed!"
+
+install-hooks: ## Configure git hooks for this repository
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/pre-commit
+	@if [ -d "../.git/modules/core/hooks" ]; then \
+		cp .githooks/pre-commit ../.git/modules/core/hooks/pre-commit; \
+		chmod +x ../.git/modules/core/hooks/pre-commit; \
+	fi
+	@echo "✅ Pre-commit hooks installed successfully!"
+
 
 ## ── Setup ────────────────────────────────────────────────────────────────
 

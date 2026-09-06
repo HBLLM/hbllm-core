@@ -742,5 +742,3 @@ class TestGovernanceEngineKernelGate:
             {"target": "robot_arm", "action": "get_position"},
         )
         assert res_act_telemetry.allowed
-
-

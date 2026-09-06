@@ -182,7 +182,9 @@ async def test_unregistered_capability_fails_closed_when_sandboxed():
         )
     )
 
-    result = await resolver.resolve_and_execute("adjust_settings", {"setting": "volume", "value": 10})
+    result = await resolver.resolve_and_execute(
+        "adjust_settings", {"setting": "volume", "value": 10}
+    )
     assert "error" in result
     assert "Sandbox policy violation" in result["error"]
     assert "no registered security policy" in result["error"]
@@ -222,4 +224,3 @@ async def test_auto_inferred_permissions_when_sandboxed():
     assert "Sandbox policy violation" in result["error"]
     assert "subprocess" in result["error"]
     assert executor.executed_count == 0
-

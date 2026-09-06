@@ -140,7 +140,8 @@ def test_spatial_operator_infers_transitive_containment_in_cohort() -> None:
 
     # 2. Forward transitive containment genuinely inferred and committed: ball_1 --PART_OF--> room_1
     transitive_edges = [
-        e for e in cohort.graph.edges_from("ball_1")
+        e
+        for e in cohort.graph.edges_from("ball_1")
         if e.edge_type == HCIREdgeType.PART_OF and "room_1" in e.targets
     ]
     assert len(transitive_edges) == 1, (
@@ -151,15 +152,16 @@ def test_spatial_operator_infers_transitive_containment_in_cohort() -> None:
     # 3. Asymmetry invariant: NO reverse / backwards containment edges
     # room_1 must NEVER be part of table_1 or ball_1
     room_outgoing = [
-        e for e in cohort.graph.edges_from("room_1")
-        if e.edge_type == HCIREdgeType.PART_OF
+        e for e in cohort.graph.edges_from("room_1") if e.edge_type == HCIREdgeType.PART_OF
     ]
     assert len(room_outgoing) == 0, f"Backwards containment from room_1 detected: {room_outgoing}"
 
     # table_1 must NEVER be part of ball_1
     table_to_ball = [
-        e for e in cohort.graph.edges_from("table_1")
+        e
+        for e in cohort.graph.edges_from("table_1")
         if e.edge_type == HCIREdgeType.PART_OF and "ball_1" in e.targets
     ]
-    assert len(table_to_ball) == 0, f"Backwards containment table_1 -> ball_1 detected: {table_to_ball}"
-
+    assert len(table_to_ball) == 0, (
+        f"Backwards containment table_1 -> ball_1 detected: {table_to_ball}"
+    )

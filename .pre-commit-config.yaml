@@ -1,0 +1,76 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+default_language_version:
+  python: python3.11
+
+default_stages: [pre-commit]
+
+repos:
+  # ── 1. General Hygiene & Sanity Checks ──────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: |
+          (?x)^(
+            .*\.so|
+            .*\.db|
+            .*\.jsonl?|
+            site/.*
+          )$
+      - id: end-of-file-fixer
+        exclude: |
+          (?x)^(
+            .*\.so|
+            .*\.db|
+            .*\.jsonl?|
+            site/.*
+          )$
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-toml
+      - id: check-json
+        exclude: |
+          (?x)^(
+            knowledge_graph\.json|
+            semantic/.*\.json
+          )$
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2000]
+
+  # ── 2. Ruff (Python Linting & Formatting) ──────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── 3. Cargo (Rust Workspace Checks) ────────────────────────────────
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Check Rust code formatting with cargo fmt
+        entry: cargo fmt --all -- --check
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      - id: cargo-check
+        name: cargo check
+        description: Check Rust workspace compilation
+        entry: cargo check --workspace
+        language: system
+        files: \.rs$|Cargo\.(toml|lock)$
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Run Clippy lints across all Rust crates
+        entry: cargo clippy --workspace -- -D warnings
+        language: system
+        files: \.rs$|Cargo\.(toml|lock)$
+        pass_filenames: false
