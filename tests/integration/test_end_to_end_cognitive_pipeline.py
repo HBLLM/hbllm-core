@@ -25,6 +25,7 @@ from hbllm.hcir.graph import (
     ContradictionNode,
     HCIREdge,
     HCIREdgeType,
+    PhysicalEntityNode,
 )
 from hbllm.hcir.kernel.capability_resolver import (
     CapabilityImplementation,
@@ -215,18 +216,29 @@ class TestEndToEndCognitivePipeline:
         """Scenario 2: Epistemic Contradiction Overrides Affirmative Command.
 
         Simulates an environment where:
-        - The user commands the robotic arm to rotate, asserting 'area is clear'.
-        - CognitiveGraph sensor telemetry contains an active observation: human is present.
+        - The user commands the robotic arm to rotate, asserting affirmative clearance
+          ('workspace_cleared=True', 'human_in_workspace=False').
+        - CognitiveGraph sensor telemetry contains an active observation: human is present
+          linked topologically to the robotic arm entity via graph edges.
         - ContradictionEngine detects the structural conflict.
-        - Epistemic arbitration determines safety is violated.
-        - GovernanceEngine fails closed on the actuator hazard.
-        - Capability executor is never invoked.
+        - EpistemicSafetyGate traverses graph hyperedge connectivity (language-independently,
+          with zero text-keyword matching) and determines active contradiction disputes clearance.
+        - EpistemicSafetyGate overrides affirmative safe state to fail-closed.
+        - GovernanceEngine blocks the actuator hazard.
+        - Physical actuator executor is never invoked.
+        - Once contradiction is resolved, the affirmative command executes successfully.
         """
         gov, resolver, _, arm_exec = setup_governed_sandbox_environment()
-        bridge = LanguageCapabilityBridge(governance_engine=gov, capability_resolver=resolver)
 
-        # 1. Set up CognitiveGraph with sensory telemetry
+        # 1. Set up CognitiveGraph with physical entity and sensory telemetry
         graph = CognitiveGraph()
+        robot_arm = PhysicalEntityNode(
+            id="robot_arm",
+            entity_name="arm",
+            entity_type="robotic_arm",
+        )
+        graph.upsert_node(robot_arm)
+
         sensor_belief = BeliefNode(
             id="sensor_human_detected",
             claim="human presence detected in actuator workspace",
@@ -238,7 +250,16 @@ class TestEndToEndCognitivePipeline:
         graph.upsert_node(sensor_belief)
         graph.upsert_node(user_claim_belief)
 
-        # Link as direct contradiction in cognitive graph
+        # Connect sensor observation belief to the physical robot arm entity
+        graph.add_edge(
+            HCIREdge(
+                sources=[sensor_belief.id],
+                targets=[robot_arm.id],
+                edge_type=HCIREdgeType.APPLIES_TO,
+            )
+        )
+
+        # Link beliefs as direct contradiction in cognitive graph
         graph.add_edge(
             HCIREdge(
                 sources=[sensor_belief.id],
@@ -251,37 +272,32 @@ class TestEndToEndCognitivePipeline:
         engine = ContradictionEngine(graph=graph)
         reports = await engine.scan_for_contradictions()
         assert len(reports) >= 1
-        assert any(
-            r.claim_a_id == sensor_belief.id or r.claim_b_id == sensor_belief.id for r in reports
-        )
 
         # Verify a ContradictionNode exists in the graph
         contra_nodes = [n for n in graph.all_nodes() if isinstance(n, ContradictionNode)]
         assert len(contra_nodes) >= 1
 
-        # 3. Epistemic world state arbiter:
-        # If an active contradiction touches actuator workspace safety, human presence is flagged
-        has_active_workspace_contradiction = any(
-            "workspace" in (getattr(graph.get_node(c.claim_a_id), "claim", "")).lower()
-            or "workspace" in (getattr(graph.get_node(c.claim_b_id), "claim", "")).lower()
-            for c in contra_nodes
+        # 3. Instantiate LanguageCapabilityBridge wired directly to graph epistemic state
+        bridge = LanguageCapabilityBridge(
+            governance_engine=gov,
+            capability_resolver=resolver,
+            graph=graph,
         )
-        assert has_active_workspace_contradiction is True
 
-        # Construct runtime evaluation context informed by epistemic world state
-        eval_context: dict[str, Any] = {
-            "workspace_cleared": False,
-            "human_in_workspace": True,
-            "epistemic_contradiction_active": True,
-        }
-
-        # 4. User issues affirmative command in English: "Rotate the arm."
+        # 4. User issues affirmative command with explicitly asserted clearance
+        # (e.g. user claims "area is clear", setting affirmative clearance flags)
         en_parser = EnglishParser()
         frame = en_parser.parse("Rotate the arm.")
 
+        affirmative_context: dict[str, Any] = {
+            "workspace_cleared": True,
+            "human_in_workspace": False,
+        }
+
+        # EpistemicSafetyGate automatically intercepts the affirmative clearance via graph topology
         result = await bridge.execute_language_command(
             frame,
-            context=eval_context,
+            context=affirmative_context,
         )
 
         # 5. Governance must fail-closed: blocked by human_in_workspace_actuator_hazard
@@ -289,7 +305,45 @@ class TestEndToEndCognitivePipeline:
         assert any(
             "human_in_workspace_actuator_hazard" in v for v in result.governance_decision.violations
         )
-        assert arm_exec.call_count == 0  # Physical actuator never moved
+        assert arm_exec.call_count == 0  # Physical actuator was never moved
+
+        # 6. Verify that once the contradiction is resolved, the affirmative command succeeds
+        for contra in contra_nodes:
+            graph.remove_node(contra.id)
+        graph.remove_node(sensor_belief.id)
+
+        allowed_result = await bridge.execute_language_command(
+            frame,
+            context={"workspace_cleared": True},
+        )
+        assert allowed_result.is_allowed is True
+        assert allowed_result.execution_result is not None
+        assert allowed_result.execution_result["status"] == "actuated"
+        assert arm_exec.call_count == 1  # Actuator executed exactly once after dispute resolution
+
+        # 7. Verify that an active contradiction connected to an UNRELATED entity (e.g. front_door)
+        # does NOT block the robot arm's affirmative clearance (topological precision)
+        door_node = PhysicalEntityNode(id="front_door", entity_name="door")
+        graph.upsert_node(door_node)
+        door_b1 = BeliefNode(id="door_b1", claim="door tamper detected")
+        door_b2 = BeliefNode(id="door_b2", claim="door closed normally")
+        graph.upsert_node(door_b1)
+        graph.upsert_node(door_b2)
+        graph.add_edge(
+            HCIREdge(
+                sources=[door_b1.id], targets=[door_node.id], edge_type=HCIREdgeType.APPLIES_TO
+            )
+        )
+        graph.upsert_node(
+            ContradictionNode(id="contra_door", claim_a_id=door_b1.id, claim_b_id=door_b2.id)
+        )
+
+        unrelated_contra_result = await bridge.execute_language_command(
+            frame,
+            context={"workspace_cleared": True},
+        )
+        assert unrelated_contra_result.is_allowed is True
+        assert arm_exec.call_count == 2
 
     @pytest.mark.asyncio
     async def test_unauthorized_perimeter_access_fails_closed(self) -> None:
