@@ -69,6 +69,7 @@ class CapabilityImplementation:
     estimated_latency_ms: int = 0  # Expected latency
     description: str = ""
     tags: list[str] = field(default_factory=list)
+    required_permissions: set[str] = field(default_factory=set)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -202,24 +203,63 @@ class CapabilityResolver:
         # ── Sandbox Policy Enforcement ──
         timeout = timeout_override
         if self.sandbox_manager is not None:
-            # Check requested permissions
-            if required_permissions:
-                for perm in required_permissions:
-                    if not self.sandbox_manager.check_permission(
-                        capability_name, impl.implementation_id, perm
-                    ):
-                        logger.warning(
-                            "Sandbox violation: permission '%s' denied for '%s:%s'",
-                            perm,
-                            capability_name,
-                            impl.implementation_id,
+            policy = self.sandbox_manager.get_policy(capability_name, impl.implementation_id)
+            if policy is None:
+                # If no explicit policy registered, check if implementation is explicitly declared safe/internal
+                is_safe = bool({"safe", "read_only", "internal"} & set(impl.tags))
+                if not is_safe:
+                    logger.warning(
+                        "Sandbox policy violation: unverified capability '%s:%s' has no registered security policy",
+                        capability_name,
+                        impl.implementation_id,
+                    )
+                    return {
+                        "error": (
+                            f"Sandbox policy violation: unverified capability '{capability_name}' "
+                            "has no registered security policy or permission specification"
                         )
-                        return {
-                            "error": f"Sandbox policy violation: permission '{perm}' denied for '{capability_name}:{impl.implementation_id}'"
-                        }
+                    }
+
+            # Derive effective permissions
+            effective_perms: set[str] = set()
+            if required_permissions is not None:
+                effective_perms.update(required_permissions)
+            else:
+                if impl.required_permissions:
+                    effective_perms.update(impl.required_permissions)
+                else:
+                    # Auto-infer required permissions from capability name and tags if not specified
+                    cap_lower = capability_name.lower()
+                    if any(
+                        term in cap_lower
+                        for term in ("exec", "subprocess", "shell", "python", "script", "cmd")
+                    ):
+                        effective_perms.add("subprocess")
+                    elif any(term in cap_lower for term in ("file", "fs", "path", "disk")):
+                        effective_perms.add("filesystem")
+                    elif any(
+                        term in cap_lower
+                        for term in ("net", "http", "url", "fetch", "api", "download", "upload")
+                    ):
+                        effective_perms.add("network")
+                    elif any(term in cap_lower for term in ("db", "database", "sql")):
+                        effective_perms.add("db_write")
+
+            for perm in effective_perms:
+                if not self.sandbox_manager.check_permission(
+                    capability_name, impl.implementation_id, perm
+                ):
+                    logger.warning(
+                        "Sandbox violation: permission '%s' denied for '%s:%s'",
+                        perm,
+                        capability_name,
+                        impl.implementation_id,
+                    )
+                    return {
+                        "error": f"Sandbox policy violation: permission '{perm}' denied for '{capability_name}:{impl.implementation_id}'"
+                    }
 
             # Extract resource limit timeout if not explicitly overridden
-            policy = self.sandbox_manager.get_policy(capability_name, impl.implementation_id)
             if (
                 timeout is None
                 and policy is not None

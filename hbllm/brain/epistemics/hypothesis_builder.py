@@ -30,6 +30,10 @@ import logging
 from typing import Any
 
 from hbllm.brain.epistemics.interfaces import HypothesisCandidate, RawIdea
+from hbllm.brain.reasoning.contradiction_utils import (
+    are_antonyms,
+    detect_structural_contradiction,
+)
 from hbllm.hcir.graph import (
     CognitiveGraph,
     HypothesisNode,
@@ -260,12 +264,15 @@ class HypothesisBuilder:
         """Score an idea using structural heuristics (no LLM)."""
         plausibility = idea.plausibility
 
-        # Testability: ideas with specific mechanisms are more testable
+        # Testability: ideas with specific mechanisms or concrete resolution are more testable
         testability = 0.5
         claim_lower = idea.claim.lower()
-        if any(w in claim_lower for w in ("cause", "mechanism", "leads to", "results in")):
+        if any(
+            w in claim_lower
+            for w in ("cause", "mechanism", "leads to", "results in", "resolve", "because")
+        ):
             testability += 0.2
-        if any(w in claim_lower for w in ("correlat", "associat")):
+        if any(w in claim_lower for w in ("correlat", "associat", "differing", "condition")):
             testability += 0.1
         if any(w in claim_lower for w in ("may", "might", "could", "possibly")):
             testability -= 0.1
@@ -364,12 +371,22 @@ class HypothesisBuilder:
         if self._llm is not None:
             return await self._llm_similarity_check(claim, existing)
 
-        # Fallback: simple string containment / overlap
+        # Fallback: string containment / overlap while respecting contradictions
         claim_words = set(claim.lower().split())
         for existing_claim in existing:
+            # If the claims structurally contradict each other, they are opposing hypotheses, NOT duplicates
+            is_conflict, _, _ = detect_structural_contradiction(claim, existing_claim)
+            if is_conflict:
+                continue
+
             existing_words = set(existing_claim.lower().split())
             if not claim_words or not existing_words:
                 continue
+
+            # Antonym pairs represent opposing claims, not duplicates
+            if any(are_antonyms(cw, ew) for cw in claim_words for ew in existing_words):
+                continue
+
             overlap = len(claim_words & existing_words)
             similarity = overlap / max(len(claim_words), len(existing_words))
             if similarity >= self._similarity_threshold:

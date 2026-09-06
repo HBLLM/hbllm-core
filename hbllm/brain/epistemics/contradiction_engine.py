@@ -25,6 +25,7 @@ from hbllm.brain.epistemics.interfaces import (
     ContradictionReport,
     CuriositySignal,
 )
+from hbllm.brain.reasoning.contradiction_utils import detect_structural_contradiction
 from hbllm.hcir.graph import (
     AudioObservationNode,
     BeliefNode,
@@ -32,6 +33,7 @@ from hbllm.hcir.graph import (
     ContradictionNode,
     EvidenceNode,
     ExperimentNode,
+    HCIREdge,
     HCIREdgeType,
     ObservationNode,
     PerceptualEvidenceNode,
@@ -95,6 +97,53 @@ class ContradictionEngine:
 
         # Scan for 3-level perceptual contradictions
         reports.extend(await self.scan_for_perceptual_contradictions())
+
+        # Commit ContradictionNodes and CONTRADICTS edges to graph for all reports
+        for report in reports:
+            contra_id = f"contra_{abs(hash(report.claim_a_id + report.claim_b_id)) % 1000000}"
+            if self._graph.get_node(contra_id) is None:
+                level = PerceptualContradictionLevel.LEVEL_3_BELIEF_CONFLICT
+                if report.contradiction_level:
+                    try:
+                        level = PerceptualContradictionLevel(report.contradiction_level)
+                    except ValueError:
+                        level = PerceptualContradictionLevel.LEVEL_3_BELIEF_CONFLICT
+                contra_node = ContradictionNode(
+                    id=contra_id,
+                    claim_a_id=report.claim_a_id,
+                    claim_b_id=report.claim_b_id,
+                    contradiction_type=report.contradiction_type,
+                    contradiction_level=level,
+                    possible_explanations=report.possible_explanations,
+                    investigation_priority=report.investigation_priority,
+                )
+                self._graph.upsert_node(contra_node)
+
+            # Link with CONTRADICTS edge if both nodes exist in graph
+            if (
+                self._graph.get_node(report.claim_a_id) is not None
+                and self._graph.get_node(report.claim_b_id) is not None
+            ):
+                existing = any(
+                    e.edge_type == HCIREdgeType.CONTRADICTS
+                    and (
+                        (report.claim_a_id in e.sources and report.claim_b_id in e.targets)
+                        or (report.claim_b_id in e.sources and report.claim_a_id in e.targets)
+                    )
+                    for e in self._graph.edges_from(report.claim_a_id)
+                )
+                if not existing:
+                    self._graph.add_edge(
+                        HCIREdge(
+                            sources=[report.claim_a_id],
+                            targets=[report.claim_b_id],
+                            edge_type=HCIREdgeType.CONTRADICTS,
+                            metadata={
+                                "origin": "contradiction_engine",
+                                "type": report.contradiction_type,
+                            },
+                        )
+                    )
 
         return reports
 
@@ -453,49 +502,76 @@ class ContradictionEngine:
             node_id = _node.id
             node = self._graph.get_node(node_id)
             if isinstance(node, BeliefNode):
-                beliefs.append(node)
+                if not domain or getattr(node, "domain", "") == domain:
+                    beliefs.append(node)
 
-        # Pairwise comparison using LLM if available
         reports: list[ContradictionReport] = []
-        if self._llm is not None and len(beliefs) >= 2:
-            # Only compare high-confidence beliefs (expensive operation)
-            strong_beliefs = [b for b in beliefs if b.uncertainty.confidence >= 0.5][
-                :20
-            ]  # Limit to prevent O(n²) explosion
+        # Pairwise comparison: limit to active/confident beliefs to prevent O(n²) explosion
+        candidate_beliefs = [b for b in beliefs if self._get_belief_confidence(b) >= 0.3][:50]
 
-            for i in range(len(strong_beliefs)):
-                for j in range(i + 1, len(strong_beliefs)):
-                    if await self._beliefs_conflict(
-                        strong_beliefs[i],
-                        strong_beliefs[j],
-                    ):
-                        reports.append(
-                            ContradictionReport(
-                                claim_a_id=strong_beliefs[i].id,
-                                claim_b_id=strong_beliefs[j].id,
-                                contradiction_type="belief_conflict",
-                                investigation_priority=0.7,
-                                context="LLM-detected belief conflict",
-                            )
+        for i in range(len(candidate_beliefs)):
+            for j in range(i + 1, len(candidate_beliefs)):
+                b1 = candidate_beliefs[i]
+                b2 = candidate_beliefs[j]
+
+                # Deterministic structural / semantic contradiction detection without LLM
+                is_conflict, explanation, conf = detect_structural_contradiction(
+                    b1.claim, b2.claim
+                )
+
+                if not is_conflict and self._llm is not None:
+                    # Optional LLM fallback
+                    if await self._beliefs_conflict(b1, b2):
+                        is_conflict = True
+                        explanation = "LLM-detected belief conflict"
+                        conf = 0.7
+
+                if is_conflict:
+                    priority = max(self._get_belief_confidence(b1), self._get_belief_confidence(b2)) * conf
+                    reports.append(
+                        ContradictionReport(
+                            claim_a_id=b1.id,
+                            claim_b_id=b2.id,
+                            contradiction_type="belief_conflict",
+                            contradiction_level=str(
+                                PerceptualContradictionLevel.LEVEL_3_BELIEF_CONFLICT
+                            ),
+                            possible_explanations=[explanation],
+                            investigation_priority=round(priority, 3),
+                            context=f"Belief conflict: '{b1.claim}' vs '{b2.claim}' ({explanation})",
                         )
+                    )
 
         return reports
+
+    @staticmethod
+    def _get_belief_confidence(node: BeliefNode) -> float:
+        """Extract confidence score from belief_confidence or uncertainty vector."""
+        if hasattr(node, "belief_confidence") and getattr(node.belief_confidence, "confidence", None) is not None:
+            return float(node.belief_confidence.confidence)
+        if hasattr(node, "uncertainty") and getattr(node.uncertainty, "confidence", None) is not None:
+            return float(node.uncertainty.confidence)
+        return 0.5
 
     async def _beliefs_conflict(
         self,
         a: BeliefNode,
         b: BeliefNode,
     ) -> bool:
-        """Use LLM to check if two beliefs conflict."""
+        """Check if two beliefs conflict via structural analysis or LLM."""
+        is_conflict, _, _ = detect_structural_contradiction(a.claim, b.claim)
+        if is_conflict:
+            return True
+
+        if self._llm is None:
+            return False
+
         prompt = (
             f"Do these two beliefs contradict each other?\n"
             f"Belief A: {a.claim}\n"
             f"Belief B: {b.claim}\n\n"
             f"Answer YES or NO only."
         )
-        if self._llm is None:
-            return False
-
         try:
             response = await self._llm.generate(prompt)
             text = response if isinstance(response, str) else str(response)

@@ -80,6 +80,8 @@ _HUMAN_PROXIMITY_PATTERNS = (
     "user_present",
     "presence",
     "proximity",
+    "nearby",
+    "occupant_detected",
     "body",
     "face",
     "motion_detected",
@@ -234,6 +236,81 @@ _ACTUATE_ACTION_SYNONYMS = {
     "swing_robot_arm",
 }
 
+_SAFE_READ_ONLY_ACTIONS = {
+    "status",
+    "get_status",
+    "check_status",
+    "is_locked",
+    "inspect",
+    "view",
+    "query",
+    "read",
+    "get_state",
+    "check_state",
+}
+
+_SAFE_ACTUATOR_QUERIES = {
+    "status",
+    "get_status",
+    "get_position",
+    "read_telemetry",
+    "inspect",
+    "joint_states",
+    "get_encoder",
+    "telemetry",
+    "query",
+    "read",
+}
+
+_sinhala_lexicon_cache: Any = None
+_tamil_lexicon_cache: Any = None
+
+
+def _get_sinhala_lexicon() -> Any:
+    global _sinhala_lexicon_cache
+    if _sinhala_lexicon_cache is None:
+        try:
+            from hbllm.brain.language.sinhala.lexicon import SinhalaLexicon
+
+            _sinhala_lexicon_cache = SinhalaLexicon()
+        except ImportError:
+            _sinhala_lexicon_cache = False
+    return _sinhala_lexicon_cache if _sinhala_lexicon_cache is not False else None
+
+
+def _get_tamil_lexicon() -> Any:
+    global _tamil_lexicon_cache
+    if _tamil_lexicon_cache is None:
+        try:
+            from hbllm.brain.language.tamil.lexicon import TamilLexicon
+
+            _tamil_lexicon_cache = TamilLexicon()
+        except ImportError:
+            _tamil_lexicon_cache = False
+    return _tamil_lexicon_cache if _tamil_lexicon_cache is not False else None
+
+
+def _normalize_multilingual_term(term: str) -> str:
+    """Normalize non-English/localized lemmas to canonical English concept predicates."""
+    if not term:
+        return term
+    # Check if term contains non-ASCII characters (e.g. Sinhala or Tamil Unicode blocks)
+    if any(ord(c) > 127 for c in term):
+        clean_t = term.strip()
+        # 1. Try Sinhala
+        si_lex = _get_sinhala_lexicon()
+        if si_lex is not None:
+            si_entries = si_lex.lookup(clean_t)
+            if si_entries and si_entries[0].semantic_predicate:
+                return si_entries[0].semantic_predicate
+        # 2. Try Tamil
+        ta_lex = _get_tamil_lexicon()
+        if ta_lex is not None:
+            ta_entries = ta_lex.lookup(clean_t)
+            if ta_entries and ta_entries[0].semantic_predicate:
+                return ta_entries[0].semantic_predicate
+    return term
+
 
 def _flatten_mapping(data: Any, prefix: str = "", max_depth: int = 10) -> dict[str, Any]:
     """Recursively flatten arbitrary nested dictionaries, lists, and dataclasses into key-value map."""
@@ -282,7 +359,8 @@ class StructuredIntent:
     target: str = ""
     force_torque_value: float = 0.0
     is_unattended: bool = False
-    human_in_workspace: bool = False
+    human_in_workspace: bool | None = None
+    workspace_cleared: bool | None = None
     is_override_attempt: bool = False
     is_authorized: bool | None = None  # None = not explicitly specified
     power_level: str = "normal"
@@ -440,7 +518,7 @@ class GovernanceEngine:
             parts = capability_name.lower().split(".")[-1].split("_")
             detected_action = parts[0] if parts else capability_name.lower()
 
-        intent.action = detected_action
+        intent.action = _normalize_multilingual_term(detected_action)
 
         # 2. Target resolution (recursively scanning target keys)
         detected_target = ""
@@ -458,7 +536,7 @@ class GovernanceEngine:
             else:
                 detected_target = parts[0]
 
-        intent.target = detected_target
+        intent.target = _normalize_multilingual_term(detected_target)
 
         # 3. Proximity / Human Presence detection (Semantic scanning across all keys and nested structures)
         for k, v in all_flattened.items():
@@ -474,6 +552,24 @@ class GovernanceEngine:
                 ):
                     intent.human_in_workspace = True
                     break
+                elif v is False or str(v).lower() in ("false", "0", "no", "cleared", "none"):
+                    intent.human_in_workspace = False
+                elif v is None:
+                    intent.human_in_workspace = None
+
+            if any(
+                p in k_clean
+                for p in (
+                    "workspace_cleared",
+                    "area_cleared",
+                    "proximity_cleared",
+                    "clearance_verified",
+                )
+            ):
+                if v is True or str(v).lower() in ("true", "1", "yes"):
+                    intent.workspace_cleared = True
+                elif v is False or str(v).lower() in ("false", "0", "no"):
+                    intent.workspace_cleared = False
 
         # 4. Unattended / Supervision state (Semantic scanning)
         for k, v in all_flattened.items():
@@ -595,19 +691,17 @@ class GovernanceEngine:
                     "[CRITICAL] life_safety_critical_device_protection: Prohibit disabling or muting life-safety sensors, alarms, and emergency interlocks"
                 )
 
-        # 2. Unauthorized Perimeter Door / Gate Unlock (Fail-Closed)
+        # 2. Unauthorized Perimeter Door / Gate Unlock (Fail-Closed Allowlist Inversion)
         is_perimeter_target = any(door in intent.target for door in _PERIMETER_TARGETS) or any(
             door in intent.action for door in _PERIMETER_TARGETS
         )
-        is_unlock_action = any(act in intent.action for act in _UNLOCK_ACTION_SYNONYMS) or any(
-            act in intent.target for act in _UNLOCK_ACTION_SYNONYMS
-        )
-
-        if is_perimeter_target and is_unlock_action:
+        if is_perimeter_target:
             if eval_context.get("authorized") is not True:
-                violations.append(
-                    "[HIGH] unauthorized_door_unlock_and_perimeter_security: Prohibit unauthorized physical perimeter door or vault unlock commands"
-                )
+                # Any action targeting a perimeter barrier that is not an explicitly safe read-only query MUST fail closed
+                if intent.action not in _SAFE_READ_ONLY_ACTIONS:
+                    violations.append(
+                        "[HIGH] unauthorized_door_unlock_and_perimeter_security: Prohibit unauthorized physical perimeter door or vault unlock commands"
+                    )
 
         # 3. Actuator Force & Torque Limits
         if intent.force_torque_value > 500.0:
@@ -615,17 +709,40 @@ class GovernanceEngine:
                 f"[HIGH] actuator_force_torque_limit: Block excessive actuator force (>500N) or torque commands exceeding physical safety limits (received {intent.force_torque_value})"
             )
 
-        # 4. Human in Workspace Actuator Hazard (Fail-Closed Caution)
+        # 4. Human in Workspace Actuator Hazard (Fail-Closed Proximity Interlock)
         is_actuator_target = any(act in intent.target for act in _ROBOTIC_ACTUATOR_TARGETS) or any(
             act in intent.action for act in _ROBOTIC_ACTUATOR_TARGETS
         )
         is_actuator_action = any(act in intent.action for act in _ACTUATE_ACTION_SYNONYMS)
 
-        if eval_context.get("human_in_workspace") is True:
-            if is_actuator_target or is_actuator_action:
-                violations.append(
-                    "[CRITICAL] human_in_workspace_actuator_hazard: Block high-energy or hazardous actuator motions when human presence is detected in workspace"
-                )
+        if is_actuator_target or is_actuator_action:
+            # If it is an explicitly safe query, allow without proximity interlock
+            if intent.action not in _SAFE_ACTUATOR_QUERIES:
+                if eval_context.get("human_in_workspace") is True:
+                    violations.append(
+                        "[CRITICAL] human_in_workspace_actuator_hazard: Block high-energy or hazardous actuator motions when human presence is detected in workspace"
+                    )
+                elif any(
+                    any(p in k for p in _HUMAN_PROXIMITY_PATTERNS) and eval_context[k] is True
+                    for k in eval_context
+                ):
+                    violations.append(
+                        "[CRITICAL] human_in_workspace_actuator_hazard: Block high-energy or hazardous actuator motions when human presence is detected in workspace"
+                    )
+                elif (
+                    eval_context.get("workspace_cleared") is False
+                    or any(
+                        any(p in k for p in _HUMAN_PROXIMITY_PATTERNS) and eval_context[k] is None
+                        for k in eval_context
+                    )
+                    or not (
+                        eval_context.get("workspace_cleared") is True
+                        or eval_context.get("human_in_workspace") is False
+                    )
+                ):
+                    violations.append(
+                        "[CRITICAL] human_in_workspace_actuator_hazard: Block actuator motion when workspace clearance is unverified (fail-closed proximity interlock)"
+                    )
 
         # 5. Unattended Thermal / Fire Hazard
         if any(th in intent.target for th in _THERMAL_TARGETS) or any(
@@ -673,8 +790,13 @@ class GovernanceEngine:
         # Inject arguments into context
         eval_context.update(arguments)
 
-        # 2. Extract structured intent & normalize synonyms
-        intent = self._extract_intent(capability_name, arguments, eval_context)
+        # 2. Extract structured intent & normalize synonyms (or use pre-formed intent if provided)
+        if isinstance(arguments.get("intent"), StructuredIntent):
+            intent = arguments["intent"]
+        elif isinstance(context, StructuredIntent):
+            intent = context
+        else:
+            intent = self._extract_intent(capability_name, arguments, eval_context)
 
         # 3. Apply Fail-Closed Authorization Policy
         # For security-sensitive targets, authorization defaults to False unless explicitly proven True
@@ -689,15 +811,23 @@ class GovernanceEngine:
             eval_context["authorized"] = False
         elif intent.is_authorized is True:
             eval_context["authorized"] = True
-        elif is_sensitive_target:
-            # Fail-closed default on sensitive targets
-            eval_context["authorized"] = False
-        else:
-            # Default for non-sensitive operations (e.g. sensor readings, UI)
-            eval_context["authorized"] = True
+        elif eval_context.get("authorized") is None:
+            if is_sensitive_target:
+                # Fail-closed default on sensitive targets
+                eval_context["authorized"] = False
+            else:
+                # Default for non-sensitive operations (e.g. sensor readings, UI)
+                eval_context["authorized"] = True
 
-        if intent.human_in_workspace:
+        if intent.human_in_workspace is True:
             eval_context["human_in_workspace"] = True
+        elif intent.human_in_workspace is False:
+            eval_context["human_in_workspace"] = False
+
+        if intent.workspace_cleared is True:
+            eval_context["workspace_cleared"] = True
+        elif intent.workspace_cleared is False:
+            eval_context["workspace_cleared"] = False
 
         if intent.is_unattended:
             eval_context["unattended"] = True

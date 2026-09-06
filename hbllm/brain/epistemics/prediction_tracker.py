@@ -35,6 +35,10 @@ import time
 from typing import Any
 
 from hbllm.brain.epistemics.interfaces import PredictionOutcome
+from hbllm.brain.reasoning.contradiction_utils import (
+    are_antonyms,
+    detect_structural_contradiction,
+)
 from hbllm.hcir.graph import (
     CognitiveGraph,
     HCIREdge,
@@ -341,20 +345,17 @@ class PredictionTracker:
         if pred_lower == obs_lower:
             return True
 
-        # Check for obvious contradictions
-        opposites = {
-            ("increase", "decrease"),
-            ("decrease", "increase"),
-            ("yes", "no"),
-            ("no", "yes"),
-            ("true", "false"),
-            ("false", "true"),
-            ("positive", "negative"),
-            ("negative", "positive"),
-        }
-        for a, b in opposites:
-            if a in pred_lower and b in obs_lower:
-                return False
+        # Check for obvious contradictions via semantic antonyms and structural detection
+        is_conflict, _, _ = detect_structural_contradiction(pred_lower, obs_lower)
+        if is_conflict:
+            return False
+
+        pred_words = pred_lower.split()
+        obs_words = obs_lower.split()
+        for pw in pred_words:
+            for ow in obs_words:
+                if are_antonyms(pw, ow):
+                    return False
 
         # Partial match
         if pred_lower in obs_lower or obs_lower in pred_lower:
@@ -365,6 +366,9 @@ class PredictionTracker:
             return await self._llm_compare(predicted, observed)
 
         return None  # Can't determine
+
+    # Compatibility alias for outcome match evaluation
+    _outcomes_match = _evaluate_correctness
 
     async def _llm_compare(
         self,
@@ -431,17 +435,15 @@ class PredictionTracker:
         if a == b:
             return False
 
-        # Check for known opposites
-        opposites = [
-            ("increase", "decrease"),
-            ("positive", "negative"),
-            ("yes", "no"),
-            ("true", "false"),
-            ("higher", "lower"),
-            ("more", "less"),
-        ]
-        for x, y in opposites:
-            if (x in a and y in b) or (y in a and x in b):
-                return True
+        is_conflict, _, _ = detect_structural_contradiction(a, b)
+        if is_conflict:
+            return True
+
+        words_a = a.split()
+        words_b = b.split()
+        for wa in words_a:
+            for wb in words_b:
+                if are_antonyms(wa, wb):
+                    return True
 
         return False

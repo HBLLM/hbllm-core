@@ -412,25 +412,55 @@ class IdeaGenerator:
         self,
         node: ContradictionNode,
     ) -> list[RawIdea]:
-        """Generate structural ideas from contradiction topology."""
-        return [
-            RawIdea(
-                claim="A hidden variable may explain the contradiction "
-                f"between {node.claim_a_id} and {node.claim_b_id}",
-                plausibility=0.4,
-                origin_trigger=DiscoveryTrigger.CONTRADICTION,
-                origin_id=node.id,
-                reasoning="Hidden variable hypothesis (template)",
-            ),
-            RawIdea(
-                claim="The contradiction may be context-dependent — "
-                "both claims could be true under different conditions",
-                plausibility=0.4,
-                origin_trigger=DiscoveryTrigger.CONTRADICTION,
-                origin_id=node.id,
-                reasoning="Context dependency hypothesis (template)",
-            ),
-        ]
+        """Generate structural ideas from contradiction topology and semantic analysis."""
+        node_a = self._graph.get_node(node.claim_a_id) if hasattr(self, "_graph") else None
+        node_b = self._graph.get_node(node.claim_b_id) if hasattr(self, "_graph") else None
+        claim_a = (
+            getattr(node_a, "claim", "") or getattr(node_a, "statement", "") or node.claim_a_id
+        )
+        claim_b = (
+            getattr(node_b, "claim", "") or getattr(node_b, "statement", "") or node.claim_b_id
+        )
+
+        ideas: list[RawIdea] = []
+
+        # Formulate resolution hypotheses from structural explanations
+        for exp in node.possible_explanations:
+            ideas.append(
+                RawIdea(
+                    claim=f"Resolve conflict between '{claim_a}' and '{claim_b}': {exp}",
+                    plausibility=0.5,
+                    origin_trigger=DiscoveryTrigger.CONTRADICTION,
+                    origin_id=node.id,
+                    reasoning=f"Formulated from structural contradiction analysis: {exp}",
+                )
+            )
+
+        ideas.extend(
+            [
+                RawIdea(
+                    claim=(
+                        f"A hidden variable may explain the contradiction between "
+                        f"'{claim_a}' and '{claim_b}'"
+                    ),
+                    plausibility=0.4,
+                    origin_trigger=DiscoveryTrigger.CONTRADICTION,
+                    origin_id=node.id,
+                    reasoning="Hidden variable hypothesis (template)",
+                ),
+                RawIdea(
+                    claim=(
+                        f"The contradiction between '{claim_a}' and '{claim_b}' is "
+                        "context-dependent under differing environmental conditions"
+                    ),
+                    plausibility=0.4,
+                    origin_trigger=DiscoveryTrigger.CONTRADICTION,
+                    origin_id=node.id,
+                    reasoning="Context dependency hypothesis (template)",
+                ),
+            ]
+        )
+        return ideas
 
     def _template_generate_from_anomaly(
         self,

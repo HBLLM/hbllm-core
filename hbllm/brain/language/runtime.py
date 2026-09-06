@@ -32,6 +32,8 @@ from hbllm.brain.language.english.parser import EnglishParser
 from hbllm.brain.language.english.realizer import EnglishRealizer
 from hbllm.brain.language.sinhala.parser import SinhalaParser
 from hbllm.brain.language.sinhala.realizer import SinhalaRealizer
+from hbllm.brain.language.tamil.parser import TamilParser
+from hbllm.brain.language.tamil.realizer import TamilRealizer
 from hbllm.hcir.graph import CognitiveGraph
 
 logger = logging.getLogger(__name__)
@@ -93,10 +95,12 @@ class MultilingualLanguageRuntime:
         self._parsers: dict[str, LanguageParser] = {
             "en": EnglishParser(),
             "si": SinhalaParser(),
+            "ta": TamilParser(),
         }
         self._realizers: dict[str, LanguageRealizer] = {
             "en": EnglishRealizer(self._epistemic_policy),
             "si": SinhalaRealizer(self._epistemic_policy),
+            "ta": TamilRealizer(self._epistemic_policy),
         }
 
     def register_language(

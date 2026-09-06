@@ -83,16 +83,43 @@ class SinhalaParser:
                 frame.set_role(ThematicRole.LOCATION, loc_ref)
             return frame
 
-        # 3. Imperative Command: "බෝලය මේසය මතට ගෙනයන්න" / "කොටුව තල්ලු කරන්න"
-        if any(t in ("ගෙනයන්න", "දමන්න", "තල්ලු කරන්න", "තල්ලු") for t in clean_tokens):
-            action_verb = "move"
-            if "තල්ලු" in text or "තල්ලු කරන්න" in text:
-                action_verb = "push"
+        # 3. Imperative Command: "බෝලය මේසය මතට ගෙනයන්න" / "ඉදිරිපස දොර අරින්න" / "රොබෝ අත කරකවන්න"
+        command_verbs = {
+            "විවෘත කරන්න": "open",
+            "අගුළු අරින්න": "unlock",
+            "අගුළුහරින්න": "unlock",
+            "අගුළු දමන්න": "lock",
+            "අගුළුලන්න": "lock",
+            "තල්ලු කරන්න": "push",
+            "ගෙනයන්න": "move",
+            "දමන්න": "put",
+            "තල්ලු": "push",
+            "අරින්න": "open",
+            "ඇරගන්න": "open",
+            "අරින්නට": "open",
+            "වහන්න": "close",
+            "පියවන්න": "close",
+            "කරකවන්න": "rotate",
+            "නවතන්න": "stop",
+        }
+        matched_cmd_verb = None
+        matched_verb_phrase = ""
+        for cv_key, cv_pred in command_verbs.items():
+            if cv_key in text:
+                matched_cmd_verb = cv_pred
+                matched_verb_phrase = cv_key
+                break
 
+        if matched_cmd_verb:
+            action_verb = matched_cmd_verb
+            verb_tokens = matched_verb_phrase.split()
             target_tokens = [
-                t for t in clean_tokens if t not in ("ගෙනයන්න", "දමන්න", "තල්ලු", "කරන්න", "මතට", "වෙත")
+                t
+                for t in clean_tokens
+                if t not in verb_tokens
+                and t not in ("කරන්න", "කරපන්", "කරන්නට", "මතට", "වෙත", "එය", "මේක")
             ]
-            patient_ref = self._extract_entity_ref(target_tokens[:1])
+            patient_ref = self._extract_entity_ref(target_tokens)
 
             frame = SemanticFrame(
                 frame_type=FrameType.COMMAND,
@@ -158,21 +185,44 @@ class SinhalaParser:
         return theme_tokens, loc_tokens, predicate
 
     def _extract_entity_ref(self, tokens: list[str]) -> EntityReference | None:
-        """Extract an EntityReference from Sinhala tokens (e.g. 'රතු බෝලය')."""
+        """Extract an EntityReference from Sinhala tokens (e.g. 'රතු බෝලය', 'ඉදිරිපස දොර')."""
         if not tokens:
             return None
+
+        # Check full joined phrase in lexicon first
+        full_phrase = " ".join(tokens)
+        phrase_entries = self._lexicon.lookup(full_phrase)
+        if phrase_entries and phrase_entries[0].pos == SinhalaPOS.NOUN:
+            return EntityReference(
+                concept_name=phrase_entries[0].semantic_predicate,
+                properties=phrase_entries[0].properties or {},
+                specifier="definite",
+                raw_text=full_phrase,
+            )
 
         props: dict[str, Any] = {}
         concept_name: str | None = None
 
-        for t in tokens:
-            entries = self._lexicon.lookup(t)
+        # Check two-word sliding window then individual tokens
+        i = 0
+        while i < len(tokens):
+            if i + 1 < len(tokens):
+                bigram = f"{tokens[i]} {tokens[i + 1]}"
+                entries = self._lexicon.lookup(bigram)
+                if entries:
+                    entry = entries[0]
+                    if entry.pos == SinhalaPOS.NOUN:
+                        concept_name = entry.semantic_predicate
+                        i += 2
+                        continue
+            entries = self._lexicon.lookup(tokens[i])
             if entries:
                 entry = entries[0]
                 if entry.pos == SinhalaPOS.ADJ and entry.properties:
                     props.update(entry.properties)
                 elif entry.pos == SinhalaPOS.NOUN:
                     concept_name = entry.semantic_predicate
+            i += 1
 
         if not concept_name and tokens:
             concept_name = tokens[-1]
