@@ -449,4 +449,3 @@ class SpatialOperator:
             SpatialRelation.NEAR: HCIREdgeType.CORRELATES_WITH,
         }
         return mapping.get(relation, HCIREdgeType.CORRELATES_WITH)
-

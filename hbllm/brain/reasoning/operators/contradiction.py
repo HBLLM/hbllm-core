@@ -262,16 +262,12 @@ class ContradictionOperator:
                 if pair in seen:
                     continue
 
-                is_conflict, explanation, conf = detect_structural_contradiction(
-                    claim_a, claim_b
-                )
+                is_conflict, explanation, conf = detect_structural_contradiction(claim_a, claim_b)
                 if is_conflict:
                     seen.add(pair)
                     results.append(
                         {
-                            "description": (
-                                f"Negation contradiction: '{claim_a}' vs '{claim_b}'"
-                            ),
+                            "description": (f"Negation contradiction: '{claim_a}' vs '{claim_b}'"),
                             "severity": conf,
                             "strategy": "negation_pattern",
                             "node_a": id_a,
