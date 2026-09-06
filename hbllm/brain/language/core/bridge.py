@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.brain.language.core.semantic_frame import (
     FrameType,
@@ -18,11 +18,15 @@ from hbllm.brain.language.core.semantic_frame import (
     ThematicRole,
 )
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.governance.epistemic_gate import EpistemicSafetyGate
 from hbllm.hcir.kernel.governance.governance_engine import (
     GovernanceDecision,
     GovernanceEngine,
     StructuredIntent,
 )
+
+if TYPE_CHECKING:
+    from hbllm.hcir.graph import CognitiveGraph
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,16 @@ class LanguageCapabilityBridge:
         self,
         governance_engine: GovernanceEngine | None = None,
         capability_resolver: CapabilityResolver | None = None,
+        graph: CognitiveGraph | None = None,
+        epistemic_gate: EpistemicSafetyGate | None = None,
     ) -> None:
-        self._gov = governance_engine or GovernanceEngine()
+        self._gov = governance_engine or GovernanceEngine(
+            graph=graph, epistemic_gate=epistemic_gate
+        )
+        if epistemic_gate is not None and self._gov.epistemic_gate is None:
+            self._gov.attach_epistemic_gate(epistemic_gate)
+        elif graph is not None and self._gov.epistemic_gate is None:
+            self._gov.attach_epistemic_gate(EpistemicSafetyGate(graph=graph))
         self._resolver = capability_resolver
 
     def compile_intent(
@@ -98,11 +110,19 @@ class LanguageCapabilityBridge:
             cap_name = f"task_{predicate or 'execute'}"
             action = predicate or "execute"
 
+        grounded_entity_ids: list[str] = []
+        if isinstance(frame, GroundedSemanticFrame):
+            grounded_entity_ids = list(frame.grounded_entities.values())
+
+        params: dict[str, Any] = {"action": action, "target": target_name}
+        if grounded_entity_ids:
+            params["grounded_entity_ids"] = grounded_entity_ids
+
         return CapabilityDispatchIntent(
             capability_name=cap_name,
             action=action,
             target=target_name,
-            parameters={"action": action, "target": target_name},
+            parameters=params,
             structured_intent=structured_intent,
         )
 
@@ -114,6 +134,11 @@ class LanguageCapabilityBridge:
         """Evaluate linguistic intent under GovernanceEngine and execute if safe."""
         eval_ctx = dict(context or {})
         dispatch_intent = self.compile_intent(frame)
+
+        if "grounded_entity_ids" in dispatch_intent.parameters:
+            eval_ctx.setdefault(
+                "grounded_entity_ids", dispatch_intent.parameters["grounded_entity_ids"]
+            )
 
         # Merge intent params with runtime context
         call_args = {**dispatch_intent.parameters, **eval_ctx}

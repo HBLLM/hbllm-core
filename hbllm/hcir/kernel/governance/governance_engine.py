@@ -22,7 +22,9 @@ from hbllm.brain.governance.policy_engine import (
     PolicyEngine,
     PolicyType,
 )
+from hbllm.hcir.graph import CognitiveGraph
 from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+from hbllm.hcir.kernel.governance.epistemic_gate import EpistemicSafetyGate
 from hbllm.hcir.kernel.governance.policies.migration_policy import MigrationMode, MigrationPolicy
 from hbllm.security.audit_trail import AuditTrail
 
@@ -389,12 +391,20 @@ class GovernanceEngine:
         constitutional_verifier: ConstitutionalVerifier | None = None,
         audit_trail: AuditTrail | None = None,
         auto_load_baseline_safety: bool = True,
+        graph: CognitiveGraph | None = None,
+        epistemic_gate: EpistemicSafetyGate | None = None,
     ) -> None:
         self._migration_policy = migration_policy or MigrationPolicy(MigrationMode.HYBRID)
         self._policy_engine = policy_engine or PolicyEngine()
         self._owner_rule_store = owner_rule_store
         self._constitutional_verifier = constitutional_verifier or ConstitutionalVerifier()
         self._audit_trail = audit_trail
+        if epistemic_gate is not None:
+            self._epistemic_gate = epistemic_gate
+        elif graph is not None:
+            self._epistemic_gate = EpistemicSafetyGate(graph=graph)
+        else:
+            self._epistemic_gate = None
 
         if auto_load_baseline_safety:
             self._load_baseline_safety_policies()
@@ -423,8 +433,16 @@ class GovernanceEngine:
     def audit_trail(self) -> AuditTrail | None:
         return self._audit_trail
 
+    @property
+    def epistemic_gate(self) -> EpistemicSafetyGate | None:
+        return self._epistemic_gate
+
     def set_audit_trail(self, audit_trail: AuditTrail) -> None:
         self._audit_trail = audit_trail
+
+    def attach_epistemic_gate(self, gate: EpistemicSafetyGate) -> None:
+        """Attach an EpistemicSafetyGate for graph-connectivity-based affirmative claim overrides."""
+        self._epistemic_gate = gate
 
     def attach_owner_rule_store(self, store: OwnerRuleStore, tenant_id: str = "*") -> None:
         """Attach an OwnerRuleStore and load rules for a given tenant."""
@@ -837,8 +855,21 @@ class GovernanceEngine:
             if isinstance(v, str) and not k.endswith("_state"):
                 eval_context[f"{k}_state"] = v
 
-        tenant_id = str(eval_context.get("tenant_id", "default"))
-        domain = str(eval_context.get("domain", ""))
+        # 3.5. Evaluate Epistemic Safety Gate (Graph-Connectivity Overrides)
+        if self._epistemic_gate is not None:
+            eval_context = self._epistemic_gate.evaluate_overrides(
+                target=intent.target,
+                capability_name=capability_name,
+                context=eval_context,
+                grounded_entity_ids=eval_context.get("grounded_entity_ids"),
+            )
+            # Sync overridden safety states back to structured intent
+            if eval_context.get("workspace_cleared") is False:
+                intent.workspace_cleared = False
+            if eval_context.get("human_in_workspace") is True:
+                intent.human_in_workspace = True
+            if eval_context.get("authorized") is False:
+                intent.is_authorized = False
 
         # 4. Direct Structured Invariant Checks
         structured_violations = self._evaluate_structured_invariants(intent, eval_context)
@@ -853,6 +884,9 @@ class GovernanceEngine:
             f"{intent.action} {intent.target} {intent.target} {intent.action} "
             + " ".join(arg_tokens)
         )
+
+        tenant_id = str(eval_context.get("tenant_id", "default"))
+        domain = str(eval_context.get("domain", ""))
 
         # 6. Evaluate PolicyEngine (for custom owner rules and configured policies)
         policy_res = self._policy_engine.evaluate(
