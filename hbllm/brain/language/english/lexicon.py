@@ -98,6 +98,11 @@ class EnglishLexicon:
             "cup": "cup",
             "block": "block",
             "robot": "robot",
+            "arm": "arm",
+            "door": "door",
+            "gate": "gate",
+            "safe": "safe",
+            "lock": "lock",
             "hand": "hand",
             "shelf": "shelf",
             "chair": "chair",
@@ -135,6 +140,10 @@ class EnglishLexicon:
             "fall": "fall",
             "roll": "roll",
             "support": "supports",
+            "open": "open",
+            "unlock": "unlock",
+            "rotate": "rotate",
+            "close": "close",
         }
         for verb, pred in verbs.items():
             self.add_entry(
