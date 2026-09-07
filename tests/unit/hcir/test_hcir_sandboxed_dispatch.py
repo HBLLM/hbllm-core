@@ -224,3 +224,67 @@ async def test_auto_inferred_permissions_when_sandboxed():
     assert "Sandbox policy violation" in result["error"]
     assert "subprocess" in result["error"]
     assert executor.executed_count == 0
+
+
+@pytest.mark.asyncio
+async def test_write_config_blocked_when_filesystem_denied_without_declared_permissions():
+    """Verify that 'write_config' without declared required_permissions is blocked when allow_filesystem=False."""
+    sandbox_mgr = CapabilitySandboxManager()
+    policy = SandboxedCapabilityPolicy(
+        capability_name="write_config",
+        provider_id="config_writer",
+        trust_level=TrustLevel.VERIFIED,
+        permissions=CapabilityPermissions(
+            allow_filesystem=False,
+        ),
+    )
+    sandbox_mgr.register_policy(policy)
+
+    resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
+    executor = MockExecutor(return_data={"status": "file written"})
+    resolver.register(
+        CapabilityImplementation(
+            capability_name="write_config",
+            implementation_id="config_writer",
+            executor=executor,
+        )
+    )
+
+    # Caller passes NO required_permissions
+    result = await resolver.resolve_and_execute("write_config", {})
+    assert "error" in result
+    assert "Sandbox policy violation" in result["error"]
+    assert "filesystem" in result["error"]
+    assert executor.executed_count == 0  # Not executed!
+
+
+@pytest.mark.asyncio
+async def test_policy_explicit_required_permissions_derived_automatically():
+    """Verify that policy-declared required_permissions are enforced when caller omits them."""
+    sandbox_mgr = CapabilitySandboxManager()
+    policy = SandboxedCapabilityPolicy(
+        capability_name="custom_action",
+        provider_id="custom_worker",
+        trust_level=TrustLevel.VERIFIED,
+        required_permissions={"network"},
+        permissions=CapabilityPermissions(
+            allow_network=False,
+        ),
+    )
+    sandbox_mgr.register_policy(policy)
+
+    resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
+    executor = MockExecutor()
+    resolver.register(
+        CapabilityImplementation(
+            capability_name="custom_action",
+            implementation_id="custom_worker",
+            executor=executor,
+        )
+    )
+
+    result = await resolver.resolve_and_execute("custom_action", {})
+    assert "error" in result
+    assert "Sandbox policy violation" in result["error"]
+    assert "network" in result["error"]
+    assert executor.executed_count == 0
