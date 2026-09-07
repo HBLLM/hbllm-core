@@ -156,3 +156,42 @@ def test_real_farama_babyai_open_red_door() -> None:
 
     env.close()
     assert success, "Failed to solve real BabyAI-OpenRedDoor-v0 episode"
+
+
+def test_real_farama_babyai_unlock_local() -> None:
+    """Test HCIR adapter on official Farama BabyAI-UnlockLocal-v0 (key-door prerequisite)."""
+    env = make_gym_babyai_level("BabyAI-UnlockLocal-v0")
+    obs, info = env.reset(seed=10)
+
+    adapter = BabyAIPerceptionAdapter()
+    planner = BabyAIActionAdapter(room_size=22)
+    parser = BabyAIMissionParser()
+
+    mission = obs["mission"]
+    goal = parser.parse(mission)
+
+    # Initial 360 scan
+    for _ in range(4):
+        adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+        obs, r, term, trunc, info = env.step(int(MiniGridAction.LEFT))
+
+    adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+
+    target_node = planner.find_target_entity(adapter.graph, goal)
+    assert target_node is not None, f"Could not find target door for goal {goal} in mapped room"
+
+    trajectory = planner.plan_trajectory(adapter.graph, goal)
+    assert len(trajectory) > 0
+    assert MiniGridAction.PICKUP in trajectory, "Trajectory must include picking up the key"
+    assert MiniGridAction.TOGGLE in trajectory, "Trajectory must include toggling the door"
+
+    success = False
+    for act in trajectory:
+        obs, r, term, trunc, info = env.step(int(act))
+        adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+        if term and r > 0.0:
+            success = True
+            break
+
+    env.close()
+    assert success, "Failed to solve real BabyAI-UnlockLocal-v0 episode"
