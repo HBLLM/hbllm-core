@@ -2,7 +2,7 @@
   "name": "babyai-adapter",
   "version": "1.0.0",
   "manifest_version": 2,
-  "description": "BabyAI Level-1, Level-2, & Level-3 (Single-Room, Multi-Room Door Navigation, & Key-Door Unlocking Prerequisite Reasoning) perception and action adapter plugin for HCIR",
+  "description": "BabyAI Full Spectrum (Levels 1–7: Navigation, Pickup, Doors, Unlocking, Relational PutNext, Unblocking, and Sequential Instruction Synthesis) perception and action adapter plugin for HCIR",
   "author": "hbllm-team",
   "entry_point": "__init__.py",
   "platform_version": ">=1.0.0",

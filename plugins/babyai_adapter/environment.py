@@ -227,7 +227,10 @@ class BabyAIEnvironment:
             fx, fy = self.get_front_pos()
             if 0 <= fx < self.width and 0 <= fy < self.height:
                 front_cell = self.grid[fx][fy]
-                if self.carrying is not None and front_cell.object_type == MiniGridObjectType.EMPTY:
+                if self.carrying is not None and front_cell.object_type in (
+                    MiniGridObjectType.EMPTY,
+                    MiniGridObjectType.FLOOR,
+                ):
                     self.grid[fx][fy] = self.carrying
                     self.carrying = None
 
@@ -271,105 +274,70 @@ class BabyAIEnvironment:
         }
         return obs, reward, terminated, truncated, info
 
-    def _check_goal_achieved(self) -> bool:
-        """Evaluate if the goal specified in the mission string is satisfied."""
-        mission_lower = self.mission.lower()
-        is_pickup = (
-            "pick up" in mission_lower
-            or "pickup" in mission_lower
-            or "ගන්න" in mission_lower
-            or "எடுக்கவும்" in mission_lower
-        )
-
-        if is_pickup:
+    def _is_single_goal_achieved(self, goal: Any) -> bool:
+        """Evaluate if a single BabyAIGoal is satisfied on the environment."""
+        if goal.action == "pickup":
             if self.carrying is None:
                 return False
             car_type = IDX_TO_OBJECT.get(int(self.carrying.object_type), "")
             car_color = IDX_TO_COLOR.get(int(self.carrying.color), "")
-            if car_type in mission_lower and car_color in mission_lower:
-                return True
-            return False
-        elif any(
-            w in mission_lower
-            for w in ("open", "unlock", "අරින්න", "හරින්න", "විවෘත", "අගුළු", "திறக்கவும்", "பூட்டு")
-        ):
-            # Open / unlock door mission: check if any door matching requested color is OPEN
+            return goal.matches_attributes(car_type, car_color)
+
+        if goal.action == "open":
             for x in range(self.width):
                 for y in range(self.height):
                     cell = self.grid[x][y]
                     if cell.object_type == MiniGridObjectType.DOOR:
                         door_col = IDX_TO_COLOR.get(int(cell.color), "")
                         if cell.state == MiniGridState.OPEN:
-                            if any(
-                                c in mission_lower
-                                for c in (
-                                    "red",
-                                    "green",
-                                    "blue",
-                                    "purple",
-                                    "yellow",
-                                    "grey",
-                                    "රතු",
-                                    "කොළ",
-                                    "නිල්",
-                                    "දම්",
-                                    "කහ",
-                                    "අළු",
-                                    "சிவப்பு",
-                                    "பச்சை",
-                                    "நீலம்",
-                                    "ஊதா",
-                                    "மஞ்சள்",
-                                    "சாம்பல்",
-                                )
-                            ):
-                                si_cols = {
-                                    "රතු": "red",
-                                    "කොළ": "green",
-                                    "නිල්": "blue",
-                                    "දම්": "purple",
-                                    "කහ": "yellow",
-                                    "අළු": "grey",
-                                }
-                                ta_cols = {
-                                    "சிவப்பு": "red",
-                                    "பச்சை": "green",
-                                    "நீலம்": "blue",
-                                    "ஊதா": "purple",
-                                    "மஞ்சள்": "yellow",
-                                    "சாம்பல்": "grey",
-                                }
-                                matched = False
-                                if door_col in mission_lower:
-                                    matched = True
-                                for si_k, en_v in si_cols.items():
-                                    if si_k in mission_lower and door_col == en_v:
-                                        matched = True
-                                for ta_k, en_v in ta_cols.items():
-                                    if ta_k in mission_lower and door_col == en_v:
-                                        matched = True
-                                if matched:
-                                    return True
-                            else:
-                                # Any door opened
+                            if goal.target_color is None or goal.target_color == door_col:
                                 return True
             return False
-        else:
-            # Go to task: agent must be adjacent to the target and facing it, or at target
+
+        if goal.action == "put_next":
+            m_cells = []
+            f_cells = []
+            for x in range(self.width):
+                for y in range(self.height):
+                    cell = self.grid[x][y]
+                    c_type = IDX_TO_OBJECT.get(int(cell.object_type), "")
+                    c_col = IDX_TO_COLOR.get(int(cell.color), "")
+                    if goal.matches_attributes(c_type, c_col):
+                        m_cells.append((x, y))
+                    if goal.matches_fixed_attributes(c_type, c_col):
+                        f_cells.append((x, y))
+            for mx, my in m_cells:
+                for fx, fy in f_cells:
+                    if abs(mx - fx) + abs(my - fy) == 1:
+                        return True
+            return False
+
+        if goal.action == "go_to":
             fx, fy = self.get_front_pos()
             if 0 <= fx < self.width and 0 <= fy < self.height:
                 cell = self.grid[fx][fy]
-                obj_type = IDX_TO_OBJECT.get(int(cell.object_type), "")
-                obj_color = IDX_TO_COLOR.get(int(cell.color), "")
-                if obj_type in mission_lower and (
-                    obj_color in mission_lower
-                    or not any(
-                        c in mission_lower
-                        for c in ("red", "green", "blue", "purple", "yellow", "grey")
-                    )
-                ):
+                c_type = IDX_TO_OBJECT.get(int(cell.object_type), "")
+                c_col = IDX_TO_COLOR.get(int(cell.color), "")
+                if goal.matches_attributes(c_type, c_col):
                     return True
             return False
+
+        return False
+
+    def _check_goal_achieved(self) -> bool:
+        """Evaluate if the goal specified in the mission string is satisfied."""
+        from .mission import BabyAIMissionParser
+
+        parser = BabyAIMissionParser()
+        parsed_goal = parser.parse(self.mission)
+
+        if parsed_goal.is_compound():
+            for sub in parsed_goal.subgoals:
+                if not self._is_single_goal_achieved(sub):
+                    return False
+            return True
+
+        return self._is_single_goal_achieved(parsed_goal)
 
 
 def create_babyai_level(
@@ -498,6 +466,93 @@ def create_unlock_door_level(
             )
 
     return env
+
+
+def create_put_next_level(
+    mission: str = "put the yellow key next to the yellow box",
+    move_obj: tuple[str, str, tuple[int, int]] = ("key", "yellow", (2, 2)),
+    fixed_obj: tuple[str, str, tuple[int, int]] = ("box", "yellow", (5, 4)),
+    distractors: list[tuple[str, str, tuple[int, int]]] | None = None,
+    agent_pos: tuple[int, int] = (1, 1),
+    agent_dir: int = 0,
+    room_size: int = 8,
+) -> BabyAIEnvironment:
+    """Instantiate a single room level for relational PutNext tasks."""
+    env = BabyAIEnvironment(width=room_size, height=room_size, mission=mission)
+    env.agent_pos = agent_pos
+    env.agent_dir = agent_dir
+
+    m_type, m_col, (mx, my) = move_obj
+    env.place_object(mx, my, MiniGridObjectType[m_type.upper()], MiniGridColor[m_col.upper()])
+
+    f_type, f_col, (fx, fy) = fixed_obj
+    env.place_object(fx, fy, MiniGridObjectType[f_type.upper()], MiniGridColor[f_col.upper()])
+
+    if distractors:
+        for d_type, d_col, (dx, dy) in distractors:
+            env.place_object(
+                dx, dy, MiniGridObjectType[d_type.upper()], MiniGridColor[d_col.upper()]
+            )
+
+    return env
+
+
+def create_blocked_level(
+    mission: str = "pick up the red box",
+    target_pos: tuple[int, int] = (7, 2),
+    door_pos: tuple[int, int] = (4, 2),
+    blocker_pos: tuple[int, int] = (3, 2),
+    blocker: tuple[str, str] = ("ball", "purple"),
+    key_pos: tuple[int, int] = (2, 1),
+    agent_pos: tuple[int, int] = (1, 1),
+    room_width: int = 9,
+    room_height: int = 5,
+) -> BabyAIEnvironment:
+    """Instantiate a partitioned level where the door is blocked by a pickupable obstacle."""
+    env = create_unlock_door_level(
+        mission=mission,
+        door_color="red",
+        door_pos=door_pos,
+        key_pos=key_pos,
+        agent_pos=agent_pos,
+        room_width=room_width,
+        room_height=room_height,
+    )
+    b_type, b_col = blocker
+    env.place_object(
+        blocker_pos[0],
+        blocker_pos[1],
+        MiniGridObjectType[b_type.upper()],
+        MiniGridColor[b_col.upper()],
+    )
+    env.place_object(
+        target_pos[0],
+        target_pos[1],
+        MiniGridObjectType.BOX,
+        MiniGridColor.RED,
+    )
+    return env
+
+
+def create_sequential_level(
+    mission: str = "open the red door, then pick up the green box",
+    door_pos: tuple[int, int] = (4, 2),
+    target_pos: tuple[int, int] = (7, 2),
+    agent_pos: tuple[int, int] = (1, 1),
+    room_width: int = 9,
+    room_height: int = 5,
+) -> BabyAIEnvironment:
+    """Instantiate a level with sequential subgoals across rooms."""
+    return create_two_room_door_level(
+        mission=mission,
+        door_color="red",
+        door_pos=door_pos,
+        door_state=MiniGridState.CLOSED,
+        target_in_room2=("box", "green", target_pos),
+        agent_pos=agent_pos,
+        room_width=room_width,
+        room_height=room_height,
+    )
 
 
 def make_gym_babyai_level(

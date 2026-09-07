@@ -42,6 +42,7 @@ class BabyAIPerceptionAdapter:
         self,
         observation: MiniGridObservation | dict[str, Any],
         known_agent_pos: tuple[int, int] | None = None,
+        known_carrying: Any = ...,
     ) -> CognitiveGraph:
         """Process observation and update CognitiveGraph nodes and edges."""
         if isinstance(observation, dict):
@@ -63,14 +64,35 @@ class BabyAIPerceptionAdapter:
         # Determine agent position: from extra metadata, argument, or graph
         agent_pos = known_agent_pos or obs.extra.get("agent_pos", (1, 1))
         direction = obs.direction
-        carrying_tuple = obs.extra.get("carrying")
 
-        # 1. Update Agent Node
-        carrying_info = None
-        if carrying_tuple:
-            car_type = IDX_TO_OBJECT.get(carrying_tuple[0], "unknown")
-            car_col = IDX_TO_COLOR.get(carrying_tuple[1], "unknown")
-            carrying_info = {"type": car_type, "color": car_col}
+        # 1. Update Agent Node and Carrying State
+        carrying_info: dict[str, Any] | None = None
+        if known_carrying is not ...:
+            if known_carrying is None:
+                carrying_info = None
+            elif hasattr(known_carrying, "type") and hasattr(known_carrying, "color"):
+                carrying_info = {
+                    "type": str(known_carrying.type),
+                    "color": str(known_carrying.color),
+                }
+            elif isinstance(known_carrying, tuple):
+                car_type = IDX_TO_OBJECT.get(known_carrying[0], "unknown")
+                car_col = IDX_TO_COLOR.get(known_carrying[1], "unknown")
+                carrying_info = {"type": car_type, "color": car_col}
+            elif isinstance(known_carrying, dict):
+                carrying_info = known_carrying
+        elif "carrying" in obs.extra:
+            carrying_tuple = obs.extra.get("carrying")
+            if carrying_tuple:
+                car_type = IDX_TO_OBJECT.get(carrying_tuple[0], "unknown")
+                car_col = IDX_TO_COLOR.get(carrying_tuple[1], "unknown")
+                carrying_info = {"type": car_type, "color": car_col}
+            else:
+                carrying_info = None
+        elif self.graph.has_node(self.agent_id):
+            existing = self.graph.get_node(self.agent_id)
+            if isinstance(existing, PhysicalEntityNode):
+                carrying_info = existing.properties.get("carrying")
 
         agent_node = PhysicalEntityNode(
             id=self.agent_id,
@@ -181,6 +203,41 @@ class BabyAIPerceptionAdapter:
                         and n.entity_lifecycle == EntityLifecycle.TRACKED
                     ):
                         n.entity_lifecycle = EntityLifecycle.OCCLUDED
+
+        # 4. Maintain pairwise NEAR edges between tracked/occluded physical entities
+        active_items = []
+        for pos, eid in self._known_entities.items():
+            if self.graph.has_node(eid):
+                node = self.graph.get_node(eid)
+                if isinstance(node, PhysicalEntityNode) and node.entity_lifecycle in (
+                    EntityLifecycle.TRACKED,
+                    EntityLifecycle.OCCLUDED,
+                ):
+                    active_items.append((eid, node.properties.get("coords")))
+
+        for i in range(len(active_items)):
+            eid1, c1 = active_items[i]
+            if not c1:
+                continue
+            for j in range(i + 1, len(active_items)):
+                eid2, c2 = active_items[j]
+                if not c2:
+                    continue
+                d = abs(c1[0] - c2[0]) + abs(c1[1] - c2[1])
+                pair_id = f"edge_near_{min(eid1, eid2)}_{max(eid1, eid2)}"
+                if d == 1:
+                    if not self.graph.has_edge(pair_id):
+                        self.graph.add_edge(
+                            HCIREdge(
+                                id=pair_id,
+                                edge_type=HCIREdgeType.NEAR,
+                                sources=[eid1],
+                                targets=[eid2],
+                            )
+                        )
+                else:
+                    if self.graph.has_edge(pair_id):
+                        self.graph.remove_edge(pair_id)
 
         return self.graph
 
