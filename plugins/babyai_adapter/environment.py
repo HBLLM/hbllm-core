@@ -158,9 +158,9 @@ class BabyAIEnvironment:
                     cell = self.grid[curr_x][curr_y]
                     if cell.object_type in (MiniGridObjectType.WALL,):
                         return True
-                    if (
-                        cell.object_type == MiniGridObjectType.DOOR
-                        and cell.state == MiniGridState.CLOSED
+                    if cell.object_type == MiniGridObjectType.DOOR and cell.state in (
+                        MiniGridState.CLOSED,
+                        MiniGridState.LOCKED,
                     ):
                         return True
             e2 = 2 * err
@@ -236,12 +236,18 @@ class BabyAIEnvironment:
             if 0 <= fx < self.width and 0 <= fy < self.height:
                 front_cell = self.grid[fx][fy]
                 if front_cell.object_type == MiniGridObjectType.DOOR:
-                    new_state = (
-                        MiniGridState.CLOSED
-                        if front_cell.state == MiniGridState.OPEN
-                        else MiniGridState.OPEN
-                    )
-                    front_cell.state = new_state
+                    if front_cell.state == MiniGridState.LOCKED:
+                        # Can only open if carrying matching key!
+                        if (
+                            self.carrying is not None
+                            and self.carrying.object_type == MiniGridObjectType.KEY
+                            and self.carrying.color == front_cell.color
+                        ):
+                            front_cell.state = MiniGridState.OPEN
+                    elif front_cell.state == MiniGridState.OPEN:
+                        front_cell.state = MiniGridState.CLOSED
+                    else:  # CLOSED
+                        front_cell.state = MiniGridState.OPEN
 
         elif act == MiniGridAction.DONE:
             # Check success condition
@@ -268,7 +274,12 @@ class BabyAIEnvironment:
     def _check_goal_achieved(self) -> bool:
         """Evaluate if the goal specified in the mission string is satisfied."""
         mission_lower = self.mission.lower()
-        is_pickup = "pick up" in mission_lower or "pickup" in mission_lower
+        is_pickup = (
+            "pick up" in mission_lower
+            or "pickup" in mission_lower
+            or "ගන්න" in mission_lower
+            or "எடுக்கவும்" in mission_lower
+        )
 
         if is_pickup:
             if self.carrying is None:
@@ -278,8 +289,11 @@ class BabyAIEnvironment:
             if car_type in mission_lower and car_color in mission_lower:
                 return True
             return False
-        elif "open" in mission_lower:
-            # Open door mission: check if any door matching requested color is OPEN
+        elif any(
+            w in mission_lower
+            for w in ("open", "unlock", "අරින්න", "හරින්න", "විවෘත", "අගුළු", "திறக்கவும்", "பூட்டு")
+        ):
+            # Open / unlock door mission: check if any door matching requested color is OPEN
             for x in range(self.width):
                 for y in range(self.height):
                     cell = self.grid[x][y]
@@ -288,9 +302,53 @@ class BabyAIEnvironment:
                         if cell.state == MiniGridState.OPEN:
                             if any(
                                 c in mission_lower
-                                for c in ("red", "green", "blue", "purple", "yellow", "grey")
+                                for c in (
+                                    "red",
+                                    "green",
+                                    "blue",
+                                    "purple",
+                                    "yellow",
+                                    "grey",
+                                    "රතු",
+                                    "කොළ",
+                                    "නිල්",
+                                    "දම්",
+                                    "කහ",
+                                    "අළු",
+                                    "சிவப்பு",
+                                    "பச்சை",
+                                    "நீலம்",
+                                    "ஊதா",
+                                    "மஞ்சள்",
+                                    "சாம்பல்",
+                                )
                             ):
+                                si_cols = {
+                                    "රතු": "red",
+                                    "කොළ": "green",
+                                    "නිල්": "blue",
+                                    "දම්": "purple",
+                                    "කහ": "yellow",
+                                    "අළු": "grey",
+                                }
+                                ta_cols = {
+                                    "சிவப்பு": "red",
+                                    "பச்சை": "green",
+                                    "நீலம்": "blue",
+                                    "ஊதா": "purple",
+                                    "மஞ்சள்": "yellow",
+                                    "சாம்பல்": "grey",
+                                }
+                                matched = False
                                 if door_col in mission_lower:
+                                    matched = True
+                                for si_k, en_v in si_cols.items():
+                                    if si_k in mission_lower and door_col == en_v:
+                                        matched = True
+                                for ta_k, en_v in ta_cols.items():
+                                    if ta_k in mission_lower and door_col == en_v:
+                                        matched = True
+                                if matched:
                                     return True
                             else:
                                 # Any door opened
@@ -379,6 +437,59 @@ def create_two_room_door_level(
     if target_in_room2:
         t_type, t_col, (tx, ty) = target_in_room2
         env.place_object(tx, ty, MiniGridObjectType[t_type.upper()], MiniGridColor[t_col.upper()])
+
+    if distractors:
+        for d_type, d_col, (dx, dy) in distractors:
+            env.place_object(
+                dx, dy, MiniGridObjectType[d_type.upper()], MiniGridColor[d_col.upper()]
+            )
+
+    return env
+
+
+def create_unlock_door_level(
+    mission: str = "open the red door",
+    door_color: str = "red",
+    door_pos: tuple[int, int] = (4, 2),
+    key_pos: tuple[int, int] = (2, 2),
+    key_color: str | None = None,
+    distractors: list[tuple[str, str, tuple[int, int]]] | None = None,
+    agent_pos: tuple[int, int] = (1, 1),
+    agent_dir: int = 0,
+    room_width: int = 9,
+    room_height: int = 5,
+) -> BabyAIEnvironment:
+    """Instantiate a partitioned level with a locked door and a key."""
+    env = BabyAIEnvironment(width=room_width, height=room_height, mission=mission)
+    env.agent_pos = agent_pos
+    env.agent_dir = agent_dir
+
+    split_x = door_pos[0]
+    # Build partition wall at split_x with locked door
+    for y in range(room_height):
+        if y == door_pos[1]:
+            d_col = MiniGridColor[door_color.upper()]
+            env.grid[split_x][y] = GridCell(
+                object_type=MiniGridObjectType.DOOR,
+                color=d_col,
+                state=MiniGridState.LOCKED,
+            )
+        else:
+            env.grid[split_x][y] = GridCell(
+                object_type=MiniGridObjectType.WALL,
+                color=MiniGridColor.GREY,
+                state=MiniGridState.CLOSED,
+            )
+
+    # Place key (matching door color by default)
+    kc = key_color or door_color
+    env.place_object(
+        key_pos[0],
+        key_pos[1],
+        MiniGridObjectType.KEY,
+        MiniGridColor[kc.upper()],
+        state=MiniGridState.OPEN,
+    )
 
     if distractors:
         for d_type, d_col, (dx, dy) in distractors:

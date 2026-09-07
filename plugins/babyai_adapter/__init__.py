@@ -15,6 +15,7 @@ from .environment import (
     BabyAIEnvironment,
     create_babyai_level,
     create_two_room_door_level,
+    create_unlock_door_level,
     make_gym_babyai_level,
 )
 from .mission import BabyAIMissionParser
@@ -72,6 +73,7 @@ __all__ = [
     "PLUGIN_VERSION",
     "create_babyai_level",
     "create_two_room_door_level",
+    "create_unlock_door_level",
     "make_gym_babyai_level",
     "register",
     "setup",

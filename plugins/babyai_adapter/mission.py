@@ -75,7 +75,7 @@ class BabyAIMissionParser:
         # Determine intent / action
         if "pick up" in cleaned or "pickup" in cleaned:
             action = "pickup"
-        elif "open" in cleaned:
+        elif "open" in cleaned or "unlock" in cleaned:
             action = "open"
         else:
             action = "go_to"
@@ -105,7 +105,7 @@ class BabyAIMissionParser:
     def _parse_sinhala(self, cleaned: str, raw: str) -> BabyAIGoal:
         if "ගන්න" in cleaned or "උස්සන්න" in cleaned:
             action = "pickup"
-        elif "අරින්න" in cleaned or "හරින්න" in cleaned or "විවෘත" in cleaned:
+        elif "අරින්න" in cleaned or "හරින්න" in cleaned or "විවෘත" in cleaned or "අගුළු" in cleaned:
             action = "open"
         else:
             action = "go_to"
@@ -133,7 +133,7 @@ class BabyAIMissionParser:
     def _parse_tamil(self, cleaned: str, raw: str) -> BabyAIGoal:
         if "எடுக்கவும்" in cleaned or "எடு" in cleaned:
             action = "pickup"
-        elif "திறக்கவும்" in cleaned or "திற" in cleaned:
+        elif "திறக்கவும்" in cleaned or "திற" in cleaned or "பூட்டு" in cleaned:
             action = "open"
         else:
             action = "go_to"
