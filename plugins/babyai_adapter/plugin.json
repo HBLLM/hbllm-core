@@ -2,7 +2,7 @@
   "name": "babyai-adapter",
   "version": "1.0.0",
   "manifest_version": 2,
-  "description": "BabyAI Level-1 (Single-Room GoToObj & PickupObj) perception and action adapter plugin for HCIR",
+  "description": "BabyAI Level-1 & Level-2 (Single-Room and Multi-Room Door Navigation) perception and action adapter plugin for HCIR",
   "author": "hbllm-team",
   "entry_point": "__init__.py",
   "platform_version": ">=1.0.0",

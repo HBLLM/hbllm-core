@@ -39,11 +39,13 @@ class BabyAIEnvironment:
     def __init__(
         self,
         room_size: int = 8,
+        width: int | None = None,
+        height: int | None = None,
         max_steps: int = 64,
         mission: str = "go to the red ball",
     ) -> None:
-        self.width = room_size
-        self.height = room_size
+        self.width = width or room_size
+        self.height = height or room_size
         self.max_steps = max_steps
         self.mission = mission
         self.step_count = 0
@@ -81,9 +83,15 @@ class BabyAIEnvironment:
         y: int,
         object_type: MiniGridObjectType,
         color: MiniGridColor,
-        state: MiniGridState = MiniGridState.OPEN,
+        state: MiniGridState | None = None,
     ) -> None:
         """Place an object at discrete coordinates."""
+        if state is None:
+            state = (
+                MiniGridState.CLOSED
+                if object_type == MiniGridObjectType.DOOR
+                else MiniGridState.OPEN
+            )
         if 0 < x < self.width - 1 and 0 < y < self.height - 1:
             self.grid[x][y] = GridCell(object_type=object_type, color=color, state=state)
 
@@ -270,6 +278,24 @@ class BabyAIEnvironment:
             if car_type in mission_lower and car_color in mission_lower:
                 return True
             return False
+        elif "open" in mission_lower:
+            # Open door mission: check if any door matching requested color is OPEN
+            for x in range(self.width):
+                for y in range(self.height):
+                    cell = self.grid[x][y]
+                    if cell.object_type == MiniGridObjectType.DOOR:
+                        door_col = IDX_TO_COLOR.get(int(cell.color), "")
+                        if cell.state == MiniGridState.OPEN:
+                            if any(
+                                c in mission_lower
+                                for c in ("red", "green", "blue", "purple", "yellow", "grey")
+                            ):
+                                if door_col in mission_lower:
+                                    return True
+                            else:
+                                # Any door opened
+                                return True
+            return False
         else:
             # Go to task: agent must be adjacent to the target and facing it, or at target
             fx, fy = self.get_front_pos()
@@ -277,7 +303,13 @@ class BabyAIEnvironment:
                 cell = self.grid[fx][fy]
                 obj_type = IDX_TO_OBJECT.get(int(cell.object_type), "")
                 obj_color = IDX_TO_COLOR.get(int(cell.color), "")
-                if obj_type in mission_lower and obj_color in mission_lower:
+                if obj_type in mission_lower and (
+                    obj_color in mission_lower
+                    or not any(
+                        c in mission_lower
+                        for c in ("red", "green", "blue", "purple", "yellow", "grey")
+                    )
+                ):
                     return True
             return False
 
@@ -306,6 +338,53 @@ def create_babyai_level(
         d_type = MiniGridObjectType[d_type_str.upper()]
         d_col = MiniGridColor[d_col_str.upper()]
         env.place_object(dx, dy, d_type, d_col)
+
+    return env
+
+
+def create_two_room_door_level(
+    mission: str = "open the red door",
+    door_color: str = "red",
+    door_pos: tuple[int, int] = (4, 2),
+    door_state: MiniGridState = MiniGridState.CLOSED,
+    room_width: int = 9,
+    room_height: int = 5,
+    agent_pos: tuple[int, int] = (2, 2),
+    agent_dir: int = 0,
+    target_in_room2: tuple[str, str, tuple[int, int]] | None = None,
+    distractors: list[tuple[str, str, tuple[int, int]]] | None = None,
+) -> BabyAIEnvironment:
+    """Instantiate a two-room partitioned environment (similar to BabyAI-OpenRedDoor-v0)."""
+    env = BabyAIEnvironment(width=room_width, height=room_height, mission=mission)
+    env.agent_pos = agent_pos
+    env.agent_dir = agent_dir
+
+    split_x = door_pos[0]
+    # Build partition wall at split_x
+    for y in range(room_height):
+        if y == door_pos[1]:
+            d_col = MiniGridColor[door_color.upper()]
+            env.grid[split_x][y] = GridCell(
+                object_type=MiniGridObjectType.DOOR,
+                color=d_col,
+                state=door_state,
+            )
+        else:
+            env.grid[split_x][y] = GridCell(
+                object_type=MiniGridObjectType.WALL,
+                color=MiniGridColor.GREY,
+                state=MiniGridState.CLOSED,
+            )
+
+    if target_in_room2:
+        t_type, t_col, (tx, ty) = target_in_room2
+        env.place_object(tx, ty, MiniGridObjectType[t_type.upper()], MiniGridColor[t_col.upper()])
+
+    if distractors:
+        for d_type, d_col, (dx, dy) in distractors:
+            env.place_object(
+                dx, dy, MiniGridObjectType[d_type.upper()], MiniGridColor[d_col.upper()]
+            )
 
     return env
 

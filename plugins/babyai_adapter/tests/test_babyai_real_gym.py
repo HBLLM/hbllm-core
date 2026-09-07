@@ -118,3 +118,41 @@ def test_real_farama_babyai_pickup_obj() -> None:
 
     env.close()
     assert success, "Failed to solve real BabyAI-PickupDist-v0 episode"
+
+
+def test_real_farama_babyai_open_red_door() -> None:
+    """Test HCIR adapter on official Farama BabyAI-OpenRedDoor-v0 (9x5 partition room with red door)."""
+    env = make_gym_babyai_level("BabyAI-OpenRedDoor-v0")
+    obs, info = env.reset(seed=42)
+
+    adapter = BabyAIPerceptionAdapter()
+    planner = BabyAIActionAdapter(room_size=(9, 5))
+    parser = BabyAIMissionParser()
+
+    mission = obs["mission"]
+    goal = parser.parse(mission)
+
+    # Initial 360 scan
+    for _ in range(4):
+        adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+        obs, r, term, trunc, info = env.step(int(MiniGridAction.LEFT))
+
+    adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+
+    target_node = planner.find_target_entity(adapter.graph, goal)
+    assert target_node is not None, f"Could not find target for goal {goal} in mapped room"
+
+    trajectory = planner.plan_trajectory(adapter.graph, goal)
+    assert len(trajectory) > 0
+    assert MiniGridAction.TOGGLE in trajectory
+
+    success = False
+    for act in trajectory:
+        obs, r, term, trunc, info = env.step(int(act))
+        adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+        if term and r > 0.0:
+            success = True
+            break
+
+    env.close()
+    assert success, "Failed to solve real BabyAI-OpenRedDoor-v0 episode"
