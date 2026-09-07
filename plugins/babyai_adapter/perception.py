@@ -65,6 +65,21 @@ class BabyAIPerceptionAdapter:
         agent_pos = known_agent_pos or obs.extra.get("agent_pos", (1, 1))
         direction = obs.direction
 
+        # In MiniGrid, the agent's carried item is placed at (view_size // 2, view_size - 1)
+        # in the partially observable view (e.g. vx=3, vy=6 for a 7x7 grid)
+        view_size = len(obs.image)
+        carrying_from_obs: dict[str, Any] | None = None
+        if view_size > 0:
+            agent_vx = view_size // 2
+            if agent_vx < len(obs.image):
+                agent_vy = len(obs.image[agent_vx]) - 1
+                if agent_vy >= 0:
+                    car_tuple = obs.image[agent_vx][agent_vy]
+                    car_obj = IDX_TO_OBJECT.get(car_tuple[0], "empty")
+                    car_col = IDX_TO_COLOR.get(car_tuple[1], "red")
+                    if car_obj not in ("unseen", "empty", "floor"):
+                        carrying_from_obs = {"type": car_obj, "color": car_col}
+
         # 1. Update Agent Node and Carrying State
         carrying_info: dict[str, Any] | None = None
         if known_carrying is not ...:
@@ -81,18 +96,19 @@ class BabyAIPerceptionAdapter:
                 carrying_info = {"type": car_type, "color": car_col}
             elif isinstance(known_carrying, dict):
                 carrying_info = known_carrying
-        elif "carrying" in obs.extra:
+        elif "carrying" in obs.extra and obs.extra["carrying"] is not None:
             carrying_tuple = obs.extra.get("carrying")
             if carrying_tuple:
                 car_type = IDX_TO_OBJECT.get(carrying_tuple[0], "unknown")
                 car_col = IDX_TO_COLOR.get(carrying_tuple[1], "unknown")
                 carrying_info = {"type": car_type, "color": car_col}
-            else:
-                carrying_info = None
+        elif carrying_from_obs is not None:
+            carrying_info = carrying_from_obs
+        elif "carrying" in obs.extra and obs.extra["carrying"] is None:
+            carrying_info = None
         elif self.graph.has_node(self.agent_id):
-            existing = self.graph.get_node(self.agent_id)
-            if isinstance(existing, PhysicalEntityNode):
-                carrying_info = existing.properties.get("carrying")
+            # The observation's carried cell is authoritative
+            carrying_info = carrying_from_obs
 
         agent_node = PhysicalEntityNode(
             id=self.agent_id,
@@ -114,7 +130,6 @@ class BabyAIPerceptionAdapter:
             self.graph.add_node(agent_node)
 
         # 2. Extract Visible Entities from 7x7 Egocentric View
-        view_size = len(obs.image)
         fwd_vec = DIR_TO_VEC[MiniGridDirection(direction)]
         right_vec = (-fwd_vec[1], fwd_vec[0])
 
@@ -122,11 +137,15 @@ class BabyAIPerceptionAdapter:
 
         for vx in range(view_size):
             for vy in range(len(obs.image[vx])):
-                cell_tuple = obs.image[vx][vy]
-                obj_idx, col_idx, state_idx = cell_tuple[0], cell_tuple[1], cell_tuple[2]
-
                 fwd_dist = 6 - vy
                 right_dist = vx - 3
+
+                # Skip the agent's own position (it represents carried item, not a world grid cell)
+                if fwd_dist == 0 and right_dist == 0:
+                    continue
+
+                cell_tuple = obs.image[vx][vy]
+                obj_idx, col_idx, state_idx = cell_tuple[0], cell_tuple[1], cell_tuple[2]
 
                 wx = agent_pos[0] + fwd_dist * fwd_vec[0] + right_dist * right_vec[0]
                 wy = agent_pos[1] + fwd_dist * fwd_vec[1] + right_dist * right_vec[1]

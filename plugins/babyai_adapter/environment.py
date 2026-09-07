@@ -129,6 +129,12 @@ class BabyAIEnvironment:
                     # Outside world boundary
                     obs_grid[vx][vy] = [int(MiniGridObjectType.UNSEEN), 0, 0]
 
+        # Make it so the agent sees what it is carrying (identical to real MiniGrid gen_obs_grid)
+        if self.carrying:
+            obs_grid[3][6] = list(self.carrying.to_tuple())
+        else:
+            obs_grid[3][6] = [int(MiniGridObjectType.EMPTY), 0, 0]
+
         return MiniGridObservation(
             image=obs_grid,
             direction=self.agent_dir,
