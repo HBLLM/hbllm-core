@@ -197,6 +197,58 @@ def test_real_farama_babyai_unlock_local() -> None:
     assert success, "Failed to solve real BabyAI-UnlockLocal-v0 episode"
 
 
+def test_real_farama_babyai_unlock_pickup() -> None:
+    """Test HCIR adapter on official Farama BabyAI-UnlockPickup-v0 (closed-loop prerequisite chaining)."""
+    env = make_gym_babyai_level("BabyAI-UnlockPickup-v0")
+    obs, info = env.reset(seed=5)
+
+    adapter = BabyAIPerceptionAdapter()
+    planner = BabyAIActionAdapter(room_size=16)
+    parser = BabyAIMissionParser()
+
+    goal = parser.parse(obs["mission"])
+
+    success = False
+    for _ in range(72):
+        adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+        act = planner.plan_next_action(adapter.graph, goal)
+        obs, r, term, trunc, info = env.step(int(act))
+        if term and r > 0.0:
+            success = True
+            break
+
+    env.close()
+    assert success, (
+        f"Failed to solve real BabyAI-UnlockPickup-v0 seed 5: mission='{goal.raw_instruction}'"
+    )
+
+
+def test_real_farama_babyai_key_corridor() -> None:
+    """Test HCIR adapter on official Farama BabyAI-KeyCorridorS3R1-v0 (multi-room search and chaining)."""
+    env = make_gym_babyai_level("BabyAI-KeyCorridorS3R1-v0")
+    obs, info = env.reset(seed=42)
+
+    adapter = BabyAIPerceptionAdapter()
+    planner = BabyAIActionAdapter(room_size=10)
+    parser = BabyAIMissionParser()
+
+    goal = parser.parse(obs["mission"])
+
+    success = False
+    for _ in range(env.unwrapped.max_steps):
+        adapter.ingest_observation(obs, known_agent_pos=env.unwrapped.agent_pos)
+        act = planner.plan_next_action(adapter.graph, goal)
+        obs, r, term, trunc, info = env.step(int(act))
+        if term and r > 0.0:
+            success = True
+            break
+
+    env.close()
+    assert success, (
+        f"Failed to solve real BabyAI-KeyCorridorS3R1-v0: mission='{goal.raw_instruction}'"
+    )
+
+
 def test_real_farama_babyai_put_next_local() -> None:
     """Test HCIR adapter on official Farama BabyAI-PutNextLocal-v0 (Tier 4 Relational PutNext)."""
     env = make_gym_babyai_level("BabyAI-PutNextLocal-v0")

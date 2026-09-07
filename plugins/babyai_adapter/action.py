@@ -61,7 +61,14 @@ class BabyAIActionAdapter:
         return candidates[0]
 
     def find_closed_door(self, graph: CognitiveGraph) -> PhysicalEntityNode | None:
-        """Find any known closed door to explore adjacent rooms."""
+        """Find any known closed door to explore adjacent rooms, prioritizing accessible doors."""
+        unlocked: list[PhysicalEntityNode] = []
+        locked_with_key: list[PhysicalEntityNode] = []
+        locked_other: list[PhysicalEntityNode] = []
+
+        agent_pos, agent_dir, carrying = self.get_agent_state(graph)
+        car_key = carrying.get("color") if carrying and carrying.get("type") == "key" else None
+
         for node in graph.all_nodes():
             if (
                 isinstance(node, PhysicalEntityNode)
@@ -69,7 +76,40 @@ class BabyAIActionAdapter:
                 and node.properties.get("is_door")
                 and node.properties.get("state") != "open"
             ):
-                return node
+                door_state = node.properties.get("state")
+                door_col = node.properties.get("color")
+                if door_state == "closed":
+                    unlocked.append(node)
+                elif door_state == "locked":
+                    has_key = car_key == door_col or door_col is None
+                    key_visible = (
+                        self.find_target_entity(
+                            graph,
+                            BabyAIGoal(
+                                action="pickup",
+                                target_type="key",
+                                target_color=door_col,
+                            ),
+                        )
+                        is not None
+                    )
+                    if has_key or key_visible:
+                        locked_with_key.append(node)
+                    else:
+                        locked_other.append(node)
+
+        # Priority 1: Unlocked doors (can explore immediately)
+        if unlocked:
+            return unlocked[0]
+
+        # Priority 2: Locked doors where we have or see the matching key
+        if locked_with_key:
+            return locked_with_key[0]
+
+        # Priority 3: Other locked doors
+        if locked_other:
+            return locked_other[0]
+
         return None
 
     def get_agent_state(
