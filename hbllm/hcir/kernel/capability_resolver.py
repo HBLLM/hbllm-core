@@ -19,6 +19,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from hbllm.hcir.kernel.capability_sandboxing import infer_capability_permissions
+
 if TYPE_CHECKING:
     from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
 
@@ -220,30 +222,25 @@ class CapabilityResolver:
                         )
                     }
 
-            # Derive effective permissions
+            # Derive effective permissions: caller override > policy > implementation > runtime inference
             effective_perms: set[str] = set()
             if required_permissions is not None:
-                effective_perms.update(required_permissions)
+                if isinstance(required_permissions, (list, set, tuple)):
+                    effective_perms.update(required_permissions)
+                else:
+                    effective_perms.add(str(required_permissions))
             else:
+                # 1. Derive from policy (which declares required permissions or infers them)
+                if policy is not None and getattr(policy, "required_permissions", None):
+                    effective_perms.update(policy.required_permissions)
+                # 2. Derive from implementation
                 if impl.required_permissions:
                     effective_perms.update(impl.required_permissions)
-                else:
-                    # Auto-infer required permissions from capability name and tags if not specified
-                    cap_lower = capability_name.lower()
-                    if any(
-                        term in cap_lower
-                        for term in ("exec", "subprocess", "shell", "python", "script", "cmd")
-                    ):
-                        effective_perms.add("subprocess")
-                    elif any(term in cap_lower for term in ("file", "fs", "path", "disk")):
-                        effective_perms.add("filesystem")
-                    elif any(
-                        term in cap_lower
-                        for term in ("net", "http", "url", "fetch", "api", "download", "upload")
-                    ):
-                        effective_perms.add("network")
-                    elif any(term in cap_lower for term in ("db", "database", "sql")):
-                        effective_perms.add("db_write")
+                # 3. If still empty, infer from capability name, tags, and runtime params
+                if not effective_perms:
+                    effective_perms.update(
+                        infer_capability_permissions(capability_name, tags=impl.tags, params=params)
+                    )
 
             for perm in effective_perms:
                 if not self.sandbox_manager.check_permission(

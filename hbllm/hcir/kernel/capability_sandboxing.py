@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,152 @@ class CapabilityResourceLimits:
     timeout_seconds: float = 10.0
 
 
+_FS_TERMS = {
+    "file",
+    "fs",
+    "path",
+    "disk",
+    "write",
+    "read",
+    "save",
+    "load",
+    "config",
+    "dir",
+    "folder",
+    "mkdir",
+    "rmdir",
+    "delete",
+    "remove",
+    "log",
+    "store",
+    "export",
+    "import",
+    "dump",
+    "append",
+    "storage",
+    "io",
+    "cat",
+    "touch",
+    "cp",
+    "mv",
+}
+_SUBPROCESS_TERMS = {
+    "exec",
+    "subprocess",
+    "shell",
+    "python",
+    "script",
+    "cmd",
+    "command",
+    "bash",
+    "sh",
+    "run",
+    "process",
+    "spawn",
+    "terminal",
+    "cli",
+    "system",
+    "popen",
+}
+_NETWORK_TERMS = {
+    "net",
+    "http",
+    "https",
+    "url",
+    "fetch",
+    "api",
+    "download",
+    "upload",
+    "web",
+    "socket",
+    "request",
+    "remote",
+    "curl",
+    "dns",
+    "ping",
+    "scrape",
+    "webhook",
+    "connect",
+    "endpoint",
+    "ip",
+}
+_DB_TERMS = {
+    "db",
+    "database",
+    "sql",
+    "query",
+    "table",
+    "record",
+    "insert",
+    "update",
+    "upsert",
+    "mutate",
+    "persist",
+    "commit",
+    "sqlite",
+    "postgres",
+    "mysql",
+}
+
+
+def infer_capability_permissions(
+    capability_name: str,
+    tags: list[str] | None = None,
+    params: dict[str, Any] | None = None,
+) -> set[str]:
+    """Auto-infer required permissions from capability name, tags, and runtime parameters."""
+    perms: set[str] = set()
+    cap_lower = capability_name.lower().replace("-", "_")
+    cap_tokens = set(cap_lower.split("_"))
+
+    # Name-based matching (exact token or substring)
+    if any(t in cap_tokens or t in cap_lower for t in _FS_TERMS):
+        perms.add("filesystem")
+    if any(t in cap_tokens or t in cap_lower for t in _SUBPROCESS_TERMS):
+        perms.add("subprocess")
+    if any(t in cap_tokens or t in cap_lower for t in _NETWORK_TERMS):
+        perms.add("network")
+    if any(t in cap_tokens or t in cap_lower for t in _DB_TERMS):
+        perms.add("db_write")
+
+    # Tag-based matching
+    if tags:
+        for tag in tags:
+            tag_lower = tag.lower()
+            if tag_lower in ("filesystem", "fs", "io"):
+                perms.add("filesystem")
+            elif tag_lower in ("subprocess", "shell", "cmd"):
+                perms.add("subprocess")
+            elif tag_lower in ("network", "net", "web", "api"):
+                perms.add("network")
+            elif tag_lower in ("db", "database", "sql"):
+                perms.add("db_write")
+
+    # Parameter-based matching
+    if params:
+        for key in params.keys():
+            k_lower = key.lower()
+            if k_lower in (
+                "path",
+                "filepath",
+                "filename",
+                "file",
+                "dir",
+                "directory",
+                "dest",
+                "src",
+            ):
+                perms.add("filesystem")
+            elif k_lower in ("url", "endpoint", "host", "domain", "web_url"):
+                perms.add("network")
+            elif k_lower in ("cmd", "command", "script", "code", "shell_cmd"):
+                perms.add("subprocess")
+            elif k_lower in ("table", "sql", "db", "database", "query"):
+                perms.add("db_write")
+
+    return perms
+
+
 @dataclass
 class SandboxedCapabilityPolicy:
     """Complete security policy bound to a capability provider."""
@@ -67,6 +214,13 @@ class SandboxedCapabilityPolicy:
     isolation_mode: IsolationMode = IsolationMode.IN_PROCESS
     permissions: CapabilityPermissions = field(default_factory=CapabilityPermissions)
     resource_limits: CapabilityResourceLimits = field(default_factory=CapabilityResourceLimits)
+    required_permissions: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.required_permissions, (list, tuple)):
+            self.required_permissions = set(self.required_permissions)
+        if not self.required_permissions:
+            self.required_permissions = infer_capability_permissions(self.capability_name)
 
     def validate_execution(self, requested_permissions: set[str]) -> bool:
         """Validate if requested operations exceed granted permissions."""
@@ -78,6 +232,9 @@ class SandboxedCapabilityPolicy:
             return False
         if "subprocess" in requested_permissions and not self.permissions.allow_subprocess:
             logger.warning("Sandbox violation: %s denied subprocess access", self.provider_id)
+            return False
+        if "db_write" in requested_permissions and not self.permissions.allow_db_write:
+            logger.warning("Sandbox violation: %s denied db_write access", self.provider_id)
             return False
         return True
 
