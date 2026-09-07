@@ -101,18 +101,60 @@ class MiniGridObservation:
 class BabyAIGoal:
     """Semantic goal parsed from a BabyAI mission instruction."""
 
-    action: str  # e.g., "go_to", "pickup", "open"
-    target_type: str  # e.g., "ball", "box", "key", "door"
+    action: str  # e.g., "go_to", "pickup", "open", "put_next"
+    target_type: str = "ball"  # e.g., "ball", "box", "key", "door"
     target_color: str | None = None  # e.g., "red", "green", "blue"
     target_id: str | None = None  # Bound entity ID once identified in graph
+
+    # Tier 4: PutNext fixed landmark target
+    fixed_type: str | None = None  # e.g., "box", "key", "ball", "door"
+    fixed_color: str | None = None  # e.g., "green", "blue"
+    fixed_id: str | None = None
+
+    # Tier 6: Sequential & compound subgoals
+    subgoals: list[BabyAIGoal] = field(default_factory=list)
+    sequence_mode: str = "single"  # "single", "sequence", "and", "after"
+    current_subgoal_idx: int = 0
+
     language: str = "en"
     raw_instruction: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def is_compound(self) -> bool:
+        """Return True if this goal contains multiple sequential subgoals."""
+        return len(self.subgoals) > 0
+
+    def get_active_subgoal(self) -> BabyAIGoal:
+        """Return the current active subgoal (or self if single)."""
+        if self.is_compound() and self.current_subgoal_idx < len(self.subgoals):
+            return self.subgoals[self.current_subgoal_idx]
+        return self
+
+    def advance_subgoal(self) -> bool:
+        """Advance to next subgoal. Returns True if advanced, False if all completed."""
+        if self.is_compound():
+            self.current_subgoal_idx += 1
+            return self.current_subgoal_idx < len(self.subgoals)
+        return False
+
+    def is_all_completed(self) -> bool:
+        """Return True if all subgoals have been marked completed."""
+        if self.is_compound():
+            return self.current_subgoal_idx >= len(self.subgoals)
+        return False
 
     def matches_attributes(self, entity_type: str, color: str | None = None) -> bool:
         """Check if an entity satisfies this goal's type and color requirements."""
         if self.target_type and self.target_type != entity_type:
             return False
         if self.target_color and color and self.target_color != color:
+            return False
+        return True
+
+    def matches_fixed_attributes(self, entity_type: str, color: str | None = None) -> bool:
+        """Check if an entity satisfies the PutNext fixed landmark requirements."""
+        if self.fixed_type and self.fixed_type != entity_type:
+            return False
+        if self.fixed_color and color and self.fixed_color != color:
             return False
         return True

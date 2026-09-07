@@ -71,7 +71,107 @@ class BabyAIMissionParser:
         # Default: English
         return self._parse_english(cleaned, instruction)
 
+    def _extract_entity_en(self, text: str) -> tuple[str, str | None]:
+        found_color = None
+        for color in _EN_COLORS:
+            if re.search(rf"\b{color}\b", text):
+                found_color = "grey" if color == "gray" else color
+                break
+        found_object = "ball"
+        for obj in _EN_OBJECTS:
+            if re.search(rf"\b{obj}\b", text):
+                found_object = obj
+                break
+        return found_object, found_color
+
+    def _extract_entity_si(self, text: str) -> tuple[str, str | None]:
+        found_color = None
+        for si_col, en_col in _SI_COLORS.items():
+            if si_col in text:
+                found_color = en_col
+                break
+        found_object = "ball"
+        for si_obj, en_obj in _SI_OBJECTS.items():
+            if si_obj in text:
+                found_object = en_obj
+                break
+        return found_object, found_color
+
+    def _extract_entity_ta(self, text: str) -> tuple[str, str | None]:
+        found_color = None
+        for ta_col, en_col in _TA_COLORS.items():
+            if ta_col in text:
+                found_color = en_col
+                break
+        found_object = "ball"
+        for ta_obj, en_obj in _TA_OBJECTS.items():
+            if ta_obj in text:
+                found_object = en_obj
+                break
+        return found_object, found_color
+
     def _parse_english(self, cleaned: str, raw: str) -> BabyAIGoal:
+        # Check compound sequencing in English
+        if " after you " in cleaned:
+            parts = cleaned.split(" after you ", 1)
+            sub_b = self._parse_english(parts[1], parts[1])
+            sub_a = self._parse_english(parts[0], parts[0])
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=[sub_b, sub_a],
+                sequence_mode="after",
+                language="en",
+                raw_instruction=raw,
+            )
+
+        if ", then " in cleaned:
+            parts = cleaned.split(", then ")
+            subgoals = [self._parse_english(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="sequence",
+                language="en",
+                raw_instruction=raw,
+            )
+
+        if " then " in cleaned:
+            parts = cleaned.split(" then ")
+            subgoals = [self._parse_english(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="sequence",
+                language="en",
+                raw_instruction=raw,
+            )
+
+        if " and " in cleaned and (" next to " not in cleaned):
+            parts = cleaned.split(" and ")
+            subgoals = [self._parse_english(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="and",
+                language="en",
+                raw_instruction=raw,
+            )
+
+        # Check PutNext
+        if " next to " in cleaned:
+            parts = cleaned.split(" next to ", 1)
+            target_obj, target_col = self._extract_entity_en(parts[0])
+            fixed_obj, fixed_col = self._extract_entity_en(parts[1])
+            return BabyAIGoal(
+                action="put_next",
+                target_type=target_obj,
+                target_color=target_col,
+                fixed_type=fixed_obj,
+                fixed_color=fixed_col,
+                language="en",
+                raw_instruction=raw,
+            )
+
         # Determine intent / action
         if "pick up" in cleaned or "pickup" in cleaned:
             action = "pickup"
@@ -80,19 +180,7 @@ class BabyAIMissionParser:
         else:
             action = "go_to"
 
-        # Extract color
-        found_color = None
-        for color in _EN_COLORS:
-            if re.search(rf"\b{color}\b", cleaned):
-                found_color = "grey" if color == "gray" else color
-                break
-
-        # Extract target object
-        found_object = "ball"  # default
-        for obj in _EN_OBJECTS:
-            if re.search(rf"\b{obj}\b", cleaned):
-                found_object = obj
-                break
+        found_object, found_color = self._extract_entity_en(cleaned)
 
         return BabyAIGoal(
             action=action,
@@ -103,6 +191,47 @@ class BabyAIMissionParser:
         )
 
     def _parse_sinhala(self, cleaned: str, raw: str) -> BabyAIGoal:
+        # Check compound sequencing in Sinhala
+        if "පසුව" in cleaned:  # then
+            parts = cleaned.split("පසුව")
+            subgoals = [self._parse_sinhala(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="sequence",
+                language="si",
+                raw_instruction=raw,
+            )
+
+        if " සහ " in cleaned:  # and
+            parts = cleaned.split(" සහ ")
+            subgoals = [self._parse_sinhala(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="and",
+                language="si",
+                raw_instruction=raw,
+            )
+
+        # Check PutNext in Sinhala
+        if ("ළඟින්" in cleaned or "අසල" in cleaned or "ළඟ" in cleaned) and (
+            "තියන්න" in cleaned or "තබන්න" in cleaned
+        ):
+            splitter = "ළඟින්" if "ළඟින්" in cleaned else ("අසල" if "අසල" in cleaned else "ළඟ")
+            parts = cleaned.split(splitter, 1)
+            fixed_obj, fixed_col = self._extract_entity_si(parts[0])
+            target_obj, target_col = self._extract_entity_si(parts[1])
+            return BabyAIGoal(
+                action="put_next",
+                target_type=target_obj,
+                target_color=target_col,
+                fixed_type=fixed_obj,
+                fixed_color=fixed_col,
+                language="si",
+                raw_instruction=raw,
+            )
+
         if "ගන්න" in cleaned or "උස්සන්න" in cleaned:
             action = "pickup"
         elif "අරින්න" in cleaned or "හරින්න" in cleaned or "විවෘත" in cleaned or "අගුළු" in cleaned:
@@ -110,17 +239,7 @@ class BabyAIMissionParser:
         else:
             action = "go_to"
 
-        found_color = None
-        for si_col, en_col in _SI_COLORS.items():
-            if si_col in cleaned:
-                found_color = en_col
-                break
-
-        found_object = "ball"
-        for si_obj, en_obj in _SI_OBJECTS.items():
-            if si_obj in cleaned:
-                found_object = en_obj
-                break
+        found_object, found_color = self._extract_entity_si(cleaned)
 
         return BabyAIGoal(
             action=action,
@@ -131,6 +250,44 @@ class BabyAIMissionParser:
         )
 
     def _parse_tamil(self, cleaned: str, raw: str) -> BabyAIGoal:
+        # Check compound sequencing in Tamil
+        if "பிறகு" in cleaned:  # then / after
+            parts = cleaned.split("பிறகு")
+            subgoals = [self._parse_tamil(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="sequence",
+                language="ta",
+                raw_instruction=raw,
+            )
+
+        if " மற்றும் " in cleaned:  # and
+            parts = cleaned.split(" மற்றும் ")
+            subgoals = [self._parse_tamil(p, p) for p in parts]
+            return BabyAIGoal(
+                action="sequence",
+                subgoals=subgoals,
+                sequence_mode="and",
+                language="ta",
+                raw_instruction=raw,
+            )
+
+        # Check PutNext in Tamil
+        if "அருகில்" in cleaned and ("வைக்கவும்" in cleaned or "வை" in cleaned):
+            parts = cleaned.split("அருகில்", 1)
+            fixed_obj, fixed_col = self._extract_entity_ta(parts[0])
+            target_obj, target_col = self._extract_entity_ta(parts[1])
+            return BabyAIGoal(
+                action="put_next",
+                target_type=target_obj,
+                target_color=target_col,
+                fixed_type=fixed_obj,
+                fixed_color=fixed_col,
+                language="ta",
+                raw_instruction=raw,
+            )
+
         if "எடுக்கவும்" in cleaned or "எடு" in cleaned:
             action = "pickup"
         elif "திறக்கவும்" in cleaned or "திற" in cleaned or "பூட்டு" in cleaned:
@@ -138,17 +295,7 @@ class BabyAIMissionParser:
         else:
             action = "go_to"
 
-        found_color = None
-        for ta_col, en_col in _TA_COLORS.items():
-            if ta_col in cleaned:
-                found_color = en_col
-                break
-
-        found_object = "ball"
-        for ta_obj, en_obj in _TA_OBJECTS.items():
-            if ta_obj in cleaned:
-                found_object = en_obj
-                break
+        found_object, found_color = self._extract_entity_ta(cleaned)
 
         return BabyAIGoal(
             action=action,
