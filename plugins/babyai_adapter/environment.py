@@ -308,3 +308,24 @@ def create_babyai_level(
         env.place_object(dx, dy, d_type, d_col)
 
     return env
+
+
+def make_gym_babyai_level(
+    env_id: str = "BabyAI-GoToObj-v0",
+    render_mode: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Instantiate the upstream official Farama Gymnasium BabyAI environment.
+
+    Requires 'minigrid' and 'gymnasium'.
+    """
+    try:
+        import gymnasium as gym
+        import minigrid  # noqa: F401
+
+        return gym.make(env_id, render_mode=render_mode, **kwargs)
+    except ImportError as e:
+        raise ImportError(
+            f"Loading official Gym environment '{env_id}' requires 'minigrid' and 'gymnasium'. "
+            f"Install them via: pip install minigrid gymnasium"
+        ) from e
