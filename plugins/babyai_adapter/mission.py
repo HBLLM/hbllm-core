@@ -49,6 +49,7 @@ _TA_OBJECTS = {
     "பெட்டியை": "box",
     "சாவி": "key",
     "கதவு": "door",
+    "கதவை": "door",
 }
 
 
@@ -102,7 +103,13 @@ class BabyAIMissionParser:
         )
 
     def _parse_sinhala(self, cleaned: str, raw: str) -> BabyAIGoal:
-        action = "pickup" if ("ගන්න" in cleaned or "උස්සන්න" in cleaned) else "go_to"
+        if "ගන්න" in cleaned or "උස්සන්න" in cleaned:
+            action = "pickup"
+        elif "අරින්න" in cleaned or "හරින්න" in cleaned or "විවෘත" in cleaned:
+            action = "open"
+        else:
+            action = "go_to"
+
         found_color = None
         for si_col, en_col in _SI_COLORS.items():
             if si_col in cleaned:
@@ -124,7 +131,13 @@ class BabyAIMissionParser:
         )
 
     def _parse_tamil(self, cleaned: str, raw: str) -> BabyAIGoal:
-        action = "pickup" if ("எடுக்கவும்" in cleaned or "எடு" in cleaned) else "go_to"
+        if "எடுக்கவும்" in cleaned or "எடு" in cleaned:
+            action = "pickup"
+        elif "திறக்கவும்" in cleaned or "திற" in cleaned:
+            action = "open"
+        else:
+            action = "go_to"
+
         found_color = None
         for ta_col, en_col in _TA_COLORS.items():
             if ta_col in cleaned:

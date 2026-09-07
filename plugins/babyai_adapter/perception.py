@@ -126,9 +126,8 @@ class BabyAIPerceptionAdapter:
                     continue
 
                 is_pickupable = obj_type in ("ball", "box", "key")
-                is_passable = obj_type in ("empty", "floor") or (
-                    obj_type == "door" and state == "open"
-                )
+                is_door = obj_type == "door"
+                is_passable = obj_type in ("empty", "floor") or (is_door and state == "open")
 
                 # Entity unique persistent identifier for this spatial instance
                 entity_id = f"ent_{obj_type}_{color}_{wx}_{wy}"
@@ -144,6 +143,7 @@ class BabyAIPerceptionAdapter:
                         "coords": (wx, wy),
                         "passable": is_passable,
                         "pickupable": is_pickupable,
+                        "is_door": is_door,
                         "last_observed_step": obs.step_count,
                     },
                     entity_lifecycle=EntityLifecycle.TRACKED,
