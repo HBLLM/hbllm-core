@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from .action import BabyAIActionAdapter
-from .environment import BabyAIEnvironment, create_babyai_level
+from .environment import BabyAIEnvironment, create_babyai_level, make_gym_babyai_level
 from .mission import BabyAIMissionParser
 from .perception import BabyAIPerceptionAdapter
 from .types import (
@@ -66,6 +66,7 @@ __all__ = [
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "create_babyai_level",
+    "make_gym_babyai_level",
     "register",
     "setup",
 ]
