@@ -1,0 +1,20 @@
+{
+  "name": "babyai-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "BabyAI / MiniGrid perception and action adapter plugin for HCIR cognitive architectures",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": [],
+  "tags": ["eval", "benchmark", "babyai", "minigrid", "hcir", "compositional-generalization"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "babyai_observe",
+    "babyai_act",
+    "babyai_parse_mission",
+    "babyai_step",
+    "babyai_plan_trajectory"
+  ],
+  "permissions": ["environment_simulation"]
+}
