@@ -42,6 +42,9 @@ class BabyAIActionAdapter:
         self.obstacle_resolver = CausalObstacleResolver(
             grid=EpistemicSpatialGrid(default_bounds=(self.width, self.height))
         )
+        self.action_queue: list[MiniGridAction] = []
+        self.last_agent_pos: tuple[int, int] | None = None
+        self.last_action: MiniGridAction | None = None
 
     @property
     def active_frontier(self) -> tuple[int, int] | None:
@@ -57,6 +60,9 @@ class BabyAIActionAdapter:
         self.visited_positions.clear()
         self.consecutive_rotations = 0
         self.frontier_navigator.reset()
+        self.action_queue.clear()
+        self.last_agent_pos = None
+        self.last_action = None
 
     def find_target_entity(
         self, graph: CognitiveGraph, goal: BabyAIGoal
@@ -90,6 +96,44 @@ class BabyAIActionAdapter:
 
         if not candidates:
             return None
+
+        # Filter by egocentric relative location if specified (e.g. "in front of you", "on your left")
+        if goal.relative_loc:
+            agent_node = None
+            for n in graph.all_nodes():
+                if isinstance(n, PhysicalEntityNode) and n.entity_type == "agent":
+                    agent_node = n
+                    break
+            if agent_node:
+                init_pos = agent_node.properties.get(
+                    "initial_pos", agent_node.properties.get("coords", (1, 1))
+                )
+                init_dir = agent_node.properties.get(
+                    "initial_dir", agent_node.properties.get("direction", 0)
+                )
+                d1 = DIR_TO_VEC[MiniGridDirection(init_dir)]
+                d2 = (-d1[1], d1[0])
+
+                filtered: list[PhysicalEntityNode] = []
+                for cand in candidates:
+                    coords = cand.properties.get("coords")
+                    if not coords:
+                        continue
+                    v = (coords[0] - init_pos[0], coords[1] - init_pos[1])
+                    dot_d1 = v[0] * d1[0] + v[1] * d1[1]
+                    dot_d2 = v[0] * d2[0] + v[1] * d2[1]
+                    matches = {
+                        "front": dot_d1 > 0,
+                        "behind": dot_d1 < 0,
+                        "left": dot_d2 < 0,
+                        "right": dot_d2 > 0,
+                    }
+                    if matches.get(goal.relative_loc, False):
+                        filtered.append(cand)
+                if filtered:
+                    candidates = filtered
+                else:
+                    return None
 
         # Sort by distance to agent to prioritize the closest matching target
         agent_pos, _, _ = self.get_agent_state(graph)
@@ -641,18 +685,27 @@ class BabyAIActionAdapter:
         crit: set[tuple[int, int]] = set()
         if target_pos:
             crit.add(target_pos)
-            # Forbid dropping in any cell on direct line/facing target
-            fwd = DIR_TO_VEC[MiniGridDirection(curr_dir)]
-            front_pos = (curr_pos[0] + fwd[0], curr_pos[1] + fwd[1])
-            dx = target_pos[0] - curr_pos[0]
-            dy = target_pos[1] - curr_pos[1]
-            if (
-                (dx > 0 and fwd[0] > 0)
-                or (dx < 0 and fwd[0] < 0)
-                or (dy > 0 and fwd[1] > 0)
-                or (dy < 0 and fwd[1] < 0)
-            ):
-                crit.add(front_pos)
+            # Avoid dropping directly on the planned path to target
+            target_traj = self._plan_direct_path(
+                graph=graph,
+                start_pos=curr_pos,
+                start_dir=curr_dir,
+                target_pos=target_pos,
+                target_entity_type="target",
+                target_entity_id="",
+            )
+            if target_traj:
+                sim_p = curr_pos
+                sim_d = curr_dir
+                for act in target_traj:
+                    if act == MiniGridAction.FORWARD:
+                        fwd = DIR_TO_VEC[MiniGridDirection(sim_d)]
+                        sim_p = (sim_p[0] + fwd[0], sim_p[1] + fwd[1])
+                        crit.add(sim_p)
+                    elif act == MiniGridAction.LEFT:
+                        sim_d = (sim_d - 1) % 4
+                    elif act == MiniGridAction.RIGHT:
+                        sim_d = (sim_d + 1) % 4
 
         drop_candidates = self.obstacle_resolver.find_safe_drop_candidates(
             graph=graph,
@@ -704,23 +757,57 @@ class BabyAIActionAdapter:
         agent_pos, agent_dir, carrying = self.get_agent_state(graph)
         self.visited_positions.add(agent_pos)
 
-        # Hands-full safety check: If agent is carrying an unwanted obstacle,
+        # Hands-full safety check: If agent is carrying an unwanted object,
         # and the goal requires empty hands (pickup, put_next, or unlocking a door),
         # drop it on an adjacent free cell before continuing!
         if carrying is not None:
             is_goal_target = goal.matches_attributes(
                 carrying.get("type", ""), carrying.get("color")
             )
-            has_door = self.find_closed_door(graph) is not None
-            is_needed_key = carrying.get("type") == "key" and has_door
+            car_col = carrying.get("color") if carrying.get("type") == "key" else None
+            is_needed_key = False
+            target_ent = self.find_target_entity(graph, goal)
 
-            # In "go_to", carrying an object does NOT block reaching the target!
-            requires_empty_hands = (goal.action in ("pickup", "put_next")) or (
-                goal.action == "open" and not is_needed_key
-            )
+            # A carried key is needed if the goal target is not yet found,
+            # or if reaching the goal target requires unlocking a door of this color!
+            if car_col is not None or carrying.get("type") == "key":
+                for node in graph.all_nodes():
+                    if (
+                        isinstance(node, PhysicalEntityNode)
+                        and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                        and node.properties.get("is_door")
+                        and node.properties.get("state") == "locked"
+                        and (node.properties.get("color") == car_col or car_col is None)
+                    ):
+                        if target_ent is not None and target_ent.entity_type != "door":
+                            tp = target_ent.properties.get("coords")
+                            if tp:
+                                direct_path = self._plan_direct_path(
+                                    graph=graph,
+                                    start_pos=agent_pos,
+                                    start_dir=agent_dir,
+                                    target_pos=tp,
+                                    target_entity_type=target_ent.entity_type,
+                                    target_entity_id=target_ent.id,
+                                )
+                                if direct_path is not None:
+                                    break
+                        is_needed_key = True
+                        break
 
-            if not is_goal_target and not is_needed_key and requires_empty_hands:
-                target_ent = self.find_target_entity(graph, goal)
+            # Only drop if the carried object is not the target and not a needed key!
+            # If target_ent is not yet located, keep carrying the object while exploring.
+            should_drop = False
+            if goal.action == "pickup" and not is_goal_target and not is_needed_key:
+                if target_ent is not None:
+                    should_drop = True
+            elif goal.action == "put_next" and not is_goal_target and not is_needed_key:
+                if target_ent is not None:
+                    should_drop = True
+            elif goal.action == "open" and not is_needed_key and not is_goal_target:
+                should_drop = True
+
+            if should_drop:
                 target_coord = target_ent.properties.get("coords") if target_ent else None
                 drop_traj = self._plan_drop_carried_obstacle(
                     graph, agent_pos, agent_dir, target_pos=target_coord
@@ -782,6 +869,18 @@ class BabyAIActionAdapter:
                 return [MiniGridAction.DONE]
 
             if door_state == "locked":
+                # Check if the access corridor to the door is physically blocked by an obstacle!
+                # If blocked, unblocking the obstacle takes strict causal precedence over fetching/carrying the key.
+                door_blocker = self._find_blocking_obstacle(
+                    graph, target_pos, carrying_key=door_col
+                )
+                if door_blocker is not None:
+                    unblock_traj = self._plan_unblock_obstacle(
+                        graph, door_blocker, critical_pos=target_pos
+                    )
+                    if unblock_traj:
+                        return unblock_traj
+
                 # Check carrying
                 has_matching_key = (
                     carrying is not None
@@ -895,5 +994,34 @@ class BabyAIActionAdapter:
         goal: BabyAIGoal,
     ) -> MiniGridAction:
         """Get the single immediate next action."""
+        agent_pos, _, _ = self.get_agent_state(graph)
+
+        # Invalidation check: if previous FORWARD action did not change position, clear queue
+        if (
+            self.action_queue
+            and self.last_action == MiniGridAction.FORWARD
+            and self.last_agent_pos == agent_pos
+        ):
+            self.action_queue.clear()
+
+        self.last_agent_pos = agent_pos
+
+        if self.action_queue:
+            act = self.action_queue.pop(0)
+            if act != MiniGridAction.DONE:
+                self.last_action = act
+                return act
+            self.action_queue.clear()
+
         trajectory = self.plan_trajectory(graph, goal)
-        return trajectory[0] if trajectory else MiniGridAction.DONE
+        if not trajectory:
+            self.last_action = MiniGridAction.DONE
+            return MiniGridAction.DONE
+
+        # Multi-action causal commitment (e.g. unblocking relocation sequences)
+        if MiniGridAction.PICKUP in trajectory and MiniGridAction.DROP in trajectory:
+            self.action_queue = [a for a in trajectory[1:] if a != MiniGridAction.DONE]
+
+        act = trajectory[0]
+        self.last_action = act
+        return act

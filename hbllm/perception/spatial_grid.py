@@ -131,12 +131,15 @@ class EpistemicSpatialGrid:
                         partition.walls.add(coords)
                 else:  # closed
                     partition.closed_doors.add(coords)
-            elif node.properties.get("pickupable", False) and node.entity_type in (
-                "ball",
-                "box",
-                "key",
-            ):
-                partition.movable_obstacles[coords] = node
+            elif node.properties.get("pickupable", False):
+                if (
+                    node.entity_type == "key"
+                    and carrying_key is not None
+                    and (node.properties.get("color") == carrying_key or carrying_key is None)
+                ):
+                    pass
+                else:
+                    partition.movable_obstacles[coords] = node
             elif not node.properties.get("passable", False):
                 partition.walls.add(coords)
 

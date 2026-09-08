@@ -39,6 +39,8 @@ class BabyAIPerceptionAdapter:
         self.agent_id = "agent_primary"
         self._known_entities: dict[tuple[int, int], str] = {}  # (wx, wy) -> entity_id
         self.grid = EpistemicSpatialGrid(self.graph)
+        self.initial_agent_pos: tuple[int, int] | None = None
+        self.initial_agent_dir: int | None = None
 
     @property
     def visited_cells(self) -> set[tuple[int, int]]:
@@ -76,6 +78,9 @@ class BabyAIPerceptionAdapter:
         # Determine agent position: from extra metadata, argument, or graph
         agent_pos = known_agent_pos or obs.extra.get("agent_pos", (1, 1))
         direction = obs.direction
+        if self.initial_agent_pos is None:
+            self.initial_agent_pos = agent_pos
+            self.initial_agent_dir = direction
         self.grid.mark_visited(agent_pos)
 
         # In MiniGrid, the agent's carried item is placed at (view_size // 2, view_size - 1)
@@ -131,6 +136,8 @@ class BabyAIPerceptionAdapter:
                 "coords": agent_pos,
                 "direction": direction,
                 "direction_name": MiniGridDirection(direction).name.lower(),
+                "initial_pos": self.initial_agent_pos,
+                "initial_dir": self.initial_agent_dir,
                 "carrying": carrying_info,
                 "visited_cells": set(self.visited_cells),
                 "seen_cells": set(self.seen_cells),
@@ -192,6 +199,8 @@ class BabyAIPerceptionAdapter:
                 entity_id = f"ent_{obj_type}_{color}_{wx}_{wy}"
                 self._known_entities[(wx, wy)] = entity_id
 
+                is_from_init = agent_pos == self.initial_agent_pos
+
                 node = PhysicalEntityNode(
                     id=entity_id,
                     entity_name=f"{color}_{obj_type}",
@@ -203,6 +212,7 @@ class BabyAIPerceptionAdapter:
                         "passable": is_passable,
                         "pickupable": is_pickupable,
                         "is_door": is_door,
+                        "seen_from_initial_pos": is_from_init,
                         "last_observed_step": obs.step_count,
                     },
                     entity_lifecycle=EntityLifecycle.TRACKED,
@@ -212,6 +222,8 @@ class BabyAIPerceptionAdapter:
                     ex_node = self.graph.get_node(entity_id)
                     if isinstance(ex_node, PhysicalEntityNode):
                         ex_node.properties.update(node.properties)
+                        if is_from_init or ex_node.properties.get("seen_from_initial_pos"):
+                            ex_node.properties["seen_from_initial_pos"] = True
                         ex_node.entity_lifecycle = EntityLifecycle.TRACKED
                 else:
                     self.graph.add_node(node)
