@@ -34,6 +34,15 @@ class BabyAIActionAdapter:
             self.width, self.height = room_size
         else:
             self.width = self.height = room_size
+        self.visited_positions: set[tuple[int, int]] = set()
+        self.consecutive_rotations: int = 0
+        self.active_frontier: tuple[int, int] | None = None
+
+    def reset(self) -> None:
+        """Reset internal exploration history, rotation counters, and frontier commitments."""
+        self.visited_positions.clear()
+        self.consecutive_rotations = 0
+        self.active_frontier = None
 
     def find_target_entity(
         self, graph: CognitiveGraph, goal: BabyAIGoal
@@ -48,19 +57,39 @@ class BabyAIActionAdapter:
             ):
                 continue
 
+            if goal.target_id and node.id != goal.target_id:
+                continue
+
+            # If goal is to open a door, ignore doors that are already open
+            if (
+                goal.action == "open"
+                and node.properties.get("is_door")
+                and node.properties.get("state") == "open"
+            ):
+                continue
+
             entity_type = node.entity_type
             color = node.properties.get("color")
 
-            if goal.matches_attributes(entity_type, color):
+            if goal.matches_attributes(entity_type, color, entity_id=node.id):
                 candidates.append(node)
 
         if not candidates:
             return None
 
-        # If multiple candidates, pick the first (or closest to agent)
+        # Sort by distance to agent to prioritize the closest matching target
+        agent_pos, _, _ = self.get_agent_state(graph)
+        candidates.sort(
+            key=lambda n: (
+                abs(n.properties.get("coords", (0, 0))[0] - agent_pos[0])
+                + abs(n.properties.get("coords", (0, 0))[1] - agent_pos[1])
+            )
+        )
         return candidates[0]
 
-    def find_closed_door(self, graph: CognitiveGraph) -> PhysicalEntityNode | None:
+    def find_closed_door(
+        self, graph: CognitiveGraph, only_accessible: bool = True
+    ) -> PhysicalEntityNode | None:
         """Find any known closed door to explore adjacent rooms, prioritizing accessible doors."""
         unlocked: list[PhysicalEntityNode] = []
         locked_with_key: list[PhysicalEntityNode] = []
@@ -98,6 +127,15 @@ class BabyAIActionAdapter:
                     else:
                         locked_other.append(node)
 
+        # Sort by distance to agent
+        def dist_to_agent(n: PhysicalEntityNode) -> int:
+            c = n.properties.get("coords", (0, 0))
+            return abs(c[0] - agent_pos[0]) + abs(c[1] - agent_pos[1])
+
+        unlocked.sort(key=dist_to_agent)
+        locked_with_key.sort(key=dist_to_agent)
+        locked_other.sort(key=dist_to_agent)
+
         # Priority 1: Unlocked doors (can explore immediately)
         if unlocked:
             return unlocked[0]
@@ -106,8 +144,8 @@ class BabyAIActionAdapter:
         if locked_with_key:
             return locked_with_key[0]
 
-        # Priority 3: Other locked doors
-        if locked_other:
+        # Priority 3: Other locked doors (only if non-accessible doors allowed)
+        if not only_accessible and locked_other:
             return locked_other[0]
 
         return None
@@ -161,8 +199,27 @@ class BabyAIActionAdapter:
         terminal_action: MiniGridAction | None = None,
         carrying_key: str | None = None,
         ignored_entity_ids: set[str] | None = None,
+        allow_walk_onto_target: bool = False,
     ) -> list[MiniGridAction] | None:
-        """BFS path planner from (start_pos, start_dir) to facing target_pos."""
+        """BFS path planner from (start_pos, start_dir) to facing or stepping onto target_pos."""
+        is_waypoint = allow_walk_onto_target or (
+            terminal_action is None and target_entity_type in ("floor", "waypoint", "door")
+        )
+
+        def is_at_target(x: int, y: int, d: int) -> bool:
+            if is_waypoint:
+                return (x, y) == target_pos
+            fwd = DIR_TO_VEC[MiniGridDirection(d)]
+            front = (x + fwd[0], y + fwd[1])
+            return front == target_pos
+
+        if is_at_target(start_pos[0], start_pos[1], start_dir):
+            final_actions: list[MiniGridAction] = []
+            if terminal_action is not None:
+                final_actions.append(terminal_action)
+            final_actions.append(MiniGridAction.DONE)
+            return final_actions
+
         node_coords = [
             n.properties.get("coords", (0, 0))
             for n in graph.all_nodes()
@@ -173,6 +230,16 @@ class BabyAIActionAdapter:
 
         walls: set[tuple[int, int]] = set()
         closed_doors: set[tuple[int, int]] = set()
+
+        seen_cells: set[tuple[int, int]] = set()
+        agent_node = None
+        for node in graph.all_nodes():
+            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
+                agent_node = node
+                break
+        if agent_node:
+            seen_cells = set(agent_node.properties.get("seen_cells", []))
+            seen_cells.update(agent_node.properties.get("visited_cells", []))
 
         for node in graph.all_nodes():
             if (
@@ -210,18 +277,13 @@ class BabyAIActionAdapter:
         ] = collections.deque([(start_state, [])])
         visited: set[tuple[int, int, int, frozenset[tuple[int, int]]]] = {start_state}
 
-        def is_facing_target(x: int, y: int, d: int) -> bool:
-            fwd = DIR_TO_VEC[MiniGridDirection(d)]
-            front = (x + fwd[0], y + fwd[1])
-            return front == target_pos
-
         max_depth = max(100, (max_x + max_y) * 4)
-        final_actions: list[MiniGridAction] | None = None
+        final_actions = None
 
         while queue:
             (curr_x, curr_y, curr_d, opened_doors), actions = queue.popleft()
 
-            if is_facing_target(curr_x, curr_y, curr_d):
+            if is_at_target(curr_x, curr_y, curr_d):
                 final_actions = list(actions)
                 break
 
@@ -247,17 +309,20 @@ class BabyAIActionAdapter:
 
             # Successor 3: TOGGLE
             if front_pos in closed_doors and front_pos not in opened_doors:
-                new_opened = opened_doors | {front_pos}
-                toggle_state = (curr_x, curr_y, curr_d, new_opened)
-                if toggle_state not in visited:
-                    visited.add(toggle_state)
-                    queue.append((toggle_state, actions + [MiniGridAction.TOGGLE]))
+                if terminal_action != MiniGridAction.TOGGLE or front_pos == target_pos:
+                    new_opened = opened_doors | {front_pos}
+                    toggle_state = (curr_x, curr_y, curr_d, new_opened)
+                    if toggle_state not in visited:
+                        visited.add(toggle_state)
+                        queue.append((toggle_state, actions + [MiniGridAction.TOGGLE]))
 
             # Successor 4: MOVE FORWARD
             if 0 <= front_pos[0] < max_x and 0 <= front_pos[1] < max_y:
                 is_closed_door = front_pos in closed_doors and front_pos not in opened_doors
                 is_wall = front_pos in walls
-                is_solid_target = front_pos == target_pos and target_entity_type != "door"
+                is_solid_target = (
+                    front_pos == target_pos and target_entity_type != "door" and not is_waypoint
+                )
 
                 if not is_wall and not is_closed_door and not is_solid_target:
                     fwd_state = (front_pos[0], front_pos[1], curr_d, opened_doors)
@@ -304,12 +369,19 @@ class BabyAIActionAdapter:
             return False
 
         if subgoal.action == "open":
-            if (
-                target
-                and target.properties.get("is_door")
-                and target.properties.get("state") == "open"
-            ):
-                return True
+            for node in graph.all_nodes():
+                if (
+                    isinstance(node, PhysicalEntityNode)
+                    and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                    and node.properties.get("is_door")
+                ):
+                    if subgoal.target_id and node.id != subgoal.target_id:
+                        continue
+                    if subgoal.matches_attributes(
+                        node.entity_type, node.properties.get("color"), entity_id=node.id
+                    ):
+                        if node.properties.get("state") == "open":
+                            return True
             return False
 
         if subgoal.action == "go_to":
@@ -331,21 +403,280 @@ class BabyAIActionAdapter:
 
         return False
 
+    def find_unexplored_frontier(
+        self, graph: CognitiveGraph
+    ) -> tuple[tuple[int, int], PhysicalEntityNode | None] | None:
+        """Find an untraversed open door or nearest passable cell bordering unobserved space."""
+        agent_pos, agent_dir, _ = self.get_agent_state(graph)
+        agent_node = None
+        for node in graph.all_nodes():
+            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
+                agent_node = node
+                break
+
+        visited = set(self.visited_positions)
+        visited.add(agent_pos)
+        seen = set()
+        if agent_node:
+            visited.update(agent_node.properties.get("visited_cells", []))
+            seen.update(agent_node.properties.get("seen_cells", []))
+
+        node_coords = [
+            n.properties.get("coords", (0, 0))
+            for n in graph.all_nodes()
+            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
+        ]
+        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
+        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
+
+        walls: set[tuple[int, int]] = set()
+        closed_doors: set[tuple[int, int]] = set()
+        open_doors: dict[tuple[int, int], PhysicalEntityNode] = {}
+
+        for node in graph.all_nodes():
+            if (
+                isinstance(node, PhysicalEntityNode)
+                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                and node.entity_type != "agent"
+            ):
+                c = node.properties.get("coords")
+                if not c:
+                    continue
+                if node.properties.get("is_door"):
+                    if node.properties.get("state") == "open":
+                        open_doors[c] = node
+                    else:
+                        closed_doors.add(c)
+                elif not node.properties.get("passable", False):
+                    walls.add(c)
+
+        # Sort open doors by proximity to agent
+        sorted_doors = sorted(
+            open_doors.items(),
+            key=lambda item: abs(item[0][0] - agent_pos[0]) + abs(item[0][1] - agent_pos[1]),
+        )
+
+        # Priority 1: Open doors leading into unvisited cells (closest first)
+        for dc, door_node in sorted_doors:
+            for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                nc = (dc[0] + ddx, dc[1] + ddy)
+                if (
+                    0 < nc[0] < max_x - 1
+                    and 0 < nc[1] < max_y - 1
+                    and nc not in visited
+                    and nc not in walls
+                    and nc not in closed_doors
+                ):
+                    return (nc, door_node)
+
+        # Priority 2: Open door cells themselves that haven't been stepped on
+        for dc, door_node in sorted_doors:
+            if dc not in visited:
+                return (dc, door_node)
+
+        # Priority 3: BFS for nearest passable cell bordering unseen space
+        queue = collections.deque([agent_pos])
+        bfs_visited = {agent_pos}
+        while queue:
+            cx, cy = queue.popleft()
+            borders_unseen = False
+            for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                nx, ny = cx + ddx, cy + ddy
+                if (
+                    0 < nx < max_x - 1
+                    and 0 < ny < max_y - 1
+                    and (nx, ny) not in walls
+                    and (nx, ny) not in seen
+                ):
+                    borders_unseen = True
+                    break
+
+            if borders_unseen and (cx, cy) != agent_pos:
+                return ((cx, cy), None)
+
+            for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                nx, ny = cx + ddx, cy + ddy
+                if (
+                    0 < nx < max_x - 1
+                    and 0 < ny < max_y - 1
+                    and (nx, ny) not in bfs_visited
+                    and (nx, ny) not in walls
+                    and (nx, ny) not in closed_doors
+                ):
+                    bfs_visited.add((nx, ny))
+                    queue.append((nx, ny))
+
+        return None
+
+    def _plan_explore_frontier(self, graph: CognitiveGraph) -> list[MiniGridAction] | None:
+        """Plan a path to the nearest open portal or frontier cell with target commitment."""
+        agent_pos, agent_dir, _ = self.get_agent_state(graph)
+
+        # If we have an active frontier target, keep pursuing it until reached or visited
+        if self.active_frontier is not None:
+            visited_set = set(self.visited_positions)
+            agent_node = None
+            for node in graph.all_nodes():
+                if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
+                    agent_node = node
+                    break
+            if agent_node:
+                visited_set.update(agent_node.properties.get("visited_cells", []))
+
+            if agent_pos == self.active_frontier or self.active_frontier in visited_set:
+                self.active_frontier = None
+            else:
+                traj = self._plan_direct_path(
+                    graph=graph,
+                    start_pos=agent_pos,
+                    start_dir=agent_dir,
+                    target_pos=self.active_frontier,
+                    target_entity_type="waypoint",
+                    target_entity_id="",
+                    terminal_action=None,
+                    allow_walk_onto_target=True,
+                )
+                if traj and traj != [MiniGridAction.DONE]:
+                    return traj
+                self.active_frontier = None
+
+        frontier = self.find_unexplored_frontier(graph)
+        if frontier is None:
+            return None
+        target_pos, target_node = frontier
+        target_type = target_node.entity_type if target_node else "floor"
+        target_id = target_node.id if target_node else ""
+        traj = self._plan_direct_path(
+            graph=graph,
+            start_pos=agent_pos,
+            start_dir=agent_dir,
+            target_pos=target_pos,
+            target_entity_type=target_type,
+            target_entity_id=target_id,
+            terminal_action=None,
+            allow_walk_onto_target=True,
+        )
+        if traj and traj != [MiniGridAction.DONE]:
+            self.active_frontier = target_pos
+            return traj
+        return None
+
     def _find_blocking_obstacle(
-        self, graph: CognitiveGraph, target_pos: tuple[int, int]
+        self,
+        graph: CognitiveGraph,
+        target_pos: tuple[int, int],
+        carrying_key: str | None = None,
     ) -> PhysicalEntityNode | None:
-        """Find any pickupable obstacle directly adjacent to target_pos."""
+        """Find any pickupable obstacle directly adjacent to target_pos or along the path to it."""
+        # 1. First check immediate 1-step adjacency to target_pos
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             check_pos = (target_pos[0] + dx, target_pos[1] + dy)
             for node in graph.all_nodes():
                 if (
                     isinstance(node, PhysicalEntityNode)
                     and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                    and node.entity_type in ("ball", "box")
+                    and node.entity_type in ("ball", "box", "key")
                     and node.properties.get("coords") == check_pos
                     and node.properties.get("pickupable", False)
                 ):
                     return node
+
+        # 2. Path-level relaxed BFS
+        agent_pos, agent_dir, _ = self.get_agent_state(graph)
+        node_coords = [
+            n.properties.get("coords", (0, 0))
+            for n in graph.all_nodes()
+            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
+        ]
+        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
+        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
+
+        walls: set[tuple[int, int]] = set()
+        closed_doors: set[tuple[int, int]] = set()
+        movable_obstacles: dict[tuple[int, int], PhysicalEntityNode] = {}
+
+        seen_cells: set[tuple[int, int]] = set()
+        agent_node = None
+        for node in graph.all_nodes():
+            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
+                agent_node = node
+                break
+        if agent_node:
+            seen_cells = set(agent_node.properties.get("seen_cells", []))
+            seen_cells.update(agent_node.properties.get("visited_cells", []))
+
+        for node in graph.all_nodes():
+            if (
+                isinstance(node, PhysicalEntityNode)
+                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                and node.entity_type != "agent"
+            ):
+                c = node.properties.get("coords")
+                if not c:
+                    continue
+                if node.properties.get("is_door"):
+                    if node.properties.get("state") == "locked":
+                        if carrying_key is not None and (
+                            carrying_key == node.properties.get("color")
+                            or node.properties.get("color") is None
+                        ):
+                            closed_doors.add(c)
+                        else:
+                            walls.add(c)
+                    elif node.properties.get("state") == "closed":
+                        closed_doors.add(c)
+                elif node.properties.get("pickupable", False) and node.entity_type in (
+                    "ball",
+                    "box",
+                    "key",
+                ):
+                    movable_obstacles[c] = node
+                elif not node.properties.get("passable", False):
+                    walls.add(c)
+
+        start_state = (agent_pos[0], agent_pos[1], agent_dir, frozenset())
+        queue = collections.deque([(start_state, [])])
+        visited = {start_state}
+
+        def is_facing_or_at(x: int, y: int, d: int) -> bool:
+            if (x, y) == target_pos:
+                return True
+            fwd = DIR_TO_VEC[MiniGridDirection(d)]
+            return (x + fwd[0], y + fwd[1]) == target_pos
+
+        max_depth = max(100, (max_x + max_y) * 4)
+        while queue:
+            (cx, cy, cd, op_doors), path = queue.popleft()
+            if is_facing_or_at(cx, cy, cd):
+                for step_pos in path:
+                    if step_pos in movable_obstacles:
+                        return movable_obstacles[step_pos]
+                break
+
+            if len(path) > max_depth:
+                continue
+
+            for nd in [(cd - 1) % 4, (cd + 1) % 4]:
+                st = (cx, cy, nd, op_doors)
+                if st not in visited:
+                    visited.add(st)
+                    queue.append((st, path))
+
+            fwd = DIR_TO_VEC[MiniGridDirection(cd)]
+            front_pos = (cx + fwd[0], cy + fwd[1])
+            if 0 <= front_pos[0] < max_x and 0 <= front_pos[1] < max_y:
+                is_cd = front_pos in closed_doors and front_pos not in op_doors
+                if is_cd:
+                    st = (cx, cy, cd, op_doors | {front_pos})
+                    if st not in visited:
+                        visited.add(st)
+                        queue.append((st, path))
+                elif front_pos not in walls:
+                    st = (front_pos[0], front_pos[1], cd, op_doors)
+                    if st not in visited:
+                        visited.add(st)
+                        queue.append((st, path + [front_pos]))
+
         return None
 
     def _plan_unblock_obstacle(
@@ -607,12 +938,13 @@ class BabyAIActionAdapter:
                 isinstance(node, PhysicalEntityNode)
                 and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
             ):
-                if node.properties.get("is_door") and node.properties.get("state") != "open":
+                if node.properties.get("is_door"):
                     dc = node.properties.get("coords")
                     if dc:
                         forbidden_cells.add(dc)
-                        for ddx, ddy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                            forbidden_cells.add((dc[0] + ddx, dc[1] + ddy))
+                        if node.properties.get("state") != "open":
+                            for ddx, ddy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                                forbidden_cells.add((dc[0] + ddx, dc[1] + ddy))
                 if node.entity_type == "key":
                     kc = node.properties.get("coords")
                     if kc:
@@ -638,7 +970,7 @@ class BabyAIActionAdapter:
         if not drop_candidates:
             return None
 
-        # Prefer front cell if available
+        # Prefer front cell if available so agent can drop without rotating
         fwd = DIR_TO_VEC[MiniGridDirection(curr_dir)]
         front_pos = (curr_pos[0] + fwd[0], curr_pos[1] + fwd[1])
         if front_pos in drop_candidates:
@@ -685,6 +1017,7 @@ class BabyAIActionAdapter:
                 return put_traj
 
         agent_pos, agent_dir, carrying = self.get_agent_state(graph)
+        self.visited_positions.add(agent_pos)
 
         # Hands-full safety check: If agent is carrying an unwanted obstacle,
         # drop it immediately on an adjacent free cell before continuing!
@@ -701,13 +1034,15 @@ class BabyAIActionAdapter:
 
         target_entity = self.find_target_entity(graph, goal)
         if target_entity is None:
-            # If target is not in current room, check for a closed door to explore
-            closed_door = self.find_closed_door(graph)
+            # 1. Check for an accessible closed door to explore
+            closed_door = self.find_closed_door(graph, only_accessible=True)
             if closed_door:
+                self.active_frontier = None
                 explore_goal = BabyAIGoal(
                     action="open",
                     target_type="door",
                     target_color=closed_door.properties.get("color"),
+                    target_id=closed_door.id,
                 )
                 door_traj = self.plan_trajectory(graph, explore_goal)
                 if door_traj and door_traj != [MiniGridAction.DONE]:
@@ -716,7 +1051,27 @@ class BabyAIActionAdapter:
                         return door_traj[:-1] + [MiniGridAction.FORWARD]
                     return door_traj
 
-            # Otherwise, rotate to explore current room
+            # 2. Check for unexplored frontiers or open portals
+            frontier_traj = self._plan_explore_frontier(graph)
+            if frontier_traj:
+                self.consecutive_rotations = 0
+                return frontier_traj
+
+            # 3. Fallback rotation sweep with stuck-prevention
+            self.consecutive_rotations += 1
+            if self.consecutive_rotations > 4:
+                self.consecutive_rotations = 0
+                fwd = DIR_TO_VEC[MiniGridDirection(agent_dir)]
+                front = (agent_pos[0] + fwd[0], agent_pos[1] + fwd[1])
+                occupied_or_walls = {
+                    n.properties.get("coords")
+                    for n in graph.all_nodes()
+                    if isinstance(n, PhysicalEntityNode)
+                    and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                    and (not n.properties.get("passable", False) or n.entity_type == "wall")
+                }
+                if front not in occupied_or_walls:
+                    return [MiniGridAction.FORWARD]
             return [MiniGridAction.LEFT]
 
         target_pos = target_entity.properties.get("coords")
@@ -729,16 +1084,8 @@ class BabyAIActionAdapter:
             door_col = target_entity.properties.get("color")
             if door_state == "open":
                 return [MiniGridAction.DONE]
-            if door_state == "locked":
-                # Check if doorway is blocked by a movable obstacle first
-                door_blocker = self._find_blocking_obstacle(graph, target_pos)
-                if door_blocker is not None:
-                    unblock_traj = self._plan_unblock_obstacle(
-                        graph, door_blocker, critical_pos=target_pos
-                    )
-                    if unblock_traj:
-                        return unblock_traj
 
+            if door_state == "locked":
                 # Check carrying
                 has_matching_key = (
                     carrying is not None
@@ -786,7 +1133,9 @@ class BabyAIActionAdapter:
                                 if door_traj is not None:
                                     return key_actions + door_traj
                                 # If door path blocked from key pose, check unblocking
-                                blocker = self._find_blocking_obstacle(graph, target_pos)
+                                blocker = self._find_blocking_obstacle(
+                                    graph, target_pos, carrying_key=door_col
+                                )
                                 if blocker is not None:
                                     unblock_traj = self._plan_unblock_obstacle(
                                         graph, blocker, critical_pos=target_pos
@@ -803,7 +1152,10 @@ class BabyAIActionAdapter:
                                     )
                                     if unblock_traj:
                                         return unblock_traj
-                    # If key not yet observed in graph, rotate to locate it
+                    # If key not yet observed in graph, explore frontiers to discover it!
+                    frontier_traj = self._plan_explore_frontier(graph)
+                    if frontier_traj:
+                        return frontier_traj
                     return [MiniGridAction.LEFT]
 
         # Standard direct path execution
@@ -825,13 +1177,19 @@ class BabyAIActionAdapter:
             carrying_key=car_key_col,
         )
 
-        # If direct path failed, check for Causal Obstacle Unblocking (Tier 5)
-        if traj is None:
-            blocker = self._find_blocking_obstacle(graph, target_pos)
+        # If direct path failed or requires an extreme detour, check for Causal Obstacle Unblocking (Tier 5)
+        m_dist = abs(agent_pos[0] - target_pos[0]) + abs(agent_pos[1] - target_pos[1])
+        if traj is None or len(traj) > max(10, m_dist * 3):
+            blocker = self._find_blocking_obstacle(graph, target_pos, carrying_key=car_key_col)
             if blocker is not None:
                 unblock_traj = self._plan_unblock_obstacle(graph, blocker, critical_pos=target_pos)
                 if unblock_traj:
                     return unblock_traj
+
+            # If path failed and no blocker, explore frontiers
+            frontier_traj = self._plan_explore_frontier(graph)
+            if frontier_traj:
+                return frontier_traj
 
         return traj if traj is not None else [MiniGridAction.DONE]
 

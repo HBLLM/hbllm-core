@@ -143,8 +143,15 @@ class BabyAIGoal:
             return self.current_subgoal_idx >= len(self.subgoals)
         return False
 
-    def matches_attributes(self, entity_type: str, color: str | None = None) -> bool:
+    def matches_attributes(
+        self,
+        entity_type: str,
+        color: str | None = None,
+        entity_id: str | None = None,
+    ) -> bool:
         """Check if an entity satisfies this goal's type and color requirements."""
+        if self.target_id and entity_id and self.target_id != entity_id:
+            return False
         if self.target_type and self.target_type != entity_type:
             return False
         if self.target_color and color and self.target_color != color:
