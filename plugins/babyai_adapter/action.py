@@ -501,6 +501,23 @@ class BabyAIActionAdapter:
             dir_to_vec={d.value: v for d, v in DIR_TO_VEC.items()},
         )
 
+    def _find_candidate_blocking_obstacles(
+        self,
+        graph: CognitiveGraph,
+        target_pos: tuple[int, int],
+        carrying_key: str | None = None,
+    ) -> list[PhysicalEntityNode]:
+        """Find candidate blocking obstacles along paths to target, prioritized by directness and proximity."""
+        agent_pos, agent_dir, _ = self.get_agent_state(graph)
+        return self.obstacle_resolver.find_candidate_blocking_obstacles(
+            graph=graph,
+            agent_pos=agent_pos,
+            agent_dir=agent_dir,
+            target_pos=target_pos,
+            carrying_key=carrying_key,
+            dir_to_vec={d.value: v for d, v in DIR_TO_VEC.items()},
+        )
+
     def _plan_unblock_obstacle(
         self,
         graph: CognitiveGraph,
@@ -562,6 +579,7 @@ class BabyAIActionAdapter:
             graph=graph,
             curr_pos=p_end,
             critical_positions={critical_pos, blocker_pos},
+            traversable_positions={blocker_pos},
         )
 
         for rc in relocate_candidates:
@@ -748,14 +766,55 @@ class BabyAIActionAdapter:
             active = goal.get_active_subgoal()
             return self.plan_trajectory(graph, active)
 
-        # Check PutNext (Tier 4)
-        if goal.action == "put_next":
-            put_traj = self._plan_put_next(graph, goal)
-            if put_traj:
-                return put_traj
-
         agent_pos, agent_dir, carrying = self.get_agent_state(graph)
         self.visited_positions.add(agent_pos)
+
+        # Check PutNext (Tier 4)
+        if goal.action == "put_next":
+            target_node = self.find_target_entity(graph, goal)
+            fixed_node = self.find_fixed_entity(graph, goal)
+            if target_node is not None and fixed_node is not None:
+                put_traj = self._plan_put_next(graph, goal)
+                if put_traj:
+                    return put_traj
+
+            # Both entities (target + fixed landmark) are required.
+            # If either is not yet observed, explore closed doors or frontiers to discover them!
+            closed_door = self.find_closed_door(graph, only_accessible=True)
+            if closed_door:
+                self.active_frontier = None
+                explore_goal = BabyAIGoal(
+                    action="open",
+                    target_type="door",
+                    target_color=closed_door.properties.get("color"),
+                    target_id=closed_door.id,
+                )
+                door_traj = self.plan_trajectory(graph, explore_goal)
+                if door_traj and door_traj != [MiniGridAction.DONE]:
+                    if len(door_traj) >= 2 and door_traj[-2] == MiniGridAction.TOGGLE:
+                        return door_traj[:-1] + [MiniGridAction.FORWARD]
+                    return door_traj
+
+            frontier_traj = self._plan_explore_frontier(graph)
+            if frontier_traj:
+                self.consecutive_rotations = 0
+                return frontier_traj
+
+            self.consecutive_rotations += 1
+            if self.consecutive_rotations > 4:
+                self.consecutive_rotations = 0
+                fwd = DIR_TO_VEC[MiniGridDirection(agent_dir)]
+                front = (agent_pos[0] + fwd[0], agent_pos[1] + fwd[1])
+                occupied_or_walls = {
+                    n.properties.get("coords")
+                    for n in graph.all_nodes()
+                    if isinstance(n, PhysicalEntityNode)
+                    and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                    and (not n.properties.get("passable", False) or n.entity_type == "wall")
+                }
+                if front not in occupied_or_walls:
+                    return [MiniGridAction.FORWARD]
+            return [MiniGridAction.LEFT]
 
         # Hands-full safety check: If agent is carrying an unwanted object,
         # and the goal requires empty hands (pickup, put_next, or unlocking a door),
@@ -866,20 +925,49 @@ class BabyAIActionAdapter:
             door_state = target_entity.properties.get("state")
             door_col = target_entity.properties.get("color")
             if door_state == "open":
+                if goal.target_id is None:
+                    closed_door = self.find_closed_door(graph, only_accessible=True)
+                    if closed_door:
+                        explore_goal = BabyAIGoal(
+                            action="open",
+                            target_type="door",
+                            target_color=closed_door.properties.get("color"),
+                            target_id=closed_door.id,
+                        )
+                        door_traj = self.plan_trajectory(graph, explore_goal)
+                        if door_traj and door_traj != [MiniGridAction.DONE]:
+                            return door_traj
+                    frontier_traj = self._plan_explore_frontier(graph)
+                    if frontier_traj:
+                        return frontier_traj
                 return [MiniGridAction.DONE]
 
             if door_state == "locked":
                 # Check if the access corridor to the door is physically blocked by an obstacle!
                 # If blocked, unblocking the obstacle takes strict causal precedence over fetching/carrying the key.
-                door_blocker = self._find_blocking_obstacle(
-                    graph, target_pos, carrying_key=door_col
+                door_check_traj = self._plan_direct_path(
+                    graph=graph,
+                    start_pos=agent_pos,
+                    start_dir=agent_dir,
+                    target_pos=target_pos,
+                    target_entity_type="door",
+                    target_entity_id=target_entity.id,
+                    terminal_action=MiniGridAction.TOGGLE,
+                    carrying_key=door_col,
                 )
-                if door_blocker is not None:
-                    unblock_traj = self._plan_unblock_obstacle(
-                        graph, door_blocker, critical_pos=target_pos
+                m_dist_door = abs(agent_pos[0] - target_pos[0]) + abs(agent_pos[1] - target_pos[1])
+                if door_check_traj is None or self.obstacle_resolver.is_extreme_detour(
+                    len(door_check_traj), m_dist_door
+                ):
+                    candidate_blockers = self._find_candidate_blocking_obstacles(
+                        graph, target_pos, carrying_key=door_col
                     )
-                    if unblock_traj:
-                        return unblock_traj
+                    for door_blocker in candidate_blockers:
+                        unblock_traj = self._plan_unblock_obstacle(
+                            graph, door_blocker, critical_pos=target_pos
+                        )
+                        if unblock_traj:
+                            return unblock_traj
 
                 # Check carrying
                 has_matching_key = (
@@ -928,10 +1016,10 @@ class BabyAIActionAdapter:
                                 if door_traj is not None:
                                     return key_actions + door_traj
                                 # If door path blocked from key pose, check unblocking
-                                blocker = self._find_blocking_obstacle(
+                                candidate_blockers = self._find_candidate_blocking_obstacles(
                                     graph, target_pos, carrying_key=door_col
                                 )
-                                if blocker is not None:
+                                for blocker in candidate_blockers:
                                     unblock_traj = self._plan_unblock_obstacle(
                                         graph, blocker, critical_pos=target_pos
                                     )
@@ -975,8 +1063,10 @@ class BabyAIActionAdapter:
         # If direct path failed or requires an extreme detour, check for Causal Obstacle Unblocking (Tier 5)
         m_dist = abs(agent_pos[0] - target_pos[0]) + abs(agent_pos[1] - target_pos[1])
         if traj is None or self.obstacle_resolver.is_extreme_detour(len(traj), m_dist):
-            blocker = self._find_blocking_obstacle(graph, target_pos, carrying_key=car_key_col)
-            if blocker is not None:
+            candidate_blockers = self._find_candidate_blocking_obstacles(
+                graph, target_pos, carrying_key=car_key_col
+            )
+            for blocker in candidate_blockers:
                 unblock_traj = self._plan_unblock_obstacle(graph, blocker, critical_pos=target_pos)
                 if unblock_traj:
                     return unblock_traj
@@ -986,7 +1076,26 @@ class BabyAIActionAdapter:
             if frontier_traj:
                 return frontier_traj
 
-        return traj if traj is not None else [MiniGridAction.DONE]
+        if traj is not None:
+            return traj
+
+        # Path failed, unblocking failed, frontier exploration exhausted.
+        # Fallback rotation sweep with stuck-prevention (never return premature DONE!)
+        self.consecutive_rotations += 1
+        if self.consecutive_rotations > 4:
+            self.consecutive_rotations = 0
+            fwd = DIR_TO_VEC[MiniGridDirection(agent_dir)]
+            front = (agent_pos[0] + fwd[0], agent_pos[1] + fwd[1])
+            occupied_or_walls = {
+                n.properties.get("coords")
+                for n in graph.all_nodes()
+                if isinstance(n, PhysicalEntityNode)
+                and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
+                and (not n.properties.get("passable", False) or n.entity_type == "wall")
+            }
+            if front not in occupied_or_walls:
+                return [MiniGridAction.FORWARD]
+        return [MiniGridAction.LEFT]
 
     def plan_next_action(
         self,
