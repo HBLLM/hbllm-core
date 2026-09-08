@@ -1,0 +1,20 @@
+{
+  "name": "crafter-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Crafter 2D Open-World Survival and Tech Tree perception and causal action adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "crafter", "survival", "tech-tree", "hcir", "embodied"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "crafter_observe",
+    "crafter_act",
+    "crafter_plan_recipe",
+    "crafter_step",
+    "crafter_plan_trajectory"
+  ],
+  "permissions": ["environment_simulation"]
+}

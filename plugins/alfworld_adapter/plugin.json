@@ -1,0 +1,20 @@
+{
+  "name": "alfworld-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "ALFWorld Interactive Text & Embodied Household Task perception and causal affordance adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": [],
+  "tags": ["eval", "benchmark", "alfworld", "alfred", "embodied", "textworld", "hcir", "affordance-planning"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "alfworld_observe",
+    "alfworld_act",
+    "alfworld_plan_task",
+    "alfworld_step",
+    "alfworld_decompose_instruction"
+  ],
+  "permissions": ["environment_simulation"]
+}

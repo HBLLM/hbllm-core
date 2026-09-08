@@ -1,0 +1,20 @@
+{
+  "name": "safety-gym-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Safety-Gymnasium Constrained Safe Navigation & Dynamic Hazard Avoidance perception and causal action adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "safety-gymnasium", "safe-rl", "constrained-planning", "hcir", "embodied"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "safety_gym_observe",
+    "safety_gym_act",
+    "safety_gym_plan_safe_path",
+    "safety_gym_step",
+    "safety_gym_evaluate_risk"
+  ],
+  "permissions": ["environment_simulation"]
+}

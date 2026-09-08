@@ -1,0 +1,20 @@
+{
+  "name": "ai2thor-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "AI2-THOR 3D Photorealistic Embodied Manipulation & Hierarchical Scene Graph perception and causal action adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "ai2thor", "embodied", "3d-scene-graph", "manipulation", "hcir"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "ai2thor_observe",
+    "ai2thor_act",
+    "ai2thor_plan_manipulation",
+    "ai2thor_step",
+    "ai2thor_query_scene_graph"
+  ],
+  "permissions": ["environment_simulation"]
+}

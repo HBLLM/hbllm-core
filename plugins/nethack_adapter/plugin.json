@@ -1,0 +1,20 @@
+{
+  "name": "nethack-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "NetHack & MiniHack Roguelike Procedural Dungeon Crawl perception and tactical causal action adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "nethack", "minihack", "roguelike", "dungeon-crawl", "hcir", "embodied"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "nethack_observe",
+    "nethack_act",
+    "nethack_explore_dungeon",
+    "nethack_step",
+    "nethack_plan_tactical_path"
+  ],
+  "permissions": ["environment_simulation"]
+}
