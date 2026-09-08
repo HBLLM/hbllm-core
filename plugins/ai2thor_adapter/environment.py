@@ -33,7 +33,8 @@ class StandaloneAI2ThorEnv:
     receptacle containment trees, and physical affordance state updates.
     """
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, tier: int = 4) -> None:
+        self.tier = tier
         self.rng = random.Random(seed)
         self.step_count = 0
         self.max_steps = 100
@@ -65,7 +66,7 @@ class StandaloneAI2ThorEnv:
         return self._get_obs(), {"goal": self.goal}
 
     def _build_scene(self) -> None:
-        """Instantiate 3D kitchen scene objects and goal."""
+        """Instantiate 3D kitchen scene objects and goal according to tier."""
         self.objects = {
             "CounterTop_1": AI2ThorObjectMetadata(
                 objectId="CounterTop_1",
@@ -112,11 +113,34 @@ class StandaloneAI2ThorEnv:
         self.objects["CounterTop_1"].receptacleObjectIds = ["Mug_1"]
         self.objects["DiningTable_1"].receptacleObjectIds = ["Apple_1"]
 
-        self.goal = AI2ThorGoal(
-            target_object_id="Mug_1",
-            target_receptacle_id="Microwave_1",
-            raw_instruction="Put Mug_1 in Microwave_1",
-        )
+        if self.tier == 1:
+            # Tier 1: Object Retrieval ("Pickup Mug_1")
+            self.goal = AI2ThorGoal(
+                target_object_id="Mug_1",
+                target_receptacle_id=None,
+                raw_instruction="Pick up Mug_1",
+            )
+        elif self.tier == 2:
+            # Tier 2: State Toggling / Opening ("Open Microwave_1")
+            self.goal = AI2ThorGoal(
+                target_object_id=None,
+                target_receptacle_id="Microwave_1",
+                raw_instruction="Open Microwave_1",
+            )
+        elif self.tier == 3:
+            # Tier 3: Surface Relocation ("Put Apple_1 on CounterTop_1")
+            self.goal = AI2ThorGoal(
+                target_object_id="Apple_1",
+                target_receptacle_id="CounterTop_1",
+                raw_instruction="Put Apple_1 on CounterTop_1",
+            )
+        else:
+            # Tier 4: Container Transfer ("Put Mug_1 in Microwave_1")
+            self.goal = AI2ThorGoal(
+                target_object_id="Mug_1",
+                target_receptacle_id="Microwave_1",
+                raw_instruction="Put Mug_1 in Microwave_1",
+            )
 
     def _dist_to_agent(self, pos: AI2ThorVector3) -> float:
         ap = self.agent_pose.position
@@ -232,8 +256,19 @@ class StandaloneAI2ThorEnv:
         if self.goal:
             t_obj = self.goal.target_object_id
             t_rec = self.goal.target_receptacle_id
-            if t_obj in self.objects and t_rec in self.objects:
-                if t_rec in self.objects[t_obj].parentReceptacles:
+            if t_obj and t_rec:
+                if t_obj in self.objects and t_rec in self.objects:
+                    if t_rec in self.objects[t_obj].parentReceptacles:
+                        terminated = True
+                        reward = 1.0
+            elif t_obj and not t_rec:
+                # Retrieval goal: holding target object
+                if self.held_object_id == t_obj:
+                    terminated = True
+                    reward = 1.0
+            elif t_rec and not t_obj:
+                # State toggling/opening goal: receptacle opened
+                if self.objects[t_rec].isOpened or self.objects[t_rec].isToggled:
                     terminated = True
                     reward = 1.0
 
@@ -281,11 +316,11 @@ class StandaloneAI2ThorEnv:
         )
 
 
-def make_ai2thor_env(seed: int | None = None) -> StandaloneAI2ThorEnv:
+def make_ai2thor_env(seed: int | None = None, tier: int = 4) -> StandaloneAI2ThorEnv:
     """Instantiate AI2-THOR environment with fallback to symbolic 3D engine."""
     try:
         logger.info("Using native ai2thor controller")
-        return StandaloneAI2ThorEnv(seed=seed)
+        return StandaloneAI2ThorEnv(seed=seed, tier=tier)
     except Exception as e:
         logger.debug("Native ai2thor unavailable (%s), using StandaloneAI2ThorEnv", e)
-        return StandaloneAI2ThorEnv(seed=seed)
+        return StandaloneAI2ThorEnv(seed=seed, tier=tier)

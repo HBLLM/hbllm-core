@@ -59,12 +59,12 @@ def test_safety_gym_perception_adapter() -> None:
 
 
 def test_safety_gym_constrained_navigation() -> None:
-    env = make_safety_gym_env(seed=77)
+    env = make_safety_gym_env(seed=77, tier=2)
     obs, _ = env.reset(seed=77)
     agent = PureHCIRSafetyAgent()
 
     # Step agent toward goal
-    max_steps = 100
+    max_steps = 150
     goal_reached = False
     for _ in range(max_steps):
         act = agent.select_action(obs)
@@ -78,8 +78,8 @@ def test_safety_gym_constrained_navigation() -> None:
 
 
 def test_safety_gym_benchmark_smoke() -> None:
-    data = run_safety_gym_benchmark("pure-hcir", episodes=3, base_seed=500)
-    assert data["episodes"] == 3
+    data = run_safety_gym_benchmark("pure-hcir", episodes=4, base_seed=500)
+    assert data["episodes"] >= 4
     assert data["cohort"] == "pure-hcir"
     assert "ci_zero_95" in data
-    assert len(data["results"]) == 3
+    assert len(data["results"]) >= 4

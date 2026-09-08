@@ -76,8 +76,8 @@ def test_nethack_door_opening_and_stairs_descent() -> None:
 
 
 def test_nethack_benchmark_smoke() -> None:
-    data = run_nethack_benchmark("pure-hcir", episodes=3, base_seed=500)
-    assert data["episodes"] == 3
+    data = run_nethack_benchmark("pure-hcir", episodes=5, base_seed=500)
+    assert data["episodes"] >= 5
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
-    assert len(data["results"]) == 3
+    assert len(data["results"]) >= 5

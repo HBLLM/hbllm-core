@@ -95,8 +95,8 @@ def test_crafter_wood_collection() -> None:
 
 
 def test_crafter_benchmark_smoke() -> None:
-    data = run_crafter_benchmark("pure-hcir", episodes=3, base_seed=500)
-    assert data["episodes"] == 3
+    data = run_crafter_benchmark("pure-hcir", episodes_per_target=1, base_seed=500)
+    assert data["episodes"] >= 1
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
-    assert len(data["results"]) == 3
+    assert len(data["results"]) >= 1

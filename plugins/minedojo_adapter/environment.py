@@ -34,8 +34,10 @@ class StandaloneMineDojoEnv:
         self,
         size: tuple[int, int, int] = (32, 32, 16),
         seed: int | None = None,
+        tier: int = 4,
     ) -> None:
         self.size_x, self.size_y, self.size_z = size
+        self.tier = tier
         self.rng = random.Random(seed)
         self.step_count = 0
         self.max_steps = 100
@@ -63,7 +65,7 @@ class StandaloneMineDojoEnv:
         return self._get_obs(), {"goal": self.goal}
 
     def _generate_voxel_world(self) -> None:
-        """Create layered voxel terrain with trees and ores."""
+        """Create layered voxel terrain with trees, rock outcrop, and ores."""
         # Initialize with AIR
         self.voxels = [
             [[MineDojoVoxel.AIR for _ in range(self.size_x)] for _ in range(self.size_y)]
@@ -97,6 +99,22 @@ class StandaloneMineDojoEnv:
                 for dx in range(-1, 2):
                     if not (dx == 0 and dy == 0 and lz < 10):
                         self.voxels[lz][ty + dy][tx + dx] = MineDojoVoxel.LEAVES
+
+        # Rock outcrop at (16, 14) for stone age mining
+        for sz in range(6, 10):
+            self.voxels[sz][14][16] = MineDojoVoxel.STONE
+
+        # Configure tier-specific goal
+        if self.tier == 1:
+            self.goal = MineDojoGoal(target_item="log", target_count=1)
+        elif self.tier == 2:
+            self.goal = MineDojoGoal(target_item="planks", target_count=4)
+        elif self.tier == 3:
+            self.goal = MineDojoGoal(target_item="crafting_table", target_count=1)
+        elif self.tier == 4:
+            self.goal = MineDojoGoal(target_item="wooden_pickaxe", target_count=1)
+        elif self.tier == 5:
+            self.goal = MineDojoGoal(target_item="stone_pickaxe", target_count=1)
 
     def _target_block_pos(self) -> tuple[int, int, int]:
         """Compute coordinate of block directly in front of player."""
@@ -263,11 +281,11 @@ class StandaloneMineDojoEnv:
         )
 
 
-def make_minedojo_env(seed: int | None = None) -> StandaloneMineDojoEnv:
+def make_minedojo_env(seed: int | None = None, tier: int = 4) -> StandaloneMineDojoEnv:
     """Instantiate MineDojo environment with fallback to standalone 3D voxel engine."""
     try:
         logger.info("Using native minedojo environment")
-        return StandaloneMineDojoEnv(seed=seed)
+        return StandaloneMineDojoEnv(seed=seed, tier=tier)
     except Exception as e:
         logger.debug("Native minedojo unavailable (%s), using StandaloneMineDojoEnv", e)
-        return StandaloneMineDojoEnv(seed=seed)
+        return StandaloneMineDojoEnv(seed=seed, tier=tier)

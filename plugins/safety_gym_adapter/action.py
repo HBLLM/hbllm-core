@@ -24,7 +24,7 @@ class SafetyGymActionAdapter:
     Calculates collision-free trajectories satisfying C_t = 0 constraints.
     """
 
-    def __init__(self, clearance_margin: float = 0.35) -> None:
+    def __init__(self, clearance_margin: float = 0.45) -> None:
         self.clearance_margin = clearance_margin
 
     def plan_next_action(self, obs: SafetyObservation) -> SafetyGymAction:
@@ -46,21 +46,28 @@ class SafetyGymActionAdapter:
             dist = math.hypot(ax - obstacle.x, ay - obstacle.y)
             safe_dist = obstacle.radius + self.clearance_margin
             if dist < safe_dist and dist > 0.01:
-                repulse_mag = 5.0 * (1.0 / dist - 1.0 / safe_dist) / (dist**2)
-                repulse_mag = min(12.0, max(0.0, repulse_mag))
-                fx += repulse_mag * (ax - obstacle.x) / dist
-                fy += repulse_mag * (ay - obstacle.y) / dist
+                repulse_mag = 12.0 * (1.0 / dist - 1.0 / safe_dist) / (dist**2)
+                repulse_mag = min(20.0, max(0.0, repulse_mag))
+                rx = (ax - obstacle.x) / dist
+                ry = (ay - obstacle.y) / dist
+
+                # Tangent vector to flank obstacles
+                dot1 = (-ry) * fx + rx * fy
+                dot2 = ry * fx + (-rx) * fy
+                tx, ty = (-ry, rx) if dot1 >= dot2 else (ry, -rx)
+
+                fx += repulse_mag * (rx + 0.8 * tx)
+                fy += repulse_mag * (ry + 0.8 * ty)
 
         # 3. Repulsive force from dynamic gremlins (predictive)
         for g in obs.gremlins:
-            # Predict gremlin position 2 steps ahead
             future_gx = g.x + 2 * g.vx
             future_gy = g.y + 2 * g.vy
             dist = math.hypot(ax - future_gx, ay - future_gy)
             safe_dist = g.radius + self.clearance_margin + 0.15
             if dist < safe_dist and dist > 0.01:
-                repulse_mag = 6.0 * (1.0 / dist - 1.0 / safe_dist) / (dist**2)
-                repulse_mag = min(12.0, max(0.0, repulse_mag))
+                repulse_mag = 10.0 * (1.0 / dist - 1.0 / safe_dist) / (dist**2)
+                repulse_mag = min(18.0, max(0.0, repulse_mag))
                 fx += repulse_mag * (ax - future_gx) / dist
                 fy += repulse_mag * (ay - future_gy) / dist
 
@@ -80,7 +87,7 @@ class SafetyGymActionAdapter:
         # Normalize angle difference to [-pi, pi]
         angle_diff = (desired_heading - current_heading + math.pi) % (2 * math.pi) - math.pi
 
-        # Steering decision: allow forward motion when within 45 degrees of desired heading
+        # Steering decision: allow forward motion when heading aligns with potential field
         if angle_diff > math.pi / 4.0:
             return SafetyGymAction.TURN_LEFT
         elif angle_diff < -math.pi / 4.0:
