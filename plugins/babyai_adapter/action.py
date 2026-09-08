@@ -631,13 +631,33 @@ class BabyAIActionAdapter:
         return prefix_actions if prefix_actions else [MiniGridAction.LEFT]
 
     def _plan_drop_carried_obstacle(
-        self, graph: CognitiveGraph, curr_pos: tuple[int, int], curr_dir: int
+        self,
+        graph: CognitiveGraph,
+        curr_pos: tuple[int, int],
+        curr_dir: int,
+        target_pos: tuple[int, int] | None = None,
     ) -> list[MiniGridAction] | None:
         """Drop an unwanted carried obstacle onto an empty adjacent cell."""
+        crit: set[tuple[int, int]] = set()
+        if target_pos:
+            crit.add(target_pos)
+            # Forbid dropping in any cell on direct line/facing target
+            fwd = DIR_TO_VEC[MiniGridDirection(curr_dir)]
+            front_pos = (curr_pos[0] + fwd[0], curr_pos[1] + fwd[1])
+            dx = target_pos[0] - curr_pos[0]
+            dy = target_pos[1] - curr_pos[1]
+            if (
+                (dx > 0 and fwd[0] > 0)
+                or (dx < 0 and fwd[0] < 0)
+                or (dy > 0 and fwd[1] > 0)
+                or (dy < 0 and fwd[1] < 0)
+            ):
+                crit.add(front_pos)
+
         drop_candidates = self.obstacle_resolver.find_safe_drop_candidates(
             graph=graph,
             curr_pos=curr_pos,
-            critical_positions=set(),
+            critical_positions=crit,
             curr_dir=curr_dir,
             dir_to_vec={d.value: v for d, v in DIR_TO_VEC.items()},
         )
@@ -685,15 +705,26 @@ class BabyAIActionAdapter:
         self.visited_positions.add(agent_pos)
 
         # Hands-full safety check: If agent is carrying an unwanted obstacle,
-        # drop it immediately on an adjacent free cell before continuing!
+        # and the goal requires empty hands (pickup, put_next, or unlocking a door),
+        # drop it on an adjacent free cell before continuing!
         if carrying is not None:
             is_goal_target = goal.matches_attributes(
                 carrying.get("type", ""), carrying.get("color")
             )
             has_door = self.find_closed_door(graph) is not None
             is_needed_key = carrying.get("type") == "key" and has_door
-            if not is_goal_target and not is_needed_key:
-                drop_traj = self._plan_drop_carried_obstacle(graph, agent_pos, agent_dir)
+
+            # In "go_to", carrying an object does NOT block reaching the target!
+            requires_empty_hands = (goal.action in ("pickup", "put_next")) or (
+                goal.action == "open" and not is_needed_key
+            )
+
+            if not is_goal_target and not is_needed_key and requires_empty_hands:
+                target_ent = self.find_target_entity(graph, goal)
+                target_coord = target_ent.properties.get("coords") if target_ent else None
+                drop_traj = self._plan_drop_carried_obstacle(
+                    graph, agent_pos, agent_dir, target_pos=target_coord
+                )
                 if drop_traj:
                     return drop_traj
 
