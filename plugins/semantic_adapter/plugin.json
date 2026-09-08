@@ -1,0 +1,20 @@
+{
+  "name": "semantic-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Semantic Ambiguity, Underspecified Language, and Hybrid LLM-Guided Causal Grounding adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "semantic-ambiguity", "underspecified", "guided-hcir", "hybrid", "hcir"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "semantic_observe_instruction",
+    "semantic_ground_directive",
+    "semantic_detect_ambiguity",
+    "semantic_plan_guided_hcir",
+    "semantic_step"
+  ],
+  "permissions": ["environment_simulation"]
+}

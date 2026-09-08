@@ -1,0 +1,20 @@
+{
+  "name": "overcooked-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Overcooked-AI Multi-Agent Cooperative Kitchen, Counter Sharing, and Recipe Coordination adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "overcooked", "multi-agent", "cooperation", "theory-of-mind", "hcir"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "overcooked_observe",
+    "overcooked_act",
+    "overcooked_plan_recipe",
+    "overcooked_estimate_partner_intent",
+    "overcooked_step"
+  ],
+  "permissions": ["environment_simulation"]
+}
