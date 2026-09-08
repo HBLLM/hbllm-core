@@ -33,6 +33,9 @@ _SI_OBJECTS = {
     "පෙට්ටි": "box",
     "යතුර": "key",
     "දොර": "door",
+    "වස්තුව": "object",
+    "වස්තුවක්": "object",
+    "දෙයක්": "object",
 }
 
 # Tamil lexicon
@@ -52,6 +55,8 @@ _TA_OBJECTS = {
     "சாவி": "key",
     "கதவு": "door",
     "கதவை": "door",
+    "பொருள்": "object",
+    "பொருளை": "object",
 }
 
 
