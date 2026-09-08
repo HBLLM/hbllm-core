@@ -14,7 +14,9 @@ import collections
 import logging
 from typing import Any
 
+from hbllm.actions import CausalObstacleResolver, TopologicalFrontierNavigator
 from hbllm.hcir.graph import CognitiveGraph, EntityLifecycle, PhysicalEntityNode
+from hbllm.perception import EpistemicSpatialGrid
 
 from .types import (
     DIR_TO_VEC,
@@ -36,13 +38,25 @@ class BabyAIActionAdapter:
             self.width = self.height = room_size
         self.visited_positions: set[tuple[int, int]] = set()
         self.consecutive_rotations: int = 0
-        self.active_frontier: tuple[int, int] | None = None
+        self.frontier_navigator = TopologicalFrontierNavigator()
+        self.obstacle_resolver = CausalObstacleResolver(
+            grid=EpistemicSpatialGrid(default_bounds=(self.width, self.height))
+        )
+
+    @property
+    def active_frontier(self) -> tuple[int, int] | None:
+        """Active exploration frontier target coordinate, managed with hysteresis."""
+        return self.frontier_navigator.active_frontier
+
+    @active_frontier.setter
+    def active_frontier(self, val: tuple[int, int] | None) -> None:
+        self.frontier_navigator.active_frontier = val
 
     def reset(self) -> None:
         """Reset internal exploration history, rotation counters, and frontier commitments."""
         self.visited_positions.clear()
         self.consecutive_rotations = 0
-        self.active_frontier = None
+        self.frontier_navigator.reset()
 
     def find_target_entity(
         self, graph: CognitiveGraph, goal: BabyAIGoal
@@ -220,55 +234,18 @@ class BabyAIActionAdapter:
             final_actions.append(MiniGridAction.DONE)
             return final_actions
 
-        node_coords = [
-            n.properties.get("coords", (0, 0))
-            for n in graph.all_nodes()
-            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
-        ]
-        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
-        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
+        combined_ignored = set(ignored_entity_ids or ())
+        if target_entity_id:
+            combined_ignored.add(target_entity_id)
 
-        walls: set[tuple[int, int]] = set()
-        closed_doors: set[tuple[int, int]] = set()
-
-        seen_cells: set[tuple[int, int]] = set()
-        agent_node = None
-        for node in graph.all_nodes():
-            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
-                agent_node = node
-                break
-        if agent_node:
-            seen_cells = set(agent_node.properties.get("seen_cells", []))
-            seen_cells.update(agent_node.properties.get("visited_cells", []))
-
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                and node.entity_type != "agent"
-                and node.id != target_entity_id
-                and (ignored_entity_ids is None or node.id not in ignored_entity_ids)
-            ):
-                c = node.properties.get("coords")
-                if not c:
-                    continue
-                if node.properties.get("is_door"):
-                    door_state = node.properties.get("state")
-                    door_col = node.properties.get("color")
-                    if door_state == "open":
-                        pass  # open door is passable
-                    elif door_state == "locked":
-                        # Locked door can only be toggled if carrying matching key
-                        if carrying_key is not None and (
-                            carrying_key == door_col or door_col is None
-                        ):
-                            closed_doors.add(c)
-                        else:
-                            walls.add(c)
-                    else:  # closed
-                        closed_doors.add(c)
-                elif not node.properties.get("passable", False):
-                    walls.add(c)
+        grid = EpistemicSpatialGrid(graph, default_bounds=(self.width, self.height))
+        partition = grid.partition_cells(
+            ignored_entity_ids=combined_ignored,
+            carrying_key=carrying_key,
+        )
+        walls = partition.blocking_cells
+        closed_doors = partition.closed_doors
+        max_x, max_y = partition.max_x, partition.max_y
 
         # BFS state: (curr_x, curr_y, curr_d, opened_doors: frozenset[tuple[int, int]])
         start_state = (start_pos[0], start_pos[1], start_dir, frozenset())
@@ -407,138 +384,40 @@ class BabyAIActionAdapter:
         self, graph: CognitiveGraph
     ) -> tuple[tuple[int, int], PhysicalEntityNode | None] | None:
         """Find an untraversed open door or nearest passable cell bordering unobserved space."""
-        agent_pos, agent_dir, _ = self.get_agent_state(graph)
-        agent_node = None
-        for node in graph.all_nodes():
-            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
-                agent_node = node
-                break
-
-        visited = set(self.visited_positions)
-        visited.add(agent_pos)
-        seen = set()
-        if agent_node:
-            visited.update(agent_node.properties.get("visited_cells", []))
-            seen.update(agent_node.properties.get("seen_cells", []))
-
-        node_coords = [
-            n.properties.get("coords", (0, 0))
-            for n in graph.all_nodes()
-            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
-        ]
-        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
-        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
-
-        walls: set[tuple[int, int]] = set()
-        closed_doors: set[tuple[int, int]] = set()
-        open_doors: dict[tuple[int, int], PhysicalEntityNode] = {}
-
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                and node.entity_type != "agent"
-            ):
-                c = node.properties.get("coords")
-                if not c:
-                    continue
-                if node.properties.get("is_door"):
-                    if node.properties.get("state") == "open":
-                        open_doors[c] = node
-                    else:
-                        closed_doors.add(c)
-                elif not node.properties.get("passable", False):
-                    walls.add(c)
-
-        # Sort open doors by proximity to agent
-        sorted_doors = sorted(
-            open_doors.items(),
-            key=lambda item: abs(item[0][0] - agent_pos[0]) + abs(item[0][1] - agent_pos[1]),
-        )
-
-        # Priority 1: Open doors leading into unvisited cells (closest first)
-        for dc, door_node in sorted_doors:
-            for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-                nc = (dc[0] + ddx, dc[1] + ddy)
-                if (
-                    0 < nc[0] < max_x - 1
-                    and 0 < nc[1] < max_y - 1
-                    and nc not in visited
-                    and nc not in walls
-                    and nc not in closed_doors
-                ):
-                    return (nc, door_node)
-
-        # Priority 2: Open door cells themselves that haven't been stepped on
-        for dc, door_node in sorted_doors:
-            if dc not in visited:
-                return (dc, door_node)
-
-        # Priority 3: BFS for nearest passable cell bordering unseen space
-        queue = collections.deque([agent_pos])
-        bfs_visited = {agent_pos}
-        while queue:
-            cx, cy = queue.popleft()
-            borders_unseen = False
-            for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-                nx, ny = cx + ddx, cy + ddy
-                if (
-                    0 < nx < max_x - 1
-                    and 0 < ny < max_y - 1
-                    and (nx, ny) not in walls
-                    and (nx, ny) not in seen
-                ):
-                    borders_unseen = True
-                    break
-
-            if borders_unseen and (cx, cy) != agent_pos:
-                return ((cx, cy), None)
-
-            for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-                nx, ny = cx + ddx, cy + ddy
-                if (
-                    0 < nx < max_x - 1
-                    and 0 < ny < max_y - 1
-                    and (nx, ny) not in bfs_visited
-                    and (nx, ny) not in walls
-                    and (nx, ny) not in closed_doors
-                ):
-                    bfs_visited.add((nx, ny))
-                    queue.append((nx, ny))
-
-        return None
+        agent_pos, _, _ = self.get_agent_state(graph)
+        grid = EpistemicSpatialGrid(graph, default_bounds=(self.width, self.height))
+        return grid.find_frontiers(agent_pos, visited_cells=self.visited_positions)
 
     def _plan_explore_frontier(self, graph: CognitiveGraph) -> list[MiniGridAction] | None:
         """Plan a path to the nearest open portal or frontier cell with target commitment."""
         agent_pos, agent_dir, _ = self.get_agent_state(graph)
 
-        # If we have an active frontier target, keep pursuing it until reached or visited
-        if self.active_frontier is not None:
-            visited_set = set(self.visited_positions)
-            agent_node = None
-            for node in graph.all_nodes():
-                if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
-                    agent_node = node
-                    break
-            if agent_node:
-                visited_set.update(agent_node.properties.get("visited_cells", []))
+        visited_set = set(self.visited_positions)
+        agent_node = None
+        for node in graph.all_nodes():
+            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
+                agent_node = node
+                break
+        if agent_node:
+            visited_set.update(agent_node.properties.get("visited_cells", []))
 
-            if agent_pos == self.active_frontier or self.active_frontier in visited_set:
-                self.active_frontier = None
-            else:
-                traj = self._plan_direct_path(
-                    graph=graph,
-                    start_pos=agent_pos,
-                    start_dir=agent_dir,
-                    target_pos=self.active_frontier,
-                    target_entity_type="waypoint",
-                    target_entity_id="",
-                    terminal_action=None,
-                    allow_walk_onto_target=True,
-                )
-                if traj and traj != [MiniGridAction.DONE]:
-                    return traj
-                self.active_frontier = None
+        # If we have an active frontier target, keep pursuing it until reached or visited
+        if self.frontier_navigator.is_valid(agent_pos, visited_set):
+            target_pos = self.frontier_navigator.active_frontier
+            assert target_pos is not None
+            traj = self._plan_direct_path(
+                graph=graph,
+                start_pos=agent_pos,
+                start_dir=agent_dir,
+                target_pos=target_pos,
+                target_entity_type="waypoint",
+                target_entity_id="",
+                terminal_action=None,
+                allow_walk_onto_target=True,
+            )
+            if traj and traj != [MiniGridAction.DONE]:
+                return traj
+            self.frontier_navigator.invalidate()
 
         frontier = self.find_unexplored_frontier(graph)
         if frontier is None:
@@ -557,7 +436,7 @@ class BabyAIActionAdapter:
             allow_walk_onto_target=True,
         )
         if traj and traj != [MiniGridAction.DONE]:
-            self.active_frontier = target_pos
+            self.frontier_navigator.commit(target_pos)
             return traj
         return None
 
@@ -568,116 +447,15 @@ class BabyAIActionAdapter:
         carrying_key: str | None = None,
     ) -> PhysicalEntityNode | None:
         """Find any pickupable obstacle directly adjacent to target_pos or along the path to it."""
-        # 1. First check immediate 1-step adjacency to target_pos
-        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            check_pos = (target_pos[0] + dx, target_pos[1] + dy)
-            for node in graph.all_nodes():
-                if (
-                    isinstance(node, PhysicalEntityNode)
-                    and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                    and node.entity_type in ("ball", "box", "key")
-                    and node.properties.get("coords") == check_pos
-                    and node.properties.get("pickupable", False)
-                ):
-                    return node
-
-        # 2. Path-level relaxed BFS
         agent_pos, agent_dir, _ = self.get_agent_state(graph)
-        node_coords = [
-            n.properties.get("coords", (0, 0))
-            for n in graph.all_nodes()
-            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
-        ]
-        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
-        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
-
-        walls: set[tuple[int, int]] = set()
-        closed_doors: set[tuple[int, int]] = set()
-        movable_obstacles: dict[tuple[int, int], PhysicalEntityNode] = {}
-
-        seen_cells: set[tuple[int, int]] = set()
-        agent_node = None
-        for node in graph.all_nodes():
-            if isinstance(node, PhysicalEntityNode) and node.entity_type == "agent":
-                agent_node = node
-                break
-        if agent_node:
-            seen_cells = set(agent_node.properties.get("seen_cells", []))
-            seen_cells.update(agent_node.properties.get("visited_cells", []))
-
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                and node.entity_type != "agent"
-            ):
-                c = node.properties.get("coords")
-                if not c:
-                    continue
-                if node.properties.get("is_door"):
-                    if node.properties.get("state") == "locked":
-                        if carrying_key is not None and (
-                            carrying_key == node.properties.get("color")
-                            or node.properties.get("color") is None
-                        ):
-                            closed_doors.add(c)
-                        else:
-                            walls.add(c)
-                    elif node.properties.get("state") == "closed":
-                        closed_doors.add(c)
-                elif node.properties.get("pickupable", False) and node.entity_type in (
-                    "ball",
-                    "box",
-                    "key",
-                ):
-                    movable_obstacles[c] = node
-                elif not node.properties.get("passable", False):
-                    walls.add(c)
-
-        start_state = (agent_pos[0], agent_pos[1], agent_dir, frozenset())
-        queue = collections.deque([(start_state, [])])
-        visited = {start_state}
-
-        def is_facing_or_at(x: int, y: int, d: int) -> bool:
-            if (x, y) == target_pos:
-                return True
-            fwd = DIR_TO_VEC[MiniGridDirection(d)]
-            return (x + fwd[0], y + fwd[1]) == target_pos
-
-        max_depth = max(100, (max_x + max_y) * 4)
-        while queue:
-            (cx, cy, cd, op_doors), path = queue.popleft()
-            if is_facing_or_at(cx, cy, cd):
-                for step_pos in path:
-                    if step_pos in movable_obstacles:
-                        return movable_obstacles[step_pos]
-                break
-
-            if len(path) > max_depth:
-                continue
-
-            for nd in [(cd - 1) % 4, (cd + 1) % 4]:
-                st = (cx, cy, nd, op_doors)
-                if st not in visited:
-                    visited.add(st)
-                    queue.append((st, path))
-
-            fwd = DIR_TO_VEC[MiniGridDirection(cd)]
-            front_pos = (cx + fwd[0], cy + fwd[1])
-            if 0 <= front_pos[0] < max_x and 0 <= front_pos[1] < max_y:
-                is_cd = front_pos in closed_doors and front_pos not in op_doors
-                if is_cd:
-                    st = (cx, cy, cd, op_doors | {front_pos})
-                    if st not in visited:
-                        visited.add(st)
-                        queue.append((st, path))
-                elif front_pos not in walls:
-                    st = (front_pos[0], front_pos[1], cd, op_doors)
-                    if st not in visited:
-                        visited.add(st)
-                        queue.append((st, path + [front_pos]))
-
-        return None
+        return self.obstacle_resolver.find_blocking_obstacle(
+            graph=graph,
+            agent_pos=agent_pos,
+            agent_dir=agent_dir,
+            target_pos=target_pos,
+            carrying_key=carrying_key,
+            dir_to_vec={d.value: v for d, v in DIR_TO_VEC.items()},
+        )
 
     def _plan_unblock_obstacle(
         self,
@@ -695,36 +473,13 @@ class BabyAIActionAdapter:
         curr_pos = agent_pos
         curr_dir = agent_dir
 
-        node_coords = [
-            n.properties.get("coords", (0, 0))
-            for n in graph.all_nodes()
-            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
-        ]
-        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
-        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
-
-        occupied: set[tuple[int, int]] = set()
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                and node.entity_type != "agent"
-            ):
-                c = node.properties.get("coords")
-                if c:
-                    occupied.add(c)
-
         # Phase 1: If already carrying something, drop it on an adjacent empty tile first
         if carrying is not None:
-            drop_candidates = [
-                (curr_pos[0] + dx, curr_pos[1] + dy)
-                for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]
-                if 0 < curr_pos[0] + dx < max_x - 1
-                and 0 < curr_pos[1] + dy < max_y - 1
-                and (curr_pos[0] + dx, curr_pos[1] + dy) not in occupied
-                and (curr_pos[0] + dx, curr_pos[1] + dy) != critical_pos
-                and (curr_pos[0] + dx, curr_pos[1] + dy) != blocker_pos
-            ]
+            drop_candidates = self.obstacle_resolver.find_safe_drop_candidates(
+                graph=graph,
+                curr_pos=curr_pos,
+                critical_positions={critical_pos, blocker_pos},
+            )
             if not drop_candidates:
                 return None
             drop_cell = drop_candidates[0]
@@ -759,32 +514,11 @@ class BabyAIActionAdapter:
         p_end, d_end = self._simulate_pose(curr_pos, curr_dir, u_acts)
 
         # Phase 3: Relocate the blocker away from critical_pos and blocker_pos
-        occupied.discard(blocker_pos)
-        forbidden_cells: set[tuple[int, int]] = {critical_pos, blocker_pos}
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-            ):
-                if node.properties.get("is_door") and node.properties.get("state") != "open":
-                    dc = node.properties.get("coords")
-                    if dc:
-                        forbidden_cells.add(dc)
-                        for ddx, ddy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                            forbidden_cells.add((dc[0] + ddx, dc[1] + ddy))
-                if node.entity_type == "key":
-                    kc = node.properties.get("coords")
-                    if kc:
-                        forbidden_cells.add(kc)
-
-        relocate_candidates = [
-            (p_end[0] + dx, p_end[1] + dy)
-            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]
-            if 0 < p_end[0] + dx < max_x - 1
-            and 0 < p_end[1] + dy < max_y - 1
-            and (p_end[0] + dx, p_end[1] + dy) not in occupied
-            and (p_end[0] + dx, p_end[1] + dy) not in forbidden_cells
-        ]
+        relocate_candidates = self.obstacle_resolver.find_safe_drop_candidates(
+            graph=graph,
+            curr_pos=p_end,
+            critical_positions={critical_pos, blocker_pos},
+        )
 
         for rc in relocate_candidates:
             drop_traj = self._plan_direct_path(
@@ -856,31 +590,18 @@ class BabyAIActionAdapter:
             (fx, fy - 1),
         ]
 
-        node_coords = [
-            n.properties.get("coords", (0, 0))
-            for n in graph.all_nodes()
-            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
-        ]
-        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
-        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
-
-        occupied_coords: set[tuple[int, int]] = set()
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                and node.entity_type != "agent"
-            ):
-                if target_node and node.id == target_node.id and prefix_actions:
-                    continue
-                c = node.properties.get("coords")
-                if c:
-                    occupied_coords.add(c)
+        grid = EpistemicSpatialGrid(graph, default_bounds=(self.width, self.height))
+        max_x, max_y = grid.get_bounds()
+        partition = grid.partition_cells(
+            ignored_entity_ids={target_node.id} if (target_node and prefix_actions) else None
+        )
 
         valid_drop_cells = [
             (nx, ny)
             for (nx, ny) in candidate_neighbors
-            if 0 < nx < max_x - 1 and 0 < ny < max_y - 1 and (nx, ny) not in occupied_coords
+            if 0 < nx < max_x - 1
+            and 0 < ny < max_y - 1
+            and (nx, ny) not in partition.occupied_coords
         ]
 
         if not valid_drop_cells:
@@ -913,70 +634,13 @@ class BabyAIActionAdapter:
         self, graph: CognitiveGraph, curr_pos: tuple[int, int], curr_dir: int
     ) -> list[MiniGridAction] | None:
         """Drop an unwanted carried obstacle onto an empty adjacent cell."""
-        node_coords = [
-            n.properties.get("coords", (0, 0))
-            for n in graph.all_nodes()
-            if isinstance(n, PhysicalEntityNode) and n.entity_lifecycle != EntityLifecycle.FORGOTTEN
-        ]
-        max_x = max([self.width] + [c[0] + 2 for c in node_coords])
-        max_y = max([self.height] + [c[1] + 2 for c in node_coords])
-
-        occupied: set[tuple[int, int]] = set()
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-                and node.entity_type != "agent"
-            ):
-                c = node.properties.get("coords")
-                if c:
-                    occupied.add(c)
-
-        forbidden_cells: set[tuple[int, int]] = set()
-        for node in graph.all_nodes():
-            if (
-                isinstance(node, PhysicalEntityNode)
-                and node.entity_lifecycle != EntityLifecycle.FORGOTTEN
-            ):
-                if node.properties.get("is_door"):
-                    dc = node.properties.get("coords")
-                    if dc:
-                        forbidden_cells.add(dc)
-                        if node.properties.get("state") != "open":
-                            for ddx, ddy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                                forbidden_cells.add((dc[0] + ddx, dc[1] + ddy))
-                if node.entity_type == "key":
-                    kc = node.properties.get("coords")
-                    if kc:
-                        forbidden_cells.add(kc)
-
-        drop_candidates = [
-            (curr_pos[0] + dx, curr_pos[1] + dy)
-            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]
-            if 0 < curr_pos[0] + dx < max_x - 1
-            and 0 < curr_pos[1] + dy < max_y - 1
-            and (curr_pos[0] + dx, curr_pos[1] + dy) not in occupied
-            and (curr_pos[0] + dx, curr_pos[1] + dy) not in forbidden_cells
-        ]
-        if not drop_candidates:
-            # Fall back to any non-occupied cell if forbidden filter is too strict
-            drop_candidates = [
-                (curr_pos[0] + dx, curr_pos[1] + dy)
-                for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]
-                if 0 < curr_pos[0] + dx < max_x - 1
-                and 0 < curr_pos[1] + dy < max_y - 1
-                and (curr_pos[0] + dx, curr_pos[1] + dy) not in occupied
-            ]
-        if not drop_candidates:
-            return None
-
-        # Prefer front cell if available so agent can drop without rotating
-        fwd = DIR_TO_VEC[MiniGridDirection(curr_dir)]
-        front_pos = (curr_pos[0] + fwd[0], curr_pos[1] + fwd[1])
-        if front_pos in drop_candidates:
-            drop_candidates.remove(front_pos)
-            drop_candidates.insert(0, front_pos)
-
+        drop_candidates = self.obstacle_resolver.find_safe_drop_candidates(
+            graph=graph,
+            curr_pos=curr_pos,
+            critical_positions=set(),
+            curr_dir=curr_dir,
+            dir_to_vec={d.value: v for d, v in DIR_TO_VEC.items()},
+        )
         for drop_cell in drop_candidates:
             traj = self._plan_direct_path(
                 graph=graph,
@@ -989,6 +653,7 @@ class BabyAIActionAdapter:
             )
             if traj is not None:
                 return traj
+
         return None
 
     def plan_trajectory(
@@ -1179,7 +844,7 @@ class BabyAIActionAdapter:
 
         # If direct path failed or requires an extreme detour, check for Causal Obstacle Unblocking (Tier 5)
         m_dist = abs(agent_pos[0] - target_pos[0]) + abs(agent_pos[1] - target_pos[1])
-        if traj is None or len(traj) > max(10, m_dist * 3):
+        if traj is None or self.obstacle_resolver.is_extreme_detour(len(traj), m_dist):
             blocker = self._find_blocking_obstacle(graph, target_pos, carrying_key=car_key_col)
             if blocker is not None:
                 unblock_traj = self._plan_unblock_obstacle(graph, blocker, critical_pos=target_pos)
