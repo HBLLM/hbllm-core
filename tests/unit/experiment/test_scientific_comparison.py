@@ -232,6 +232,16 @@ class TestTaskParityAndMetrics:
         assert summary.median == 0.94
         assert summary.ci_95_low < 0.94 < summary.ci_95_high
 
+        # Wilson score interval tests
+        prop_100 = ExperimentStatistics.summarize_proportion("success_rate", 100, 100)
+        assert prop_100.rate == 1.0
+        assert prop_100.ci_95_high == 1.0
+        assert 0.95 < prop_100.ci_95_low < 1.0
+
+        prop_90 = ExperimentStatistics.summarize_proportion("success_rate", 90, 100)
+        assert prop_90.rate == 0.90
+        assert prop_90.ci_95_low < 0.90 < prop_90.ci_95_high
+
 
 class TestAblationMatrixDegradation:
     """Verifies that disabling specific cognitive waves shows expected causal degradation."""

@@ -49,13 +49,7 @@ class CausalObstacleResolver:
         partition = grid.partition_cells(carrying_key=carrying_key)
         max_x, max_y = partition.max_x, partition.max_y
 
-        # 1. First check immediate 1-step adjacency to target_pos
-        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            check_pos = (target_pos[0] + dx, target_pos[1] + dy)
-            if check_pos in partition.movable_obstacles:
-                return partition.movable_obstacles[check_pos]
-
-        # 2. Path-level obstacle detection using relaxed BFS
+        # 1. Path-level obstacle detection using relaxed BFS (finds obstacle closest to agent)
         start_state = (agent_pos[0], agent_pos[1], agent_dir, frozenset())
         queue = collections.deque([(start_state, [])])
         visited = {start_state}
@@ -98,6 +92,12 @@ class CausalObstacleResolver:
                     if st not in visited:
                         visited.add(st)
                         queue.append((st, path + [front_pos]))
+
+        # 2. Fallback: check immediate 1-step adjacency to target_pos
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            check_pos = (target_pos[0] + dx, target_pos[1] + dy)
+            if check_pos in partition.movable_obstacles:
+                return partition.movable_obstacles[check_pos]
 
         return None
 

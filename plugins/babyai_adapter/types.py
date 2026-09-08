@@ -125,14 +125,20 @@ class BabyAIGoal:
         return len(self.subgoals) > 0
 
     def get_active_subgoal(self) -> BabyAIGoal:
-        """Return the current active subgoal (or self if single)."""
+        """Return the current active leaf subgoal (or self if single)."""
         if self.is_compound() and self.current_subgoal_idx < len(self.subgoals):
-            return self.subgoals[self.current_subgoal_idx]
+            sub = self.subgoals[self.current_subgoal_idx]
+            if sub.is_compound():
+                return sub.get_active_subgoal()
+            return sub
         return self
 
     def advance_subgoal(self) -> bool:
-        """Advance to next subgoal. Returns True if advanced, False if all completed."""
-        if self.is_compound():
+        """Advance to next subgoal, supporting nested compounds. Returns True if advanced, False if all completed."""
+        if self.is_compound() and self.current_subgoal_idx < len(self.subgoals):
+            sub = self.subgoals[self.current_subgoal_idx]
+            if sub.is_compound() and sub.advance_subgoal():
+                return True
             self.current_subgoal_idx += 1
             return self.current_subgoal_idx < len(self.subgoals)
         return False
@@ -140,6 +146,10 @@ class BabyAIGoal:
     def is_all_completed(self) -> bool:
         """Return True if all subgoals have been marked completed."""
         if self.is_compound():
+            if self.current_subgoal_idx < len(self.subgoals):
+                sub = self.subgoals[self.current_subgoal_idx]
+                if sub.is_compound() and not sub.is_all_completed():
+                    return False
             return self.current_subgoal_idx >= len(self.subgoals)
         return False
 
@@ -152,7 +162,13 @@ class BabyAIGoal:
         """Check if an entity satisfies this goal's type and color requirements."""
         if self.target_id and entity_id and self.target_id != entity_id:
             return False
-        if self.target_type and self.target_type != entity_type:
+        if (
+            self.target_type
+            and self.target_type not in ("object", "item")
+            and self.target_type != entity_type
+        ):
+            return False
+        if self.target_type in ("object", "item") and entity_type not in ("ball", "box", "key"):
             return False
         if self.target_color and color and self.target_color != color:
             return False
@@ -160,7 +176,13 @@ class BabyAIGoal:
 
     def matches_fixed_attributes(self, entity_type: str, color: str | None = None) -> bool:
         """Check if an entity satisfies the PutNext fixed landmark requirements."""
-        if self.fixed_type and self.fixed_type != entity_type:
+        if (
+            self.fixed_type
+            and self.fixed_type not in ("object", "item")
+            and self.fixed_type != entity_type
+        ):
+            return False
+        if self.fixed_type in ("object", "item") and entity_type not in ("ball", "box", "key"):
             return False
         if self.fixed_color and color and self.fixed_color != color:
             return False
