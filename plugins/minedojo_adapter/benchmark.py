@@ -94,17 +94,27 @@ class LLMOnlyMineDojoAgent:
         return self.rng.choice(acts)
 
 
-def run_minedojo_benchmark(
+MINEDOJO_TIERS = [
+    (1, "Tier 1: Wood Harvesting"),
+    (2, "Tier 2: Planks & Sticks"),
+    (3, "Tier 3: Crafting Table"),
+    (4, "Tier 4: Wooden Pickaxe"),
+    (5, "Tier 5: Stone Pickaxe"),
+]
+
+
+def run_minedojo_tier_benchmark(
     cohort_name: str,
-    episodes: int = 15,
+    tier: int,
+    episodes: int = 3,
     base_seed: int = 6000,
 ) -> dict[str, Any]:
-    """Run benchmark across episodes."""
+    """Run benchmark for a given cohort on a specific MineDojo tier."""
     results: list[MineDojoEpisodeResult] = []
 
     for i in range(episodes):
-        seed = base_seed + i
-        env = make_minedojo_env(seed=seed)
+        seed = base_seed + (tier * 100) + i
+        env = make_minedojo_env(seed=seed, tier=tier)
         obs, info = env.reset(seed=seed)
         goal: MineDojoGoal = info["goal"]
 
@@ -125,7 +135,7 @@ def run_minedojo_benchmark(
                 done = True
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        success = obs.inventory.wooden_pickaxe > 0
+        success = total_reward > 0.0
 
         results.append(
             MineDojoEpisodeResult(
@@ -142,33 +152,106 @@ def run_minedojo_benchmark(
 
     successes = sum(1 for r in results if r.success)
     ci_low, ci_high = wilson_score_interval(successes, episodes)
-    mean_steps = sum(r.steps for r in results) / episodes
+    mean_steps = sum(r.steps for r in results) / episodes if episodes else 0.0
 
     return {
         "cohort": cohort_name,
+        "tier": tier,
         "episodes": episodes,
-        "success_rate": successes / episodes,
+        "success_rate": successes / episodes if episodes else 0.0,
         "ci_95": [round(ci_low, 3), round(ci_high, 3)],
         "mean_steps": round(mean_steps, 1),
         "results": [asdict(r) for r in results],
     }
 
 
+def run_minedojo_benchmark(
+    cohort_name: str,
+    episodes: int = 15,
+    base_seed: int = 6000,
+) -> dict[str, Any]:
+    """Backwards-compatible benchmark across standard environments."""
+    eps_per_tier = max(1, episodes // len(MINEDOJO_TIERS))
+    all_results = []
+    total_successes = 0
+    total_steps = 0
+    total_eps = 0
+
+    for tier_id, _ in MINEDOJO_TIERS:
+        res = run_minedojo_tier_benchmark(
+            cohort_name, tier=tier_id, episodes=eps_per_tier, base_seed=base_seed
+        )
+        all_results.extend(res["results"])
+        total_eps += res["episodes"]
+        total_successes += sum(1 for r in res["results"] if r["success"])
+        total_steps += sum(r["steps"] for r in res["results"])
+
+    ci_low, ci_high = wilson_score_interval(total_successes, total_eps)
+
+    return {
+        "cohort": cohort_name,
+        "episodes": total_eps,
+        "success_rate": total_successes / total_eps if total_eps else 0.0,
+        "ci_95": [round(ci_low, 3), round(ci_high, 3)],
+        "mean_steps": round(total_steps / total_eps, 1) if total_eps else 0.0,
+        "results": all_results,
+    }
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MineDojo Three-Cohort Benchmark")
-    parser.add_argument("--episodes", type=int, default=15, help="Number of episodes")
+    parser = argparse.ArgumentParser(description="MineDojo Multi-Tier Benchmark")
+    parser.add_argument("--episodes-per-tier", type=int, default=3, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=6000, help="Base seed")
     args = parser.parse_args()
 
-    print(f"\n{'=' * 75}\nRunning MineDojo Benchmark (N={args.episodes} episodes)\n{'=' * 75}")
+    print(f"\n{'=' * 85}")
+    print(
+        f"Running MineDojo Full-Spectrum Benchmark (5 Tiers, N={args.episodes_per_tier} eps/tier)"
+    )
+    print(f"{'=' * 85}\n")
 
     for cohort in ("pure-hcir", "llm-only"):
-        data = run_minedojo_benchmark(cohort, episodes=args.episodes, base_seed=args.seed)
+        print(f"--- Cohort: {cohort.upper()} ---")
         print(
-            f"Cohort: {data['cohort']:<15} | "
-            f"Craft Pickaxe Rate: {data['success_rate'] * 100:5.1f}% CI={data['ci_95']} | "
-            f"Mean Steps: {data['mean_steps']:5.1f}"
+            f"{'Progression Tier':<35} | {'Success Rate':<12} | {'95% Wilson CI':<18} | {'Mean Steps'}"
         )
+        print("-" * 85)
+
+        total_eps = 0
+        total_successes = 0
+        total_steps = 0
+
+        for tier_id, tier_name in MINEDOJO_TIERS:
+            data = run_minedojo_tier_benchmark(
+                cohort,
+                tier=tier_id,
+                episodes=args.episodes_per_tier,
+                base_seed=args.seed,
+            )
+            total_eps += data["episodes"]
+            total_successes += sum(1 for r in data["results"] if r["success"])
+            total_steps += sum(r["steps"] for r in data["results"])
+
+            ci_str = f"[{data['ci_95'][0]:.3f}, {data['ci_95'][1]:.3f}]"
+            print(
+                f"{tier_name:<35} | "
+                f"{data['success_rate'] * 100:11.1f}% | "
+                f"{ci_str:<18} | "
+                f"{data['mean_steps']:10.1f}"
+            )
+
+        overall_rate = total_successes / total_eps if total_eps else 0.0
+        ci_low, ci_high = wilson_score_interval(total_successes, total_eps)
+        overall_steps = total_steps / total_eps if total_eps else 0.0
+
+        print("-" * 85)
+        print(
+            f"{'OVERALL':<35} | "
+            f"{overall_rate * 100:11.1f}% | "
+            f"[{ci_low:.3f}, {ci_high:.3f}]        | "
+            f"{overall_steps:10.1f} (Total {total_eps} eps)"
+        )
+        print("\n")
 
 
 if __name__ == "__main__":

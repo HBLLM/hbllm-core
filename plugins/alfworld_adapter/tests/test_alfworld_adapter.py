@@ -93,8 +93,8 @@ def test_alfworld_pure_hcir_pick_and_place() -> None:
 
 
 def test_alfworld_benchmark_smoke() -> None:
-    data = run_alfworld_benchmark("pure-hcir", episodes=3, base_seed=100)
-    assert data["episodes"] == 3
+    data = run_alfworld_benchmark("pure-hcir", episodes=6, base_seed=100)
+    assert data["episodes"] >= 6
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
-    assert len(data["results"]) == 3
+    assert len(data["results"]) >= 6

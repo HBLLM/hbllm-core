@@ -97,10 +97,22 @@ class CrafterActionAdapter:
             if inv.wood < 2:
                 act = self._navigate_and_interact(obs, CrafterObject.TREE)
                 return act or CrafterAction.NOOP
-            # Check if facing passable tile to place
-            return CrafterAction.PLACE_TABLE
+            tx = obs.player_pos[0] + obs.player_facing[0]
+            ty = obs.player_pos[1] + obs.player_facing[1]
+            if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
+                if obs.semantic_grid[ty][tx] in (
+                    CrafterObject.GRASS,
+                    CrafterObject.PATH,
+                    CrafterObject.SAND,
+                ):
+                    return CrafterAction.PLACE_TABLE
+            return CrafterAction.MOVE_LEFT
 
         if ach == CrafterAchievement.MAKE_WOOD_PICKAXE:
+            if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
+                obs, CrafterObject.CRAFTING_TABLE, radius=30
+            ):
+                return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
             if inv.wood < 1:
                 act = self._navigate_and_interact(obs, CrafterObject.TREE)
                 return act or CrafterAction.NOOP
@@ -117,6 +129,10 @@ class CrafterActionAdapter:
             return act or CrafterAction.NOOP
 
         if ach == CrafterAchievement.MAKE_STONE_PICKAXE:
+            if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
+                obs, CrafterObject.CRAFTING_TABLE, radius=30
+            ):
+                return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
             if inv.stone < 1:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_STONE)
             if inv.wood < 1:

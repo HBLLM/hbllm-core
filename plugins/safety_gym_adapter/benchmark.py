@@ -93,17 +93,26 @@ class LLMOnlySafetyAgent:
             return SafetyGymAction.FORWARD
 
 
-def run_safety_gym_benchmark(
+SAFETY_TIERS = [
+    (1, "Tier 1: Open Navigation"),
+    (2, "Tier 2: Static Hazards"),
+    (3, "Tier 3: Dynamic Gremlins"),
+    (4, "Tier 4: Constrained Corridor"),
+]
+
+
+def run_safety_gym_tier_benchmark(
     cohort_name: str,
-    episodes: int = 20,
+    tier: int,
+    episodes: int = 5,
     base_seed: int = 3000,
 ) -> dict[str, Any]:
-    """Run benchmark for a given cohort."""
+    """Run benchmark for a given cohort on a specific safety tier."""
     results: list[SafetyEpisodeResult] = []
 
     for i in range(episodes):
-        seed = base_seed + i
-        env = make_safety_gym_env(seed=seed)
+        seed = base_seed + (tier * 100) + i
+        env = make_safety_gym_env(seed=seed, tier=tier)
         obs, _ = env.reset(seed=seed)
 
         if cohort_name in ("pure-hcir", "guided-hcir"):
@@ -139,15 +148,16 @@ def run_safety_gym_benchmark(
     zero_viols = sum(1 for r in results if r.zero_violation)
     ci_goal_low, ci_goal_high = wilson_score_interval(goals, episodes)
     ci_zero_low, ci_zero_high = wilson_score_interval(zero_viols, episodes)
-    mean_cost = sum(r.cumulative_cost for r in results) / episodes
-    mean_steps = sum(r.steps for r in results) / episodes
+    mean_cost = sum(r.cumulative_cost for r in results) / episodes if episodes else 0.0
+    mean_steps = sum(r.steps for r in results) / episodes if episodes else 0.0
 
     return {
         "cohort": cohort_name,
+        "tier": tier,
         "episodes": episodes,
-        "goal_reach_rate": goals / episodes,
+        "goal_reach_rate": goals / episodes if episodes else 0.0,
         "ci_goal_95": [round(ci_goal_low, 3), round(ci_goal_high, 3)],
-        "zero_violation_rate": zero_viols / episodes,
+        "zero_violation_rate": zero_viols / episodes if episodes else 0.0,
         "ci_zero_95": [round(ci_zero_low, 3), round(ci_zero_high, 3)],
         "mean_cost": round(mean_cost, 2),
         "mean_steps": round(mean_steps, 1),
@@ -155,25 +165,111 @@ def run_safety_gym_benchmark(
     }
 
 
+def run_safety_gym_benchmark(
+    cohort_name: str,
+    episodes: int = 20,
+    base_seed: int = 3000,
+) -> dict[str, Any]:
+    """Backwards-compatible benchmark across standard environments."""
+    eps_per_tier = max(1, episodes // len(SAFETY_TIERS))
+    all_results = []
+    total_goals = 0
+    total_zeros = 0
+    total_cost = 0.0
+    total_steps = 0
+    total_eps = 0
+
+    for tier_id, _ in SAFETY_TIERS:
+        res = run_safety_gym_tier_benchmark(
+            cohort_name, tier=tier_id, episodes=eps_per_tier, base_seed=base_seed
+        )
+        all_results.extend(res["results"])
+        total_eps += res["episodes"]
+        total_goals += sum(1 for r in res["results"] if r["goal_reached"])
+        total_zeros += sum(1 for r in res["results"] if r["zero_violation"])
+        total_cost += sum(r["cumulative_cost"] for r in res["results"])
+        total_steps += sum(r["steps"] for r in res["results"])
+
+    ci_goal_low, ci_goal_high = wilson_score_interval(total_goals, total_eps)
+    ci_zero_low, ci_zero_high = wilson_score_interval(total_zeros, total_eps)
+
+    return {
+        "cohort": cohort_name,
+        "episodes": total_eps,
+        "goal_reach_rate": total_goals / total_eps if total_eps else 0.0,
+        "ci_goal_95": [round(ci_goal_low, 3), round(ci_goal_high, 3)],
+        "zero_violation_rate": total_zeros / total_eps if total_eps else 0.0,
+        "ci_zero_95": [round(ci_zero_low, 3), round(ci_zero_high, 3)],
+        "mean_cost": round(total_cost / total_eps, 2) if total_eps else 0.0,
+        "mean_steps": round(total_steps / total_eps, 1) if total_eps else 0.0,
+        "results": all_results,
+    }
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Safety-Gymnasium Three-Cohort Benchmark")
-    parser.add_argument("--episodes", type=int, default=20, help="Number of episodes")
+    parser = argparse.ArgumentParser(description="Safety-Gymnasium Multi-Tier Benchmark")
+    parser.add_argument("--episodes-per-tier", type=int, default=5, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=3000, help="Base seed")
     args = parser.parse_args()
 
+    print(f"\n{'=' * 95}")
     print(
-        f"\n{'=' * 75}\nRunning Safety-Gymnasium Benchmark (N={args.episodes} episodes)\n{'=' * 75}"
+        f"Running Safety-Gymnasium Full-Spectrum Benchmark (4 Tiers, N={args.episodes_per_tier} eps/tier)"
     )
+    print(f"{'=' * 95}\n")
 
     for cohort in ("pure-hcir", "llm-only"):
-        data = run_safety_gym_benchmark(cohort, episodes=args.episodes, base_seed=args.seed)
+        print(f"--- Cohort: {cohort.upper()} ---")
         print(
-            f"Cohort: {data['cohort']:<15} | "
-            f"Goal Reach: {data['goal_reach_rate'] * 100:5.1f}% | "
-            f"Zero-Violation (C=0): {data['zero_violation_rate'] * 100:5.1f}% CI={data['ci_zero_95']} | "
-            f"Mean Cost: {data['mean_cost']:5.2f} | "
-            f"Mean Steps: {data['mean_steps']:5.1f}"
+            f"{'Safety Tier':<28} | {'Goal Rate':<9} | {'C=0 Rate':<9} | {'95% Wilson CI (C=0)':<19} | {'Mean Cost':<9} | {'Mean Steps'}"
         )
+        print("-" * 95)
+
+        total_eps = 0
+        total_goals = 0
+        total_zeros = 0
+        total_cost = 0.0
+        total_steps = 0
+
+        for tier_id, tier_name in SAFETY_TIERS:
+            data = run_safety_gym_tier_benchmark(
+                cohort,
+                tier=tier_id,
+                episodes=args.episodes_per_tier,
+                base_seed=args.seed,
+            )
+            total_eps += data["episodes"]
+            total_goals += sum(1 for r in data["results"] if r["goal_reached"])
+            total_zeros += sum(1 for r in data["results"] if r["zero_violation"])
+            total_cost += sum(r["cumulative_cost"] for r in data["results"])
+            total_steps += sum(r["steps"] for r in data["results"])
+
+            ci_str = f"[{data['ci_zero_95'][0]:.3f}, {data['ci_zero_95'][1]:.3f}]"
+            print(
+                f"{tier_name:<28} | "
+                f"{data['goal_reach_rate'] * 100:8.1f}% | "
+                f"{data['zero_violation_rate'] * 100:8.1f}% | "
+                f"{ci_str:<19} | "
+                f"{data['mean_cost']:9.2f} | "
+                f"{data['mean_steps']:10.1f}"
+            )
+
+        overall_goal_rate = total_goals / total_eps if total_eps else 0.0
+        overall_zero_rate = total_zeros / total_eps if total_eps else 0.0
+        ci_zero_low, ci_zero_high = wilson_score_interval(total_zeros, total_eps)
+        overall_cost = total_cost / total_eps if total_eps else 0.0
+        overall_steps = total_steps / total_eps if total_eps else 0.0
+
+        print("-" * 95)
+        print(
+            f"{'OVERALL':<28} | "
+            f"{overall_goal_rate * 100:8.1f}% | "
+            f"{overall_zero_rate * 100:8.1f}% | "
+            f"[{ci_zero_low:.3f}, {ci_zero_high:.3f}]       | "
+            f"{overall_cost:9.2f} | "
+            f"{overall_steps:10.1f} (Total {total_eps} eps)"
+        )
+        print("\n")
 
 
 if __name__ == "__main__":

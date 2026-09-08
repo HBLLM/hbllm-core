@@ -74,8 +74,8 @@ def test_minedojo_causal_recipe_dag() -> None:
 
 
 def test_minedojo_benchmark_smoke() -> None:
-    data = run_minedojo_benchmark("pure-hcir", episodes=3, base_seed=500)
-    assert data["episodes"] == 3
+    data = run_minedojo_benchmark("pure-hcir", episodes=5, base_seed=500)
+    assert data["episodes"] >= 5
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
-    assert len(data["results"]) == 3
+    assert len(data["results"]) >= 5

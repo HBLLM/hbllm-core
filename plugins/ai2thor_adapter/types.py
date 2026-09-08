@@ -89,6 +89,6 @@ class AI2ThorObservation:
 class AI2ThorGoal:
     """Task target specification."""
 
-    target_object_id: str
-    target_receptacle_id: str
+    target_object_id: str | None = None
+    target_receptacle_id: str | None = None
     raw_instruction: str = ""

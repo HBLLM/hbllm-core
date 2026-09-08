@@ -37,9 +37,11 @@ class StandaloneNetHackEnv:
         height: int = 21,
         width: int = 79,
         seed: int | None = None,
+        tier: int = 5,
     ) -> None:
         self.height = height
         self.width = width
+        self.tier = tier
         self.rng = random.Random(seed)
 
         self.dungeon_level = 1
@@ -73,7 +75,7 @@ class StandaloneNetHackEnv:
         return self._get_obs(), {}
 
     def _generate_dungeon(self) -> None:
-        """Generate 2 rooms connected by a corridor with a closed door."""
+        """Generate procedural dungeon according to benchmark tier."""
         self.full_grid = [
             [NetHackGlyph.WALL for _ in range(self.width)] for _ in range(self.height)
         ]
@@ -87,7 +89,26 @@ class StandaloneNetHackEnv:
             for x in range(r1_x1, r1_x2 + 1):
                 self.full_grid[y][x] = NetHackGlyph.FLOOR
 
-        # Room 2: (35, 5) to (50, 14)
+        # Tier 1: Single Room Navigation
+        if self.tier == 1:
+            self.player_pos = (r1_x1 + 2, r1_y1 + 2)
+            self.stairs_pos = (r1_x2 - 2, r1_y2 - 2)
+            sx, sy = self.stairs_pos
+            self.full_grid[sy][sx] = NetHackGlyph.STAIRS_DOWN
+            return
+
+        # Tier 4: Monster Combat (Single room with monster blocking stairs)
+        if self.tier == 4:
+            self.player_pos = (r1_x1 + 2, r1_y1 + 2)
+            mx, my = r1_x1 + 6, r1_y1 + 2
+            self.full_grid[my][mx] = NetHackGlyph.MONSTER
+            self.monsters[(mx, my)] = 6
+            self.stairs_pos = (r1_x2 - 2, r1_y1 + 2)
+            sx, sy = self.stairs_pos
+            self.full_grid[sy][sx] = NetHackGlyph.STAIRS_DOWN
+            return
+
+        # Tiers 2, 3, 5: Two Rooms connected by corridor
         r2_x1, r2_y1, r2_x2, r2_y2 = 35, 5, 50, 14
         for y in range(r2_y1, r2_y2 + 1):
             for x in range(r2_x1, r2_x2 + 1):
@@ -98,24 +119,29 @@ class StandaloneNetHackEnv:
         for x in range(r1_x2 + 1, r2_x1):
             self.full_grid[cy][x] = NetHackGlyph.CORRIDOR
 
-        # Closed Door at Room 1 corridor exit
-        door_x = r1_x2
-        self.full_grid[cy][door_x] = NetHackGlyph.DOOR_CLOSED
-
         # Player placed in Room 1
         self.player_pos = (r1_x1 + 2, r1_y1 + 2)
 
-        # Stairs Down placed in Room 2
+        # Stairs placed in Room 2
         self.stairs_pos = (r2_x2 - 2, r2_y2 - 2)
         sx, sy = self.stairs_pos
         self.full_grid[sy][sx] = NetHackGlyph.STAIRS_DOWN
 
-        # Add monster in Room 2
+        if self.tier == 2:
+            # Tier 2: Open Corridor Exploration (no door, no monster)
+            self.full_grid[cy][r1_x2] = NetHackGlyph.FLOOR
+            return
+
+        if self.tier == 3:
+            # Tier 3: Closed Door Navigation (closed door, no monster)
+            self.full_grid[cy][r1_x2] = NetHackGlyph.DOOR_CLOSED
+            return
+
+        # Tier 5: Full Dungeon Descent (closed door + monster)
+        self.full_grid[cy][r1_x2] = NetHackGlyph.DOOR_CLOSED
         mx, my = r2_x1 + 4, cy
         self.full_grid[my][mx] = NetHackGlyph.MONSTER
         self.monsters[(mx, my)] = 6
-
-        # Add key on floor in Room 1
         self.full_grid[r1_y2 - 2][r1_x1 + 4] = NetHackGlyph.KEY
 
     def _update_visibility(self) -> None:
@@ -252,12 +278,12 @@ class StandaloneNetHackEnv:
         )
 
 
-def make_nethack_env(seed: int | None = None) -> StandaloneNetHackEnv:
+def make_nethack_env(seed: int | None = None, tier: int = 5) -> StandaloneNetHackEnv:
     """Instantiate NetHack environment, falling back smoothly to standalone simulation."""
     try:
         # If minihack works
         logger.info("Using native minihack environment")
-        return StandaloneNetHackEnv(seed=seed)
+        return StandaloneNetHackEnv(seed=seed, tier=tier)
     except Exception as e:
         logger.debug("Native minihack unavailable (%s), using StandaloneNetHackEnv", e)
-        return StandaloneNetHackEnv(seed=seed)
+        return StandaloneNetHackEnv(seed=seed, tier=tier)

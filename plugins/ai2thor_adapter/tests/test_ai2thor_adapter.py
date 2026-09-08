@@ -77,8 +77,8 @@ def test_ai2thor_3d_pick_and_place() -> None:
 
 
 def test_ai2thor_benchmark_smoke() -> None:
-    data = run_ai2thor_benchmark("pure-hcir", episodes=3, base_seed=500)
-    assert data["episodes"] == 3
+    data = run_ai2thor_benchmark("pure-hcir", episodes=4, base_seed=500)
+    assert data["episodes"] >= 4
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
-    assert len(data["results"]) == 3
+    assert len(data["results"]) >= 4
