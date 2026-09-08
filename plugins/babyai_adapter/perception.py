@@ -37,6 +37,8 @@ class BabyAIPerceptionAdapter:
         self.graph = graph if graph is not None else CognitiveGraph()
         self.agent_id = "agent_primary"
         self._known_entities: dict[tuple[int, int], str] = {}  # (wx, wy) -> entity_id
+        self.visited_cells: set[tuple[int, int]] = set()
+        self.seen_cells: set[tuple[int, int]] = set()
 
     def ingest_observation(
         self,
@@ -64,6 +66,7 @@ class BabyAIPerceptionAdapter:
         # Determine agent position: from extra metadata, argument, or graph
         agent_pos = known_agent_pos or obs.extra.get("agent_pos", (1, 1))
         direction = obs.direction
+        self.visited_cells.add(agent_pos)
 
         # In MiniGrid, the agent's carried item is placed at (view_size // 2, view_size - 1)
         # in the partially observable view (e.g. vx=3, vy=6 for a 7x7 grid)
@@ -119,6 +122,8 @@ class BabyAIPerceptionAdapter:
                 "direction": direction,
                 "direction_name": MiniGridDirection(direction).name.lower(),
                 "carrying": carrying_info,
+                "visited_cells": set(self.visited_cells),
+                "seen_cells": set(self.seen_cells),
             },
             entity_lifecycle=EntityLifecycle.TRACKED,
         )
@@ -155,6 +160,9 @@ class BabyAIPerceptionAdapter:
                 obj_type = IDX_TO_OBJECT.get(obj_idx, "unseen")
                 color = IDX_TO_COLOR.get(col_idx, "red")
                 state = IDX_TO_STATE.get(state_idx, "open")
+
+                if obj_type != "unseen":
+                    self.seen_cells.add((wx, wy))
 
                 if obj_type in ("unseen", "empty", "floor"):
                     # If this cell previously had an object, and now it's empty, mark forgotten
