@@ -11,18 +11,21 @@ from hbllm.perception.reality_bus import (
     RealityEventBus,
 )
 from hbllm.perception.reflex_arc import ReflexArc, ReflexRule
+from hbllm.perception.spatial_grid import EpistemicSpatialGrid, SpatialCellPartition
 from hbllm.perception.vector_projector import MultimodalProjector
 from hbllm.perception.vision_node import VisionNode
 
 __all__ = [
     "AudioInputNode",
     "AudioOutputNode",
+    "EpistemicSpatialGrid",
     "EventLog",
     "EventNormalizer",
     "EventOrigin",
     "PerceptionEvent",
     "PerceptionModality",
     "RealityEventBus",
+    "SpatialCellPartition",
     "VisionNode",
     "MultimodalProjector",
     "ReflexArc",

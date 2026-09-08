@@ -17,6 +17,7 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     PhysicalEntityNode,
 )
+from hbllm.perception import EpistemicSpatialGrid
 
 from .types import (
     DIR_TO_VEC,
@@ -37,8 +38,17 @@ class BabyAIPerceptionAdapter:
         self.graph = graph if graph is not None else CognitiveGraph()
         self.agent_id = "agent_primary"
         self._known_entities: dict[tuple[int, int], str] = {}  # (wx, wy) -> entity_id
-        self.visited_cells: set[tuple[int, int]] = set()
-        self.seen_cells: set[tuple[int, int]] = set()
+        self.grid = EpistemicSpatialGrid(self.graph)
+
+    @property
+    def visited_cells(self) -> set[tuple[int, int]]:
+        """Allocentric cells stepped on by the agent."""
+        return self.grid.visited_cells
+
+    @property
+    def seen_cells(self) -> set[tuple[int, int]]:
+        """Allocentric cells observed by the agent."""
+        return self.grid.seen_cells
 
     def ingest_observation(
         self,
@@ -66,7 +76,7 @@ class BabyAIPerceptionAdapter:
         # Determine agent position: from extra metadata, argument, or graph
         agent_pos = known_agent_pos or obs.extra.get("agent_pos", (1, 1))
         direction = obs.direction
-        self.visited_cells.add(agent_pos)
+        self.grid.mark_visited(agent_pos)
 
         # In MiniGrid, the agent's carried item is placed at (view_size // 2, view_size - 1)
         # in the partially observable view (e.g. vx=3, vy=6 for a 7x7 grid)
@@ -162,7 +172,7 @@ class BabyAIPerceptionAdapter:
                 state = IDX_TO_STATE.get(state_idx, "open")
 
                 if obj_type != "unseen":
-                    self.seen_cells.add((wx, wy))
+                    self.grid.mark_seen([(wx, wy)])
 
                 if obj_type in ("unseen", "empty", "floor"):
                     # If this cell previously had an object, and now it's empty, mark forgotten
