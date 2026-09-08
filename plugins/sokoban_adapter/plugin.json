@@ -1,0 +1,20 @@
+{
+  "name": "sokoban-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Sokoban Combinatorial Irreversibility, Deadlock Avoidance, and Box-Pushing planning plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "sokoban", "boxoban", "combinatorial", "deadlock-avoidance", "hcir"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "sokoban_observe",
+    "sokoban_act",
+    "sokoban_plan_push",
+    "sokoban_detect_deadlocks",
+    "sokoban_step"
+  ],
+  "permissions": ["environment_simulation"]
+}

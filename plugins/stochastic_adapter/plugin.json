@@ -1,0 +1,20 @@
+{
+  "name": "stochastic-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Sensorimotor Noise, Actuator Slip, Perceptual Dropout, and Epistemic Belief Revision adapter plugin for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": ["eval", "benchmark", "stochasticity", "noise", "epistemics", "belief-revision", "hcir"],
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "stochastic_observe",
+    "stochastic_act",
+    "stochastic_filter_belief",
+    "stochastic_detect_surprise",
+    "stochastic_step"
+  ],
+  "permissions": ["environment_simulation"]
+}
