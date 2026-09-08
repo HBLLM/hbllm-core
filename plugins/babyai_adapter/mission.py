@@ -13,7 +13,9 @@ from .types import BabyAIGoal
 
 # Canonical English vocab
 _EN_COLORS = {"red", "green", "blue", "purple", "yellow", "grey", "gray"}
-_EN_OBJECTS = {"ball", "box", "key", "door"}
+_EN_OBJECTS_SPECIFIC = ["ball", "box", "key", "door"]
+_EN_OBJECTS_GENERIC = ["object", "item"]
+_EN_OBJECTS = set(_EN_OBJECTS_SPECIFIC) | set(_EN_OBJECTS_GENERIC)
 
 # Sinhala lexicon
 _SI_COLORS = {
@@ -77,11 +79,18 @@ class BabyAIMissionParser:
             if re.search(rf"\b{color}\b", text):
                 found_color = "grey" if color == "gray" else color
                 break
-        found_object = "ball"
-        for obj in _EN_OBJECTS:
+        found_object = None
+        for obj in _EN_OBJECTS_SPECIFIC:
             if re.search(rf"\b{obj}\b", text):
                 found_object = obj
                 break
+        if found_object is None:
+            for obj in _EN_OBJECTS_GENERIC:
+                if re.search(rf"\b{obj}\b", text):
+                    found_object = "object"
+                    break
+        if found_object is None:
+            found_object = "ball"
         return found_object, found_color
 
     def _extract_entity_si(self, text: str) -> tuple[str, str | None]:
@@ -111,6 +120,10 @@ class BabyAIMissionParser:
         return found_object, found_color
 
     def _parse_english(self, cleaned: str, raw: str) -> BabyAIGoal:
+        # Strip relative agent-centric phrases that describe spatial perspective
+        for phrase in (" in front of you", " behind you", " on your left", " on your right"):
+            cleaned = cleaned.replace(phrase, "")
+
         # Check compound sequencing in English
         if " after you " in cleaned:
             parts = cleaned.split(" after you ", 1)
@@ -146,7 +159,7 @@ class BabyAIMissionParser:
                 raw_instruction=raw,
             )
 
-        if " and " in cleaned and (" next to " not in cleaned):
+        if " and " in cleaned:
             parts = cleaned.split(" and ")
             subgoals = [self._parse_english(p, p) for p in parts]
             return BabyAIGoal(

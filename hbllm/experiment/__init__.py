@@ -26,7 +26,7 @@ from hbllm.experiment.manifests import ReproducibilityManifest
 from hbllm.experiment.metrics import ExperimentMetricsCalculator
 from hbllm.experiment.reports import ScientificExperimentReport
 from hbllm.experiment.runner import ExperimentRunner
-from hbllm.experiment.statistics import ExperimentStatistics, MetricSummary
+from hbllm.experiment.statistics import ExperimentStatistics, MetricSummary, ProportionSummary
 from hbllm.experiment.tasks import (
     E1_ConceptAcquisitionTask,
     E2_LexicalAcquisitionTask,
@@ -67,6 +67,7 @@ __all__ = [
     "LeakageAuditor",
     "MetricSummary",
     "PhysicalEnvironmentState",
+    "ProportionSummary",
     "ReproducibilityManifest",
     "ScientificExperimentReport",
     "TaskEvaluationResult",
