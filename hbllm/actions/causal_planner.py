@@ -48,11 +48,9 @@ class CausalObstacleResolver:
         grid = EpistemicSpatialGrid(graph, default_bounds=(self.grid.width, self.grid.height))
         partition = grid.partition_cells(carrying_key=carrying_key)
         max_x, max_y = partition.max_x, partition.max_y
+        max_depth = max(100, (max_x + max_y) * 4)
 
-        # 1. Path-level obstacle detection using relaxed BFS (finds obstacle closest to agent)
         start_state = (agent_pos[0], agent_pos[1], agent_dir, frozenset())
-        queue = collections.deque([(start_state, [])])
-        visited = {start_state}
 
         def is_facing_or_at(x: int, y: int, d: int) -> bool:
             if (x, y) == target_pos:
@@ -60,7 +58,9 @@ class CausalObstacleResolver:
             fwd = vecs[d % 4]
             return (x + fwd[0], y + fwd[1]) == target_pos
 
-        max_depth = max(100, (max_x + max_y) * 4)
+        # 1. Path-level obstacle detection using relaxed BFS (finds obstacle closest to agent)
+        queue = collections.deque([(start_state, [])])
+        visited = {start_state}
         while queue:
             (cx, cy, cd, op_doors), path = queue.popleft()
             if is_facing_or_at(cx, cy, cd):

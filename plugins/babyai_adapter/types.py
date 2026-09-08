@@ -116,6 +116,9 @@ class BabyAIGoal:
     sequence_mode: str = "single"  # "single", "sequence", "and", "after"
     current_subgoal_idx: int = 0
 
+    # Egocentric spatial qualifier: "front", "behind", "left", "right"
+    relative_loc: str | None = None
+
     language: str = "en"
     raw_instruction: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -123,6 +126,15 @@ class BabyAIGoal:
     def is_compound(self) -> bool:
         """Return True if this goal contains multiple sequential subgoals."""
         return len(self.subgoals) > 0
+
+    def flatten_subgoals(self) -> list[BabyAIGoal]:
+        """Recursively flatten all nested subgoals into an ordered list of leaf subgoals."""
+        if not self.is_compound():
+            return [self]
+        res: list[BabyAIGoal] = []
+        for s in self.subgoals:
+            res.extend(s.flatten_subgoals())
+        return res
 
     def get_active_subgoal(self) -> BabyAIGoal:
         """Return the current active leaf subgoal (or self if single)."""

@@ -124,41 +124,45 @@ class BabyAIMissionParser:
                 break
         return found_object, found_color
 
-    def _parse_english(self, cleaned: str, raw: str) -> BabyAIGoal:
-        # Strip relative agent-centric phrases that describe spatial perspective
-        for phrase in (" in front of you", " behind you", " on your left", " on your right"):
-            cleaned = cleaned.replace(phrase, "")
+    def _extract_relative_loc_en(self, text: str) -> tuple[str, str | None]:
+        rel = None
+        cleaned = text
+        for phrase, loc_name in [
+            (" in front of you", "front"),
+            (" behind you", "behind"),
+            (" on your left", "left"),
+            (" on your right", "right"),
+        ]:
+            if phrase in cleaned:
+                rel = loc_name
+                cleaned = cleaned.replace(phrase, "")
+        return cleaned, rel
 
+    def _parse_english(self, cleaned: str, raw: str) -> BabyAIGoal:
         # Check compound sequencing in English
         if " after you " in cleaned:
             parts = cleaned.split(" after you ", 1)
-            sub_b = self._parse_english(parts[1], parts[1])
-            sub_a = self._parse_english(parts[0], parts[0])
+            # Causal prerequisite: parts[1] must precede parts[0]
+            sub_prereq = self._parse_english(parts[1], parts[1])
+            sub_action = self._parse_english(parts[0], parts[0])
+            flat_subgoals = sub_prereq.flatten_subgoals() + sub_action.flatten_subgoals()
             return BabyAIGoal(
                 action="sequence",
-                subgoals=[sub_b, sub_a],
+                subgoals=flat_subgoals,
                 sequence_mode="after",
                 language="en",
                 raw_instruction=raw,
             )
 
-        if ", then " in cleaned:
-            parts = cleaned.split(", then ")
-            subgoals = [self._parse_english(p, p) for p in parts]
+        if ", then " in cleaned or " then " in cleaned:
+            delim = ", then " if ", then " in cleaned else " then "
+            parts = cleaned.split(delim)
+            flat_subgoals: list[BabyAIGoal] = []
+            for p in parts:
+                flat_subgoals.extend(self._parse_english(p, p).flatten_subgoals())
             return BabyAIGoal(
                 action="sequence",
-                subgoals=subgoals,
-                sequence_mode="sequence",
-                language="en",
-                raw_instruction=raw,
-            )
-
-        if " then " in cleaned:
-            parts = cleaned.split(" then ")
-            subgoals = [self._parse_english(p, p) for p in parts]
-            return BabyAIGoal(
-                action="sequence",
-                subgoals=subgoals,
+                subgoals=flat_subgoals,
                 sequence_mode="sequence",
                 language="en",
                 raw_instruction=raw,
@@ -166,14 +170,19 @@ class BabyAIMissionParser:
 
         if " and " in cleaned:
             parts = cleaned.split(" and ")
-            subgoals = [self._parse_english(p, p) for p in parts]
+            flat_subgoals = []
+            for p in parts:
+                flat_subgoals.extend(self._parse_english(p, p).flatten_subgoals())
             return BabyAIGoal(
                 action="sequence",
-                subgoals=subgoals,
+                subgoals=flat_subgoals,
                 sequence_mode="and",
                 language="en",
                 raw_instruction=raw,
             )
+
+        # Single clause: extract relative location if present
+        cleaned, rel_loc = self._extract_relative_loc_en(cleaned)
 
         # Check PutNext
         if " next to " in cleaned:
@@ -186,6 +195,7 @@ class BabyAIMissionParser:
                 target_color=target_col,
                 fixed_type=fixed_obj,
                 fixed_color=fixed_col,
+                relative_loc=rel_loc,
                 language="en",
                 raw_instruction=raw,
             )
@@ -204,6 +214,7 @@ class BabyAIMissionParser:
             action=action,
             target_type=found_object,
             target_color=found_color,
+            relative_loc=rel_loc,
             language="en",
             raw_instruction=raw,
         )
@@ -212,10 +223,12 @@ class BabyAIMissionParser:
         # Check compound sequencing in Sinhala
         if "පසුව" in cleaned:  # then
             parts = cleaned.split("පසුව")
-            subgoals = [self._parse_sinhala(p, p) for p in parts]
+            flat_subgoals: list[BabyAIGoal] = []
+            for p in parts:
+                flat_subgoals.extend(self._parse_sinhala(p, p).flatten_subgoals())
             return BabyAIGoal(
                 action="sequence",
-                subgoals=subgoals,
+                subgoals=flat_subgoals,
                 sequence_mode="sequence",
                 language="si",
                 raw_instruction=raw,
@@ -223,10 +236,12 @@ class BabyAIMissionParser:
 
         if " සහ " in cleaned:  # and
             parts = cleaned.split(" සහ ")
-            subgoals = [self._parse_sinhala(p, p) for p in parts]
+            flat_subgoals = []
+            for p in parts:
+                flat_subgoals.extend(self._parse_sinhala(p, p).flatten_subgoals())
             return BabyAIGoal(
                 action="sequence",
-                subgoals=subgoals,
+                subgoals=flat_subgoals,
                 sequence_mode="and",
                 language="si",
                 raw_instruction=raw,
@@ -271,10 +286,12 @@ class BabyAIMissionParser:
         # Check compound sequencing in Tamil
         if "பிறகு" in cleaned:  # then / after
             parts = cleaned.split("பிறகு")
-            subgoals = [self._parse_tamil(p, p) for p in parts]
+            flat_subgoals: list[BabyAIGoal] = []
+            for p in parts:
+                flat_subgoals.extend(self._parse_tamil(p, p).flatten_subgoals())
             return BabyAIGoal(
                 action="sequence",
-                subgoals=subgoals,
+                subgoals=flat_subgoals,
                 sequence_mode="sequence",
                 language="ta",
                 raw_instruction=raw,
@@ -282,10 +299,12 @@ class BabyAIMissionParser:
 
         if " மற்றும் " in cleaned:  # and
             parts = cleaned.split(" மற்றும் ")
-            subgoals = [self._parse_tamil(p, p) for p in parts]
+            flat_subgoals = []
+            for p in parts:
+                flat_subgoals.extend(self._parse_tamil(p, p).flatten_subgoals())
             return BabyAIGoal(
                 action="sequence",
-                subgoals=subgoals,
+                subgoals=flat_subgoals,
                 sequence_mode="and",
                 language="ta",
                 raw_instruction=raw,
