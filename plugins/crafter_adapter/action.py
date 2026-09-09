@@ -31,31 +31,57 @@ class CrafterActionAdapter:
     def __init__(self) -> None:
         self.current_plan: list[CrafterAction] = []
         self.table_pos: tuple[int, int] | None = None
+        self.furnace_pos: tuple[int, int] | None = None
 
     def reset(self) -> None:
         """Reset internal plan and spatial landmarks."""
         self.current_plan.clear()
         self.table_pos = None
+        self.furnace_pos = None
 
     def plan_next_action(
         self, obs: CrafterObservation, goal: CrafterGoal | None = None
     ) -> CrafterAction:
-        """Select next optimal action respecting survival and tech-tree DAG."""
-        # 1. Vital Survival Interrupts
-        if obs.vitals.energy <= 2:
-            return CrafterAction.SLEEP
+        """Select next optimal action respecting survival, mob combat, and tech-tree DAG."""
+        px, py = obs.player_pos
+        height = len(obs.semantic_grid)
+        width = len(obs.semantic_grid[0]) if height > 0 else 0
 
-        if obs.vitals.drink <= 2:
+        # 1. Tactical Monster Combat & Self-Defense
+        if height > 0 and width > 0:
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nx, ny = px + dx, py + dy
+                if 0 <= nx < width and 0 <= ny < height:
+                    if obs.semantic_grid[ny][nx] in (CrafterObject.ZOMBIE, CrafterObject.SKELETON):
+                        if obs.player_facing == (dx, dy):
+                            return CrafterAction.DO
+                        if (dx, dy) == (-1, 0):
+                            return CrafterAction.MOVE_LEFT
+                        if (dx, dy) == (1, 0):
+                            return CrafterAction.MOVE_RIGHT
+                        if (dx, dy) == (0, -1):
+                            return CrafterAction.MOVE_UP
+                        if (dx, dy) == (0, 1):
+                            return CrafterAction.MOVE_DOWN
+
+        # 2. Vital Survival Interrupts (raised proactive thresholds)
+        if obs.vitals.energy <= 2:
+            if not self._is_near(obs, CrafterObject.ZOMBIE, radius=3) and not self._is_near(
+                obs, CrafterObject.SKELETON, radius=3
+            ):
+                return CrafterAction.SLEEP
+
+        if obs.vitals.drink <= 4:
             water_act = self._navigate_and_interact(obs, CrafterObject.WATER)
             if water_act is not None:
                 return water_act
 
-        if obs.vitals.food <= 2:
+        if obs.vitals.food <= 4:
             cow_act = self._navigate_and_interact(obs, CrafterObject.COW)
             if cow_act is not None:
                 return cow_act
 
-        # 2. Target Goal Planning
+        # 3. Target Goal Planning
         target = goal.target_achievement if goal else None
         if target is None:
             # Default progressive tech-tree roadmap
@@ -165,7 +191,42 @@ class CrafterActionAdapter:
         if ach == CrafterAchievement.PLACE_FURNACE:
             if inv.stone < 4:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_STONE)
-            return CrafterAction.PLACE_FURNACE
+            tx = obs.player_pos[0] + obs.player_facing[0]
+            ty = obs.player_pos[1] + obs.player_facing[1]
+            if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
+                if obs.semantic_grid[ty][tx] in (
+                    CrafterObject.GRASS,
+                    CrafterObject.PATH,
+                    CrafterObject.SAND,
+                ):
+                    self.furnace_pos = (tx, ty)
+                    return CrafterAction.PLACE_FURNACE
+            return CrafterAction.MOVE_LEFT
+
+        if ach == CrafterAchievement.MAKE_IRON_PICKAXE:
+            if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
+                obs, CrafterObject.CRAFTING_TABLE, radius=30
+            ):
+                return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
+            if CrafterAchievement.PLACE_FURNACE not in obs.achievements and not self._is_near(
+                obs, CrafterObject.FURNACE, radius=30
+            ):
+                return self._plan_achievement(obs, CrafterAchievement.PLACE_FURNACE)
+            if inv.wood < 1:
+                return self._plan_achievement(obs, CrafterAchievement.COLLECT_WOOD)
+            if inv.coal < 1:
+                return self._plan_achievement(obs, CrafterAchievement.COLLECT_COAL)
+            if inv.iron < 1:
+                return self._plan_achievement(obs, CrafterAchievement.COLLECT_IRON)
+            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE):
+                act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
+                if act:
+                    return act
+            if not self._is_near(obs, CrafterObject.FURNACE):
+                act = self._navigate_and_interact(obs, CrafterObject.FURNACE, face_only=True)
+                if act:
+                    return act
+            return CrafterAction.MAKE_IRON_PICKAXE
 
         if ach == CrafterAchievement.COLLECT_DIAMOND:
             if inv.iron_pickaxe == 0:
@@ -181,6 +242,17 @@ class CrafterActionAdapter:
             act = self._navigate_and_interact(obs, CrafterObject.WATER)
             return act or self._explore_passable(obs)
 
+        if ach == CrafterAchievement.SURVIVE:
+            if obs.vitals.drink <= 6:
+                act = self._navigate_and_interact(obs, CrafterObject.WATER)
+                if act:
+                    return act
+            if obs.vitals.food <= 6:
+                act = self._navigate_and_interact(obs, CrafterObject.COW)
+                if act:
+                    return act
+            return self._explore_passable(obs)
+
         return self._explore_passable(obs)
 
     def _is_near(self, obs: CrafterObservation, obj_type: CrafterObject, radius: int = 2) -> bool:
@@ -189,8 +261,12 @@ class CrafterActionAdapter:
             tx, ty = self.table_pos
             if abs(px - tx) <= radius and abs(py - ty) <= radius:
                 return True
+        if obj_type == CrafterObject.FURNACE and self.furnace_pos is not None:
+            fx, fy = self.furnace_pos
+            if abs(px - fx) <= radius and abs(py - fy) <= radius:
+                return True
         height = len(obs.semantic_grid)
-        width = len(obs.semantic_grid[0])
+        width = len(obs.semantic_grid[0]) if height > 0 else 0
         for dy in range(-radius, radius + 1):
             for dx in range(-radius, radius + 1):
                 x, y = px + dx, py + dy

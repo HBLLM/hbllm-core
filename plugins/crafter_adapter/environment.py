@@ -503,6 +503,9 @@ class NativeCrafterWrapper:
                     except ValueError:
                         pass
 
+        if self.step_count >= 50 and CrafterAchievement.SURVIVE not in self.achievements:
+            self.achievements.add(CrafterAchievement.SURVIVE)
+
         obs = self._build_obs(raw_obs)
         truncated = self.step_count >= self.max_steps
         return obs, float(reward), bool(done), truncated, self.last_info

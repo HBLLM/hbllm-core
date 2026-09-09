@@ -175,12 +175,13 @@ def run_nethack_benchmark(
     """Backwards-compatible benchmark across standard environments."""
     eps_per_tier = max(1, episodes // len(NETHACK_TIERS))
     all_results = []
+    tier_summaries = {}
     total_successes = 0
     total_steps = 0
     total_gold = 0
     total_eps = 0
 
-    for tier_id, _ in NETHACK_TIERS:
+    for tier_id, tier_name in NETHACK_TIERS:
         res = run_nethack_tier_benchmark(
             cohort_name,
             tier=tier_id,
@@ -188,6 +189,14 @@ def run_nethack_benchmark(
             base_seed=base_seed,
             prefer_native=prefer_native,
         )
+        tier_summaries[tier_name] = {
+            "tier": tier_id,
+            "episodes": res["episodes"],
+            "success_rate": res["success_rate"],
+            "ci_95": res["ci_95"],
+            "mean_steps": res["mean_steps"],
+            "mean_gold": res["mean_gold"],
+        }
         all_results.extend(res["results"])
         total_eps += res["episodes"]
         total_successes += sum(1 for r in res["results"] if r["success"])
@@ -203,6 +212,7 @@ def run_nethack_benchmark(
         "ci_95": [round(ci_low, 3), round(ci_high, 3)],
         "mean_steps": round(total_steps / total_eps, 1) if total_eps else 0.0,
         "mean_gold": round(total_gold / total_eps, 1) if total_eps else 0.0,
+        "tier_summaries": tier_summaries,
         "results": all_results,
     }
 
