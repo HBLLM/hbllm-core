@@ -11,6 +11,13 @@ import logging
 import random
 from typing import Any
 
+import numpy as np
+
+if not hasattr(np, "Inf"):
+    np.Inf = np.inf  # type: ignore
+if not hasattr(np, "bool8"):
+    np.bool8 = np.bool_  # type: ignore
+
 from .types import (
     AgentState,
     CulinaryItem,
@@ -451,7 +458,17 @@ class NativeOvercookedWrapper:
         self._overcooked_env_cls = OvercookedEnv
         self._gridworld_cls = OvercookedGridworld
 
-        self.tier = OvercookedTier(tier)
+        if isinstance(tier, int):
+            tier_int_map = {
+                1: OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO,
+                2: OvercookedTier.TIER_2_ASYMMETRIC_COORDINATION,
+                3: OvercookedTier.TIER_3_CORRIDOR_CONTENTION,
+                4: OvercookedTier.TIER_4_FORCED_COORDINATION,
+                5: OvercookedTier.TIER_5_COUNTER_CIRCUIT,
+            }
+            self.tier = tier_int_map.get(tier, OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO)
+        else:
+            self.tier = OvercookedTier(tier)
         self.seed = seed
         self.max_steps = max_steps
         self.step_count = 0
@@ -596,8 +613,14 @@ class NativeOvercookedWrapper:
                 else:
                     p_status = PotStatus.EMPTY
 
-                cook_tick = getattr(obj, "cooking_tick", -1)
-                cook_time = getattr(obj, "cook_time", 4)
+                try:
+                    cook_tick = getattr(obj, "cooking_tick", -1)
+                except Exception:
+                    cook_tick = -1
+                try:
+                    cook_time = getattr(obj, "cook_time", 4)
+                except Exception:
+                    cook_time = 4
                 pots.append(
                     PotState(
                         pos=(r, c),

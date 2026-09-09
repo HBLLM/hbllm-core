@@ -364,11 +364,21 @@ class NativeAI2ThorWrapper:
         self.scene = self.SCENE_MAP.get(tier, scene)
         self.step_count = 0
         self.max_steps = 100
+        from pathlib import Path
+
+        releases_dir = Path.home() / ".ai2thor" / "releases"
+        if not releases_dir.exists() or not any(releases_dir.iterdir()):
+            raise RuntimeError(
+                "AI2-THOR Unity standalone build not downloaded. "
+                "Use StandaloneAI2ThorEnv or download the Unity build."
+            )
 
         self.controller = self._controller_cls(
             scene=self.scene,
             gridSize=self.grid_size,
             renderDepthImage=render_depth_image,
+            server_start_timeout=5.0,
+            server_timeout=5.0,
         )
         self.reset(seed=seed)
 

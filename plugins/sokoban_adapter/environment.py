@@ -253,12 +253,19 @@ class NativeSokobanWrapper:
     Translates raw gym observations and room_state into typed SokobanObservation.
     """
 
+    is_native: bool = True
+
     def __init__(
         self,
         env_name: str = "Sokoban-v0",
         seed: int = 42,
         max_steps: int = 120,
     ) -> None:
+        import numpy as np
+
+        if not hasattr(np, "bool8"):
+            np.bool8 = np.bool_  # type: ignore
+
         import gym  # type: ignore
         import gym_sokoban  # type: ignore # noqa: F401
 

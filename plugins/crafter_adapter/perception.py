@@ -73,6 +73,9 @@ class CrafterPerceptionAdapter:
             self.graph.add_node(agent_node)
 
         # Ingest nearby objects into CognitiveGraph
+        if not obs.semantic_grid or not obs.semantic_grid[0]:
+            return self.graph
+
         height = len(obs.semantic_grid)
         width = len(obs.semantic_grid[0])
         search_radius = 16
