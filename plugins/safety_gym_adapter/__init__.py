@@ -12,7 +12,11 @@ from typing import Any
 
 from .action import SafetyGymActionAdapter
 from .benchmark import PureHCIRSafetyAgent, run_safety_gym_benchmark
-from .environment import StandaloneSafetyGymEnv, make_safety_gym_env
+from .environment import (
+    NativeSafetyGymWrapper,
+    StandaloneSafetyGymEnv,
+    make_safety_gym_env,
+)
 from .perception import SafetyGymPerceptionAdapter
 from .types import (
     SafetyEntity,
@@ -40,6 +44,7 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 
 __all__ = [
+    "NativeSafetyGymWrapper",
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRSafetyAgent",

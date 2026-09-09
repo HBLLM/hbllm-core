@@ -281,11 +281,126 @@ class StandaloneMineDojoEnv:
         )
 
 
-def make_minedojo_env(seed: int | None = None, tier: int = 4) -> StandaloneMineDojoEnv:
-    """Instantiate MineDojo environment with fallback to standalone 3D voxel engine."""
-    try:
-        logger.info("Using native minedojo environment")
-        return StandaloneMineDojoEnv(seed=seed, tier=tier)
-    except Exception as e:
-        logger.debug("Native minedojo unavailable (%s), using StandaloneMineDojoEnv", e)
-        return StandaloneMineDojoEnv(seed=seed, tier=tier)
+class NativeMineDojoWrapper:
+    """
+    Dual-mode wrapper wrapping authentic upstream minedojo package.
+
+    NOTE ON MINEDOJO UPSTREAM ARCHITECTURE:
+    The upstream 'minedojo' package interfaces with Minecraft via a Java bridge daemon
+    requiring a Java 8+ runtime and local Minecraft client process.
+    When installed and running in an environment with Java/Minecraft daemon support,
+    this wrapper delegates directly to minedojo.make().
+    In standalone or CI environments, HBLLM provides the high-fidelity StandaloneMineDojoEnv
+    simulating procedural 3D voxel grids, tool tiers, and Minecraft crafting DAGs.
+    """
+
+    is_native: bool = True
+
+    TASK_MAP = {
+        1: "harvest_milk",
+        2: "harvest_wool_with_shears",
+        3: "combat_spider_plains_sword",
+        4: "harvest_1_log",
+        5: "harvest_1_iron_ore",
+    }
+
+    def __init__(
+        self,
+        seed: int | None = None,
+        tier: int = 4,
+        image_size: tuple[int, int] = (160, 256),
+    ) -> None:
+        try:
+            import minedojo  # type: ignore
+        except ImportError as err:
+            raise ImportError(
+                "minedojo is required for NativeMineDojoWrapper. "
+                "Install via 'pip install minedojo' (requires Java 8+) or use StandaloneMineDojoEnv."
+            ) from err
+
+        self._minedojo = minedojo
+        self.tier = tier
+        self.seed = seed
+        self.step_count = 0
+        self.max_steps = 100
+        self.inventory = MineDojoInventory()
+
+        task_id = self.TASK_MAP.get(tier, "harvest_1_log")
+        self.env = self._minedojo.make(
+            task_id=task_id,
+            image_size=image_size,
+            seed=seed,
+        )
+        self.reset(seed=seed)
+
+    def reset(self, seed: int | None = None) -> tuple[MineDojoObservation, dict[str, Any]]:
+        if seed is not None:
+            self.seed = seed
+        self.step_count = 0
+        raw_obs = self.env.reset()
+        obs = self._build_obs(raw_obs)
+        return obs, {}
+
+    def step(
+        self, action: MineDojoAction | int | Any
+    ) -> tuple[MineDojoObservation, float, bool, bool, dict[str, Any]]:
+        self.step_count += 1
+        raw_obs, reward, done, info = self.env.step(action)
+        obs = self._build_obs(raw_obs)
+        truncated = self.step_count >= self.max_steps
+        return obs, float(reward), done, truncated, info
+
+    def _build_obs(self, raw_obs: Any) -> MineDojoObservation:
+        voxels = [[[0 for _ in range(11)] for _ in range(11)] for _ in range(5)]
+        pos = (16, 16, 6)
+        yaw, pitch = 0.0, 0.0
+
+        if isinstance(raw_obs, dict):
+            if "voxels" in raw_obs:
+                v = raw_obs["voxels"]
+                if hasattr(v, "tolist"):
+                    voxels = v.tolist()
+            if "location_stats" in raw_obs:
+                loc = raw_obs["location_stats"]
+                pos = (
+                    int(loc.get("pos", [16, 16, 6])[0]),
+                    int(loc.get("pos", [16, 16, 6])[1]),
+                    int(loc.get("pos", [16, 16, 6])[2]),
+                )
+                yaw = (
+                    float(loc.get("yaw", [0.0])[0])
+                    if isinstance(loc.get("yaw"), (list, tuple))
+                    else float(loc.get("yaw", 0.0))
+                )
+                pitch = (
+                    float(loc.get("pitch", [0.0])[0])
+                    if isinstance(loc.get("pitch"), (list, tuple))
+                    else float(loc.get("pitch", 0.0))
+                )
+
+        return MineDojoObservation(
+            voxels=voxels,
+            player_pos=pos,
+            player_yaw=yaw,
+            player_pitch=pitch,
+            inventory=self.inventory,
+            step_count=self.step_count,
+            raw_obs=raw_obs,
+        )
+
+
+def make_minedojo_env(
+    seed: int | None = None,
+    tier: int = 4,
+    prefer_native: bool = False,
+) -> StandaloneMineDojoEnv | NativeMineDojoWrapper:
+    """Instantiate MineDojo environment with dual-mode native/standalone selection."""
+    if prefer_native:
+        try:
+            return NativeMineDojoWrapper(seed=seed, tier=tier)
+        except Exception as e:
+            logger.warning(
+                "Native minedojo unavailable (%s), falling back to StandaloneMineDojoEnv",
+                e,
+            )
+    return StandaloneMineDojoEnv(seed=seed, tier=tier)

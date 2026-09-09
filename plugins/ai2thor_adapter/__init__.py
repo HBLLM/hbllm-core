@@ -12,7 +12,11 @@ from typing import Any
 
 from .action import AI2ThorActionAdapter
 from .benchmark import PureHCIRAI2ThorAgent, run_ai2thor_benchmark
-from .environment import StandaloneAI2ThorEnv, make_ai2thor_env
+from .environment import (
+    NativeAI2ThorWrapper,
+    StandaloneAI2ThorEnv,
+    make_ai2thor_env,
+)
 from .perception import AI2ThorPerceptionAdapter
 from .types import (
     AI2ThorActionType,
@@ -49,6 +53,7 @@ __all__ = [
     "AI2ThorObservation",
     "AI2ThorPerceptionAdapter",
     "AI2ThorVector3",
+    "NativeAI2ThorWrapper",
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRAI2ThorAgent",

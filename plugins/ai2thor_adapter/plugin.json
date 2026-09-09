@@ -8,6 +8,10 @@
   "platform_version": ">=1.0.0",
   "dependencies": ["numpy>=1.24.0"],
   "tags": ["eval", "benchmark", "ai2thor", "embodied", "3d-scene-graph", "manipulation", "hcir"],
+  "benchmark_category": "upstream_external_benchmark",
+  "upstream_package": "ai2thor",
+  "supports_native_execution": true,
+  "supports_standalone_fallback": true,
   "license": "GPL-3.0-only",
   "capabilities": [
     "ai2thor_observe",

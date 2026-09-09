@@ -79,3 +79,12 @@ def test_minedojo_benchmark_smoke() -> None:
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
     assert len(data["results"]) >= 5
+
+
+def test_native_minedojo_wrapper_fallback() -> None:
+    env = make_minedojo_env(seed=42, tier=1, prefer_native=True)
+    assert env is not None
+    obs, info = env.reset(seed=42)
+    assert obs is not None
+    assert obs.step_count == 0
+    assert obs.player_pos is not None

@@ -8,6 +8,10 @@
   "platform_version": ">=1.0.0",
   "dependencies": ["numpy>=1.24.0"],
   "tags": ["eval", "benchmark", "sokoban", "boxoban", "combinatorial", "deadlock-avoidance", "hcir"],
+  "benchmark_category": "upstream_external_benchmark",
+  "upstream_package": "gym-sokoban",
+  "supports_native_execution": true,
+  "supports_standalone_fallback": true,
   "license": "GPL-3.0-only",
   "capabilities": [
     "sokoban_observe",

@@ -16,7 +16,7 @@ from .benchmark import (
     run_overcooked_benchmark,
     run_overcooked_tier,
 )
-from .environment import StandaloneOvercookedEnv, make_overcooked_env
+from .environment import NativeOvercookedWrapper, StandaloneOvercookedEnv, make_overcooked_env
 from .perception import OvercookedPerceptionAdapter
 from .types import (
     AgentState,
@@ -50,6 +50,7 @@ __all__ = [
     "AgentState",
     "CulinaryItem",
     "KitchenTile",
+    "NativeOvercookedWrapper",
     "OvercookedAction",
     "OvercookedActionAdapter",
     "OvercookedObservation",

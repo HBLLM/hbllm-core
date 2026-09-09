@@ -12,7 +12,11 @@ from typing import Any
 
 from .action import MineDojoActionAdapter
 from .benchmark import PureHCIRMineDojoAgent, run_minedojo_benchmark
-from .environment import StandaloneMineDojoEnv, make_minedojo_env
+from .environment import (
+    NativeMineDojoWrapper,
+    StandaloneMineDojoEnv,
+    make_minedojo_env,
+)
 from .perception import MineDojoPerceptionAdapter
 from .types import (
     MineDojoAction,
@@ -47,6 +51,7 @@ __all__ = [
     "MineDojoObservation",
     "MineDojoPerceptionAdapter",
     "MineDojoVoxel",
+    "NativeMineDojoWrapper",
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRMineDojoAgent",

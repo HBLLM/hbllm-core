@@ -12,7 +12,11 @@ from typing import Any
 
 from .action import NetHackActionAdapter
 from .benchmark import PureHCIRNetHackAgent, run_nethack_benchmark
-from .environment import StandaloneNetHackEnv, make_nethack_env
+from .environment import (
+    NativeNetHackWrapper,
+    StandaloneNetHackEnv,
+    make_nethack_env,
+)
 from .perception import NetHackPerceptionAdapter
 from .types import (
     ACTION_VECTORS,
@@ -51,6 +55,7 @@ __all__ = [
     "NetHackObservation",
     "NetHackPerceptionAdapter",
     "NetHackStats",
+    "NativeNetHackWrapper",
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRNetHackAgent",
