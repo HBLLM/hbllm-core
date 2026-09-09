@@ -4,6 +4,10 @@ from hbllm.perception.audio_in_node import AudioInputNode
 from hbllm.perception.audio_out_node import AudioOutputNode
 from hbllm.perception.event_log import EventLog
 from hbllm.perception.normalizer import EventNormalizer
+from hbllm.perception.physical_perception_stream import (
+    PhysicalObservationEvent,
+    PhysicalPerceptionStream,
+)
 from hbllm.perception.reality_bus import (
     EventOrigin,
     PerceptionEvent,
@@ -24,6 +28,8 @@ __all__ = [
     "EventOrigin",
     "PerceptionEvent",
     "PerceptionModality",
+    "PhysicalObservationEvent",
+    "PhysicalPerceptionStream",
     "RealityEventBus",
     "SpatialCellPartition",
     "VisionNode",

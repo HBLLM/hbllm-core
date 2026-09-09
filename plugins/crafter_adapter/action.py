@@ -149,7 +149,7 @@ class CrafterActionAdapter:
             if inv.wood < 1:
                 act = self._navigate_and_interact(obs, CrafterObject.TREE)
                 return act or self._explore_passable(obs)
-            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE):
+            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
                 act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
                 if act:
                     return act
@@ -170,7 +170,7 @@ class CrafterActionAdapter:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_STONE)
             if inv.wood < 1:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_WOOD)
-            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE):
+            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
                 act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
                 if act:
                     return act
@@ -191,16 +191,35 @@ class CrafterActionAdapter:
         if ach == CrafterAchievement.PLACE_FURNACE:
             if inv.stone < 4:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_STONE)
-            tx = obs.player_pos[0] + obs.player_facing[0]
-            ty = obs.player_pos[1] + obs.player_facing[1]
+            # If crafting table exists, ensure we place furnace right next to table
+            if self.table_pos is not None and not self._is_near(
+                obs, CrafterObject.CRAFTING_TABLE, radius=1
+            ):
+                act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
+                if act:
+                    return act
+
+            px, py = obs.player_pos
+            passable = (CrafterObject.GRASS, CrafterObject.PATH, CrafterObject.SAND)
+            tx = px + obs.player_facing[0]
+            ty = py + obs.player_facing[1]
             if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
-                if obs.semantic_grid[ty][tx] in (
-                    CrafterObject.GRASS,
-                    CrafterObject.PATH,
-                    CrafterObject.SAND,
-                ):
+                if obs.semantic_grid[ty][tx] in passable:
                     self.furnace_pos = (tx, ty)
                     return CrafterAction.PLACE_FURNACE
+
+            # Rotate to a passable neighbor tile
+            for (dx, dy), action in (
+                ((-1, 0), CrafterAction.MOVE_LEFT),
+                ((1, 0), CrafterAction.MOVE_RIGHT),
+                ((0, -1), CrafterAction.MOVE_UP),
+                ((0, 1), CrafterAction.MOVE_DOWN),
+            ):
+                nx, ny = px + dx, py + dy
+                if 0 <= nx < len(obs.semantic_grid[0]) and 0 <= ny < len(obs.semantic_grid):
+                    if obs.semantic_grid[ny][nx] in passable:
+                        return action
+
             return CrafterAction.MOVE_LEFT
 
         if ach == CrafterAchievement.MAKE_IRON_PICKAXE:
@@ -218,14 +237,25 @@ class CrafterActionAdapter:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_COAL)
             if inv.iron < 1:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_IRON)
-            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE):
-                act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
-                if act:
-                    return act
-            if not self._is_near(obs, CrafterObject.FURNACE):
-                act = self._navigate_and_interact(obs, CrafterObject.FURNACE, face_only=True)
-                if act:
-                    return act
+
+            near_table = self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1)
+            near_furnace = self._is_near(obs, CrafterObject.FURNACE, radius=1)
+            if not (near_table and near_furnace):
+                overlap_step = self._navigate_to_overlap(
+                    obs, CrafterObject.CRAFTING_TABLE, CrafterObject.FURNACE
+                )
+                if overlap_step:
+                    return overlap_step
+                if not near_table:
+                    act = self._navigate_and_interact(
+                        obs, CrafterObject.CRAFTING_TABLE, face_only=True
+                    )
+                    if act:
+                        return act
+                elif not near_furnace:
+                    act = self._navigate_and_interact(obs, CrafterObject.FURNACE, face_only=True)
+                    if act:
+                        return act
             return CrafterAction.MAKE_IRON_PICKAXE
 
         if ach == CrafterAchievement.COLLECT_DIAMOND:
@@ -303,6 +333,13 @@ class CrafterActionAdapter:
             and self.table_pos is not None
         ):
             target_pos = self.table_pos
+
+        if (
+            target_pos is None
+            and target_type == CrafterObject.FURNACE
+            and self.furnace_pos is not None
+        ):
+            target_pos = self.furnace_pos
 
         if target_pos is None:
             return None
@@ -405,3 +442,65 @@ class CrafterActionAdapter:
                 return act
 
         return CrafterAction.DO
+
+    def _navigate_to_overlap(
+        self,
+        obs: CrafterObservation,
+        obj_a: CrafterObject,
+        obj_b: CrafterObject,
+    ) -> CrafterAction | None:
+        """Find a passable tile within Chebyshev radius 1 of both objects and step toward it."""
+        pos_a = self.table_pos if obj_a == CrafterObject.CRAFTING_TABLE else self.furnace_pos
+        pos_b = self.furnace_pos if obj_b == CrafterObject.FURNACE else self.table_pos
+        if pos_a is None or pos_b is None:
+            return None
+
+        px, py = obs.player_pos
+        ax, ay = pos_a
+        bx, by = pos_b
+        height = len(obs.semantic_grid)
+        width = len(obs.semantic_grid[0]) if height > 0 else 0
+
+        passable_ids = (
+            CrafterObject.GRASS,
+            CrafterObject.PATH,
+            CrafterObject.SAND,
+            CrafterObject.EMPTY,
+        )
+
+        candidates = set()
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                cx, cy = ax + dx, ay + dy
+                if 0 <= cx < width and 0 <= cy < height:
+                    if abs(cx - bx) <= 1 and abs(cy - by) <= 1:
+                        if obs.semantic_grid[cy][cx] in passable_ids:
+                            candidates.add((cx, cy))
+
+        if not candidates or (px, py) in candidates:
+            return None
+
+        queue = deque([(px, py, [])])
+        visited = {(px, py)}
+        while queue:
+            cx, cy, path = queue.popleft()
+            if (cx, cy) in candidates:
+                if path:
+                    return path[0]
+                return None
+
+            if len(path) >= 60:
+                continue
+
+            for act, (dx, dy) in (
+                (CrafterAction.MOVE_LEFT, (-1, 0)),
+                (CrafterAction.MOVE_RIGHT, (1, 0)),
+                (CrafterAction.MOVE_UP, (0, -1)),
+                (CrafterAction.MOVE_DOWN, (0, 1)),
+            ):
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
+                    if obs.semantic_grid[ny][nx] in passable_ids:
+                        visited.add((nx, ny))
+                        queue.append((nx, ny, path + [act]))
+        return None

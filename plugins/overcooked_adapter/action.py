@@ -16,6 +16,7 @@ from .types import (
     KitchenTile,
     OvercookedAction,
     OvercookedObservation,
+    PotStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,18 @@ class OvercookedActionAdapter:
                     dest = (obs.agent.pos[0] + dr, obs.agent.pos[1] + dc)
                     if dest == obs.partner.pos:
                         self.planned_actions.clear()
+                        if obs.agent.agent_id == 1:
+                            for evasive_act, er, ec in DIRECTION_DELTAS:
+                                cand = (obs.agent.pos[0] + er, obs.agent.pos[1] + ec)
+                                if (
+                                    0 <= cand[0] < len(obs.grid)
+                                    and 0 <= cand[1] < len(obs.grid[0])
+                                    and obs.grid[cand[0]][cand[1]] == int(KitchenTile.FLOOR)
+                                    and cand != obs.partner.pos
+                                    and cand != dest
+                                ):
+                                    self.expected_pos = cand
+                                    return evasive_act
                         self.expected_pos = obs.agent.pos
                         return OvercookedAction.STAY
 
@@ -142,13 +155,26 @@ class OvercookedActionAdapter:
                 dishes_on_counter = sum(
                     1 for c in shared_counters if obs.counter_items.get(c) == CulinaryItem.DISH
                 )
-                total_pot_onions = sum(p.onions_in_pot for p in obs.pots)
+                needed_onions = sum(
+                    max(0, p.required_onions - p.onions_in_pot)
+                    for p in obs.pots
+                    if p.status not in (PotStatus.READY, PotStatus.COOKING)
+                )
+                if not any(p.status in (PotStatus.EMPTY, PotStatus.FILLING) for p in obs.pots):
+                    needed_onions = 3
 
-                if (total_pot_onions + onions_on_counter) < 3 and can_reach_onions:
+                if onions_on_counter < max(needed_onions, 1) and can_reach_onions:
                     self._plan_interact_with(obs, onion_dispensers[0])
                     return
-                elif dishes_on_counter == 0 and can_reach_dishes:
+                elif (
+                    dishes_on_counter == 0
+                    and can_reach_dishes
+                    and any(p.status in (PotStatus.COOKING, PotStatus.READY) for p in obs.pots)
+                ):
                     self._plan_interact_with(obs, dish_dispensers[0])
+                    return
+                elif onions_on_counter < 3 and can_reach_onions:
+                    self._plan_interact_with(obs, onion_dispensers[0])
                     return
                 else:
                     self.planned_actions = [OvercookedAction.STAY]
@@ -185,12 +211,11 @@ class OvercookedActionAdapter:
                     self._plan_interact_with(obs, empty_counter)
                     return
 
-        # Priority 4: Fetch dish if pot is cooking or ready
-        if held == CulinaryItem.NONE and (ready_pots or cooking_pots):
+        # Priority 4: Fetch dish if a pot is READY
+        if held == CulinaryItem.NONE and ready_pots:
             if can_reach_dishes and dish_dispensers:
                 self._plan_interact_with(obs, dish_dispensers[0])
                 return
-            # Pick up dish from shared counter
             shared_dishes = [
                 pos
                 for pos, item in obs.counter_items.items()
@@ -200,33 +225,53 @@ class OvercookedActionAdapter:
                 self._plan_interact_with(obs, shared_dishes[0])
                 return
 
-        # Priority 5: If holding dish and pot is cooking, wait near pot
-        if held == CulinaryItem.DISH and cooking_pots:
-            pot_pos = cooking_pots[0].pos
-            self._plan_interact_with(obs, pot_pos)
-            if self.planned_actions and self.planned_actions[-1] == OvercookedAction.INTERACT:
-                self.planned_actions.pop()
-            return
-
-        # Priority 6: Fill pot with onions
+        # Priority 5: Fill pot with onions (interleaving while another pot cooks!)
         if filling_pots:
             target_pot = filling_pots[0]
             if held == CulinaryItem.ONION:
                 self._plan_interact_with(obs, target_pot.pos)
                 return
             elif held == CulinaryItem.NONE:
-                if can_reach_onions and onion_dispensers:
-                    self._plan_interact_with(obs, onion_dispensers[0])
-                    return
-                # Pick up onion from shared counter
                 shared_onions = [
                     pos
                     for pos, item in obs.counter_items.items()
                     if item == CulinaryItem.ONION and self._is_reachable(obs, pos)
                 ]
-                if shared_onions:
+                if can_reach_onions and onion_dispensers:
+                    self._plan_interact_with(obs, onion_dispensers[0])
+                    return
+                elif shared_onions:
                     self._plan_interact_with(obs, shared_onions[0])
                     return
+
+        # Priority 5.5: If holding onion but no pot needs onions, deposit on counter to free hands
+        if held == CulinaryItem.ONION and not filling_pots:
+            empty_counter = self._find_empty_counter(obs)
+            if empty_counter is not None:
+                self._plan_interact_with(obs, empty_counter)
+                return
+
+        # Priority 6: If cooking pot exists and no pots need filling (or no onions available):
+        # Fetch dish or wait near cooking pot
+        if cooking_pots:
+            if held == CulinaryItem.NONE:
+                if can_reach_dishes and dish_dispensers:
+                    self._plan_interact_with(obs, dish_dispensers[0])
+                    return
+                shared_dishes = [
+                    pos
+                    for pos, item in obs.counter_items.items()
+                    if item == CulinaryItem.DISH and self._is_reachable(obs, pos)
+                ]
+                if shared_dishes:
+                    self._plan_interact_with(obs, shared_dishes[0])
+                    return
+            elif held == CulinaryItem.DISH:
+                pot_pos = cooking_pots[0].pos
+                self._plan_interact_with(obs, pot_pos)
+                if self.planned_actions and self.planned_actions[-1] == OvercookedAction.INTERACT:
+                    self.planned_actions.pop()
+                return
 
         # Courtesy Yield: If empty-handed and standing adjacent to pot/station that partner needs
         if (

@@ -228,6 +228,29 @@ class StandaloneNetHackEnv:
             if not opened:
                 self.last_message = "No closed door here."
 
+        # Kick Action (e.g. break locked doors or obstacles)
+        elif act == NetHackAction.KICK:
+            kicked = False
+            for dx, dy in (
+                (0, -1),
+                (1, 0),
+                (0, 1),
+                (-1, 0),
+                (1, -1),
+                (1, 1),
+                (-1, 1),
+                (-1, -1),
+            ):
+                nx, ny = px + dx, py + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.full_grid[ny][nx] == NetHackGlyph.DOOR_CLOSED:
+                        self.full_grid[ny][nx] = NetHackGlyph.DOOR_OPEN
+                        self.last_message = "As you kick the door, it gives way and breaks open!"
+                        kicked = True
+                        break
+            if not kicked:
+                self.last_message = "You kick at empty space."
+
         # Pickup Action
         elif act == NetHackAction.PICKUP:
             curr = self.full_grid[py][px]
