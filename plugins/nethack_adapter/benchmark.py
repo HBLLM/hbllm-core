@@ -108,13 +108,14 @@ def run_nethack_tier_benchmark(
     tier: int,
     episodes: int = 3,
     base_seed: int = 4000,
+    prefer_native: bool = False,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific NetHack/MiniHack tier."""
     results: list[NetHackEpisodeResult] = []
 
     for i in range(episodes):
         seed = base_seed + (tier * 100) + i
-        env = make_nethack_env(seed=seed, tier=tier)
+        env = make_nethack_env(seed=seed, tier=tier, prefer_native=prefer_native)
         obs, _ = env.reset(seed=seed)
 
         if cohort_name in ("pure-hcir", "guided-hcir"):
@@ -167,6 +168,7 @@ def run_nethack_benchmark(
     cohort_name: str,
     episodes: int = 15,
     base_seed: int = 4000,
+    prefer_native: bool = False,
 ) -> dict[str, Any]:
     """Backwards-compatible benchmark across standard environments."""
     eps_per_tier = max(1, episodes // len(NETHACK_TIERS))
@@ -178,7 +180,11 @@ def run_nethack_benchmark(
 
     for tier_id, _ in NETHACK_TIERS:
         res = run_nethack_tier_benchmark(
-            cohort_name, tier=tier_id, episodes=eps_per_tier, base_seed=base_seed
+            cohort_name,
+            tier=tier_id,
+            episodes=eps_per_tier,
+            base_seed=base_seed,
+            prefer_native=prefer_native,
         )
         all_results.extend(res["results"])
         total_eps += res["episodes"]
@@ -203,11 +209,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="NetHack Multi-Tier Benchmark")
     parser.add_argument("--episodes-per-tier", type=int, default=3, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=4000, help="Base seed")
+    parser.add_argument(
+        "--prefer-native",
+        "--native",
+        action="store_true",
+        help="Run against upstream native minihack/nle package",
+    )
     args = parser.parse_args()
 
     print(f"\n{'=' * 85}")
     print(
-        f"Running NetHack / MiniHack Full-Spectrum Benchmark (5 Tiers, N={args.episodes_per_tier} eps/tier)"
+        f"Running NetHack / MiniHack Full-Spectrum Benchmark (5 Tiers, N={args.episodes_per_tier} eps/tier, Native={args.prefer_native})"
     )
     print(f"{'=' * 85}\n")
 
@@ -229,6 +241,7 @@ def main() -> None:
                 tier=tier_id,
                 episodes=args.episodes_per_tier,
                 base_seed=args.seed,
+                prefer_native=args.prefer_native,
             )
             total_eps += data["episodes"]
             total_successes += sum(1 for r in data["results"] if r["success"])

@@ -52,6 +52,7 @@ def run_overcooked_tier(
     tier: OvercookedTier | str,
     episodes: int = 5,
     seed: int = 42,
+    prefer_native: bool = False,
 ) -> dict[str, Any]:
     """Run evaluation on a single Overcooked cooperative tier."""
     agent = PureHCIROvercookedAgent()
@@ -63,7 +64,7 @@ def run_overcooked_tier(
 
     for ep in range(episodes):
         agent.reset_episode()
-        env = make_overcooked_env(tier=tier_enum, seed=seed + ep)
+        env = make_overcooked_env(tier=tier_enum, seed=seed + ep, prefer_native=prefer_native)
         obs = env.reset()
 
         done = False
@@ -96,6 +97,7 @@ def run_overcooked_benchmark(
     episodes_per_tier: int = 5,
     seed: int = 42,
     episodes: int | None = None,
+    prefer_native: bool = False,
 ) -> dict[str, Any]:
     """Run full 5-tier Overcooked cooperative benchmark."""
     if episodes is not None:
@@ -107,7 +109,12 @@ def run_overcooked_benchmark(
     total_steps = 0
 
     for tier in OvercookedTier:
-        res = run_overcooked_tier(tier, episodes=episodes_per_tier, seed=seed)
+        res = run_overcooked_tier(
+            tier,
+            episodes=episodes_per_tier,
+            seed=seed,
+            prefer_native=prefer_native,
+        )
         tiers_results[tier.value] = res
         total_successes += res["successes"]
         total_episodes += res["episodes"]
