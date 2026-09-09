@@ -255,9 +255,18 @@ class NativeSokobanWrapper:
 
     is_native: bool = True
 
+    TIER_ENV_MAP = {
+        SokobanTier.TIER_1_DIRECT_PUSH: "Sokoban-small-v0",
+        SokobanTier.TIER_2_OBSTACLE_NAVIGATION: "Sokoban-small-v1",
+        SokobanTier.TIER_3_CORNER_DEADLOCK_AVOIDANCE: "Sokoban-v0",
+        SokobanTier.TIER_4_MULTI_BOX_ASSIGNMENT: "Sokoban-v1",
+        SokobanTier.TIER_5_COMBINATORIAL_MAZE: "Sokoban-large-v0",
+    }
+
     def __init__(
         self,
-        env_name: str = "Sokoban-v0",
+        tier: SokobanTier | str = SokobanTier.TIER_1_DIRECT_PUSH,
+        env_name: str | None = None,
         seed: int = 42,
         max_steps: int = 120,
     ) -> None:
@@ -269,11 +278,13 @@ class NativeSokobanWrapper:
         import gym  # type: ignore
         import gym_sokoban  # type: ignore # noqa: F401
 
+        self.tier = SokobanTier(tier)
+        if env_name is None:
+            env_name = self.TIER_ENV_MAP.get(self.tier, "Sokoban-v0")
         self.native_env = gym.make(env_name)
         self.seed = seed
         self.max_steps = max_steps
         self.step_count = 0
-        self.reset(seed=seed)
 
     def reset(self, seed: int | None = None) -> SokobanObservation:
         if seed is not None:
@@ -320,9 +331,21 @@ class NativeSokobanWrapper:
         targets: list[tuple[int, int]] = []
         grid: list[list[int]] = []
 
+        GYM_TO_SOKOBAN_TILE = {
+            0: int(SokobanTile.WALL),
+            1: int(SokobanTile.EMPTY),
+            2: int(SokobanTile.TARGET),
+            3: int(SokobanTile.BOX_ON_TARGET),
+            4: int(SokobanTile.BOX),
+            5: int(SokobanTile.PLAYER),
+        }
+
         if room is not None:
             h, w = room.shape
-            grid = [[int(room[r][c]) for c in range(w)] for r in range(h)]
+            grid = [
+                [GYM_TO_SOKOBAN_TILE.get(int(room[r][c]), int(SokobanTile.EMPTY)) for c in range(w)]
+                for r in range(h)
+            ]
             for r in range(h):
                 for c in range(w):
                     tile = int(room[r][c])
@@ -359,8 +382,11 @@ def make_sokoban_env(
     """
     if prefer_native:
         try:
-            wrapper = NativeSokobanWrapper(seed=seed, max_steps=max_steps)
-            logger.info("Successfully bound to native gym-sokoban environment")
+            wrapper = NativeSokobanWrapper(tier=tier, seed=seed, max_steps=max_steps)
+            logger.info(
+                "Successfully bound to native gym-sokoban environment (%s)",
+                wrapper.native_env.spec.id if hasattr(wrapper.native_env, "spec") else "native",
+            )
             return wrapper
         except Exception as e:
             logger.debug(

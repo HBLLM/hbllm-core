@@ -127,6 +127,7 @@ def run_crafter_benchmark(
     episodes_per_target: int = 3,
     base_seed: int = 1000,
     episodes: int | None = None,
+    prefer_native: bool = False,
 ) -> dict[str, Any]:
     """Run benchmark across all 5 Crafter competency tiers."""
     if episodes is not None:
@@ -153,7 +154,7 @@ def run_crafter_benchmark(
                 seed = current_seed
                 current_seed += 1
 
-                env = make_crafter_env(seed=seed)
+                env = make_crafter_env(seed=seed, prefer_native=prefer_native)
                 obs, _ = env.reset(seed=seed)
 
                 if cohort_name in ("pure-hcir", "guided-hcir"):
@@ -239,15 +240,24 @@ def main() -> None:
         "--episodes-per-target", type=int, default=3, help="Episodes per milestone target"
     )
     parser.add_argument("--seed", type=int, default=1000, help="Base random seed")
+    parser.add_argument(
+        "--prefer-native",
+        "--native",
+        action="store_true",
+        help="Run against upstream native crafter package",
+    )
     args = parser.parse_args()
 
     print(
-        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones)\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native={args.prefer_native})\n{'=' * 85}"
     )
 
     for cohort in ("pure-hcir", "llm-only"):
         data = run_crafter_benchmark(
-            cohort, episodes_per_target=args.episodes_per_target, base_seed=args.seed
+            cohort,
+            episodes_per_target=args.episodes_per_target,
+            base_seed=args.seed,
+            prefer_native=args.prefer_native,
         )
         print(
             f"\n--- Cohort: {data['cohort'].upper()} (Crafter Score: {data['crafter_score']}%) ---"

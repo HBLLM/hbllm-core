@@ -74,8 +74,10 @@ class SokobanActionAdapter:
         ] = deque([(start_state, [])])
         visited = {start_state}
 
-        max_nodes = 8000
+        max_nodes = 2500
         nodes = 0
+        best_path: list[SokobanAction] = []
+        best_score = float("inf")
 
         while queue and nodes < max_nodes:
             nodes += 1
@@ -84,6 +86,14 @@ class SokobanActionAdapter:
             if curr_boxes == targets:
                 self.planned_actions = list(path)
                 return
+
+            if targets:
+                score = sum(
+                    min(abs(br - tr) + abs(bc - tc) for tr, tc in targets) for br, bc in curr_boxes
+                )
+                if score < best_score and path:
+                    best_score = score
+                    best_path = path
 
             pr, pc = curr_player
             for act, dr, dc in DIRECTION_DELTAS:
@@ -98,21 +108,18 @@ class SokobanActionAdapter:
                     if (nnr, nnc) in walls or (nnr, nnc) in curr_boxes:
                         continue
 
-                    # Prune static corner dead-ends
+                    # Deadlock pruning
                     if (nnr, nnc) in taboo_cells and (nnr, nnc) not in targets:
                         continue
 
-                    # Prune 2x2 box/wall deadlocks
-                    next_boxes = set(curr_boxes)
-                    next_boxes.remove((nr, nc))
-                    next_boxes.add((nnr, nnc))
+                    new_boxes = set(curr_boxes)
+                    new_boxes.remove((nr, nc))
+                    new_boxes.add((nnr, nnc))
 
-                    if self._is_2x2_deadlock((nnr, nnc), walls, next_boxes, targets):
+                    if self._is_2x2_deadlock((nnr, nnc), walls, new_boxes, targets):
                         continue
 
-                    new_boxes_frozen = frozenset(next_boxes)
-                    next_state = ((nr, nc), new_boxes_frozen)
-
+                    next_state = ((nr, nc), frozenset(new_boxes))
                     if next_state not in visited:
                         visited.add(next_state)
                         queue.append((next_state, path + [act]))
@@ -123,7 +130,8 @@ class SokobanActionAdapter:
                         visited.add(next_state)
                         queue.append((next_state, path + [act]))
 
-        logger.warning("Sokoban planner reached search limit without finding complete path")
+        logger.debug("Sokoban planner reached search limit, executing best partial trajectory")
+        self.planned_actions = list(best_path) if best_path else [SokobanAction.UP] * 4
 
     def _is_2x2_deadlock(
         self,

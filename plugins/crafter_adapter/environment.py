@@ -536,6 +536,8 @@ class NativeCrafterWrapper:
         if hasattr(self.native_env, "_sem_view"):
             try:
                 sem_arr = self.native_env._sem_view()
+                if hasattr(sem_arr, "T"):
+                    sem_arr = sem_arr.T
                 semantic_data = sem_arr.tolist() if hasattr(sem_arr, "tolist") else list(sem_arr)
             except Exception:
                 semantic_data = []
