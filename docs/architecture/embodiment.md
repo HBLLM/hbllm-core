@@ -59,3 +59,20 @@ User Request → Risk Classifier → Confirmation Gate (if needed) → Idempoten
 ```
 
 All embodiment actions follow this pipeline to ensure safety, reversibility, and verification at every step.
+
+---
+
+## 7. Empirical Validation Across Authentic Native Environments
+
+The Execution Reality Layer and HCIR Causal Planners are evaluated strictly against **authentic, installed upstream simulator packages** (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack` / `nle`). Rather than relying on autoregressive token generation for spatial pathfinding or vital monitoring, HBLLM uses typed state ingress and zero-token topological causal planning.
+
+| Domain | Environment Package | Literature / RL Baseline | Pure HCIR Performance | Key Architectural Mechanism |
+| :--- | :--- | :---: | :---: | :--- |
+| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M steps)<br>4.2% (PPO, 1M steps) | **41.28%** Hafner Score<br>**93.9%** Multi-Tier | Causal Recipe DAG + Vital Priority Interrupts |
+| **Grounded Language** | `minigrid` (v3.1.0) | ~50% (IL, 1M+ demos)<br>< 10% (PPO on BossLevel) | **97.8%** Overall (44/45)<br>**80.0%** BossLevel | Spatial-epistemic search & key-door deduction |
+| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **80.0%** Native Success (16/20) | Reverse-BFS dead-end detection & frozen box hashing |
+| **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO Self-Play) | **100.0%** (15/15 episodes) | Causal recipe pipelining & counter contention resolution |
+| **Rogue-Like Dungeons** | `minihack` (v1.0.2) / `nle` | < 20% (IMPALA / TorchBeast) | **80.0%** (4/5 tiers at 100%) | Frontier glyph exploration & melee combat interrupts |
+
+*For complete metric tables, 95% Wilson confidence intervals, per-tier breakdowns, and CLI reproducibility commands, refer to the [Embodied Cognitive & Frontier Benchmarks](../api/benchmarks.md#embodied-cognitive-frontier-benchmarks) API reference.*
+

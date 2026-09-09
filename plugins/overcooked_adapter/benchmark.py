@@ -52,7 +52,8 @@ def run_overcooked_tier(
     tier: OvercookedTier | str,
     episodes: int = 5,
     seed: int = 42,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
     """Run evaluation on a single Overcooked cooperative tier."""
     agent = PureHCIROvercookedAgent()
@@ -67,6 +68,10 @@ def run_overcooked_tier(
         agent1 = PureHCIROvercookedAgent()
         agent1.reset_episode()
         env = make_overcooked_env(tier=tier_enum, seed=seed + ep, prefer_native=prefer_native)
+        if require_native and not getattr(env, "is_native", False):
+            raise RuntimeError(
+                "Native 'overcooked_ai_py' package is strictly required; standalone fallback is disabled."
+            )
         obs = env.reset()
 
         is_solo = tier_enum == OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO
@@ -105,7 +110,8 @@ def run_overcooked_benchmark(
     episodes_per_tier: int = 5,
     seed: int = 42,
     episodes: int | None = None,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
     """Run full 5-tier Overcooked cooperative benchmark."""
     if episodes is not None:
@@ -122,6 +128,7 @@ def run_overcooked_benchmark(
             episodes=episodes_per_tier,
             seed=seed,
             prefer_native=prefer_native,
+            require_native=require_native,
         )
         tiers_results[tier.value] = res
         total_successes += res["successes"]

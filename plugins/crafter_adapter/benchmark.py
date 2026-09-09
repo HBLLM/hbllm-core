@@ -126,14 +126,10 @@ def run_crafter_benchmark(
     cohort_name: str,
     episodes_per_target: int = 3,
     base_seed: int = 1000,
-    episodes: int | None = None,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
-    """Run benchmark across all 5 Crafter competency tiers."""
-    if episodes is not None:
-        total_targets = sum(len(tgts) for tgts in CRAFTER_TIERS.values())
-        episodes_per_target = max(1, episodes // total_targets)
-
+    """Execute Crafter benchmark across 5 tech tiers."""
     all_results: list[CrafterEpisodeResult] = []
     tier_summaries: dict[str, Any] = {}
     achievement_success_counts: dict[str, int] = {}
@@ -155,6 +151,10 @@ def run_crafter_benchmark(
                 current_seed += 1
 
                 env = make_crafter_env(seed=seed, prefer_native=prefer_native)
+                if require_native and not getattr(env, "is_native", False):
+                    raise RuntimeError(
+                        "Native 'crafter' upstream package is strictly required; standalone fallback is disabled."
+                    )
                 obs, _ = env.reset(seed=seed)
 
                 if cohort_name in ("pure-hcir", "guided-hcir"):

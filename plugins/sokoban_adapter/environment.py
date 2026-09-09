@@ -311,12 +311,13 @@ class NativeSokobanWrapper:
             has_unsolved_boxes = 4 in room
             won = not has_unsolved_boxes and (3 in room)
 
+        is_done = bool(done or won or self.step_count >= self.max_steps)
         obs = self._extract_obs(
-            done=done or won or self.step_count >= self.max_steps,
+            done=is_done,
             won=won,
             info=info or {},
         )
-        return obs, float(reward), done or won, info or {}
+        return obs, float(reward), is_done, info or {}
 
     def _extract_obs(
         self,
@@ -374,13 +375,14 @@ def make_sokoban_env(
     tier: SokobanTier | str = SokobanTier.TIER_1_DIRECT_PUSH,
     seed: int = 42,
     max_steps: int = 120,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = False,
 ) -> Any:
     """Factory creating configured Sokoban environments.
 
     Supports native upstream `gym-sokoban` or deterministic 5-tier `StandaloneSokobanEnv`.
     """
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             wrapper = NativeSokobanWrapper(tier=tier, seed=seed, max_steps=max_steps)
             logger.info(
@@ -389,6 +391,10 @@ def make_sokoban_env(
             )
             return wrapper
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'gym-sokoban' upstream package is required but failed: {e}"
+                ) from e
             logger.debug(
                 "Native gym-sokoban unavailable (%s), falling back to StandaloneSokobanEnv", e
             )

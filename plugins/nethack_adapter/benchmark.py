@@ -106,9 +106,10 @@ NETHACK_TIERS = [
 def run_nethack_tier_benchmark(
     cohort_name: str,
     tier: int,
-    episodes: int = 3,
+    episodes: int = 5,
     base_seed: int = 4000,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific NetHack/MiniHack tier."""
     results: list[NetHackEpisodeResult] = []
@@ -116,6 +117,10 @@ def run_nethack_tier_benchmark(
     for i in range(episodes):
         seed = base_seed + (tier * 100) + i
         env = make_nethack_env(seed=seed, tier=tier, prefer_native=prefer_native)
+        if require_native and not getattr(env, "is_native", False):
+            raise RuntimeError(
+                "Native 'minihack' / 'nle' package is strictly required; standalone fallback is disabled."
+            )
         obs, _ = env.reset(seed=seed)
 
         if cohort_name in ("pure-hcir", "guided-hcir"):
@@ -171,7 +176,8 @@ def run_nethack_benchmark(
     cohort_name: str,
     episodes: int = 15,
     base_seed: int = 4000,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
     """Backwards-compatible benchmark across standard environments."""
     eps_per_tier = max(1, episodes // len(NETHACK_TIERS))
@@ -189,6 +195,7 @@ def run_nethack_benchmark(
             episodes=eps_per_tier,
             base_seed=base_seed,
             prefer_native=prefer_native,
+            require_native=require_native,
         )
         tier_summaries[tier_name] = {
             "tier": tier_id,
@@ -209,9 +216,13 @@ def run_nethack_benchmark(
     return {
         "cohort": cohort_name,
         "episodes": total_eps,
+        "total_episodes": total_eps,
         "success_rate": total_successes / total_eps if total_eps else 0.0,
+        "overall_success_rate": total_successes / total_eps if total_eps else 0.0,
         "ci_95": [round(ci_low, 3), round(ci_high, 3)],
+        "overall_ci_95": [round(ci_low, 3), round(ci_high, 3)],
         "mean_steps": round(total_steps / total_eps, 1) if total_eps else 0.0,
+        "overall_mean_steps": round(total_steps / total_eps, 1) if total_eps else 0.0,
         "mean_gold": round(total_gold / total_eps, 1) if total_eps else 0.0,
         "tier_summaries": tier_summaries,
         "results": all_results,

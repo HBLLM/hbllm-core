@@ -593,13 +593,18 @@ class NativeNetHackWrapper:
 def make_nethack_env(
     seed: int | None = None,
     tier: int = 5,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = False,
 ) -> StandaloneNetHackEnv | NativeNetHackWrapper:
     """Instantiate NetHack environment with dual-mode native/standalone selection."""
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             return NativeNetHackWrapper(seed=seed, tier=tier)
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'minihack' / 'nle' upstream package is required but failed: {e}"
+                ) from e
             logger.warning(
                 "Native minihack unavailable (%s), falling back to StandaloneNetHackEnv",
                 e,

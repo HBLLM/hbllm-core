@@ -672,13 +672,18 @@ def make_overcooked_env(
     tier: OvercookedTier | str = OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO,
     seed: int = 42,
     max_steps: int = 150,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = False,
 ) -> StandaloneOvercookedEnv | NativeOvercookedWrapper:
     """Factory creating Overcooked environments with dual-mode native/standalone selection."""
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             return NativeOvercookedWrapper(tier=tier, seed=seed, max_steps=max_steps)
         except Exception as err:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'overcooked_ai_py' upstream package is required but failed: {err}"
+                ) from err
             logger.warning(
                 "Failed to initialize NativeOvercookedWrapper (%s), falling back to StandaloneOvercookedEnv",
                 err,
