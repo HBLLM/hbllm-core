@@ -320,7 +320,7 @@ class NativeNetHackWrapper:
         1: "MiniHack-Room-5x5-v0",
         2: "MiniHack-Room-15x15-v0",
         3: "MiniHack-Corridor-R3-v0",
-        4: "MiniHack-KeyRoom-S5-v0",
+        4: "MiniHack-Room-Monster-5x5-v0",
         5: "MiniHack-MultiRoom-N4-v0",
     }
 
@@ -416,9 +416,8 @@ class NativeNetHackWrapper:
             (-1, -1): "NW",
         }
 
-        # Handle modal two-step OPEN action in NetHack C-engine
-        if act_enum == NetHackAction.OPEN_DOOR and "OPEN" in self._action_name_to_idx:
-            open_idx = self._action_name_to_idx["OPEN"]
+        # Handle door interactions (modal OPEN/KICK if supported, or step-into-door)
+        if act_enum in (NetHackAction.OPEN_DOOR, NetHackAction.KICK):
             px, py = self.player_pos
             dir_name = "E"
             for (dx, dy), name in dir_to_name.items():
@@ -427,48 +426,50 @@ class NativeNetHackWrapper:
                     if self.known_glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
                         dir_name = name
                         break
-            dir_idx = self._action_name_to_idx.get(dir_name, 0)
-            if self._is_gymnasium:
-                _, r1, term1, trunc1, i1 = self.env.step(open_idx)
-                raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
-                reward = float(r1 + r2)
-                terminated = term1 or term2
-                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
-                info = {**i1, **i2}
-            else:
-                _, r1, d1, i1 = self.env.step(open_idx)
-                raw_obs, r2, d2, i2 = self.env.step(dir_idx)
-                reward = float(r1 + r2)
-                terminated = d1 or d2
-                truncated = self.step_count >= self.max_steps
-                info = {**i1, **i2}
 
-        # Handle modal KICK action
-        elif act_enum == NetHackAction.KICK and "KICK" in self._action_name_to_idx:
-            kick_idx = self._action_name_to_idx["KICK"]
-            px, py = self.player_pos
-            dir_name = "E"
-            for (dx, dy), name in dir_to_name.items():
-                nx, ny = px + dx, py + dy
-                if 0 <= ny < len(self.known_glyphs) and 0 <= nx < len(self.known_glyphs[0]):
-                    if self.known_glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
-                        dir_name = name
-                        break
-            dir_idx = self._action_name_to_idx.get(dir_name, 0)
-            if self._is_gymnasium:
-                _, r1, term1, trunc1, i1 = self.env.step(kick_idx)
-                raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
-                reward = float(r1 + r2)
-                terminated = term1 or term2
-                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
-                info = {**i1, **i2}
+            if act_enum == NetHackAction.OPEN_DOOR and "OPEN" in self._action_name_to_idx:
+                open_idx = self._action_name_to_idx["OPEN"]
+                dir_idx = self._action_name_to_idx.get(dir_name, 0)
+                if self._is_gymnasium:
+                    _, r1, term1, trunc1, i1 = self.env.step(open_idx)
+                    raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
+                    reward = float(r1 + r2)
+                    terminated = term1 or term2
+                    truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                    info = {**i1, **i2}
+                else:
+                    _, r1, d1, i1 = self.env.step(open_idx)
+                    raw_obs, r2, d2, i2 = self.env.step(dir_idx)
+                    reward = float(r1 + r2)
+                    terminated = d1 or d2
+                    truncated = self.step_count >= self.max_steps
+                    info = {**i1, **i2}
+            elif act_enum == NetHackAction.KICK and "KICK" in self._action_name_to_idx:
+                kick_idx = self._action_name_to_idx["KICK"]
+                dir_idx = self._action_name_to_idx.get(dir_name, 0)
+                if self._is_gymnasium:
+                    _, r1, term1, trunc1, i1 = self.env.step(kick_idx)
+                    raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
+                    reward = float(r1 + r2)
+                    terminated = term1 or term2
+                    truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                    info = {**i1, **i2}
+                else:
+                    _, r1, d1, i1 = self.env.step(kick_idx)
+                    raw_obs, r2, d2, i2 = self.env.step(dir_idx)
+                    reward = float(r1 + r2)
+                    terminated = d1 or d2
+                    truncated = self.step_count >= self.max_steps
+                    info = {**i1, **i2}
             else:
-                _, r1, d1, i1 = self.env.step(kick_idx)
-                raw_obs, r2, d2, i2 = self.env.step(dir_idx)
-                reward = float(r1 + r2)
-                terminated = d1 or d2
-                truncated = self.step_count >= self.max_steps
-                info = {**i1, **i2}
+                # In standard MiniHack environments, stepping into the closed door opens it!
+                act_idx = self._action_name_to_idx.get(dir_name, 0)
+                if self._is_gymnasium:
+                    raw_obs, reward, terminated, truncated, info = self.env.step(act_idx)
+                else:
+                    raw_obs, reward, terminated, info = self.env.step(act_idx)
+                reward = float(reward)
+                truncated = truncated or (self.step_count >= self.max_steps)
 
         else:
             name_map = {
