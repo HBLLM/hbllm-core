@@ -653,9 +653,11 @@ class NativeCrafterWrapper:
         )
 
 
-def make_crafter_env(seed: int | None = None, prefer_native: bool = False) -> Any:
-    """Instantiate Crafter environment, binding to native crafter if available or falling back to standalone."""
-    if prefer_native:
+def make_crafter_env(
+    seed: int | None = None, prefer_native: bool = True, require_native: bool = False
+) -> Any:
+    """Instantiate Crafter environment, binding to native crafter by default."""
+    if prefer_native or require_native:
         try:
             wrapper = NativeCrafterWrapper(seed=seed)
             logger.info(
@@ -663,5 +665,9 @@ def make_crafter_env(seed: int | None = None, prefer_native: bool = False) -> An
             )
             return wrapper
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'crafter' upstream package is required but failed: {e}"
+                ) from e
             logger.debug("Native crafter unavailable (%s), falling back to StandaloneCrafterEnv", e)
     return StandaloneCrafterEnv(seed=seed)

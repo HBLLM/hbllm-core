@@ -93,7 +93,7 @@ class SokobanActionAdapter:
         ] = [(h0, 0, counter, start_state, [])]
         visited = {start_state}
 
-        max_nodes = 6000
+        max_nodes = 1500
         nodes = 0
         best_path: list[SokobanAction] = []
         best_score = float("inf")

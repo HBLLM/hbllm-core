@@ -52,7 +52,8 @@ def run_sokoban_tier(
     tier: SokobanTier | str,
     episodes: int = 5,
     seed: int = 42,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
     """Run evaluation on a single Sokoban tier."""
     agent = PureHCIRSokobanAgent()
@@ -65,10 +66,15 @@ def run_sokoban_tier(
     for ep in range(episodes):
         agent.reset_episode()
         env = make_sokoban_env(tier=tier_enum, seed=seed + ep, prefer_native=prefer_native)
+        if require_native and not getattr(env, "is_native", False):
+            raise RuntimeError(
+                "Native 'gym_sokoban' package is strictly required; standalone fallback is disabled."
+            )
         obs = env.reset()
 
         done = False
-        while not done:
+        step_limit = getattr(env, "max_steps", 120)
+        while not done and not obs.done and obs.step_count < step_limit:
             action = agent.select_action(obs)
             obs, _reward, done, info = env.step(action)
 
@@ -97,7 +103,8 @@ def run_sokoban_benchmark(
     episodes_per_tier: int = 5,
     seed: int = 42,
     episodes: int | None = None,
-    prefer_native: bool = False,
+    prefer_native: bool = True,
+    require_native: bool = True,
 ) -> dict[str, Any]:
     """Run full-spectrum 5-tier Sokoban benchmark."""
     if episodes is not None:
@@ -114,6 +121,7 @@ def run_sokoban_benchmark(
             episodes=episodes_per_tier,
             seed=seed,
             prefer_native=prefer_native,
+            require_native=require_native,
         )
         tiers_results[tier.value] = res
         total_successes += res["successes"]
