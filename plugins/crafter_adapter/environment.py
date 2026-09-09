@@ -507,6 +507,28 @@ class NativeCrafterWrapper:
         truncated = self.step_count >= self.max_steps
         return obs, float(reward), bool(done), truncated, self.last_info
 
+    CRAFTER_NATIVE_TO_OBJECT = {
+        0: int(CrafterObject.EMPTY),
+        1: int(CrafterObject.WATER),
+        2: int(CrafterObject.GRASS),
+        3: int(CrafterObject.STONE),
+        4: int(CrafterObject.PATH),
+        5: int(CrafterObject.SAND),
+        6: int(CrafterObject.TREE),
+        7: int(CrafterObject.LAVA),
+        8: int(CrafterObject.COAL),
+        9: int(CrafterObject.IRON),
+        10: int(CrafterObject.DIAMOND),
+        11: int(CrafterObject.CRAFTING_TABLE),
+        12: int(CrafterObject.FURNACE),
+        13: int(CrafterObject.PLAYER),
+        14: int(CrafterObject.COW),
+        15: int(CrafterObject.ZOMBIE),
+        16: int(CrafterObject.SKELETON),
+        17: int(CrafterObject.ARROW),
+        18: int(CrafterObject.PLANT),
+    }
+
     def _build_obs(self, raw_obs: Any) -> CrafterObservation:
         inv_data: dict[str, int] = {}
         vitals_data = {"health": 9, "food": 9, "drink": 9, "energy": 9}
@@ -538,7 +560,14 @@ class NativeCrafterWrapper:
                 sem_arr = self.native_env._sem_view()
                 if hasattr(sem_arr, "T"):
                     sem_arr = sem_arr.T
-                semantic_data = sem_arr.tolist() if hasattr(sem_arr, "tolist") else list(sem_arr)
+                raw_list = sem_arr.tolist() if hasattr(sem_arr, "tolist") else list(sem_arr)
+                semantic_data = [
+                    [
+                        self.CRAFTER_NATIVE_TO_OBJECT.get(int(cell), int(CrafterObject.EMPTY))
+                        for cell in row
+                    ]
+                    for row in raw_list
+                ]
             except Exception:
                 semantic_data = []
 

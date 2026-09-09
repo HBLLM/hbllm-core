@@ -338,6 +338,7 @@ class NativeNetHackWrapper:
         self.seed = seed
         self.step_count = 0
         self.max_steps = 200
+        self.dungeon_level = 1
 
         env_id = self.ENV_MAP.get(tier, "MiniHack-MultiRoom-N4-v0")
         self.env = self._gym.make(env_id)
@@ -347,6 +348,7 @@ class NativeNetHackWrapper:
         if seed is not None:
             self.seed = seed
         self.step_count = 0
+        self.dungeon_level = 1
         if self._is_gymnasium:
             raw_obs, info = self.env.reset(seed=seed) if seed is not None else self.env.reset()
         else:
@@ -371,6 +373,8 @@ class NativeNetHackWrapper:
             raw_obs, reward, done, info = self.env.step(act_idx)
             terminated = done
             truncated = self.step_count >= self.max_steps
+        if reward >= 1.0:
+            self.dungeon_level = 2
         obs = self._build_obs(raw_obs)
         return obs, float(reward), terminated, truncated, info
 
@@ -379,14 +383,41 @@ class NativeNetHackWrapper:
         chars = []
         message = ""
         px, py = 0, 0
-        stats = NetHackStats()
+        stats = NetHackStats(dungeon_level=self.dungeon_level)
 
         if isinstance(raw_obs, dict):
             if "chars" in raw_obs:
                 raw_chars = raw_obs["chars"]
                 chars = [[chr(c) for c in row] for row in raw_chars]
-            if "glyphs" in raw_obs:
-                glyphs = [list(row) for row in raw_obs["glyphs"]]
+                CHAR_TO_GLYPH = {
+                    ord("."): int(NetHackGlyph.FLOOR),
+                    ord("#"): int(NetHackGlyph.CORRIDOR),
+                    ord("+"): int(NetHackGlyph.DOOR_CLOSED),
+                    ord("'"): int(NetHackGlyph.DOOR_OPEN),
+                    ord(">"): int(NetHackGlyph.STAIRS_DOWN),
+                    ord("<"): int(NetHackGlyph.STAIRS_UP),
+                    ord("@"): int(NetHackGlyph.PLAYER),
+                    ord("$"): int(NetHackGlyph.GOLD),
+                    ord("0"): int(NetHackGlyph.KEY),
+                    ord("("): int(NetHackGlyph.KEY),
+                    ord("%"): int(NetHackGlyph.FOOD),
+                }
+                h = len(raw_chars)
+                w = len(raw_chars[0]) if h > 0 else 0
+                glyphs = []
+                for r in range(h):
+                    row_glyphs = []
+                    for c in range(w):
+                        ch = raw_chars[r][c]
+                        if ch in CHAR_TO_GLYPH:
+                            row_glyphs.append(CHAR_TO_GLYPH[ch])
+                        elif (65 <= ch <= 90) or (97 <= ch <= 122):
+                            row_glyphs.append(int(NetHackGlyph.MONSTER))
+                        elif ch in (ord("|"), ord("-"), ord(" ")):
+                            row_glyphs.append(int(NetHackGlyph.WALL))
+                        else:
+                            row_glyphs.append(int(NetHackGlyph.WALL))
+                    glyphs.append(row_glyphs)
             if "message" in raw_obs:
                 message = "".join([chr(c) for c in raw_obs["message"] if c != 0])
             if "blstats" in raw_obs:
@@ -400,6 +431,7 @@ class NativeNetHackWrapper:
                         max_energy=int(bl[13]),
                         level=int(bl[18]),
                         gold=int(bl[19]),
+                        dungeon_level=self.dungeon_level,
                     )
 
         return NetHackObservation(

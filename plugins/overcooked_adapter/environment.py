@@ -614,13 +614,13 @@ class NativeOvercookedWrapper:
                     p_status = PotStatus.EMPTY
 
                 try:
-                    cook_tick = getattr(obj, "cooking_tick", -1)
+                    cook_tick = getattr(obj, "_cooking_tick", getattr(obj, "cooking_tick", -1))
                 except Exception:
                     cook_tick = -1
                 try:
-                    cook_time = getattr(obj, "cook_time", 4)
+                    cook_time = getattr(obj, "_cook_time", getattr(obj, "cook_time", 20))
                 except Exception:
-                    cook_time = 4
+                    cook_time = 20
                 pots.append(
                     PotState(
                         pos=(r, c),

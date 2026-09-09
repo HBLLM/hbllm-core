@@ -30,6 +30,12 @@ class CrafterActionAdapter:
 
     def __init__(self) -> None:
         self.current_plan: list[CrafterAction] = []
+        self.table_pos: tuple[int, int] | None = None
+
+    def reset(self) -> None:
+        """Reset internal plan and spatial landmarks."""
+        self.current_plan.clear()
+        self.table_pos = None
 
     def plan_next_action(
         self, obs: CrafterObservation, goal: CrafterGoal | None = None
@@ -91,12 +97,12 @@ class CrafterActionAdapter:
 
         if ach == CrafterAchievement.COLLECT_WOOD:
             act = self._navigate_and_interact(obs, CrafterObject.TREE)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
         if ach == CrafterAchievement.PLACE_TABLE:
             if inv.wood < 2:
                 act = self._navigate_and_interact(obs, CrafterObject.TREE)
-                return act or CrafterAction.NOOP
+                return act or self._explore_passable(obs)
             tx = obs.player_pos[0] + obs.player_facing[0]
             ty = obs.player_pos[1] + obs.player_facing[1]
             if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
@@ -105,6 +111,7 @@ class CrafterActionAdapter:
                     CrafterObject.PATH,
                     CrafterObject.SAND,
                 ):
+                    self.table_pos = (tx, ty)
                     return CrafterAction.PLACE_TABLE
             return CrafterAction.MOVE_LEFT
 
@@ -115,7 +122,7 @@ class CrafterActionAdapter:
                 return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
             if inv.wood < 1:
                 act = self._navigate_and_interact(obs, CrafterObject.TREE)
-                return act or CrafterAction.NOOP
+                return act or self._explore_passable(obs)
             if not self._is_near(obs, CrafterObject.CRAFTING_TABLE):
                 act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
                 if act:
@@ -126,7 +133,7 @@ class CrafterActionAdapter:
             if inv.wood_pickaxe == 0 and inv.stone_pickaxe == 0:
                 return self._plan_achievement(obs, CrafterAchievement.MAKE_WOOD_PICKAXE)
             act = self._navigate_and_interact(obs, CrafterObject.STONE)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
         if ach == CrafterAchievement.MAKE_STONE_PICKAXE:
             if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
@@ -147,13 +154,13 @@ class CrafterActionAdapter:
             if inv.wood_pickaxe == 0 and inv.stone_pickaxe == 0:
                 return self._plan_achievement(obs, CrafterAchievement.MAKE_WOOD_PICKAXE)
             act = self._navigate_and_interact(obs, CrafterObject.COAL)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
         if ach == CrafterAchievement.COLLECT_IRON:
             if inv.stone_pickaxe == 0:
                 return self._plan_achievement(obs, CrafterAchievement.MAKE_STONE_PICKAXE)
             act = self._navigate_and_interact(obs, CrafterObject.IRON)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
         if ach == CrafterAchievement.PLACE_FURNACE:
             if inv.stone < 4:
@@ -164,20 +171,24 @@ class CrafterActionAdapter:
             if inv.iron_pickaxe == 0:
                 return self._plan_achievement(obs, CrafterAchievement.COLLECT_IRON)
             act = self._navigate_and_interact(obs, CrafterObject.DIAMOND)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
         if ach == CrafterAchievement.EAT_COW:
             act = self._navigate_and_interact(obs, CrafterObject.COW)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
         if ach == CrafterAchievement.COLLECT_DRINK:
             act = self._navigate_and_interact(obs, CrafterObject.WATER)
-            return act or CrafterAction.NOOP
+            return act or self._explore_passable(obs)
 
-        return CrafterAction.NOOP
+        return self._explore_passable(obs)
 
     def _is_near(self, obs: CrafterObservation, obj_type: CrafterObject, radius: int = 2) -> bool:
         px, py = obs.player_pos
+        if obj_type == CrafterObject.CRAFTING_TABLE and self.table_pos is not None:
+            tx, ty = self.table_pos
+            if abs(px - tx) <= radius and abs(py - ty) <= radius:
+                return True
         height = len(obs.semantic_grid)
         width = len(obs.semantic_grid[0])
         for dy in range(-radius, radius + 1):
@@ -202,16 +213,20 @@ class CrafterActionAdapter:
         # 1. Find nearest instance of target_type
         target_pos = None
         best_dist = float("inf")
-        radius = 24
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                x, y = px + dx, py + dy
-                if 0 <= x < width and 0 <= y < height:
-                    if obs.semantic_grid[y][x] == target_type:
-                        dist = abs(px - x) + abs(py - y)
-                        if dist < best_dist:
-                            best_dist = dist
-                            target_pos = (x, y)
+        for y in range(height):
+            for x in range(width):
+                if obs.semantic_grid[y][x] == target_type:
+                    dist = abs(px - x) + abs(py - y)
+                    if dist < best_dist:
+                        best_dist = dist
+                        target_pos = (x, y)
+
+        if (
+            target_pos is None
+            and target_type == CrafterObject.CRAFTING_TABLE
+            and self.table_pos is not None
+        ):
+            target_pos = self.table_pos
 
         if target_pos is None:
             return None
@@ -263,7 +278,7 @@ class CrafterActionAdapter:
                     return path[0]
                 return None
 
-            if len(path) >= 30:  # Search depth cap
+            if len(path) >= 60:  # Search depth cap
                 continue
 
             for act, (dx, dy) in (
@@ -279,3 +294,38 @@ class CrafterActionAdapter:
                         queue.append((nx, ny, path + [act]))
 
         return None
+
+    def _explore_passable(self, obs: CrafterObservation) -> CrafterAction:
+        """Move in an available passable direction to discover new terrain."""
+        px, py = obs.player_pos
+        height = len(obs.semantic_grid)
+        width = len(obs.semantic_grid[0]) if height > 0 else 0
+        passable_ids = (
+            CrafterObject.GRASS,
+            CrafterObject.PATH,
+            CrafterObject.SAND,
+            CrafterObject.EMPTY,
+        )
+        fx, fy = obs.player_facing
+        nx, ny = px + fx, py + fy
+        if 0 <= nx < width and 0 <= ny < height and obs.semantic_grid[ny][nx] in passable_ids:
+            if fx == -1:
+                return CrafterAction.MOVE_LEFT
+            if fx == 1:
+                return CrafterAction.MOVE_RIGHT
+            if fy == -1:
+                return CrafterAction.MOVE_UP
+            if fy == 1:
+                return CrafterAction.MOVE_DOWN
+
+        for act, (dx, dy) in (
+            (CrafterAction.MOVE_UP, (0, -1)),
+            (CrafterAction.MOVE_RIGHT, (1, 0)),
+            (CrafterAction.MOVE_DOWN, (0, 1)),
+            (CrafterAction.MOVE_LEFT, (-1, 0)),
+        ):
+            nx, ny = px + dx, py + dy
+            if 0 <= nx < width and 0 <= ny < height and obs.semantic_grid[ny][nx] in passable_ids:
+                return act
+
+        return CrafterAction.DO
