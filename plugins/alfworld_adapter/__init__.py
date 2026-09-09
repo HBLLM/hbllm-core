@@ -12,7 +12,11 @@ from typing import Any
 
 from .action import ALFWorldActionAdapter
 from .benchmark import PureHCIRALFWorldAgent, run_alfworld_benchmark
-from .environment import StandaloneALFWorldEnv, make_alfworld_env
+from .environment import (
+    NativeALFWorldWrapper,
+    StandaloneALFWorldEnv,
+    make_alfworld_env,
+)
 from .perception import ALFWorldPerceptionAdapter
 from .types import (
     ALFWorldAffordance,
@@ -49,6 +53,7 @@ __all__ = [
     "ALFWorldPerceptionAdapter",
     "ALFWorldReceptacle",
     "ALFWorldTaskType",
+    "NativeALFWorldWrapper",
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRALFWorldAgent",

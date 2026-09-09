@@ -82,3 +82,15 @@ def test_ai2thor_benchmark_smoke() -> None:
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
     assert len(data["results"]) >= 4
+
+
+def test_native_ai2thor_wrapper_fallback_and_channels() -> None:
+    env = make_ai2thor_env(seed=42, tier=1, prefer_native=True)
+    assert env is not None
+    obs, info = env.reset(seed=42)
+    assert obs is not None
+    assert obs.step_count == 0
+    # Verify observation carries typed 3D scene-graph metadata
+    assert len(obs.objects) > 0
+    assert hasattr(obs.objects[0], "objectId")
+    assert hasattr(obs.objects[0], "position")

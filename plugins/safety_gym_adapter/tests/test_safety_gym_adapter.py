@@ -83,3 +83,13 @@ def test_safety_gym_benchmark_smoke() -> None:
     assert data["cohort"] == "pure-hcir"
     assert "ci_zero_95" in data
     assert len(data["results"]) >= 4
+
+
+def test_native_safety_gym_wrapper_abi_handling() -> None:
+    # make_safety_gym_env with prefer_native=True should either return NativeSafetyGymWrapper
+    # (if safety_gymnasium is present and compatible) or fall back cleanly to StandaloneSafetyGymEnv
+    env = make_safety_gym_env(seed=42, tier=2, prefer_native=True)
+    assert env is not None
+    obs, info = env.reset(seed=42)
+    assert obs is not None
+    assert obs.step_count == 0

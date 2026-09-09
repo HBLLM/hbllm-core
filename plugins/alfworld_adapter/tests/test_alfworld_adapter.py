@@ -98,3 +98,11 @@ def test_alfworld_benchmark_smoke() -> None:
     assert data["cohort"] == "pure-hcir"
     assert "ci_95" in data
     assert len(data["results"]) >= 6
+
+
+def test_native_alfworld_wrapper_fallback() -> None:
+    env = make_alfworld_env(task_type=ALFWorldTaskType.PICK_AND_PLACE, seed=42, prefer_native=True)
+    assert env is not None
+    obs, info = env.reset(seed=42)
+    assert obs is not None
+    assert obs.step_count == 0

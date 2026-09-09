@@ -21,6 +21,8 @@ from overcooked_adapter import (
     PLUGIN_NAME,
     PLUGIN_VERSION,
     CulinaryItem,
+    KitchenTile,
+    NativeOvercookedWrapper,
     OvercookedAction,
     OvercookedPerceptionAdapter,
     OvercookedTier,
@@ -80,3 +82,25 @@ def test_overcooked_benchmark_smoke() -> None:
     assert len(bench["tiers"]) == 5
     for tier_name, tier_res in bench["tiers"].items():
         assert tier_res["success_rate"] == 1.0
+
+
+def test_native_overcooked_wrapper() -> None:
+    try:
+        import overcooked_ai_py  # noqa: F401
+    except ImportError:
+        return
+
+    env = make_overcooked_env(
+        tier=OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, seed=42, prefer_native=True
+    )
+    assert getattr(env, "is_native", False) is True
+    assert isinstance(env, NativeOvercookedWrapper)
+    obs = env.reset()
+    assert obs.agent.held_item == CulinaryItem.NONE
+    assert len(obs.pots) >= 1
+    assert obs.grid[0][2] == int(KitchenTile.POT) or len(obs.pots) >= 1
+
+    # Step in native environment
+    next_obs, reward, done, info = env.step(OvercookedAction.UP)
+    assert not done
+    assert next_obs.step_count == 1

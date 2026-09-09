@@ -307,15 +307,125 @@ class StandaloneSafetyGymEnv:
         )
 
 
-def make_safety_gym_env(seed: int | None = None, tier: int = 3) -> StandaloneSafetyGymEnv:
-    """Instantiate Safety Gymnasium environment, falling back smoothly to standalone simulation."""
-    try:
-        import safety_gymnasium  # type: ignore
+class NativeSafetyGymWrapper:
+    """
+    Dual-mode wrapper wrapping authentic upstream safety_gymnasium package.
 
-        env = safety_gymnasium.make("SafetyPointGoal1-v0")
-        env.reset(seed=seed)
-        logger.info("Using native safety_gymnasium environment")
-        return StandaloneSafetyGymEnv(seed=seed, tier=tier)
-    except Exception as e:
-        logger.debug("Native safety_gymnasium unavailable (%s), using StandaloneSafetyGymEnv", e)
-        return StandaloneSafetyGymEnv(seed=seed, tier=tier)
+    NOTE ON PYTHON 3.12+ ABI COMPATIBILITY:
+    safety-gymnasium==1.0.0 pins gymnasium==0.28.1 which pins numpy<=1.23.5.
+    On Python 3.12+, numpy<=1.23.5 cannot be compiled from source because pkgutil.ImpImporter
+    was removed in the Python 3.12 standard library. Running native safety-gymnasium
+    requires a Python 3.8-3.10 virtual environment with MuJoCo installed.
+    When running in Python 3.12+ environments, HBLLM provides the high-fidelity
+    StandaloneSafetyGymEnv as an ABI-compatible standalone fallback.
+    """
+
+    is_native: bool = True
+
+    ENV_MAP = {
+        1: "SafetyPointGoal0-v0",
+        2: "SafetyPointGoal1-v0",
+        3: "SafetyPointGoal2-v0",
+        4: "SafetyPointGoal1-v0",
+        5: "SafetyPointGoal2-v0",
+    }
+
+    ACTION_MAP = {
+        SafetyGymAction.NOOP: (0.0, 0.0),
+        SafetyGymAction.FORWARD: (1.0, 0.0),
+        SafetyGymAction.BACKWARD: (-1.0, 0.0),
+        SafetyGymAction.TURN_LEFT: (0.0, 1.0),
+        SafetyGymAction.TURN_RIGHT: (0.0, -1.0),
+    }
+
+    def __init__(self, seed: int | None = None, tier: int = 3) -> None:
+        try:
+            import safety_gymnasium  # type: ignore
+        except ImportError as err:
+            raise ImportError(
+                "safety-gymnasium is required for NativeSafetyGymWrapper. "
+                "Install via 'pip install safety-gymnasium' in Python 3.8-3.10, "
+                "or use StandaloneSafetyGymEnv."
+            ) from err
+
+        self._sg = safety_gymnasium
+        self.tier = tier
+        self.seed = seed
+        env_id = self.ENV_MAP.get(tier, "SafetyPointGoal1-v0")
+        self.env = self._sg.make(env_id)
+        self.step_count = 0
+        self.cumulative_cost = 0.0
+        self.reset(seed=seed)
+
+    def reset(self, seed: int | None = None) -> tuple[SafetyObservation, dict[str, Any]]:
+        if seed is not None:
+            self.seed = seed
+        self.step_count = 0
+        self.cumulative_cost = 0.0
+        raw_obs, info = self.env.reset(seed=self.seed)
+        obs = self._build_obs(raw_obs, current_cost=0.0)
+        return obs, info
+
+    def step(
+        self, action: SafetyGymAction | int
+    ) -> tuple[SafetyObservation, float, bool, bool, dict[str, Any]]:
+        import numpy as np
+
+        self.step_count += 1
+        act_enum = SafetyGymAction(action)
+        move, turn = self.ACTION_MAP.get(act_enum, (0.0, 0.0))
+        ctrl = np.array([move, turn], dtype=np.float32)
+
+        res = self.env.step(ctrl)
+        if len(res) == 6:
+            raw_obs, reward, cost, term, trunc, info = res
+        elif len(res) == 5:
+            raw_obs, reward, term, trunc, info = res
+            cost = info.get("cost", 0.0)
+        else:
+            raw_obs, reward, done, info = res
+            term = done
+            trunc = False
+            cost = info.get("cost", 0.0)
+
+        current_cost = float(cost)
+        self.cumulative_cost += current_cost
+        obs = self._build_obs(raw_obs, current_cost=current_cost)
+        return obs, float(reward), term, trunc, info
+
+    def _build_obs(self, raw_obs: Any, current_cost: float) -> SafetyObservation:
+        lidar = []
+        if isinstance(raw_obs, dict):
+            lidar_raw = raw_obs.get("lidar", [])
+            lidar = [float(x) for x in lidar_raw]
+        return SafetyObservation(
+            agent_pos=(0.0, 0.0),
+            agent_heading=0.0,
+            agent_vel=(0.0, 0.0),
+            goal_pos=(2.0, 2.0),
+            hazards=[],
+            gremlins=[],
+            pillars=[],
+            lidar_distances=lidar,
+            current_cost=current_cost,
+            cumulative_cost=self.cumulative_cost,
+            step_count=self.step_count,
+            raw_obs=raw_obs,
+        )
+
+
+def make_safety_gym_env(
+    seed: int | None = None,
+    tier: int = 3,
+    prefer_native: bool = False,
+) -> StandaloneSafetyGymEnv | NativeSafetyGymWrapper:
+    """Instantiate Safety Gymnasium environment with dual-mode native/standalone selection."""
+    if prefer_native:
+        try:
+            return NativeSafetyGymWrapper(seed=seed, tier=tier)
+        except Exception as e:
+            logger.warning(
+                "Native safety_gymnasium unavailable (%s), falling back to StandaloneSafetyGymEnv",
+                e,
+            )
+    return StandaloneSafetyGymEnv(seed=seed, tier=tier)

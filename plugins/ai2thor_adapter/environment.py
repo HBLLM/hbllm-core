@@ -316,11 +316,161 @@ class StandaloneAI2ThorEnv:
         )
 
 
-def make_ai2thor_env(seed: int | None = None, tier: int = 4) -> StandaloneAI2ThorEnv:
-    """Instantiate AI2-THOR environment with fallback to symbolic 3D engine."""
-    try:
-        logger.info("Using native ai2thor controller")
-        return StandaloneAI2ThorEnv(seed=seed, tier=tier)
-    except Exception as e:
-        logger.debug("Native ai2thor unavailable (%s), using StandaloneAI2ThorEnv", e)
-        return StandaloneAI2ThorEnv(seed=seed, tier=tier)
+class NativeAI2ThorWrapper:
+    """
+    Dual-mode wrapper wrapping authentic upstream ai2thor.controller.Controller.
+
+    PERCEPTION CHANNEL SPECIFICATION:
+    AI2-THOR offers two perceptual modalities:
+    1. Symbolic 3D Scene Graph Channel: event.metadata['objects'] containing ground-truth 3D
+       coordinates, receptacle containment trees, and physical affordance states.
+    2. Visual Camera Channel: event.frame (RGB uint8 numpy array) from the simulated agent camera.
+
+    This adapter implements the Ground-Truth 3D Scene Graph Channel by default, projecting
+    event.metadata['objects'] into strongly-typed AI2ThorObjectMetadata instances, while
+    attaching the raw RGB camera frame to AI2ThorObservation.raw_obs for multimodal / visual reasoning.
+    """
+
+    is_native: bool = True
+
+    SCENE_MAP = {
+        1: "FloorPlan1",  # Kitchen: Open navigation / inspect
+        2: "FloorPlan2",  # Kitchen: Static object interaction
+        3: "FloorPlan3",  # Kitchen: Receptacle containment
+        4: "FloorPlan4",  # Kitchen: Multi-step affordance manipulation
+        5: "FloorPlan5",  # Kitchen: Complex multi-room/chained task
+    }
+
+    def __init__(
+        self,
+        scene: str = "FloorPlan1",
+        seed: int | None = None,
+        tier: int = 4,
+        grid_size: float = 0.25,
+        render_depth_image: bool = False,
+    ) -> None:
+        try:
+            from ai2thor.controller import Controller  # type: ignore
+        except ImportError as err:
+            raise ImportError(
+                "ai2thor is required for NativeAI2ThorWrapper. "
+                "Install via 'pip install ai2thor' or use StandaloneAI2ThorEnv."
+            ) from err
+
+        self._controller_cls = Controller
+        self.tier = tier
+        self.seed = seed
+        self.grid_size = grid_size
+        self.scene = self.SCENE_MAP.get(tier, scene)
+        self.step_count = 0
+        self.max_steps = 100
+
+        self.controller = self._controller_cls(
+            scene=self.scene,
+            gridSize=self.grid_size,
+            renderDepthImage=render_depth_image,
+        )
+        self.reset(seed=seed)
+
+    def reset(self, seed: int | None = None) -> tuple[AI2ThorObservation, dict[str, Any]]:
+        """Reset native AI2-THOR controller."""
+        if seed is not None:
+            self.seed = seed
+        self.step_count = 0
+        event = self.controller.reset(scene=self.scene)
+        obs = self._build_obs_from_event(event)
+        return obs, {"event": event}
+
+    def step(
+        self, action: AI2ThorActionType | str, **action_kwargs: Any
+    ) -> tuple[AI2ThorObservation, float, bool, bool, dict[str, Any]]:
+        """Execute primitive action on native AI2-THOR controller."""
+        self.step_count += 1
+        action_name = action.value if isinstance(action, AI2ThorActionType) else str(action)
+        event = self.controller.step(action=action_name, **action_kwargs)
+
+        obs = self._build_obs_from_event(event)
+        terminated = False
+        truncated = self.step_count >= self.max_steps
+        reward = 1.0 if obs.last_action_success else 0.0
+
+        return obs, reward, terminated, truncated, {"event": event}
+
+    def _build_obs_from_event(self, event: Any) -> AI2ThorObservation:
+        """Project native AI2-THOR event metadata and camera vision into typed observation."""
+        meta = event.metadata
+        agent_meta = meta.get("agent", {})
+        pos_dict = agent_meta.get("position", {})
+        rot_dict = agent_meta.get("rotation", {})
+
+        agent_pose = AI2ThorAgentPose(
+            position=AI2ThorVector3(
+                x=float(pos_dict.get("x", 0.0)),
+                y=float(pos_dict.get("y", 0.9)),
+                z=float(pos_dict.get("z", 0.0)),
+            ),
+            rotation=float(rot_dict.get("y", 0.0)),
+            horizon=float(agent_meta.get("cameraHorizon", 0.0)),
+        )
+
+        obj_list: list[AI2ThorObjectMetadata] = []
+        for obj in meta.get("objects", []):
+            o_pos = obj.get("position", {})
+            o_rot = obj.get("rotation", {})
+            obj_list.append(
+                AI2ThorObjectMetadata(
+                    objectId=str(obj.get("objectId", "")),
+                    objectType=str(obj.get("objectType", "")),
+                    position=AI2ThorVector3(
+                        x=float(o_pos.get("x", 0.0)),
+                        y=float(o_pos.get("y", 0.0)),
+                        z=float(o_pos.get("z", 0.0)),
+                    ),
+                    rotation=AI2ThorVector3(
+                        x=float(o_rot.get("x", 0.0)),
+                        y=float(o_rot.get("y", 0.0)),
+                        z=float(o_rot.get("z", 0.0)),
+                    ),
+                    distance=float(obj.get("distance", 0.0)),
+                    isInteractable=bool(obj.get("isInteractable", True)),
+                    isPickupable=bool(obj.get("isPickupable", False)),
+                    isReceptacle=bool(obj.get("isReceptacle", False)),
+                    isOpenable=bool(obj.get("isOpenable", False)),
+                    isOpened=bool(obj.get("isOpened", False)),
+                    isToggleable=bool(obj.get("isToggleable", False)),
+                    isToggled=bool(obj.get("isToggled", False)),
+                    parentReceptacles=list(obj.get("parentReceptacles") or []),
+                    receptacleObjectIds=list(obj.get("receptacleObjectIds") or []),
+                )
+            )
+
+        held_ids = [o["objectId"] for o in meta.get("objects", []) if o.get("isPickedUp", False)]
+        held_id = held_ids[0] if held_ids else None
+        frame = getattr(event, "frame", None)
+
+        return AI2ThorObservation(
+            agent_pose=agent_pose,
+            objects=obj_list,
+            held_object_id=held_id,
+            last_action_success=bool(meta.get("lastActionSuccess", True)),
+            last_action_error=str(meta.get("errorMessage", "")),
+            step_count=self.step_count,
+            raw_obs={"frame": frame, "metadata": meta},
+        )
+
+
+def make_ai2thor_env(
+    seed: int | None = None,
+    tier: int = 4,
+    prefer_native: bool = False,
+) -> StandaloneAI2ThorEnv | NativeAI2ThorWrapper:
+    """Instantiate AI2-THOR environment with dual-mode native/standalone selection."""
+    if prefer_native:
+        try:
+            return NativeAI2ThorWrapper(seed=seed, tier=tier)
+        except Exception as e:
+            logger.warning(
+                "Native ai2thor controller unavailable (%s), falling back to StandaloneAI2ThorEnv",
+                e,
+            )
+    return StandaloneAI2ThorEnv(seed=seed, tier=tier)

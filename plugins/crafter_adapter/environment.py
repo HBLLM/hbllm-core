@@ -456,20 +456,96 @@ class StandaloneCrafterEnv:
         )
 
 
-def make_crafter_env(seed: int | None = None) -> StandaloneCrafterEnv:
-    """Instantiate Crafter environment, falling back smoothly to standalone simulation."""
-    try:
+class NativeCrafterWrapper:
+    """Wrapper around upstream `crafter.Env` that projects state into typed CrafterObservation."""
+
+    def __init__(self, seed: int | None = None) -> None:
         import crafter  # type: ignore
 
-        env = crafter.Env()
-        env.reset(seed=seed)
-        # Verify it works
-        _ = env.action_names
-        logger.info("Using native crafter.Env")
-        # If native works, we return a wrapped instance or Standalone
-        return StandaloneCrafterEnv(seed=seed)
-    except Exception as e:
-        logger.debug(
-            "Native crafter unavailable or ABI incompatible (%s), using StandaloneCrafterEnv", e
+        self.native_env = crafter.Env(seed=seed)
+        self.step_count = 0
+        self.max_steps = 300
+        self.last_info: dict[str, Any] = {}
+        self.achievements: set[CrafterAchievement] = set()
+
+    def reset(self, seed: int | None = None) -> tuple[CrafterObservation, dict[str, Any]]:
+        self.step_count = 0
+        self.achievements.clear()
+        if seed is not None:
+            import crafter  # type: ignore
+
+            self.native_env = crafter.Env(seed=seed)
+        raw_obs = self.native_env.reset()
+        self.last_info = {}
+        return self._build_obs(raw_obs), {}
+
+    def step(
+        self, action: CrafterAction | int
+    ) -> tuple[CrafterObservation, float, bool, dict[str, Any]]:
+        self.step_count += 1
+        act_idx = int(action)
+        raw_obs, reward, done, info = self.native_env.step(act_idx)
+        self.last_info = info or {}
+
+        if "achievements" in self.last_info:
+            for ach_name, count in self.last_info["achievements"].items():
+                if count > 0:
+                    try:
+                        self.achievements.add(CrafterAchievement(ach_name))
+                    except ValueError:
+                        pass
+
+        obs = self._build_obs(raw_obs)
+        return obs, float(reward), bool(done), info
+
+    def _build_obs(self, raw_obs: Any) -> CrafterObservation:
+        inv_data: dict[str, int] = {}
+        vitals_data = {"health": 9, "food": 9, "drink": 9, "energy": 9}
+        if "inventory" in self.last_info:
+            inv_dict = self.last_info["inventory"]
+            for k in [
+                "wood",
+                "stone",
+                "coal",
+                "iron",
+                "diamond",
+                "drink",
+                "wood_pickaxe",
+                "stone_pickaxe",
+                "iron_pickaxe",
+                "wood_sword",
+                "stone_sword",
+                "iron_sword",
+            ]:
+                if k in inv_dict:
+                    inv_data[k] = inv_dict[k]
+        for v in ["health", "food", "drink", "energy"]:
+            if v in self.last_info:
+                vitals_data[v] = self.last_info[v]
+
+        semantic_data = getattr(self.native_env, "semantic", [])
+        return CrafterObservation(
+            semantic_grid=semantic_data if isinstance(semantic_data, list) else [],
+            player_pos=(32, 32),
+            player_facing=(0, 1),
+            inventory=CrafterInventory(**inv_data),
+            vitals=CrafterVitals(**vitals_data),
+            achievements=set(self.achievements),
+            step_count=self.step_count,
+            day_time=(self.step_count % 300) / 300.0,
+            info=dict(self.last_info),
         )
-        return StandaloneCrafterEnv(seed=seed)
+
+
+def make_crafter_env(seed: int | None = None, prefer_native: bool = True) -> Any:
+    """Instantiate Crafter environment, binding to native crafter if available or falling back to standalone."""
+    if prefer_native:
+        try:
+            wrapper = NativeCrafterWrapper(seed=seed)
+            logger.info(
+                "Successfully instantiated NativeCrafterWrapper using upstream 'crafter' package"
+            )
+            return wrapper
+        except Exception as e:
+            logger.debug("Native crafter unavailable (%s), falling back to StandaloneCrafterEnv", e)
+    return StandaloneCrafterEnv(seed=seed)

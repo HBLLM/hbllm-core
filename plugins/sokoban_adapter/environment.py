@@ -247,10 +247,116 @@ class StandaloneSokobanEnv:
         )
 
 
+class NativeSokobanWrapper:
+    """Wrapper around upstream `gym-sokoban` environment (e.g. Sokoban-v0).
+
+    Translates raw gym observations and room_state into typed SokobanObservation.
+    """
+
+    def __init__(
+        self,
+        env_name: str = "Sokoban-v0",
+        seed: int = 42,
+        max_steps: int = 120,
+    ) -> None:
+        import gym  # type: ignore
+        import gym_sokoban  # type: ignore # noqa: F401
+
+        self.native_env = gym.make(env_name)
+        self.seed = seed
+        self.max_steps = max_steps
+        self.step_count = 0
+        self.reset(seed=seed)
+
+    def reset(self, seed: int | None = None) -> SokobanObservation:
+        if seed is not None:
+            self.seed = seed
+        self.step_count = 0
+        try:
+            self.native_env.seed(self.seed)
+        except Exception:
+            pass
+        _raw_obs = self.native_env.reset()
+        return self._extract_obs(done=False, won=False)
+
+    def step(
+        self, action: SokobanAction | int
+    ) -> tuple[SokobanObservation, float, bool, dict[str, Any]]:
+        self.step_count += 1
+        # In gym-sokoban: 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT
+        gym_act = int(action) + 1
+        _raw_obs, reward, done, info = self.native_env.step(gym_act)
+
+        room = getattr(self.native_env, "room_state", None)
+        won = False
+        if room is not None:
+            has_unsolved_boxes = 4 in room
+            won = not has_unsolved_boxes and (3 in room)
+
+        obs = self._extract_obs(
+            done=done or won or self.step_count >= self.max_steps,
+            won=won,
+            info=info or {},
+        )
+        return obs, float(reward), done or won, info or {}
+
+    def _extract_obs(
+        self,
+        done: bool = False,
+        won: bool = False,
+        info: dict[str, Any] | None = None,
+    ) -> SokobanObservation:
+        room = getattr(self.native_env, "room_state", None)
+        player_pos = tuple(getattr(self.native_env, "player_position", (1, 1)))
+
+        boxes: list[tuple[int, int]] = []
+        targets: list[tuple[int, int]] = []
+        grid: list[list[int]] = []
+
+        if room is not None:
+            h, w = room.shape
+            grid = [[int(room[r][c]) for c in range(w)] for r in range(h)]
+            for r in range(h):
+                for c in range(w):
+                    tile = int(room[r][c])
+                    if tile in (3, 4):
+                        boxes.append((r, c))
+                    if tile in (2, 3):
+                        targets.append((r, c))
+        else:
+            grid = [[0 for _ in range(7)] for _ in range(7)]
+
+        return SokobanObservation(
+            grid=grid,
+            player_pos=(int(player_pos[0]), int(player_pos[1])),
+            boxes=sorted(boxes),
+            targets=sorted(targets),
+            step_count=self.step_count,
+            max_steps=self.max_steps,
+            done=done,
+            won=won,
+            deadlock_detected=False,
+            info=info or {},
+        )
+
+
 def make_sokoban_env(
     tier: SokobanTier | str = SokobanTier.TIER_1_DIRECT_PUSH,
     seed: int = 42,
     max_steps: int = 120,
-) -> StandaloneSokobanEnv:
-    """Factory creating configured Sokoban environments."""
+    prefer_native: bool = False,
+) -> Any:
+    """Factory creating configured Sokoban environments.
+
+    Supports native upstream `gym-sokoban` or deterministic 5-tier `StandaloneSokobanEnv`.
+    """
+    if prefer_native:
+        try:
+            wrapper = NativeSokobanWrapper(seed=seed, max_steps=max_steps)
+            logger.info("Successfully bound to native gym-sokoban environment")
+            return wrapper
+        except Exception as e:
+            logger.debug(
+                "Native gym-sokoban unavailable (%s), falling back to StandaloneSokobanEnv", e
+            )
     return StandaloneSokobanEnv(tier=tier, seed=seed, max_steps=max_steps)

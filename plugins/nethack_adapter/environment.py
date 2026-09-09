@@ -278,12 +278,134 @@ class StandaloneNetHackEnv:
         )
 
 
-def make_nethack_env(seed: int | None = None, tier: int = 5) -> StandaloneNetHackEnv:
-    """Instantiate NetHack environment, falling back smoothly to standalone simulation."""
-    try:
-        # If minihack works
-        logger.info("Using native minihack environment")
-        return StandaloneNetHackEnv(seed=seed, tier=tier)
-    except Exception as e:
-        logger.debug("Native minihack unavailable (%s), using StandaloneNetHackEnv", e)
-        return StandaloneNetHackEnv(seed=seed, tier=tier)
+class NativeNetHackWrapper:
+    """
+    Dual-mode wrapper wrapping authentic upstream minihack / nle package.
+
+    NOTE ON MINIHACK / NLE UPSTREAM COMPILATION:
+    The upstream 'minihack' / 'nle' packages compile against the NetHack C source distribution
+    requiring flex, bison, and specific C toolchain headers.
+    When installed in an environment supporting minihack/nle, this wrapper binds directly
+    to gym.make('MiniHack-...').
+    In standalone or CI environments, HBLLM provides the high-fidelity StandaloneNetHackEnv
+    simulating procedural NetHack dungeon generation, glyph grids, tactical combat, and descent.
+    """
+
+    is_native: bool = True
+
+    ENV_MAP = {
+        1: "MiniHack-Room-5x5-v0",
+        2: "MiniHack-Room-15x15-v0",
+        3: "MiniHack-Corridor-R3-v0",
+        4: "MiniHack-KeyRoom-S5-v0",
+        5: "MiniHack-MultiRoom-N4-v0",
+    }
+
+    ACTION_MAP = {
+        NetHackAction.NORTH: 0,
+        NetHackAction.EAST: 1,
+        NetHackAction.SOUTH: 2,
+        NetHackAction.WEST: 3,
+        NetHackAction.NORTHEAST: 4,
+        NetHackAction.SOUTHEAST: 5,
+        NetHackAction.SOUTHWEST: 6,
+        NetHackAction.NORTHWEST: 7,
+        NetHackAction.WAIT: 8,
+        NetHackAction.OPEN_DOOR: 9,
+        NetHackAction.DESCEND_STAIRS: 11,
+    }
+
+    def __init__(self, seed: int | None = None, tier: int = 5) -> None:
+        try:
+            import gym  # type: ignore
+            import minihack  # type: ignore # noqa: F401
+        except ImportError as err:
+            raise ImportError(
+                "minihack and gym are required for NativeNetHackWrapper. "
+                "Install via 'pip install minihack' or use StandaloneNetHackEnv."
+            ) from err
+
+        self._gym = gym
+        self.tier = tier
+        self.seed = seed
+        self.step_count = 0
+        self.max_steps = 200
+
+        env_id = self.ENV_MAP.get(tier, "MiniHack-MultiRoom-N4-v0")
+        self.env = self._gym.make(env_id)
+        self.reset(seed=seed)
+
+    def reset(self, seed: int | None = None) -> tuple[NetHackObservation, dict[str, Any]]:
+        if seed is not None:
+            self.seed = seed
+        self.step_count = 0
+        raw_obs = self.env.reset()
+        obs = self._build_obs(raw_obs)
+        return obs, {}
+
+    def step(
+        self, action: NetHackAction | int
+    ) -> tuple[NetHackObservation, float, bool, bool, dict[str, Any]]:
+        self.step_count += 1
+        act_enum = NetHackAction(action)
+        act_idx = self.ACTION_MAP.get(act_enum, 8)
+        raw_obs, reward, done, info = self.env.step(act_idx)
+        obs = self._build_obs(raw_obs)
+        truncated = self.step_count >= self.max_steps
+        return obs, float(reward), done, truncated, info
+
+    def _build_obs(self, raw_obs: Any) -> NetHackObservation:
+        glyphs = []
+        chars = []
+        message = ""
+        px, py = 0, 0
+        stats = NetHackStats()
+
+        if isinstance(raw_obs, dict):
+            if "chars" in raw_obs:
+                raw_chars = raw_obs["chars"]
+                chars = [[chr(c) for c in row] for row in raw_chars]
+            if "glyphs" in raw_obs:
+                glyphs = [list(row) for row in raw_obs["glyphs"]]
+            if "message" in raw_obs:
+                message = "".join([chr(c) for c in raw_obs["message"] if c != 0])
+            if "blstats" in raw_obs:
+                bl = raw_obs["blstats"]
+                if len(bl) >= 25:
+                    px, py = int(bl[0]), int(bl[1])
+                    stats = NetHackStats(
+                        hp=int(bl[10]),
+                        max_hp=int(bl[11]),
+                        energy=int(bl[12]),
+                        max_energy=int(bl[13]),
+                        level=int(bl[18]),
+                        gold=int(bl[19]),
+                    )
+
+        return NetHackObservation(
+            glyphs=glyphs or [[int(NetHackGlyph.FLOOR)]],
+            chars=chars or [["."]],
+            player_pos=(px, py),
+            stats=stats,
+            inventory=[],
+            message=message,
+            step_count=self.step_count,
+            raw_obs=raw_obs,
+        )
+
+
+def make_nethack_env(
+    seed: int | None = None,
+    tier: int = 5,
+    prefer_native: bool = False,
+) -> StandaloneNetHackEnv | NativeNetHackWrapper:
+    """Instantiate NetHack environment with dual-mode native/standalone selection."""
+    if prefer_native:
+        try:
+            return NativeNetHackWrapper(seed=seed, tier=tier)
+        except Exception as e:
+            logger.warning(
+                "Native minihack unavailable (%s), falling back to StandaloneNetHackEnv",
+                e,
+            )
+    return StandaloneNetHackEnv(seed=seed, tier=tier)

@@ -468,9 +468,116 @@ class StandaloneALFWorldEnv:
         return False
 
 
+class NativeALFWorldWrapper:
+    """
+    Dual-mode wrapper wrapping authentic upstream alfworld.agents.environment package.
+
+    NOTE ON ALFWorld UPSTREAM PACKAGING & ABI:
+    The official 'alfworld' package depends on TextWorld and Jericho (a C++ Z-Machine emulator).
+    Upstream Jericho wheels are distributed for Python <=3.10 and fail compilation on
+    Python 3.12+ due to removed C-API macros.
+    When executed in a Python 3.8-3.10 environment with 'alfworld' installed,
+    this wrapper delegates directly to authentic AlfredTWEnv.
+    When running in Python 3.12+ or without alfworld, HBLLM provides the high-fidelity
+    StandaloneALFWorldEnv standalone simulator.
+    """
+
+    is_native: bool = True
+
+    TASK_PREFIX_MAP = {
+        ALFWorldTaskType.PICK_AND_PLACE: "pick_and_place_simple",
+        ALFWorldTaskType.EXAMINE_IN_LIGHT: "look_at_obj_in_light",
+        ALFWorldTaskType.CLEAN_AND_PLACE: "pick_clean_then_place_in_recep",
+        ALFWorldTaskType.HEAT_AND_PLACE: "pick_heat_then_place_in_recep",
+        ALFWorldTaskType.COOL_AND_PLACE: "pick_cool_then_place_in_recep",
+        ALFWorldTaskType.PICK_TWO_AND_PLACE: "pick_two_obj_and_place",
+    }
+
+    def __init__(
+        self,
+        task_type: ALFWorldTaskType = ALFWorldTaskType.PICK_AND_PLACE,
+        seed: int | None = None,
+        config_path: str | None = None,
+    ) -> None:
+        try:
+            import alfworld.agents.environment as alf_env  # type: ignore
+        except ImportError as err:
+            raise ImportError(
+                "alfworld is required for NativeALFWorldWrapper. "
+                "Install via 'pip install alfworld' in Python 3.8-3.10, "
+                "or use StandaloneALFWorldEnv."
+            ) from err
+
+        self._alf_env = alf_env
+        self.task_type = task_type
+        self.seed = seed
+        self.step_count = 0
+        self.max_steps = 50
+
+        # Initialize native environment if config available
+        self.env = None
+        if config_path:
+            self.env = alf_env.AlfredTWEnv(config_path, train_eval="eval_out_of_distribution")
+
+    def reset(
+        self,
+        seed: int | None = None,
+        task_type: ALFWorldTaskType | None = None,
+    ) -> tuple[ALFWorldObservation, dict[str, Any]]:
+        """Reset native environment or raise if config uninitialized."""
+        if seed is not None:
+            self.seed = seed
+        if task_type is not None:
+            self.task_type = task_type
+        self.step_count = 0
+
+        if self.env is not None:
+            obs_text, info = self.env.reset()
+            obs = ALFWorldObservation(
+                feedback=str(obs_text),
+                inventory_text=str(info.get("inventory", "")),
+                admissible_commands=list(info.get("admissible_commands", [])),
+                won=False,
+                step_count=0,
+                max_steps=self.max_steps,
+            )
+            return obs, info
+
+        raise RuntimeError("NativeALFWorldWrapper requires an ALFWorld configuration file.")
+
+    def step(self, action: str) -> tuple[ALFWorldObservation, float, bool, bool, dict[str, Any]]:
+        """Step native environment with text command."""
+        self.step_count += 1
+        if self.env is not None:
+            obs_text, reward, done, info = self.env.step(action)
+            won = bool(info.get("won", False) or reward > 0)
+            truncated = self.step_count >= self.max_steps
+            obs = ALFWorldObservation(
+                feedback=str(obs_text),
+                inventory_text=str(info.get("inventory", "")),
+                admissible_commands=list(info.get("admissible_commands", [])),
+                won=won,
+                step_count=self.step_count,
+                max_steps=self.max_steps,
+            )
+            return obs, float(reward), done or won, truncated, info
+
+        raise RuntimeError("NativeALFWorldWrapper requires an ALFWorld configuration file.")
+
+
 def make_alfworld_env(
     task_type: ALFWorldTaskType = ALFWorldTaskType.PICK_AND_PLACE,
     seed: int | None = None,
-) -> StandaloneALFWorldEnv:
-    """Instantiate ALFWorld environment with automatic fallback to high-fidelity simulation."""
+    prefer_native: bool = False,
+    config_path: str | None = None,
+) -> StandaloneALFWorldEnv | NativeALFWorldWrapper:
+    """Instantiate ALFWorld environment with dual-mode native/standalone selection."""
+    if prefer_native:
+        try:
+            return NativeALFWorldWrapper(task_type=task_type, seed=seed, config_path=config_path)
+        except Exception as e:
+            logger.warning(
+                "Native alfworld unavailable (%s), falling back to StandaloneALFWorldEnv",
+                e,
+            )
     return StandaloneALFWorldEnv(task_type=task_type, seed=seed)

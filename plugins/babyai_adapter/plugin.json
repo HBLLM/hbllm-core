@@ -8,6 +8,10 @@
   "platform_version": ">=1.0.0",
   "dependencies": ["minigrid>=3.0.0", "gymnasium>=0.28.1"],
   "tags": ["eval", "benchmark", "babyai", "minigrid", "hcir", "compositional-generalization"],
+  "benchmark_category": "upstream_external_benchmark",
+  "upstream_package": "minigrid",
+  "supports_native_execution": true,
+  "supports_standalone_fallback": true,
   "license": "GPL-3.0-only",
   "capabilities": [
     "babyai_observe",
