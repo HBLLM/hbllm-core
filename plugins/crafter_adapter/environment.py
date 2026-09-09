@@ -479,6 +479,21 @@ class NativeCrafterWrapper:
             self.native_env = crafter.Env(seed=seed)
         raw_obs = self.native_env.reset()
         self.last_info = {}
+
+        # Sync achievements if any unlocked initially
+        player = getattr(
+            self.native_env,
+            "_player",
+            getattr(getattr(self.native_env, "unwrapped", None), "_player", None),
+        )
+        if player is not None and hasattr(player, "achievements"):
+            for ach_name, count in player.achievements.items():
+                if count > 0:
+                    try:
+                        self.achievements.add(CrafterAchievement(ach_name))
+                    except ValueError:
+                        pass
+
         return self._build_obs(raw_obs), {}
 
     def step(
@@ -489,7 +504,19 @@ class NativeCrafterWrapper:
         raw_obs, reward, done, info = self.native_env.step(act_idx)
         self.last_info = info or {}
 
-        if hasattr(self.native_env, "_unlocked"):
+        player = getattr(
+            self.native_env,
+            "_player",
+            getattr(getattr(self.native_env, "unwrapped", None), "_player", None),
+        )
+        if player is not None and hasattr(player, "achievements"):
+            for ach_name, count in player.achievements.items():
+                if count > 0:
+                    try:
+                        self.achievements.add(CrafterAchievement(ach_name))
+                    except ValueError:
+                        pass
+        elif hasattr(self.native_env, "_unlocked"):
             for ach_name in self.native_env._unlocked:
                 try:
                     self.achievements.add(CrafterAchievement(ach_name))
@@ -535,35 +562,62 @@ class NativeCrafterWrapper:
     def _build_obs(self, raw_obs: Any) -> CrafterObservation:
         inv_data: dict[str, int] = {}
         vitals_data = {"health": 9, "food": 9, "drink": 9, "energy": 9}
-        if "inventory" in self.last_info:
-            inv_dict = self.last_info["inventory"]
-            for k in [
-                "wood",
-                "stone",
-                "coal",
-                "iron",
-                "diamond",
-                "sapling",
-                "wood_pickaxe",
-                "stone_pickaxe",
-                "iron_pickaxe",
-                "wood_sword",
-                "stone_sword",
-                "iron_sword",
-            ]:
-                if k in inv_dict:
-                    inv_data[k] = inv_dict[k]
+
+        player = getattr(
+            self.native_env,
+            "_player",
+            getattr(getattr(self.native_env, "unwrapped", None), "_player", None),
+        )
+
+        player_inv: dict[str, Any] = {}
+        if player is not None and hasattr(player, "inventory"):
+            player_inv = dict(player.inventory)
+        elif "inventory" in self.last_info:
+            player_inv = dict(self.last_info["inventory"])
+
+        for k in [
+            "wood",
+            "stone",
+            "coal",
+            "iron",
+            "diamond",
+            "sapling",
+            "wood_pickaxe",
+            "stone_pickaxe",
+            "iron_pickaxe",
+            "wood_sword",
+            "stone_sword",
+            "iron_sword",
+        ]:
+            if k in player_inv:
+                inv_data[k] = int(player_inv[k])
+
         for v in ["health", "food", "drink", "energy"]:
-            if v in self.last_info:
-                vitals_data[v] = self.last_info[v]
+            if v in player_inv:
+                vitals_data[v] = int(player_inv[v])
+            elif v in self.last_info:
+                vitals_data[v] = int(self.last_info[v])
 
         semantic_data: list[list[int]] = []
+        raw_sem = None
         if hasattr(self.native_env, "_sem_view"):
             try:
-                sem_arr = self.native_env._sem_view()
-                if hasattr(sem_arr, "T"):
-                    sem_arr = sem_arr.T
-                raw_list = sem_arr.tolist() if hasattr(sem_arr, "tolist") else list(sem_arr)
+                raw_sem = self.native_env._sem_view()
+            except Exception:
+                raw_sem = None
+        if raw_sem is None and hasattr(getattr(self.native_env, "unwrapped", None), "_sem_view"):
+            try:
+                raw_sem = self.native_env.unwrapped._sem_view()
+            except Exception:
+                raw_sem = None
+        if raw_sem is None and "semantic" in self.last_info:
+            raw_sem = self.last_info["semantic"]
+
+        if raw_sem is not None:
+            try:
+                if hasattr(raw_sem, "T"):
+                    raw_sem = raw_sem.T
+                raw_list = raw_sem.tolist() if hasattr(raw_sem, "tolist") else list(raw_sem)
                 semantic_data = [
                     [
                         self.CRAFTER_NATIVE_TO_OBJECT.get(int(cell), int(CrafterObject.EMPTY))
@@ -576,12 +630,14 @@ class NativeCrafterWrapper:
 
         player_pos = (32, 32)
         player_facing = (0, 1)
-        if hasattr(self.native_env, "_player"):
-            player = self.native_env._player
+        if player is not None:
             if hasattr(player, "pos"):
                 player_pos = (int(player.pos[0]), int(player.pos[1]))
             if hasattr(player, "facing"):
                 player_facing = (int(player.facing[0]), int(player.facing[1]))
+        elif "player_pos" in self.last_info:
+            pp = self.last_info["player_pos"]
+            player_pos = (int(pp[0]), int(pp[1]))
 
         return CrafterObservation(
             semantic_grid=semantic_data,

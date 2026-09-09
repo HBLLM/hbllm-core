@@ -8,6 +8,7 @@ HBLLM CognitiveGraph and EpistemicSpatialGrid.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
@@ -17,8 +18,11 @@ from hbllm.hcir.graph import (
 from hbllm.perception import EpistemicSpatialGrid
 
 from .types import (
+    CrafterAchievement,
+    CrafterInventory,
     CrafterObject,
     CrafterObservation,
+    CrafterVitals,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,28 @@ class CrafterPerceptionAdapter:
     - CognitiveGraph for vital tracking, inventory state, and resource entities.
     """
 
+    CRAFTER_NATIVE_TO_OBJECT = {
+        0: int(CrafterObject.EMPTY),
+        1: int(CrafterObject.WATER),
+        2: int(CrafterObject.GRASS),
+        3: int(CrafterObject.STONE),
+        4: int(CrafterObject.PATH),
+        5: int(CrafterObject.SAND),
+        6: int(CrafterObject.TREE),
+        7: int(CrafterObject.LAVA),
+        8: int(CrafterObject.COAL),
+        9: int(CrafterObject.IRON),
+        10: int(CrafterObject.DIAMOND),
+        11: int(CrafterObject.CRAFTING_TABLE),
+        12: int(CrafterObject.FURNACE),
+        13: int(CrafterObject.PLAYER),
+        14: int(CrafterObject.COW),
+        15: int(CrafterObject.ZOMBIE),
+        16: int(CrafterObject.SKELETON),
+        17: int(CrafterObject.ARROW),
+        18: int(CrafterObject.PLANT),
+    }
+
     def __init__(
         self,
         graph: CognitiveGraph | None = None,
@@ -42,8 +68,92 @@ class CrafterPerceptionAdapter:
         self.width = width
         self.height = height
 
-    def ingest_observation(self, obs: CrafterObservation) -> CognitiveGraph:
+    def ingest_observation(
+        self, observation: CrafterObservation | dict[str, Any]
+    ) -> CognitiveGraph:
         """Update spatial grid and cognitive graph from observation."""
+        if isinstance(observation, dict):
+            sem = observation.get("semantic_grid")
+            if sem is None and "semantic" in observation:
+                raw_sem = observation["semantic"]
+                if hasattr(raw_sem, "T"):
+                    raw_sem = raw_sem.T
+                raw_list = raw_sem.tolist() if hasattr(raw_sem, "tolist") else list(raw_sem)
+                sem = [
+                    [
+                        self.CRAFTER_NATIVE_TO_OBJECT.get(int(cell), int(CrafterObject.EMPTY))
+                        for cell in row
+                    ]
+                    for row in raw_list
+                ]
+            elif sem is None:
+                sem = []
+
+            raw_pos = observation.get("player_pos", (32, 32))
+            player_pos = (int(raw_pos[0]), int(raw_pos[1]))
+            raw_facing = observation.get("player_facing", (0, 1))
+            player_facing = (int(raw_facing[0]), int(raw_facing[1]))
+
+            raw_inv = observation.get("inventory", {})
+            inv_dict = {}
+            for k in [
+                "wood",
+                "stone",
+                "coal",
+                "iron",
+                "diamond",
+                "sapling",
+                "wood_pickaxe",
+                "stone_pickaxe",
+                "iron_pickaxe",
+                "wood_sword",
+                "stone_sword",
+                "iron_sword",
+            ]:
+                if k in raw_inv:
+                    inv_dict[k] = int(raw_inv[k])
+            inventory = CrafterInventory(**inv_dict)
+
+            vitals_dict = {"health": 9, "food": 9, "drink": 9, "energy": 9}
+            raw_vitals = observation.get("vitals", {})
+            for v in ["health", "food", "drink", "energy"]:
+                if v in raw_vitals:
+                    vitals_dict[v] = int(raw_vitals[v])
+                elif v in raw_inv:
+                    vitals_dict[v] = int(raw_inv[v])
+            vitals = CrafterVitals(**vitals_dict)
+
+            raw_achs = observation.get("achievements", set())
+            achs = set()
+            if isinstance(raw_achs, dict):
+                for k, count in raw_achs.items():
+                    if count > 0:
+                        try:
+                            achs.add(CrafterAchievement(k))
+                        except ValueError:
+                            pass
+            elif isinstance(raw_achs, (set, list, tuple)):
+                for k in raw_achs:
+                    try:
+                        achs.add(CrafterAchievement(k))
+                    except ValueError:
+                        pass
+
+            obs = CrafterObservation(
+                semantic_grid=sem,
+                player_pos=player_pos,
+                player_facing=player_facing,
+                inventory=inventory,
+                vitals=vitals,
+                achievements=achs,
+                step_count=int(observation.get("step_count", 0)),
+                day_time=float(observation.get("day_time", 0.0)),
+                raw_obs=observation.get("raw_obs"),
+                info=observation.get("info", {}),
+            )
+        else:
+            obs = observation
+
         px, py = obs.player_pos
 
         # Update Agent Node

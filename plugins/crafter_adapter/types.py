@@ -82,6 +82,7 @@ class CrafterAchievement(StrEnum):
     MAKE_IRON_PICKAXE = "make_iron_pickaxe"
     MAKE_IRON_SWORD = "make_iron_sword"
     COLLECT_DIAMOND = "collect_diamond"
+    WAKE_UP = "wake_up"
     SURVIVE = "survive"
 
 
