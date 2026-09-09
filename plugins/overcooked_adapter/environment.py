@@ -171,6 +171,7 @@ class StandaloneOvercookedEnv:
     def step(
         self,
         action: OvercookedAction | int,
+        partner_action: OvercookedAction | int | None = None,
     ) -> tuple[OvercookedObservation, float, bool, dict[str, Any]]:
         """Apply agent action, advance kitchen timers, and step partner agent."""
         self.step_count += 1
@@ -181,7 +182,10 @@ class StandaloneOvercookedEnv:
 
         # 2. Step partner agent if present
         if self.partner is not None:
-            self._step_partner_agent()
+            if partner_action is not None:
+                self._apply_agent_action(self.partner, OvercookedAction(partner_action))
+            else:
+                self._step_partner_agent()
 
         # 3. Advance cooking timers in all pots
         for pot in self.pots:
@@ -463,8 +467,8 @@ class NativeOvercookedWrapper:
                 1: OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO,
                 2: OvercookedTier.TIER_2_ASYMMETRIC_COORDINATION,
                 3: OvercookedTier.TIER_3_CORRIDOR_CONTENTION,
-                4: OvercookedTier.TIER_4_FORCED_COORDINATION,
-                5: OvercookedTier.TIER_5_COUNTER_CIRCUIT,
+                4: OvercookedTier.TIER_4_DYNAMIC_PARTNER_ADAPTATION,
+                5: OvercookedTier.TIER_5_MULTI_ORDER_SURGE,
             }
             self.tier = tier_int_map.get(tier, OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO)
         else:

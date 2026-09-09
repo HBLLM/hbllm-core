@@ -7,8 +7,8 @@ optimal collision-free and deadlock-free action sequences.
 
 from __future__ import annotations
 
+import heapq
 import logging
-from collections import deque
 from typing import Any
 
 from .types import SokobanAction, SokobanObservation, SokobanTile
@@ -53,7 +53,7 @@ class SokobanActionAdapter:
         obs: SokobanObservation,
         perception_data: dict[str, Any],
     ) -> None:
-        """Compute deadlock-free push path using state-space BFS search."""
+        """Compute deadlock-free push path using state-space A* search."""
         player_pos = obs.player_pos
         boxes = frozenset(obs.boxes)
         targets = frozenset(obs.targets)
@@ -68,20 +68,39 @@ class SokobanActionAdapter:
                 if obs.grid[r][c] == int(SokobanTile.WALL):
                     walls.add((r, c))
 
+        def heuristic(curr_player: tuple[int, int], curr_boxes: frozenset[tuple[int, int]]) -> int:
+            if not targets:
+                return 0
+            h = 0
+            for br, bc in curr_boxes:
+                h += min(abs(br - tr) + abs(bc - tc) for tr, tc in targets)
+            unsolved = [b for b in curr_boxes if b not in targets]
+            if unsolved:
+                h += min(abs(curr_player[0] - br) + abs(curr_player[1] - bc) for br, bc in unsolved)
+            return h
+
         start_state = (player_pos, boxes)
-        queue: deque[
-            tuple[tuple[tuple[int, int], frozenset[tuple[int, int]]], list[SokobanAction]]
-        ] = deque([(start_state, [])])
+        h0 = heuristic(player_pos, boxes)
+        counter = 0
+        pq: list[
+            tuple[
+                int,
+                int,
+                int,
+                tuple[tuple[int, int], frozenset[tuple[int, int]]],
+                list[SokobanAction],
+            ]
+        ] = [(h0, 0, counter, start_state, [])]
         visited = {start_state}
 
-        max_nodes = 2500
+        max_nodes = 6000
         nodes = 0
         best_path: list[SokobanAction] = []
         best_score = float("inf")
 
-        while queue and nodes < max_nodes:
+        while pq and nodes < max_nodes:
             nodes += 1
-            (curr_player, curr_boxes), path = queue.popleft()
+            _f, g, _, (curr_player, curr_boxes), path = heapq.heappop(pq)
 
             if curr_boxes == targets:
                 self.planned_actions = list(path)
@@ -119,16 +138,41 @@ class SokobanActionAdapter:
                     if self._is_2x2_deadlock((nnr, nnc), walls, new_boxes, targets):
                         continue
 
-                    next_state = ((nr, nc), frozenset(new_boxes))
+                    frozen_new_boxes = frozenset(new_boxes)
+                    next_state = ((nr, nc), frozen_new_boxes)
                     if next_state not in visited:
                         visited.add(next_state)
-                        queue.append((next_state, path + [act]))
+                        counter += 1
+                        next_g = g + 1
+                        next_h = heuristic((nr, nc), frozen_new_boxes)
+                        heapq.heappush(
+                            pq,
+                            (
+                                next_g + next_h,
+                                next_g,
+                                counter,
+                                next_state,
+                                path + [act],
+                            ),
+                        )
                 else:
                     # Free walk
                     next_state = ((nr, nc), curr_boxes)
                     if next_state not in visited:
                         visited.add(next_state)
-                        queue.append((next_state, path + [act]))
+                        counter += 1
+                        next_g = g + 1
+                        next_h = heuristic((nr, nc), curr_boxes)
+                        heapq.heappush(
+                            pq,
+                            (
+                                next_g + next_h,
+                                next_g,
+                                counter,
+                                next_state,
+                                path + [act],
+                            ),
+                        )
 
         logger.debug("Sokoban planner reached search limit, executing best partial trajectory")
         self.planned_actions = list(best_path) if best_path else [SokobanAction.UP] * 4

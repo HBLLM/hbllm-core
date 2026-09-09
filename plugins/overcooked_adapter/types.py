@@ -99,3 +99,21 @@ class OvercookedObservation:
     done: bool = False
     won: bool = False
     info: dict[str, Any] = field(default_factory=dict)
+
+    def swap_agents(self) -> OvercookedObservation:
+        """Return observation with agent and partner perspectives swapped."""
+        if self.partner is None:
+            return self
+        return OvercookedObservation(
+            grid=[row[:] for row in self.grid],
+            agent=self.partner,
+            partner=self.agent,
+            pots=self.pots,
+            counter_items=dict(self.counter_items),
+            soups_delivered=self.soups_delivered,
+            step_count=self.step_count,
+            max_steps=self.max_steps,
+            done=self.done,
+            won=self.won,
+            info=dict(self.info),
+        )

@@ -311,7 +311,7 @@ class NativeNetHackWrapper:
         NetHackAction.SOUTHWEST: 6,
         NetHackAction.NORTHWEST: 7,
         NetHackAction.WAIT: 8,
-        NetHackAction.OPEN_DOOR: 9,
+        NetHackAction.OPEN_DOOR: 8,
         NetHackAction.DESCEND_STAIRS: 11,
     }
 
@@ -339,9 +339,21 @@ class NativeNetHackWrapper:
         self.step_count = 0
         self.max_steps = 200
         self.dungeon_level = 1
+        self.player_pos = (0, 0)
+        self.known_glyphs: list[list[int]] = []
+        self.known_chars: list[list[str]] = []
 
         env_id = self.ENV_MAP.get(tier, "MiniHack-MultiRoom-N4-v0")
         self.env = self._gym.make(env_id)
+
+        # Introspect authentic action space definitions
+        self._action_name_to_idx: dict[str, int] = {}
+        unwrapped_actions = getattr(self.env.unwrapped, "actions", None)
+        if unwrapped_actions:
+            for idx, act in enumerate(unwrapped_actions):
+                name = getattr(act, "name", str(act))
+                self._action_name_to_idx[name] = idx
+
         self.reset(seed=seed)
 
     def reset(self, seed: int | None = None) -> tuple[NetHackObservation, dict[str, Any]]:
@@ -349,6 +361,8 @@ class NativeNetHackWrapper:
             self.seed = seed
         self.step_count = 0
         self.dungeon_level = 1
+        self.known_glyphs = []
+        self.known_chars = []
         if self._is_gymnasium:
             raw_obs, info = self.env.reset(seed=seed) if seed is not None else self.env.reset()
         else:
@@ -362,33 +376,135 @@ class NativeNetHackWrapper:
     ) -> tuple[NetHackObservation, float, bool, bool, dict[str, Any]]:
         self.step_count += 1
         act_enum = NetHackAction(action)
-        act_idx = self.ACTION_MAP.get(act_enum, 0)
-        action_space_size = getattr(self.env.action_space, "n", 8)
-        if act_idx >= action_space_size:
-            act_idx = act_idx % action_space_size
-        if self._is_gymnasium:
-            raw_obs, reward, terminated, truncated_env, info = self.env.step(act_idx)
-            truncated = truncated_env or (self.step_count >= self.max_steps)
+        reward = 0.0
+        terminated = False
+        truncated = False
+        info: dict[str, Any] = {}
+
+        # Direction vector mapping for modal actions
+        dir_to_name = {
+            (0, -1): "N",
+            (1, 0): "E",
+            (0, 1): "S",
+            (-1, 0): "W",
+            (1, -1): "NE",
+            (1, 1): "SE",
+            (-1, 1): "SW",
+            (-1, -1): "NW",
+        }
+
+        # Handle modal two-step OPEN action in NetHack C-engine
+        if act_enum == NetHackAction.OPEN_DOOR and "OPEN" in self._action_name_to_idx:
+            open_idx = self._action_name_to_idx["OPEN"]
+            px, py = self.player_pos
+            dir_name = "E"
+            for (dx, dy), name in dir_to_name.items():
+                nx, ny = px + dx, py + dy
+                if 0 <= ny < len(self.known_glyphs) and 0 <= nx < len(self.known_glyphs[0]):
+                    if self.known_glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
+                        dir_name = name
+                        break
+            dir_idx = self._action_name_to_idx.get(dir_name, 0)
+            if self._is_gymnasium:
+                _, r1, term1, trunc1, i1 = self.env.step(open_idx)
+                raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
+                reward = float(r1 + r2)
+                terminated = term1 or term2
+                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                info = {**i1, **i2}
+            else:
+                _, r1, d1, i1 = self.env.step(open_idx)
+                raw_obs, r2, d2, i2 = self.env.step(dir_idx)
+                reward = float(r1 + r2)
+                terminated = d1 or d2
+                truncated = self.step_count >= self.max_steps
+                info = {**i1, **i2}
+
+        # Handle modal KICK action
+        elif act_enum == NetHackAction.KICK and "KICK" in self._action_name_to_idx:
+            kick_idx = self._action_name_to_idx["KICK"]
+            px, py = self.player_pos
+            dir_name = "E"
+            for (dx, dy), name in dir_to_name.items():
+                nx, ny = px + dx, py + dy
+                if 0 <= ny < len(self.known_glyphs) and 0 <= nx < len(self.known_glyphs[0]):
+                    if self.known_glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
+                        dir_name = name
+                        break
+            dir_idx = self._action_name_to_idx.get(dir_name, 0)
+            if self._is_gymnasium:
+                _, r1, term1, trunc1, i1 = self.env.step(kick_idx)
+                raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
+                reward = float(r1 + r2)
+                terminated = term1 or term2
+                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                info = {**i1, **i2}
+            else:
+                _, r1, d1, i1 = self.env.step(kick_idx)
+                raw_obs, r2, d2, i2 = self.env.step(dir_idx)
+                reward = float(r1 + r2)
+                terminated = d1 or d2
+                truncated = self.step_count >= self.max_steps
+                info = {**i1, **i2}
+
         else:
-            raw_obs, reward, done, info = self.env.step(act_idx)
-            terminated = done
-            truncated = self.step_count >= self.max_steps
+            name_map = {
+                "NORTH": "N",
+                "EAST": "E",
+                "SOUTH": "S",
+                "WEST": "W",
+                "NORTHEAST": "NE",
+                "SOUTHEAST": "SE",
+                "SOUTHWEST": "SW",
+                "NORTHWEST": "NW",
+                "PICKUP": "PICKUP",
+                "WAIT": "WAIT",
+            }
+            target_name = name_map.get(act_enum.name, act_enum.name)
+            act_idx = self._action_name_to_idx.get(target_name, self.ACTION_MAP.get(act_enum, 0))
+            action_space_size = getattr(self.env.action_space, "n", 8)
+            if act_idx >= action_space_size:
+                act_idx = act_idx % action_space_size
+
+            if self._is_gymnasium:
+                raw_obs, reward_env, term_env, trunc_env, info = self.env.step(act_idx)
+                reward = float(reward_env)
+                terminated = term_env
+                truncated = trunc_env or (self.step_count >= self.max_steps)
+            else:
+                raw_obs, reward_env, done_env, info = self.env.step(act_idx)
+                reward = float(reward_env)
+                terminated = done_env
+                truncated = self.step_count >= self.max_steps
+
         if reward >= 1.0:
             self.dungeon_level = 2
         obs = self._build_obs(raw_obs)
-        return obs, float(reward), terminated, truncated, info
+        return obs, reward, terminated, truncated, info
 
     def _build_obs(self, raw_obs: Any) -> NetHackObservation:
-        glyphs = []
-        chars = []
         message = ""
         px, py = 0, 0
         stats = NetHackStats(dungeon_level=self.dungeon_level)
 
         if isinstance(raw_obs, dict):
+            if "blstats" in raw_obs:
+                bl = raw_obs["blstats"]
+                if len(bl) >= 25:
+                    px, py = int(bl[0]), int(bl[1])
+                    stats = NetHackStats(
+                        hp=int(bl[10]),
+                        max_hp=int(bl[11]),
+                        energy=int(bl[12]),
+                        max_energy=int(bl[13]),
+                        level=int(bl[18]),
+                        gold=int(bl[19]),
+                        dungeon_level=self.dungeon_level,
+                    )
+            self.player_pos = (px, py)
+
             if "chars" in raw_obs:
                 raw_chars = raw_obs["chars"]
-                chars = [[chr(c) for c in row] for row in raw_chars]
                 CHAR_TO_GLYPH = {
                     ord("."): int(NetHackGlyph.FLOOR),
                     ord("#"): int(NetHackGlyph.CORRIDOR),
@@ -404,39 +520,43 @@ class NativeNetHackWrapper:
                 }
                 h = len(raw_chars)
                 w = len(raw_chars[0]) if h > 0 else 0
-                glyphs = []
+
+                if (
+                    not self.known_glyphs
+                    or len(self.known_glyphs) != h
+                    or len(self.known_glyphs[0]) != w
+                ):
+                    self.known_glyphs = [
+                        [int(NetHackGlyph.UNEXPLORED) for _ in range(w)] for _ in range(h)
+                    ]
+                    self.known_chars = [[" " for _ in range(w)] for _ in range(h)]
+
                 for r in range(h):
-                    row_glyphs = []
                     for c in range(w):
                         ch = raw_chars[r][c]
                         if ch in CHAR_TO_GLYPH:
-                            row_glyphs.append(CHAR_TO_GLYPH[ch])
+                            self.known_glyphs[r][c] = CHAR_TO_GLYPH[ch]
+                            self.known_chars[r][c] = chr(ch)
                         elif (65 <= ch <= 90) or (97 <= ch <= 122):
-                            row_glyphs.append(int(NetHackGlyph.MONSTER))
-                        elif ch in (ord("|"), ord("-"), ord(" ")):
-                            row_glyphs.append(int(NetHackGlyph.WALL))
-                        else:
-                            row_glyphs.append(int(NetHackGlyph.WALL))
-                    glyphs.append(row_glyphs)
+                            self.known_glyphs[r][c] = int(NetHackGlyph.MONSTER)
+                            self.known_chars[r][c] = chr(ch)
+                        elif ch in (ord("|"), ord("-")):
+                            self.known_glyphs[r][c] = int(NetHackGlyph.WALL)
+                            self.known_chars[r][c] = chr(ch)
+
             if "message" in raw_obs:
                 message = "".join([chr(c) for c in raw_obs["message"] if c != 0])
-            if "blstats" in raw_obs:
-                bl = raw_obs["blstats"]
-                if len(bl) >= 25:
-                    px, py = int(bl[0]), int(bl[1])
-                    stats = NetHackStats(
-                        hp=int(bl[10]),
-                        max_hp=int(bl[11]),
-                        energy=int(bl[12]),
-                        max_energy=int(bl[13]),
-                        level=int(bl[18]),
-                        gold=int(bl[19]),
-                        dungeon_level=self.dungeon_level,
-                    )
+
+        glyphs_copy = (
+            [list(row) for row in self.known_glyphs]
+            if self.known_glyphs
+            else [[int(NetHackGlyph.FLOOR)]]
+        )
+        chars_copy = [list(row) for row in self.known_chars] if self.known_chars else [["."]]
 
         return NetHackObservation(
-            glyphs=glyphs or [[int(NetHackGlyph.FLOOR)]],
-            chars=chars or [["."]],
+            glyphs=glyphs_copy,
+            chars=chars_copy,
             player_pos=(px, py),
             stats=stats,
             inventory=[],

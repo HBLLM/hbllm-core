@@ -64,13 +64,21 @@ def run_overcooked_tier(
 
     for ep in range(episodes):
         agent.reset_episode()
+        agent1 = PureHCIROvercookedAgent()
+        agent1.reset_episode()
         env = make_overcooked_env(tier=tier_enum, seed=seed + ep, prefer_native=prefer_native)
         obs = env.reset()
 
+        is_solo = tier_enum == OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO
         done = False
         while not done:
             action = agent.select_action(obs)
-            obs, _reward, done, info = env.step(action)
+            partner_action = (
+                agent1.select_action(obs.swap_agents())
+                if (obs.partner is not None and not is_solo)
+                else None
+            )
+            obs, _reward, done, info = env.step(action, partner_action=partner_action)
 
         if obs.won:
             successes += 1
