@@ -459,6 +459,8 @@ class StandaloneCrafterEnv:
 class NativeCrafterWrapper:
     """Wrapper around upstream `crafter.Env` that projects state into typed CrafterObservation."""
 
+    is_native: bool = True
+
     def __init__(self, seed: int | None = None) -> None:
         import crafter  # type: ignore
 
@@ -481,13 +483,19 @@ class NativeCrafterWrapper:
 
     def step(
         self, action: CrafterAction | int
-    ) -> tuple[CrafterObservation, float, bool, dict[str, Any]]:
+    ) -> tuple[CrafterObservation, float, bool, bool, dict[str, Any]]:
         self.step_count += 1
         act_idx = int(action)
         raw_obs, reward, done, info = self.native_env.step(act_idx)
         self.last_info = info or {}
 
-        if "achievements" in self.last_info:
+        if hasattr(self.native_env, "_unlocked"):
+            for ach_name in self.native_env._unlocked:
+                try:
+                    self.achievements.add(CrafterAchievement(ach_name))
+                except ValueError:
+                    pass
+        elif "achievements" in self.last_info:
             for ach_name, count in self.last_info["achievements"].items():
                 if count > 0:
                     try:
@@ -496,7 +504,8 @@ class NativeCrafterWrapper:
                         pass
 
         obs = self._build_obs(raw_obs)
-        return obs, float(reward), bool(done), info
+        truncated = self.step_count >= self.max_steps
+        return obs, float(reward), bool(done), truncated, self.last_info
 
     def _build_obs(self, raw_obs: Any) -> CrafterObservation:
         inv_data: dict[str, int] = {}
@@ -509,7 +518,7 @@ class NativeCrafterWrapper:
                 "coal",
                 "iron",
                 "diamond",
-                "drink",
+                "sapling",
                 "wood_pickaxe",
                 "stone_pickaxe",
                 "iron_pickaxe",
@@ -523,21 +532,38 @@ class NativeCrafterWrapper:
             if v in self.last_info:
                 vitals_data[v] = self.last_info[v]
 
-        semantic_data = getattr(self.native_env, "semantic", [])
+        semantic_data: list[list[int]] = []
+        if hasattr(self.native_env, "_sem_view"):
+            try:
+                sem_arr = self.native_env._sem_view()
+                semantic_data = sem_arr.tolist() if hasattr(sem_arr, "tolist") else list(sem_arr)
+            except Exception:
+                semantic_data = []
+
+        player_pos = (32, 32)
+        player_facing = (0, 1)
+        if hasattr(self.native_env, "_player"):
+            player = self.native_env._player
+            if hasattr(player, "pos"):
+                player_pos = (int(player.pos[0]), int(player.pos[1]))
+            if hasattr(player, "facing"):
+                player_facing = (int(player.facing[0]), int(player.facing[1]))
+
         return CrafterObservation(
-            semantic_grid=semantic_data if isinstance(semantic_data, list) else [],
-            player_pos=(32, 32),
-            player_facing=(0, 1),
+            semantic_grid=semantic_data,
+            player_pos=player_pos,
+            player_facing=player_facing,
             inventory=CrafterInventory(**inv_data),
             vitals=CrafterVitals(**vitals_data),
             achievements=set(self.achievements),
             step_count=self.step_count,
             day_time=(self.step_count % 300) / 300.0,
+            raw_obs=raw_obs,
             info=dict(self.last_info),
         )
 
 
-def make_crafter_env(seed: int | None = None, prefer_native: bool = True) -> Any:
+def make_crafter_env(seed: int | None = None, prefer_native: bool = False) -> Any:
     """Instantiate Crafter environment, binding to native crafter if available or falling back to standalone."""
     if prefer_native:
         try:

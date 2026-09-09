@@ -90,6 +90,9 @@ class NetHackStats:
     gold: int = 0
     armor_class: int = 10
     exp_level: int = 1
+    energy: int = 10
+    max_energy: int = 10
+    level: int = 1
 
 
 @dataclass

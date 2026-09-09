@@ -176,6 +176,7 @@ class CrafterObservation:
     step_count: int = 0
     day_time: float = 0.0  # 0.0 to 1.0 (day/night)
     raw_obs: Any = None
+    info: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

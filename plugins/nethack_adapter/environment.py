@@ -317,13 +317,21 @@ class NativeNetHackWrapper:
 
     def __init__(self, seed: int | None = None, tier: int = 5) -> None:
         try:
-            import gym  # type: ignore
+            import gymnasium as gym  # type: ignore
             import minihack  # type: ignore # noqa: F401
-        except ImportError as err:
-            raise ImportError(
-                "minihack and gym are required for NativeNetHackWrapper. "
-                "Install via 'pip install minihack' or use StandaloneNetHackEnv."
-            ) from err
+
+            self._is_gymnasium = True
+        except ImportError:
+            try:
+                import gym  # type: ignore
+                import minihack  # type: ignore # noqa: F401
+
+                self._is_gymnasium = False
+            except ImportError as err:
+                raise ImportError(
+                    "minihack and gymnasium/gym are required for NativeNetHackWrapper. "
+                    "Install via 'pip install minihack' or use StandaloneNetHackEnv."
+                ) from err
 
         self._gym = gym
         self.tier = tier
@@ -339,20 +347,32 @@ class NativeNetHackWrapper:
         if seed is not None:
             self.seed = seed
         self.step_count = 0
-        raw_obs = self.env.reset()
+        if self._is_gymnasium:
+            raw_obs, info = self.env.reset(seed=seed) if seed is not None else self.env.reset()
+        else:
+            raw_obs = self.env.reset()
+            info = {}
         obs = self._build_obs(raw_obs)
-        return obs, {}
+        return obs, info
 
     def step(
         self, action: NetHackAction | int
     ) -> tuple[NetHackObservation, float, bool, bool, dict[str, Any]]:
         self.step_count += 1
         act_enum = NetHackAction(action)
-        act_idx = self.ACTION_MAP.get(act_enum, 8)
-        raw_obs, reward, done, info = self.env.step(act_idx)
+        act_idx = self.ACTION_MAP.get(act_enum, 0)
+        action_space_size = getattr(self.env.action_space, "n", 8)
+        if act_idx >= action_space_size:
+            act_idx = act_idx % action_space_size
+        if self._is_gymnasium:
+            raw_obs, reward, terminated, truncated_env, info = self.env.step(act_idx)
+            truncated = truncated_env or (self.step_count >= self.max_steps)
+        else:
+            raw_obs, reward, done, info = self.env.step(act_idx)
+            terminated = done
+            truncated = self.step_count >= self.max_steps
         obs = self._build_obs(raw_obs)
-        truncated = self.step_count >= self.max_steps
-        return obs, float(reward), done, truncated, info
+        return obs, float(reward), terminated, truncated, info
 
     def _build_obs(self, raw_obs: Any) -> NetHackObservation:
         glyphs = []
