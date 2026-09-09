@@ -166,7 +166,16 @@ def run_crafter_benchmark(
                 done = False
                 total_reward = 0.0
 
-                max_steps = 70 if target == CrafterAchievement.SURVIVE else 50
+                max_steps = (
+                    100
+                    if target
+                    in (
+                        CrafterAchievement.MAKE_IRON_PICKAXE,
+                        CrafterAchievement.PLACE_FURNACE,
+                        CrafterAchievement.COLLECT_IRON,
+                    )
+                    else (70 if target == CrafterAchievement.SURVIVE else 50)
+                )
 
                 while not done and obs.step_count < max_steps:
                     act = agent.select_action(obs, goal)

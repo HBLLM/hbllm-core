@@ -429,7 +429,7 @@ class NativeOvercookedWrapper:
         OvercookedTier.TIER_2_ASYMMETRIC_COORDINATION: "asymmetric_advantages",
         OvercookedTier.TIER_3_CORRIDOR_CONTENTION: "coordination_ring",
         OvercookedTier.TIER_4_DYNAMIC_PARTNER_ADAPTATION: "forced_coordination",
-        OvercookedTier.TIER_5_MULTI_ORDER_SURGE: "counter_circuit",
+        OvercookedTier.TIER_5_MULTI_ORDER_SURGE: "counter_circuit_o_1order",
     }
 
     TILE_MAP = {

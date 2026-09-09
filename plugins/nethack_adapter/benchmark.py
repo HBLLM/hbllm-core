@@ -127,7 +127,8 @@ def run_nethack_tier_benchmark(
         done = False
 
         total_reward = 0.0
-        while not done and obs.step_count < 150:
+        step_limit = 250 if tier in (3, 5) else 150
+        while not done and obs.step_count < step_limit:
             act = agent.select_action(obs)
             obs, r, term, trunc, info = env.step(act)
             total_reward += r

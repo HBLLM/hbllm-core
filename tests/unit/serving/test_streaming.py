@@ -18,7 +18,7 @@ async def test_stream_lifecycle(bus):
     await bus.start()
     stream = CognitiveStream(bus, correlation_id="test-123", timeout=2.0)
     await stream.start()
-    assert len(stream._subscriptions) == 4
+    assert len(stream._subscriptions) == 7
     await stream.stop()
     assert len(stream._subscriptions) == 0
     await bus.stop()

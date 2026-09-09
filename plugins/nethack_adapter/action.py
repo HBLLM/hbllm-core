@@ -32,6 +32,8 @@ class NetHackActionAdapter:
     def __init__(self) -> None:
         self.visited_tiles: set[tuple[int, int]] = set()
         self.failed_door_open_attempts: int = 0
+        self.stairs_pos: tuple[int, int] | None = None
+        self.key_pos: tuple[int, int] | None = None
 
     def plan_next_action(
         self, obs: NetHackObservation, goal: NetHackGoal | None = None
@@ -41,12 +43,27 @@ class NetHackActionAdapter:
         self.visited_tiles.add((px, py))
         curr_glyph = obs.glyphs[py][px]
 
+        # Scan for stairs and key in current observation
+        visible_stairs = self._find_glyph_pos(obs, NetHackGlyph.STAIRS_DOWN)
+        if visible_stairs is not None:
+            self.stairs_pos = visible_stairs
+
+        visible_key = self._find_glyph_pos(obs, NetHackGlyph.KEY)
+        if visible_key is not None:
+            self.key_pos = visible_key
+
         # 1. If standing on stairs down, descend!
-        if curr_glyph == NetHackGlyph.STAIRS_DOWN:
+        if (
+            self.stairs_pos is not None and (px, py) == self.stairs_pos
+        ) or curr_glyph == NetHackGlyph.STAIRS_DOWN:
             return NetHackAction.DESCEND_STAIRS
 
         # 2. If standing on key or gold, pick up!
-        if curr_glyph in (NetHackGlyph.KEY, NetHackGlyph.GOLD):
+        if (self.key_pos is not None and (px, py) == self.key_pos) or curr_glyph in (
+            NetHackGlyph.KEY,
+            NetHackGlyph.GOLD,
+        ):
+            self.key_pos = None
             return NetHackAction.PICKUP
 
         # 3. If orthogonally adjacent to closed door, open or kick it!
@@ -67,11 +84,21 @@ class NetHackActionAdapter:
         else:
             self.failed_door_open_attempts = 0
 
+        # Tactical Combat: If adjacent to a monster, engage and attack!
+        width = len(obs.glyphs[0])
+        height = len(obs.glyphs)
+        for act, (dx, dy) in ACTION_VECTORS.items():
+            nx, ny = px + dx, py + dy
+            if 0 <= nx < width and 0 <= ny < height:
+                if obs.glyphs[ny][nx] == NetHackGlyph.MONSTER:
+                    return act
+
         # 4. Check if stairs down has been observed
-        stairs_pos = self._find_glyph_pos(obs, NetHackGlyph.STAIRS_DOWN)
-        if stairs_pos is not None:
-            # BFS path directly to stairs
-            step = self._bfs_path_step(obs, stairs_pos, allow_monsters=True)
+        target_stairs = self.stairs_pos or visible_stairs
+        if target_stairs is not None:
+            if (px, py) == target_stairs:
+                return NetHackAction.DESCEND_STAIRS
+            step = self._bfs_path_step(obs, target_stairs, allow_monsters=True)
             if step is not None:
                 return step
 
@@ -203,7 +230,7 @@ class NetHackActionAdapter:
                         return path[0]
                     return None
 
-            if len(path) >= 80:  # depth cap
+            if len(path) >= 150:  # Search depth cap for multi-room dungeons
                 continue
 
             for act, (dx, dy) in ACTION_VECTORS.items():
