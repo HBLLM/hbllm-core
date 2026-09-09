@@ -49,7 +49,18 @@ class OvercookedPerceptionAdapter:
                 partner_intent = "idle_or_navigating"
 
         ready_pots = [p for p in obs.pots if p.status == PotStatus.READY]
-        filling_pots = [p for p in obs.pots if p.status in (PotStatus.EMPTY, PotStatus.FILLING)]
+        ready_to_cook_pots = [
+            p
+            for p in obs.pots
+            if p.onions_in_pot >= p.required_onions
+            and p.status not in (PotStatus.COOKING, PotStatus.READY)
+        ]
+        filling_pots = [
+            p
+            for p in obs.pots
+            if p.onions_in_pot < p.required_onions
+            and p.status in (PotStatus.EMPTY, PotStatus.FILLING)
+        ]
         cooking_pots = [p for p in obs.pots if p.status == PotStatus.COOKING]
 
         return {
@@ -62,6 +73,7 @@ class OvercookedPerceptionAdapter:
             "dish_dispensers": list(self.dish_dispensers),
             "serving_stations": list(self.serving_stations),
             "ready_pots": ready_pots,
+            "ready_to_cook_pots": ready_to_cook_pots,
             "filling_pots": filling_pots,
             "cooking_pots": cooking_pots,
             "counter_items": dict(obs.counter_items),

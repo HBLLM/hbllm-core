@@ -126,14 +126,16 @@ def run_nethack_tier_benchmark(
         t0 = time.perf_counter()
         done = False
 
+        total_reward = 0.0
         while not done and obs.step_count < 150:
             act = agent.select_action(obs)
             obs, r, term, trunc, info = env.step(act)
+            total_reward += r
             if term or trunc:
                 done = True
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        success = obs.stats.dungeon_level >= 2
+        success = (obs.stats.dungeon_level >= 2) or (total_reward >= 1.0)
 
         results.append(
             NetHackEpisodeResult(

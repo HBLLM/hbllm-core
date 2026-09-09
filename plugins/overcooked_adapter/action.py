@@ -112,14 +112,34 @@ class OvercookedActionAdapter:
             self._plan_interact_with(obs, ready_pots[0].pos)
             return
 
-        # Priority 3: Fetch dish if pot is ready or almost ready
+        # Priority 3: Ignite full pot (3 onions) to start cooking
+        ready_to_cook = perception_data.get("ready_to_cook_pots", [])
+        if ready_to_cook:
+            target_pot = ready_to_cook[0]
+            if held == CulinaryItem.NONE:
+                self._plan_interact_with(obs, target_pot.pos)
+                return
+            elif held == CulinaryItem.ONION:
+                empty_counter = self._find_empty_counter(obs)
+                if empty_counter is not None:
+                    self._plan_interact_with(obs, empty_counter)
+                    return
+
+        # Priority 4: Fetch dish if pot is cooking or ready
         if held == CulinaryItem.NONE and (ready_pots or cooking_pots) and dish_dispensers:
-            # Check if dish dispenser is accessible to this agent
             if self._is_reachable(obs, dish_dispensers[0]):
                 self._plan_interact_with(obs, dish_dispensers[0])
                 return
 
-        # Priority 4: Fill pot with onions
+        # Priority 5: If holding dish and pot is cooking, wait adjacent to pot
+        if held == CulinaryItem.DISH and cooking_pots:
+            pot_pos = cooking_pots[0].pos
+            self._plan_interact_with(obs, pot_pos)
+            if self.planned_actions and self.planned_actions[-1] == OvercookedAction.INTERACT:
+                self.planned_actions.pop()
+            return
+
+        # Priority 6: Fill pot with onions
         if filling_pots:
             target_pot = filling_pots[0]
             if held == CulinaryItem.ONION:
@@ -133,14 +153,25 @@ class OvercookedActionAdapter:
                 self._plan_interact_with(obs, onion_dispensers[0])
                 return
 
-        # Priority 5: If pot is cooking and we are empty, fetch dish if reachable
-        if cooking_pots and held == CulinaryItem.NONE and dish_dispensers:
-            if self._is_reachable(obs, dish_dispensers[0]):
-                self._plan_interact_with(obs, dish_dispensers[0])
-                return
-
         # Default wait
         self.planned_actions = [OvercookedAction.STAY]
+
+    def _find_empty_counter(self, obs: OvercookedObservation) -> tuple[int, int] | None:
+        """Find nearest accessible counter tile not currently holding an item."""
+        height = len(obs.grid)
+        width = len(obs.grid[0]) if height > 0 else 0
+        best_counter = None
+        best_dist = float("inf")
+        ar, ac = obs.agent.pos
+        for r in range(height):
+            for c in range(width):
+                if obs.grid[r][c] == int(KitchenTile.COUNTER) and (r, c) not in obs.counter_items:
+                    if self._is_reachable(obs, (r, c)):
+                        dist = abs(ar - r) + abs(ac - c)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_counter = (r, c)
+        return best_counter
 
     def _is_reachable(self, obs: OvercookedObservation, appliance_pos: tuple[int, int]) -> bool:
         """Check if any adjacent interaction cell is reachable by agent."""
