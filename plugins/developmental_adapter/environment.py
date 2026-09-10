@@ -56,6 +56,12 @@ class BabyWorldEnvironment:
             self._setup_randomized_confounded_world()
         elif scenario == "friction_confounded_world":
             self._setup_friction_confounded_world()
+        elif scenario == "affordance_discovery_world":
+            self._setup_affordance_discovery_world()
+        elif scenario == "containment_world":
+            self._setup_containment_world()
+        elif scenario == "tool_use_world":
+            self._setup_tool_use_world()
         elif scenario == "unseen_entities_world":
             self._setup_unseen_entities_world()
         elif scenario == "unseen_environment_world":
@@ -412,6 +418,159 @@ class BabyWorldEnvironment:
 
         return demos
 
+    def _setup_affordance_discovery_world(self) -> None:
+        """Stage D4 Affordance Discovery World: Spheres, blocks, containers, and immovable obstacles."""
+        self.objects["obj_ball_red"] = BabyObjectState(
+            id="obj_ball_red",
+            object_type=BabyObjectType.BALL,
+            color="red",
+            mass=1.0,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(0.4, 0.2),
+            rollable=True,
+        )
+        self.objects["obj_ball_blue"] = BabyObjectState(
+            id="obj_ball_blue",
+            object_type=BabyObjectType.BALL,
+            color="blue",
+            mass=1.5,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(0.4, -0.2),
+            rollable=True,
+        )
+        self.objects["obj_block_green"] = BabyObjectState(
+            id="obj_block_green",
+            object_type=BabyObjectType.BLOCK,
+            color="green",
+            mass=2.0,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(0.3, 0.3),
+            rollable=False,
+        )
+        self.objects["obj_block_yellow"] = BabyObjectState(
+            id="obj_block_yellow",
+            object_type=BabyObjectType.BLOCK,
+            color="yellow",
+            mass=3.0,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(0.3, -0.3),
+            rollable=False,
+        )
+        self.objects["obj_box_open"] = BabyObjectState(
+            id="obj_box_open",
+            object_type=BabyObjectType.BOX,
+            color="brown",
+            mass=4.0,
+            size=Vector2D(0.6, 0.6),
+            position=Vector2D(0.4, 0.0),
+            is_container=True,
+            is_open=True,
+            rollable=False,
+        )
+        self.objects["obj_heavy_pillar"] = BabyObjectState(
+            id="obj_heavy_pillar",
+            object_type=BabyObjectType.BLOCK,
+            color="gray",
+            mass=50.0,
+            size=Vector2D(0.8, 0.8),
+            position=Vector2D(1.0, 1.0),
+            is_fixed=True,
+            rollable=False,
+        )
+
+    def _setup_containment_world(self) -> None:
+        """Stage D2 Spatial Containment & Transport World."""
+        self.objects["obj_container_box"] = BabyObjectState(
+            id="obj_container_box",
+            object_type=BabyObjectType.BOX,
+            color="blue",
+            mass=3.0,
+            size=Vector2D(0.7, 0.7),
+            position=Vector2D(0.4, 0.1),
+            is_container=True,
+            is_open=True,
+            contained_object_ids=["obj_toy_ball", "obj_toy_cube"],
+        )
+        self.objects["obj_toy_ball"] = BabyObjectState(
+            id="obj_toy_ball",
+            object_type=BabyObjectType.BALL,
+            color="red",
+            mass=0.5,
+            size=Vector2D(0.2, 0.2),
+            position=Vector2D(0.4, 0.1),
+            contained_in="obj_container_box",
+            rollable=True,
+        )
+        self.objects["obj_toy_cube"] = BabyObjectState(
+            id="obj_toy_cube",
+            object_type=BabyObjectType.BLOCK,
+            color="yellow",
+            mass=0.6,
+            size=Vector2D(0.2, 0.2),
+            position=Vector2D(0.4, 0.1),
+            contained_in="obj_container_box",
+            rollable=False,
+        )
+        self.objects["obj_outside_ball"] = BabyObjectState(
+            id="obj_outside_ball",
+            object_type=BabyObjectType.BALL,
+            color="green",
+            mass=0.8,
+            size=Vector2D(0.3, 0.3),
+            position=Vector2D(0.4, -0.6),
+            contained_in=None,
+            rollable=True,
+        )
+
+    def _setup_tool_use_world(self) -> None:
+        """Stage D5 Tool Use & Compositional Causal Chains World."""
+        # Distant target: distance = 2.2 > REACH_DISTANCE (1.5)
+        self.objects["obj_distant_reward"] = BabyObjectState(
+            id="obj_distant_reward",
+            object_type=BabyObjectType.BALL,
+            color="gold",
+            mass=0.8,
+            size=Vector2D(0.3, 0.3),
+            position=Vector2D(2.2, 0.0),
+            rollable=True,
+        )
+        # Functional Tool: Reachable (distance = 0.61 <= 1.5), Length = 1.0 (1.5 + 1.0 = 2.5 > 2.2)
+        self.objects["obj_stick_tool"] = BabyObjectState(
+            id="obj_stick_tool",
+            object_type=BabyObjectType.BLOCK,
+            color="brown",
+            mass=0.7,
+            size=Vector2D(0.1, 1.0),
+            position=Vector2D(0.6, 0.1),
+            is_tool=True,
+            tool_length=1.0,
+            rollable=False,
+        )
+        # Distractor 1: Ineffective tool (too short, length = 0.2 -> max reach 1.7 < 2.2)
+        self.objects["obj_short_twig"] = BabyObjectState(
+            id="obj_short_twig",
+            object_type=BabyObjectType.BLOCK,
+            color="brown",
+            mass=0.3,
+            size=Vector2D(0.1, 0.2),
+            position=Vector2D(0.6, -0.2),
+            is_tool=True,
+            tool_length=0.2,
+            rollable=False,
+        )
+        # Distractor 2: Ungraspable heavy boulder (mass 25.0 > 10.0 limit)
+        self.objects["obj_heavy_boulder"] = BabyObjectState(
+            id="obj_heavy_boulder",
+            object_type=BabyObjectType.BLOCK,
+            color="gray",
+            mass=25.0,
+            size=Vector2D(0.6, 0.6),
+            position=Vector2D(0.6, 0.35),
+            is_tool=False,
+            tool_length=0.0,
+            rollable=False,
+        )
+
     def _setup_unseen_entities_world(self) -> None:
         """Level 2 Generalization World: Unseen Entities (Novel colors & shapes)."""
         # Green Cylinder (Light -> Moves)
@@ -571,10 +730,94 @@ class BabyWorldEnvironment:
                     )
                     consequences["moved"] = True
                     consequences["displacement"] = displacement
+
+                    # Containment Transport: Contained objects move synchronously with container
+                    if target.contained_object_ids:
+                        for cid in target.contained_object_ids:
+                            cobj = self.objects.get(cid)
+                            if cobj:
+                                cobj.position.x += displacement * math.cos(angle)
+                                cobj.position.y += displacement * math.sin(angle)
+                                cobj.velocity = Vector2D(
+                                    displacement * math.cos(angle), displacement * math.sin(angle)
+                                )
                 else:
                     target.velocity = Vector2D(0.0, 0.0)
                     consequences["moved"] = False
                     consequences["displacement"] = 0.0
+
+        elif action == BabyActionType.ROLL:
+            if target:
+                dist = self.agent_position.distance_to(target.position)
+                force = float(params.get("force", self.DEFAULT_PUSH_FORCE))
+                is_spherical = target.rollable or target.object_type == BabyObjectType.BALL
+                if not target.is_fixed and dist <= self.REACH_DISTANCE and is_spherical:
+                    angle = math.atan2(
+                        target.position.y - self.agent_position.y,
+                        target.position.x - self.agent_position.x,
+                    )
+                    displacement = min(2.0, (force * 1.5) / (target.mass + 0.5))
+                    target.position.x += displacement * math.cos(angle)
+                    target.position.y += displacement * math.sin(angle)
+                    target.velocity = Vector2D(
+                        displacement * math.cos(angle), displacement * math.sin(angle)
+                    )
+                    consequences["rolled"] = True
+                    consequences["displacement"] = displacement
+                else:
+                    target.velocity = Vector2D(0.0, 0.0)
+                    consequences["rolled"] = False
+                    consequences["displacement"] = 0.0
+
+        elif action == BabyActionType.PLACE:
+            if self.agent_held_object_id and self.agent_held_object_id in self.objects:
+                held_obj = self.objects[self.agent_held_object_id]
+                if target and (
+                    target.is_container
+                    or target.object_type in (BabyObjectType.CONTAINER, BabyObjectType.BOX)
+                ):
+                    dist = self.agent_position.distance_to(target.position)
+                    if dist <= self.REACH_DISTANCE and (target.is_open is None or target.is_open):
+                        held_obj.held_by_agent = False
+                        held_obj.contained_in = target.id
+                        held_obj.position = Vector2D(target.position.x, target.position.y)
+                        if held_obj.id not in target.contained_object_ids:
+                            target.contained_object_ids.append(held_obj.id)
+                        self.agent_held_object_id = None
+                        consequences["placed_in_container"] = True
+                        consequences["container_id"] = target.id
+                    else:
+                        consequences["placed_in_container"] = False
+                else:
+                    held_obj.held_by_agent = False
+                    self.agent_held_object_id = None
+                    consequences["placed_on_floor"] = True
+
+        elif action in (BabyActionType.PULL, BabyActionType.EXTEND):
+            if target:
+                held_tool = (
+                    self.objects.get(self.agent_held_object_id)
+                    if self.agent_held_object_id
+                    else None
+                )
+                tool_len = held_tool.tool_length if (held_tool and held_tool.is_tool) else 0.0
+                effective_reach = self.REACH_DISTANCE + tool_len
+                dist = self.agent_position.distance_to(target.position)
+                if dist <= effective_reach and not target.is_fixed and target.mass < 15.0:
+                    pull_dist = min(dist - 0.4, 1.2)
+                    angle = math.atan2(
+                        self.agent_position.y - target.position.y,
+                        self.agent_position.x - target.position.x,
+                    )
+                    target.position.x += pull_dist * math.cos(angle)
+                    target.position.y += pull_dist * math.sin(angle)
+                    consequences["pulled"] = True
+                    consequences["new_distance"] = self.agent_position.distance_to(target.position)
+                    consequences["tool_used"] = held_tool.id if held_tool else None
+                    consequences["effective_reach"] = effective_reach
+                else:
+                    consequences["pulled"] = False
+                    consequences["out_of_reach"] = dist > effective_reach
 
         elif action == BabyActionType.OPEN:
             if target and target.is_open is not None:
@@ -657,6 +900,11 @@ class BabyWorldEnvironment:
                     "mass_sensation": obj.mass,  # Tactile/inertial resistance estimate
                     "surface_friction": obj.surface_friction,  # Surface texture/friction estimate
                     "is_held": obj.held_by_agent,
+                    "is_container": obj.is_container,
+                    "contained_in": obj.contained_in,
+                    "is_tool": obj.is_tool,
+                    "tool_length": obj.tool_length,
+                    "rollable": obj.rollable or obj.object_type == BabyObjectType.BALL,
                 }
             )
 

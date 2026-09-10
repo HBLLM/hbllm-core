@@ -52,9 +52,11 @@ class BabyActionType(str, Enum):
     RELEASE = "RELEASE"
     PUSH = "PUSH"
     PULL = "PULL"
+    ROLL = "ROLL"
     PLACE = "PLACE"
     OPEN = "OPEN"
     CLOSE = "CLOSE"
+    EXTEND = "EXTEND"
 
 
 @dataclass
@@ -85,9 +87,14 @@ class BabyObjectState:
     is_fixed: bool = False  # Fixed to floor/table or movable
     is_open: bool | None = None  # For containers / doors
     contained_in: str | None = None  # ID of container if inside
+    contained_object_ids: list[str] = field(default_factory=list)
     held_by_agent: bool = False
     is_occluded: bool = False  # True if hidden behind an occluder from agent's eye
     surface_friction: float = 1.0
+    is_container: bool = False
+    is_tool: bool = False
+    tool_length: float = 0.0
+    rollable: bool = False
 
 
 @dataclass
@@ -159,6 +166,9 @@ class BeliefTransitionType(str, Enum):
     CONFIDENCE_CHANGED = "confidence_changed"
     RULE_GENERALIZED = "rule_generalized"
     RULE_REVISED = "rule_revised"
+    AFFORDANCE_DISCOVERED = "affordance_discovered"
+    SPATIAL_SCHEMA_INDUCED = "spatial_schema_induced"
+    TOOL_COMPOSED = "tool_composed"
 
 
 @dataclass
@@ -197,3 +207,33 @@ class CausalHypothesis:
 
     def describe(self) -> str:
         return f"{self.action.value}(x) ∧ ({self.variable} {self.operator} {self.value}) => {self.consequence}"
+
+
+@dataclass
+class AffordanceHypothesis:
+    """Hypothesis for object-action functional affordance (Stage D4)."""
+
+    hypothesis_id: str = field(default_factory=lambda: f"aff_{uuid.uuid4().hex[:6]}")
+    action: BabyActionType = BabyActionType.ROLL
+    entity_shape: str = "ball"
+    affordance_label: str = "ROLLABLE"
+    confidence: float = 0.5
+    interventions_tested: int = 0
+    falsified: bool = False
+    confirmed: bool = False
+    supporting_episodes: list[str] = field(default_factory=list)
+    counterexamples: list[str] = field(default_factory=list)
+
+    def describe(self) -> str:
+        return f"AFFORDS({self.entity_shape}, {self.action.value}) => {self.affordance_label}"
+
+
+@dataclass
+class SpatialRelationFact:
+    """Structured spatial fact induced from continuous geometric perception (Stage D2)."""
+
+    relation: BabyRelationType
+    subject_id: str
+    object_id: str
+    confidence: float = 1.0
+    evidence: dict[str, Any] = field(default_factory=dict)
