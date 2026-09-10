@@ -93,6 +93,7 @@ class DevelopmentalPerceptionAdapter:
                 "shape": percept["shape"],
                 "color": percept["color"],
                 "mass_sensation": percept["mass_sensation"],
+                "surface_friction": percept.get("surface_friction", 1.0),
                 "last_seen_step": obs.step_index,
             }
 
@@ -105,6 +106,7 @@ class DevelopmentalPerceptionAdapter:
                     "spatial_coordinates": percept["spatial_coordinates"],
                     "velocity": percept["velocity"],
                     "mass_sensation": percept["mass_sensation"],
+                    "surface_friction": percept.get("surface_friction", 1.0),
                     "is_held": percept["is_held"],
                     "is_observed": True,
                     "depth_distance": obs.depth.get(raw_id, 0.0),
@@ -121,17 +123,15 @@ class DevelopmentalPerceptionAdapter:
                         sources=["agent_effector"],
                         targets=[neutral_id],
                         weight=1.0,
+                        properties={"depth": depth},
                     )
                 )
 
-        # 3. Object Permanence for Occluded Entities
-        # Entities that were previously observed but are now visually occluded
-        for occluded_raw_id in obs.occluded_entity_ids:
-            if occluded_raw_id in self._unobserved_beliefs:
-                belief = self._unobserved_beliefs[occluded_raw_id]
+        # 3. Object Permanence: Keep tracked beliefs for entities not currently in line-of-sight
+        for raw_id in obs.occluded_entity_ids:
+            if raw_id in self._unobserved_beliefs:
+                belief = self._unobserved_beliefs[raw_id]
                 neutral_id = belief["neutral_id"]
-
-                # Add as unobserved epistemic belief node with spatial uncertainty
                 occluded_node = PhysicalEntityNode(
                     id=neutral_id,
                     properties={
@@ -139,6 +139,7 @@ class DevelopmentalPerceptionAdapter:
                         "color": belief["color"],
                         "last_known_position": belief["last_position"],
                         "mass_sensation": belief["mass_sensation"],
+                        "surface_friction": belief.get("surface_friction", 1.0),
                         "is_observed": False,
                         "occluded": True,
                         "steps_since_seen": obs.step_index - belief["last_seen_step"],

@@ -70,41 +70,90 @@ class InterventionalCausalDiscoveryEngine:
         if positive_episodes:
             from collections import Counter
 
-            # 1. Identify salient surface features from positive movers
-            pos_colors = Counter(
-                ep["features"]["color"]
-                for ep in positive_episodes
-                if "color" in ep.get("features", {})
-            )
-            pos_color = pos_colors.most_common(1)[0][0] if pos_colors else "red"
+            # Collect candidate variables from observational demonstration features
+            candidate_features = set()
+            for ep in episodes_data:
+                candidate_features.update(ep.get("features", {}).keys())
 
-            pos_shapes = Counter(
-                ep["features"]["shape"]
-                for ep in positive_episodes
-                if "shape" in ep.get("features", {})
-            )
-            pos_shape = pos_shapes.most_common(1)[0][0] if pos_shapes else "ball"
+            candidate_features.discard("size_extent")
+            candidate_features.discard("spatial_coordinates")
 
-            # 2. Derive continuous mass threshold from decision boundary between positive and negative movers
-            pos_masses = [
-                float(ep["features"]["mass_sensation"])
-                for ep in positive_episodes
-                if "mass_sensation" in ep.get("features", {})
-            ]
-            neg_masses = [
-                float(ep["features"]["mass_sensation"])
-                for ep in negative_episodes
-                if "mass_sensation" in ep.get("features", {})
+            preferred_order = ["color", "shape", "surface_friction", "mass_sensation"]
+            ordered_features = [f for f in preferred_order if f in candidate_features] + [
+                f for f in sorted(candidate_features) if f not in preferred_order
             ]
 
-            if pos_masses and neg_masses:
-                max_pos = max(pos_masses)
-                min_neg = min(neg_masses)
-                mass_threshold = round((max_pos + min_neg) / 2.0, 1)
-            elif pos_masses:
-                mass_threshold = round(max(pos_masses) * 1.5, 1)
-            else:
-                mass_threshold = 5.0
+            self.hypotheses = []
+            for feat in ordered_features:
+                sample_val = next(
+                    (
+                        ep["features"][feat]
+                        for ep in episodes_data
+                        if feat in ep.get("features", {})
+                    ),
+                    None,
+                )
+                if isinstance(sample_val, str):
+                    # Categorical variable (e.g. color, shape)
+                    pos_vals = Counter(
+                        ep["features"][feat]
+                        for ep in positive_episodes
+                        if feat in ep.get("features", {})
+                    )
+                    top_val = pos_vals.most_common(1)[0][0] if pos_vals else sample_val
+                    self.hypotheses.append(
+                        CausalHypothesis(
+                            action=BabyActionType.PUSH,
+                            variable=feat,
+                            operator="==",
+                            value=top_val,
+                            consequence="MOVES",
+                            confidence=0.5,
+                        )
+                    )
+                elif isinstance(sample_val, (int, float)):
+                    # Continuous numeric variable (e.g. mass_sensation, surface_friction)
+                    pos_nums = [
+                        float(ep["features"][feat])
+                        for ep in positive_episodes
+                        if feat in ep.get("features", {})
+                    ]
+                    neg_nums = [
+                        float(ep["features"][feat])
+                        for ep in negative_episodes
+                        if feat in ep.get("features", {})
+                    ]
+
+                    if pos_nums and neg_nums:
+                        mean_pos = sum(pos_nums) / len(pos_nums)
+                        mean_neg = sum(neg_nums) / len(neg_nums)
+                        if abs(mean_pos - mean_neg) < 0.05:
+                            # Feature exhibits zero observational variance across outcomes;
+                            # cannot explain why some moved and others remained stationary.
+                            continue
+                        elif mean_pos < mean_neg:
+                            operator = "<"
+                            threshold = round((max(pos_nums) + min(neg_nums)) / 2.0, 2)
+                        else:
+                            operator = ">"
+                            threshold = round((min(pos_nums) + max(neg_nums)) / 2.0, 2)
+                    elif pos_nums:
+                        operator = "<"
+                        threshold = round(max(pos_nums) * 1.5, 2)
+                    else:
+                        operator = "<"
+                        threshold = 5.0
+
+                    self.hypotheses.append(
+                        CausalHypothesis(
+                            action=BabyActionType.PUSH,
+                            variable=feat,
+                            operator=operator,
+                            value=threshold,
+                            consequence="MOVES",
+                            confidence=0.5,
+                        )
+                    )
         else:
             # Fallback when no demonstrations are present: sample from visual percepts
             pos_color = observation.vision[0]["color"] if observation.vision else "red"
@@ -116,32 +165,32 @@ class InterventionalCausalDiscoveryEngine:
             ]
             mass_threshold = round(statistics.median(masses), 1) if masses else 5.0
 
-        self.hypotheses = [
-            CausalHypothesis(
-                action=BabyActionType.PUSH,
-                variable="color",
-                operator="==",
-                value=pos_color,
-                consequence="MOVES",
-                confidence=0.5,
-            ),
-            CausalHypothesis(
-                action=BabyActionType.PUSH,
-                variable="shape",
-                operator="==",
-                value=pos_shape,
-                consequence="MOVES",
-                confidence=0.5,
-            ),
-            CausalHypothesis(
-                action=BabyActionType.PUSH,
-                variable="mass_sensation",
-                operator="<",
-                value=mass_threshold,
-                consequence="MOVES",
-                confidence=0.5,
-            ),
-        ]
+            self.hypotheses = [
+                CausalHypothesis(
+                    action=BabyActionType.PUSH,
+                    variable="color",
+                    operator="==",
+                    value=pos_color,
+                    consequence="MOVES",
+                    confidence=0.5,
+                ),
+                CausalHypothesis(
+                    action=BabyActionType.PUSH,
+                    variable="shape",
+                    operator="==",
+                    value=pos_shape,
+                    consequence="MOVES",
+                    confidence=0.5,
+                ),
+                CausalHypothesis(
+                    action=BabyActionType.PUSH,
+                    variable="mass_sensation",
+                    operator="<",
+                    value=mass_threshold,
+                    consequence="MOVES",
+                    confidence=0.5,
+                ),
+            ]
 
         for h in self.hypotheses:
             self._record_belief_event(
@@ -153,6 +202,26 @@ class InterventionalCausalDiscoveryEngine:
             )
 
         return self.hypotheses
+
+    @staticmethod
+    def _predict_hypothesis(h: CausalHypothesis, features: dict[str, Any]) -> bool:
+        """Evaluate hypothesis prediction against observed features."""
+        val = features.get(h.variable)
+        if val is None:
+            return False
+        if h.operator == "==":
+            return str(val) == str(h.value)
+        elif h.operator == "!=":
+            return str(val) != str(h.value)
+        elif h.operator == "<":
+            return float(val) < float(h.value)
+        elif h.operator == "<=":
+            return float(val) <= float(h.value)
+        elif h.operator == ">":
+            return float(val) > float(h.value)
+        elif h.operator == ">=":
+            return float(val) >= float(h.value)
+        return False
 
     def select_active_intervention(
         self,
@@ -183,18 +252,8 @@ class InterventionalCausalDiscoveryEngine:
             if not percept:
                 continue
 
-            # Compute predictions across all active hypotheses
-            predictions = []
-            for h in active_hyps:
-                if h.variable == "color":
-                    p = percept["color"] == h.value
-                elif h.variable == "shape":
-                    p = percept["shape"] == h.value
-                elif h.variable == "mass_sensation":
-                    p = float(percept["mass_sensation"]) < float(h.value)
-                else:
-                    p = False
-                predictions.append(p)
+            # Compute predictions across all active hypotheses generically
+            predictions = [self._predict_hypothesis(h, percept) for h in active_hyps]
 
             # Disagreement score: count pairs of hypotheses with conflicting predictions
             disagreements = 0
@@ -245,7 +304,12 @@ class InterventionalCausalDiscoveryEngine:
             "target_id": target_id,
             "target_color": target_percept["color"] if target_percept else "",
             "target_shape": target_percept["shape"] if target_percept else "",
-            "target_mass": float(target_percept["mass_sensation"]) if target_percept else 0.0,
+            "color": target_percept["color"] if target_percept else "",
+            "shape": target_percept["shape"] if target_percept else "",
+            "mass_sensation": float(target_percept["mass_sensation"]) if target_percept else 0.0,
+            "surface_friction": float(target_percept.get("surface_friction", 1.0))
+            if target_percept
+            else 1.0,
             "did_move": did_move,
             "displacement": consequences.get("displacement", 0.0),
         }
@@ -261,26 +325,13 @@ class InterventionalCausalDiscoveryEngine:
     def _update_hypotheses_from_evidence(self, probe_result: dict[str, Any]) -> None:
         """Update posterior confidences and falsify invalidated hypotheses."""
         did_move = probe_result["did_move"]
-        color = probe_result["target_color"]
-        shape = probe_result["target_shape"]
-        mass = probe_result["target_mass"]
 
         for h in self.hypotheses:
             if h.falsified:
                 continue
 
             prior_conf = h.confidence
-
-            # Compute prediction for this hypothesis
-            if h.variable == "color":
-                predicted_move = color == h.value
-            elif h.variable == "shape":
-                predicted_move = shape == h.value
-            elif h.variable == "mass_sensation":
-                predicted_move = mass < h.value
-            else:
-                predicted_move = False
-
+            predicted_move = self._predict_hypothesis(h, probe_result)
             h.interventions_tested += 1
 
             if predicted_move != did_move:
@@ -352,33 +403,43 @@ class InterventionalCausalDiscoveryEngine:
         if not self.confirmed_causal_rules:
             return 0.0, []
 
-        # Prioritize confirmed mass causal rule if available
-        mass_rules = [
+        # Prioritize confirmed physical causal rule (surface_friction or mass_sensation) if available
+        phys_rules = [
             r
             for r in self.confirmed_causal_rules
-            if r["precondition"]["property"] == "mass_sensation"
+            if r["precondition"]["property"] in ("surface_friction", "mass_sensation")
         ]
-        rule = mass_rules[0] if mass_rules else self.confirmed_causal_rules[0]
+        rule = phys_rules[0] if phys_rules else self.confirmed_causal_rules[0]
         prop_key = rule["precondition"]["property"]
-        threshold = rule["precondition"]["value"]
+        threshold = float(rule["precondition"]["value"])
+        operator = rule["precondition"]["operator"]
 
         eval_records = []
         correct = 0
 
         for obj_info in test_objects:
-            actual_mass = float(obj_info["mass"])
+            actual_mass = float(obj_info.get("mass", 5.0))
+            actual_friction = float(obj_info.get("surface_friction", 1.0))
 
-            if prop_key == "mass_sensation":
-                predicted_moves = actual_mass < float(threshold)
-            elif prop_key == "color":
-                predicted_moves = obj_info.get("color") == threshold
-            elif prop_key == "shape":
-                predicted_moves = obj_info.get("shape") == threshold
+            if prop_key == "surface_friction":
+                feat_val = actual_friction
+            elif prop_key == "mass_sensation":
+                feat_val = actual_mass
+            else:
+                feat_val = obj_info.get(prop_key, "")
+
+            if operator == "<":
+                predicted_moves = float(feat_val) < threshold
+            elif operator == ">":
+                predicted_moves = float(feat_val) > threshold
+            elif operator == "==":
+                predicted_moves = str(feat_val) == str(threshold)
             else:
                 predicted_moves = False
 
-            # Actual physical outcome under force
-            actual_moves = actual_mass < BabyWorldEnvironment.MASS_THRESHOLD
+            # Ground truth physical outcome under standard force F = 5.0:
+            # Moves if Force (5.0) > Mass * Friction
+            actual_moves = 5.0 > (actual_mass * actual_friction)
 
             is_correct = predicted_moves == actual_moves
             if is_correct:
@@ -390,13 +451,14 @@ class InterventionalCausalDiscoveryEngine:
                     "color": obj_info.get("color"),
                     "shape": obj_info.get("shape"),
                     "mass": actual_mass,
+                    "surface_friction": actual_friction,
                     "predicted_moves": predicted_moves,
                     "actual_moves": actual_moves,
                     "is_correct": is_correct,
                 }
             )
 
-        accuracy = correct / max(1, len(test_objects))
+        accuracy = round(correct / len(test_objects), 4) if test_objects else 0.0
         return accuracy, eval_records
 
     def _record_belief_event(

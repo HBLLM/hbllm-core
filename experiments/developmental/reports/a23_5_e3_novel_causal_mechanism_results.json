@@ -1,6 +1,6 @@
 {
-  "experiment": "A23.5_confounded_train_world",
-  "scenario": "confounded_train_world",
+  "experiment": "A23.5_friction_confounded_world",
+  "scenario": "friction_confounded_world",
   "trials_per_cohort": 15,
   "max_interventions": 20,
   "cohorts": {
@@ -60,7 +60,7 @@
         "20": 15
       },
       "failures_count": 15,
-      "mean_wasted_interventions": 19.8,
+      "mean_wasted_interventions": 19.87,
       "mean_false_hypotheses": 2,
       "level1_train_accuracy": 0.85,
       "level2_unseen_entities_accuracy": 0.65,
@@ -180,7 +180,7 @@
         "2": 15
       },
       "failures_count": 0,
-      "mean_wasted_interventions": 0.87,
+      "mean_wasted_interventions": 0.8,
       "mean_false_hypotheses": 2,
       "level1_train_accuracy": 1.0,
       "level2_unseen_entities_accuracy": 1.0,

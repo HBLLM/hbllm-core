@@ -60,7 +60,7 @@
         "20": 15
       },
       "failures_count": 15,
-      "mean_wasted_interventions": 17.8,
+      "mean_wasted_interventions": 17.13,
       "mean_false_hypotheses": 2,
       "level1_train_accuracy": 0.85,
       "level2_unseen_entities_accuracy": 0.65,

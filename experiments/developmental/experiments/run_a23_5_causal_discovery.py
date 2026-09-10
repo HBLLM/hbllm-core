@@ -70,6 +70,27 @@ def main() -> None:
     e2_file.write_text(json.dumps(e2_results["data"], indent=2))
     print(f"E2 report saved to: {e2_file}")
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # EXPERIMENT E3: NOVEL CAUSAL MECHANISM DISCOVERY (SURFACE FRICTION)
+    # ─────────────────────────────────────────────────────────────────────────────
+    print("\n" + "=" * 85)
+    print("EXECUTING A23.5-E3: NOVEL CAUSAL MECHANISM DISCOVERY")
+    print("Observational Setup: Mass Constant (5.0), Color ↔ Friction Confounder")
+    print("=" * 85)
+
+    e3_results = run_a23_5_benchmark(
+        n_trials=15,
+        max_interventions=20,
+        seed_base=400,
+        scenario="friction_confounded_world",
+    )
+    print("\n" + e3_results["ascii_table"])
+    print("\n" + e3_results["discrete_table"])
+
+    e3_file = reports_dir / "a23_5_e3_novel_causal_mechanism_results.json"
+    e3_file.write_text(json.dumps(e3_results["data"], indent=2))
+    print(f"E3 report saved to: {e3_file}")
+
 
 if __name__ == "__main__":
     main()

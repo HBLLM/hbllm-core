@@ -111,7 +111,11 @@ def main() -> None:
         "--scenario",
         type=str,
         default="confounded_train_world",
-        choices=["confounded_train_world", "randomized_confounded_world"],
+        choices=[
+            "confounded_train_world",
+            "randomized_confounded_world",
+            "friction_confounded_world",
+        ],
         help="Environment scenario to evaluate",
     )
     args = parser.parse_args()

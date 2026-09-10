@@ -54,6 +54,8 @@ class BabyWorldEnvironment:
             self._setup_confounded_train_world()
         elif scenario == "randomized_confounded_world":
             self._setup_randomized_confounded_world()
+        elif scenario == "friction_confounded_world":
+            self._setup_friction_confounded_world()
         elif scenario == "unseen_entities_world":
             self._setup_unseen_entities_world()
         elif scenario == "unseen_environment_world":
@@ -248,6 +250,122 @@ class BabyWorldEnvironment:
 
         return confound_desc
 
+    def _setup_friction_confounded_world(self) -> str:
+        """A23.5-E3 Novel Causal Mechanism: Surface Friction Confounder.
+
+        Physical Setup:
+        - All objects have identical mass (5.0 kg), so mass CANNOT explain motion differences.
+        - Push Force = 5.0 N.
+        - True Physical Law: Moves if Force (5.0) > Mass (5.0) * Friction (μ).
+          => Moves if μ < 1.0.
+
+        Observational Confound:
+        - Green objects are Smooth (μ in [0.15, 0.30] < 1.0 => MOVE).
+        - Yellow objects are Rough (μ in [1.80, 2.50] > 1.0 => STATIONARY).
+        - Spurious Correlation: color == 'green' correlates 100% with movement.
+
+        Contrastive Decoupling Probes:
+        - obj_contrast_yellow_smooth: Yellow, but μ = 0.20 => MOVES! (Falsifies color)
+        - obj_contrast_green_rough: Green, but μ = 2.00 => STATIONARY! (Falsifies color)
+        """
+        # 1. Four Correlated Smooth Green Objects (Movers)
+        self.objects["obj_green_smooth_ball"] = BabyObjectState(
+            id="obj_green_smooth_ball",
+            object_type=BabyObjectType.BALL,
+            color="green",
+            mass=5.0,
+            surface_friction=0.20,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(1.0, 1.0),
+        )
+        self.objects["obj_green_smooth_block"] = BabyObjectState(
+            id="obj_green_smooth_block",
+            object_type=BabyObjectType.BLOCK,
+            color="green",
+            mass=5.0,
+            surface_friction=0.25,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(1.2, 0.2),
+        )
+        self.objects["obj_green_smooth_cylinder"] = BabyObjectState(
+            id="obj_green_smooth_cylinder",
+            object_type=BabyObjectType.BLOCK,
+            color="green",
+            mass=5.0,
+            surface_friction=0.18,
+            size=Vector2D(0.3, 0.6),
+            position=Vector2D(0.9, 0.6),
+        )
+        self.objects["obj_green_smooth_box"] = BabyObjectState(
+            id="obj_green_smooth_box",
+            object_type=BabyObjectType.BOX,
+            color="green",
+            mass=5.0,
+            surface_friction=0.30,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(1.4, 0.8),
+        )
+
+        # 2. Four Correlated Rough Yellow Objects (Non-Movers)
+        self.objects["obj_yellow_rough_ball"] = BabyObjectState(
+            id="obj_yellow_rough_ball",
+            object_type=BabyObjectType.BALL,
+            color="yellow",
+            mass=5.0,
+            surface_friction=2.00,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(0.8, -1.0),
+        )
+        self.objects["obj_yellow_rough_block"] = BabyObjectState(
+            id="obj_yellow_rough_block",
+            object_type=BabyObjectType.BLOCK,
+            color="yellow",
+            mass=5.0,
+            surface_friction=2.20,
+            size=Vector2D(0.6, 0.6),
+            position=Vector2D(1.5, -0.5),
+        )
+        self.objects["obj_yellow_rough_cylinder"] = BabyObjectState(
+            id="obj_yellow_rough_cylinder",
+            object_type=BabyObjectType.BLOCK,
+            color="yellow",
+            mass=5.0,
+            surface_friction=1.80,
+            size=Vector2D(0.4, 0.7),
+            position=Vector2D(1.1, -1.3),
+        )
+        self.objects["obj_yellow_rough_box"] = BabyObjectState(
+            id="obj_yellow_rough_box",
+            object_type=BabyObjectType.BOX,
+            color="yellow",
+            mass=5.0,
+            surface_friction=2.50,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(1.6, -1.1),
+        )
+
+        # 3. Two Contrastive Decoupling Probes
+        self.objects["obj_contrast_yellow_smooth"] = BabyObjectState(
+            id="obj_contrast_yellow_smooth",
+            object_type=BabyObjectType.BALL,
+            color="yellow",
+            mass=5.0,
+            surface_friction=0.20,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(0.5, 1.2),
+        )
+        self.objects["obj_contrast_green_rough"] = BabyObjectState(
+            id="obj_contrast_green_rough",
+            object_type=BabyObjectType.BLOCK,
+            color="green",
+            mass=5.0,
+            surface_friction=2.00,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(1.3, -1.2),
+        )
+
+        return "friction:green->smooth(0.2),yellow->rough(2.0)"
+
     def generate_observational_demonstrations(self) -> list[dict[str, Any]]:
         """Generate standardized observational demonstration episodes on training objects.
 
@@ -283,6 +401,7 @@ class BabyWorldEnvironment:
                         "shape": obj.object_type.value,
                         "size_extent": obj.size.to_tuple(),
                         "mass_sensation": obj.mass,
+                        "surface_friction": obj.surface_friction,
                     },
                     "outcome": "MOVES" if moved else "STATIONARY",
                     "moved": moved,
@@ -536,6 +655,7 @@ class BabyWorldEnvironment:
                     "spatial_coordinates": obj.position.to_tuple(),
                     "velocity": obj.velocity.to_tuple(),
                     "mass_sensation": obj.mass,  # Tactile/inertial resistance estimate
+                    "surface_friction": obj.surface_friction,  # Surface texture/friction estimate
                     "is_held": obj.held_by_agent,
                 }
             )
