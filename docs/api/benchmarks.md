@@ -194,18 +194,22 @@ Unlike traditional Deep Reinforcement Learning (requiring millions of environmen
 
 ```mermaid
 graph LR
-    subgraph Deep RL Baselines
-        Env1[Environment] -->|1M+ Steps| PPO[PPO / DreamerV2 / Rainbow]
-        PPO -->|Sample Inefficient| Act1[Action]
+    subgraph RL ["Deep RL Baselines"]
+        Env1["Environment"] -->|"1M+ Steps"| PPO["PPO / DreamerV2 / Rainbow"]
+        PPO -->|"Sample Inefficient"| Act1["Action"]
     end
-    subgraph Autoregressive LLMs
-        Env2[Environment] -->|RGB / Text Tokens| LLM[LLM / ReAct Prompt]
-        LLM -->|Hallucinations & Context Drift| Act2[Action]
+    subgraph LLM_Sub ["Autoregressive LLMs"]
+        Env2["Environment"] -->|"RGB / Text Tokens"| LLM["LLM / ReAct Prompt"]
+        LLM -->|"Hallucinations & Context Drift"| Act2["Action"]
     end
-    subgraph HBLLM Pure HCIR
-        Env3[Environment] -->|Byte Sync| Perc[Perception Adapter]
-        Perc -->|Typed State| DAG[Causal Recipe DAG + Topological BFS]
-        DAG -->|0 Tokens / Sub-ms| Act3[Act### Master Empirical Benchmark Matrix (Strict Native Upstream Packages Only)
+    subgraph HCIR_Sub ["HBLLM Pure HCIR"]
+        Env3["Environment"] -->|"Byte Sync"| Perc["Perception Adapter"]
+        Perc -->|"Typed State"| DAG["Causal Recipe DAG + Topological BFS"]
+        DAG -->|"0 Tokens / Sub-ms"| Act3["Action"]
+    end
+```
+
+### Master Empirical Benchmark Matrix (Strict Native Upstream Packages Only)
 
 > [!IMPORTANT]
 > **Strict Native Engine Standard**: All metrics documented below were measured exclusively against **authentic, installed upstream simulator packages** (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack` / `nle`). Zero standalone mock simulations or synthetic surrogates are included in this benchmark report.

@@ -98,6 +98,8 @@ HBLLM_BUS_TYPE=redis \
 HBLLM_REDIS_URL=redis://redis-host:6379 \
 HBLLM_REDIS_HMAC_KEY=your-secret-key \
 python -m hbllm.serving.api --worker-mode
+```
+
 ---
 
 ## Kubernetes Deployment
