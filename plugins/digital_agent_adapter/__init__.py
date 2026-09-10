@@ -18,6 +18,10 @@ from .benchmark import (
 )
 from .environment import StandaloneDigitalEnv, make_digital_env
 from .perception import DigitalPerceptionAdapter
+from .predicates import (
+    DIGITAL_PREDICATES,
+    register_digital_predicates,
+)
 from .types import (
     DigitalAction,
     DigitalActionType,
@@ -31,9 +35,13 @@ logger = logging.getLogger(__name__)
 PLUGIN_NAME = "digital-agent-adapter"
 PLUGIN_VERSION = "1.0.0"
 
+# Register domain predicates
+register_digital_predicates()
+
 
 def setup(agent: Any = None) -> None:
     """Plugin setup hook."""
+    register_digital_predicates()
     logger.info("Loaded plugin '%s' v%s", PLUGIN_NAME, PLUGIN_VERSION)
 
 
@@ -45,6 +53,7 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 __all__ = [
     "DOMNode",
+    "DIGITAL_PREDICATES",
     "DigitalAction",
     "DigitalActionAdapter",
     "DigitalActionType",
@@ -57,6 +66,7 @@ __all__ = [
     "StandaloneDigitalEnv",
     "make_digital_env",
     "register",
+    "register_digital_predicates",
     "run_digital_benchmark",
     "run_digital_tier",
     "setup",

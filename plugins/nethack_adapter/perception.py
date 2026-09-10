@@ -8,10 +8,12 @@ HBLLM CognitiveGraph and EpistemicSpatialGrid with fog-of-war tracking.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
+    GoalNode,
     PhysicalEntityNode,
 )
 from hbllm.perception import EpistemicSpatialGrid
@@ -116,3 +118,21 @@ class NetHackPerceptionAdapter:
                         self.graph.add_node(node)
 
         return self.graph
+
+    def ingest_goal(self, goal: Any | None, obs: NetHackObservation) -> GoalNode:
+        """Create active GoalNode for dungeon navigation."""
+        target_conds = ["descended"]
+        if goal and getattr(goal, "target_action", "") == "pickup_key":
+            target_conds = ["has(key)"]
+
+        goal_node = GoalNode(
+            id="goal_active",
+            properties={"target_conditions": target_conds},
+        )
+        if self.graph.has_node("goal_active"):
+            ex = self.graph.get_node("goal_active")
+            if isinstance(ex, GoalNode):
+                ex.properties.update(goal_node.properties)
+        else:
+            self.graph.add_node(goal_node)
+        return goal_node

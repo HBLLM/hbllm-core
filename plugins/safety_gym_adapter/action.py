@@ -10,6 +10,12 @@ from __future__ import annotations
 import logging
 import math
 
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode, CognitiveGraph
+
+from .perception import SafetyGymPerceptionAdapter
 from .types import (
     SafetyGymAction,
     SafetyObservation,
@@ -26,9 +32,48 @@ class SafetyGymActionAdapter:
 
     def __init__(self, clearance_margin: float = 0.45) -> None:
         self.clearance_margin = clearance_margin
+        self.perception = SafetyGymPerceptionAdapter()
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
+
+    def reset(self) -> None:
+        """Reset internal perception state."""
+        self.perception = SafetyGymPerceptionAdapter()
+
+    def enumerate_affordances(
+        self, obs: SafetyObservation, graph: CognitiveGraph
+    ) -> list[ActionNode]:
+        """Declare candidate safe navigation ActionNodes."""
+        affordances = [
+            ActionNode(
+                id="act_navigate_goal",
+                intent="navigate_goal",
+                requirements=[],
+                produces=["near(goal)"],
+            )
+        ]
+        stale = [n.id for n in graph.all_nodes() if n.id.startswith("act_")]
+        for sid in stale:
+            graph.remove_node(sid)
+
+        for act in affordances:
+            graph.add_node(act)
+
+        return affordances
 
     def plan_next_action(self, obs: SafetyObservation) -> SafetyGymAction:
         """Select next discrete action minimizing distance to goal while maintaining C=0."""
+        # 1. Update graph and declare affordances
+        self.perception.ingest_observation(obs)
+        goal_node = self.perception.ingest_goal(obs)
+        self.enumerate_affordances(obs, self.perception.graph)
+
+        # 2. Query UnifiedReasoningRuntime
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description="Constrained safe navigation to goal",
+        )
+        self.runtime.reason(graph=self.perception.graph, problem=problem)
         ax, ay = obs.agent_pos
         gx, gy = obs.goal_pos
         current_heading = obs.agent_heading

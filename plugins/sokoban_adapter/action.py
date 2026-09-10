@@ -11,6 +11,13 @@ import heapq
 import logging
 from typing import Any
 
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode, CognitiveGraph
+
+from .perception import SokobanPerceptionAdapter
+from .predicates import register_sokoban_predicates
 from .types import SokobanAction, SokobanObservation, SokobanTile
 
 logger = logging.getLogger(__name__)
@@ -27,18 +34,63 @@ class SokobanActionAdapter:
     """Causal planner for Sokoban that prunes deadlocks and solves box arrangements."""
 
     def __init__(self) -> None:
+        register_sokoban_predicates()
         self.planned_actions: list[SokobanAction] = []
+        self.perception = SokobanPerceptionAdapter()
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
 
     def reset(self) -> None:
-        """Clear action buffer."""
+        """Clear action buffer and perception state."""
         self.planned_actions.clear()
+        self.perception.reset()
+
+    def enumerate_affordances(
+        self, obs: SokobanObservation, graph: CognitiveGraph
+    ) -> list[ActionNode]:
+        """Declare candidate push ActionNodes for boxes towards targets."""
+        affordances: list[ActionNode] = []
+        stale = [n.id for n in graph.all_nodes() if n.id.startswith("act_")]
+        for sid in stale:
+            graph.remove_node(sid)
+
+        for br, bc in obs.boxes:
+            box_id = f"box_{br}_{bc}"
+            for tr, tc in obs.targets:
+                target_id = f"target_{tr}_{tc}"
+                affordances.append(
+                    ActionNode(
+                        id=f"act_push_{br}_{bc}_to_{tr}_{tc}",
+                        intent=f"push_box_{box_id}_to_{target_id}",
+                        requirements=[f"near({box_id})"],
+                        produces=[f"box_on_target({box_id}, {target_id})"],
+                    )
+                )
+
+        for act in affordances:
+            graph.add_node(act)
+
+        return affordances
 
     def select_action(
         self,
         obs: SokobanObservation,
         perception_data: dict[str, Any],
     ) -> SokobanAction:
-        """Select next primitive action, computing path if queue is empty."""
+        """Select next primitive action using HCIR causal reasoning and A* motor execution."""
+        # 1. Ingest graph and declare affordances
+        self.perception.ingest_observation(obs)
+        goal_node = self.perception.ingest_goal(obs)
+        self.enumerate_affordances(obs, self.perception.graph)
+
+        # 2. Query UnifiedReasoningRuntime for high-level plan step
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description="Sokoban box pushing puzzle",
+        )
+        self.runtime.reason(graph=self.perception.graph, problem=problem)
+
+        # 3. Motor dispatch via A* push path
         if not self.planned_actions:
             self._plan_solution(obs, perception_data)
 

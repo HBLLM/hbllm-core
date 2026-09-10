@@ -10,6 +10,12 @@ from __future__ import annotations
 import logging
 import re
 
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode, CognitiveGraph
+
+from .perception import ALFWorldPerceptionAdapter
 from .types import (
     ALFWorldGoal,
     ALFWorldObservation,
@@ -29,9 +35,85 @@ class ALFWorldActionAdapter:
         self.explored_receptacles: set[str] = set()
         self.known_locations: dict[str, str] = {}  # obj_id -> receptacle_name
         self.held_transformed: bool = False
+        self.perception = ALFWorldPerceptionAdapter()
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
+
+    def reset(self) -> None:
+        """Reset internal exploration history and perception."""
+        self.explored_receptacles.clear()
+        self.known_locations.clear()
+        self.held_transformed = False
+        self.perception = ALFWorldPerceptionAdapter()
+
+    def enumerate_affordances(
+        self, obs: ALFWorldObservation, graph: CognitiveGraph
+    ) -> list[ActionNode]:
+        """Declare candidate ActionNodes matching current admissible text commands."""
+        affordances: list[ActionNode] = []
+        stale = [n.id for n in graph.all_nodes() if n.id.startswith("act_")]
+        for sid in stale:
+            graph.remove_node(sid)
+
+        for cmd in obs.admissible_commands:
+            cmd_norm = cmd.replace(" ", "_")
+            if cmd.startswith("go to"):
+                target = cmd.replace("go to ", "").strip()
+                affordances.append(
+                    ActionNode(
+                        id=f"act_{cmd_norm}",
+                        intent=cmd,
+                        requirements=[],
+                        produces=[f"near({target})"],
+                    )
+                )
+            elif cmd.startswith("take "):
+                target = cmd.replace("take ", "").split(" from ")[0].strip()
+                affordances.append(
+                    ActionNode(
+                        id=f"act_{cmd_norm}",
+                        intent=cmd,
+                        requirements=[f"near({target})"],
+                        produces=[f"holds({target})"],
+                    )
+                )
+            elif cmd.startswith("put "):
+                affordances.append(
+                    ActionNode(
+                        id=f"act_{cmd_norm}",
+                        intent=cmd,
+                        requirements=["holds(object)"],
+                        produces=["goal_achieved"],
+                    )
+                )
+            else:
+                affordances.append(
+                    ActionNode(
+                        id=f"act_{cmd_norm}",
+                        intent=cmd,
+                        requirements=[],
+                        produces=["state_changed"],
+                    )
+                )
+
+        for act in affordances:
+            graph.add_node(act)
+
+        return affordances
 
     def plan_next_action(self, obs: ALFWorldObservation, goal: ALFWorldGoal) -> str:
-        """Generate next admissible text action."""
+        """Generate next admissible text action through HCIR causal subgoaling."""
+        # 1. Update graph and declare affordances
+        self.perception.ingest_observation(obs)
+        goal_node = self.perception.ingest_goal(goal)
+        self.enumerate_affordances(obs, self.perception.graph)
+
+        # 2. Query UnifiedReasoningRuntime
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description=f"ALFWorld task: {goal.task_type.value}",
+        )
+        self.runtime.reason(graph=self.perception.graph, problem=problem)
         admissible = set(obs.admissible_commands)
         current_loc = obs.current_location
 

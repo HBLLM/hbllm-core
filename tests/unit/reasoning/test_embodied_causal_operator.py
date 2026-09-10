@@ -12,6 +12,8 @@ Verifies:
 
 from __future__ import annotations
 
+from typing import Any
+
 from hbllm.brain.reasoning.operators.base import (
     CognitiveContext,
     FrozenGraphView,
@@ -369,3 +371,117 @@ def test_unified_reasoning_runtime_integration() -> None:
     assert invocations[0].result.status == ResultStatus.SUCCESS
     assert invocations[0].result.conclusions["best_action"] == "open"
     assert invocations[0].result.conclusions["action_id"] == "act_open_box"
+
+
+def test_tech_tree_crafting_causal_resolution() -> None:
+    """EmbodiedCausalOperator backward-chains recursive crafting tech-tree DAG:
+    Goal: make_wood_pickaxe
+    Requires: near(crafting_table), has(wood, 1)
+    crafting_table requires: place_table (requires has(wood, 2))
+    has(wood) requires: collect_wood (requires near(tree))
+    Agent has no wood and is near tree -> selects collect_wood!
+    """
+    graph = CognitiveGraph()
+    graph.add_node(
+        PhysicalEntityNode(
+            id="agent",
+            entity_type="agent",
+            properties={"inventory": {"wood": 0}, "x": 10, "y": 10, "reach_distance": 1.5},
+        )
+    )
+    graph.add_node(
+        PhysicalEntityNode(
+            id="tree_1",
+            entity_type="resource",
+            properties={"x": 10, "y": 10, "distance": 0.0},
+        )
+    )
+    # Affordances
+    graph.add_node(
+        ActionNode(
+            id="act_make_pickaxe",
+            intent="make_wood_pickaxe",
+            requirements=["near(crafting_table)", "has(wood, 1)"],
+            produces=["has(wood_pickaxe)"],
+        )
+    )
+    graph.add_node(
+        ActionNode(
+            id="act_place_table",
+            intent="place_table",
+            requirements=["has(wood, 2)"],
+            produces=["near(crafting_table)", "has(table)"],
+        )
+    )
+    graph.add_node(
+        ActionNode(
+            id="act_collect_wood",
+            intent="collect_wood",
+            requirements=["near(tree_1)"],
+            produces=["has(wood, 1)", "has(wood, 2)"],
+        )
+    )
+    goal = GoalNode(id="goal_craft", properties={"target_conditions": ["has(wood_pickaxe)"]})
+    graph.add_node(goal)
+
+    frozen = FrozenGraphView.from_graph(graph)
+    context = CognitiveContext(
+        graph_view=frozen,
+        problem=ReasoningProblem(problem_type=ProblemType.PLANNING, goal_node_ids=("goal_craft",)),
+    )
+
+    op = EmbodiedCausalOperator()
+    result = op.execute(context.problem, context)
+
+    assert result.status == ResultStatus.SUCCESS
+    assert result.conclusions["best_action"] == "collect_wood"
+    assert result.conclusions["action_id"] == "act_collect_wood"
+
+
+def test_grid_predicates_and_custom_registry() -> None:
+    """Verify standing_on, adjacency, and custom predicate extension registry."""
+    graph = CognitiveGraph()
+    graph.add_node(
+        PhysicalEntityNode(
+            id="agent",
+            entity_type="agent",
+            properties={"drink": 3.0, "x": 5, "y": 5, "coords": (5, 5)},
+        )
+    )
+    graph.add_node(
+        PhysicalEntityNode(
+            id="water_1",
+            entity_type="resource",
+            properties={"coords": (5, 6), "x": 5, "y": 6},
+        )
+    )
+    graph.add_node(
+        PhysicalEntityNode(
+            id="stairs_down",
+            entity_type="stairs",
+            properties={"coords": (5, 5), "x": 5, "y": 5},
+        )
+    )
+
+    view = FrozenGraphView.from_graph(graph)
+    op = EmbodiedCausalOperator()
+
+    # Core universal primitives
+    assert op.is_condition_satisfied("standing_on(stairs_down)", view)
+    assert op.is_condition_satisfied("adjacent(water_1)", view)
+
+    # Unregistered predicate returns False
+    assert not op.is_condition_satisfied("custom_dummy_vital(drink, 2)", view)
+
+    # Register custom predicate via Extension Registry
+    def eval_vital(args: list[str], v: FrozenGraphView, props: dict[str, Any]) -> bool:
+        vital_name = args[0] if args else "health"
+        min_val = float(args[1]) if len(args) > 1 else 4.0
+        return float(props.get(vital_name, 10.0)) >= min_val
+
+    EmbodiedCausalOperator.register_predicate("custom_dummy_vital", eval_vital)
+    try:
+        assert not op.is_condition_satisfied("custom_dummy_vital(drink, 4)", view)
+        assert op.is_condition_satisfied("custom_dummy_vital(drink, 2)", view)
+    finally:
+        EmbodiedCausalOperator.unregister_predicate("custom_dummy_vital")

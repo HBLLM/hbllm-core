@@ -35,13 +35,21 @@ PLUGIN_NAME = "overcooked-adapter"
 PLUGIN_VERSION = "1.0.0"
 
 
+from .predicates import register_overcooked_predicates
+
+# Register domain predicates with EmbodiedCausalOperator
+register_overcooked_predicates()
+
+
 def setup(agent: Any = None) -> None:
     """Plugin setup hook."""
+    register_overcooked_predicates()
     logger.info("Loaded plugin '%s' v%s", PLUGIN_NAME, PLUGIN_VERSION)
 
 
 def register(bus: Any = None, registry: Any = None) -> list[Any]:
     """Plugin registration hook conforming to HBLLM plugin manager."""
+    register_overcooked_predicates()
     logger.info("Registered capabilities for '%s'", PLUGIN_NAME)
     return []
 

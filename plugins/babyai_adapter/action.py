@@ -15,7 +15,15 @@ import logging
 from typing import Any
 
 from hbllm.actions import CausalObstacleResolver, TopologicalFrontierNavigator
-from hbllm.hcir.graph import CognitiveGraph, EntityLifecycle, PhysicalEntityNode
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import (
+    ActionNode,
+    CognitiveGraph,
+    EntityLifecycle,
+    PhysicalEntityNode,
+)
 from hbllm.perception import EpistemicSpatialGrid
 
 from .types import (
@@ -45,6 +53,7 @@ class BabyAIActionAdapter:
         self.action_queue: list[MiniGridAction] = []
         self.last_agent_pos: tuple[int, int] | None = None
         self.last_action: MiniGridAction | None = None
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
 
     @property
     def active_frontier(self) -> tuple[int, int] | None:
@@ -63,6 +72,128 @@ class BabyAIActionAdapter:
         self.action_queue.clear()
         self.last_agent_pos = None
         self.last_action = None
+
+    def enumerate_affordances(
+        self, graph: CognitiveGraph, goal: BabyAIGoal | None = None
+    ) -> list[ActionNode]:
+        """Declare candidate ActionNodes with causal preconditions and outcomes for BabyAI."""
+        affordances: list[ActionNode] = []
+        coords, direction, carrying = self.get_agent_state(graph)
+
+        # Clear stale action nodes
+        stale = [n.id for n in graph.all_nodes() if n.id.startswith("act_")]
+        for sid in stale:
+            graph.remove_node(sid)
+
+        for node in graph.all_nodes():
+            if not isinstance(node, PhysicalEntityNode) or node.entity_type == "agent":
+                continue
+            if node.entity_lifecycle == EntityLifecycle.FORGOTTEN:
+                continue
+
+            nid = node.id
+            etype = node.entity_type
+            props = node.properties
+
+            # 1. Navigation / Approach affordance to any known entity
+            affordances.append(
+                ActionNode(
+                    id=f"act_approach_{nid}",
+                    intent=f"approach_{nid}",
+                    requirements=[],
+                    produces=[f"near({nid})", f"adjacent({nid})"],
+                    properties={"target_id": nid, "target_pos": props.get("coords")},
+                )
+            )
+
+            # 2. Pickup affordance for movable objects (ball, box, key)
+            if etype in ("ball", "box", "key"):
+                affordances.append(
+                    ActionNode(
+                        id=f"act_pickup_{nid}",
+                        intent=f"pickup_{nid}",
+                        requirements=[f"near({nid})", "has(none)"],
+                        produces=[f"holds({nid})"],
+                        properties={"target_id": nid},
+                    )
+                )
+
+            # 3. Door toggle / unlock affordance
+            if etype == "door" or props.get("is_door"):
+                door_color = props.get("color")
+                is_locked = bool(props.get("is_locked", False)) or props.get("state") == "locked"
+                is_open = props.get("state") == "open" or bool(props.get("is_opened", False))
+
+                if not is_open:
+                    if is_locked:
+                        matching_keys = [
+                            k.id
+                            for k in graph.all_nodes()
+                            if isinstance(k, PhysicalEntityNode)
+                            and k.entity_type == "key"
+                            and k.properties.get("color") == door_color
+                        ]
+                        key_id = matching_keys[0] if matching_keys else f"key_{door_color}"
+                        affordances.append(
+                            ActionNode(
+                                id=f"act_unlock_{nid}",
+                                intent=f"unlock_{nid}",
+                                requirements=[f"near({nid})", f"holds({key_id})"],
+                                produces=[f"is_unlocked({nid})"],
+                                properties={"target_id": nid, "key_id": key_id},
+                            )
+                        )
+                    affordances.append(
+                        ActionNode(
+                            id=f"act_open_{nid}",
+                            intent=f"open_{nid}",
+                            requirements=[f"near({nid})", f"is_unlocked({nid})"],
+                            produces=[f"is_opened({nid})"],
+                            properties={"target_id": nid},
+                        )
+                    )
+
+        # 4. Drop affordance if carrying an object
+        if carrying:
+            held_id = carrying.get("id", "object")
+            affordances.append(
+                ActionNode(
+                    id="act_drop",
+                    intent="drop",
+                    requirements=[f"holds({held_id})"],
+                    produces=["has(none)"],
+                )
+            )
+
+        for act in affordances:
+            graph.add_node(act)
+
+        return affordances
+
+    def plan_cognitive_step(self, graph: CognitiveGraph, goal: BabyAIGoal) -> str | None:
+        """Query UnifiedReasoningRuntime with EmbodiedCausalOperator for the next causal intent."""
+        self.enumerate_affordances(graph, goal)
+        from .perception import BabyAIPerceptionAdapter
+
+        adapter = BabyAIPerceptionAdapter(graph=graph)
+        goal_node = adapter.ingest_goal(goal)
+
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description=f"BabyAI causal goal resolution: {goal.action}",
+        )
+        trace = self.runtime.reason(graph=graph, problem=problem)
+        if (
+            trace
+            and trace.final_result
+            and trace.final_result.conclusions
+            and "best_action" in trace.final_result.conclusions
+        ):
+            best = trace.final_result.conclusions["best_action"]
+            if best and best != "no_op":
+                return best
+        return None
 
     def find_target_entity(
         self, graph: CognitiveGraph, goal: BabyAIGoal

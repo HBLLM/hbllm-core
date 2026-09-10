@@ -285,6 +285,16 @@ class FrozenGraphView:
     def all_edge_ids(self) -> frozenset[str]:
         return frozenset(self._edges.keys())
 
+    def count_by_type(self, node_type: HCIRNodeType) -> int:
+        """Count nodes of the given type without deep-copying."""
+        return sum(1 for n in self._nodes.values() if n.node_type == node_type)
+
+    def iter_nodes_by_type(self, node_type: HCIRNodeType):
+        """Iterate over nodes of the given type without deep-copying."""
+        for n in self._nodes.values():
+            if n.node_type == node_type:
+                yield n
+
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
         """Return deep-copied nodes of the given type."""
         return [n.model_copy(deep=True) for n in self._nodes.values() if n.node_type == node_type]

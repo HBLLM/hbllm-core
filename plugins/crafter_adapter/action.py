@@ -13,7 +13,6 @@ import logging
 from collections import deque
 
 from .types import (
-    CrafterAchievement,
     CrafterAction,
     CrafterGoal,
     CrafterObject,
@@ -23,112 +22,253 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode, CognitiveGraph
+
+from .perception import CrafterPerceptionAdapter
+from .predicates import register_crafter_predicates
+
+
 class CrafterActionAdapter:
     """
-    Translates high-level causal decisions into executable Crafter discrete actions.
+    Pure Device Driver for Crafter environment.
+
+    Decoupled into:
+    1. enumerate_affordances: Declares ActionNodes with causal preconditions and outcomes.
+    2. execute_action: Low-level motor dispatch (grid BFS, facing, tool usage).
+    3. plan_next_action: Routes causal planning directly through UnifiedReasoningRuntime.
     """
 
     def __init__(self) -> None:
+        register_crafter_predicates()
         self.current_plan: list[CrafterAction] = []
         self.table_pos: tuple[int, int] | None = None
         self.furnace_pos: tuple[int, int] | None = None
+        self.perception = CrafterPerceptionAdapter()
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
 
     def reset(self) -> None:
         """Reset internal plan and spatial landmarks."""
         self.current_plan.clear()
         self.table_pos = None
         self.furnace_pos = None
+        self.perception = CrafterPerceptionAdapter()
 
-    def plan_next_action(
-        self, obs: CrafterObservation, goal: CrafterGoal | None = None
-    ) -> CrafterAction:
-        """Select next optimal action respecting survival, mob combat, and tech-tree DAG."""
-        px, py = obs.player_pos
-        height = len(obs.semantic_grid)
-        width = len(obs.semantic_grid[0]) if height > 0 else 0
+    def enumerate_affordances(
+        self, obs: CrafterObservation, graph: CognitiveGraph
+    ) -> list[ActionNode]:
+        """Declare candidate ActionNodes with explicit causal requirements and outputs."""
+        affordances: list[ActionNode] = [
+            # Survival & Defense
+            ActionNode(
+                id="act_defend",
+                intent="defend",
+                requirements=[],
+                produces=["safe_from_monster"],
+            ),
+            ActionNode(
+                id="act_sleep",
+                intent="sleep",
+                requirements=["no_mobs_adjacent"],
+                produces=["vitals_safe(energy, 9)"],
+            ),
+            ActionNode(
+                id="act_drink",
+                intent="drink",
+                requirements=["near(water)"],
+                produces=["vitals_safe(drink, 5)"],
+            ),
+            ActionNode(
+                id="act_eat",
+                intent="eat",
+                requirements=["near(cow)"],
+                produces=["vitals_safe(food, 5)"],
+            ),
+            # Tech-Tree Crafting & Gathering
+            ActionNode(
+                id="act_collect_wood",
+                intent="collect_wood",
+                requirements=["near(tree)"],
+                produces=["has(wood, 1)", "has(wood, 2)"],
+            ),
+            ActionNode(
+                id="act_place_table",
+                intent="place_table",
+                requirements=["has(wood, 2)"],
+                produces=["has(table)", "near(crafting_table)"],
+            ),
+            ActionNode(
+                id="act_make_wood_pickaxe",
+                intent="make_wood_pickaxe",
+                requirements=["near(crafting_table)", "has(wood, 1)"],
+                produces=["has(wood_pickaxe)"],
+            ),
+            ActionNode(
+                id="act_collect_stone",
+                intent="collect_stone",
+                requirements=["has(wood_pickaxe)", "near(stone)"],
+                produces=["has(stone, 1)", "has(stone, 4)"],
+            ),
+            ActionNode(
+                id="act_make_stone_pickaxe",
+                intent="make_stone_pickaxe",
+                requirements=["near(crafting_table)", "has(wood, 1)", "has(stone, 1)"],
+                produces=["has(stone_pickaxe)"],
+            ),
+            ActionNode(
+                id="act_place_furnace",
+                intent="place_furnace",
+                requirements=["has(stone, 4)"],
+                produces=["has(furnace)", "near(furnace)"],
+            ),
+            ActionNode(
+                id="act_collect_coal",
+                intent="collect_coal",
+                requirements=["has(wood_pickaxe)", "near(coal)"],
+                produces=["has(coal, 1)"],
+            ),
+            ActionNode(
+                id="act_collect_iron",
+                intent="collect_iron",
+                requirements=["has(stone_pickaxe)", "near(iron)"],
+                produces=["has(iron, 1)"],
+            ),
+            ActionNode(
+                id="act_make_iron_pickaxe",
+                intent="make_iron_pickaxe",
+                requirements=[
+                    "has(iron, 1)",
+                    "has(coal, 1)",
+                    "has(wood, 1)",
+                    "near(crafting_table)",
+                    "near(furnace)",
+                ],
+                produces=["has(iron_pickaxe)"],
+            ),
+            ActionNode(
+                id="act_collect_diamond",
+                intent="collect_diamond",
+                requirements=["has(iron_pickaxe)", "near(diamond)"],
+                produces=["has(diamond)"],
+            ),
+            # Spatial Approach Primitives
+            ActionNode(
+                id="act_approach_tree",
+                intent="approach_tree",
+                requirements=[],
+                produces=["near(tree)"],
+            ),
+            ActionNode(
+                id="act_approach_water",
+                intent="approach_water",
+                requirements=[],
+                produces=["near(water)"],
+            ),
+            ActionNode(
+                id="act_approach_cow",
+                intent="approach_cow",
+                requirements=[],
+                produces=["near(cow)"],
+            ),
+            ActionNode(
+                id="act_approach_table",
+                intent="approach_crafting_table",
+                requirements=[],
+                produces=["near(crafting_table)"],
+            ),
+            ActionNode(
+                id="act_approach_stone",
+                intent="approach_stone",
+                requirements=[],
+                produces=["near(stone)"],
+            ),
+            ActionNode(
+                id="act_approach_coal",
+                intent="approach_coal",
+                requirements=[],
+                produces=["near(coal)"],
+            ),
+            ActionNode(
+                id="act_approach_iron",
+                intent="approach_iron",
+                requirements=[],
+                produces=["near(iron)"],
+            ),
+            ActionNode(
+                id="act_approach_furnace",
+                intent="approach_furnace",
+                requirements=[],
+                produces=["near(furnace)"],
+            ),
+            ActionNode(
+                id="act_approach_diamond",
+                intent="approach_diamond",
+                requirements=[],
+                produces=["near(diamond)"],
+            ),
+            # Default Exploration
+            ActionNode(
+                id="act_explore",
+                intent="explore",
+                requirements=[],
+                produces=["explore_done"],
+            ),
+        ]
 
-        # 1. Tactical Monster Combat & Self-Defense
-        if height > 0 and width > 0:
-            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nx, ny = px + dx, py + dy
-                if 0 <= nx < width and 0 <= ny < height:
-                    if obs.semantic_grid[ny][nx] in (CrafterObject.ZOMBIE, CrafterObject.SKELETON):
-                        if obs.player_facing == (dx, dy):
-                            return CrafterAction.DO
-                        if (dx, dy) == (-1, 0):
-                            return CrafterAction.MOVE_LEFT
-                        if (dx, dy) == (1, 0):
-                            return CrafterAction.MOVE_RIGHT
-                        if (dx, dy) == (0, -1):
-                            return CrafterAction.MOVE_UP
-                        if (dx, dy) == (0, 1):
-                            return CrafterAction.MOVE_DOWN
+        for act in affordances:
+            if graph.has_node(act.id):
+                graph.remove_node(act.id)
+            graph.add_node(act)
 
-        # 2. Vital Survival Interrupts (raised proactive thresholds)
-        if obs.vitals.energy <= 2:
-            if not self._is_near(obs, CrafterObject.ZOMBIE, radius=3) and not self._is_near(
-                obs, CrafterObject.SKELETON, radius=3
-            ):
-                return CrafterAction.SLEEP
+        return affordances
 
-        if obs.vitals.drink <= 4:
-            water_act = self._navigate_and_interact(obs, CrafterObject.WATER)
-            if water_act is not None:
-                return water_act
+    def execute_action(self, intent: str, obs: CrafterObservation) -> CrafterAction:
+        """Low-level actuator dispatch: translates declarative intent into discrete motor actions."""
+        # 1. Self-defense mob engagement
+        if intent == "defend":
+            px, py = obs.player_pos
+            height = len(obs.semantic_grid)
+            width = len(obs.semantic_grid[0]) if height > 0 else 0
+            if height > 0 and width > 0:
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nx, ny = px + dx, py + dy
+                    if 0 <= nx < width and 0 <= ny < height:
+                        if obs.semantic_grid[ny][nx] in (
+                            CrafterObject.ZOMBIE,
+                            CrafterObject.SKELETON,
+                        ):
+                            if obs.player_facing == (dx, dy):
+                                return CrafterAction.DO
+                            if (dx, dy) == (-1, 0):
+                                return CrafterAction.MOVE_LEFT
+                            if (dx, dy) == (1, 0):
+                                return CrafterAction.MOVE_RIGHT
+                            if (dx, dy) == (0, -1):
+                                return CrafterAction.MOVE_UP
+                            if (dx, dy) == (0, 1):
+                                return CrafterAction.MOVE_DOWN
+            return self._explore_passable(obs)
 
-        if obs.vitals.food <= 4:
-            cow_act = self._navigate_and_interact(obs, CrafterObject.COW)
-            if cow_act is not None:
-                return cow_act
+        # 2. Vitals & Sleep
+        if intent == "sleep":
+            return CrafterAction.SLEEP
 
-        # 3. Target Goal Planning
-        target = goal.target_achievement if goal else None
-        if target is None:
-            # Default progressive tech-tree roadmap
-            target = self._select_next_achievement(obs)
+        if intent in ("drink", "approach_water"):
+            act = self._navigate_and_interact(obs, CrafterObject.WATER)
+            return act or self._explore_passable(obs)
 
-        return self._plan_achievement(obs, target)
+        if intent in ("eat", "approach_cow"):
+            act = self._navigate_and_interact(obs, CrafterObject.COW)
+            return act or self._explore_passable(obs)
 
-    def _select_next_achievement(self, obs: CrafterObservation) -> CrafterAchievement:
-        """Progressive technology tree roadmap."""
-        achs = obs.achievements
-        inv = obs.inventory
-
-        if CrafterAchievement.COLLECT_WOOD not in achs or inv.wood < 2:
-            return CrafterAchievement.COLLECT_WOOD
-        if CrafterAchievement.PLACE_TABLE not in achs:
-            return CrafterAchievement.PLACE_TABLE
-        if CrafterAchievement.MAKE_WOOD_PICKAXE not in achs and inv.wood_pickaxe == 0:
-            return CrafterAchievement.MAKE_WOOD_PICKAXE
-        if CrafterAchievement.COLLECT_STONE not in achs or inv.stone < 1:
-            return CrafterAchievement.COLLECT_STONE
-        if CrafterAchievement.MAKE_STONE_PICKAXE not in achs and inv.stone_pickaxe == 0:
-            return CrafterAchievement.MAKE_STONE_PICKAXE
-        if CrafterAchievement.COLLECT_COAL not in achs or inv.coal < 1:
-            return CrafterAchievement.COLLECT_COAL
-        if CrafterAchievement.COLLECT_IRON not in achs or inv.iron < 1:
-            return CrafterAchievement.COLLECT_IRON
-        if CrafterAchievement.PLACE_FURNACE not in achs and inv.stone >= 4:
-            return CrafterAchievement.PLACE_FURNACE
-        if CrafterAchievement.MAKE_IRON_PICKAXE not in achs and inv.iron_pickaxe == 0:
-            return CrafterAchievement.MAKE_IRON_PICKAXE
-        if CrafterAchievement.COLLECT_DIAMOND not in achs:
-            return CrafterAchievement.COLLECT_DIAMOND
-
-        return CrafterAchievement.SURVIVE
-
-    def _plan_achievement(self, obs: CrafterObservation, ach: CrafterAchievement) -> CrafterAction:
-        """Causal dispatch for target achievement."""
-        inv = obs.inventory
-
-        if ach == CrafterAchievement.COLLECT_WOOD:
+        # 3. Wood & Table
+        if intent in ("collect_wood", "approach_tree"):
             act = self._navigate_and_interact(obs, CrafterObject.TREE)
             return act or self._explore_passable(obs)
 
-        if ach == CrafterAchievement.PLACE_TABLE:
-            if inv.wood < 2:
-                act = self._navigate_and_interact(obs, CrafterObject.TREE)
-                return act or self._explore_passable(obs)
+        if intent == "place_table":
             tx = obs.player_pos[0] + obs.player_facing[0]
             ty = obs.player_pos[1] + obs.player_facing[1]
             if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
@@ -141,147 +281,117 @@ class CrafterActionAdapter:
                     return CrafterAction.PLACE_TABLE
             return CrafterAction.MOVE_LEFT
 
-        if ach == CrafterAchievement.MAKE_WOOD_PICKAXE:
-            if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
-                obs, CrafterObject.CRAFTING_TABLE, radius=30
-            ):
-                return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
-            if inv.wood < 1:
-                act = self._navigate_and_interact(obs, CrafterObject.TREE)
-                return act or self._explore_passable(obs)
+        if intent == "make_wood_pickaxe":
             if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
                 act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
                 if act:
                     return act
             return CrafterAction.MAKE_WOOD_PICKAXE
 
-        if ach == CrafterAchievement.COLLECT_STONE:
-            if inv.wood_pickaxe == 0 and inv.stone_pickaxe == 0:
-                return self._plan_achievement(obs, CrafterAchievement.MAKE_WOOD_PICKAXE)
+        # 4. Stone & Pickaxe
+        if intent in ("collect_stone", "approach_stone"):
             act = self._navigate_and_interact(obs, CrafterObject.STONE)
             return act or self._explore_passable(obs)
 
-        if ach == CrafterAchievement.MAKE_STONE_PICKAXE:
-            if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
-                obs, CrafterObject.CRAFTING_TABLE, radius=30
-            ):
-                return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
-            if inv.stone < 1:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_STONE)
-            if inv.wood < 1:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_WOOD)
+        if intent == "make_stone_pickaxe":
             if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
                 act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
                 if act:
                     return act
             return CrafterAction.MAKE_STONE_PICKAXE
 
-        if ach == CrafterAchievement.COLLECT_COAL:
-            if inv.wood_pickaxe == 0 and inv.stone_pickaxe == 0:
-                return self._plan_achievement(obs, CrafterAchievement.MAKE_WOOD_PICKAXE)
-            act = self._navigate_and_interact(obs, CrafterObject.COAL)
-            return act or self._explore_passable(obs)
-
-        if ach == CrafterAchievement.COLLECT_IRON:
-            if inv.stone_pickaxe == 0:
-                return self._plan_achievement(obs, CrafterAchievement.MAKE_STONE_PICKAXE)
-            act = self._navigate_and_interact(obs, CrafterObject.IRON)
-            return act or self._explore_passable(obs)
-
-        if ach == CrafterAchievement.PLACE_FURNACE:
-            if inv.stone < 4:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_STONE)
-            # If crafting table exists, ensure we place furnace right next to table
+        # 5. Furnace & Metallurgy
+        if intent == "place_furnace":
             if self.table_pos is not None and not self._is_near(
                 obs, CrafterObject.CRAFTING_TABLE, radius=1
             ):
                 act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
                 if act:
                     return act
-
-            px, py = obs.player_pos
-            passable = (CrafterObject.GRASS, CrafterObject.PATH, CrafterObject.SAND)
-            tx = px + obs.player_facing[0]
-            ty = py + obs.player_facing[1]
-            if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
-                if obs.semantic_grid[ty][tx] in passable:
-                    self.furnace_pos = (tx, ty)
+            fx = obs.player_pos[0] + obs.player_facing[0]
+            fy = obs.player_pos[1] + obs.player_facing[1]
+            if 0 <= fx < len(obs.semantic_grid[0]) and 0 <= fy < len(obs.semantic_grid):
+                if obs.semantic_grid[fy][fx] in (
+                    CrafterObject.GRASS,
+                    CrafterObject.PATH,
+                    CrafterObject.SAND,
+                ):
+                    self.furnace_pos = (fx, fy)
                     return CrafterAction.PLACE_FURNACE
-
-            # Rotate to a passable neighbor tile
-            for (dx, dy), action in (
-                ((-1, 0), CrafterAction.MOVE_LEFT),
-                ((1, 0), CrafterAction.MOVE_RIGHT),
-                ((0, -1), CrafterAction.MOVE_UP),
-                ((0, 1), CrafterAction.MOVE_DOWN),
-            ):
-                nx, ny = px + dx, py + dy
-                if 0 <= nx < len(obs.semantic_grid[0]) and 0 <= ny < len(obs.semantic_grid):
-                    if obs.semantic_grid[ny][nx] in passable:
-                        return action
-
             return CrafterAction.MOVE_LEFT
 
-        if ach == CrafterAchievement.MAKE_IRON_PICKAXE:
-            if CrafterAchievement.PLACE_TABLE not in obs.achievements and not self._is_near(
-                obs, CrafterObject.CRAFTING_TABLE, radius=30
-            ):
-                return self._plan_achievement(obs, CrafterAchievement.PLACE_TABLE)
-            if CrafterAchievement.PLACE_FURNACE not in obs.achievements and not self._is_near(
-                obs, CrafterObject.FURNACE, radius=30
-            ):
-                return self._plan_achievement(obs, CrafterAchievement.PLACE_FURNACE)
-            if inv.wood < 1:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_WOOD)
-            if inv.coal < 1:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_COAL)
-            if inv.iron < 1:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_IRON)
+        if intent in ("collect_coal", "approach_coal"):
+            act = self._navigate_and_interact(obs, CrafterObject.COAL)
+            return act or self._explore_passable(obs)
 
-            near_table = self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1)
-            near_furnace = self._is_near(obs, CrafterObject.FURNACE, radius=1)
-            if not (near_table and near_furnace):
-                overlap_step = self._navigate_to_overlap(
-                    obs, CrafterObject.CRAFTING_TABLE, CrafterObject.FURNACE
-                )
-                if overlap_step:
-                    return overlap_step
-                if not near_table:
-                    act = self._navigate_and_interact(
-                        obs, CrafterObject.CRAFTING_TABLE, face_only=True
-                    )
-                    if act:
-                        return act
-                elif not near_furnace:
-                    act = self._navigate_and_interact(obs, CrafterObject.FURNACE, face_only=True)
-                    if act:
-                        return act
+        if intent in ("collect_iron", "approach_iron"):
+            act = self._navigate_and_interact(obs, CrafterObject.IRON)
+            return act or self._explore_passable(obs)
+
+        if intent == "make_iron_pickaxe":
+            act = self._navigate_to_overlap(
+                obs, CrafterObject.CRAFTING_TABLE, CrafterObject.FURNACE
+            )
+            if act:
+                return act
             return CrafterAction.MAKE_IRON_PICKAXE
 
-        if ach == CrafterAchievement.COLLECT_DIAMOND:
-            if inv.iron_pickaxe == 0:
-                return self._plan_achievement(obs, CrafterAchievement.COLLECT_IRON)
+        if intent in ("collect_diamond", "approach_diamond"):
             act = self._navigate_and_interact(obs, CrafterObject.DIAMOND)
             return act or self._explore_passable(obs)
 
-        if ach == CrafterAchievement.EAT_COW:
-            act = self._navigate_and_interact(obs, CrafterObject.COW)
+        if intent == "approach_crafting_table":
+            act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
             return act or self._explore_passable(obs)
 
-        if ach == CrafterAchievement.COLLECT_DRINK:
-            act = self._navigate_and_interact(obs, CrafterObject.WATER)
+        if intent == "approach_furnace":
+            act = self._navigate_and_interact(obs, CrafterObject.FURNACE, face_only=True)
             return act or self._explore_passable(obs)
 
-        if ach == CrafterAchievement.SURVIVE:
-            if obs.vitals.drink <= 6:
-                act = self._navigate_and_interact(obs, CrafterObject.WATER)
-                if act:
-                    return act
-            if obs.vitals.food <= 6:
-                act = self._navigate_and_interact(obs, CrafterObject.COW)
-                if act:
-                    return act
-            return self._explore_passable(obs)
+        return self._explore_passable(obs)
+
+    def plan_next_action(
+        self, obs: CrafterObservation, goal: CrafterGoal | None = None
+    ) -> CrafterAction:
+        """Select next action using UnifiedReasoningRuntime with EmbodiedCausalOperator."""
+        # 1. Tactical Monster Combat Fast-Path
+        px, py = obs.player_pos
+        height = len(obs.semantic_grid)
+        width = len(obs.semantic_grid[0]) if height > 0 else 0
+        if height > 0 and width > 0:
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nx, ny = px + dx, py + dy
+                if 0 <= nx < width and 0 <= ny < height:
+                    if obs.semantic_grid[ny][nx] in (CrafterObject.ZOMBIE, CrafterObject.SKELETON):
+                        return self.execute_action("defend", obs)
+
+        # 2. Perception Ingestion
+        self.perception.ingest_observation(obs)
+
+        # 3. Goal Translation
+        goal_node = self.perception.ingest_goal(goal, obs)
+
+        # 4. Affordance Declaration
+        self.enumerate_affordances(obs, self.perception.graph)
+
+        # 5. Cognitive Causal Planning via UnifiedReasoningRuntime
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description="Crafter tech-tree and survival goal resolution",
+        )
+        trace = self.runtime.reason(graph=self.perception.graph, problem=problem)
+
+        # 6. Actuator Motor Dispatch
+        if (
+            trace
+            and trace.final_result
+            and trace.final_result.conclusions
+            and "best_action" in trace.final_result.conclusions
+        ):
+            chosen_intent = trace.final_result.conclusions["best_action"]
+            if chosen_intent and chosen_intent != "no_op":
+                return self.execute_action(chosen_intent, obs)
 
         return self._explore_passable(obs)
 

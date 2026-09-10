@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import logging
 
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode, CognitiveGraph
+
+from .perception import MineDojoPerceptionAdapter
 from .types import (
     MineDojoAction,
     MineDojoGoal,
@@ -23,8 +29,73 @@ class MineDojoActionAdapter:
     HCIR Recursive Recipe DAG and Voxel Harvesting Planner for MineDojo.
     """
 
+    def __init__(self) -> None:
+        self.perception = MineDojoPerceptionAdapter()
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
+
+    def reset(self) -> None:
+        """Reset internal perception state."""
+        self.perception = MineDojoPerceptionAdapter()
+
+    def enumerate_affordances(
+        self, obs: MineDojoObservation, graph: CognitiveGraph
+    ) -> list[ActionNode]:
+        """Declare candidate crafting and mining ActionNodes."""
+        affordances = [
+            ActionNode(
+                id="act_mine_tree",
+                intent="mine_tree",
+                requirements=[],
+                produces=["has(log)"],
+            ),
+            ActionNode(
+                id="act_craft_planks",
+                intent="craft_planks",
+                requirements=["has(log)"],
+                produces=["has(planks)"],
+            ),
+            ActionNode(
+                id="act_craft_table",
+                intent="craft_table",
+                requirements=["has(planks, 4)"],
+                produces=["has(crafting_table)"],
+            ),
+            ActionNode(
+                id="act_craft_sticks",
+                intent="craft_sticks",
+                requirements=["has(planks, 2)"],
+                produces=["has(stick)"],
+            ),
+            ActionNode(
+                id="act_craft_wood_pickaxe",
+                intent="craft_wood_pickaxe",
+                requirements=["has(crafting_table)", "has(planks, 3)", "has(stick, 2)"],
+                produces=["has(wooden_pickaxe)"],
+            ),
+        ]
+        stale = [n.id for n in graph.all_nodes() if n.id.startswith("act_")]
+        for sid in stale:
+            graph.remove_node(sid)
+
+        for act in affordances:
+            graph.add_node(act)
+
+        return affordances
+
     def plan_next_action(self, obs: MineDojoObservation, goal: MineDojoGoal) -> MineDojoAction:
-        """Select next optimal action towards synthesizing goal item."""
+        """Select next optimal action towards synthesizing goal item via HCIR backward chaining."""
+        # 1. Update graph and declare affordances
+        self.perception.ingest_observation(obs)
+        goal_node = self.perception.ingest_goal(goal)
+        self.enumerate_affordances(obs, self.perception.graph)
+
+        # 2. Query UnifiedReasoningRuntime
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description=f"Synthesize {goal.target_item}",
+        )
+        self.runtime.reason(graph=self.perception.graph, problem=problem)
         inv = obs.inventory
         target = goal.target_item
 

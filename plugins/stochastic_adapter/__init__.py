@@ -18,6 +18,10 @@ from .benchmark import (
 )
 from .environment import StandaloneStochasticEnv, make_stochastic_env
 from .perception import StochasticPerceptionAdapter
+from .predicates import (
+    STOCHASTIC_PREDICATES,
+    register_stochastic_predicates,
+)
 from .types import (
     EpistemicEntityBelief,
     StochasticAction,
@@ -30,9 +34,13 @@ logger = logging.getLogger(__name__)
 PLUGIN_NAME = "stochastic-adapter"
 PLUGIN_VERSION = "1.0.0"
 
+# Register domain predicates
+register_stochastic_predicates()
+
 
 def setup(agent: Any = None) -> None:
     """Plugin setup hook."""
+    register_stochastic_predicates()
     logger.info("Loaded plugin '%s' v%s", PLUGIN_NAME, PLUGIN_VERSION)
 
 
@@ -47,6 +55,7 @@ __all__ = [
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRStochasticAgent",
+    "STOCHASTIC_PREDICATES",
     "StandaloneStochasticEnv",
     "StochasticAction",
     "StochasticActionAdapter",
@@ -55,6 +64,7 @@ __all__ = [
     "StochasticTier",
     "make_stochastic_env",
     "register",
+    "register_stochastic_predicates",
     "run_stochastic_benchmark",
     "run_stochastic_tier",
     "setup",
