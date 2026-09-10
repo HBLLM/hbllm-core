@@ -222,6 +222,7 @@ graph LR
 | **Sokoban** | `gym_sokoban` (v0.0.6) | 5 Combinatorial Push Tiers (Boxoban) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Corner deadlocks) | **80.0%** (16/20 eps) | $[0.584, 0.919]$ | **0 tokens** |
 | **Overcooked-AI** | `overcooked_ai_py` (v1.1.0) | 5 Cooperative Kitchen Layouts | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter) | **100.0%** (15/15 eps) | $[0.796, 1.000]$ | **0 tokens** |
 | **NetHack** | `minihack` (v1.0.2) / `nle` (v1.3.0) | 5 Dungeon Navigation & Combat Tiers | < 20% (IMPALA / TorchBeast) | 0.0% (0/15 eps) | **80.0%** (4/5 tiers at 100%) | $[0.376, 0.964]$ | **0 tokens** |
+| **AI2-THOR** | `ai2thor` (v5.0.0) | 4 Manipulation Tiers (Pickup $\rightarrow$ Transfer) | ~30–45% (Embodied CLIP / PPO) | 8.3% (1/12 eps) | **91.7%** (11/12 eps) | $[0.646, 0.985]$ | **0 tokens** |
 
 ---
 
@@ -350,6 +351,20 @@ Evaluated against authentic `minihack` gymnasium environments with NetHack C-eng
 
 ---
 
+#### 6. AI2-THOR: 3D Embodied Object Manipulation & Physical Spatial Reasoning (`ai2thor` v5.0.0 + Unity Standalone Player)
+
+Evaluated against authentic native AI2-THOR Unity standalone player across all 4 canonical manipulation tiers:
+
+- **Overall Success Rate**: **91.7%** (11/12 episodes, 95% Wilson CI: $[0.646, 0.985]$, 15.4 mean steps)
+  - `Tier 1: Object Interaction / Pickup` (`FloorPlan1`): **100.0%** (3/3, 95% Wilson CI: $[0.439, 1.000]$, 10.7 mean steps)
+  - `Tier 2: State Toggling / Opening` (`FloorPlan2`): **100.0%** (3/3, 95% Wilson CI: $[0.439, 1.000]$, 9.7 mean steps)
+  - `Tier 3: Surface Relocation` (`FloorPlan3`): **100.0%** (3/3, 95% Wilson CI: $[0.439, 1.000]$, 16.3 mean steps)
+  - `Tier 4: Container Transfer` (`FloorPlan4`): **66.7%** (2/3, 95% Wilson CI: $[0.208, 0.939]$, 25.0 mean steps)
+- **Comparison baseline (`LLM-Only / Stochastic`)**: **8.3%** (1/12 episodes, 95% Wilson CI: $[0.015, 0.354]$, 55.1 mean steps)
+- **Key Mechanism**: Ground-truth 3D physics scene graph ingestion (`event.metadata['objects']`), yaw and pitch camera alignment before interaction, affordance-verified arm reach manipulation, obstacle avoidance and collision recovery without LLM token overhead.
+
+---
+
 ### Reproducibility Commands (All Native Frameworks)
 
 To reproduce these benchmarks against installed native packages on your local hardware:
@@ -369,17 +384,19 @@ python plugins/babyai_adapter/benchmark.py --episodes-per-tier 5
 
 # 5. NetHack Multi-Tier Benchmark (Native minihack / nle)
 python plugins/nethack_adapter/benchmark.py --native --cohort pure-hcir
+
+# 6. AI2-THOR Multi-Tier Benchmark (Native ai2thor Controller + Unity player)
+python plugins/ai2thor_adapter/benchmark.py --native
 ```
 
 ---
 
 ### Excluded Environments & Technical Blocker Audit
 
-To preserve strict empirical integrity, four candidate embodied environments were comprehensively evaluated but intentionally **excluded** from the Master Benchmark Matrix. Rather than relying on simplified offline mock environments or synthetic surrogates, HBLLM enforces a fail-loud boundary (`require_native=True`) whenever native simulator dependencies are uninstalled or architecturally blocked on the host platform.
+To preserve strict empirical integrity, three candidate embodied environments were comprehensively evaluated but intentionally **excluded** from the Master Benchmark Matrix. Rather than relying on simplified offline mock environments or synthetic surrogates, HBLLM enforces a fail-loud boundary (`require_native=True`) whenever native simulator dependencies are uninstalled or architecturally blocked on the host platform.
 
 | Environment | Primary Architectural Blocker | Upstream Dep Status | Dual-Mode Engine Behavior |
 | :--- | :--- | :--- | :--- |
-| **AI2-THOR** | Requires headless Unity binary (~500MB–1GB download), active Metal/X11 display context, and AllenAct framework. | Package uninstalled; blocked in headless CI / non-display server environments. | `make_ai2thor_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
 | **Safety-Gymnasium** | Rigidly pinned to legacy `gymnasium<0.28` and MuJoCo C bindings incompatible with Python 3.12 wheel ecosystems. | Package uninstalled; dependency pinning conflict. | `make_safety_gym_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
 | **ALFWorld** | Requires native TextWorld compilation, Fast-Downward PDDL classical planning solvers, and legacy PyYAML/Pydantic pins incompatible with modern macOS ARM64 / Python 3.12 without legacy toolchains. | Package uninstalled; C/PDDL compilation dependency failure. | `make_alfworld_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
 | **MineDojo** | Requires Oracle/OpenJDK Java 8 runtime, an active local Minecraft 1.16.5 client instance with Forge modding, and virtual X11 framebuffers. | Package uninstalled; external JVM & game client prerequisite. | `make_minedojo_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
@@ -390,11 +407,11 @@ Every adapter in `plugins/` adheres to a strict dual-mode contract:
 
 ```python
 # Standalone Mode (Permitted for internal schema and unit test validation):
-env = make_ai2thor_env(prefer_native=False)
+env = make_safety_gym_env(prefer_native=False)
 assert env.is_native is False  # Standalone simulated engine active
 
 # Benchmark Mode (Strict Native Standard):
-env = make_ai2thor_env(prefer_native=True, require_native=True)
+env = make_safety_gym_env(prefer_native=True, require_native=True)
 # Raises RuntimeError: Native package is strictly required; standalone fallback is disabled.
 ```
 

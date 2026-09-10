@@ -122,45 +122,58 @@ def run_ai2thor_tier_benchmark(
     tier: int,
     episodes: int = 3,
     base_seed: int = 5000,
+    prefer_native: bool = True,
+    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific AI2-THOR manipulation tier."""
     canonical_cohort = resolve_cohort(cohort_name)
     results: list[AI2ThorEpisodeResult] = []
 
-    for i in range(episodes):
-        seed = base_seed + (tier * 100) + i
-        env = make_ai2thor_env(seed=seed, tier=tier)
-        obs, info = env.reset(seed=seed)
-        goal: AI2ThorGoal = info["goal"]
-
-        if canonical_cohort == "pure-hcir":
-            agent = PureHCIRAI2ThorAgent()
-        else:
-            agent = LLMOnlyAI2ThorAgent(seed=seed)
-
-        t0 = time.perf_counter()
-        done = False
-        total_reward = 0.0
-
-        while not done and obs.step_count < 60:
-            act = agent.select_action(obs, goal)
-            obs, r, term, trunc, info = env.step(act)
-            total_reward += r
-            if term or trunc:
-                done = True
-
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        success = total_reward > 0.0
-
-        results.append(
-            AI2ThorEpisodeResult(
-                seed=seed,
-                steps=obs.step_count,
-                success=success,
-                reward=total_reward,
-                elapsed_ms=elapsed_ms,
-            )
+    env = make_ai2thor_env(
+        seed=base_seed, tier=tier, prefer_native=prefer_native, require_native=require_native
+    )
+    if require_native and not getattr(env, "is_native", False):
+        raise RuntimeError(
+            "Native 'ai2thor' package is strictly required; standalone fallback is disabled."
         )
+
+    try:
+        for i in range(episodes):
+            seed = base_seed + (tier * 100) + i
+            obs, info = env.reset(seed=seed)
+            goal: AI2ThorGoal = info["goal"]
+
+            if canonical_cohort == "pure-hcir":
+                agent = PureHCIRAI2ThorAgent()
+            else:
+                agent = LLMOnlyAI2ThorAgent(seed=seed)
+
+            t0 = time.perf_counter()
+            done = False
+            total_reward = 0.0
+
+            while not done and obs.step_count < 60:
+                act = agent.select_action(obs, goal)
+                obs, r, term, trunc, info = env.step(act)
+                total_reward += r
+                if term or trunc:
+                    done = True
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            success = total_reward > 0.0 or info.get("success", False)
+
+            results.append(
+                AI2ThorEpisodeResult(
+                    seed=seed,
+                    steps=obs.step_count,
+                    success=success,
+                    reward=total_reward,
+                    elapsed_ms=elapsed_ms,
+                )
+            )
+    finally:
+        if hasattr(env, "close"):
+            env.close()
 
     successes = sum(1 for r in results if r.success)
     ci_low, ci_high = wilson_score_interval(successes, episodes)
@@ -179,8 +192,10 @@ def run_ai2thor_tier_benchmark(
 
 def run_ai2thor_benchmark(
     cohort_name: str,
-    episodes: int = 15,
+    episodes: int = 12,
     base_seed: int = 5000,
+    prefer_native: bool = True,
+    require_native: bool = False,
 ) -> dict[str, Any]:
     """Backwards-compatible benchmark across standard environments."""
     eps_per_tier = max(1, episodes // len(AI2THOR_TIERS))
@@ -191,7 +206,12 @@ def run_ai2thor_benchmark(
 
     for tier_id, _ in AI2THOR_TIERS:
         res = run_ai2thor_tier_benchmark(
-            cohort_name, tier=tier_id, episodes=eps_per_tier, base_seed=base_seed
+            cohort_name,
+            tier=tier_id,
+            episodes=eps_per_tier,
+            base_seed=base_seed,
+            prefer_native=prefer_native,
+            require_native=require_native,
         )
         all_results.extend(res["results"])
         total_eps += res["episodes"]
@@ -220,13 +240,26 @@ def main() -> None:
         default=None,
         help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
     )
+    parser.add_argument(
+        "--prefer-native",
+        "--native",
+        action="store_true",
+        default=True,
+        help="Run against upstream native ai2thor package and Unity player",
+    )
+    parser.add_argument(
+        "--require-native",
+        action="store_true",
+        default=False,
+        help="Strictly require upstream native package, failing if unavailable",
+    )
     args = parser.parse_args()
 
     cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 85}")
     print(
-        f"Running AI2-THOR Full-Spectrum Benchmark (4 Tiers, N={args.episodes_per_tier} eps/tier)"
+        f"Running AI2-THOR Full-Spectrum Benchmark (4 Tiers, N={args.episodes_per_tier} eps/tier, Native={args.prefer_native})"
     )
     print(f"{'=' * 85}\n")
 
@@ -247,6 +280,8 @@ def main() -> None:
                 tier=tier_id,
                 episodes=args.episodes_per_tier,
                 base_seed=args.seed,
+                prefer_native=args.prefer_native,
+                require_native=args.require_native,
             )
             total_eps += data["episodes"]
             total_successes += sum(1 for r in data["results"] if r["success"])

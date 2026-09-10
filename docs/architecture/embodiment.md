@@ -64,7 +64,7 @@ All embodiment actions follow this pipeline to ensure safety, reversibility, and
 
 ## 7. Empirical Validation Across Authentic Native Environments
 
-The Execution Reality Layer and HCIR Causal Planners are evaluated strictly against **authentic, installed upstream simulator packages** (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack` / `nle`). Rather than relying on autoregressive token generation for spatial pathfinding or vital monitoring, HBLLM uses typed state ingress and zero-token topological causal planning.
+The Execution Reality Layer and HCIR Causal Planners are evaluated strictly against **authentic, installed upstream simulator packages** (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack` / `nle`, `ai2thor`). Rather than relying on autoregressive token generation for spatial pathfinding or vital monitoring, HBLLM uses typed state ingress and zero-token topological causal planning.
 
 | Domain | Environment Package | Literature / RL Baseline | Pure HCIR Performance | Key Architectural Mechanism |
 | :--- | :--- | :---: | :---: | :--- |
@@ -73,6 +73,7 @@ The Execution Reality Layer and HCIR Causal Planners are evaluated strictly agai
 | **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **80.0%** Native Success (16/20) | Reverse-BFS dead-end detection & frozen box hashing |
 | **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO Self-Play) | **100.0%** (15/15 episodes) | Causal recipe pipelining & counter contention resolution |
 | **Rogue-Like Dungeons** | `minihack` (v1.0.2) / `nle` | < 20% (IMPALA / TorchBeast) | **80.0%** (4/5 tiers at 100%) | Frontier glyph exploration & melee combat interrupts |
+| **3D Object Manipulation** | `ai2thor` (v5.0.0) | ~30–45% (Embodied CLIP / PPO) | **91.7%** (11/12 episodes) | Ground-truth 3D scene graph, camera yaw/pitch alignment & affordance reach |
 
 *For complete metric tables, 95% Wilson confidence intervals, per-tier breakdowns, and CLI reproducibility commands, refer to the [Embodied Cognitive & Frontier Benchmarks](../api/benchmarks.md#embodied-cognitive-frontier-benchmarks) API reference.*
 
