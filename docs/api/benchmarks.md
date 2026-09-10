@@ -359,29 +359,46 @@ To reproduce these benchmarks against installed native packages on your local ha
 python core/plugins/crafter_adapter/benchmark.py --native
 
 # 2. Sokoban 5-Tier Benchmark (Native gym-sokoban)
-python -c "
-import sys; sys.path.extend(['core', 'core/plugins'])
-from sokoban_adapter.benchmark import run_sokoban_benchmark
-print(run_sokoban_benchmark(episodes_per_tier=4, prefer_native=True))
-"
+python core/plugins/sokoban_adapter/benchmark.py --native
 
 # 3. Overcooked-AI Cooperative Benchmark (Native overcooked_ai_py)
-python -c "
-import sys; sys.path.extend(['core', 'core/plugins'])
-from overcooked_adapter.benchmark import run_overcooked_benchmark
-print(run_overcooked_benchmark(episodes_per_tier=3, prefer_native=True))
-"
+python core/plugins/overcooked_adapter/benchmark.py --native
 
 # 4. BabyAI Multi-Tier Benchmark (Native minigrid)
 python core/plugins/babyai_adapter/benchmark.py --episodes-per-tier 5
 
 # 5. NetHack Multi-Tier Benchmark (Native minihack / nle)
-python -c "
-import sys; sys.path.extend(['core', 'core/plugins'])
-from nethack_adapter.benchmark import run_nethack_benchmark
-print(run_nethack_benchmark('pure-hcir', episodes=5, prefer_native=True))
-"
+python core/plugins/nethack_adapter/benchmark.py --native --cohort pure-hcir
 ```
+
+---
+
+### Excluded Environments & Technical Blocker Audit
+
+To preserve strict empirical integrity, four candidate embodied environments were comprehensively evaluated but intentionally **excluded** from the Master Benchmark Matrix. Rather than relying on simplified offline mock environments or synthetic surrogates, HBLLM enforces a fail-loud boundary (`require_native=True`) whenever native simulator dependencies are uninstalled or architecturally blocked on the host platform.
+
+| Environment | Primary Architectural Blocker | Upstream Dep Status | Dual-Mode Engine Behavior |
+| :--- | :--- | :--- | :--- |
+| **AI2-THOR** | Requires headless Unity binary (~500MB–1GB download), active Metal/X11 display context, and AllenAct framework. | Package uninstalled; blocked in headless CI / non-display server environments. | `make_ai2thor_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
+| **Safety-Gymnasium** | Rigidly pinned to legacy `gymnasium<0.28` and MuJoCo C bindings incompatible with Python 3.12 wheel ecosystems. | Package uninstalled; dependency pinning conflict. | `make_safety_gym_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
+| **ALFWorld** | Requires native TextWorld compilation, Fast-Downward PDDL classical planning solvers, and legacy PyYAML/Pydantic pins incompatible with modern macOS ARM64 / Python 3.12 without legacy toolchains. | Package uninstalled; C/PDDL compilation dependency failure. | `make_alfworld_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
+| **MineDojo** | Requires Oracle/OpenJDK Java 8 runtime, an active local Minecraft 1.16.5 client instance with Forge modding, and virtual X11 framebuffers. | Package uninstalled; external JVM & game client prerequisite. | `make_minedojo_env(require_native=True)` raises `RuntimeError`. Standalone simulator engine available for offline unit tests. |
+
+#### Architectural Guarantee: Fail-Loud Native Verification
+
+Every adapter in `core/plugins/` adheres to a strict dual-mode contract:
+
+```python
+# Standalone Mode (Permitted for internal schema and unit test validation):
+env = make_ai2thor_env(prefer_native=False)
+assert env.is_native is False  # Standalone simulated engine active
+
+# Benchmark Mode (Strict Native Standard):
+env = make_ai2thor_env(prefer_native=True, require_native=True)
+# Raises RuntimeError: Native package is strictly required; standalone fallback is disabled.
+```
+
+This design guarantees that reported benchmark metrics can **never** be silently contaminated by offline simulated engines.
 
 
 
