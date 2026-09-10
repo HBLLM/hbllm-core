@@ -9,12 +9,27 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
+from pathlib import Path
 from typing import Any
 
-from .action import DigitalActionAdapter
-from .environment import make_digital_env
-from .perception import DigitalPerceptionAdapter
-from .types import DigitalAction, DigitalObservation, DigitalTier
+_adapter_dir = Path(__file__).resolve().parent
+_plugins_dir = _adapter_dir.parent
+_core_dir = _plugins_dir.parent
+for _p in (str(_core_dir), str(_plugins_dir)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    from .action import DigitalActionAdapter
+    from .environment import make_digital_env
+    from .perception import DigitalPerceptionAdapter
+    from .types import DigitalAction, DigitalObservation, DigitalTier
+except ImportError:
+    from digital_agent_adapter.action import DigitalActionAdapter
+    from digital_agent_adapter.environment import make_digital_env
+    from digital_agent_adapter.perception import DigitalPerceptionAdapter
+    from digital_agent_adapter.types import DigitalAction, DigitalObservation, DigitalTier
 
 logger = logging.getLogger(__name__)
 
@@ -131,3 +146,34 @@ def run_digital_benchmark(
         "ci_95": [round(ci_low, 3), round(ci_high, 3)],
         "overall_mean_steps": round(mean_steps, 1),
     }
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Digital Agent Multi-Tier Benchmark")
+    parser.add_argument(
+        "--episodes-per-tier", type=int, default=5, help="Episodes per digital benchmark tier"
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Base random seed")
+    args = parser.parse_args()
+
+    print(f"\n{'=' * 85}\nRunning Digital Agent Multi-Tier Benchmark (5 Tiers)\n{'=' * 85}")
+    data = run_digital_benchmark(
+        episodes_per_tier=args.episodes_per_tier,
+        seed=args.seed,
+    )
+    print(
+        f"Overall Success Rate: {data['overall_success_rate'] * 100:.1f}% | Zero Violation Rate: {data['zero_violation_rate'] * 100:.1f}% | 95% Wilson CI: {data['ci_95']} | Total Episodes: {data['total_episodes']}"
+    )
+    print(f"Mean Steps: {data['overall_mean_steps']:.1f}")
+    print("-" * 85)
+    for tier_name, res in data["tiers"].items():
+        print(
+            f"  {tier_name:<35}: {res['success_rate'] * 100:5.1f}% ({res['successes']}/{res['episodes']}) | "
+            f"CI: {res['ci_95']} | Violations: {res['total_safety_violations']} | Steps: {res['mean_steps']:.1f}"
+        )
+
+
+if __name__ == "__main__":
+    main()

@@ -344,9 +344,21 @@ class EmbodiedCausalOperator:
         provenance_steps.append(f"[Depth {depth}] Resolving unsatisfied condition: '{target_cond}'")
 
         # 3. Find candidate action(s) that produce target_cond
-        producing_actions = [
-            act for act in candidate_actions if any(p.strip() == target_cond for p in act.produces)
-        ]
+        t_pred, t_args = parse_condition(target_cond)
+        producing_actions = []
+        for act in candidate_actions:
+            matched = False
+            for p in act.produces:
+                p_clean = p.strip()
+                if p_clean == target_cond:
+                    matched = True
+                    break
+                p_pred, p_args = parse_condition(p_clean)
+                if p_pred and p_pred == t_pred and p_args and t_args and p_args[0] == t_args[0]:
+                    matched = True
+                    break
+            if matched:
+                producing_actions.append(act)
 
         if not producing_actions:
             # Special case: check if target_cond is 'not_contained_in_closed(X)'
@@ -531,6 +543,21 @@ class EmbodiedCausalOperator:
                 return False
             item_name = args[0]
             req_count = int(args[1]) if len(args) > 1 else 1
+
+            # 0. Check empty hands / empty inventory condition
+            if item_name in ("none", "empty"):
+                held_id = agent_props.get("held_object_id")
+                carrying = agent_props.get("carrying")
+                is_held_empty = held_id in (None, "", "none", "empty")
+                is_carrying_empty = (
+                    carrying is None
+                    or carrying == {}
+                    or (
+                        isinstance(carrying, dict)
+                        and carrying.get("type") in (None, "", "none", "empty")
+                    )
+                )
+                return is_held_empty and is_carrying_empty
 
             # 1. Check agent inventory dictionary
             inv = agent_props.get("inventory", {})

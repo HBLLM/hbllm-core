@@ -388,12 +388,25 @@ class UnifiedReasoningRuntime:
 
         seen_evidence: set[str] = set()
         seen_assumptions: set[str] = set()
+        best_action_conf = -1.0
 
         for result in results:
             if result.status == ResultStatus.ERROR:
                 continue
 
-            merged_conclusions.update(result.conclusions)
+            for k, v in result.conclusions.items():
+                if k == "best_action":
+                    if v and result.confidence > best_action_conf:
+                        merged_conclusions["best_action"] = v
+                        best_action_conf = result.confidence
+                        if "action_id" in result.conclusions:
+                            merged_conclusions["action_id"] = result.conclusions["action_id"]
+                elif k == "action_id":
+                    if not merged_conclusions.get("action_id"):
+                        merged_conclusions["action_id"] = v
+                else:
+                    merged_conclusions[k] = v
+
             confidences.append(result.confidence)
 
             for ref in result.evidence_refs:

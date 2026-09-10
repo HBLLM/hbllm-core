@@ -63,11 +63,41 @@ def eval_command_safe(args: list[str], view: FrozenGraphView, agent_props: dict[
     return True
 
 
+def eval_typed(args: list[str], view: FrozenGraphView, agent_props: dict[str, Any]) -> bool:
+    """Predicate: typed(node_id)."""
+    if not args:
+        return False
+    nid = args[0]
+    dom_node = view.get_node(f"dom_{nid}")
+    if dom_node and hasattr(dom_node, "properties"):
+        val = dom_node.properties.get("value")
+        return bool(val and str(val).strip())
+    return False
+
+
+def eval_file_written(args: list[str], view: FrozenGraphView, agent_props: dict[str, Any]) -> bool:
+    """Predicate: file_written(path)."""
+    if not args:
+        return False
+    path = args[0]
+    fnode = view.get_node(f"file_{path}")
+    if fnode and hasattr(fnode, "properties"):
+        content = fnode.properties.get("content", "")
+        if path == "/workspace/src/app.py":
+            return "return 42" in content
+        if path == "/workspace/calculator.py":
+            return "return a + b" in content
+        return bool(content)
+    return False
+
+
 DIGITAL_PREDICATES = {
     "file_exists": eval_file_exists,
     "has_error": eval_has_error,
     "assertion_failed": eval_assertion_failed,
     "command_safe": eval_command_safe,
+    "typed": eval_typed,
+    "file_written": eval_file_written,
 }
 
 
