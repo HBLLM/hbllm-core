@@ -21,7 +21,8 @@ def test_active_interventional_causal_discovery_resolves_confounding():
     engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
 
     # 1. Observe and formulate initial hypotheses under observational correlation
-    hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+    obs_demos = env.generate_observational_demonstrations()
+    hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=obs_demos)
     assert len(hypotheses) >= 3
     var_names = [h.variable for h in hypotheses]
     assert "color" in var_names
@@ -66,7 +67,8 @@ def test_three_level_generalization():
     engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
 
     obs = env.get_sensory_observation()
-    engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+    demos = env.generate_observational_demonstrations()
+    engine.observe_and_generate_hypotheses(obs, episodes_data=demos)
 
     # Run active discovery
     available_ids = list(env.objects.keys())
@@ -112,7 +114,8 @@ def test_event_sourced_belief_transitions_history():
     engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
 
     obs = env.get_sensory_observation()
-    engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+    demos = env.generate_observational_demonstrations()
+    engine.observe_and_generate_hypotheses(obs, episodes_data=demos)
 
     available_ids = list(env.objects.keys())
     for _ in range(6):
@@ -142,8 +145,9 @@ def test_causal_variable_invariance_across_randomized_worlds():
         perception = DevelopmentalPerceptionAdapter()
         engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
 
+        demos = env.generate_observational_demonstrations()
         obs = env.get_sensory_observation()
-        engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+        engine.observe_and_generate_hypotheses(obs, episodes_data=demos)
 
         available_ids = list(env.objects.keys())
         for _ in range(10):
@@ -157,6 +161,10 @@ def test_causal_variable_invariance_across_randomized_worlds():
         mass_hyp = next(h for h in engine.hypotheses if h.variable == "mass_sensation")
         assert mass_hyp.confirmed is True
         assert mass_hyp.confidence >= 0.95
+
+        # All spurious surface hypotheses MUST be falsified
+        spurious_hyps = [h for h in engine.hypotheses if h.variable != "mass_sensation"]
+        assert all(h.falsified for h in spurious_hyps)
 
 
 def test_observational_demonstrations_and_hypothesis_induction_without_rule_leakage():
