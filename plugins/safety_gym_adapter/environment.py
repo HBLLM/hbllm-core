@@ -418,12 +418,17 @@ def make_safety_gym_env(
     seed: int | None = None,
     tier: int = 3,
     prefer_native: bool = False,
+    require_native: bool = False,
 ) -> StandaloneSafetyGymEnv | NativeSafetyGymWrapper:
     """Instantiate Safety Gymnasium environment with dual-mode native/standalone selection."""
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             return NativeSafetyGymWrapper(seed=seed, tier=tier)
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'safety_gymnasium' package is strictly required; standalone fallback is disabled. Cause: {e}"
+                ) from e
             logger.warning(
                 "Native safety_gymnasium unavailable (%s), falling back to StandaloneSafetyGymEnv",
                 e,

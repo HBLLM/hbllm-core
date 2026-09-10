@@ -393,12 +393,17 @@ def make_minedojo_env(
     seed: int | None = None,
     tier: int = 4,
     prefer_native: bool = False,
+    require_native: bool = False,
 ) -> StandaloneMineDojoEnv | NativeMineDojoWrapper:
     """Instantiate MineDojo environment with dual-mode native/standalone selection."""
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             return NativeMineDojoWrapper(seed=seed, tier=tier)
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'minedojo' package is strictly required; standalone fallback is disabled. Cause: {e}"
+                ) from e
             logger.warning(
                 "Native minedojo unavailable (%s), falling back to StandaloneMineDojoEnv",
                 e,

@@ -473,12 +473,17 @@ def make_ai2thor_env(
     seed: int | None = None,
     tier: int = 4,
     prefer_native: bool = False,
+    require_native: bool = False,
 ) -> StandaloneAI2ThorEnv | NativeAI2ThorWrapper:
     """Instantiate AI2-THOR environment with dual-mode native/standalone selection."""
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             return NativeAI2ThorWrapper(seed=seed, tier=tier)
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'ai2thor' package is strictly required; standalone fallback is disabled. Cause: {e}"
+                ) from e
             logger.warning(
                 "Native ai2thor controller unavailable (%s), falling back to StandaloneAI2ThorEnv",
                 e,

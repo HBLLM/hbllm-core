@@ -570,12 +570,17 @@ def make_alfworld_env(
     seed: int | None = None,
     prefer_native: bool = False,
     config_path: str | None = None,
+    require_native: bool = False,
 ) -> StandaloneALFWorldEnv | NativeALFWorldWrapper:
     """Instantiate ALFWorld environment with dual-mode native/standalone selection."""
-    if prefer_native:
+    if prefer_native or require_native:
         try:
             return NativeALFWorldWrapper(task_type=task_type, seed=seed, config_path=config_path)
         except Exception as e:
+            if require_native:
+                raise RuntimeError(
+                    f"Native 'alfworld' package is strictly required; standalone fallback is disabled. Cause: {e}"
+                ) from e
             logger.warning(
                 "Native alfworld unavailable (%s), falling back to StandaloneALFWorldEnv",
                 e,
