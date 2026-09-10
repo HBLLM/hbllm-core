@@ -78,13 +78,13 @@ class CrafterActionAdapter:
                 id="act_drink",
                 intent="drink",
                 requirements=["near(water)"],
-                produces=["vitals_safe(drink, 5)"],
+                produces=["has(drink)", "has(collect_drink)", "vitals_safe(drink, 5)"],
             ),
             ActionNode(
                 id="act_eat",
                 intent="eat",
                 requirements=["near(cow)"],
-                produces=["vitals_safe(food, 5)"],
+                produces=["has(food)", "has(eat_cow)", "vitals_safe(food, 5)"],
             ),
             # Tech-Tree Crafting & Gathering
             ActionNode(

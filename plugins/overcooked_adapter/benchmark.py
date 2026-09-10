@@ -9,12 +9,27 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
+from pathlib import Path
 from typing import Any
 
-from .action import OvercookedActionAdapter
-from .environment import make_overcooked_env
-from .perception import OvercookedPerceptionAdapter
-from .types import OvercookedAction, OvercookedObservation, OvercookedTier
+_adapter_dir = Path(__file__).resolve().parent
+_plugins_dir = _adapter_dir.parent
+_core_dir = _plugins_dir.parent
+for _p in (str(_core_dir), str(_plugins_dir)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    from .action import OvercookedActionAdapter
+    from .environment import make_overcooked_env
+    from .perception import OvercookedPerceptionAdapter
+    from .types import OvercookedAction, OvercookedObservation, OvercookedTier
+except ImportError:
+    from overcooked_adapter.action import OvercookedActionAdapter
+    from overcooked_adapter.environment import make_overcooked_env
+    from overcooked_adapter.perception import OvercookedPerceptionAdapter
+    from overcooked_adapter.types import OvercookedAction, OvercookedObservation, OvercookedTier
 
 logger = logging.getLogger(__name__)
 

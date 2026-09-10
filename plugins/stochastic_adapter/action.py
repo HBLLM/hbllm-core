@@ -98,12 +98,11 @@ class StochasticActionAdapter:
         # Query UnifiedReasoningRuntime for high-level epistemic verification
         try:
             problem = ReasoningProblem(
-                problem_type=ProblemType.EMBODIED_CAUSAL,
-                goal_node=goal_node,
-                graph=graph,
-                context={"step_count": obs.step_count},
+                problem_type=ProblemType.PLANNING,
+                goal_node_ids=(goal_node.id,),
+                description="Stochastic navigation goal verification",
             )
-            self.runtime.reason(problem)
+            self.runtime.reason(graph=graph, problem=problem)
         except Exception as exc:
             logger.debug("UnifiedReasoningRuntime resolution fallback: %s", exc)
 

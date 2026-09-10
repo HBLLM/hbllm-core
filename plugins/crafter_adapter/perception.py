@@ -326,8 +326,8 @@ class CrafterPerceptionAdapter:
                 CrafterAchievement.PLACE_FURNACE: ["has(furnace)"],
                 CrafterAchievement.MAKE_IRON_PICKAXE: ["has(iron_pickaxe)"],
                 CrafterAchievement.COLLECT_DIAMOND: ["has(diamond)"],
-                CrafterAchievement.COLLECT_DRINK: ["vitals_safe(drink, 5)"],
-                CrafterAchievement.EAT_COW: ["vitals_safe(food, 5)"],
+                CrafterAchievement.COLLECT_DRINK: ["has(collect_drink)"],
+                CrafterAchievement.EAT_COW: ["has(eat_cow)"],
                 CrafterAchievement.SURVIVE: ["vitals_safe(health, 5)"],
             }
             target_conditions.extend(cond_map.get(ach, ["vitals_safe(health, 5)"]))

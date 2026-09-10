@@ -9,12 +9,27 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
+from pathlib import Path
 from typing import Any
 
-from .action import SokobanActionAdapter
-from .environment import make_sokoban_env
-from .perception import SokobanPerceptionAdapter
-from .types import SokobanAction, SokobanObservation, SokobanTier
+# Support direct script execution
+_plugins_root = Path(__file__).resolve().parent.parent
+_core_root = _plugins_root.parent
+for p in [str(_core_root), str(_plugins_root)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+try:
+    from .action import SokobanActionAdapter
+    from .environment import make_sokoban_env
+    from .perception import SokobanPerceptionAdapter
+    from .types import SokobanAction, SokobanObservation, SokobanTier
+except ImportError:
+    from sokoban_adapter.action import SokobanActionAdapter
+    from sokoban_adapter.environment import make_sokoban_env
+    from sokoban_adapter.perception import SokobanPerceptionAdapter
+    from sokoban_adapter.types import SokobanAction, SokobanObservation, SokobanTier
 
 logger = logging.getLogger(__name__)
 

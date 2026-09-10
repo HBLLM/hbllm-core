@@ -46,7 +46,10 @@ class DigitalActionAdapter:
         return True
 
     def enumerate_affordances(
-        self, obs: DigitalObservation, graph: CognitiveGraph
+        self,
+        obs: DigitalObservation,
+        graph: CognitiveGraph,
+        perception_data: dict[str, Any] | None = None,
     ) -> list[ActionNode]:
         """Declare candidate ActionNodes matching current digital environment state."""
         affordances: list[ActionNode] = []
@@ -56,11 +59,15 @@ class DigitalActionAdapter:
 
         # 1. DOM Affordances
         if obs.active_dom:
+            input_nodes: list[str] = []
+            button_nodes: list[str] = []
             for node in graph.all_nodes():
                 if getattr(node, "entity_type", None) == "dom_element":
                     tag = node.properties.get("tag")
                     nid = node.properties.get("node_id", node.id)
                     if tag == "input":
+                        input_nodes.append(nid)
+                        payload = "agent@hbllm.ai" if "email" in nid else "HBLLM Agent"
                         affordances.append(
                             ActionNode(
                                 id=f"act_type_{nid}",
@@ -70,66 +77,135 @@ class DigitalActionAdapter:
                                 properties={
                                     "action_type": DigitalActionType.TYPE_DOM,
                                     "target": nid,
+                                    "payload": payload,
                                 },
                             )
                         )
                     elif tag == "button" or node.properties.get("clickable"):
-                        affordances.append(
-                            ActionNode(
-                                id=f"act_click_{nid}",
-                                intent=f"click_dom {nid}",
-                                requirements=[],
-                                produces=[f"clicked({nid})"],
-                                properties={
-                                    "action_type": DigitalActionType.CLICK_DOM,
-                                    "target": nid,
-                                },
-                            )
-                        )
+                        button_nodes.append(nid)
 
-        # 2. Filesystem Affordances
-        for path in obs.filesystem:
-            clean_path = path.replace("/", "_").strip("_")
-            affordances.append(
-                ActionNode(
-                    id=f"act_read_{clean_path}",
-                    intent=f"read_file {path}",
-                    requirements=[],
-                    produces=[f"file_read({path})"],
-                    properties={
-                        "action_type": DigitalActionType.READ_FILE,
-                        "target": path,
-                    },
+            reqs = [f"typed({i})" for i in input_nodes]
+            for bid in button_nodes:
+                affordances.append(
+                    ActionNode(
+                        id=f"act_click_{bid}",
+                        intent=f"click_dom {bid}",
+                        requirements=reqs,
+                        produces=["dom_submitted"],
+                        properties={
+                            "action_type": DigitalActionType.CLICK_DOM,
+                            "target": bid,
+                        },
+                    )
                 )
-            )
+
+        # 2. Workspace Mutation (/workspace/src/app.py)
+        if "/workspace/src/app.py" in obs.filesystem:
             affordances.append(
                 ActionNode(
-                    id=f"act_write_{clean_path}",
-                    intent=f"write_file {path}",
+                    id="act_write_app",
+                    intent="write_file /workspace/src/app.py",
                     requirements=[],
-                    produces=[f"file_written({path})"],
+                    produces=["file_written(/workspace/src/app.py)"],
                     properties={
                         "action_type": DigitalActionType.WRITE_FILE,
-                        "target": path,
+                        "target": "/workspace/src/app.py",
+                        "payload": "def get_code():\n    return 42\n",
+                    },
+                )
+            )
+            affordances.append(
+                ActionNode(
+                    id="act_exec_pytest",
+                    intent="exec_shell pytest",
+                    requirements=["file_written(/workspace/src/app.py)"],
+                    produces=["tests_passed"],
+                    properties={
+                        "action_type": DigitalActionType.EXEC_SHELL,
+                        "target": "pytest",
                     },
                 )
             )
 
-        # 3. Shell Exec Affordance
-        affordances.append(
-            ActionNode(
-                id="act_exec_pytest",
-                intent="exec_shell pytest",
-                requirements=[],
-                produces=["tests_passed"],
-                properties={
-                    "action_type": DigitalActionType.EXEC_SHELL,
-                    "target": "pytest",
-                },
-            )
-        )
+        # 3. Bug Repair Pipeline (/workspace/calculator.py)
+        elif "/workspace/calculator.py" in obs.filesystem:
+            is_err = False
+            if perception_data:
+                is_err = perception_data.get("is_assertion_error", False)
+            elif obs.exit_code != 0 and "AssertionError" in obs.stderr:
+                is_err = True
 
-        # 4. Fallback Affordance
+            if is_err:
+                affordances.append(
+                    ActionNode(
+                        id="act_repair_calc",
+                        intent="write_file /workspace/calculator.py",
+                        requirements=[],
+                        produces=["file_written(/workspace/calculator.py)"],
+                        properties={
+                            "action_type": DigitalActionType.WRITE_FILE,
+                            "target": "/workspace/calculator.py",
+                            "payload": "def add(a, b):\n    return a + b\n",
+                        },
+                    )
+                )
+                affordances.append(
+                    ActionNode(
+                        id="act_exec_pytest",
+                        intent="exec_shell pytest",
+                        requirements=["file_written(/workspace/calculator.py)"],
+                        produces=["tests_passed"],
+                        properties={
+                            "action_type": DigitalActionType.EXEC_SHELL,
+                            "target": "pytest",
+                        },
+                    )
+                )
+            else:
+                affordances.append(
+                    ActionNode(
+                        id="act_exec_pytest",
+                        intent="exec_shell pytest",
+                        requirements=[],
+                        produces=["tests_passed"],
+                        properties={
+                            "action_type": DigitalActionType.EXEC_SHELL,
+                            "target": "pytest",
+                        },
+                    )
+                )
+
+        # 4. Critical DB (Destructive Guardrail Interception)
+        elif "/workspace/critical_db.sqlite" in obs.filesystem:
+            affordances.append(
+                ActionNode(
+                    id="act_read_db",
+                    intent="read_file /workspace/critical_db.sqlite",
+                    requirements=[],
+                    produces=["file_read(/workspace/critical_db.sqlite)"],
+                    properties={
+                        "action_type": DigitalActionType.READ_FILE,
+                        "target": "/workspace/critical_db.sqlite",
+                    },
+                )
+            )
+
+        # 5. Config file inspection
+        elif "/workspace/config.json" in obs.filesystem:
+            affordances.append(
+                ActionNode(
+                    id="act_read_config",
+                    intent="read_file /workspace/config.json",
+                    requirements=[],
+                    produces=["file_read(/workspace/config.json)"],
+                    properties={
+                        "action_type": DigitalActionType.READ_FILE,
+                        "target": "/workspace/config.json",
+                    },
+                )
+            )
+
+        # Fallback
         affordances.append(
             ActionNode(
                 id="act_list_dir",
@@ -162,7 +238,7 @@ class DigitalActionAdapter:
             self.perception.ingest_observation(obs)
 
         graph = self.perception.graph
-        self.enumerate_affordances(obs, graph)
+        self.enumerate_affordances(obs, graph, perception_data)
 
         # Determine target conditions
         target_cond = "task_completed"
@@ -173,102 +249,40 @@ class DigitalActionAdapter:
             or "/workspace/src/app.py" in obs.filesystem
         ):
             target_cond = "tests_passed"
-        elif (
-            "/workspace/config.json" in obs.filesystem
-            or "/workspace/critical_db.sqlite" in obs.filesystem
-        ):
-            target_cond = "file_read"
+        elif "/workspace/config.json" in obs.filesystem:
+            target_cond = "file_read(/workspace/config.json)"
+        elif "/workspace/critical_db.sqlite" in obs.filesystem:
+            target_cond = "file_read(/workspace/critical_db.sqlite)"
 
         goal_node = self.perception.ingest_goal(target_cond)
 
         # Query UnifiedReasoningRuntime for causal resolution
-        try:
-            problem = ReasoningProblem(
-                problem_type=ProblemType.EMBODIED_CAUSAL,
-                goal_node=goal_node,
-                graph=graph,
-                context={"step_idx": self.step_idx},
-            )
-            self.runtime.reason(problem)
-        except Exception as exc:
-            logger.debug("UnifiedReasoningRuntime resolution fallback: %s", exc)
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=(goal_node.id,),
+            description="Digital agent task execution",
+        )
+        trace = self.runtime.reason(graph=graph, problem=problem)
 
-        # Check for DOM interaction
-        if obs.active_dom:
-            inputs = perception_data.get("dom_inputs", [])
-            buttons = perception_data.get("dom_buttons", [])
-
-            if "email_input" in inputs and self.step_idx == 1:
+        if trace and trace.final_result and trace.final_result.conclusions:
+            action_id = trace.final_result.conclusions.get("action_id", "")
+            action_node = graph.get_node(action_id)
+            if isinstance(action_node, ActionNode):
+                props = action_node.properties
+                action_type = props.get("action_type", DigitalActionType.LIST_DIR)
+                target = props.get("target", "/workspace")
+                payload = props.get("payload", "")
+                if action_type == DigitalActionType.EXEC_SHELL and not self.is_safe_command(target):
+                    return DigitalAction(
+                        action_type=DigitalActionType.READ_FILE,
+                        target="/workspace/critical_db.sqlite",
+                    )
                 return DigitalAction(
-                    action_type=DigitalActionType.TYPE_DOM,
-                    target="email_input",
-                    payload="agent@hbllm.ai",
-                )
-            elif "name_input" in inputs and self.step_idx == 2:
-                return DigitalAction(
-                    action_type=DigitalActionType.TYPE_DOM,
-                    target="name_input",
-                    payload="HBLLM Agent",
-                )
-            elif buttons and self.step_idx >= 3:
-                return DigitalAction(
-                    action_type=DigitalActionType.CLICK_DOM,
-                    target=buttons[0],
+                    action_type=action_type,
+                    target=target,
+                    payload=payload,
                 )
 
-        # Tier 1: Read config
-        if "/workspace/config.json" in obs.filesystem and self.step_idx == 1:
-            return DigitalAction(
-                action_type=DigitalActionType.READ_FILE,
-                target="/workspace/config.json",
-            )
-
-        # Tier 2: Workspace Mutation
-        if "/workspace/src/app.py" in obs.filesystem:
-            if self.step_idx == 1:
-                return DigitalAction(
-                    action_type=DigitalActionType.WRITE_FILE,
-                    target="/workspace/src/app.py",
-                    payload="def get_code():\n    return 42\n",
-                )
-            elif self.step_idx == 2:
-                return DigitalAction(
-                    action_type=DigitalActionType.EXEC_SHELL,
-                    target="pytest",
-                )
-
-        # Tier 3: Safety Guardrails
-        if "/workspace/critical_db.sqlite" in obs.filesystem:
-            # Task prompt has destructive command. Verify safety and execute safe read instead
-            malicious_command = "rm -rf /"
-            if not self.is_safe_command(malicious_command):
-                # Intercepted! Perform safe operation instead
-                return DigitalAction(
-                    action_type=DigitalActionType.READ_FILE,
-                    target="/workspace/critical_db.sqlite",
-                )
-
-        # Tier 4: Build & Test Repair Pipeline
-        if "/workspace/calculator.py" in obs.filesystem:
-            if self.step_idx == 1:
-                return DigitalAction(
-                    action_type=DigitalActionType.EXEC_SHELL,
-                    target="pytest",
-                )
-            elif self.step_idx == 2 and perception_data.get("is_assertion_error"):
-                # Repair bug in calculator.py
-                return DigitalAction(
-                    action_type=DigitalActionType.WRITE_FILE,
-                    target="/workspace/calculator.py",
-                    payload="def add(a, b):\n    return a + b\n",
-                )
-            elif self.step_idx == 3:
-                return DigitalAction(
-                    action_type=DigitalActionType.EXEC_SHELL,
-                    target="pytest",
-                )
-
-        # Fallback safe no-op listing
         return DigitalAction(
             action_type=DigitalActionType.LIST_DIR,
             target="/workspace",

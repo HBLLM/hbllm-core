@@ -188,7 +188,7 @@ class OvercookedActionAdapter:
                     ActionNode(
                         id="act_fetch_onion_from_counter",
                         intent="fetch_from_counter",
-                        requirements=["has(none)", "near(shared_counter)", "onion_on_counter"],
+                        requirements=["onion_on_counter", "has(none)", "near(shared_counter)"],
                         produces=["has(onion)"],
                     ),
                     ActionNode(
@@ -200,7 +200,7 @@ class OvercookedActionAdapter:
                     ActionNode(
                         id="act_fetch_soup_from_counter",
                         intent="fetch_from_counter",
-                        requirements=["has(none)", "near(shared_counter)", "soup_on_counter"],
+                        requirements=["soup_on_counter", "has(none)", "near(shared_counter)"],
                         produces=["has(soup)"],
                     ),
                     ActionNode(
@@ -212,7 +212,7 @@ class OvercookedActionAdapter:
                     ActionNode(
                         id="act_fetch_dish_from_counter",
                         intent="fetch_dish_from_counter",
-                        requirements=["has(none)", "near(shared_counter)", "dish_on_counter"],
+                        requirements=["dish_on_counter", "has(none)", "near(shared_counter)"],
                         produces=["has(dish)"],
                     ),
                     ActionNode(
@@ -315,56 +315,7 @@ class OvercookedActionAdapter:
         obs: OvercookedObservation,
         perception_data: dict[str, Any],
     ) -> None:
-        """Query UnifiedReasoningRuntime with EmbodiedCausalOperator and dispatch chosen intent."""
-        # --- Held-item fast-path: bypass causal backward-chaining when the agent
-        # already holds an item and the next action is unambiguous.  This prevents
-        # the re-plan deadlock where the backward chainer resolves deposit_excess
-        # (to satisfy has(none) for fetch_from_counter) even though the agent
-        # already has the ingredient it needs.
-        held = obs.agent.held_item
-        pots = obs.pots
-        ready_pots = [p for p in pots if p.status == PotStatus.READY]
-        filling_pots = [
-            p
-            for p in pots
-            if p.onions_in_pot < p.required_onions
-            and p.status in (PotStatus.EMPTY, PotStatus.FILLING)
-        ]
-
-        if held == CulinaryItem.ONION:
-            # If any reachable filling/empty pot exists → put onion in it.
-            target_pots = filling_pots or pots
-            reachable = [p for p in target_pots if self._is_reachable(obs, p.pos)]
-            if reachable:
-                self._dispatch_intent("put_onion_in_pot", obs, perception_data)
-                return
-            # No reachable pot: deposit on shared counter for partner.
-            self._dispatch_intent("deposit_on_counter", obs, perception_data)
-            return
-
-        if held == CulinaryItem.DISH:
-            # If a ready pot is reachable → plate the soup.
-            reachable_ready = [p for p in ready_pots if self._is_reachable(obs, p.pos)]
-            if reachable_ready:
-                self._dispatch_intent("plate_soup", obs, perception_data)
-                return
-            # Otherwise deposit dish so partner can use it.
-            self._dispatch_intent("deposit_on_counter", obs, perception_data)
-            return
-
-        if held == CulinaryItem.SOUP:
-            serving_stations = (
-                perception_data.get("serving_stations") or self.perception.serving_stations
-            )
-            reachable_serving = [s for s in serving_stations if self._is_reachable(obs, s)]
-            if reachable_serving:
-                self._dispatch_intent("serve_soup", obs, perception_data)
-                return
-            # Can't reach serving station: deposit soup on shared counter for partner.
-            self._dispatch_intent("deposit_on_counter", obs, perception_data)
-            return
-
-        # --- General path: delegate to UnifiedReasoningRuntime ---
+        # Delegate 100% of cognitive goal resolution to UnifiedReasoningRuntime
         graph = self.perception.to_cognitive_graph(obs, perception_data)
         self.enumerate_affordances(obs, graph)
 

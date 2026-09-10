@@ -72,6 +72,18 @@ class MineDojoActionAdapter:
                 requirements=["has(crafting_table)", "has(planks, 3)", "has(stick, 2)"],
                 produces=["has(wooden_pickaxe)"],
             ),
+            ActionNode(
+                id="act_mine_stone",
+                intent="mine_stone",
+                requirements=["has(wooden_pickaxe)"],
+                produces=["has(cobblestone)"],
+            ),
+            ActionNode(
+                id="act_craft_stone_pickaxe",
+                intent="craft_stone_pickaxe",
+                requirements=["has(crafting_table)", "has(cobblestone, 3)", "has(stick, 2)"],
+                produces=["has(stone_pickaxe)"],
+            ),
         ]
         stale = [n.id for n in graph.all_nodes() if n.id.startswith("act_")]
         for sid in stale:
@@ -81,6 +93,24 @@ class MineDojoActionAdapter:
             graph.add_node(act)
 
         return affordances
+
+    def execute_action(self, intent: str, obs: MineDojoObservation) -> MineDojoAction:
+        """Low-level actuator dispatch: translates declarative intent into discrete motor actions."""
+        if intent == "mine_tree":
+            return self._navigate_and_mine_tree(obs)
+        if intent == "craft_planks":
+            return MineDojoAction.CRAFT_PLANKS
+        if intent == "craft_table":
+            return MineDojoAction.CRAFT_TABLE
+        if intent == "craft_sticks":
+            return MineDojoAction.CRAFT_STICKS
+        if intent == "craft_wood_pickaxe":
+            return MineDojoAction.CRAFT_WOOD_PICKAXE
+        if intent == "mine_stone":
+            return self._navigate_and_mine_stone(obs)
+        if intent == "craft_stone_pickaxe":
+            return MineDojoAction.CRAFT_STONE_PICKAXE
+        return MineDojoAction.NOOP
 
     def plan_next_action(self, obs: MineDojoObservation, goal: MineDojoGoal) -> MineDojoAction:
         """Select next optimal action towards synthesizing goal item via HCIR backward chaining."""
@@ -95,86 +125,18 @@ class MineDojoActionAdapter:
             goal_node_ids=(goal_node.id,),
             description=f"Synthesize {goal.target_item}",
         )
-        self.runtime.reason(graph=self.perception.graph, problem=problem)
-        inv = obs.inventory
-        target = goal.target_item
+        trace = self.runtime.reason(graph=self.perception.graph, problem=problem)
 
-        # Tier 1: Raw Log Harvesting
-        if target == "log":
-            if inv.log >= goal.target_count:
-                return MineDojoAction.NOOP
-            return self._navigate_and_mine_tree(obs)
-
-        # Tier 2: Planks & Sticks
-        elif target == "planks":
-            if inv.planks >= goal.target_count:
-                return MineDojoAction.NOOP
-            if inv.log > 0:
-                return MineDojoAction.CRAFT_PLANKS
-            return self._navigate_and_mine_tree(obs)
-
-        # Tier 3: Crafting Table Synthesis
-        elif target == "crafting_table":
-            if inv.crafting_table >= goal.target_count:
-                return MineDojoAction.NOOP
-            if inv.log > 0:
-                return MineDojoAction.CRAFT_PLANKS
-            if inv.planks >= 4:
-                return MineDojoAction.CRAFT_TABLE
-            return self._navigate_and_mine_tree(obs)
-
-        # Tier 4: Wooden Pickaxe
-        elif target == "wooden_pickaxe":
-            if inv.wooden_pickaxe >= goal.target_count:
-                return MineDojoAction.NOOP
-            if inv.log > 0:
-                return MineDojoAction.CRAFT_PLANKS
-            if inv.crafting_table == 0:
-                if inv.planks >= 4:
-                    return MineDojoAction.CRAFT_TABLE
-                return self._navigate_and_mine_tree(obs)
-            if inv.stick < 2:
-                if inv.planks >= 2:
-                    return MineDojoAction.CRAFT_STICKS
-                return self._navigate_and_mine_tree(obs)
-            if inv.planks >= 3 and inv.stick >= 2:
-                return MineDojoAction.CRAFT_WOOD_PICKAXE
-            return self._navigate_and_mine_tree(obs)
-
-        # Tier 5: Stone Pickaxe & Cobblestone
-        elif target in ("stone_pickaxe", "cobblestone"):
-            if target == "stone_pickaxe" and inv.stone_pickaxe >= goal.target_count:
-                return MineDojoAction.NOOP
-            if target == "cobblestone" and inv.cobblestone >= goal.target_count:
-                return MineDojoAction.NOOP
-
-            # Sub-goal: Need wooden pickaxe first to mine stone
-            if inv.wooden_pickaxe == 0:
-                if inv.log > 0:
-                    return MineDojoAction.CRAFT_PLANKS
-                if inv.crafting_table == 0:
-                    if inv.planks >= 4:
-                        return MineDojoAction.CRAFT_TABLE
-                    return self._navigate_and_mine_tree(obs)
-                if inv.stick < 4:  # Craft enough sticks for both pickaxes
-                    if inv.planks >= 2:
-                        return MineDojoAction.CRAFT_STICKS
-                    return self._navigate_and_mine_tree(obs)
-                if inv.planks >= 3 and inv.stick >= 2:
-                    return MineDojoAction.CRAFT_WOOD_PICKAXE
-                return self._navigate_and_mine_tree(obs)
-
-            # Wooden pickaxe in hand: acquire cobblestone
-            if inv.cobblestone < 3:
-                return self._navigate_and_mine_stone(obs)
-
-            # Craft stone pickaxe
-            if target == "stone_pickaxe":
-                if inv.stick < 2:
-                    if inv.planks >= 2:
-                        return MineDojoAction.CRAFT_STICKS
-                    return self._navigate_and_mine_tree(obs)
-                return MineDojoAction.CRAFT_STONE_PICKAXE
+        # 3. Actuator Motor Dispatch
+        if (
+            trace
+            and trace.final_result
+            and trace.final_result.conclusions
+            and "best_action" in trace.final_result.conclusions
+        ):
+            chosen_intent = trace.final_result.conclusions["best_action"]
+            if chosen_intent and chosen_intent != "no_op":
+                return self.execute_action(chosen_intent, obs)
 
         return MineDojoAction.NOOP
 
