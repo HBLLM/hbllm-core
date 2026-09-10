@@ -368,6 +368,9 @@ class GoalDirectedPlanningEngine:
             return False
 
         if goal.predicate == "INSIDE" and goal.target_id:
+            # If still held in agent's hand, it has not been placed into container yet
+            if self.env.agent_held_object_id == goal.subject_id:
+                return False
             container = self.env.objects.get(goal.target_id)
             if not container:
                 return False
