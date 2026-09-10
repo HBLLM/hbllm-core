@@ -43,6 +43,7 @@ class BabyWorldEnvironment:
         self.objects: dict[str, BabyObjectState] = {}
         self.occluders: list[str] = []
         self._state_snapshots: list[dict[str, Any]] = []
+        self.current_scenario: str = scenario or "confounded_train_world"
         if scenario is not None:
             self.reset(scenario=scenario)
 
@@ -59,13 +60,18 @@ class BabyWorldEnvironment:
         self.objects.clear()
         self.occluders.clear()
         self._state_snapshots.clear()
+        self.current_scenario = scenario
 
-        if scenario == "confounded_train_world":
+        if scenario in ("confounded_train_world", "mass_confounded_world"):
             self._setup_confounded_train_world()
         elif scenario == "randomized_confounded_world":
             self._setup_randomized_confounded_world()
         elif scenario == "friction_confounded_world":
             self._setup_friction_confounded_world()
+        elif scenario == "force_confounded_world":
+            self._setup_force_confounded_world()
+        elif scenario == "aperture_confounded_world":
+            self._setup_aperture_confounded_world()
         elif scenario == "affordance_discovery_world":
             self._setup_affordance_discovery_world()
         elif scenario == "containment_world":
@@ -183,19 +189,24 @@ class BabyWorldEnvironment:
         )
 
     def _setup_randomized_confounded_world(self, mode_override: int | None = None) -> str:
-        """A23.5-E2: Causal Variable Invariance.
+        """A23.5-E2: Causal Variable Invariance across Dynamic Multi-Modal Confounders.
 
-        Dynamically varies the surface confounder across episodes:
-        Mode 0: Red -> Light, Blue -> Heavy
-        Mode 1: Blue -> Light, Red -> Heavy
-        Mode 2: Block -> Light, Ball -> Heavy
-        Mode 3: Ball -> Light, Block -> Heavy
-        Mode 4: Purple -> Light, Cyan -> Heavy
-        Mode 5: Orange -> Light, Black -> Heavy
+        Dynamically varies the surface confounders across episodes:
+        Mode 0: Red -> Light, Blue -> Heavy (Color confounder)
+        Mode 1: Blue -> Light, Red -> Heavy (Color inversion)
+        Mode 2: Block -> Light, Ball -> Heavy (Shape confounder)
+        Mode 3: Ball -> Light, Block -> Heavy (Shape inversion)
+        Mode 4: Purple -> Light, Cyan -> Heavy (Novel palette)
+        Mode 5: Orange -> Light, Black -> Heavy (Novel palette)
+        Mode 6: Striped -> Light, Smooth -> Heavy (Texture confounder)
+        Mode 7: Small -> Light, Large -> Heavy (Size confounder)
 
         The true causal invariant is always: mass < MASS_THRESHOLD (5.0).
         """
-        mode = mode_override if mode_override is not None else self.rng.randint(0, 5)
+        mode = mode_override if mode_override is not None else self.rng.randint(0, 7)
+
+        pos_texture, neg_texture = "smooth", "smooth"
+        pos_size, neg_size = Vector2D(0.4, 0.4), Vector2D(0.5, 0.5)
 
         if mode == 0:
             confound_desc = "color:red->light,blue->heavy"
@@ -217,10 +228,20 @@ class BabyWorldEnvironment:
             confound_desc = "color:purple->light,cyan->heavy"
             pos_color, neg_color = "purple", "cyan"
             pos_type, neg_type = BabyObjectType.BALL, BabyObjectType.BLOCK
-        else:
+        elif mode == 5:
             confound_desc = "color:orange->light,black->heavy"
             pos_color, neg_color = "orange", "black"
             pos_type, neg_type = BabyObjectType.BLOCK, BabyObjectType.BALL
+        elif mode == 6:
+            confound_desc = "texture:striped->light,smooth->heavy"
+            pos_color, neg_color = "cyan", "cyan"
+            pos_type, neg_type = BabyObjectType.BALL, BabyObjectType.BALL
+            pos_texture, neg_texture = "striped", "smooth"
+        else:
+            confound_desc = "size:small->light,large->heavy"
+            pos_color, neg_color = "purple", "purple"
+            pos_type, neg_type = BabyObjectType.BLOCK, BabyObjectType.BLOCK
+            pos_size, neg_size = Vector2D(0.2, 0.2), Vector2D(0.9, 0.9)
 
         # 4 Correlated Light objects (Moves)
         for i in range(4):
@@ -228,8 +249,9 @@ class BabyWorldEnvironment:
                 id=f"obj_pos_{i}",
                 object_type=pos_type,
                 color=pos_color,
+                texture=pos_texture,
                 mass=1.2 + i * 0.4,
-                size=Vector2D(0.4, 0.4),
+                size=pos_size,
                 position=Vector2D(0.5 + i * 0.3, 0.5 + i * 0.2),
             )
 
@@ -239,8 +261,9 @@ class BabyWorldEnvironment:
                 id=f"obj_neg_{i}",
                 object_type=neg_type,
                 color=neg_color,
+                texture=neg_texture,
                 mass=11.0 + i * 1.5,
-                size=Vector2D(0.5, 0.5),
+                size=neg_size,
                 position=Vector2D(0.5 + i * 0.3, -0.5 - i * 0.2),
             )
 
@@ -250,8 +273,9 @@ class BabyWorldEnvironment:
             id="obj_contrast_light",
             object_type=neg_type,
             color=neg_color,
+            texture=neg_texture,
             mass=1.1,
-            size=Vector2D(0.4, 0.4),
+            size=neg_size,
             position=Vector2D(1.5, 0.0),
         )
         # B: Positive surface feature, but HEAVY (Does not move!) -> Falsifies surface correlation
@@ -259,8 +283,9 @@ class BabyWorldEnvironment:
             id="obj_contrast_heavy",
             object_type=pos_type,
             color=pos_color,
+            texture=pos_texture,
             mass=14.0,
-            size=Vector2D(0.5, 0.5),
+            size=pos_size,
             position=Vector2D(1.5, -1.0),
         )
 
@@ -382,6 +407,127 @@ class BabyWorldEnvironment:
 
         return "friction:green->smooth(0.2),yellow->rough(2.0)"
 
+    def _setup_force_confounded_world(self) -> str:
+        """A23.5-E3 Novel Causal Mechanism: Applied Force vs. Static Resistance Threshold.
+
+        Physical Setup:
+        - All objects have identical mass (1.0 kg) and surface friction (1.0).
+        - Standard push force = 5.0 N.
+        - True Physical Law: Moves if Force (5.0) > static_threshold.
+
+        Observational Confound:
+        - Blue objects have low static resistance (static_threshold in [1.5, 2.5] < 5.0 => MOVE).
+        - Red objects have high static resistance (static_threshold in [11.0, 15.0] > 5.0 => STATIONARY).
+        - Spurious Correlation: color == 'blue' correlates 100% with movement.
+
+        Contrastive Decoupling Probes:
+        - obj_contrast_red_low_threshold: Red, but static_threshold = 2.0 => MOVES! (Falsifies color)
+        - obj_contrast_blue_high_threshold: Blue, but static_threshold = 14.0 => STATIONARY! (Falsifies color)
+        """
+        for i in range(4):
+            self.objects[f"obj_blue_weak_{i}"] = BabyObjectState(
+                id=f"obj_blue_weak_{i}",
+                object_type=BabyObjectType.BALL if i % 2 == 0 else BabyObjectType.BLOCK,
+                color="blue",
+                mass=1.0,
+                surface_friction=1.0,
+                static_threshold=1.5 + i * 0.3,
+                size=Vector2D(0.4, 0.4),
+                position=Vector2D(0.5 + i * 0.3, 0.5 + i * 0.2),
+            )
+        for i in range(4):
+            self.objects[f"obj_red_strong_{i}"] = BabyObjectState(
+                id=f"obj_red_strong_{i}",
+                object_type=BabyObjectType.BLOCK if i % 2 == 0 else BabyObjectType.BALL,
+                color="red",
+                mass=1.0,
+                surface_friction=1.0,
+                static_threshold=11.0 + i * 1.5,
+                size=Vector2D(0.5, 0.5),
+                position=Vector2D(0.5 + i * 0.3, -0.5 - i * 0.2),
+            )
+        self.objects["obj_contrast_red_low_threshold"] = BabyObjectState(
+            id="obj_contrast_red_low_threshold",
+            object_type=BabyObjectType.BLOCK,
+            color="red",
+            mass=1.0,
+            surface_friction=1.0,
+            static_threshold=2.0,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(1.5, 0.0),
+        )
+        self.objects["obj_contrast_blue_high_threshold"] = BabyObjectState(
+            id="obj_contrast_blue_high_threshold",
+            object_type=BabyObjectType.BALL,
+            color="blue",
+            mass=1.0,
+            surface_friction=1.0,
+            static_threshold=14.0,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(1.5, -1.0),
+        )
+        return "force_threshold:blue->low(2.0),red->high(12.0)"
+
+    def _setup_aperture_confounded_world(self) -> str:
+        """A23.5-E3 Novel Causal Mechanism: Geometric Aperture Clearance.
+
+        Physical Setup:
+        - Objects pushed through an aperture slot of width W = 0.5m.
+        - True Physical Law: Passes/Moves if clearance_diameter <= 0.5m.
+
+        Observational Confound:
+        - Cylinders are narrow (clearance_diameter in [0.2, 0.35] <= 0.5 => PASSES/MOVES).
+        - Boxes are wide (clearance_diameter in [0.7, 0.9] > 0.5 => BLOCKED/STATIONARY).
+        - Spurious Correlation: shape == 'block' correlates with movement vs 'box' with stationary.
+
+        Contrastive Decoupling Probes:
+        - obj_contrast_box_narrow: Box, but clearance_diameter = 0.30m => PASSES! (Falsifies shape)
+        - obj_contrast_cylinder_wide: Block, but clearance_diameter = 0.85m => BLOCKED! (Falsifies shape)
+        """
+        for i in range(4):
+            self.objects[f"obj_narrow_pass_{i}"] = BabyObjectState(
+                id=f"obj_narrow_pass_{i}",
+                object_type=BabyObjectType.BLOCK,
+                color="green",
+                mass=1.0,
+                surface_friction=1.0,
+                clearance_diameter=0.20 + i * 0.05,
+                size=Vector2D(0.3, 0.3),
+                position=Vector2D(0.5 + i * 0.3, 0.5 + i * 0.2),
+            )
+        for i in range(4):
+            self.objects[f"obj_wide_block_{i}"] = BabyObjectState(
+                id=f"obj_wide_block_{i}",
+                object_type=BabyObjectType.BOX,
+                color="yellow",
+                mass=1.0,
+                surface_friction=1.0,
+                clearance_diameter=0.70 + i * 0.06,
+                size=Vector2D(0.8, 0.8),
+                position=Vector2D(0.5 + i * 0.3, -0.5 - i * 0.2),
+            )
+        self.objects["obj_contrast_box_narrow"] = BabyObjectState(
+            id="obj_contrast_box_narrow",
+            object_type=BabyObjectType.BOX,
+            color="yellow",
+            mass=1.0,
+            surface_friction=1.0,
+            clearance_diameter=0.30,
+            size=Vector2D(0.3, 0.3),
+            position=Vector2D(1.5, 0.0),
+        )
+        self.objects["obj_contrast_cylinder_wide"] = BabyObjectState(
+            id="obj_contrast_cylinder_wide",
+            object_type=BabyObjectType.BLOCK,
+            color="green",
+            mass=1.0,
+            surface_friction=1.0,
+            clearance_diameter=0.85,
+            size=Vector2D(0.8, 0.8),
+            position=Vector2D(1.5, -1.0),
+        )
+        return "aperture_clearance:block->narrow(0.3),box->wide(0.8)"
+
     def generate_observational_demonstrations(self) -> list[dict[str, Any]]:
         """Generate standardized observational demonstration episodes on training objects.
 
@@ -415,9 +561,12 @@ class BabyWorldEnvironment:
                     "features": {
                         "color": obj.color,
                         "shape": obj.object_type.value,
+                        "texture": getattr(obj, "texture", "smooth"),
                         "size_extent": obj.size.to_tuple(),
                         "mass_sensation": obj.mass,
-                        "surface_friction": obj.surface_friction,
+                        "surface_friction": getattr(obj, "surface_friction", 1.0),
+                        "static_threshold": getattr(obj, "static_threshold", 0.0),
+                        "clearance_diameter": getattr(obj, "clearance_diameter", 0.4),
                     },
                     "outcome": "MOVES" if moved else "STATIONARY",
                     "moved": moved,
@@ -747,8 +896,18 @@ class BabyWorldEnvironment:
                 consequences["target_mass"] = target.mass
 
                 # True Physical Causal Law:
-                # An object moves if force exceeds resistance (mass * friction) and is not fixed
-                effective_resistance = target.mass * target.surface_friction
+                # Effective resistance combines inertial mass, surface friction, static threshold,
+                # and geometric aperture clearance constraints
+                effective_resistance = max(
+                    target.mass * target.surface_friction,
+                    getattr(target, "static_threshold", 0.0),
+                )
+                if (
+                    self.current_scenario == "aperture_confounded_world"
+                    and getattr(target, "clearance_diameter", 0.4) > 0.5
+                ):
+                    effective_resistance = 999.0  # Physically blocked by aperture
+
                 if (
                     not target.is_fixed
                     and dist <= self.REACH_DISTANCE
@@ -949,11 +1108,14 @@ class BabyWorldEnvironment:
                     "percept_id": obj_id,
                     "shape": obj.object_type.value,  # e.g. "ball", "block" (geometric descriptor)
                     "color": obj.color,
+                    "texture": getattr(obj, "texture", "smooth"),
                     "size_extent": obj.size.to_tuple(),
                     "spatial_coordinates": obj.position.to_tuple(),
                     "velocity": obj.velocity.to_tuple(),
                     "mass_sensation": obj.mass,  # Tactile/inertial resistance estimate
                     "surface_friction": obj.surface_friction,  # Surface texture/friction estimate
+                    "static_threshold": getattr(obj, "static_threshold", 0.0),
+                    "clearance_diameter": getattr(obj, "clearance_diameter", 0.4),
                     "is_held": obj.held_by_agent,
                     "is_container": obj.is_container,
                     "contained_in": obj.contained_in,

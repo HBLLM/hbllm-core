@@ -92,8 +92,11 @@ class DevelopmentalPerceptionAdapter:
                 "last_position": percept["spatial_coordinates"],
                 "shape": percept["shape"],
                 "color": percept["color"],
+                "texture": percept.get("texture", "smooth"),
                 "mass_sensation": percept["mass_sensation"],
                 "surface_friction": percept.get("surface_friction", 1.0),
+                "static_threshold": percept.get("static_threshold", 0.0),
+                "clearance_diameter": percept.get("clearance_diameter", 0.4),
                 "last_seen_step": obs.step_index,
             }
 
@@ -102,11 +105,14 @@ class DevelopmentalPerceptionAdapter:
                 properties={
                     "shape": percept["shape"],
                     "color": percept["color"],
+                    "texture": percept.get("texture", "smooth"),
                     "size_extent": percept["size_extent"],
                     "spatial_coordinates": percept["spatial_coordinates"],
                     "velocity": percept["velocity"],
                     "mass_sensation": percept["mass_sensation"],
                     "surface_friction": percept.get("surface_friction", 1.0),
+                    "static_threshold": percept.get("static_threshold", 0.0),
+                    "clearance_diameter": percept.get("clearance_diameter", 0.4),
                     "is_held": percept["is_held"],
                     "is_observed": True,
                     "depth_distance": obs.depth.get(raw_id, 0.0),

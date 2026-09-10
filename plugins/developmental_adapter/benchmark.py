@@ -115,6 +115,8 @@ def main() -> None:
             "confounded_train_world",
             "randomized_confounded_world",
             "friction_confounded_world",
+            "force_confounded_world",
+            "aperture_confounded_world",
         ],
         help="Environment scenario to evaluate",
     )

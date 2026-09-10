@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .a20_transfer_bridge import A20RelationalTransferBridge
 from .action import DevelopmentalActionAdapter
 from .affordance_discovery import AffordanceDiscoveryEngine
 from .benchmark import run_a23_5_benchmark
@@ -100,6 +101,7 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 
 __all__ = [
+    "A20RelationalTransferBridge",
     "ActiveDevelopmentalHCIRCohort",
     "AffordanceDiscoveryEngine",
     "AffordanceHypothesis",

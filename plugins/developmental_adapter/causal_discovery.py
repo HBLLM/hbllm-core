@@ -306,10 +306,17 @@ class InterventionalCausalDiscoveryEngine:
             "target_shape": target_percept["shape"] if target_percept else "",
             "color": target_percept["color"] if target_percept else "",
             "shape": target_percept["shape"] if target_percept else "",
+            "texture": target_percept.get("texture", "smooth") if target_percept else "smooth",
             "mass_sensation": float(target_percept["mass_sensation"]) if target_percept else 0.0,
             "surface_friction": float(target_percept.get("surface_friction", 1.0))
             if target_percept
             else 1.0,
+            "static_threshold": float(target_percept.get("static_threshold", 0.0))
+            if target_percept
+            else 0.0,
+            "clearance_diameter": float(target_percept.get("clearance_diameter", 0.4))
+            if target_percept
+            else 0.4,
             "did_move": did_move,
             "displacement": consequences.get("displacement", 0.0),
         }
@@ -403,11 +410,12 @@ class InterventionalCausalDiscoveryEngine:
         if not self.confirmed_causal_rules:
             return 0.0, []
 
-        # Prioritize confirmed physical causal rule (surface_friction or mass_sensation) if available
+        # Prioritize confirmed physical causal rule if available
         phys_rules = [
             r
             for r in self.confirmed_causal_rules
-            if r["precondition"]["property"] in ("surface_friction", "mass_sensation")
+            if r["precondition"]["property"]
+            in ("surface_friction", "mass_sensation", "static_threshold", "clearance_diameter")
         ]
         rule = phys_rules[0] if phys_rules else self.confirmed_causal_rules[0]
         prop_key = rule["precondition"]["property"]
@@ -420,26 +428,39 @@ class InterventionalCausalDiscoveryEngine:
         for obj_info in test_objects:
             actual_mass = float(obj_info.get("mass", 5.0))
             actual_friction = float(obj_info.get("surface_friction", 1.0))
+            actual_static = float(obj_info.get("static_threshold", 0.0))
+            actual_clearance = float(obj_info.get("clearance_diameter", 0.4))
 
             if prop_key == "surface_friction":
                 feat_val = actual_friction
             elif prop_key == "mass_sensation":
                 feat_val = actual_mass
+            elif prop_key == "static_threshold":
+                feat_val = actual_static
+            elif prop_key == "clearance_diameter":
+                feat_val = actual_clearance
             else:
                 feat_val = obj_info.get(prop_key, "")
 
             if operator == "<":
                 predicted_moves = float(feat_val) < threshold
+            elif operator == "<=":
+                predicted_moves = float(feat_val) <= threshold
             elif operator == ">":
                 predicted_moves = float(feat_val) > threshold
+            elif operator == ">=":
+                predicted_moves = float(feat_val) >= threshold
             elif operator == "==":
                 predicted_moves = str(feat_val) == str(threshold)
             else:
                 predicted_moves = False
 
-            # Ground truth physical outcome under standard force F = 5.0:
-            # Moves if Force (5.0) > Mass * Friction
-            actual_moves = 5.0 > (actual_mass * actual_friction)
+            # Ground truth physical outcome:
+            if prop_key == "clearance_diameter" or "clearance_diameter" in obj_info:
+                actual_moves = actual_clearance <= 0.5
+            else:
+                effective_resistance = max(actual_mass * actual_friction, actual_static)
+                actual_moves = 5.0 > effective_resistance
 
             is_correct = predicted_moves == actual_moves
             if is_correct:

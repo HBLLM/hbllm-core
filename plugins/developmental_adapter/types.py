@@ -91,6 +91,9 @@ class BabyObjectState:
     held_by_agent: bool = False
     is_occluded: bool = False  # True if hidden behind an occluder from agent's eye
     surface_friction: float = 1.0
+    texture: str = "smooth"  # "smooth", "rough", "striped", "metallic"
+    static_threshold: float = 0.0  # Force resistance threshold (N)
+    clearance_diameter: float = 0.4  # Geometric aperture clearance (m)
     is_container: bool = False
     is_tool: bool = False
     tool_length: float = 0.0

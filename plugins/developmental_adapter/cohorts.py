@@ -15,6 +15,7 @@ import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from .blank_brain import create_blank_brain_substrate
 from .causal_discovery import InterventionalCausalDiscoveryEngine
@@ -59,6 +60,209 @@ class BaseDevelopmentalCohort(ABC):
         pass
 
 
+def detect_target_variable(env: BabyWorldEnvironment) -> str:
+    """Identify the latent physical causal variable governing movement in this environment."""
+    if any(getattr(o, "static_threshold", 0.0) != 0.0 for o in env.objects.values()):
+        return "static_threshold"
+    if (
+        any(getattr(o, "clearance_diameter", 0.4) != 0.4 for o in env.objects.values())
+        and getattr(env, "current_scenario", "") == "aperture_confounded_world"
+    ):
+        return "clearance_diameter"
+    if any(getattr(o, "surface_friction", 1.0) != 1.0 for o in env.objects.values()):
+        return "surface_friction"
+    return "mass_sensation"
+
+
+def generate_test_suites(
+    target_var: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Produce held-out test sets (Level 2 entities and Level 3 worlds) for evaluation."""
+    if target_var == "surface_friction":
+        unseen_entities = [
+            {
+                "id": "ue1",
+                "color": "cyan",
+                "shape": "cylinder",
+                "mass": 5.0,
+                "surface_friction": 0.15,
+            },
+            {
+                "id": "ue2",
+                "color": "purple",
+                "shape": "cone",
+                "mass": 5.0,
+                "surface_friction": 2.50,
+            },
+            {
+                "id": "ue3",
+                "color": "magenta",
+                "shape": "torus",
+                "mass": 5.0,
+                "surface_friction": 0.08,
+            },
+        ]
+        unseen_world = [
+            {
+                "id": "uw1",
+                "color": "orange",
+                "shape": "block",
+                "mass": 5.0,
+                "surface_friction": 0.25,
+            },
+            {
+                "id": "uw2",
+                "color": "brown",
+                "shape": "box",
+                "mass": 5.0,
+                "surface_friction": 2.80,
+            },
+        ]
+    elif target_var == "static_threshold":
+        unseen_entities = [
+            {
+                "id": "ue1",
+                "color": "cyan",
+                "shape": "cylinder",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "static_threshold": 1.8,
+            },
+            {
+                "id": "ue2",
+                "color": "purple",
+                "shape": "cone",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "static_threshold": 12.5,
+            },
+            {
+                "id": "ue3",
+                "color": "magenta",
+                "shape": "torus",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "static_threshold": 0.8,
+            },
+        ]
+        unseen_world = [
+            {
+                "id": "uw1",
+                "color": "orange",
+                "shape": "block",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "static_threshold": 2.2,
+            },
+            {
+                "id": "uw2",
+                "color": "brown",
+                "shape": "box",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "static_threshold": 16.0,
+            },
+        ]
+    elif target_var == "clearance_diameter":
+        unseen_entities = [
+            {
+                "id": "ue1",
+                "color": "cyan",
+                "shape": "cylinder",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "clearance_diameter": 0.22,
+            },
+            {
+                "id": "ue2",
+                "color": "purple",
+                "shape": "cone",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "clearance_diameter": 0.75,
+            },
+            {
+                "id": "ue3",
+                "color": "magenta",
+                "shape": "torus",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "clearance_diameter": 0.15,
+            },
+        ]
+        unseen_world = [
+            {
+                "id": "uw1",
+                "color": "orange",
+                "shape": "block",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "clearance_diameter": 0.28,
+            },
+            {
+                "id": "uw2",
+                "color": "brown",
+                "shape": "box",
+                "mass": 1.0,
+                "surface_friction": 1.0,
+                "clearance_diameter": 0.82,
+            },
+        ]
+    else:  # mass_sensation
+        unseen_entities = [
+            {
+                "id": "ue1",
+                "color": "green",
+                "shape": "cylinder",
+                "mass": 1.8,
+                "surface_friction": 1.0,
+            },
+            {
+                "id": "ue2",
+                "color": "yellow",
+                "shape": "cone",
+                "mass": 11.2,
+                "surface_friction": 1.0,
+            },
+            {
+                "id": "ue3",
+                "color": "purple",
+                "shape": "torus",
+                "mass": 0.9,
+                "surface_friction": 1.0,
+            },
+        ]
+        unseen_world = [
+            {
+                "id": "uw1",
+                "color": "orange",
+                "shape": "block",
+                "mass": 2.2,
+                "surface_friction": 1.0,
+            },
+            {
+                "id": "uw2",
+                "color": "brown",
+                "shape": "box",
+                "mass": 18.0,
+                "surface_friction": 1.0,
+            },
+        ]
+    return unseen_entities, unseen_world
+
+
+def is_wasted_intervention(target_var: str, ent: Any) -> bool:
+    """Check if the selected probe repeats observational correlation rather than contrasting."""
+    if target_var == "surface_friction":
+        return ent.color == "green" and getattr(ent, "surface_friction", 1.0) < 1.0
+    elif target_var == "static_threshold":
+        return ent.color == "blue" and getattr(ent, "static_threshold", 0.0) < 5.0
+    elif target_var == "clearance_diameter":
+        return ent.color == "green" and getattr(ent, "clearance_diameter", 0.4) <= 0.5
+    else:
+        return ent.color == "red" and getattr(ent, "mass", 5.0) < 5.0
+
+
 class ScriptedCohort(BaseDevelopmentalCohort):
     """Cohort A: Hand-coded rule oracle (traditional robotics baseline)."""
 
@@ -70,12 +274,7 @@ class ScriptedCohort(BaseDevelopmentalCohort):
         env: BabyWorldEnvironment,
         max_interventions: int = 20,
     ) -> CohortDiscoveryResult:
-        # Pre-programmed with exact ground truth: 0 interventions needed to "discover"
-        target_var = (
-            "surface_friction"
-            if any(getattr(o, "surface_friction", 1.0) != 1.0 for o in env.objects.values())
-            else "mass_sensation"
-        )
+        target_var = detect_target_variable(env)
         return CohortDiscoveryResult(
             cohort_id=self.cohort_id,
             identified_causal_rule=True,
@@ -127,11 +326,7 @@ class NeuralLearnerCohort(BaseDevelopmentalCohort):
         if not env.objects:
             env.reset("confounded_train_world")
 
-        target_var = (
-            "surface_friction"
-            if any(getattr(o, "surface_friction", 1.0) != 1.0 for o in env.objects.values())
-            else "mass_sensation"
-        )
+        target_var = detect_target_variable(env)
         is_friction_task = target_var == "surface_friction"
 
         interventions = 0
@@ -143,7 +338,12 @@ class NeuralLearnerCohort(BaseDevelopmentalCohort):
 
             cand_id = self.rng.choice(list(env.objects.keys()))
             obj = env.objects[cand_id]
-            actual_move = 5.0 > (obj.mass * obj.surface_friction)
+            if target_var == "static_threshold":
+                actual_move = 5.0 > getattr(obj, "static_threshold", 0.0)
+            elif target_var == "clearance_diameter":
+                actual_move = getattr(obj, "clearance_diameter", 0.4) <= 0.5
+            else:
+                actual_move = 5.0 > (obj.mass * obj.surface_friction)
 
             # Feature extraction
             x_red = 1.0 if obj.color == "red" else 0.0
@@ -205,6 +405,8 @@ class NeuralLearnerCohort(BaseDevelopmentalCohort):
             discovered = (
                 self.weights["normalized_friction"] < -0.8 and abs(self.weights["is_green"]) < 0.25
             )
+        elif target_var in ("static_threshold", "clearance_diameter"):
+            discovered = False
         else:
             discovered = (
                 self.weights["normalized_mass"] < -0.8 and abs(self.weights["is_red"]) < 0.25
@@ -238,11 +440,7 @@ class MatureHCIRCohort(BaseDevelopmentalCohort):
         env: BabyWorldEnvironment,
         max_interventions: int = 20,
     ) -> CohortDiscoveryResult:
-        target_var = (
-            "surface_friction"
-            if any(getattr(o, "surface_friction", 1.0) != 1.0 for o in env.objects.values())
-            else "mass_sensation"
-        )
+        target_var = detect_target_variable(env)
         return CohortDiscoveryResult(
             cohort_id=self.cohort_id,
             identified_causal_rule=True,
@@ -275,12 +473,7 @@ class ActiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
         perception = DevelopmentalPerceptionAdapter()
         engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
 
-        target_var = (
-            "surface_friction"
-            if any(getattr(o, "surface_friction", 1.0) != 1.0 for o in env.objects.values())
-            else "mass_sensation"
-        )
-        is_friction_task = target_var == "surface_friction"
+        target_var = detect_target_variable(env)
 
         obs = env.get_sensory_observation()
         available_ids = list(env.objects.keys())
@@ -304,11 +497,8 @@ class ActiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
 
             # Check if this intervention was redundant/wasted
             ent = env.objects.get(target_id)
-            if ent:
-                if is_friction_task and ent.color == "green" and ent.surface_friction < 1.0:
-                    wasted += 1
-                elif not is_friction_task and ent.color == "red" and ent.mass < 5.0:
-                    wasted += 1
+            if ent and is_wasted_intervention(target_var, ent):
+                wasted += 1
 
             did_move, probe_res = engine.execute_interventional_probe(
                 target_id, action=BabyActionType.PUSH
@@ -318,7 +508,6 @@ class ActiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
         discovered = any(h.confirmed and h.variable == target_var for h in engine.hypotheses)
 
         # 3. Evaluate Three-Level Generalization
-        # Level 1: Train objects
         train_objs = [
             {
                 "id": o.id,
@@ -326,92 +515,14 @@ class ActiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
                 "shape": o.object_type.value,
                 "mass": o.mass,
                 "surface_friction": o.surface_friction,
+                "static_threshold": getattr(o, "static_threshold", 0.0),
+                "clearance_diameter": getattr(o, "clearance_diameter", 0.4),
             }
             for o in env.objects.values()
         ]
         l1_acc, _ = engine.evaluate_generalization(train_objs)
 
-        if is_friction_task:
-            unseen_entities = [
-                {
-                    "id": "ue1",
-                    "color": "cyan",
-                    "shape": "cylinder",
-                    "mass": 5.0,
-                    "surface_friction": 0.15,
-                },
-                {
-                    "id": "ue2",
-                    "color": "purple",
-                    "shape": "cone",
-                    "mass": 5.0,
-                    "surface_friction": 2.50,
-                },
-                {
-                    "id": "ue3",
-                    "color": "magenta",
-                    "shape": "torus",
-                    "mass": 5.0,
-                    "surface_friction": 0.08,
-                },
-            ]
-            unseen_world = [
-                {
-                    "id": "uw1",
-                    "color": "orange",
-                    "shape": "block",
-                    "mass": 5.0,
-                    "surface_friction": 0.25,
-                },
-                {
-                    "id": "uw2",
-                    "color": "brown",
-                    "shape": "box",
-                    "mass": 5.0,
-                    "surface_friction": 2.80,
-                },
-            ]
-        else:
-            unseen_entities = [
-                {
-                    "id": "ue1",
-                    "color": "green",
-                    "shape": "cylinder",
-                    "mass": 1.8,
-                    "surface_friction": 1.0,
-                },
-                {
-                    "id": "ue2",
-                    "color": "yellow",
-                    "shape": "cone",
-                    "mass": 11.2,
-                    "surface_friction": 1.0,
-                },
-                {
-                    "id": "ue3",
-                    "color": "purple",
-                    "shape": "torus",
-                    "mass": 0.9,
-                    "surface_friction": 1.0,
-                },
-            ]
-            unseen_world = [
-                {
-                    "id": "uw1",
-                    "color": "orange",
-                    "shape": "block",
-                    "mass": 2.2,
-                    "surface_friction": 1.0,
-                },
-                {
-                    "id": "uw2",
-                    "color": "brown",
-                    "shape": "box",
-                    "mass": 18.0,
-                    "surface_friction": 1.0,
-                },
-            ]
-
+        unseen_entities, unseen_world = generate_test_suites(target_var)
         l2_acc, _ = engine.evaluate_generalization(unseen_entities)
         l3_acc, _ = engine.evaluate_generalization(unseen_world)
 
@@ -447,12 +558,7 @@ class PassiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
         perception = DevelopmentalPerceptionAdapter()
         engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
 
-        target_var = (
-            "surface_friction"
-            if any(getattr(o, "surface_friction", 1.0) != 1.0 for o in env.objects.values())
-            else "mass_sensation"
-        )
-        is_friction_task = target_var == "surface_friction"
+        target_var = detect_target_variable(env)
 
         obs = env.get_sensory_observation()
         available_ids = list(env.objects.keys())
@@ -473,11 +579,8 @@ class PassiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
             target_id = self.rng.choice(available_ids)
 
             ent = env.objects.get(target_id)
-            if ent:
-                if is_friction_task and ent.color == "green" and ent.surface_friction < 1.0:
-                    wasted += 1
-                elif not is_friction_task and ent.color == "red" and ent.mass < 5.0:
-                    wasted += 1
+            if ent and is_wasted_intervention(target_var, ent):
+                wasted += 1
 
             did_move, probe_res = engine.execute_interventional_probe(
                 target_id, action=BabyActionType.PUSH
@@ -494,92 +597,14 @@ class PassiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
                 "shape": o.object_type.value,
                 "mass": o.mass,
                 "surface_friction": o.surface_friction,
+                "static_threshold": getattr(o, "static_threshold", 0.0),
+                "clearance_diameter": getattr(o, "clearance_diameter", 0.4),
             }
             for o in env.objects.values()
         ]
         l1_acc, _ = engine.evaluate_generalization(train_objs)
 
-        if is_friction_task:
-            unseen_entities = [
-                {
-                    "id": "ue1",
-                    "color": "cyan",
-                    "shape": "cylinder",
-                    "mass": 5.0,
-                    "surface_friction": 0.15,
-                },
-                {
-                    "id": "ue2",
-                    "color": "purple",
-                    "shape": "cone",
-                    "mass": 5.0,
-                    "surface_friction": 2.50,
-                },
-                {
-                    "id": "ue3",
-                    "color": "magenta",
-                    "shape": "torus",
-                    "mass": 5.0,
-                    "surface_friction": 0.08,
-                },
-            ]
-            unseen_world = [
-                {
-                    "id": "uw1",
-                    "color": "orange",
-                    "shape": "block",
-                    "mass": 5.0,
-                    "surface_friction": 0.25,
-                },
-                {
-                    "id": "uw2",
-                    "color": "brown",
-                    "shape": "box",
-                    "mass": 5.0,
-                    "surface_friction": 2.80,
-                },
-            ]
-        else:
-            unseen_entities = [
-                {
-                    "id": "ue1",
-                    "color": "green",
-                    "shape": "cylinder",
-                    "mass": 1.8,
-                    "surface_friction": 1.0,
-                },
-                {
-                    "id": "ue2",
-                    "color": "yellow",
-                    "shape": "cone",
-                    "mass": 11.2,
-                    "surface_friction": 1.0,
-                },
-                {
-                    "id": "ue3",
-                    "color": "purple",
-                    "shape": "torus",
-                    "mass": 0.9,
-                    "surface_friction": 1.0,
-                },
-            ]
-            unseen_world = [
-                {
-                    "id": "uw1",
-                    "color": "orange",
-                    "shape": "block",
-                    "mass": 2.2,
-                    "surface_friction": 1.0,
-                },
-                {
-                    "id": "uw2",
-                    "color": "brown",
-                    "shape": "box",
-                    "mass": 18.0,
-                    "surface_friction": 1.0,
-                },
-            ]
-
+        unseen_entities, unseen_world = generate_test_suites(target_var)
         l2_acc, _ = engine.evaluate_generalization(unseen_entities)
         l3_acc, _ = engine.evaluate_generalization(unseen_world)
 
