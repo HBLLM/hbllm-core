@@ -32,14 +32,24 @@ class BabyWorldEnvironment:
     REACH_DISTANCE: float = 1.5
     TABLE_EXTENT: tuple[float, float] = (4.0, 4.0)
 
-    def __init__(self, seed: int | None = 42) -> None:
-        self.rng = random.Random(seed)
+    def __init__(
+        self, seed: int | None = 42, scenario: str | None = None, random_seed: int | None = None
+    ) -> None:
+        actual_seed = seed if random_seed is None else random_seed
+        self.rng = random.Random(actual_seed)
         self.step_index: int = 0
         self.agent_position: Vector2D = Vector2D(0.0, 0.0)
         self.agent_held_object_id: str | None = None
         self.objects: dict[str, BabyObjectState] = {}
         self.occluders: list[str] = []
         self._state_snapshots: list[dict[str, Any]] = []
+        if scenario is not None:
+            self.reset(scenario=scenario)
+
+    @property
+    def agent_hand_position(self) -> Vector2D:
+        """Proprioceptive effector/hand position of the embodied agent."""
+        return self.agent_position
 
     def reset(self, scenario: str = "confounded_train_world") -> SensoryObservation:
         """Reset environment to a designated experimental scenario."""
@@ -662,21 +672,48 @@ class BabyWorldEnvironment:
         action: BabyActionType,
         target_id: str | None = None,
         parameters: dict[str, Any] | None = None,
+        parameter: Any = None,
     ) -> tuple[SensoryObservation, float, bool, dict[str, Any]]:
         """Execute primitive embodied action in the environment."""
         self.step_index += 1
-        params = parameters or {}
+        params = dict(parameters or {})
+        if parameter is not None:
+            if isinstance(parameter, dict):
+                params.update(parameter)
+            elif isinstance(parameter, Vector2D):
+                params["position"] = parameter
+            elif isinstance(parameter, (tuple, list)):
+                params["position"] = parameter
+            else:
+                params["param"] = parameter
+
         reward = 0.0
         consequences: dict[str, Any] = {"action": action.value, "target_id": target_id}
 
         target = self.objects.get(target_id) if target_id else None
 
         if action == BabyActionType.MOVE:
-            dx = float(params.get("dx", 0.0))
-            dy = float(params.get("dy", 0.0))
-            self.agent_position.x += dx
-            self.agent_position.y += dy
+            if "position" in params:
+                pos = params["position"]
+                self.agent_position = (
+                    Vector2D(pos.x, pos.y)
+                    if isinstance(pos, Vector2D)
+                    else Vector2D(pos[0], pos[1])
+                )
+            elif "dx" in params or "dy" in params:
+                dx = float(params.get("dx", 0.0))
+                dy = float(params.get("dy", 0.0))
+                self.agent_position.x += dx
+                self.agent_position.y += dy
+            elif target:
+                self.agent_position = Vector2D(target.position.x, target.position.y)
             consequences["new_agent_pos"] = self.agent_position.to_tuple()
+
+            # Moving with held object
+            if self.agent_held_object_id and self.agent_held_object_id in self.objects:
+                self.objects[self.agent_held_object_id].position = Vector2D(
+                    self.agent_position.x, self.agent_position.y
+                )
 
         elif action == BabyActionType.REACH:
             if target:
@@ -770,22 +807,40 @@ class BabyWorldEnvironment:
                     consequences["displacement"] = 0.0
 
         elif action == BabyActionType.PLACE:
+            container_candidate_id = target_id
+            if (
+                container_candidate_id == self.agent_held_object_id
+                or (container_candidate_id and container_candidate_id not in self.objects)
+            ) and params.get("param") in self.objects:
+                container_candidate_id = params.get("param")
+            elif not container_candidate_id and params.get("param") in self.objects:
+                container_candidate_id = params.get("param")
+
+            container_target = (
+                self.objects.get(container_candidate_id) if container_candidate_id else target
+            )
+
             if self.agent_held_object_id and self.agent_held_object_id in self.objects:
                 held_obj = self.objects[self.agent_held_object_id]
-                if target and (
-                    target.is_container
-                    or target.object_type in (BabyObjectType.CONTAINER, BabyObjectType.BOX)
+                if container_target and (
+                    container_target.is_container
+                    or container_target.object_type
+                    in (BabyObjectType.CONTAINER, BabyObjectType.BOX)
                 ):
-                    dist = self.agent_position.distance_to(target.position)
-                    if dist <= self.REACH_DISTANCE and (target.is_open is None or target.is_open):
+                    dist = self.agent_position.distance_to(container_target.position)
+                    if dist <= self.REACH_DISTANCE and (
+                        container_target.is_open is None or container_target.is_open
+                    ):
                         held_obj.held_by_agent = False
-                        held_obj.contained_in = target.id
-                        held_obj.position = Vector2D(target.position.x, target.position.y)
-                        if held_obj.id not in target.contained_object_ids:
-                            target.contained_object_ids.append(held_obj.id)
+                        held_obj.contained_in = container_target.id
+                        held_obj.position = Vector2D(
+                            container_target.position.x, container_target.position.y
+                        )
+                        if held_obj.id not in container_target.contained_object_ids:
+                            container_target.contained_object_ids.append(held_obj.id)
                         self.agent_held_object_id = None
                         consequences["placed_in_container"] = True
-                        consequences["container_id"] = target.id
+                        consequences["container_id"] = container_target.id
                     else:
                         consequences["placed_in_container"] = False
                 else:

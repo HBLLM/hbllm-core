@@ -28,7 +28,19 @@
     "developmental_act",
     "developmental_intervene",
     "developmental_discover_causality",
+    "developmental_discover_affordances",
+    "developmental_spatial_containment",
+    "developmental_tool_learning",
+    "developmental_goal_planning",
+    "developmental_curiosity",
+    "developmental_concept_abstraction",
+    "developmental_language_grounding",
+    "developmental_compositional_language",
+    "developmental_continual_learning",
+    "developmental_metacognition",
+    "developmental_cross_transfer",
     "developmental_evaluate_curriculum"
   ],
   "permissions": ["environment_simulation"]
 }
+

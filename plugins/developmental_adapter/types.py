@@ -169,6 +169,17 @@ class BeliefTransitionType(str, Enum):
     AFFORDANCE_DISCOVERED = "affordance_discovered"
     SPATIAL_SCHEMA_INDUCED = "spatial_schema_induced"
     TOOL_COMPOSED = "tool_composed"
+    GOAL_SYNTHESIZED = "goal_synthesized"
+    PLAN_EXECUTED = "plan_executed"
+    PLAN_REPLANNED = "plan_replanned"
+    CURIOSITY_EXPLORATION = "curiosity_exploration"
+    CONCEPT_INDUCED = "concept_induced"
+    LEXICON_GROUNDED = "lexicon_grounded"
+    COMPOSITION_PARSED = "composition_parsed"
+    MEMORY_CONSOLIDATED = "memory_consolidated"
+    METACOGNITION_CALIBRATED = "metacognition_calibrated"
+    CROSS_WORLD_TRANSFERRED = "cross_world_transferred"
+    CROSS_DOMAIN_TRANSFERRED = "cross_domain_transferred"
 
 
 @dataclass
@@ -237,3 +248,99 @@ class SpatialRelationFact:
     object_id: str
     confidence: float = 1.0
     evidence: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PredicateGoal:
+    """Structured goal specification for developmental planning (Stage D6/D7)."""
+
+    predicate: str  # e.g. "INSIDE", "REACHABLE", "ON", "STATE", "TOUCHING"
+    subject_id: str
+    target_id: str | None = None
+    target_value: Any = None  # e.g. True or "open" or (x, y)
+
+
+@dataclass
+class PlanStep:
+    """Individual action step in a synthesized developmental plan."""
+
+    action: BabyActionType
+    target_id: str | None = None
+    tool_id: str | None = None
+    parameter: Any = None
+    expected_outcome: str = ""
+
+
+@dataclass
+class PlanExecutionResult:
+    """Outcome of multi-step compositional planning execution."""
+
+    goal: PredicateGoal
+    steps: list[PlanStep]
+    success: bool
+    replan_count: int
+    wasted_actions: int
+    executed_actions: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EpistemicUncertaintyReport:
+    """Autonomous curiosity assessment of epistemic state (Stage D8)."""
+
+    initial_entropy: float
+    final_entropy: float
+    entropy_reduction: float
+    interventions_executed: int
+    hypotheses_evaluated: int
+    discovered_rules: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ConceptCluster:
+    """Invariant concept category induced from unlabelled experience (Stage D9)."""
+
+    concept_name: str
+    archetype_features: dict[str, Any]
+    exemplar_ids: list[str]
+    confidence: float = 1.0
+
+
+class LexicalCategory(str, Enum):
+    """Grammatical and semantic category for grounded language tokens (Stage D10/D11)."""
+
+    NOUN = "NOUN"
+    VERB = "VERB"
+    ADJECTIVE = "ADJECTIVE"
+    PREPOSITION = "PREPOSITION"
+
+
+@dataclass
+class LexicalEntry:
+    """Grounded linguistic item mapping tokens to cognitive representations."""
+
+    token: str
+    category: LexicalCategory
+    grounded_symbol: str  # e.g. "ball", "PUSH", "red", "INSIDE"
+    co_occurrence_count: int = 1
+    confidence: float = 0.5
+
+
+@dataclass
+class MetacognitiveReport:
+    """Metacognitive calibration metrics (Stage D13)."""
+
+    brier_score: float
+    expected_calibration_error: float
+    abstention_accuracy: float
+    predictions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class CrossTransferEvaluation:
+    """Evaluation record for cross-world and cross-domain schema transfer (Stage D14/D15)."""
+
+    source_domain: str
+    target_domain: str
+    zero_shot_transfer_accuracy: float
+    sample_efficiency_ratio: float
+    reused_schemas: list[str] = field(default_factory=list)
