@@ -13,12 +13,14 @@ from typing import Any
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
+    GoalNode,
     PhysicalEntityNode,
 )
 from hbllm.perception import EpistemicSpatialGrid
 
 from .types import (
     CrafterAchievement,
+    CrafterGoal,
     CrafterInventory,
     CrafterObject,
     CrafterObservation,
@@ -186,49 +188,64 @@ class CrafterPerceptionAdapter:
         if not obs.semantic_grid or not obs.semantic_grid[0]:
             return self.graph
 
+        # Clean up previous resource entities so graph remains bounded
+        stale_ids = [
+            node.id
+            for node in self.graph.all_nodes()
+            if node.id != "agent" and not node.id.startswith("goal_")
+        ]
+        for nid in stale_ids:
+            self.graph.remove_node(nid)
+
         height = len(obs.semantic_grid)
         width = len(obs.semantic_grid[0])
         search_radius = 16
+
+        objects_by_type: dict[int, list[tuple[int, int, int]]] = {}
+        target_types = (
+            CrafterObject.TREE,
+            CrafterObject.WATER,
+            CrafterObject.STONE,
+            CrafterObject.COAL,
+            CrafterObject.IRON,
+            CrafterObject.DIAMOND,
+            CrafterObject.CRAFTING_TABLE,
+            CrafterObject.FURNACE,
+            CrafterObject.COW,
+            CrafterObject.ZOMBIE,
+            CrafterObject.SKELETON,
+        )
 
         for dy in range(-search_radius, search_radius + 1):
             for dx in range(-search_radius, search_radius + 1):
                 x, y = px + dx, py + dy
                 if 0 <= x < width and 0 <= y < height:
                     obj_id = obs.semantic_grid[y][x]
-                    if obj_id in (
-                        CrafterObject.TREE,
-                        CrafterObject.WATER,
-                        CrafterObject.STONE,
-                        CrafterObject.COAL,
-                        CrafterObject.IRON,
-                        CrafterObject.DIAMOND,
-                        CrafterObject.CRAFTING_TABLE,
-                        CrafterObject.FURNACE,
-                        CrafterObject.COW,
-                        CrafterObject.ZOMBIE,
-                    ):
-                        node_id = f"ent_{CrafterObject(obj_id).name.lower()}_{x}_{y}"
+                    if obj_id in target_types:
                         dist = abs(px - x) + abs(py - y)
-                        node = PhysicalEntityNode(
-                            id=node_id,
-                            entity_name=CrafterObject(obj_id).name.lower(),
-                            entity_type="resource" if obj_id < 14 else "entity",
-                            properties={
-                                "obj_type": obj_id,
-                                "x": x,
-                                "y": y,
-                                "distance": dist,
-                                "coords": (x, y),
-                                "passable": False,
-                            },
-                            entity_lifecycle=EntityLifecycle.TRACKED,
-                        )
-                        if self.graph.has_node(node_id):
-                            ex = self.graph.get_node(node_id)
-                            if isinstance(ex, PhysicalEntityNode):
-                                ex.properties.update(node.properties)
-                        else:
-                            self.graph.add_node(node)
+                        if obj_id not in objects_by_type:
+                            objects_by_type[obj_id] = []
+                        objects_by_type[obj_id].append((dist, x, y))
+
+        for obj_id, locs in objects_by_type.items():
+            locs.sort(key=lambda item: item[0])
+            for dist, x, y in locs[:3]:
+                node_id = f"ent_{CrafterObject(obj_id).name.lower()}_{x}_{y}"
+                node = PhysicalEntityNode(
+                    id=node_id,
+                    entity_name=CrafterObject(obj_id).name.lower(),
+                    entity_type="resource" if obj_id < 14 else "entity",
+                    properties={
+                        "obj_type": obj_id,
+                        "x": x,
+                        "y": y,
+                        "distance": dist,
+                        "coords": (x, y),
+                        "passable": False,
+                    },
+                    entity_lifecycle=EntityLifecycle.TRACKED,
+                )
+                self.graph.add_node(node)
 
         return self.graph
 
@@ -254,3 +271,78 @@ class CrafterPerceptionAdapter:
                             best_pos = (x, y)
 
         return best_pos
+
+    def ingest_goal(self, goal: CrafterGoal | None, obs: CrafterObservation) -> GoalNode:
+        """Translate CrafterGoal (or progressive tech-tree roadmap) into an active GoalNode."""
+        target_conditions: list[str] = []
+
+        # 1. Vital Survival Interrupts
+        if obs.vitals.energy <= 2:
+            target_conditions.append("vitals_safe(energy, 9)")
+            ach = CrafterAchievement.WAKE_UP
+        elif obs.vitals.drink <= 4:
+            target_conditions.append("vitals_safe(drink, 5)")
+            ach = CrafterAchievement.COLLECT_DRINK
+        elif obs.vitals.food <= 4:
+            target_conditions.append("vitals_safe(food, 5)")
+            ach = CrafterAchievement.EAT_COW
+        else:
+            ach = goal.target_achievement if goal else None
+            if ach is None:
+                # Progressive roadmap
+                achs = obs.achievements
+                inv = obs.inventory
+                if CrafterAchievement.COLLECT_WOOD not in achs or inv.wood < 2:
+                    ach = CrafterAchievement.COLLECT_WOOD
+                elif CrafterAchievement.PLACE_TABLE not in achs:
+                    ach = CrafterAchievement.PLACE_TABLE
+                elif CrafterAchievement.MAKE_WOOD_PICKAXE not in achs and inv.wood_pickaxe == 0:
+                    ach = CrafterAchievement.MAKE_WOOD_PICKAXE
+                elif CrafterAchievement.COLLECT_STONE not in achs or inv.stone < 1:
+                    ach = CrafterAchievement.COLLECT_STONE
+                elif CrafterAchievement.MAKE_STONE_PICKAXE not in achs and inv.stone_pickaxe == 0:
+                    ach = CrafterAchievement.MAKE_STONE_PICKAXE
+                elif CrafterAchievement.COLLECT_COAL not in achs or inv.coal < 1:
+                    ach = CrafterAchievement.COLLECT_COAL
+                elif CrafterAchievement.COLLECT_IRON not in achs or inv.iron < 1:
+                    ach = CrafterAchievement.COLLECT_IRON
+                elif CrafterAchievement.PLACE_FURNACE not in achs and inv.stone >= 4:
+                    ach = CrafterAchievement.PLACE_FURNACE
+                elif CrafterAchievement.MAKE_IRON_PICKAXE not in achs and inv.iron_pickaxe == 0:
+                    ach = CrafterAchievement.MAKE_IRON_PICKAXE
+                elif CrafterAchievement.COLLECT_DIAMOND not in achs:
+                    ach = CrafterAchievement.COLLECT_DIAMOND
+                else:
+                    ach = CrafterAchievement.SURVIVE
+
+            cond_map = {
+                CrafterAchievement.COLLECT_WOOD: ["has(wood, 1)"],
+                CrafterAchievement.PLACE_TABLE: ["has(table)"],
+                CrafterAchievement.MAKE_WOOD_PICKAXE: ["has(wood_pickaxe)"],
+                CrafterAchievement.COLLECT_STONE: ["has(stone, 1)"],
+                CrafterAchievement.MAKE_STONE_PICKAXE: ["has(stone_pickaxe)"],
+                CrafterAchievement.COLLECT_COAL: ["has(coal, 1)"],
+                CrafterAchievement.COLLECT_IRON: ["has(iron, 1)"],
+                CrafterAchievement.PLACE_FURNACE: ["has(furnace)"],
+                CrafterAchievement.MAKE_IRON_PICKAXE: ["has(iron_pickaxe)"],
+                CrafterAchievement.COLLECT_DIAMOND: ["has(diamond)"],
+                CrafterAchievement.COLLECT_DRINK: ["vitals_safe(drink, 5)"],
+                CrafterAchievement.EAT_COW: ["vitals_safe(food, 5)"],
+                CrafterAchievement.SURVIVE: ["vitals_safe(health, 5)"],
+            }
+            target_conditions.extend(cond_map.get(ach, ["vitals_safe(health, 5)"]))
+
+        goal_node = GoalNode(
+            id="goal_active",
+            properties={
+                "target_conditions": target_conditions,
+                "target_achievement": ach.value if ach else None,
+            },
+        )
+        if self.graph.has_node("goal_active"):
+            existing = self.graph.get_node("goal_active")
+            if isinstance(existing, GoalNode):
+                existing.properties.update(goal_node.properties)
+        else:
+            self.graph.add_node(goal_node)
+        return goal_node

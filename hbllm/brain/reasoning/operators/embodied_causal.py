@@ -24,6 +24,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from hbllm.brain.reasoning.operators.base import (
     CognitiveContext,
@@ -43,6 +45,9 @@ from hbllm.hcir.graph import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Type for domain predicate evaluators: (args, graph_view, agent_properties) -> satisfied
+PredicateHandler = Callable[[list[str], FrozenGraphView, dict[str, Any]], bool]
 
 # Regex pattern for condition strings: predicate(arg1, arg2, ...)
 _COND_PATTERN = re.compile(r"^([a-zA-Z0-9_]+)(?:\((.*)\))?$")
@@ -67,11 +72,36 @@ class EmbodiedCausalOperator:
 
     Evaluates active goals against the current physical state in FrozenGraphView
     and selects the causal primitive action that advances toward goal satisfaction.
+
+    Supports custom domain predicates via the open Predicate Extension Registry.
     """
 
-    def __init__(self, default_reach_distance: float = 1.6, max_recursion_depth: int = 10) -> None:
+    _custom_predicates: ClassVar[dict[str, PredicateHandler]] = {}
+
+    @classmethod
+    def register_predicate(cls, name: str, handler: PredicateHandler) -> None:
+        """Register a domain-specific predicate evaluator (e.g. from environment plugins)."""
+        cls._custom_predicates[name] = handler
+
+    @classmethod
+    def unregister_predicate(cls, name: str) -> None:
+        """Unregister a domain-specific predicate evaluator."""
+        cls._custom_predicates.pop(name, None)
+
+    @classmethod
+    def clear_registered_predicates(cls) -> None:
+        """Clear all registered custom predicates."""
+        cls._custom_predicates.clear()
+
+    def __init__(
+        self,
+        default_reach_distance: float = 1.6,
+        max_recursion_depth: int = 10,
+        custom_predicates: dict[str, PredicateHandler] | None = None,
+    ) -> None:
         self.default_reach_distance = default_reach_distance
         self.max_recursion_depth = max_recursion_depth
+        self.instance_predicates: dict[str, PredicateHandler] = custom_predicates or {}
 
     @property
     def operator_id(self) -> str:
@@ -88,8 +118,8 @@ class EmbodiedCausalOperator:
     def can_handle(self, problem: ReasoningProblem, context: CognitiveContext) -> float:
         """Score applicability for planning and embodied manipulation problems."""
         view = context.graph_view
-        n_actions = len(view.nodes_by_type(HCIRNodeType.ACTION))
-        n_entities = len(view.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY))
+        n_actions = view.count_by_type(HCIRNodeType.ACTION)
+        n_entities = view.count_by_type(HCIRNodeType.PHYSICAL_ENTITY)
 
         if problem.problem_type == ProblemType.PLANNING:
             if n_actions > 0 and n_entities > 0:
@@ -102,8 +132,8 @@ class EmbodiedCausalOperator:
         return 0.05
 
     def estimated_cost(self, problem: ReasoningProblem, context: CognitiveContext) -> ResourceCost:
-        n_actions = len(context.graph_view.nodes_by_type(HCIRNodeType.ACTION))
-        n_entities = len(context.graph_view.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY))
+        n_actions = context.graph_view.count_by_type(HCIRNodeType.ACTION)
+        n_entities = context.graph_view.count_by_type(HCIRNodeType.PHYSICAL_ENTITY)
         return ResourceCost(
             wall_clock_ms=max(1.0, (n_actions + n_entities) * 0.1),
             nodes_read=n_actions + n_entities,
@@ -162,7 +192,7 @@ class EmbodiedCausalOperator:
 
         # 3. Extract Candidate Actions
         candidate_actions = [
-            n for n in view.nodes_by_type(HCIRNodeType.ACTION) if isinstance(n, ActionNode)
+            n for n in view.iter_nodes_by_type(HCIRNodeType.ACTION) if isinstance(n, ActionNode)
         ]
         if not candidate_actions:
             elapsed_ms = (time.time() - start_time) * 1000
@@ -423,7 +453,20 @@ class EmbodiedCausalOperator:
                 return False
             target_id = args[0]
             obj = view.get_node(target_id)
-            if not obj or not hasattr(obj, "properties"):
+            if not obj:
+                candidates = [
+                    n
+                    for n in view.iter_nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)
+                    if n.entity_name == target_id or n.entity_type == target_id or target_id in n.id
+                ]
+                if candidates:
+                    return any(
+                        float(c.properties.get("distance", float("inf"))) <= reach
+                        for c in candidates
+                        if hasattr(c, "properties")
+                    )
+                return False
+            if not hasattr(obj, "properties"):
                 return False
             dist = float(obj.properties.get("distance", float("inf")))
             return dist <= reach
@@ -483,6 +526,112 @@ class EmbodiedCausalOperator:
                         return False
             return True
 
+        elif pred == "has":
+            if not args:
+                return False
+            item_name = args[0]
+            req_count = int(args[1]) if len(args) > 1 else 1
+
+            # 1. Check agent inventory dictionary
+            inv = agent_props.get("inventory", {})
+            if isinstance(inv, dict):
+                if inv.get(item_name, 0) >= req_count:
+                    return True
+                # Case-insensitive or normalized check
+                for k, v in inv.items():
+                    if k.lower() == item_name.lower() and v >= req_count:
+                        return True
+
+            # 2. Check agent achievements/items
+            achs = agent_props.get("achievements", [])
+            if item_name in achs:
+                return True
+
+            # 3. Check agent carrying / held item
+            held_id = agent_props.get("held_object_id")
+            if held_id:
+                if held_id == item_name or item_name in held_id:
+                    return True
+                held_node = view.get_node(held_id)
+                if held_node and (
+                    held_node.entity_name == item_name or held_node.entity_type == item_name
+                ):
+                    return True
+
+            carrying = agent_props.get("carrying")
+            if isinstance(carrying, dict) and (
+                carrying.get("type") == item_name or carrying.get("color") == item_name
+            ):
+                return True
+            return False
+
+        elif pred == "standing_on":
+            if not args:
+                return False
+            target_id = args[0]
+            agent_pos = agent_props.get("coords") or (
+                agent_props.get("x", 0),
+                agent_props.get("y", 0),
+            )
+            target = view.get_node(target_id)
+            if not target:
+                # Search by entity_name or entity_type
+                for n in view.iter_nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+                    if n.entity_name == target_id or n.entity_type == target_id:
+                        target = n
+                        break
+            if not target or not hasattr(target, "properties"):
+                return False
+            t_pos = target.properties.get("coords") or (
+                target.properties.get("x", 0),
+                target.properties.get("y", 0),
+            )
+            return agent_pos == t_pos
+
+        elif pred == "adjacent":
+            if not args:
+                return False
+            target_id = args[0]
+            agent_pos = agent_props.get("coords") or (
+                agent_props.get("x", 0),
+                agent_props.get("y", 0),
+            )
+            target = view.get_node(target_id)
+            if not target:
+                for n in view.iter_nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+                    if n.entity_name == target_id or n.entity_type == target_id:
+                        target = n
+                        break
+            if not target or not hasattr(target, "properties"):
+                return False
+            t_pos = target.properties.get("coords") or (
+                target.properties.get("x", 0),
+                target.properties.get("y", 0),
+            )
+            dist = abs(agent_pos[0] - t_pos[0]) + abs(agent_pos[1] - t_pos[1])
+            return dist <= 1
+
+        elif pred == "is_unlocked":
+            if not args:
+                return False
+            target_id = args[0]
+            target = view.get_node(target_id)
+            if not target or not hasattr(target, "properties"):
+                return False
+            return (
+                not bool(target.properties.get("is_locked", False))
+                and target.properties.get("state") != "locked"
+            )
+
+        # Check custom registered predicates (domain extensions from plugins)
+        handler = self.instance_predicates.get(pred) or self._custom_predicates.get(pred)
+        if handler is not None:
+            try:
+                return handler(args, view, agent_props)
+            except Exception as e:
+                logger.warning("Custom predicate '%s' evaluation error: %s", pred, e)
+                return False
+
         # Fallback: check custom properties if condition is 'prop_name(node_id)'
         if len(args) == 1:
             target_id = args[0]
@@ -526,7 +675,7 @@ class EmbodiedCausalOperator:
             return conditions
 
         # 3. Fallback: Search any GoalNode in the view
-        for node in view.nodes_by_type(HCIRNodeType.GOAL):
+        for node in view.iter_nodes_by_type(HCIRNodeType.GOAL):
             if isinstance(node, GoalNode) and not node.resolved:
                 conds = self._parse_goal_node_conditions(node)
                 conditions.extend(conds)

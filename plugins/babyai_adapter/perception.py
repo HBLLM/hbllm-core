@@ -13,6 +13,7 @@ from typing import Any
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
+    GoalNode,
     HCIREdge,
     HCIREdgeType,
     PhysicalEntityNode,
@@ -24,6 +25,7 @@ from .types import (
     IDX_TO_COLOR,
     IDX_TO_OBJECT,
     IDX_TO_STATE,
+    BabyAIGoal,
     MiniGridDirection,
     MiniGridObservation,
 )
@@ -306,3 +308,56 @@ class BabyAIPerceptionAdapter:
             ):
                 entities.append(node)
         return entities
+
+    def ingest_goal(self, goal: BabyAIGoal | None = None) -> GoalNode:
+        """Translate BabyAIGoal into an active GoalNode with typed conditions."""
+        target_conditions: list[str] = []
+        if goal:
+            active_goal = goal.get_active_subgoal()
+            action = active_goal.action
+            target_type = active_goal.target_type
+            target_id = active_goal.target_id
+
+            if not target_id:
+                for n in self.graph.all_nodes():
+                    if isinstance(n, PhysicalEntityNode) and n.entity_type != "agent":
+                        if active_goal.matches_attributes(
+                            n.entity_type, n.properties.get("color"), entity_id=n.id
+                        ):
+                            target_id = n.id
+                            break
+
+            if target_id:
+                if action in ("go_to", "goto"):
+                    target_conditions.append(f"near({target_id})")
+                elif action in ("pickup", "pick_up"):
+                    target_conditions.append(f"holds({target_id})")
+                elif action in ("open", "toggle"):
+                    target_conditions.append(f"is_opened({target_id})")
+                elif action == "put_next":
+                    target_conditions.append(f"near({target_id})")
+            else:
+                if action in ("go_to", "goto"):
+                    target_conditions.append(f"near({target_type})")
+                elif action in ("pickup", "pick_up"):
+                    target_conditions.append(f"holds({target_type})")
+                elif action in ("open", "toggle"):
+                    target_conditions.append(f"is_opened({target_type})")
+
+        if not target_conditions:
+            target_conditions = ["near(goal)"]
+
+        goal_node = GoalNode(
+            id="goal_active",
+            properties={
+                "target_conditions": target_conditions,
+                "action": goal.action if goal else "go_to",
+            },
+        )
+        if self.graph.has_node("goal_active"):
+            existing = self.graph.get_node("goal_active")
+            if isinstance(existing, GoalNode):
+                existing.properties.update(goal_node.properties)
+        else:
+            self.graph.add_node(goal_node)
+        return goal_node

@@ -13,6 +13,7 @@ import re
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
+    GoalNode,
     PhysicalEntityNode,
 )
 
@@ -171,3 +172,32 @@ class ALFWorldPerceptionAdapter:
                     self.graph.add_node(obj_node)
 
         return self.graph
+
+    def ingest_goal(self, goal: ALFWorldGoal) -> GoalNode:
+        """Create active GoalNode representing household task objective."""
+        target_conditions: list[str] = []
+        if goal.target_receptacle_type and goal.target_object_type:
+            target_conditions.append(
+                f"inside({goal.target_object_type}, {goal.target_receptacle_type})"
+            )
+        elif goal.target_object_type:
+            target_conditions.append(f"holds({goal.target_object_type})")
+        else:
+            target_conditions.append("goal_achieved")
+
+        goal_node = GoalNode(
+            id="goal_active",
+            properties={
+                "target_conditions": target_conditions,
+                "task_type": goal.task_type.value,
+                "target_object_type": goal.target_object_type,
+                "target_receptacle_type": goal.target_receptacle_type,
+            },
+        )
+        if self.graph.has_node("goal_active"):
+            ex = self.graph.get_node("goal_active")
+            if isinstance(ex, GoalNode):
+                ex.properties.update(goal_node.properties)
+        else:
+            self.graph.add_node(goal_node)
+        return goal_node

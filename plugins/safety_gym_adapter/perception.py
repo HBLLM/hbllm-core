@@ -13,6 +13,7 @@ import math
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
+    GoalNode,
     PhysicalEntityNode,
 )
 from hbllm.perception import EpistemicSpatialGrid
@@ -132,3 +133,17 @@ class SafetyGymPerceptionAdapter:
                 self.graph.add_node(g_node)
 
         return self.graph
+
+    def ingest_goal(self, obs: SafetyObservation | None = None) -> GoalNode:
+        """Create active GoalNode requiring reaching the target goal safely."""
+        goal_node = GoalNode(
+            id="goal_active",
+            properties={"target_conditions": ["near(goal)"]},
+        )
+        if self.graph.has_node("goal_active"):
+            ex = self.graph.get_node("goal_active")
+            if isinstance(ex, GoalNode):
+                ex.properties.update(goal_node.properties)
+        else:
+            self.graph.add_node(goal_node)
+        return goal_node

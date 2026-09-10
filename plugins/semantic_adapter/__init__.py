@@ -22,6 +22,10 @@ from .benchmark import (
 )
 from .environment import StandaloneSemanticEnv, make_semantic_env
 from .perception import SemanticPerceptionAdapter
+from .predicates import (
+    SEMANTIC_PREDICATES,
+    register_semantic_predicates,
+)
 from .types import (
     CausalSubgoal,
     SemanticObservation,
@@ -33,9 +37,13 @@ logger = logging.getLogger(__name__)
 PLUGIN_NAME = "semantic-adapter"
 PLUGIN_VERSION = "1.0.0"
 
+# Register domain predicates
+register_semantic_predicates()
+
 
 def setup(agent: Any = None) -> None:
     """Plugin setup hook."""
+    register_semantic_predicates()
     logger.info("Loaded plugin '%s' v%s", PLUGIN_NAME, PLUGIN_VERSION)
 
 
@@ -51,6 +59,7 @@ __all__ = [
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRSemanticPlanner",
+    "SEMANTIC_PREDICATES",
     "SemanticActionAdapter",
     "SemanticAgentCohort",
     "SemanticObservation",
@@ -59,6 +68,7 @@ __all__ = [
     "StandaloneSemanticEnv",
     "make_semantic_env",
     "register",
+    "register_semantic_predicates",
     "run_semantic_benchmark",
     "run_semantic_tier",
     "setup",

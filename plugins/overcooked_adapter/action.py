@@ -1,8 +1,10 @@
 """
 Overcooked Action Adapter.
 
-Implements causal recipe scheduling (Onion -> Pot -> Soup -> Plate -> Serve)
-and multi-agent collision-avoiding pathfinding in kitchen topologies.
+Device driver for Overcooked kitchen environments.
+Cognitive recipe scheduling and goal resolution are delegated entirely to UnifiedReasoningRuntime
+via EmbodiedCausalOperator backward chaining. This adapter handles affordance declaration,
+low-level BFS motor pathfinding, and physical collision avoidance.
 """
 
 from __future__ import annotations
@@ -11,6 +13,13 @@ import logging
 from collections import deque
 from typing import Any
 
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode, CognitiveGraph
+
+from .perception import OvercookedPerceptionAdapter
+from .predicates import register_overcooked_predicates
 from .types import (
     CulinaryItem,
     KitchenTile,
@@ -30,32 +39,228 @@ DIRECTION_DELTAS = [
 
 
 class OvercookedActionAdapter:
-    """Causal recipe executor and pathfinding adapter for kitchen coordination."""
+    """
+    Pure Device Driver for Overcooked environments.
+
+    Decoupled into:
+    1. enumerate_affordances: Declares ActionNodes with causal preconditions and recipe outputs.
+    2. execute_action / dispatch: Low-level motor actuation (BFS navigation, orientation, interact).
+    3. select_action: Routes cognitive planning through UnifiedReasoningRuntime.
+    """
 
     def __init__(self) -> None:
+        register_overcooked_predicates()
         self.planned_actions: list[OvercookedAction] = []
         self.expected_pos: tuple[int, int] | None = None
+        self.perception = OvercookedPerceptionAdapter()
+        self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
 
     def reset(self) -> None:
-        """Reset action plan queue and position expectations."""
+        """Reset internal plan queue, position tracker, and perception cache."""
         self.planned_actions.clear()
         self.expected_pos = None
+        self.perception.reset()
+
+    def enumerate_affordances(
+        self, obs: OvercookedObservation, graph: CognitiveGraph
+    ) -> list[ActionNode]:
+        """Declare candidate ActionNodes with recipe causal preconditions and outputs."""
+        all_nodes = list(graph.all_nodes())
+        has_onion_dispenser = any(
+            getattr(n, "entity_name", None) == "onion_dispenser" for n in all_nodes
+        )
+        has_dish_dispenser = any(
+            getattr(n, "entity_name", None) == "dish_dispenser" for n in all_nodes
+        )
+        has_serving_station = any(
+            getattr(n, "entity_name", None) == "serving_station" for n in all_nodes
+        )
+        has_pot = any(getattr(n, "entity_name", None) == "pot" for n in all_nodes)
+        has_shared_counter = any(
+            getattr(n, "entity_name", None) == "shared_counter" for n in all_nodes
+        )
+
+        affordances: list[ActionNode] = []
+
+        # 1. Culinary Serving & Plating Pipeline (Chef role)
+        if has_pot:
+            if has_serving_station:
+                affordances.append(
+                    ActionNode(
+                        id="act_serve_soup",
+                        intent="serve_soup",
+                        requirements=["has(soup)", "near(serving_station)"],
+                        produces=["soup_served"],
+                    )
+                )
+            affordances.extend(
+                [
+                    ActionNode(
+                        id="act_plate_soup",
+                        intent="plate_soup",
+                        requirements=["is_cooked(pot)", "has(dish)", "near(pot)"],
+                        produces=["has(soup)"],
+                    ),
+                    ActionNode(
+                        id="act_cook_pot",
+                        intent="cook_pot",
+                        requirements=["pot_has_items(pot, onion, 3)"],
+                        produces=["is_cooked(pot)"],
+                    ),
+                    ActionNode(
+                        id="act_put_onion_in_pot",
+                        intent="put_onion_in_pot",
+                        requirements=["has(onion)", "near(pot)"],
+                        produces=["pot_has_items(pot, onion, 3)"],
+                    ),
+                    ActionNode(
+                        id="act_wait_cooking",
+                        intent="wait",
+                        requirements=["is_cooking(pot)"],
+                        produces=["is_cooked(pot)"],
+                    ),
+                    ActionNode(
+                        id="act_approach_pot",
+                        intent="approach_pot",
+                        requirements=[],
+                        produces=["near(pot)"],
+                    ),
+                ]
+            )
+
+        # 2. Dispensers and Stations
+        if has_onion_dispenser:
+            affordances.extend(
+                [
+                    ActionNode(
+                        id="act_fetch_onion",
+                        intent="fetch_onion",
+                        requirements=["has(none)", "near(onion_dispenser)"],
+                        produces=["has(onion)"],
+                    ),
+                    ActionNode(
+                        id="act_approach_onion_dispenser",
+                        intent="approach_onion_dispenser",
+                        requirements=[],
+                        produces=["near(onion_dispenser)"],
+                    ),
+                ]
+            )
+
+        if has_dish_dispenser:
+            affordances.extend(
+                [
+                    ActionNode(
+                        id="act_fetch_dish",
+                        intent="fetch_dish",
+                        requirements=["has(none)", "near(dish_dispenser)"],
+                        produces=["has(dish)"],
+                    ),
+                    ActionNode(
+                        id="act_approach_dish_dispenser",
+                        intent="approach_dish_dispenser",
+                        requirements=[],
+                        produces=["near(dish_dispenser)"],
+                    ),
+                ]
+            )
+
+        if has_serving_station:
+            affordances.append(
+                ActionNode(
+                    id="act_approach_serving_station",
+                    intent="approach_serving_station",
+                    requirements=[],
+                    produces=["near(serving_station)"],
+                )
+            )
+
+        # 3. Partitioned Multi-Agent Coordination (Shared Counters)
+        if has_shared_counter:
+            affordances.extend(
+                [
+                    ActionNode(
+                        id="act_pass_onion_to_counter",
+                        intent="deposit_on_counter",
+                        requirements=["has(onion)", "near(shared_counter)"],
+                        produces=["onion_on_counter"],
+                    ),
+                    ActionNode(
+                        id="act_fetch_onion_from_counter",
+                        intent="fetch_from_counter",
+                        requirements=["has(none)", "near(shared_counter)", "onion_on_counter"],
+                        produces=["has(onion)"],
+                    ),
+                    ActionNode(
+                        id="act_pass_soup_to_counter",
+                        intent="deposit_on_counter",
+                        requirements=["has(soup)", "near(shared_counter)"],
+                        produces=["soup_on_counter"],
+                    ),
+                    ActionNode(
+                        id="act_fetch_soup_from_counter",
+                        intent="fetch_from_counter",
+                        requirements=["has(none)", "near(shared_counter)", "soup_on_counter"],
+                        produces=["has(soup)"],
+                    ),
+                    ActionNode(
+                        id="act_pass_dish_to_counter",
+                        intent="deposit_dish_on_counter",
+                        requirements=["has(dish)", "near(shared_counter)"],
+                        produces=["dish_on_counter"],
+                    ),
+                    ActionNode(
+                        id="act_fetch_dish_from_counter",
+                        intent="fetch_dish_from_counter",
+                        requirements=["has(none)", "near(shared_counter)", "dish_on_counter"],
+                        produces=["has(dish)"],
+                    ),
+                    ActionNode(
+                        id="act_approach_shared_counter",
+                        intent="approach_shared_counter",
+                        requirements=[],
+                        produces=["near(shared_counter)"],
+                    ),
+                    ActionNode(
+                        id="act_deposit_excess",
+                        intent="deposit_on_counter",
+                        requirements=["near(shared_counter)"],
+                        produces=["has(none)"],
+                    ),
+                ]
+            )
+
+        # 4. Default Idle
+        affordances.append(
+            ActionNode(
+                id="act_stay",
+                intent="stay",
+                requirements=[],
+                produces=["idle_done"],
+            )
+        )
+
+        for act in affordances:
+            if graph.has_node(act.id):
+                graph.remove_node(act.id)
+            graph.add_node(act)
+
+        return affordances
 
     def select_action(
         self,
         obs: OvercookedObservation,
         perception_data: dict[str, Any],
     ) -> OvercookedAction:
-        """Select next kitchen action, detecting unexpected bumps and dynamic partner collisions."""
-        # If agent bumped into partner or destination was blocked, invalidate plan
+        """Select next kitchen action via UnifiedReasoningRuntime with dynamic collision avoidance."""
+        # 1. Collision and unexpected bump detection
         if self.expected_pos is not None and obs.agent.pos != self.expected_pos:
             self.planned_actions.clear()
             if obs.agent.agent_id == 1:
-                # Agent 1 yields for 1 tick to let Agent 0 clear the bottleneck
                 self.expected_pos = obs.agent.pos
                 return OvercookedAction.STAY
 
-        # Check if next planned action steps into current partner position or mutual collision
+        # 2. Dynamic partner trajectory conflict check
         if self.planned_actions and obs.partner is not None:
             first_act = self.planned_actions[0]
             for act, dr, dc in DIRECTION_DELTAS:
@@ -78,12 +283,13 @@ class OvercookedActionAdapter:
                         self.expected_pos = obs.agent.pos
                         return OvercookedAction.STAY
 
+        # 3. If plan queue is empty, query UnifiedReasoningRuntime
         if not self.planned_actions:
-            self._plan_next_step(obs, perception_data)
+            self._plan_cognitive_step(obs, perception_data)
 
+        # 4. Pop next motor action
         if self.planned_actions:
             action = self.planned_actions.pop(0)
-            # Update expected pos for next turn
             pr, pc = obs.agent.pos
             dr, dc = (0, 0)
             for act, r_delta, c_delta in DIRECTION_DELTAS:
@@ -104,189 +310,246 @@ class OvercookedActionAdapter:
         self.expected_pos = obs.agent.pos
         return OvercookedAction.STAY
 
-    def _plan_next_step(
+    def _plan_cognitive_step(
         self,
         obs: OvercookedObservation,
         perception_data: dict[str, Any],
     ) -> None:
-        """Determine next recipe objective and navigate to appliance with multi-agent coordination."""
+        """Query UnifiedReasoningRuntime with EmbodiedCausalOperator and dispatch chosen intent."""
+        # --- Held-item fast-path: bypass causal backward-chaining when the agent
+        # already holds an item and the next action is unambiguous.  This prevents
+        # the re-plan deadlock where the backward chainer resolves deposit_excess
+        # (to satisfy has(none) for fetch_from_counter) even though the agent
+        # already has the ingredient it needs.
         held = obs.agent.held_item
+        pots = obs.pots
+        ready_pots = [p for p in pots if p.status == PotStatus.READY]
+        filling_pots = [
+            p
+            for p in pots
+            if p.onions_in_pot < p.required_onions
+            and p.status in (PotStatus.EMPTY, PotStatus.FILLING)
+        ]
 
-        ready_pots = perception_data.get("ready_pots", [])
-        filling_pots = perception_data.get("filling_pots", [])
-        cooking_pots = perception_data.get("cooking_pots", [])
-        ready_to_cook = perception_data.get("ready_to_cook_pots", [])
-        onion_dispensers = perception_data.get("onion_dispensers", [])
-        dish_dispensers = perception_data.get("dish_dispensers", [])
-        serving_stations = perception_data.get("serving_stations", [])
-
-        can_reach_pots = any(self._is_reachable(obs, p.pos, ignore_partner=True) for p in obs.pots)
-        can_reach_serving = any(
-            self._is_reachable(obs, s, ignore_partner=True) for s in serving_stations
-        )
-        can_reach_onions = any(
-            self._is_reachable(obs, o, ignore_partner=True) for o in onion_dispensers
-        )
-        can_reach_dishes = any(
-            self._is_reachable(obs, d, ignore_partner=True) for d in dish_dispensers
-        )
-
-        # -------------------------------------------------------------
-        # ROLE 1: SUPPLIER / PREP AGENT (Partitioned from pots)
-        # -------------------------------------------------------------
-        if not can_reach_pots and obs.partner is not None:
-            # If holding item, place on shared counter
-            if held in (CulinaryItem.ONION, CulinaryItem.DISH):
-                shared_counter = self._find_shared_counter(obs, empty_only=True)
-                if shared_counter is not None:
-                    self._plan_interact_with(obs, shared_counter)
-                    return
-                # If no empty shared counter, wait
-                self.planned_actions = [OvercookedAction.STAY]
+        if held == CulinaryItem.ONION:
+            # If any reachable filling/empty pot exists → put onion in it.
+            target_pots = filling_pots or pots
+            reachable = [p for p in target_pots if self._is_reachable(obs, p.pos)]
+            if reachable:
+                self._dispatch_intent("put_onion_in_pot", obs, perception_data)
                 return
-
-            # Holding NONE: decide whether to pass onions or dish
-            if held == CulinaryItem.NONE:
-                # Count onions on shared counter
-                shared_counters = self._get_shared_counters(obs)
-                onions_on_counter = sum(
-                    1 for c in shared_counters if obs.counter_items.get(c) == CulinaryItem.ONION
-                )
-                dishes_on_counter = sum(
-                    1 for c in shared_counters if obs.counter_items.get(c) == CulinaryItem.DISH
-                )
-                needed_onions = sum(
-                    max(0, p.required_onions - p.onions_in_pot)
-                    for p in obs.pots
-                    if p.status not in (PotStatus.READY, PotStatus.COOKING)
-                )
-                if not any(p.status in (PotStatus.EMPTY, PotStatus.FILLING) for p in obs.pots):
-                    needed_onions = 3
-
-                if onions_on_counter < max(needed_onions, 1) and can_reach_onions:
-                    self._plan_interact_with(obs, onion_dispensers[0])
-                    return
-                elif (
-                    dishes_on_counter == 0
-                    and can_reach_dishes
-                    and any(p.status in (PotStatus.COOKING, PotStatus.READY) for p in obs.pots)
-                ):
-                    self._plan_interact_with(obs, dish_dispensers[0])
-                    return
-                elif onions_on_counter < 3 and can_reach_onions:
-                    self._plan_interact_with(obs, onion_dispensers[0])
-                    return
-                else:
-                    self.planned_actions = [OvercookedAction.STAY]
-                    return
-
-        # -------------------------------------------------------------
-        # ROLE 2: CHEF / SERVER (Can reach pots)
-        # -------------------------------------------------------------
-        # Priority 1: Deliver ready soup
-        if held == CulinaryItem.SOUP:
-            if can_reach_serving and serving_stations:
-                self._plan_interact_with(obs, serving_stations[0])
-                return
-            else:
-                shared_counter = self._find_shared_counter(obs, empty_only=True)
-                if shared_counter is not None:
-                    self._plan_interact_with(obs, shared_counter)
-                    return
-
-        # Priority 2: Scoop ready soup if holding dish
-        if held == CulinaryItem.DISH and ready_pots:
-            self._plan_interact_with(obs, ready_pots[0].pos)
+            # No reachable pot: deposit on shared counter for partner.
+            self._dispatch_intent("deposit_on_counter", obs, perception_data)
             return
 
-        # Priority 3: Ignite full pot (3 onions) to start cooking
-        if ready_to_cook:
-            target_pot = ready_to_cook[0]
-            if held == CulinaryItem.NONE:
-                self._plan_interact_with(obs, target_pot.pos)
+        if held == CulinaryItem.DISH:
+            # If a ready pot is reachable → plate the soup.
+            reachable_ready = [p for p in ready_pots if self._is_reachable(obs, p.pos)]
+            if reachable_ready:
+                self._dispatch_intent("plate_soup", obs, perception_data)
                 return
-            elif held == CulinaryItem.ONION:
-                empty_counter = self._find_empty_counter(obs)
-                if empty_counter is not None:
-                    self._plan_interact_with(obs, empty_counter)
-                    return
+            # Otherwise deposit dish so partner can use it.
+            self._dispatch_intent("deposit_on_counter", obs, perception_data)
+            return
 
-        # Priority 4: Fetch dish if a pot is READY
-        if held == CulinaryItem.NONE and ready_pots:
-            if can_reach_dishes and dish_dispensers:
-                self._plan_interact_with(obs, dish_dispensers[0])
+        if held == CulinaryItem.SOUP:
+            serving_stations = (
+                perception_data.get("serving_stations") or self.perception.serving_stations
+            )
+            reachable_serving = [s for s in serving_stations if self._is_reachable(obs, s)]
+            if reachable_serving:
+                self._dispatch_intent("serve_soup", obs, perception_data)
                 return
-            shared_dishes = [
-                pos
-                for pos, item in obs.counter_items.items()
-                if item == CulinaryItem.DISH and self._is_reachable(obs, pos)
-            ]
-            if shared_dishes:
-                self._plan_interact_with(obs, shared_dishes[0])
-                return
+            # Can't reach serving station: deposit soup on shared counter for partner.
+            self._dispatch_intent("deposit_on_counter", obs, perception_data)
+            return
 
-        # Priority 5: Fill pot with onions (interleaving while another pot cooks!)
-        if filling_pots:
-            target_pot = filling_pots[0]
-            if held == CulinaryItem.ONION:
-                self._plan_interact_with(obs, target_pot.pos)
-                return
-            elif held == CulinaryItem.NONE:
-                shared_onions = [
-                    pos
-                    for pos, item in obs.counter_items.items()
-                    if item == CulinaryItem.ONION and self._is_reachable(obs, pos)
-                ]
-                if can_reach_onions and onion_dispensers:
-                    self._plan_interact_with(obs, onion_dispensers[0])
-                    return
-                elif shared_onions:
-                    self._plan_interact_with(obs, shared_onions[0])
-                    return
+        # --- General path: delegate to UnifiedReasoningRuntime ---
+        graph = self.perception.to_cognitive_graph(obs, perception_data)
+        self.enumerate_affordances(obs, graph)
 
-        # Priority 5.5: If holding onion but no pot needs onions, deposit on counter to free hands
-        if held == CulinaryItem.ONION and not filling_pots:
-            empty_counter = self._find_empty_counter(obs)
-            if empty_counter is not None:
-                self._plan_interact_with(obs, empty_counter)
-                return
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=("goal_active",),
+            description="Overcooked recipe causal resolution",
+        )
+        trace = self.runtime.reason(graph=graph, problem=problem)
 
-        # Priority 6: If cooking pot exists and no pots need filling (or no onions available):
-        # Fetch dish or wait near cooking pot
-        if cooking_pots:
-            if held == CulinaryItem.NONE:
-                if can_reach_dishes and dish_dispensers:
-                    self._plan_interact_with(obs, dish_dispensers[0])
-                    return
-                shared_dishes = [
-                    pos
-                    for pos, item in obs.counter_items.items()
-                    if item == CulinaryItem.DISH and self._is_reachable(obs, pos)
-                ]
-                if shared_dishes:
-                    self._plan_interact_with(obs, shared_dishes[0])
-                    return
-            elif held == CulinaryItem.DISH:
-                pot_pos = cooking_pots[0].pos
-                self._plan_interact_with(obs, pot_pos)
-                if self.planned_actions and self.planned_actions[-1] == OvercookedAction.INTERACT:
-                    self.planned_actions.pop()
-                return
-
-        # Courtesy Yield: If empty-handed and standing adjacent to pot/station that partner needs
+        chosen_intent = "stay"
         if (
-            held == CulinaryItem.NONE
+            trace
+            and trace.final_result
+            and trace.final_result.conclusions
+            and "best_action" in trace.final_result.conclusions
+        ):
+            chosen_intent = trace.final_result.conclusions["best_action"]
+
+        self._dispatch_intent(chosen_intent, obs, perception_data)
+
+    def _dispatch_intent(
+        self,
+        intent: str,
+        obs: OvercookedObservation,
+        perception_data: dict[str, Any],
+    ) -> None:
+        """Actuator dispatch: translates high-level causal intent into motor trajectory."""
+        onion_dispensers = (
+            perception_data.get("onion_dispensers") or self.perception.onion_dispensers
+        )
+        dish_dispensers = perception_data.get("dish_dispensers") or self.perception.dish_dispensers
+        serving_stations = (
+            perception_data.get("serving_stations") or self.perception.serving_stations
+        )
+        pots = obs.pots
+        ready_pots = [p for p in pots if p.status == PotStatus.READY]
+        filling_pots = [
+            p
+            for p in pots
+            if p.onions_in_pot < p.required_onions
+            and p.status in (PotStatus.EMPTY, PotStatus.FILLING)
+        ]
+        cooking_pots = [p for p in pots if p.status == PotStatus.COOKING]
+
+        # 1. Delivery
+        if intent in ("serve_soup", "approach_serving_station"):
+            reachable_serving = [s for s in serving_stations if self._is_reachable(obs, s)]
+            if reachable_serving:
+                target = self._nearest_appliance(obs.agent.pos, reachable_serving)
+                self._plan_interact_with(obs, target)
+                return
+
+        # 2. Plating soup
+        if intent == "plate_soup":
+            target_pots = ready_pots or pots
+            reachable_pots = [p for p in target_pots if self._is_reachable(obs, p.pos)]
+            if reachable_pots:
+                target_p = min(
+                    reachable_pots,
+                    key=lambda p: (
+                        abs(obs.agent.pos[0] - p.pos[0]) + abs(obs.agent.pos[1] - p.pos[1])
+                    ),
+                )
+                self._plan_interact_with(obs, target_p.pos)
+                return
+
+        # 3. Fetch dish
+        if intent in ("fetch_dish", "approach_dish_dispenser"):
+            reachable_dishes = [d for d in dish_dispensers if self._is_reachable(obs, d)]
+            if reachable_dishes:
+                target = self._nearest_appliance(obs.agent.pos, reachable_dishes)
+                self._plan_interact_with(obs, target)
+                return
+
+        # 4. Cook pot
+        if intent == "cook_pot":
+            full_pots = [
+                p
+                for p in pots
+                if p.onions_in_pot >= p.required_onions and self._is_reachable(obs, p.pos)
+            ]
+            if full_pots:
+                self._plan_interact_with(obs, full_pots[0].pos)
+                return
+
+        # 5. Put onion in pot / Approach pot
+        if intent in ("put_onion_in_pot", "approach_pot"):
+            target_pots = filling_pots or ready_pots or cooking_pots or pots
+            reachable_pots = [p for p in target_pots if self._is_reachable(obs, p.pos)]
+            if reachable_pots:
+                target_p = min(
+                    reachable_pots,
+                    key=lambda p: (
+                        abs(obs.agent.pos[0] - p.pos[0]) + abs(obs.agent.pos[1] - p.pos[1])
+                    ),
+                )
+                self._plan_interact_with(obs, target_p.pos)
+                return
+
+        # 6. Fetch onion
+        if intent in ("fetch_onion", "approach_onion_dispenser"):
+            shared_counters = self._get_shared_counters(obs)
+            shared_onions = [
+                pos
+                for pos in shared_counters
+                if obs.counter_items.get(pos) == CulinaryItem.ONION and self._is_reachable(obs, pos)
+            ]
+            reachable_onions = [
+                o for o in onion_dispensers if self._is_reachable(obs, o, ignore_partner=True)
+            ]
+            if shared_onions and not reachable_onions:
+                target = self._nearest_appliance(obs.agent.pos, shared_onions)
+                self._plan_interact_with(obs, target)
+                return
+
+            if reachable_onions:
+                target = self._nearest_appliance(obs.agent.pos, reachable_onions)
+                self._plan_interact_with(obs, target)
+                return
+
+        # 6b. Fetch dish from shared counter
+        if intent == "fetch_dish_from_counter":
+            shared_counters = self._get_shared_counters(obs)
+            dish_counters = [
+                pos
+                for pos in shared_counters
+                if obs.counter_items.get(pos) == CulinaryItem.DISH and self._is_reachable(obs, pos)
+            ]
+            if dish_counters:
+                target = self._nearest_appliance(obs.agent.pos, dish_counters)
+                self._plan_interact_with(obs, target)
+                return
+
+        # 6c. Deposit dish on shared counter
+        if intent == "deposit_dish_on_counter":
+            counter = self._find_shared_counter(obs, empty_only=True) or self._find_empty_counter(
+                obs
+            )
+            if counter is not None:
+                self._plan_interact_with(obs, counter)
+                return
+
+        # 7. Shared counter interaction
+        if intent in ("deposit_on_counter", "approach_shared_counter"):
+            counter = self._find_shared_counter(obs, empty_only=True) or self._find_empty_counter(
+                obs
+            )
+            if counter is not None:
+                self._plan_interact_with(obs, counter)
+                return
+
+        if intent == "fetch_from_counter":
+            shared_counters = self._get_shared_counters(obs)
+            counter_items = [
+                pos
+                for pos in shared_counters
+                if pos in obs.counter_items and self._is_reachable(obs, pos)
+            ]
+            if counter_items:
+                target = min(
+                    counter_items,
+                    key=lambda p: (
+                        0 if obs.counter_items[p] == CulinaryItem.SOUP else 1,
+                        abs(obs.agent.pos[0] - p[0]) + abs(obs.agent.pos[1] - p[1]),
+                    ),
+                )
+                self._plan_interact_with(obs, target)
+                return
+
+        if intent == "wait":
+            self.planned_actions = [OvercookedAction.STAY]
+            return
+
+        # Courtesy Yield: If empty-handed and standing adjacent to pot/station partner needs
+        if (
+            obs.agent.held_item == CulinaryItem.NONE
             and obs.partner is not None
             and obs.partner.held_item != CulinaryItem.NONE
         ):
-            blocking_pot = any(
+            blocking = any(
                 abs(obs.agent.pos[0] - p.pos[0]) + abs(obs.agent.pos[1] - p.pos[1]) == 1
                 for p in obs.pots
             )
-            if blocking_pot and obs.partner.held_item in (
-                CulinaryItem.ONION,
-                CulinaryItem.DISH,
-            ):
+            if blocking:
                 for act, dr, dc in DIRECTION_DELTAS:
                     nr, nc = obs.agent.pos[0] + dr, obs.agent.pos[1] + dc
                     if (
@@ -300,11 +563,16 @@ class OvercookedActionAdapter:
                             self.planned_actions = [act]
                             return
 
-        # Default wait
         self.planned_actions = [OvercookedAction.STAY]
 
+    def _nearest_appliance(
+        self, agent_pos: tuple[int, int], locations: list[tuple[int, int]]
+    ) -> tuple[int, int]:
+        """Return closest location by Manhattan distance."""
+        return min(locations, key=lambda p: abs(agent_pos[0] - p[0]) + abs(agent_pos[1] - p[1]))
+
     def _get_shared_counters(self, obs: OvercookedObservation) -> list[tuple[int, int]]:
-        """Get all counter locations reachable by both agents."""
+        """Get all counter locations reachable by both agents (or reachable by agent if solo)."""
         height = len(obs.grid)
         width = len(obs.grid[0]) if height > 0 else 0
         shared = []
@@ -328,7 +596,6 @@ class OvercookedActionAdapter:
         ar, ac = obs.agent.pos
         best_counter = None
         best_dist = float("inf")
-
         for pos in shared:
             if empty_only and pos in obs.counter_items:
                 continue
@@ -401,7 +668,6 @@ class OvercookedActionAdapter:
                     best_interact_turn = act
 
         if best_path is not None and best_interact_turn is not None:
-            # Path to adjacent tile + orient towards appliance + INTERACT
             self.planned_actions = list(best_path) + [
                 best_interact_turn,
                 OvercookedAction.INTERACT,
@@ -437,7 +703,6 @@ class OvercookedActionAdapter:
         height = len(obs.grid)
         width = len(obs.grid[0]) if height > 0 else 0
 
-        # Goal pos must be valid floor
         gr, gc = goal_pos
         if not (0 <= gr < height and 0 <= gc < width) or obs.grid[gr][gc] != int(KitchenTile.FLOOR):
             return None
