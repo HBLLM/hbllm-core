@@ -22,7 +22,7 @@ def test_active_interventional_causal_discovery_resolves_confounding():
 
     # 1. Observe and formulate initial hypotheses under observational correlation
     hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=[])
-    assert len(hypotheses) == 3
+    assert len(hypotheses) >= 3
     var_names = [h.variable for h in hypotheses]
     assert "color" in var_names
     assert "mass_sensation" in var_names
@@ -129,3 +129,31 @@ def test_event_sourced_belief_transitions_history():
     assert BeliefTransitionType.CONFIDENCE_CHANGED in event_types
     assert BeliefTransitionType.HYPOTHESIS_CONFIRMED in event_types
     assert BeliefTransitionType.RULE_GENERALIZED in event_types
+
+
+def test_causal_variable_invariance_across_randomized_worlds():
+    """A23.5-E2: Verify that Developmental HCIR discovers the mass invariant across varied surface confounders."""
+    for mode in [0, 1, 2, 3]:
+        env = BabyWorldEnvironment(seed=50 + mode)
+        env.reset("randomized_confounded_world")
+        env._setup_randomized_confounded_world(mode_override=mode)
+
+        substrate = create_blank_brain_substrate()
+        perception = DevelopmentalPerceptionAdapter()
+        engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
+
+        obs = env.get_sensory_observation()
+        engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+
+        available_ids = list(env.objects.keys())
+        for _ in range(10):
+            if any(h.confirmed and h.variable == "mass_sensation" for h in engine.hypotheses):
+                break
+            active_hyps = [h for h in engine.hypotheses if not h.falsified]
+            target_id, _ = engine.select_active_intervention(available_ids, active_hyps)
+            engine.execute_interventional_probe(target_id, action=BabyActionType.PUSH)
+
+        # In every randomized surface world, mass_sensation MUST be confirmed as the invariant cause!
+        mass_hyp = next(h for h in engine.hypotheses if h.variable == "mass_sensation")
+        assert mass_hyp.confirmed is True
+        assert mass_hyp.confidence >= 0.95

@@ -52,6 +52,8 @@ class BabyWorldEnvironment:
 
         if scenario == "confounded_train_world":
             self._setup_confounded_train_world()
+        elif scenario == "randomized_confounded_world":
+            self._setup_randomized_confounded_world()
         elif scenario == "unseen_entities_world":
             self._setup_unseen_entities_world()
         elif scenario == "unseen_environment_world":
@@ -161,6 +163,90 @@ class BabyWorldEnvironment:
             size=Vector2D(0.5, 0.5),
             position=Vector2D(1.3, -1.2),
         )
+
+    def _setup_randomized_confounded_world(self, mode_override: int | None = None) -> str:
+        """A23.5-E2: Causal Variable Invariance.
+
+        Dynamically varies the surface confounder across episodes:
+        Mode 0: Red -> Light, Blue -> Heavy
+        Mode 1: Blue -> Light, Red -> Heavy
+        Mode 2: Block -> Light, Ball -> Heavy
+        Mode 3: Ball -> Light, Block -> Heavy
+        Mode 4: Purple -> Light, Cyan -> Heavy
+        Mode 5: Orange -> Light, Black -> Heavy
+
+        The true causal invariant is always: mass < MASS_THRESHOLD (5.0).
+        """
+        mode = mode_override if mode_override is not None else self.rng.randint(0, 5)
+
+        if mode == 0:
+            confound_desc = "color:red->light,blue->heavy"
+            pos_color, neg_color = "red", "blue"
+            pos_type, neg_type = BabyObjectType.BALL, BabyObjectType.BLOCK
+        elif mode == 1:
+            confound_desc = "color:blue->light,red->heavy"
+            pos_color, neg_color = "blue", "red"
+            pos_type, neg_type = BabyObjectType.BLOCK, BabyObjectType.BALL
+        elif mode == 2:
+            confound_desc = "shape:block->light,ball->heavy"
+            pos_color, neg_color = "green", "green"
+            pos_type, neg_type = BabyObjectType.BLOCK, BabyObjectType.BALL
+        elif mode == 3:
+            confound_desc = "shape:ball->light,block->heavy"
+            pos_color, neg_color = "yellow", "yellow"
+            pos_type, neg_type = BabyObjectType.BALL, BabyObjectType.BLOCK
+        elif mode == 4:
+            confound_desc = "color:purple->light,cyan->heavy"
+            pos_color, neg_color = "purple", "cyan"
+            pos_type, neg_type = BabyObjectType.BALL, BabyObjectType.BLOCK
+        else:
+            confound_desc = "color:orange->light,black->heavy"
+            pos_color, neg_color = "orange", "black"
+            pos_type, neg_type = BabyObjectType.BLOCK, BabyObjectType.BALL
+
+        # 4 Correlated Light objects (Moves)
+        for i in range(4):
+            self.objects[f"obj_pos_{i}"] = BabyObjectState(
+                id=f"obj_pos_{i}",
+                object_type=pos_type,
+                color=pos_color,
+                mass=1.2 + i * 0.4,
+                size=Vector2D(0.4, 0.4),
+                position=Vector2D(0.5 + i * 0.3, 0.5 + i * 0.2),
+            )
+
+        # 4 Correlated Heavy objects (Does not move)
+        for i in range(4):
+            self.objects[f"obj_neg_{i}"] = BabyObjectState(
+                id=f"obj_neg_{i}",
+                object_type=neg_type,
+                color=neg_color,
+                mass=11.0 + i * 1.5,
+                size=Vector2D(0.5, 0.5),
+                position=Vector2D(0.5 + i * 0.3, -0.5 - i * 0.2),
+            )
+
+        # 2 Contrastive Decoupling Probes:
+        # A: Negative surface feature, but LIGHT (Moves!) -> Falsifies surface correlation
+        self.objects["obj_contrast_light"] = BabyObjectState(
+            id="obj_contrast_light",
+            object_type=neg_type,
+            color=neg_color,
+            mass=1.1,
+            size=Vector2D(0.4, 0.4),
+            position=Vector2D(1.5, 0.0),
+        )
+        # B: Positive surface feature, but HEAVY (Does not move!) -> Falsifies surface correlation
+        self.objects["obj_contrast_heavy"] = BabyObjectState(
+            id="obj_contrast_heavy",
+            object_type=pos_type,
+            color=pos_color,
+            mass=14.0,
+            size=Vector2D(0.5, 0.5),
+            position=Vector2D(1.5, -1.0),
+        )
+
+        return confound_desc
 
     def _setup_unseen_entities_world(self) -> None:
         """Level 2 Generalization World: Unseen Entities (Novel colors & shapes)."""

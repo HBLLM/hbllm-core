@@ -60,33 +60,47 @@ class InterventionalCausalDiscoveryEngine:
         2. shape == 'ball' (Spurious)
         3. mass_sensation < 5.0 (True Causal Variable)
         """
-        # Formulate competing hypotheses to test
-        h_color = CausalHypothesis(
-            action=BabyActionType.PUSH,
-            variable="color",
-            operator="==",
-            value="red",
-            consequence="MOVES",
-            confidence=0.5,
-        )
-        h_shape = CausalHypothesis(
-            action=BabyActionType.PUSH,
-            variable="shape",
-            operator="==",
-            value="ball",
-            consequence="MOVES",
-            confidence=0.5,
-        )
-        h_mass = CausalHypothesis(
-            action=BabyActionType.PUSH,
-            variable="mass_sensation",
-            operator="<",
-            value=5.0,
-            consequence="MOVES",
-            confidence=0.5,
-        )
+        # Formulate competing hypotheses from features observed on moving objects
+        positive_colors = [
+            p["color"]
+            for p in observation.vision
+            if p.get("mass_sensation", 99.0) < 5.0 and p.get("color")
+        ]
+        pos_color = positive_colors[0] if positive_colors else "red"
 
-        self.hypotheses = [h_color, h_shape, h_mass]
+        positive_shapes = [
+            p["shape"]
+            for p in observation.vision
+            if p.get("mass_sensation", 99.0) < 5.0 and p.get("shape")
+        ]
+        pos_shape = positive_shapes[0] if positive_shapes else "ball"
+
+        self.hypotheses = [
+            CausalHypothesis(
+                action=BabyActionType.PUSH,
+                variable="color",
+                operator="==",
+                value=pos_color,
+                consequence="MOVES",
+                confidence=0.5,
+            ),
+            CausalHypothesis(
+                action=BabyActionType.PUSH,
+                variable="shape",
+                operator="==",
+                value=pos_shape,
+                consequence="MOVES",
+                confidence=0.5,
+            ),
+            CausalHypothesis(
+                action=BabyActionType.PUSH,
+                variable="mass_sensation",
+                operator="<",
+                value=5.0,
+                consequence="MOVES",
+                confidence=0.5,
+            ),
+        ]
 
         for h in self.hypotheses:
             self._record_belief_event(
