@@ -141,3 +141,52 @@ def run_sokoban_benchmark(
         "ci_95": [round(ci_low, 3), round(ci_high, 3)],
         "overall_mean_steps": round(mean_steps, 1),
     }
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Sokoban Multi-Tier Benchmark")
+    parser.add_argument(
+        "--episodes-per-tier", type=int, default=5, help="Episodes per Boxoban difficulty tier"
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Base random seed")
+    parser.add_argument(
+        "--prefer-native",
+        "--native",
+        action="store_true",
+        default=True,
+        help="Run against upstream native gym_sokoban package",
+    )
+    parser.add_argument(
+        "--require-native",
+        action="store_true",
+        default=False,
+        help="Strictly require upstream native package, failing if unavailable",
+    )
+    args = parser.parse_args()
+
+    print(
+        f"\n{'=' * 85}\nRunning Sokoban Multi-Tier Benchmark (5 Tiers, Native={args.prefer_native})\n{'=' * 85}"
+    )
+    data = run_sokoban_benchmark(
+        episodes_per_tier=args.episodes_per_tier,
+        seed=args.seed,
+        prefer_native=args.prefer_native,
+        require_native=args.require_native,
+    )
+    print(
+        f"Overall Success Rate: {data['overall_success_rate'] * 100:.1f}% | 95% Wilson CI: {data['ci_95']} | Total Episodes: {data['total_episodes']}"
+    )
+    print(f"Mean Steps: {data['overall_mean_steps']:.1f}")
+    print("-" * 85)
+    for tier_name, res in data["tiers"].items():
+        deadlocks = res.get("deadlock_count", 0)
+        print(
+            f"  {tier_name:<35}: {res['success_rate'] * 100:5.1f}% ({res['successes']}/{res['episodes']}) | "
+            f"CI: {res['ci_95']} | Deadlocks: {deadlocks} | Steps: {res['mean_steps']:.1f}"
+        )
+
+
+if __name__ == "__main__":
+    main()
