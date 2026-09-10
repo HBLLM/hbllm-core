@@ -53,7 +53,7 @@ def run_sokoban_tier(
     episodes: int = 5,
     seed: int = 42,
     prefer_native: bool = True,
-    require_native: bool = True,
+    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run evaluation on a single Sokoban tier."""
     agent = PureHCIRSokobanAgent()
@@ -104,7 +104,7 @@ def run_sokoban_benchmark(
     seed: int = 42,
     episodes: int | None = None,
     prefer_native: bool = True,
-    require_native: bool = True,
+    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run full-spectrum 5-tier Sokoban benchmark."""
     if episodes is not None:

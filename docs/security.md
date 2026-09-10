@@ -4,7 +4,7 @@ HBLLM is designed for enterprise environments where data isolation, secure code 
 
 ## 1. Code Sandboxing (`ExecutionNode`)
 
-Allowing an LLM to generate and execute code autonomously is a massive security risk. HBLLM mitigates this via a rigorous, multi-layered sandboxing pipeline found in `core/hbllm/actions/execution_node.py`:
+Allowing an LLM to generate and execute code autonomously is a massive security risk. HBLLM mitigates this via a rigorous, multi-layered sandboxing pipeline found in `hbllm/actions/execution_node.py`:
 
 - **Static AST Validation**: Before any Python code is executed, it is parsed by an internal Abstract Syntax Tree (AST) walker. This static analysis strictly rejects dangerous imports (e.g., `os`, `sys`, `subprocess`) and built-in functions (e.g., `exec()`, `eval()`, `open()`).
 - **Restricted Subprocess Execution**: Validated code is never run in the main process. It is executed in an isolated, restricted subprocess.

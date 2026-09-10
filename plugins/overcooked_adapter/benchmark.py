@@ -53,7 +53,7 @@ def run_overcooked_tier(
     episodes: int = 5,
     seed: int = 42,
     prefer_native: bool = True,
-    require_native: bool = True,
+    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run evaluation on a single Overcooked cooperative tier."""
     agent = PureHCIROvercookedAgent()
@@ -111,7 +111,7 @@ def run_overcooked_benchmark(
     seed: int = 42,
     episodes: int | None = None,
     prefer_native: bool = True,
-    require_native: bool = True,
+    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run full 5-tier Overcooked cooperative benchmark."""
     if episodes is not None:

@@ -23,7 +23,7 @@ Get HBLLM Core running in under 5 minutes.
 ```bash
 # Clone the repository
 git clone https://github.com/hbllm/hbllm-core.git
-cd hbllm-core/core
+cd hbllm-core
 
 # Install in development mode
 pip install -e ".[dev]"

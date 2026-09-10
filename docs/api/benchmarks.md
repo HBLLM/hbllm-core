@@ -186,7 +186,7 @@ python -m hbllm.benchmarks.runner --suite http_api
 
 ## Embodied Cognitive & Frontier Benchmarks
 
-In addition to system microbenchmarks, HBLLM Core features a comprehensive battery of **Embodied Cognitive Adapters** (`core/plugins/`) that benchmark zero-token **Human-Cognitive Intermediate Representation (HCIR)** reasoning against authentic simulation environments (`crafter`, `gym_sokoban`, `overcooked_ai`, `minigrid`, `nle`, `safety_gymnasium`, `alfworld`, `ai2thor`).
+In addition to system microbenchmarks, HBLLM Core features a comprehensive battery of **Embodied Cognitive Adapters** (`plugins/`) that benchmark zero-token **Human-Cognitive Intermediate Representation (HCIR)** reasoning against authentic simulation environments (`crafter`, `gym_sokoban`, `overcooked_ai`, `minigrid`, `nle`, `safety_gymnasium`, `alfworld`, `ai2thor`).
 
 ### Architectural Paradigm Comparison
 
@@ -356,19 +356,19 @@ To reproduce these benchmarks against installed native packages on your local ha
 
 ```bash
 # 1. Crafter Multi-Tier Benchmark (Native crafter.Env)
-python core/plugins/crafter_adapter/benchmark.py --native
+python plugins/crafter_adapter/benchmark.py --native
 
 # 2. Sokoban 5-Tier Benchmark (Native gym-sokoban)
-python core/plugins/sokoban_adapter/benchmark.py --native
+python plugins/sokoban_adapter/benchmark.py --native
 
 # 3. Overcooked-AI Cooperative Benchmark (Native overcooked_ai_py)
-python core/plugins/overcooked_adapter/benchmark.py --native
+python plugins/overcooked_adapter/benchmark.py --native
 
 # 4. BabyAI Multi-Tier Benchmark (Native minigrid)
-python core/plugins/babyai_adapter/benchmark.py --episodes-per-tier 5
+python plugins/babyai_adapter/benchmark.py --episodes-per-tier 5
 
 # 5. NetHack Multi-Tier Benchmark (Native minihack / nle)
-python core/plugins/nethack_adapter/benchmark.py --native --cohort pure-hcir
+python plugins/nethack_adapter/benchmark.py --native --cohort pure-hcir
 ```
 
 ---
@@ -386,7 +386,7 @@ To preserve strict empirical integrity, four candidate embodied environments wer
 
 #### Architectural Guarantee: Fail-Loud Native Verification
 
-Every adapter in `core/plugins/` adheres to a strict dual-mode contract:
+Every adapter in `plugins/` adheres to a strict dual-mode contract:
 
 ```python
 # Standalone Mode (Permitted for internal schema and unit test validation):

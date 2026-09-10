@@ -41,7 +41,7 @@ def test_plugin_manifest() -> None:
 
 
 def test_sokoban_environment_mechanics() -> None:
-    env = make_sokoban_env(tier=SokobanTier.TIER_1_DIRECT_PUSH, seed=42)
+    env = make_sokoban_env(tier=SokobanTier.TIER_1_DIRECT_PUSH, seed=42, prefer_native=False)
     obs = env.reset()
     assert len(obs.boxes) == 1
     assert len(obs.targets) == 1
@@ -62,7 +62,9 @@ def test_sokoban_environment_mechanics() -> None:
 
 
 def test_corner_deadlock_detection() -> None:
-    env = make_sokoban_env(tier=SokobanTier.TIER_3_CORNER_DEADLOCK_AVOIDANCE, seed=42)
+    env = make_sokoban_env(
+        tier=SokobanTier.TIER_3_CORNER_DEADLOCK_AVOIDANCE, seed=42, prefer_native=False
+    )
     env.reset()
     # (1, 1) is a corner between top wall (0, 1) and left wall (1, 0)
     dl = env.check_deadlock((1, 1))
@@ -71,7 +73,9 @@ def test_corner_deadlock_detection() -> None:
 
 def test_perception_identifies_taboo_cells() -> None:
     perception = SokobanPerceptionAdapter()
-    env = make_sokoban_env(tier=SokobanTier.TIER_3_CORNER_DEADLOCK_AVOIDANCE, seed=42)
+    env = make_sokoban_env(
+        tier=SokobanTier.TIER_3_CORNER_DEADLOCK_AVOIDANCE, seed=42, prefer_native=False
+    )
     obs = env.reset()
     data = perception.process_observation(obs)
     assert "deadlock_taboo_cells" in data
@@ -80,7 +84,7 @@ def test_perception_identifies_taboo_cells() -> None:
 
 def test_sokoban_all_tiers_completion() -> None:
     for tier in SokobanTier:
-        res = run_sokoban_tier(tier, episodes=2, seed=10)
+        res = run_sokoban_tier(tier, episodes=2, seed=10, prefer_native=False)
         assert res["success_rate"] == 1.0, (
             f"Tier {tier.value} failed to achieve 100% success rate: {res}"
         )
@@ -88,8 +92,22 @@ def test_sokoban_all_tiers_completion() -> None:
 
 
 def test_sokoban_full_benchmark_smoke() -> None:
-    bench = run_sokoban_benchmark(episodes_per_tier=2, seed=42)
+    bench = run_sokoban_benchmark(episodes_per_tier=2, seed=42, prefer_native=False)
     assert bench["overall_success_rate"] == 1.0
     assert len(bench["tiers"]) == 5
     for tier_name, tier_res in bench["tiers"].items():
         assert tier_res["success_rate"] == 1.0
+
+
+def test_native_sokoban_wrapper() -> None:
+    env = make_sokoban_env(
+        tier=SokobanTier.TIER_1_DIRECT_PUSH,
+        seed=42,
+        prefer_native=True,
+        require_native=True,
+    )
+    assert getattr(env, "is_native", False) is True
+    obs = env.reset()
+    assert obs is not None
+    obs, reward, done, info = env.step(SokobanAction.RIGHT)
+    assert obs.step_count == 1

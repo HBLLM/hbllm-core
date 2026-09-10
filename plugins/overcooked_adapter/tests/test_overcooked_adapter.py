@@ -44,7 +44,9 @@ def test_plugin_manifest() -> None:
 
 
 def test_kitchen_mechanics_solo() -> None:
-    env = make_overcooked_env(tier=OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, seed=42)
+    env = make_overcooked_env(
+        tier=OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, seed=42, prefer_native=False
+    )
     obs = env.reset()
     assert obs.agent.held_item == CulinaryItem.NONE
     assert obs.pots[0].status == PotStatus.EMPTY
