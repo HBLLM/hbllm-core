@@ -157,3 +157,41 @@ def test_causal_variable_invariance_across_randomized_worlds():
         mass_hyp = next(h for h in engine.hypotheses if h.variable == "mass_sensation")
         assert mass_hyp.confirmed is True
         assert mass_hyp.confidence >= 0.95
+
+
+def test_observational_demonstrations_and_hypothesis_induction_without_rule_leakage():
+    """Verify that hypotheses are induced purely from observational demonstrations without ground-truth leakage."""
+    env = BabyWorldEnvironment(seed=42)
+    env.reset("confounded_train_world")
+
+    # 1. Generate observational demonstrations
+    demos = env.generate_observational_demonstrations()
+    assert len(demos) == 8  # 4 red light movers, 4 blue heavy stationary
+
+    movers = [d for d in demos if d["moved"]]
+    non_movers = [d for d in demos if not d["moved"]]
+    assert len(movers) == 4
+    assert len(non_movers) == 4
+    assert all(d["features"]["color"] == "red" for d in movers)
+    assert all(d["features"]["color"] == "blue" for d in non_movers)
+
+    # 2. Induce hypotheses from demonstrations
+    substrate = create_blank_brain_substrate()
+    perception = DevelopmentalPerceptionAdapter()
+    engine = InterventionalCausalDiscoveryEngine(substrate, perception, env)
+
+    obs = env.get_sensory_observation()
+    hyps = engine.observe_and_generate_hypotheses(obs, episodes_data=demos)
+
+    # Color hypothesis correctly induced from mover color
+    color_hyp = next(h for h in hyps if h.variable == "color")
+    assert color_hyp.value == "red"
+
+    # Mass threshold dynamically computed from boundary between movers and non-movers
+    max_pos = max(d["features"]["mass_sensation"] for d in movers)
+    min_neg = min(d["features"]["mass_sensation"] for d in non_movers)
+    expected_boundary = round((max_pos + min_neg) / 2.0, 1)
+
+    mass_hyp = next(h for h in hyps if h.variable == "mass_sensation")
+    assert mass_hyp.value == expected_boundary
+    assert mass_hyp.operator == "<"

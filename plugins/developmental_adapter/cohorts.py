@@ -243,7 +243,8 @@ class ActiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
         available_ids = list(env.objects.keys())
 
         # 1. Initial observation & hypothesis generation under confounding
-        hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+        obs_demos = env.generate_observational_demonstrations()
+        hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=obs_demos)
         false_hyps = sum(1 for h in hypotheses if h.variable != "mass_sensation")
 
         # 2. Active Interventional Loop
@@ -330,7 +331,8 @@ class PassiveDevelopmentalHCIRCohort(BaseDevelopmentalCohort):
         available_ids = list(env.objects.keys())
 
         # 1. Initial observation & hypothesis generation
-        hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=[])
+        obs_demos = env.generate_observational_demonstrations()
+        hypotheses = engine.observe_and_generate_hypotheses(obs, episodes_data=obs_demos)
         false_hyps = sum(1 for h in hypotheses if h.variable != "mass_sensation")
 
         # 2. Passive Exploration Loop: Selects entities AT RANDOM rather than actively targeting contrasts

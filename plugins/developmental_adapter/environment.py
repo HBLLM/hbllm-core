@@ -248,6 +248,51 @@ class BabyWorldEnvironment:
 
         return confound_desc
 
+    def generate_observational_demonstrations(self) -> list[dict[str, Any]]:
+        """Generate standardized observational demonstration episodes on training objects.
+
+        Simulates observational trials (analogous to adult demonstrations in infant cognitive studies).
+        Standardized push actions are applied to correlated training objects, and the resulting physical
+        motion (displacement, moved: True/False) is recorded.
+        These observational episodes contain NO active agent intervention and establish
+        the empirical correlation before the agent begins interventional reasoning.
+        """
+        demos: list[dict[str, Any]] = []
+        # Target observational objects (exclude contrastive/test probes)
+        obs_ids = [
+            oid
+            for oid in self.objects.keys()
+            if not any(k in oid for k in ("contrast", "light_ball", "heavy_block"))
+        ]
+
+        saved_state = self.save_state()
+        for oid in obs_ids:
+            obj = self.objects[oid]
+            # In demonstrations, push force is applied directly adjacent to the object
+            self.agent_position = Vector2D(obj.position.x - 0.2, obj.position.y)
+            _, _, _, consequences = self.step(BabyActionType.PUSH, target_id=oid)
+            moved = consequences.get("moved", False)
+            disp = consequences.get("displacement", 0.0)
+
+            demos.append(
+                {
+                    "action": BabyActionType.PUSH,
+                    "percept_id": oid,
+                    "features": {
+                        "color": obj.color,
+                        "shape": obj.object_type.value,
+                        "size_extent": obj.size.to_tuple(),
+                        "mass_sensation": obj.mass,
+                    },
+                    "outcome": "MOVES" if moved else "STATIONARY",
+                    "moved": moved,
+                    "displacement": disp,
+                }
+            )
+            self.restore_state(saved_state)
+
+        return demos
+
     def _setup_unseen_entities_world(self) -> None:
         """Level 2 Generalization World: Unseen Entities (Novel colors & shapes)."""
         # Green Cylinder (Light -> Moves)

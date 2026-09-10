@@ -165,31 +165,29 @@
       ]
     },
     "Cohort_E_Passive_Developmental_HCIR": {
-      "discovery_rate": 0.8,
+      "discovery_rate": 1.0,
       "median_n_tau": 2.0,
-      "mean_n_tau": 5.6,
+      "mean_n_tau": 2.0,
       "iqr_n_tau": [
         2.0,
         2.0
       ],
       "bootstrap_ci_95": [
         2.0,
-        9.2
+        2.0
       ],
       "discrete_distribution": {
-        "2": 12,
-        "20": 3
+        "2": 15
       },
-      "failures_count": 3,
-      "mean_wasted_interventions": 1.87,
+      "failures_count": 0,
+      "mean_wasted_interventions": 0.87,
       "mean_false_hypotheses": 2,
-      "level1_train_accuracy": 0.88,
-      "level2_unseen_entities_accuracy": 0.8444,
-      "level3_unseen_world_accuracy": 0.8667,
-      "mean_brier_score": 0.144,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.08,
       "all_n_tau": [
         2,
-        20,
         2,
         2,
         2,
@@ -199,10 +197,11 @@
         2,
         2,
         2,
-        20,
         2,
         2,
-        20
+        2,
+        2,
+        2
       ]
     }
   }

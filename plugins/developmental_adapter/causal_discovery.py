@@ -18,6 +18,7 @@ from .types import (
     BeliefTransitionType,
     CausalHypothesis,
     SensoryObservation,
+    Vector2D,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,35 +46,75 @@ class InterventionalCausalDiscoveryEngine:
     def observe_and_generate_hypotheses(
         self,
         observation: SensoryObservation,
-        episodes_data: list[dict[str, Any]],
+        episodes_data: list[dict[str, Any]] | None = None,
     ) -> list[CausalHypothesis]:
-        """Formulate candidate causal hypotheses based on initial correlations.
+        """Formulate candidate causal hypotheses based on initial observational correlations.
 
-        In the confounded world, the agent initially observes:
-        - red_ball (light) moved
-        - red_block (light) moved
-        - blue_ball (heavy) did not move
-        - blue_block (heavy) did not move
-
-        Candidate variables to hypothesize:
-        1. color == 'red' (Confounded / Spurious)
-        2. shape == 'ball' (Spurious)
-        3. mass_sensation < 5.0 (True Causal Variable)
+        Processes observational demonstration episodes to identify which features
+        (color, shape, mass_sensation) correlate with movement.
         """
-        # Formulate competing hypotheses from features observed on moving objects
-        positive_colors = [
-            p["color"]
-            for p in observation.vision
-            if p.get("mass_sensation", 99.0) < 5.0 and p.get("color")
-        ]
-        pos_color = positive_colors[0] if positive_colors else "red"
+        # If no observational episodes are provided, query environment demonstrations
+        if not episodes_data:
+            if hasattr(self.env, "generate_observational_demonstrations"):
+                episodes_data = self.env.generate_observational_demonstrations()
+            else:
+                episodes_data = []
 
-        positive_shapes = [
-            p["shape"]
-            for p in observation.vision
-            if p.get("mass_sensation", 99.0) < 5.0 and p.get("shape")
+        positive_episodes = [
+            ep for ep in episodes_data if ep.get("moved") or ep.get("outcome") == "MOVES"
         ]
-        pos_shape = positive_shapes[0] if positive_shapes else "ball"
+        negative_episodes = [
+            ep for ep in episodes_data if not (ep.get("moved") or ep.get("outcome") == "MOVES")
+        ]
+
+        if positive_episodes:
+            from collections import Counter
+
+            # 1. Identify salient surface features from positive movers
+            pos_colors = Counter(
+                ep["features"]["color"]
+                for ep in positive_episodes
+                if "color" in ep.get("features", {})
+            )
+            pos_color = pos_colors.most_common(1)[0][0] if pos_colors else "red"
+
+            pos_shapes = Counter(
+                ep["features"]["shape"]
+                for ep in positive_episodes
+                if "shape" in ep.get("features", {})
+            )
+            pos_shape = pos_shapes.most_common(1)[0][0] if pos_shapes else "ball"
+
+            # 2. Derive continuous mass threshold from decision boundary between positive and negative movers
+            pos_masses = [
+                float(ep["features"]["mass_sensation"])
+                for ep in positive_episodes
+                if "mass_sensation" in ep.get("features", {})
+            ]
+            neg_masses = [
+                float(ep["features"]["mass_sensation"])
+                for ep in negative_episodes
+                if "mass_sensation" in ep.get("features", {})
+            ]
+
+            if pos_masses and neg_masses:
+                max_pos = max(pos_masses)
+                min_neg = min(neg_masses)
+                mass_threshold = round((max_pos + min_neg) / 2.0, 1)
+            elif pos_masses:
+                mass_threshold = round(max(pos_masses) * 1.5, 1)
+            else:
+                mass_threshold = 5.0
+        else:
+            # Fallback when no demonstrations are present: sample from visual percepts
+            pos_color = observation.vision[0]["color"] if observation.vision else "red"
+            pos_shape = observation.vision[0]["shape"] if observation.vision else "ball"
+            import statistics
+
+            masses = [
+                p.get("mass_sensation", 5.0) for p in observation.vision if "mass_sensation" in p
+            ]
+            mass_threshold = round(statistics.median(masses), 1) if masses else 5.0
 
         self.hypotheses = [
             CausalHypothesis(
@@ -96,7 +137,7 @@ class InterventionalCausalDiscoveryEngine:
                 action=BabyActionType.PUSH,
                 variable="mass_sensation",
                 operator="<",
-                value=5.0,
+                value=mass_threshold,
                 consequence="MOVES",
                 confidence=0.5,
             ),
@@ -123,6 +164,7 @@ class InterventionalCausalDiscoveryEngine:
         Active Inference / Epistemic Curiosity:
         Picks the entity whose intervention maximizes pairwise disagreement
         (expected entropy reduction) among currently non-falsified hypotheses.
+        Features are evaluated strictly through perceptual observations rather than private simulation state.
         """
         active_hyps = [h for h in active_hypotheses if not h.falsified]
         if not active_hyps:
@@ -132,20 +174,24 @@ class InterventionalCausalDiscoveryEngine:
         max_discriminant_score: float = -999.0
         targeted_hyp: CausalHypothesis = active_hyps[0]
 
+        # Query perceptual observation map
+        obs = self.env.get_sensory_observation()
+        percept_map = {p["percept_id"]: p for p in obs.vision}
+
         for ent_id in available_entity_ids:
-            ent = self.env.objects.get(ent_id)
-            if not ent:
+            percept = percept_map.get(ent_id)
+            if not percept:
                 continue
 
             # Compute predictions across all active hypotheses
             predictions = []
             for h in active_hyps:
                 if h.variable == "color":
-                    p = ent.color == h.value
+                    p = percept["color"] == h.value
                 elif h.variable == "shape":
-                    p = ent.object_type.value == h.value
+                    p = percept["shape"] == h.value
                 elif h.variable == "mass_sensation":
-                    p = ent.mass < h.value
+                    p = float(percept["mass_sensation"]) < float(h.value)
                 else:
                     p = False
                 predictions.append(p)
@@ -184,16 +230,22 @@ class InterventionalCausalDiscoveryEngine:
         self.interventions_count += 1
         prior_state_idx = self.env.save_state()
 
+        # Position agent adjacent to target object for physical interaction
+        pre_obs = self.env.get_sensory_observation()
+        target_percept = next((p for p in pre_obs.vision if p["percept_id"] == target_id), None)
+        if target_percept:
+            pos_x, pos_y = target_percept["spatial_coordinates"]
+            self.env.agent_position = Vector2D(pos_x - 0.2, pos_y)
+
         # Step physical environment with probe action
         obs, reward, done, consequences = self.env.step(action=action, target_id=target_id)
         did_move = consequences.get("moved", False)
 
-        target_obj = self.env.objects.get(target_id)
         probe_result = {
             "target_id": target_id,
-            "target_color": target_obj.color if target_obj else "",
-            "target_shape": target_obj.object_type.value if target_obj else "",
-            "target_mass": target_obj.mass if target_obj else 0.0,
+            "target_color": target_percept["color"] if target_percept else "",
+            "target_shape": target_percept["shape"] if target_percept else "",
+            "target_mass": float(target_percept["mass_sensation"]) if target_percept else 0.0,
             "did_move": did_move,
             "displacement": consequences.get("displacement", 0.0),
         }
