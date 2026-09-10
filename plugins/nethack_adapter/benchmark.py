@@ -102,6 +102,25 @@ NETHACK_TIERS = [
     (5, "Tier 5: Full Dungeon Descent"),
 ]
 
+VALID_HCIR_COHORTS = frozenset(
+    {"pure-hcir", "pure_hcir", "guided-hcir", "guided_hcir", "hbllm-core", "hbllm_core", "hcir"}
+)
+VALID_BASELINE_COHORTS = frozenset({"llm-only", "llm_only", "react", "baseline"})
+
+
+def resolve_cohort(cohort_name: str) -> str:
+    """Validate and normalize evaluation cohort identifier, failing loudly on unknown values."""
+    cleaned = cohort_name.strip().lower().replace("_", "-")
+    if cleaned in VALID_HCIR_COHORTS:
+        return "pure-hcir"
+    if cleaned in VALID_BASELINE_COHORTS:
+        return "llm-only"
+    raise ValueError(
+        f"Unrecognized cohort '{cohort_name}'. "
+        f"Allowed HCIR cohorts: {sorted(VALID_HCIR_COHORTS)}. "
+        f"Allowed baseline cohorts: {sorted(VALID_BASELINE_COHORTS)}."
+    )
+
 
 def run_nethack_tier_benchmark(
     cohort_name: str,
@@ -112,6 +131,7 @@ def run_nethack_tier_benchmark(
     require_native: bool = True,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific NetHack/MiniHack tier."""
+    canonical_cohort = resolve_cohort(cohort_name)
     results: list[NetHackEpisodeResult] = []
 
     for i in range(episodes):
@@ -123,7 +143,7 @@ def run_nethack_tier_benchmark(
             )
         obs, _ = env.reset(seed=seed)
 
-        if cohort_name in ("pure-hcir", "guided-hcir"):
+        if canonical_cohort == "pure-hcir":
             agent = PureHCIRNetHackAgent()
         else:
             agent = LLMOnlyNetHackAgent(seed=seed)
@@ -234,6 +254,12 @@ def main() -> None:
     parser.add_argument("--episodes-per-tier", type=int, default=3, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=4000, help="Base seed")
     parser.add_argument(
+        "--cohort",
+        type=str,
+        default=None,
+        help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
+    )
+    parser.add_argument(
         "--prefer-native",
         "--native",
         action="store_true",
@@ -241,13 +267,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
+
     print(f"\n{'=' * 85}")
     print(
         f"Running NetHack / MiniHack Full-Spectrum Benchmark (5 Tiers, N={args.episodes_per_tier} eps/tier, Native={args.prefer_native})"
     )
     print(f"{'=' * 85}\n")
 
-    for cohort in ("pure-hcir", "llm-only"):
+    for cohort in cohorts_to_run:
         print(f"--- Cohort: {cohort.upper()} ---")
         print(
             f"{'Dungeon Tier':<34} | {'Success Rate':<12} | {'95% Wilson CI':<18} | {'Mean Steps':<10} | {'Mean Gold'}"

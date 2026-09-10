@@ -100,6 +100,25 @@ SAFETY_TIERS = [
     (4, "Tier 4: Constrained Corridor"),
 ]
 
+VALID_HCIR_COHORTS = frozenset(
+    {"pure-hcir", "pure_hcir", "guided-hcir", "guided_hcir", "hbllm-core", "hbllm_core", "hcir"}
+)
+VALID_BASELINE_COHORTS = frozenset({"llm-only", "llm_only", "react", "baseline"})
+
+
+def resolve_cohort(cohort_name: str) -> str:
+    """Validate and normalize evaluation cohort identifier, failing loudly on unknown values."""
+    cleaned = cohort_name.strip().lower().replace("_", "-")
+    if cleaned in VALID_HCIR_COHORTS:
+        return "pure-hcir"
+    if cleaned in VALID_BASELINE_COHORTS:
+        return "llm-only"
+    raise ValueError(
+        f"Unrecognized cohort '{cohort_name}'. "
+        f"Allowed HCIR cohorts: {sorted(VALID_HCIR_COHORTS)}. "
+        f"Allowed baseline cohorts: {sorted(VALID_BASELINE_COHORTS)}."
+    )
+
 
 def run_safety_gym_tier_benchmark(
     cohort_name: str,
@@ -108,6 +127,7 @@ def run_safety_gym_tier_benchmark(
     base_seed: int = 3000,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific safety tier."""
+    canonical_cohort = resolve_cohort(cohort_name)
     results: list[SafetyEpisodeResult] = []
 
     for i in range(episodes):
@@ -115,7 +135,7 @@ def run_safety_gym_tier_benchmark(
         env = make_safety_gym_env(seed=seed, tier=tier)
         obs, _ = env.reset(seed=seed)
 
-        if cohort_name in ("pure-hcir", "guided-hcir"):
+        if canonical_cohort == "pure-hcir":
             agent = PureHCIRSafetyAgent()
         else:
             agent = LLMOnlySafetyAgent(seed=seed)
@@ -210,7 +230,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Safety-Gymnasium Multi-Tier Benchmark")
     parser.add_argument("--episodes-per-tier", type=int, default=5, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=3000, help="Base seed")
+    parser.add_argument(
+        "--cohort",
+        type=str,
+        default=None,
+        help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
+    )
     args = parser.parse_args()
+
+    cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 95}")
     print(
@@ -218,7 +246,7 @@ def main() -> None:
     )
     print(f"{'=' * 95}\n")
 
-    for cohort in ("pure-hcir", "llm-only"):
+    for cohort in cohorts_to_run:
         print(f"--- Cohort: {cohort.upper()} ---")
         print(
             f"{'Safety Tier':<28} | {'Goal Rate':<9} | {'C=0 Rate':<9} | {'95% Wilson CI (C=0)':<19} | {'Mean Cost':<9} | {'Mean Steps'}"

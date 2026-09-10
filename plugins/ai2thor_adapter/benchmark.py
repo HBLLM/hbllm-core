@@ -91,11 +91,30 @@ class LLMOnlyAI2ThorAgent:
 
 
 AI2THOR_TIERS = [
-    (1, "Tier 1: Object Retrieval"),
+    (1, "Tier 1: Object Interaction / Pickup"),
     (2, "Tier 2: State Toggling / Opening"),
     (3, "Tier 3: Surface Relocation"),
     (4, "Tier 4: Container Transfer"),
 ]
+
+VALID_HCIR_COHORTS = frozenset(
+    {"pure-hcir", "pure_hcir", "guided-hcir", "guided_hcir", "hbllm-core", "hbllm_core", "hcir"}
+)
+VALID_BASELINE_COHORTS = frozenset({"llm-only", "llm_only", "react", "baseline"})
+
+
+def resolve_cohort(cohort_name: str) -> str:
+    """Validate and normalize evaluation cohort identifier, failing loudly on unknown values."""
+    cleaned = cohort_name.strip().lower().replace("_", "-")
+    if cleaned in VALID_HCIR_COHORTS:
+        return "pure-hcir"
+    if cleaned in VALID_BASELINE_COHORTS:
+        return "llm-only"
+    raise ValueError(
+        f"Unrecognized cohort '{cohort_name}'. "
+        f"Allowed HCIR cohorts: {sorted(VALID_HCIR_COHORTS)}. "
+        f"Allowed baseline cohorts: {sorted(VALID_BASELINE_COHORTS)}."
+    )
 
 
 def run_ai2thor_tier_benchmark(
@@ -105,6 +124,7 @@ def run_ai2thor_tier_benchmark(
     base_seed: int = 5000,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific AI2-THOR manipulation tier."""
+    canonical_cohort = resolve_cohort(cohort_name)
     results: list[AI2ThorEpisodeResult] = []
 
     for i in range(episodes):
@@ -113,7 +133,7 @@ def run_ai2thor_tier_benchmark(
         obs, info = env.reset(seed=seed)
         goal: AI2ThorGoal = info["goal"]
 
-        if cohort_name in ("pure-hcir", "guided-hcir"):
+        if canonical_cohort == "pure-hcir":
             agent = PureHCIRAI2ThorAgent()
         else:
             agent = LLMOnlyAI2ThorAgent(seed=seed)
@@ -194,7 +214,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AI2-THOR Multi-Tier Benchmark")
     parser.add_argument("--episodes-per-tier", type=int, default=3, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=5000, help="Base seed")
+    parser.add_argument(
+        "--cohort",
+        type=str,
+        default=None,
+        help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
+    )
     args = parser.parse_args()
+
+    cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 85}")
     print(
@@ -202,7 +230,7 @@ def main() -> None:
     )
     print(f"{'=' * 85}\n")
 
-    for cohort in ("pure-hcir", "llm-only"):
+    for cohort in cohorts_to_run:
         print(f"--- Cohort: {cohort.upper()} ---")
         print(
             f"{'Manipulation Tier':<35} | {'Success Rate':<12} | {'95% Wilson CI':<18} | {'Mean Steps'}"

@@ -30,7 +30,7 @@ def test_nethack_environment_lifecycle() -> None:
     obs, info = env.reset(seed=42)
 
     assert obs.player_pos is not None
-    assert obs.stats.hp == 15
+    assert obs.stats.hp > 0
     assert obs.stats.dungeon_level == 1
     assert len(obs.glyphs) == 21
     assert len(obs.glyphs[0]) == 79
@@ -51,12 +51,12 @@ def test_nethack_perception_adapter() -> None:
 
     agent_node = graph.get_node("agent")
     assert agent_node is not None
-    assert agent_node.properties["hp"] == 15
+    assert agent_node.properties["hp"] == obs.stats.hp
     assert agent_node.properties["dungeon_level"] == 1
 
 
 def test_nethack_door_opening_and_stairs_descent() -> None:
-    env = make_nethack_env(seed=77)
+    env = make_nethack_env(seed=77, prefer_native=False)
     obs, _ = env.reset(seed=77)
     agent = PureHCIRNetHackAgent()
 

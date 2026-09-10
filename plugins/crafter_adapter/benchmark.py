@@ -122,6 +122,26 @@ class LLMOnlyCrafterAgent:
         return self.rng.choices(list(CrafterAction), weights=weights)[0]
 
 
+VALID_HCIR_COHORTS = frozenset(
+    {"pure-hcir", "pure_hcir", "guided-hcir", "guided_hcir", "hbllm-core", "hbllm_core", "hcir"}
+)
+VALID_BASELINE_COHORTS = frozenset({"llm-only", "llm_only", "react", "baseline"})
+
+
+def resolve_cohort(cohort_name: str) -> str:
+    """Validate and normalize evaluation cohort identifier, failing loudly on unknown values."""
+    cleaned = cohort_name.strip().lower().replace("_", "-")
+    if cleaned in VALID_HCIR_COHORTS:
+        return "pure-hcir"
+    if cleaned in VALID_BASELINE_COHORTS:
+        return "llm-only"
+    raise ValueError(
+        f"Unrecognized cohort '{cohort_name}'. "
+        f"Allowed HCIR cohorts: {sorted(VALID_HCIR_COHORTS)}. "
+        f"Allowed baseline cohorts: {sorted(VALID_BASELINE_COHORTS)}."
+    )
+
+
 def run_crafter_benchmark(
     cohort_name: str,
     episodes_per_target: int = 3,
@@ -130,6 +150,7 @@ def run_crafter_benchmark(
     require_native: bool = True,
 ) -> dict[str, Any]:
     """Execute Crafter benchmark across 5 tech tiers."""
+    canonical_cohort = resolve_cohort(cohort_name)
     all_results: list[CrafterEpisodeResult] = []
     tier_summaries: dict[str, Any] = {}
     achievement_success_counts: dict[str, int] = {}
@@ -157,7 +178,7 @@ def run_crafter_benchmark(
                     )
                 obs, _ = env.reset(seed=seed)
 
-                if cohort_name in ("pure-hcir", "guided-hcir"):
+                if canonical_cohort == "pure-hcir":
                     agent = PureHCIRCrafterAgent()
                 else:
                     agent = LLMOnlyCrafterAgent(seed=seed)
@@ -250,6 +271,12 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=1000, help="Base random seed")
     parser.add_argument(
+        "--cohort",
+        type=str,
+        default=None,
+        help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
+    )
+    parser.add_argument(
         "--prefer-native",
         "--native",
         action="store_true",
@@ -257,11 +284,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
+
     print(
         f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native={args.prefer_native})\n{'=' * 85}"
     )
 
-    for cohort in ("pure-hcir", "llm-only"):
+    for cohort in cohorts_to_run:
         data = run_crafter_benchmark(
             cohort,
             episodes_per_target=args.episodes_per_target,

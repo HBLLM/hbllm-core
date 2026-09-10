@@ -94,6 +94,26 @@ class LLMOnlyALFWorldAgent:
         return "look"
 
 
+VALID_HCIR_COHORTS = frozenset(
+    {"pure-hcir", "pure_hcir", "guided-hcir", "guided_hcir", "hbllm-core", "hbllm_core", "hcir"}
+)
+VALID_BASELINE_COHORTS = frozenset({"llm-only", "llm_only", "react", "baseline"})
+
+
+def resolve_cohort(cohort_name: str) -> str:
+    """Validate and normalize evaluation cohort identifier, failing loudly on unknown values."""
+    cleaned = cohort_name.strip().lower().replace("_", "-")
+    if cleaned in VALID_HCIR_COHORTS:
+        return "pure-hcir"
+    if cleaned in VALID_BASELINE_COHORTS:
+        return "llm-only"
+    raise ValueError(
+        f"Unrecognized cohort '{cohort_name}'. "
+        f"Allowed HCIR cohorts: {sorted(VALID_HCIR_COHORTS)}. "
+        f"Allowed baseline cohorts: {sorted(VALID_BASELINE_COHORTS)}."
+    )
+
+
 def run_alfworld_benchmark(
     cohort_name: str,
     episodes_per_tier: int = 3,
@@ -101,6 +121,7 @@ def run_alfworld_benchmark(
     episodes: int | None = None,
 ) -> dict[str, Any]:
     """Run benchmark across all 6 ALFWorld task types with per-tier aggregation."""
+    canonical_cohort = resolve_cohort(cohort_name)
     tier_map = {
         "Tier 1: Pick & Place": ALFWorldTaskType.PICK_AND_PLACE,
         "Tier 2: Examine in Light": ALFWorldTaskType.EXAMINE_IN_LIGHT,
@@ -129,7 +150,7 @@ def run_alfworld_benchmark(
             obs, info = env.reset(seed=seed, task_type=task_type)
             goal: ALFWorldGoal = info["goal"]
 
-            if cohort_name in ("pure-hcir", "guided-hcir"):
+            if canonical_cohort == "pure-hcir":
                 agent = PureHCIRALFWorldAgent()
             else:
                 agent = LLMOnlyALFWorldAgent(seed=seed)
@@ -195,11 +216,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ALFWorld 6-Tier Benchmark")
     parser.add_argument("--episodes-per-tier", type=int, default=3, help="Episodes per task tier")
     parser.add_argument("--seed", type=int, default=2000, help="Base seed")
+    parser.add_argument(
+        "--cohort",
+        type=str,
+        default=None,
+        help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
+    )
     args = parser.parse_args()
+
+    cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 85}\nRunning ALFWorld Full-Spectrum Benchmark (6 Task Tiers)\n{'=' * 85}")
 
-    for cohort in ("pure-hcir", "llm-only"):
+    for cohort in cohorts_to_run:
         data = run_alfworld_benchmark(
             cohort, episodes_per_tier=args.episodes_per_tier, base_seed=args.seed
         )

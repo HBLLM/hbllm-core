@@ -102,6 +102,25 @@ MINEDOJO_TIERS = [
     (5, "Tier 5: Stone Pickaxe"),
 ]
 
+VALID_HCIR_COHORTS = frozenset(
+    {"pure-hcir", "pure_hcir", "guided-hcir", "guided_hcir", "hbllm-core", "hbllm_core", "hcir"}
+)
+VALID_BASELINE_COHORTS = frozenset({"llm-only", "llm_only", "react", "baseline"})
+
+
+def resolve_cohort(cohort_name: str) -> str:
+    """Validate and normalize evaluation cohort identifier, failing loudly on unknown values."""
+    cleaned = cohort_name.strip().lower().replace("_", "-")
+    if cleaned in VALID_HCIR_COHORTS:
+        return "pure-hcir"
+    if cleaned in VALID_BASELINE_COHORTS:
+        return "llm-only"
+    raise ValueError(
+        f"Unrecognized cohort '{cohort_name}'. "
+        f"Allowed HCIR cohorts: {sorted(VALID_HCIR_COHORTS)}. "
+        f"Allowed baseline cohorts: {sorted(VALID_BASELINE_COHORTS)}."
+    )
+
 
 def run_minedojo_tier_benchmark(
     cohort_name: str,
@@ -110,6 +129,7 @@ def run_minedojo_tier_benchmark(
     base_seed: int = 6000,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific MineDojo tier."""
+    canonical_cohort = resolve_cohort(cohort_name)
     results: list[MineDojoEpisodeResult] = []
 
     for i in range(episodes):
@@ -118,7 +138,7 @@ def run_minedojo_tier_benchmark(
         obs, info = env.reset(seed=seed)
         goal: MineDojoGoal = info["goal"]
 
-        if cohort_name in ("pure-hcir", "guided-hcir"):
+        if canonical_cohort == "pure-hcir":
             agent = PureHCIRMineDojoAgent()
         else:
             agent = LLMOnlyMineDojoAgent(seed=seed)
@@ -202,7 +222,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MineDojo Multi-Tier Benchmark")
     parser.add_argument("--episodes-per-tier", type=int, default=3, help="Episodes per tier")
     parser.add_argument("--seed", type=int, default=6000, help="Base seed")
+    parser.add_argument(
+        "--cohort",
+        type=str,
+        default=None,
+        help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
+    )
     args = parser.parse_args()
+
+    cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 85}")
     print(
@@ -210,7 +238,7 @@ def main() -> None:
     )
     print(f"{'=' * 85}\n")
 
-    for cohort in ("pure-hcir", "llm-only"):
+    for cohort in cohorts_to_run:
         print(f"--- Cohort: {cohort.upper()} ---")
         print(
             f"{'Progression Tier':<35} | {'Success Rate':<12} | {'95% Wilson CI':<18} | {'Mean Steps'}"
