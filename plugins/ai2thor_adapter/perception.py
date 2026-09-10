@@ -12,10 +12,14 @@ import logging
 from hbllm.hcir.graph import (
     CognitiveGraph,
     EntityLifecycle,
+    GoalNode,
+    HCIREdge,
+    HCIREdgeType,
     PhysicalEntityNode,
 )
 
 from .types import (
+    AI2ThorGoal,
     AI2ThorObjectMetadata,
     AI2ThorObservation,
 )
@@ -32,11 +36,13 @@ class AI2ThorPerceptionAdapter:
     def __init__(self, graph: CognitiveGraph | None = None) -> None:
         self.graph = graph if graph is not None else CognitiveGraph()
 
-    def ingest_observation(self, obs: AI2ThorObservation) -> CognitiveGraph:
-        """Update CognitiveGraph with 3D poses and scene graph containment."""
+    def ingest_observation(
+        self, obs: AI2ThorObservation, goal: AI2ThorGoal | None = None
+    ) -> CognitiveGraph:
+        """Update CognitiveGraph with 3D poses, scene graph containment, and goal."""
         ap = obs.agent_pose.position
 
-        # Update Agent Node
+        # 1. Update Agent Node
         agent_node = PhysicalEntityNode(
             id="agent",
             entity_name="ai2thor_agent",
@@ -48,6 +54,7 @@ class AI2ThorPerceptionAdapter:
                 "rotation": obs.agent_pose.rotation,
                 "horizon": obs.agent_pose.horizon,
                 "held_object_id": obs.held_object_id,
+                "reach_distance": 1.6,
                 "step_count": obs.step_count,
             },
             entity_lifecycle=EntityLifecycle.TRACKED,
@@ -59,7 +66,7 @@ class AI2ThorPerceptionAdapter:
         else:
             self.graph.add_node(agent_node)
 
-        # Ingest Scene Objects
+        # 2. Ingest Scene Objects
         for obj in obs.objects:
             node = PhysicalEntityNode(
                 id=obj.objectId,
@@ -76,6 +83,7 @@ class AI2ThorPerceptionAdapter:
                     "is_openable": obj.isOpenable,
                     "is_opened": obj.isOpened,
                     "is_toggleable": obj.isToggleable,
+                    "is_toggled": obj.isToggled,
                     "parent_receptacles": list(obj.parentReceptacles),
                     "contained_objects": list(obj.receptacleObjectIds),
                 },
@@ -88,7 +96,78 @@ class AI2ThorPerceptionAdapter:
             else:
                 self.graph.add_node(node)
 
+            # Assert containment edges
+            for parent_id in obj.parentReceptacles:
+                edge_id = f"edge_inside_{obj.objectId}_{parent_id}"
+                if not self.graph.has_edge(edge_id) and self.graph.has_node(parent_id):
+                    self.graph.add_edge(
+                        HCIREdge(
+                            id=edge_id,
+                            edge_type=HCIREdgeType.PART_OF,
+                            sources=[obj.objectId],
+                            targets=[parent_id],
+                            properties={"relation": "inside"},
+                        )
+                    )
+
+        # 3. Held Object Edge
+        if obs.held_object_id and self.graph.has_node(obs.held_object_id):
+            edge_id = f"edge_holds_agent_{obs.held_object_id}"
+            if not self.graph.has_edge(edge_id):
+                self.graph.add_edge(
+                    HCIREdge(
+                        id=edge_id,
+                        edge_type=HCIREdgeType.DEPENDS_ON,
+                        sources=["agent"],
+                        targets=[obs.held_object_id],
+                    )
+                )
+
+        # 4. Ingest Goal if provided
+        if goal is not None:
+            self.ingest_goal(goal)
+
         return self.graph
+
+    def ingest_goal(self, goal: AI2ThorGoal) -> GoalNode:
+        """Translate AI2ThorGoal specification into an active HCIR GoalNode."""
+        target_conditions: list[str] = []
+
+        if goal.target_receptacle_id and not goal.target_object_id:
+            # Receptacle open or toggle goal
+            rec_node = self.graph.get_node(goal.target_receptacle_id)
+            rec_props = rec_node.properties if rec_node and hasattr(rec_node, "properties") else {}
+            if rec_props.get("is_toggleable"):
+                target_conditions.append(f"is_toggled({goal.target_receptacle_id})")
+            else:
+                target_conditions.append(f"is_opened({goal.target_receptacle_id})")
+        elif goal.target_object_id and not goal.target_receptacle_id:
+            # Pickup goal
+            target_conditions.append(f"holds({goal.target_object_id})")
+        elif goal.target_object_id and goal.target_receptacle_id:
+            # Relocation goal
+            target_conditions.append(
+                f"inside({goal.target_object_id}, {goal.target_receptacle_id})"
+            )
+
+        goal_node = GoalNode(
+            id="goal_active",
+            description=f"AI2-THOR Goal: {target_conditions}",
+            properties={
+                "target_conditions": target_conditions,
+                "target_object_id": goal.target_object_id,
+                "target_receptacle_id": goal.target_receptacle_id,
+            },
+        )
+        if self.graph.has_node("goal_active"):
+            existing = self.graph.get_node("goal_active")
+            if isinstance(existing, GoalNode):
+                existing.properties.update(goal_node.properties)
+                existing.description = goal_node.description
+        else:
+            self.graph.add_node(goal_node)
+
+        return goal_node
 
     def find_object(self, obs: AI2ThorObservation, object_id: str) -> AI2ThorObjectMetadata | None:
         for obj in obs.objects:

@@ -63,6 +63,7 @@ from hbllm.brain.reasoning.operators.counterfactual import CounterfactualOperato
 
 # ── Phase 7: New Operators ───────────────────────────────────────────
 from hbllm.brain.reasoning.operators.deduction import DeductionOperator
+from hbllm.brain.reasoning.operators.embodied_causal import EmbodiedCausalOperator
 from hbllm.brain.reasoning.operators.induction import InductionOperator
 
 # ── Phase 8: Wrapped Existing Components ─────────────────────────────
@@ -108,4 +109,6 @@ __all__ = [
     "ActiveInferenceOperator",
     "SimulationOperator",
     "SNNReasoningOperator",
+    # Embodiment
+    "EmbodiedCausalOperator",
 ]

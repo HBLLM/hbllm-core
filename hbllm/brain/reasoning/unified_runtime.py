@@ -33,6 +33,7 @@ from hbllm.brain.reasoning.operators.base import (
     FrozenGraphView,
     OperatorInvocation,
     OperatorTrace,
+    ProblemType,
     ProvenanceChain,
     ReasoningBudget,
     ReasoningProblem,
@@ -40,7 +41,7 @@ from hbllm.brain.reasoning.operators.base import (
     ResultStatus,
 )
 from hbllm.brain.reasoning.operators.registry import OperatorRegistry
-from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.graph import CognitiveGraph, HCIRNodeType
 from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionOperation,
@@ -309,6 +310,13 @@ class UnifiedReasoningRuntime:
         auto_ids.update(problem.evidence_node_ids)
         auto_ids.update(problem.constraint_node_ids)
         auto_ids.update(problem.focus_node_ids)
+
+        # For planning problems, the action affordances and physical entities form the decision space
+        if problem.problem_type == ProblemType.PLANNING:
+            for act in graph.nodes_by_type(HCIRNodeType.ACTION):
+                auto_ids.add(act.id)
+            for ent in graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+                auto_ids.add(ent.id)
 
         if not auto_ids:
             return None  # Full graph view

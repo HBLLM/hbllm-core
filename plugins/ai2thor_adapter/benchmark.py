@@ -34,6 +34,10 @@ from ai2thor_adapter.types import (
     AI2ThorGoal,
     AI2ThorObservation,
 )
+from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.graph import ActionNode
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +66,47 @@ class AI2ThorEpisodeResult:
 
 
 class PureHCIRAI2ThorAgent:
-    """Pure HCIR reasoning agent with 0 LLM tokens."""
+    """Pure HCIR reasoning agent with 0 LLM tokens using UnifiedReasoningRuntime."""
 
     def __init__(self) -> None:
         self.perception = AI2ThorPerceptionAdapter()
-        self.action_adapter = AI2ThorActionAdapter()
+        self.actuator = AI2ThorActionAdapter()
+        self.registry = create_default_operator_registry()
+        self.runtime = UnifiedReasoningRuntime(self.registry)
 
     def select_action(self, obs: AI2ThorObservation, goal: AI2ThorGoal) -> dict[str, Any] | str:
-        self.perception.ingest_observation(obs)
-        return self.action_adapter.plan_next_action(obs, goal)
+        # 1. Update HCIR CognitiveGraph with perception and goal
+        graph = self.perception.ingest_observation(obs, goal)
+
+        # 2. Enumerate available affordances
+        affordances = self.actuator.enumerate_affordances(obs, graph)
+        for aff in affordances:
+            if not graph.has_node(aff.id):
+                graph.add_node(aff)
+            else:
+                existing = graph.get_node(aff.id)
+                if isinstance(existing, ActionNode):
+                    existing.requirements = aff.requirements
+                    existing.produces = aff.produces
+                    existing.properties = aff.properties
+
+        # 3. Reason over graph using UnifiedReasoningRuntime (EmbodiedCausalOperator)
+        problem = ReasoningProblem(
+            problem_type=ProblemType.PLANNING,
+            goal_node_ids=("goal_active",),
+            description="Plan next physical manipulation action",
+        )
+        trace = self.runtime.reason(graph=graph, problem=problem)
+
+        # 4. Extract winning action and execute via actuator
+        action_id = trace.final_result.conclusions.get("action_id", "")
+        chosen_node = graph.get_node(action_id) if action_id else None
+
+        if isinstance(chosen_node, ActionNode):
+            return self.actuator.execute_action(chosen_node, obs)
+
+        best_intent = trace.final_result.conclusions.get("best_action", "move_ahead")
+        return self.actuator.execute_action({"intent": best_intent}, obs)
 
 
 class LLMOnlyAI2ThorAgent:

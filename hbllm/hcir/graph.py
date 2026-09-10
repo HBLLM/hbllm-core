@@ -343,6 +343,7 @@ class GoalNode(HCIRNode):
     description: str = ""
     priority: Priority = 0.5
     resolved: bool = False
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConstraintNode(HCIRNode):
@@ -558,6 +559,7 @@ class ActionNode(HCIRNode):
     produces: list[str] = Field(default_factory=list)
     estimated_cost: CostMetric = 0
     permissions: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class EventNode(HCIRNode):

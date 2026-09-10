@@ -308,6 +308,7 @@ def create_default_operator_registry() -> OperatorRegistry:
     from hbllm.brain.reasoning.operators.contradiction import ContradictionOperator
     from hbllm.brain.reasoning.operators.counterfactual import CounterfactualOperator
     from hbllm.brain.reasoning.operators.deduction import DeductionOperator
+    from hbllm.brain.reasoning.operators.embodied_causal import EmbodiedCausalOperator
     from hbllm.brain.reasoning.operators.induction import InductionOperator
     from hbllm.brain.reasoning.operators.prediction import PredictionOperator
     from hbllm.brain.reasoning.operators.simulation import SimulationOperator
@@ -327,4 +328,5 @@ def create_default_operator_registry() -> OperatorRegistry:
     registry.register(PredictionOperator())
     registry.register(SimulationOperator())
     registry.register(ActiveInferenceOperator())
+    registry.register(EmbodiedCausalOperator())
     return registry
