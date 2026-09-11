@@ -1,14 +1,22 @@
 """
-Capability Sandboxing — security & isolation boundaries for capability execution.
+Capability Sandboxing — Two-tier security & isolation boundaries for capability execution.
 
-Provides permission policies, resource constraints, and trust scoring
-for external tool and capability execution:
+HBLLM enforces a verified defense-in-depth sandboxing architecture across two distinct tiers:
 
-    Capability
-    ├── permissions     (filesystem, network, subprocess, db_write)
-    ├── resource_limits (cpu_seconds, memory_mb, max_network_calls)
-    ├── isolation_mode  (in_process, subprocess, container)
-    └── trust_level     (untrusted, verified, system)
+    Tier 1: Logical Capability Policy Sandbox (HCIR Kernel Level)
+    ├── Permission tokens   (allow_filesystem, allow_network, allow_subprocess, allow_db_write)
+    ├── Resource limits     (max_cpu_seconds, max_memory_mb, timeout_seconds)
+    ├── Trust levels        (UNTRUSTED, VERIFIED, SYSTEM)
+    └── Dynamic inference   (AST & parameter inspection to prevent permission bypass)
+
+    Tier 2: Physical Process Isolation Sandbox (OS / Process Level)
+    ├── AST code validation (blocking __subclasses__, exec, eval, builtins)
+    ├── POSIX quotas        (RLIMIT_AS memory limit, RLIMIT_CPU core execution time)
+    ├── Environment strip   (isolated PATH, minimal environment variables)
+    └── Network namespace   (Linux unshare -Urn network isolation)
+
+Capabilities declaring ``IsolationMode.SUBPROCESS`` or executing untrusted Python code
+are automatically dispatched through Tier 2 via ``hbllm.actions.sandbox.run_sandboxed_python``.
 """
 
 from __future__ import annotations

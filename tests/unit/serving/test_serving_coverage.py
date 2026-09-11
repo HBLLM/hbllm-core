@@ -411,13 +411,13 @@ class TestState:
 
 class TestAuditMiddleware:
     def test_classify_action_chat(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         assert AuditMiddleware._classify_action("POST", "/v1/chat") == AuditAction.CHAT_MESSAGE
 
     def test_classify_action_memory_delete(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         assert (
@@ -425,13 +425,13 @@ class TestAuditMiddleware:
         )
 
     def test_classify_action_unknown(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         assert AuditMiddleware._classify_action("OPTIONS", "/unknown") == AuditAction.DATA_ACCESSED
 
     def test_classify_action_admin(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         assert (
@@ -439,7 +439,7 @@ class TestAuditMiddleware:
         )
 
     def test_classify_action_tools(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         assert (
@@ -471,10 +471,10 @@ class TestAuditMiddleware:
         assert AuditMiddleware._get_client_ip(request) == ""
 
     def test_record_severity_levels(self, tmp_path):
-        from hbllm.security.audit_log import AuditLog
+        from hbllm.security.audit_trail import AuditTrail
         from hbllm.serving.middleware.audit import AuditMiddleware
 
-        audit_log = AuditLog(db_path=str(tmp_path / "test_audit.db"))
+        audit_log = AuditTrail(db_path=str(tmp_path / "test_audit.db"))
         middleware = AuditMiddleware.__new__(AuditMiddleware)
         middleware.audit_log = audit_log
 

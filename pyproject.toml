@@ -161,7 +161,8 @@ filterwarnings = [
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-exclude = ["plugins/"]
+explicit_package_bases = true
+exclude = ["plugins/(?!developmental_adapter)"]
 disable_error_code = [
     "assignment", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 

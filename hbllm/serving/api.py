@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 
 from hbllm.config import HBLLMCoreConfig
 from hbllm.network.messages import Message, MessageType, QueryPayload
-from hbllm.security.audit_log import AuditLog
+from hbllm.security.audit_trail import AuditTrail
 from hbllm.serving.auth import JWTAuthMiddleware
 from hbllm.serving.security import BodySizeLimitMiddleware, sanitize_input
 
@@ -438,7 +438,7 @@ async def lifespan(app: FastAPI) -> Any:
     # Initialize Core Config & Security components
     config = HBLLMCoreConfig.load()
     if config.security.audit_enabled:
-        _state["audit_log"] = AuditLog(db_path=config.security.audit_db_path)
+        _state["audit_log"] = AuditTrail(db_path=config.security.audit_db_path)
 
     try:
         await _boot_brain(app=app, model_size=model_size)

@@ -46,7 +46,7 @@ class CohortDiscoveryResult:
 class BaseDevelopmentalCohort(ABC):
     """Abstract base class for developmental benchmark cohorts."""
 
-    def __init__(self, cohort_id: str, seed: int | None = 42) -> None:
+    def __init__(self, cohort_id: str = "cohort", seed: int | None = 42) -> None:
         self.cohort_id = cohort_id
         self.rng = random.Random(seed)
 

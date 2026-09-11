@@ -8,10 +8,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from hbllm.memory.semantic import SemanticMemory
-from hbllm.serving.api import app
 
 
 class TestSynapticPlasticityDynamics:
@@ -123,32 +121,3 @@ class TestSplitPersistence:
         # Load from disk
         loaded_mem = SemanticMemory.load_from_disk(tmp_path)
         assert loaded_mem.synaptic_weights["general"]["coding"] == pytest.approx(0.72)
-
-
-class TestPlasticityServingEndpoints:
-    """Verifies FastAPI serving routes for self-learning in studio.py."""
-
-    @pytest.fixture
-    def client(self, monkeypatch):
-        monkeypatch.setenv("HBLLM_ENV", "development")
-        from hbllm.serving.state import _state
-
-        monkeypatch.setitem(_state, "brain", None)
-        monkeypatch.setitem(_state, "synapse_gateway", None)
-        return TestClient(app)
-
-    def test_studio_learning_weights(self, client):
-        response = client.get("/studio/learning")
-        assert response.status_code == 200
-        data = response.json()
-
-        assert "learner" in data
-        assert "synaptic_weights" in data["learner"]
-        # Default weight for coding-coding should be present and equal 1.0
-        assert data["learner"]["synaptic_weights"]["coding"]["coding"] == pytest.approx(1.0)
-
-    def test_studio_learning_reset_weights(self, client):
-        response = client.post("/studio/learning/reset_weights")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "success"

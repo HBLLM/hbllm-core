@@ -99,7 +99,7 @@ class PedagogicalTeacher:
         logger.info(f"[{self.name}] Beginning Kindergarten instruction.")
 
         # Step 1: Paired Demonstrations (Ostensive Naming with Joint Attention)
-        lessons = [
+        lessons: list[tuple[str, dict[str, Any]]] = [
             ("red", {"color": "red"}),
             ("blue", {"color": "blue"}),
             ("green", {"color": "green"}),

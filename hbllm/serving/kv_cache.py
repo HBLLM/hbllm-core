@@ -518,7 +518,14 @@ class KVCache:
             stacklevel=2,
         )
 
-        payload = torch.load(file_path, map_location="cpu", weights_only=False)  # noqa: S301 # nosec B614
+        try:
+            payload = torch.load(file_path, map_location="cpu", weights_only=True)
+        except Exception as e:
+            raise ValueError(
+                f"Cannot safely load legacy KV cache '{file_path}' with weights_only=True: {e}. "
+                "Insecure deserialization (weights_only=False) is disabled to prevent arbitrary code execution. "
+                "Please regenerate or upgrade this cache using the modern split format (.meta.json + safe weights)."
+            ) from e
 
         config_dict = {
             "num_layers": getattr(model_config, "num_layers", 0),

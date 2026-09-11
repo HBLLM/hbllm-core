@@ -41,7 +41,7 @@ jobs:
           pip install ruff pip-audit bandit mypy
 
       - name: Type check (mypy)
-        run: mypy hbllm/ --config-file pyproject.toml
+        run: mypy hbllm/ plugins/developmental_adapter/ --config-file pyproject.toml
 
       - name: Lint with ruff
         run: ruff check .

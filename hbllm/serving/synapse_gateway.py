@@ -29,7 +29,7 @@ from fastapi import WebSocket
 
 from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
-from hbllm.security.audit_log import AuditLog
+from hbllm.security.audit_trail import AuditTrail
 
 if TYPE_CHECKING:
     from hbllm.actions.tool_registry import RemoteToolNode
@@ -43,7 +43,7 @@ class SynapseGateway:
     Tracks active devices by (tenant_id, user_id, device_id).
     """
 
-    def __init__(self, bus: MessageBus | None = None, audit_log: AuditLog | None = None):
+    def __init__(self, bus: MessageBus | None = None, audit_log: AuditTrail | None = None):
         self.bus = bus
         self.audit_log = audit_log
         # Map: (tenant_id, user_id, device_id) -> WebSocket

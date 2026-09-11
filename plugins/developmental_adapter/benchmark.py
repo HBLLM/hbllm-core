@@ -14,6 +14,7 @@ from typing import Any
 
 from .cohorts import (
     ActiveDevelopmentalHCIRCohort,
+    BaseDevelopmentalCohort,
     MatureHCIRCohort,
     NeuralLearnerCohort,
     PassiveDevelopmentalHCIRCohort,
@@ -28,14 +29,14 @@ logger = logging.getLogger(__name__)
 def run_a23_5_benchmark(
     n_trials: int = 15,
     max_interventions: int = 20,
-    seed_base: int = 100,
     scenario: str = "confounded_train_world",
+    seed_base: int = 42,
 ) -> dict[str, Any]:
-    """Execute A23.5 causal discovery benchmarks across five comparative cohorts."""
+    """Execute evaluation battery across all cohorts on the given world scenario."""
     tracker = DevelopmentalMetricsTracker()
     env = BabyWorldEnvironment()
 
-    cohort_classes = [
+    cohort_classes: list[type[BaseDevelopmentalCohort]] = [
         ScriptedCohort,
         NeuralLearnerCohort,
         MatureHCIRCohort,

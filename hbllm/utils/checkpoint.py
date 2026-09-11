@@ -57,7 +57,7 @@ def load_checkpoint(
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
 
-    # Try safe loading first
+    # Safe loading with weights_only=True enforced unconditionally
     try:
         ckpt = cast(
             dict[str, Any],
@@ -70,27 +70,11 @@ def load_checkpoint(
         logger.debug("Loaded checkpoint safely (weights_only=True): %s", path.name)
         return ckpt
     except Exception as e:
-        if strict_security:
-            raise RuntimeError(
-                f"Checkpoint {path.name} requires weights_only=False but "
-                f"strict_security=True. Error: {e}"
-            ) from e
-
-        logger.warning(
-            "Checkpoint '%s' requires weights_only=False (contains non-tensor "
-            "objects). Loading in compatibility mode. Only load checkpoints "
-            "you trust! Error was: %s",
-            path.name,
-            type(e).__name__,
-        )
-        return cast(
-            dict[str, Any],
-            torch.load(  # nosec B614
-                str(path),
-                map_location=map_location,
-                weights_only=False,
-            ),
-        )
+        raise RuntimeError(
+            f"Checkpoint '{path.name}' failed safe deserialization (weights_only=True): {e}. "
+            f"Arbitrary pickle execution via weights_only=False is strictly disallowed for security. "
+            f"If loading custom classes, add them via torch.serialization.add_safe_globals()."
+        ) from e
 
 
 def extract_model_state(ckpt: dict[str, Any]) -> dict[str, Any]:

@@ -247,35 +247,35 @@ class TestAuditMiddleware(unittest.TestCase):
     """Test audit action classification."""
 
     def test_classify_chat(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         action = AuditMiddleware._classify_action("POST", "/v1/chat/completions")
         assert action == AuditAction.CHAT_MESSAGE
 
     def test_classify_admin(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         action = AuditMiddleware._classify_action("POST", "/v1/admin/config")
         assert action == AuditAction.ADMIN_ACTION
 
     def test_classify_unknown_defaults(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         action = AuditMiddleware._classify_action("GET", "/unknown")
         assert action == AuditAction.DATA_ACCESSED
 
     def test_classify_data_export(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         action = AuditMiddleware._classify_action("POST", "/v1/data/export")
         assert action == AuditAction.DATA_EXPORTED
 
     def test_classify_tool_execution(self):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
         from hbllm.serving.middleware.audit import AuditMiddleware
 
         action = AuditMiddleware._classify_action("POST", "/v1/tools/search")
