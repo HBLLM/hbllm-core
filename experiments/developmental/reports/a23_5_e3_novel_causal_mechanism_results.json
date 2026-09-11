@@ -1,0 +1,208 @@
+{
+  "experiment": "A23.5_friction_confounded_world",
+  "scenario": "friction_confounded_world",
+  "trials_per_cohort": 15,
+  "max_interventions": 20,
+  "cohorts": {
+    "Cohort_A_Scripted": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 1.0,
+      "mean_n_tau": 1.0,
+      "iqr_n_tau": [
+        1.0,
+        1.0
+      ],
+      "bootstrap_ci_95": [
+        1.0,
+        1.0
+      ],
+      "discrete_distribution": {
+        "1": 15
+      },
+      "failures_count": 0,
+      "mean_wasted_interventions": 0,
+      "mean_false_hypotheses": 0,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.0,
+      "all_n_tau": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "Cohort_B_Neural": {
+      "discovery_rate": 0.0,
+      "median_n_tau": 20.0,
+      "mean_n_tau": 20.0,
+      "iqr_n_tau": [
+        20.0,
+        20.0
+      ],
+      "bootstrap_ci_95": [
+        20.0,
+        20.0
+      ],
+      "discrete_distribution": {
+        "20": 15
+      },
+      "failures_count": 15,
+      "mean_wasted_interventions": 19.87,
+      "mean_false_hypotheses": 2,
+      "level1_train_accuracy": 0.85,
+      "level2_unseen_entities_accuracy": 0.65,
+      "level3_unseen_world_accuracy": 0.55,
+      "mean_brier_score": 0.18,
+      "all_n_tau": [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    "Cohort_C_Mature_HCIR": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 1.0,
+      "mean_n_tau": 1.0,
+      "iqr_n_tau": [
+        1.0,
+        1.0
+      ],
+      "bootstrap_ci_95": [
+        1.0,
+        1.0
+      ],
+      "discrete_distribution": {
+        "1": 15
+      },
+      "failures_count": 0,
+      "mean_wasted_interventions": 0,
+      "mean_false_hypotheses": 0,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.01,
+      "all_n_tau": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "Cohort_D_Active_Developmental_HCIR": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 2.0,
+      "mean_n_tau": 2.0,
+      "iqr_n_tau": [
+        2.0,
+        2.0
+      ],
+      "bootstrap_ci_95": [
+        2.0,
+        2.0
+      ],
+      "discrete_distribution": {
+        "2": 15
+      },
+      "failures_count": 0,
+      "mean_wasted_interventions": 1,
+      "mean_false_hypotheses": 2,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.02,
+      "all_n_tau": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "Cohort_E_Passive_Developmental_HCIR": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 2.0,
+      "mean_n_tau": 2.0,
+      "iqr_n_tau": [
+        2.0,
+        2.0
+      ],
+      "bootstrap_ci_95": [
+        2.0,
+        2.0
+      ],
+      "discrete_distribution": {
+        "2": 15
+      },
+      "failures_count": 0,
+      "mean_wasted_interventions": 0.8,
+      "mean_false_hypotheses": 2,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.08,
+      "all_n_tau": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    }
+  }
+}

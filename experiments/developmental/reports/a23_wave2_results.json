@@ -1,0 +1,68 @@
+{
+  "stage_d4_affordances": {
+    "trials": 15,
+    "median_interventions_n_tau": 9,
+    "mean_novel_transfer_acc": 1.0,
+    "all_n_tau": [
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9,
+      9
+    ],
+    "all_transfer_acc": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "stage_d2_containment": {
+    "trials": 15,
+    "transport_invariance_discovery_rate": 1.0,
+    "object_permanence_tracking_rate": 1.0
+  },
+  "stage_d5_tool_use": {
+    "trials": 15,
+    "tool_chain_synthesis_rate": 1.0,
+    "novel_tool_transfer_acc": 1.0,
+    "all_transfer_acc": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ]
+  }
+}

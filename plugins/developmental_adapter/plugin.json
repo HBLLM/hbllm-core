@@ -1,0 +1,46 @@
+{
+  "name": "developmental-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "Developmental Cognitive Learning plugin (Milestone A23): BabyWorld simulator, minimal cognitive initialization (blank brain), Piagetian sensorimotor curriculum, interventional causal discovery under confounding (A23.5), and 5-cohort comparative benchmark for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": ["numpy>=1.24.0"],
+  "tags": [
+    "eval",
+    "benchmark",
+    "developmental",
+    "causal-discovery",
+    "intervention",
+    "confounding",
+    "hcir",
+    "epistemics",
+    "sensorimotor"
+  ],
+  "benchmark_category": "self_authored_diagnostic_battery",
+  "upstream_package": null,
+  "supports_native_execution": false,
+  "supports_standalone_fallback": true,
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "developmental_observe",
+    "developmental_act",
+    "developmental_intervene",
+    "developmental_discover_causality",
+    "developmental_discover_affordances",
+    "developmental_spatial_containment",
+    "developmental_tool_learning",
+    "developmental_goal_planning",
+    "developmental_curiosity",
+    "developmental_concept_abstraction",
+    "developmental_language_grounding",
+    "developmental_compositional_language",
+    "developmental_continual_learning",
+    "developmental_metacognition",
+    "developmental_cross_transfer",
+    "developmental_evaluate_curriculum"
+  ],
+  "permissions": ["environment_simulation"]
+}
+
