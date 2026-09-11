@@ -1,0 +1,658 @@
+{
+  "title": "Wikimedia Scientific Study: Physical Motion and Ball Rolling Demonstration",
+  "video_path_or_url": "data/curriculum/real_video/rolling_ball_demo.mp4",
+  "duration_sec": 20.7,
+  "fps": 29.97,
+  "audio_segments": [
+    {
+      "text": "yellow",
+      "start_sec": 0.5,
+      "end_sec": 2.5,
+      "speaker": "Physics Instructor",
+      "confidence": 0.98
+    },
+    {
+      "text": "ball",
+      "start_sec": 3.0,
+      "end_sec": 5.5,
+      "speaker": "Physics Instructor",
+      "confidence": 0.98
+    },
+    {
+      "text": "push",
+      "start_sec": 6.0,
+      "end_sec": 9.0,
+      "speaker": "Physics Instructor",
+      "confidence": 0.98
+    },
+    {
+      "text": "inside",
+      "start_sec": 10.0,
+      "end_sec": 13.0,
+      "speaker": "Physics Instructor",
+      "confidence": 0.98
+    }
+  ],
+  "frame_segments": [
+    {
+      "frame_index": 0,
+      "timestamp_sec": 0.0,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            232,
+            157,
+            50,
+            27
+          ],
+          "center": [
+            -0.197,
+            -0.053
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 1,
+      "timestamp_sec": 0.968,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            228,
+            157,
+            42,
+            27
+          ],
+          "center": [
+            -0.222,
+            -0.053
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 2,
+      "timestamp_sec": 1.935,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            218,
+            161,
+            41,
+            24
+          ],
+          "center": [
+            -0.255,
+            -0.039
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "timestamp_sec": 2.903,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            197,
+            165,
+            43,
+            28
+          ],
+          "center": [
+            -0.317,
+            -0.006
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 4,
+      "timestamp_sec": 3.871,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            199,
+            164,
+            43,
+            29
+          ],
+          "center": [
+            -0.311,
+            -0.008
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 5,
+      "timestamp_sec": 4.838,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            209,
+            162,
+            48,
+            27
+          ],
+          "center": [
+            -0.272,
+            -0.025
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "timestamp_sec": 5.806,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            237,
+            156,
+            45,
+            23
+          ],
+          "center": [
+            -0.189,
+            -0.069
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 7,
+      "timestamp_sec": 6.773,
+      "active_action": "PUSH",
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            237,
+            159,
+            46,
+            29
+          ],
+          "center": [
+            -0.188,
+            -0.036
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 8,
+      "timestamp_sec": 7.741,
+      "active_action": "PUSH",
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            255,
+            157,
+            42,
+            23
+          ],
+          "center": [
+            -0.138,
+            -0.064
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "timestamp_sec": 8.709,
+      "active_action": "PUSH",
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            269,
+            156,
+            41,
+            26
+          ],
+          "center": [
+            -0.095,
+            -0.061
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 10,
+      "timestamp_sec": 9.676,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            272,
+            161,
+            41,
+            26
+          ],
+          "center": [
+            -0.086,
+            -0.033
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 11,
+      "timestamp_sec": 10.644,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            259,
+            160,
+            45,
+            28
+          ],
+          "center": [
+            -0.12,
+            -0.033
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 12,
+      "timestamp_sec": 11.612,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            250,
+            158,
+            45,
+            29
+          ],
+          "center": [
+            -0.148,
+            -0.042
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 13,
+      "timestamp_sec": 12.579,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            239,
+            157,
+            46,
+            27
+          ],
+          "center": [
+            -0.181,
+            -0.053
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 14,
+      "timestamp_sec": 13.547,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            236,
+            156,
+            42,
+            25
+          ],
+          "center": [
+            -0.197,
+            -0.064
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "timestamp_sec": 14.515,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            236,
+            152,
+            43,
+            29
+          ],
+          "center": [
+            -0.195,
+            -0.075
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 16,
+      "timestamp_sec": 15.482,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            224,
+            155,
+            43,
+            28
+          ],
+          "center": [
+            -0.233,
+            -0.061
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 17,
+      "timestamp_sec": 16.45,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            220,
+            157,
+            43,
+            30
+          ],
+          "center": [
+            -0.245,
+            -0.044
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 18,
+      "timestamp_sec": 17.417,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            228,
+            154,
+            42,
+            26
+          ],
+          "center": [
+            -0.222,
+            -0.072
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 19,
+      "timestamp_sec": 18.385,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            232,
+            152,
+            42,
+            28
+          ],
+          "center": [
+            -0.209,
+            -0.078
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 20,
+      "timestamp_sec": 19.353,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            236,
+            148,
+            44,
+            28
+          ],
+          "center": [
+            -0.194,
+            -0.1
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "frame_index": 21,
+      "timestamp_sec": 20.32,
+      "active_action": null,
+      "detections": [
+        {
+          "entity_id": "vid_ent_yellow_1",
+          "object_type": "block",
+          "color": "yellow",
+          "bbox": [
+            242,
+            151,
+            44,
+            28
+          ],
+          "center": [
+            -0.175,
+            -0.083
+          ],
+          "velocity": [
+            0.0,
+            0.0
+          ],
+          "is_moving": false,
+          "confidence": 0.95
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "source": "Wikimedia Commons (Bombus terrestris rolling ball)",
+    "license": "CC-BY-4.0"
+  }
+}

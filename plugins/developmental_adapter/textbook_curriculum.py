@@ -354,8 +354,14 @@ class TextbookCurriculumCurator:
                     context["entity_type"] = BabyObjectType.BOX
                 elif "tool" in term or "stick" in term or "lever" in term:
                     context["entity_type"] = BabyObjectType.TOOL
+                elif "fulcrum" in term or "pivot" in term:
+                    context["entity_type"] = BabyObjectType.SURFACE
                 elif "pull" in term:
                     context["action"] = BabyActionType.PULL
+                elif "push" in term:
+                    context["action"] = BabyActionType.PUSH
+                elif "advantage" in term:
+                    context["property"] = "mechanical_advantage"
                 student.grounding_engine.observe_paired_demonstration(term, context)
             results["glossary_count"] = len(glossary)
             results["sections_processed"] += 1

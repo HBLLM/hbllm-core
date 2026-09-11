@@ -91,6 +91,8 @@ class LanguageGroundingEngine:
 
         # Update best grounded entry for each token
         for token, associations in self.co_occurrence_matrix.items():
+            if not associations:
+                continue
             best_target, max_count = max(associations.items(), key=lambda item: item[1])
             cat_str, sym = best_target.split(":", 1)
             cat = LexicalCategory(cat_str)
