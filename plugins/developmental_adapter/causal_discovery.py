@@ -456,7 +456,7 @@ class InterventionalCausalDiscoveryEngine:
                 predicted_moves = False
 
             # Ground truth physical outcome:
-            if prop_key == "clearance_diameter" or "clearance_diameter" in obj_info:
+            if prop_key == "clearance_diameter":
                 actual_moves = actual_clearance <= 0.5
             else:
                 effective_resistance = max(actual_mass * actual_friction, actual_static)

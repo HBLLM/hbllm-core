@@ -26,7 +26,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.0,
+        "mean_brier_score": 0.0001,
         "all_n_tau": [
           1,
           1,
@@ -56,12 +56,12 @@
           "20": 10
         },
         "failures_count": 10,
-        "mean_wasted_interventions": 19.8,
+        "mean_wasted_interventions": 7.6,
         "mean_false_hypotheses": 2,
-        "level1_train_accuracy": 0.85,
-        "level2_unseen_entities_accuracy": 0.65,
-        "level3_unseen_world_accuracy": 0.55,
-        "mean_brier_score": 0.18,
+        "level1_train_accuracy": 0.5,
+        "level2_unseen_entities_accuracy": 0.3333,
+        "level3_unseen_world_accuracy": 0.5,
+        "mean_brier_score": 0.3866,
         "all_n_tau": [
           20,
           20,
@@ -96,7 +96,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.01,
+        "mean_brier_score": 0.0001,
         "all_n_tau": [
           1,
           1,
@@ -128,10 +128,10 @@
         "failures_count": 0,
         "mean_wasted_interventions": 0,
         "mean_false_hypotheses": 3,
-        "level1_train_accuracy": 0.5,
+        "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.02,
+        "mean_brier_score": 0.0025,
         "all_n_tau": [
           2,
           2,
@@ -163,10 +163,10 @@
         "failures_count": 0,
         "mean_wasted_interventions": 0.7,
         "mean_false_hypotheses": 3,
-        "level1_train_accuracy": 0.5,
+        "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.08,
+        "mean_brier_score": 0.0025,
         "all_n_tau": [
           2,
           2,
@@ -209,7 +209,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.0,
+        "mean_brier_score": 0.0001,
         "all_n_tau": [
           1,
           1,
@@ -239,12 +239,12 @@
           "20": 10
         },
         "failures_count": 10,
-        "mean_wasted_interventions": 0.6,
+        "mean_wasted_interventions": 7.6,
         "mean_false_hypotheses": 2,
-        "level1_train_accuracy": 0.85,
-        "level2_unseen_entities_accuracy": 0.65,
-        "level3_unseen_world_accuracy": 0.55,
-        "mean_brier_score": 0.18,
+        "level1_train_accuracy": 0.5,
+        "level2_unseen_entities_accuracy": 0.3333,
+        "level3_unseen_world_accuracy": 0.5,
+        "mean_brier_score": 0.3591,
         "all_n_tau": [
           20,
           20,
@@ -279,7 +279,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.01,
+        "mean_brier_score": 0.0001,
         "all_n_tau": [
           1,
           1,
@@ -311,10 +311,10 @@
         "failures_count": 0,
         "mean_wasted_interventions": 0,
         "mean_false_hypotheses": 3,
-        "level1_train_accuracy": 0.5,
+        "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.02,
+        "mean_brier_score": 0.0025,
         "all_n_tau": [
           2,
           2,
@@ -346,10 +346,10 @@
         "failures_count": 0,
         "mean_wasted_interventions": 0.7,
         "mean_false_hypotheses": 3,
-        "level1_train_accuracy": 0.5,
+        "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.08,
+        "mean_brier_score": 0.0025,
         "all_n_tau": [
           2,
           2,
@@ -392,7 +392,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.0,
+        "mean_brier_score": 0.0001,
         "all_n_tau": [
           1,
           1,
@@ -407,7 +407,7 @@
         ]
       },
       "Cohort_B_Neural": {
-        "discovery_rate": 0.0,
+        "discovery_rate": 0.1,
         "median_n_tau": 20.0,
         "mean_n_tau": 20.0,
         "iqr_n_tau": [
@@ -421,13 +421,13 @@
         "discrete_distribution": {
           "20": 10
         },
-        "failures_count": 10,
-        "mean_wasted_interventions": 5.8,
+        "failures_count": 9,
+        "mean_wasted_interventions": 7.6,
         "mean_false_hypotheses": 2,
-        "level1_train_accuracy": 0.85,
-        "level2_unseen_entities_accuracy": 0.65,
-        "level3_unseen_world_accuracy": 0.55,
-        "mean_brier_score": 0.18,
+        "level1_train_accuracy": 0.81,
+        "level2_unseen_entities_accuracy": 0.3333,
+        "level3_unseen_world_accuracy": 0.5,
+        "mean_brier_score": 0.3683,
         "all_n_tau": [
           20,
           20,
@@ -462,7 +462,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.01,
+        "mean_brier_score": 0.0001,
         "all_n_tau": [
           1,
           1,
@@ -497,7 +497,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.02,
+        "mean_brier_score": 0.0025,
         "all_n_tau": [
           2,
           2,
@@ -532,7 +532,7 @@
         "level1_train_accuracy": 1.0,
         "level2_unseen_entities_accuracy": 1.0,
         "level3_unseen_world_accuracy": 1.0,
-        "mean_brier_score": 0.08,
+        "mean_brier_score": 0.0025,
         "all_n_tau": [
           2,
           2,
