@@ -347,3 +347,15 @@ class CrossTransferEvaluation:
     zero_shot_transfer_accuracy: float
     sample_efficiency_ratio: float
     reused_schemas: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ExamQuestionResult:
+    """Outcome of a single exam question or challenge."""
+
+    question_text: str
+    student_response: str
+    ground_truth: str
+    is_correct: bool
+    confidence: float
+    brier_error: float

@@ -11,6 +11,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
 
@@ -32,6 +33,7 @@ from .types import (
     BabyObjectState,
     BabyObjectType,
     BabyRelationType,
+    ExamQuestionResult,
     LexicalCategory,
     PredicateGoal,
     Vector2D,
@@ -47,18 +49,6 @@ class GradeLevel(str, Enum):
     ELEMENTARY = "Grade 2: Elementary School (Causal Physics & Mechanics)"
     MIDDLE_SCHOOL = "Grade 3: Middle School (Compositional Syntax & Tool Planning)"
     HIGH_SCHOOL = "Grade 4: High School (Relational Transfer & Metacognition)"
-
-
-@dataclass
-class ExamQuestionResult:
-    """Outcome of a single exam question or challenge."""
-
-    question_text: str
-    student_response: str
-    ground_truth: str
-    is_correct: bool
-    confidence: float
-    brier_error: float
 
 
 @dataclass
@@ -681,3 +671,67 @@ class PedagogicalTeacher:
         if accuracy >= 0.70:
             return "C"
         return "F (Needs Remediation)"
+
+    def teach_from_video(
+        self,
+        student: BlankBrainSubstrate,
+        manifest: Any,
+    ) -> list[Any]:
+        """Teach student vocabulary and action affordances via multimodal video demonstration."""
+        from .video_curriculum import VideoCurriculumCurator
+
+        curator = VideoCurriculumCurator()
+        pairs = curator.teach_kindergarten_from_manifest(student, manifest)
+        logger.info(
+            f"[{self.name}] Taught from video '{getattr(manifest, 'title', 'Video')}': {len(pairs)} demonstrations processed."
+        )
+        return pairs
+
+    def teach_from_textbook(
+        self,
+        student: BlankBrainSubstrate,
+        chapter: Any,
+    ) -> dict[str, Any]:
+        """Teach student formal definitions, simulation puzzles, and analogies from a textbook chapter."""
+        from .textbook_curriculum import TextbookCurriculumCurator, TextbookParser
+
+        if isinstance(chapter, str):
+            chapter = TextbookParser.parse_markdown(chapter)
+
+        curator = TextbookCurriculumCurator()
+        res = curator.teach_chapter(student, chapter)
+        logger.info(f"[{self.name}] Taught from textbook chapter '{chapter.title}': {res}")
+        return res
+
+    def conduct_textbook_exam(
+        self,
+        student: BlankBrainSubstrate,
+        chapter: Any,
+    ) -> GradeAssessment:
+        """Administer an un-mocked Socratic examination based directly on a textbook chapter."""
+        from .textbook_curriculum import TextbookCurriculumCurator, TextbookParser
+
+        if isinstance(chapter, str):
+            chapter = TextbookParser.parse_markdown(chapter)
+
+        curator = TextbookCurriculumCurator()
+        q_results = curator.conduct_chapter_examination(student, chapter)
+
+        correct = sum(1 for q in q_results if q.is_correct)
+        acc_val = round(correct / len(q_results), 4) if q_results else 0.0
+        mean_brier = (
+            round(sum(q.brier_error for q in q_results) / len(q_results), 4) if q_results else 1.0
+        )
+        letter = self._compute_letter_grade(acc_val, mean_brier)
+
+        return GradeAssessment(
+            grade_level=GradeLevel.HIGH_SCHOOL,
+            subject_title=f"Textbook Assessment: {chapter.title}",
+            total_questions=len(q_results),
+            correct_count=correct,
+            accuracy=acc_val,
+            mean_brier_score=mean_brier,
+            letter_grade=letter,
+            teacher_feedback=f"Completed Socratic examination directly compiled from '{chapter.title}'.",
+            question_results=q_results,
+        )
