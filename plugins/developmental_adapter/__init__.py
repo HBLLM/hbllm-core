@@ -40,7 +40,14 @@ from .perception import (
     DevelopmentalPerceptionAdapter,
     SemanticLeakageViolationError,
 )
+from .school import CognitiveSchool, GraduationTranscript
 from .spatial_containment import SpatialContainmentEngine
+from .teacher import (
+    GradeAssessment,
+    GradeLevel,
+    PedagogicalTeacher,
+    StudentProfile,
+)
 from .tool_learning import ToolLearningEngine
 from .types import (
     AffordanceHypothesis,
@@ -117,6 +124,7 @@ __all__ = [
     "CURRICULUM_SPECS",
     "CausalHypothesis",
     "CohortDiscoveryResult",
+    "CognitiveSchool",
     "CompositionalLanguageEngine",
     "ConceptAbstractionEngine",
     "ConceptCluster",
@@ -132,6 +140,9 @@ __all__ = [
     "EpistemicCuriosityEngine",
     "EpistemicUncertaintyReport",
     "GoalDirectedPlanningEngine",
+    "GradeAssessment",
+    "GradeLevel",
+    "GraduationTranscript",
     "InterventionalCausalDiscoveryEngine",
     "LanguageGroundingEngine",
     "LexicalCategory",
@@ -141,6 +152,7 @@ __all__ = [
     "MetacognitiveReport",
     "NeuralLearnerCohort",
     "PassiveDevelopmentalHCIRCohort",
+    "PedagogicalTeacher",
     "PlanExecutionResult",
     "PlanStep",
     "PredicateGoal",
@@ -149,6 +161,7 @@ __all__ = [
     "SensoryObservation",
     "SpatialContainmentEngine",
     "SpatialRelationFact",
+    "StudentProfile",
     "ToolLearningEngine",
     "Vector2D",
     "create_blank_brain_substrate",
