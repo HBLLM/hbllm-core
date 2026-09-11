@@ -49,6 +49,12 @@ from .teacher import (
     StudentProfile,
 )
 from .tool_learning import ToolLearningEngine
+from .trainer import (
+    CognitiveSchoolTrainer,
+    SchoolTrainingConfig,
+    SchoolTrainingSummary,
+    SemesterReport,
+)
 from .types import (
     AffordanceHypothesis,
     BabyActionType,
@@ -125,6 +131,7 @@ __all__ = [
     "CausalHypothesis",
     "CohortDiscoveryResult",
     "CognitiveSchool",
+    "CognitiveSchoolTrainer",
     "CompositionalLanguageEngine",
     "ConceptAbstractionEngine",
     "ConceptCluster",
@@ -156,8 +163,11 @@ __all__ = [
     "PlanExecutionResult",
     "PlanStep",
     "PredicateGoal",
+    "SchoolTrainingConfig",
+    "SchoolTrainingSummary",
     "ScriptedCohort",
     "SemanticLeakageViolationError",
+    "SemesterReport",
     "SensoryObservation",
     "SpatialContainmentEngine",
     "SpatialRelationFact",

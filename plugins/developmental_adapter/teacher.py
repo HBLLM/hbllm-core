@@ -20,6 +20,7 @@ from .blank_brain import BlankBrainSubstrate
 from .causal_discovery import InterventionalCausalDiscoveryEngine
 from .cohorts import generate_test_suites
 from .compositional_language import CompositionalLanguageEngine
+from .continual_development import ContinualDevelopmentEngine
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -89,6 +90,7 @@ class StudentProfile:
     compositional_engine: CompositionalLanguageEngine
     metacognitive_engine: MetacognitiveEngine
     a20_bridge: A20RelationalTransferBridge
+    continual_engine: ContinualDevelopmentEngine | None = None
 
 
 class PedagogicalTeacher:
@@ -227,6 +229,9 @@ class PedagogicalTeacher:
             student.causal_engine.execute_interventional_probe(
                 target_id, action=BabyActionType.PUSH
             )
+
+        # Induce functional shape affordances (roll, slide, grasp)
+        student.affordance_engine.discover_affordances(max_interventions=10)
 
         # Step 2: Administer Elementary Exam on novel Level 2 held-out entities
         unseen_entities, _ = generate_test_suites("mass_sensation")

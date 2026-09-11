@@ -14,6 +14,7 @@ from .affordance_discovery import AffordanceDiscoveryEngine
 from .blank_brain import create_blank_brain_substrate
 from .causal_discovery import InterventionalCausalDiscoveryEngine
 from .compositional_language import CompositionalLanguageEngine
+from .continual_development import ContinualDevelopmentEngine
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -80,6 +81,7 @@ class CognitiveSchool:
         )
         metacognitive_engine = MetacognitiveEngine(substrate=substrate, env=env)
         a20_bridge = A20RelationalTransferBridge()
+        continual_engine = ContinualDevelopmentEngine(substrate=substrate, env=env)
 
         return StudentProfile(
             substrate=substrate,
@@ -93,6 +95,7 @@ class CognitiveSchool:
             compositional_engine=compositional_engine,
             metacognitive_engine=metacognitive_engine,
             a20_bridge=a20_bridge,
+            continual_engine=continual_engine,
         )
 
     def run_full_curriculum(self) -> GraduationTranscript:
