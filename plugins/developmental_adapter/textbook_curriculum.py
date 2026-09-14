@@ -12,11 +12,12 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
 
-from .blank_brain import BlankBrainSubstrate
+if TYPE_CHECKING:
+    from .teacher import StudentProfile
 from .types import (
     BabyActionType,
     BabyObjectState,
@@ -185,14 +186,20 @@ class TextbookParser:
 
         elif sec_type == TextbookSectionType.ANALOGY_SCHEMA:
             # Extract source and target domain descriptions
-            payload["source_domain"] = "Tabletop Container / Lever"
-            payload["target_domain"] = "Industrial Ore Hopper"
+            m_src = re.search(r"Source Domain:\s*([^\n]+)", text, re.IGNORECASE)
+            m_tgt = re.search(r"Target Domain:\s*([^\n]+)", text, re.IGNORECASE)
+            payload["source_domain"] = (
+                m_src.group(1).strip() if m_src else "Tabletop Container / Lever"
+            )
+            payload["target_domain"] = m_tgt.group(1).strip() if m_tgt else "Industrial Ore Hopper"
             payload["schema_type"] = "containment"
             payload["is_applicable"] = True
 
         elif sec_type == TextbookSectionType.EXAM_CHALLENGE:
             payload["has_trick_question"] = (
-                "mystery" in text.lower() or "unobserved" in text.lower()
+                "mystery" in text.lower()
+                or "unobserved" in text.lower()
+                or "abstain" in text.lower()
             )
 
         return payload
@@ -206,12 +213,23 @@ class TextbookSimulationCompiler:
         """Transform a worked problem section into an executable simulation state."""
         payload = section.structured_payload
         instruction = payload.get("instruction", "pull green ball inside box")
+        inst_low = instruction.lower()
+
+        target_color = "green"
+        if "red" in inst_low:
+            target_color = "red"
+        elif "blue" in inst_low:
+            target_color = "blue"
+        elif "yellow" in inst_low:
+            target_color = "yellow"
+
+        ball_id = f"target_{target_color}_ball"
 
         # Create physical entities described in the textbook problem
         target_ball = BabyObjectState(
-            id="target_green_ball",
+            id=ball_id,
             object_type=BabyObjectType.BALL,
-            color="green",
+            color=target_color,
             mass=0.5,
             position=Vector2D(1.2, 0.4),  # Distant / out of direct arm reach
             size=Vector2D(0.2, 0.2),
@@ -237,14 +255,14 @@ class TextbookSimulationCompiler:
         )
 
         objects = {
-            "target_green_ball": target_ball,
+            ball_id: target_ball,
             "reach_stick": reach_stick,
             "storage_box": storage_box,
         }
 
         goal = PredicateGoal(
             predicate=BabyRelationType.INSIDE,
-            subject_id="target_green_ball",
+            subject_id=ball_id,
             target_id="storage_box",
         )
 
@@ -259,7 +277,7 @@ class TextbookSimulationCompiler:
 
     @staticmethod
     def verify_student_solution(
-        student: BlankBrainSubstrate,
+        student: StudentProfile | Any,
         puzzle: CompiledSimulationPuzzle,
     ) -> dict[str, Any]:
         """Load puzzle into student's environment, execute planned solution, and assess outcome."""
@@ -316,10 +334,13 @@ class TextbookAnalogyCompiler:
             )
         )
 
+        source_name = section.structured_payload.get("source_domain", "Tabletop Box & Ball")
+        target_name = section.structured_payload.get("target_domain", "Industrial Ore Hopper")
+
         return CompiledAnalogyTask(
             task_id=f"analogy_{section.section_id}",
-            source_domain_name="Tabletop Box & Ball",
-            target_domain_name="Industrial Ore Hopper",
+            source_domain_name=source_name,
+            target_domain_name=target_name,
             source_schema_type="containment",
             target_graph=target_hopper,
             expected_mapping_status="APPLICABLE",
@@ -337,7 +358,7 @@ class TextbookCurriculumCurator:
 
     def teach_chapter(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile | Any,
         chapter: TextbookChapter,
     ) -> dict[str, Any]:
         """Deliver chapter lessons: lexical concepts, physical simulation puzzles, and analogies."""
@@ -362,6 +383,8 @@ class TextbookCurriculumCurator:
                     context["action"] = BabyActionType.PUSH
                 elif "advantage" in term:
                     context["property"] = "mechanical_advantage"
+                else:
+                    context["property"] = term
                 student.grounding_engine.observe_paired_demonstration(term, context)
             results["glossary_count"] = len(glossary)
             results["sections_processed"] += 1
@@ -389,7 +412,7 @@ class TextbookCurriculumCurator:
 
     def conduct_chapter_examination(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile | Any,
         chapter: TextbookChapter,
     ) -> list[ExamQuestionResult]:
         """Administer an un-mocked Socratic examination based directly on textbook contents."""

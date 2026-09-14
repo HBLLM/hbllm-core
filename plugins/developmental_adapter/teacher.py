@@ -689,7 +689,7 @@ class PedagogicalTeacher:
 
     def teach_from_textbook(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile,
         chapter: Any,
     ) -> dict[str, Any]:
         """Teach student formal definitions, simulation puzzles, and analogies from a textbook chapter."""
@@ -705,7 +705,7 @@ class PedagogicalTeacher:
 
     def conduct_textbook_exam(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile,
         chapter: Any,
     ) -> GradeAssessment:
         """Administer an un-mocked Socratic examination based directly on a textbook chapter."""
