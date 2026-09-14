@@ -229,9 +229,9 @@ async def studio_rbac_audit(request: Request, limit: int = 50) -> Any:
     db_path = os.path.join(data_dir, "audit.db")
 
     try:
-        from hbllm.security.audit_log import AuditLog
+        from hbllm.security.audit_trail import AuditTrail
 
-        audit = AuditLog(db_path=db_path)
+        audit = AuditTrail(db_path=db_path)
         entries = audit.query(tenant_id=tenant_id, limit=limit)
         return {
             "tenant_id": tenant_id,

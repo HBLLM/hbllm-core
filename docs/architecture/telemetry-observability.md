@@ -89,15 +89,30 @@ This enables:
 - **Deterministic replay**: Parent/correlation chains reconstruct causality
 - **Distributed sync**: Event IDs prevent duplication
 
+### 4. Enterprise Metrics & Distributed Tracing (`network/metrics.py` & `observability/tracing.py`)
+
+Provides production-grade Prometheus metrics and OpenTelemetry tracing with graceful zero-dependency fallback:
+
+| Metric Category | Metrics | Purpose |
+|---|---|---|
+| **Cognitive Pipeline** | `hbllm_requests_total`, `hbllm_request_duration_seconds`, `hbllm_node_latency_seconds` | Request latency and throughput |
+| **SNN Dynamics** | `hbllm_snn_potentials`, `hbllm_snn_spikes_total` | Real-time membrane potentials and spike rates |
+| **Developmental Learning** | `hbllm_developmental_hypotheses_total`, `hbllm_developmental_concepts_total`, `hbllm_developmental_interventions_total`, `hbllm_developmental_entropy`, `hbllm_developmental_learning_duration_seconds` | Real-time tracking of causal discovery, belief entropy, and curriculum acquisition |
+
+The developmental learning plugin exposes `DevelopmentalTelemetryEmitter` (`plugins/developmental_adapter/metrics.py`) which automatically bridges to `MetricsCollector` when available and falls back to local in-memory ring buffers.
+
 ## Design Invariants
 
 1. **Telemetry must remain strictly observational** — no influence on cognitive states or decisions.
 2. **All cognitive events carry provenance** — no untracked decisions.
 3. **Decision replay is deterministic** — same records → same behavior.
 4. **JSONL export** is always available for offline analysis.
+5. **Graceful degradation** — telemetry and distributed tracing become silent zero-overhead no-ops if external libraries (`opentelemetry`, `prometheus_client`) are absent.
 
 ## Cross-References
 
+- [Developmental Learning](./developmental-learning.md) — active causal discovery and curriculum telemetry
 - [Executive Brain Layer](./executive-brain-layer.md) — the primary producer of telemetry events
 - [Self-Model](./self-model.md) — persistent identity (complementary to DigitalTwin)
+- [Packaging & Boundaries](./packaging-and-boundaries.md) — core-runtime vs optional extras segregation
 - [ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md) — design decisions

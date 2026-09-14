@@ -406,21 +406,21 @@ class TestSecretProviderFactory:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# audit_log.py
+# audit_trail.py
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestAuditLog:
+class TestAuditTrail:
     @pytest.fixture
     def audit(self, tmp_path):
-        from hbllm.security.audit_log import AuditLog
+        from hbllm.security.audit_trail import AuditTrail
 
-        log = AuditLog(db_path=str(tmp_path / "audit.db"))
+        log = AuditTrail(db_path=str(tmp_path / "audit.db"))
         yield log
         log.close()
 
     def test_init_with_data_dir(self, tmp_path):
-        from hbllm.security.audit_log import AuditLog
+        from hbllm.security.audit_trail import AuditLog
 
         log = AuditLog(data_dir=tmp_path)
         assert Path(log._db_path).name == "audit.db"
@@ -428,7 +428,7 @@ class TestAuditLog:
         log.close()
 
     def test_log_basic(self, audit):
-        from hbllm.security.audit_log import AuditAction
+        from hbllm.security.audit_trail import AuditAction
 
         entry = audit.log(
             action=AuditAction.AUTH_LOGIN,
@@ -442,7 +442,7 @@ class TestAuditLog:
         assert entry.action == "auth.login"
 
     def test_log_critical_severity(self, audit):
-        from hbllm.security.audit_log import AuditAction, AuditSeverity
+        from hbllm.security.audit_trail import AuditAction, AuditSeverity
 
         entry = audit.log(
             action=AuditAction.ADMIN_ACTION,
@@ -541,11 +541,13 @@ class TestAuditLog:
         assert len(audit.export_json(tenant_id="t1")) == 1
 
     def test_purge_old_entries(self, audit):
-        audit._conn.execute(
-            "INSERT INTO audit_log (id, timestamp, tenant_id, actor, action, details) VALUES (?,?,?,?,?,?)",
-            ("old1", time.time() - 400 * 86400, "t1", "sys", "test.old", "{}"),
+        conn = audit._get_conn()
+        conn.execute(
+            "INSERT INTO audit_trail (timestamp, tenant_id, actor, action, details, entry_hash) VALUES (?,?,?,?,?,?)",
+            (time.time() - 400 * 86400, "t1", "sys", "test.old", "{}", "dummy_hash"),
         )
-        audit._conn.commit()
+        conn.commit()
+        conn.close()
         audit.log(action="new", tenant_id="t1")
         assert audit.purge_old_entries(older_than_days=365) == 1
         assert audit.count() == 1

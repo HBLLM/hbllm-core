@@ -1,0 +1,51 @@
+{
+  "D3_CausalDiscovery": {
+    "median_n_tau": 2,
+    "mean_transfer_accuracy": 1.0
+  },
+  "D4_AffordanceDiscovery": {
+    "median_n_tau": 9,
+    "mean_novel_transfer_accuracy": 1.0
+  },
+  "D2_SpatialContainment": {
+    "transport_invariance_discovery_rate": 1.0,
+    "contained_permanence_tracking_rate": 1.0
+  },
+  "D5_ToolUse": {
+    "tool_synthesis_success_rate": 1.0
+  },
+  "D6_D7_GoalPlanning": {
+    "goal_completion_rate": 1.0,
+    "mean_replans": 0.0
+  },
+  "D8_Curiosity": {
+    "mean_entropy_reduction": 3.009189772097834,
+    "mean_discovered_rules": 4.0
+  },
+  "D9_ConceptAbstraction": {
+    "ood_categorization_accuracy": 1.0
+  },
+  "D10_LanguageGrounding": {
+    "mean_acquired_lexicon_size": 4.0
+  },
+  "D11_CompositionalLanguage": {
+    "zero_shot_instruction_execution_rate": 1.0
+  },
+  "D12_ContinualDevelopment": {
+    "backward_transfer_bwt": 0.0,
+    "zero_catastrophic_forgetting": true
+  },
+  "D13_Metacognition": {
+    "brier_score": 0.006250000000000003,
+    "expected_calibration_error": 0.07500000000000002,
+    "abstention_accuracy": 1.0
+  },
+  "D14_CrossWorldTransfer": {
+    "zero_shot_transfer_accuracy": 1.0,
+    "sample_efficiency_ratio": 4.5
+  },
+  "D15_CrossDomainTransfer": {
+    "zero_shot_transfer_accuracy": 1.0,
+    "sample_efficiency_ratio": 5.2
+  }
+}

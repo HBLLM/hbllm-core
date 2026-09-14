@@ -1,0 +1,97 @@
+{
+  "transfer_results": [
+    {
+      "test_case": "containment_to_hopper",
+      "source_schema": "Developmental-Containment-Transport",
+      "target_domain": "industrial_hopper_transport",
+      "is_applicable": true,
+      "is_rejected": false,
+      "alignment_score": 0.755,
+      "candidate_actions": [
+        [
+          "PUT_IN",
+          {
+            "item_id": "ore_pellet",
+            "container_id": "industrial_hopper"
+          }
+        ],
+        [
+          "MOVE",
+          {
+            "target_id": "industrial_hopper"
+          }
+        ]
+      ],
+      "role_mapping": {
+        "Container": "industrial_hopper",
+        "Payload": "ore_pellet"
+      },
+      "expected_applicable": true
+    },
+    {
+      "test_case": "containment_sealed_vault_negative_rejection",
+      "source_schema": "Developmental-Containment-Transport",
+      "target_domain": "sealed_vault_containment",
+      "is_applicable": false,
+      "is_rejected": true,
+      "alignment_score": 0.0,
+      "violations": [
+        "Constraint violation on role 'Container': expected is_closed=False, got True"
+      ],
+      "expected_applicable": false
+    },
+    {
+      "test_case": "tool_reach_to_robotic_lever",
+      "source_schema": "Developmental-Tool-Reach-Extension",
+      "target_domain": "robotic_lever_manipulation",
+      "is_applicable": true,
+      "is_rejected": false,
+      "alignment_score": 0.8,
+      "candidate_actions": [
+        [
+          "USE_TOOL",
+          {
+            "agent_id": "robotic_arm",
+            "tool_id": "crowbar",
+            "target_id": "stuck_crate"
+          }
+        ]
+      ],
+      "role_mapping": {
+        "Agent": "robotic_arm",
+        "Tool": "crowbar",
+        "Target": "stuck_crate"
+      },
+      "expected_applicable": true
+    },
+    {
+      "test_case": "causal_rule_to_conveyor_pusher",
+      "source_schema": "Developmental-Causal-Push-surface_friction",
+      "target_domain": "conveyor_system",
+      "is_applicable": true,
+      "is_rejected": false,
+      "alignment_score": 0.755,
+      "candidate_actions": [
+        [
+          "PUSH",
+          {
+            "agent_id": "conveyor_pusher",
+            "target_id": "smooth_pallet"
+          }
+        ]
+      ],
+      "role_mapping": {
+        "Agent": "conveyor_pusher",
+        "Target": "smooth_pallet"
+      },
+      "expected_applicable": true
+    }
+  ],
+  "metrics": {
+    "total_test_cases": 4,
+    "positive_transfer_success_rate": 1.0,
+    "negative_transfer_rejection_rate": 1.0,
+    "overall_analogical_accuracy": 1.0,
+    "mean_positive_alignment_score": 0.77
+  }
+}

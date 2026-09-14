@@ -163,7 +163,7 @@ def test_lora_adapter_save(tiny_model, tmp_ckpt_dir):
     adapter_path = Path(tmp_ckpt_dir) / "personalization_adapter.pt"
     assert adapter_path.exists(), f"Adapter not saved to {adapter_path}"
 
-    state = torch.load(adapter_path, map_location="cpu", weights_only=False)
+    state = torch.load(adapter_path, map_location="cpu", weights_only=True)
     assert isinstance(state, dict)
     assert len(state) > 0, "Adapter state dict is empty"
 

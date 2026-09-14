@@ -128,14 +128,14 @@ Injection patterns detected include:
 
 PBKDF2-SHA256 with 100,000 iterations and 16-byte random salts for admin password storage.
 
-## 5. Audit Logging (`hbllm.security.audit_log`)
+## 5. Audit Logging (`hbllm.security.audit_trail`)
 
-An append-only, SOC2/GDPR-compliant audit trail captures every security-sensitive operation with the full identity triplet:
+An append-only, SOC2/GDPR-compliant, cryptographically hash-chained audit ledger captures every security-sensitive operation and AI action with tamper-evident integrity:
 
 ```python
-from hbllm.security.audit_log import AuditLog, AuditAction, AuditSeverity
+from hbllm.security.audit_trail import AuditAction, AuditSeverity, AuditTrail
 
-audit = AuditLog(db_path="data/audit.db")
+audit = AuditTrail(db_path="data/audit_trail.db")
 
 audit.log(
     action=AuditAction.AUTH_FAILED,

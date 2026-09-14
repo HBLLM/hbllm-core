@@ -41,7 +41,7 @@ jobs:
           pip install ruff pip-audit bandit mypy
 
       - name: Type check (mypy)
-        run: mypy hbllm/ --config-file pyproject.toml
+        run: mypy hbllm/ plugins/developmental_adapter/ --config-file pyproject.toml
 
       - name: Lint with ruff
         run: ruff check .
@@ -60,7 +60,7 @@ jobs:
     name: "🧪 Unit Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [lint]
+    needs: [lint, rust]
     steps:
       - uses: actions/checkout@v4
 
@@ -152,6 +152,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Configure PyO3
+        run: echo "PYO3_PYTHON=$(which python)" >> $GITHUB_ENV
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -170,7 +179,9 @@ jobs:
         run: cargo check --workspace
 
       - name: Run Rust tests
-        run: cargo test --workspace --no-default-features
+        run: |
+          cargo test --workspace --no-default-features
+          cargo test --workspace
 
   # ── Documentation Build ──────────────────────────────────────────────
   docs-build:

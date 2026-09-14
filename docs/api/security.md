@@ -19,7 +19,7 @@ tenant isolation, encryption at rest, and immutable audit trails.
 | `tenant_guard.py` | `TenantGuard` | Per-tenant data isolation enforcer |
 | `tenant_interceptor.py` | `TenantInterceptor` | Bus-level tenant context injection |
 | `tenant_registry.py` | `TenantRegistry` | Tenant lifecycle management |
-| `audit_log.py` | `AuditLog` | Immutable append-only audit trail |
+| `audit_trail.py` | `AuditTrail` | Cryptographically hash-chained immutable audit ledger |
 | `encryption.py` | `EncryptionManager` | AES-256-GCM encryption at rest |
 | `secrets.py` | `SecretStore` | Secure credential storage |
 | `trust.py` | `TrustStore` | Peer trust level management |
@@ -28,7 +28,7 @@ tenant isolation, encryption at rest, and immutable audit trails.
 ## NodeIdentity
 
 Every HBLLM node has an Ed25519 keypair for signing messages and
-verifying peers in distributed swarms.
+authenticating with peers.
 
 ```python
 from hbllm.security.identity import NodeIdentity
@@ -97,14 +97,14 @@ query = guard.scope_query(base_query, tenant_id="tenant_1")
 | **Encryption** | Per-tenant encryption keys via `EncryptionManager` |
 | **Quotas** | Per-tenant resource limits (DB rows, rate limits) |
 
-## AuditLog
+## AuditTrail
 
-Immutable, append-only audit trail for compliance and forensics:
+Immutable, cryptographically hash-chained append-only audit ledger for compliance, forensics, and safety governance:
 
 ```python
-from hbllm.security.audit_log import AuditLog
+from hbllm.security.audit_trail import AuditAction, AuditTrail
 
-audit = AuditLog(db_path="data/audit.db")
+audit = AuditTrail(db_path="data/audit_trail.db")
 
 # Log an action
 audit.log(

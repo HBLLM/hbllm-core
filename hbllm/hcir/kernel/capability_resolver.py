@@ -204,6 +204,7 @@ class CapabilityResolver:
 
         # ── Sandbox Policy Enforcement ──
         timeout = timeout_override
+        policy: Any | None = None
         if self.sandbox_manager is not None:
             policy = self.sandbox_manager.get_policy(capability_name, impl.implementation_id)
             if policy is None:
@@ -265,7 +266,29 @@ class CapabilityResolver:
                 timeout = policy.resource_limits.timeout_seconds
 
         try:
-            if timeout is not None and timeout > 0:
+            # Tier 2 physical process isolation enforcement
+            if (
+                policy is not None
+                and getattr(policy, "isolation_mode", None) == "subprocess"
+                and "code" in params
+            ):
+                from hbllm.actions.sandbox import run_sandboxed_python
+
+                sandbox_timeout = timeout or 5.0
+                max_mem = policy.resource_limits.max_memory_mb if policy else 256
+                disable_net = not getattr(policy.permissions, "allow_network", False)
+                res = await run_sandboxed_python(
+                    params["code"],
+                    timeout=sandbox_timeout,
+                    max_memory_mb=max_mem,
+                    disable_network=disable_net,
+                )
+                result = {
+                    "status": res.status,
+                    "output": res.output,
+                    "error": res.error,
+                }
+            elif timeout is not None and timeout > 0:
                 result = await asyncio.wait_for(impl.executor.execute(params), timeout=timeout)
             else:
                 result = await impl.executor.execute(params)

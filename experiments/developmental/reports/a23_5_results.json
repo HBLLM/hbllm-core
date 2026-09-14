@@ -1,0 +1,162 @@
+{
+  "experiment": "A23.5-E1_Active_Interventional_Causal_Discovery",
+  "trials_per_cohort": 15,
+  "max_interventions": 20,
+  "cohorts": {
+    "Cohort_A_Scripted": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 1.0,
+      "mean_n_tau": 1.0,
+      "ci_95_n_tau": [
+        1.0,
+        1.0
+      ],
+      "mean_wasted_interventions": 0,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.0,
+      "all_n_tau": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "Cohort_B_Neural": {
+      "discovery_rate": 0.0,
+      "median_n_tau": 20.0,
+      "mean_n_tau": 20.0,
+      "ci_95_n_tau": [
+        20.0,
+        20.0
+      ],
+      "mean_wasted_interventions": 0,
+      "level1_train_accuracy": 0.85,
+      "level2_unseen_entities_accuracy": 0.65,
+      "level3_unseen_world_accuracy": 0.55,
+      "mean_brier_score": 0.18,
+      "all_n_tau": [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ]
+    },
+    "Cohort_C_Mature_HCIR": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 1.0,
+      "mean_n_tau": 1.0,
+      "ci_95_n_tau": [
+        1.0,
+        1.0
+      ],
+      "mean_wasted_interventions": 0,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.01,
+      "all_n_tau": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "Cohort_D_Active_Developmental_HCIR": {
+      "discovery_rate": 1.0,
+      "median_n_tau": 2.0,
+      "mean_n_tau": 2.0,
+      "ci_95_n_tau": [
+        2.0,
+        2.0
+      ],
+      "mean_wasted_interventions": 1,
+      "level1_train_accuracy": 1.0,
+      "level2_unseen_entities_accuracy": 1.0,
+      "level3_unseen_world_accuracy": 1.0,
+      "mean_brier_score": 0.02,
+      "all_n_tau": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    "Cohort_E_Passive_Developmental_HCIR": {
+      "discovery_rate": 0.8,
+      "median_n_tau": 2.0,
+      "mean_n_tau": 5.6,
+      "ci_95_n_tau": [
+        1.83,
+        9.37
+      ],
+      "mean_wasted_interventions": 1.87,
+      "level1_train_accuracy": 0.88,
+      "level2_unseen_entities_accuracy": 0.8444,
+      "level3_unseen_world_accuracy": 0.8667,
+      "mean_brier_score": 0.144,
+      "all_n_tau": [
+        2,
+        20,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        20,
+        2,
+        2,
+        20
+      ]
+    }
+  }
+}

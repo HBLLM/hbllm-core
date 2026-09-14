@@ -8,6 +8,15 @@ Provides:
   - EncryptionVault: Field-level encryption at rest
 """
 
+from hbllm.security.audit_trail import (
+    AuditAction,
+    AuditEntry,
+    AuditLog,
+    AuditSeverity,
+    AuditTrail,
+    ComplianceAuditEntry,
+    SafetyAuditEntry,
+)
 from hbllm.security.repository import TenantSQLiteRepository
 from hbllm.security.tenant_guard import (
     SystemContext,
@@ -24,6 +33,13 @@ from hbllm.security.tenant_interceptor import (
 )
 
 __all__ = [
+    "AuditAction",
+    "AuditEntry",
+    "AuditLog",
+    "AuditSeverity",
+    "AuditTrail",
+    "ComplianceAuditEntry",
+    "SafetyAuditEntry",
     "SystemContext",
     "TenantContext",
     "TenantGuardMode",

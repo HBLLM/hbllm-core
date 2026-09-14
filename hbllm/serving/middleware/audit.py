@@ -20,7 +20,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from hbllm.security.audit_log import AuditAction, AuditLog, AuditSeverity
+from hbllm.security.audit_trail import AuditAction, AuditSeverity, AuditTrail
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
     Failed requests (4xx/5xx) are logged with WARNING/CRITICAL severity.
     """
 
-    def __init__(self, app: object, audit_log: AuditLog) -> None:
+    def __init__(self, app: object, audit_log: AuditTrail) -> None:
         super().__init__(app)  # type: ignore[arg-type]
         self.audit_log = audit_log
 
