@@ -7,6 +7,7 @@ guarantees (BWT >= 0), and cognitive checkpoint persistence to disk.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -24,7 +25,18 @@ from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
 from .metacognition import MetacognitiveEngine
+from .metrics import DevelopmentalTelemetryEmitter
 from .perception import DevelopmentalPerceptionAdapter
+
+try:
+    from hbllm.observability import trace_span
+except Exception:
+
+    @contextlib.contextmanager  # type: ignore[no-redef]
+    def trace_span(name: str, attributes: dict[str, Any] | None = None, **kwargs: Any):
+        yield None
+
+
 from .school import CognitiveSchool
 from .teacher import (
     GradeAssessment,
@@ -104,26 +116,32 @@ class CognitiveSchoolTrainer:
             f"Beginning cognitive school training for {self.config.student_name} "
             f"across {self.config.num_semesters} academic semesters."
         )
+        with trace_span(
+            "developmental.school.train",
+            attributes={
+                "student_name": self.config.student_name,
+                "num_semesters": self.config.num_semesters,
+            },
+        ):
+            # -------------------------------------------------------------
+            # Semester 1: Freshman — Perceptual Grounding & Fast-Mapping
+            # -------------------------------------------------------------
+            rep1 = self._run_semester_1_foundations()
+            self.history.append(rep1)
 
-        # -------------------------------------------------------------
-        # Semester 1: Freshman — Perceptual Grounding & Fast-Mapping
-        # -------------------------------------------------------------
-        rep1 = self._run_semester_1_foundations()
-        self.history.append(rep1)
+            # -------------------------------------------------------------
+            # Semester 2: Sophomore — Causal Mechanics, Tools & Syntax
+            # -------------------------------------------------------------
+            if self.config.num_semesters >= 2:
+                rep2 = self._run_semester_2_dynamics_and_tools()
+                self.history.append(rep2)
 
-        # -------------------------------------------------------------
-        # Semester 2: Sophomore — Causal Mechanics, Tools & Syntax
-        # -------------------------------------------------------------
-        if self.config.num_semesters >= 2:
-            rep2 = self._run_semester_2_dynamics_and_tools()
-            self.history.append(rep2)
-
-        # -------------------------------------------------------------
-        # Semester 3: Senior — Relational Transfer & Metacognitive Defense
-        # -------------------------------------------------------------
-        if self.config.num_semesters >= 3:
-            rep3 = self._run_semester_3_relational_and_defense()
-            self.history.append(rep3)
+            # -------------------------------------------------------------
+            # Semester 3: Senior — Relational Transfer & Metacognitive Defense
+            # -------------------------------------------------------------
+            if self.config.num_semesters >= 3:
+                rep3 = self._run_semester_3_relational_and_defense()
+                self.history.append(rep3)
 
         # Calculate Cumulative Statistics
         total_questions = sum(r.assessment.total_questions for r in self.history)
@@ -164,31 +182,38 @@ class CognitiveSchoolTrainer:
     def _run_semester_1_foundations(self) -> SemesterReport:
         """Semester 1: Grounded vocabulary acquisition and initial physical observation."""
         logger.info("=== Starting Semester 1: Perceptual Foundations ===")
-        # 1. Active sensory exposure across episodes
-        for ep in range(self.config.episodes_per_semester):
-            sub_env = BabyWorldEnvironment(seed=self.config.seed + ep * 10)
-            # Observe diverse objects
-            for obj in sub_env.objects.values():
-                self.student.grounding_engine.observe_paired_demonstration(
-                    f"look at {obj.color.value}", {"color": obj.color.value}
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
+        with trace_span("developmental.school.semester_1", attributes={"semester": 1}):
+            with emitter.measure_latency("semester_1"):
+                # 1. Active sensory exposure across episodes
+                for ep in range(self.config.episodes_per_semester):
+                    sub_env = BabyWorldEnvironment(seed=self.config.seed + ep * 10)
+                    # Observe diverse objects
+                    for obj in sub_env.objects.values():
+                        self.student.grounding_engine.observe_paired_demonstration(
+                            f"look at {obj.color.value}", {"color": obj.color.value}
+                        )
+
+                # 2. Teacher Kindergarten instruction & exam
+                assessment = self.teacher.conduct_kindergarten(self.student)
+
+                # 3. Baseline recording in continual engine
+                if self.student.continual_engine:
+                    self.student.continual_engine.record_stage_baseline(
+                        "semester_1", assessment.accuracy
+                    )
+
+                # 4. Sleep Consolidation Cycle 1
+                sleep_info = {}
+                if self.config.enable_sleep_consolidation and self.student.continual_engine:
+                    sleep_info = self.student.continual_engine.consolidate_memory_sleep_cycle()
+
+                # 5. Save Checkpoint
+                ckpt_path = self.save_checkpoint(
+                    semester=1, checkpoint_dir=self.checkpoint_dir / "semester_1"
                 )
 
-        # 2. Teacher Kindergarten instruction & exam
-        assessment = self.teacher.conduct_kindergarten(self.student)
-
-        # 3. Baseline recording in continual engine
-        if self.student.continual_engine:
-            self.student.continual_engine.record_stage_baseline("semester_1", assessment.accuracy)
-
-        # 4. Sleep Consolidation Cycle 1
-        sleep_info = {}
-        if self.config.enable_sleep_consolidation and self.student.continual_engine:
-            sleep_info = self.student.continual_engine.consolidate_memory_sleep_cycle()
-
-        # 5. Save Checkpoint
-        ckpt_path = self.save_checkpoint(
-            semester=1, checkpoint_dir=self.checkpoint_dir / "semester_1"
-        )
+                emitter.record_concept_acquired("perceptual_lexicon")
 
         return SemesterReport(
             semester_index=1,
@@ -205,52 +230,59 @@ class CognitiveSchoolTrainer:
     def _run_semester_2_dynamics_and_tools(self) -> SemesterReport:
         """Semester 2: Causal mechanics, Socratic counter-examples, tool use, and syntax."""
         logger.info("=== Starting Semester 2: Dynamics, Tools & Compositional Syntax ===")
-        # 1. Elementary causal physics with Socratic counter-examples
-        g2 = self.teacher.conduct_elementary_physics(self.student)
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
+        with trace_span("developmental.school.semester_2", attributes={"semester": 2}):
+            with emitter.measure_latency("semester_2"):
+                # 1. Elementary causal physics with Socratic counter-examples
+                g2 = self.teacher.conduct_elementary_physics(self.student)
 
-        # 2. Middle school tool planning and syntax parsing
-        g3 = self.teacher.conduct_middle_school_planning(self.student)
+                # 2. Middle school tool planning and syntax parsing
+                g3 = self.teacher.conduct_middle_school_planning(self.student)
 
-        # Combine into Semester 2 assessment
-        combined_q = g2.question_results + g3.question_results
-        total_q = len(combined_q)
-        correct_q = sum(1 for q in combined_q if q.is_correct)
-        acc = round(correct_q / total_q, 4) if total_q > 0 else 0.0
-        mean_brier = (
-            round(sum(q.brier_error for q in combined_q) / total_q, 4) if total_q > 0 else 0.0
-        )
+                # Combine into Semester 2 assessment
+                combined_q = g2.question_results + g3.question_results
+                total_q = len(combined_q)
+                correct_q = sum(1 for q in combined_q if q.is_correct)
+                acc = round(correct_q / total_q, 4) if total_q > 0 else 0.0
+                mean_brier = (
+                    round(sum(q.brier_error for q in combined_q) / total_q, 4)
+                    if total_q > 0
+                    else 0.0
+                )
 
-        sem2_assessment = GradeAssessment(
-            grade_level=g2.grade_level,
-            subject_title="Semester 2: Causal Mechanics & Indirect Tool Planning",
-            total_questions=total_q,
-            correct_count=correct_q,
-            accuracy=acc,
-            mean_brier_score=mean_brier,
-            letter_grade="A+ (Summa Cum Laude)" if acc >= 0.95 else "A",
-            teacher_feedback="Mastered counter-example decoupling and indirect tool synthesis.",
-            question_results=combined_q,
-        )
+                sem2_assessment = GradeAssessment(
+                    grade_level=g2.grade_level,
+                    subject_title="Semester 2: Causal Mechanics & Indirect Tool Planning",
+                    total_questions=total_q,
+                    correct_count=correct_q,
+                    accuracy=acc,
+                    mean_brier_score=mean_brier,
+                    letter_grade="A+ (Summa Cum Laude)" if acc >= 0.95 else "A",
+                    teacher_feedback="Mastered counter-example decoupling and indirect tool synthesis.",
+                    question_results=combined_q,
+                )
 
-        # 3. Backward Transfer Check (verify semester 1 knowledge did not degrade)
-        bwt = 0.0
-        if self.student.continual_engine:
-            # Re-evaluate lexicon recall
-            lex_recall = 1.0 if len(self.student.grounding_engine.lexicon) >= 6 else 0.8
-            bwt, _ = self.student.continual_engine.evaluate_backward_transfer(
-                {"semester_1": lex_recall}
-            )
-            self.student.continual_engine.record_stage_baseline("semester_2", acc)
+                # 3. Backward Transfer Check (verify semester 1 knowledge did not degrade)
+                bwt = 0.0
+                if self.student.continual_engine:
+                    # Re-evaluate lexicon recall
+                    lex_recall = 1.0 if len(self.student.grounding_engine.lexicon) >= 6 else 0.8
+                    bwt, _ = self.student.continual_engine.evaluate_backward_transfer(
+                        {"semester_1": lex_recall}
+                    )
+                    self.student.continual_engine.record_stage_baseline("semester_2", acc)
 
-        # 4. Sleep Consolidation Cycle 2
-        sleep_info = {}
-        if self.config.enable_sleep_consolidation and self.student.continual_engine:
-            sleep_info = self.student.continual_engine.consolidate_memory_sleep_cycle()
+                # 4. Sleep Consolidation Cycle 2
+                sleep_info = {}
+                if self.config.enable_sleep_consolidation and self.student.continual_engine:
+                    sleep_info = self.student.continual_engine.consolidate_memory_sleep_cycle()
 
-        # 5. Save Checkpoint
-        ckpt_path = self.save_checkpoint(
-            semester=2, checkpoint_dir=self.checkpoint_dir / "semester_2"
-        )
+                # 5. Save Checkpoint
+                ckpt_path = self.save_checkpoint(
+                    semester=2, checkpoint_dir=self.checkpoint_dir / "semester_2"
+                )
+
+                emitter.record_concept_acquired("causal_tool_planning")
 
         return SemesterReport(
             semester_index=2,
@@ -267,26 +299,31 @@ class CognitiveSchoolTrainer:
     def _run_semester_3_relational_and_defense(self) -> SemesterReport:
         """Semester 3: Relational schema transfer and metacognitive trick defense."""
         logger.info("=== Starting Semester 3: Relational Analogy & Metacognitive Defense ===")
-        # 1. High school transfer & defense
-        g4 = self.teacher.conduct_high_school_transfer(self.student)
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
+        with trace_span("developmental.school.semester_3", attributes={"semester": 3}):
+            with emitter.measure_latency("semester_3"):
+                # 1. High school transfer & defense
+                g4 = self.teacher.conduct_high_school_transfer(self.student)
 
-        # 2. Backward Transfer Check
-        bwt = 0.0
-        if self.student.continual_engine:
-            bwt, _ = self.student.continual_engine.evaluate_backward_transfer(
-                {"semester_1": 1.0, "semester_2": 1.0}
-            )
-            self.student.continual_engine.record_stage_baseline("semester_3", g4.accuracy)
+                # 2. Backward Transfer Check
+                bwt = 0.0
+                if self.student.continual_engine:
+                    bwt, _ = self.student.continual_engine.evaluate_backward_transfer(
+                        {"semester_1": 1.0, "semester_2": 1.0}
+                    )
+                    self.student.continual_engine.record_stage_baseline("semester_3", g4.accuracy)
 
-        # 3. Sleep Consolidation Cycle 3
-        sleep_info = {}
-        if self.config.enable_sleep_consolidation and self.student.continual_engine:
-            sleep_info = self.student.continual_engine.consolidate_memory_sleep_cycle()
+                # 3. Sleep Consolidation Cycle 3
+                sleep_info = {}
+                if self.config.enable_sleep_consolidation and self.student.continual_engine:
+                    sleep_info = self.student.continual_engine.consolidate_memory_sleep_cycle()
 
-        # 4. Save Checkpoint
-        ckpt_path = self.save_checkpoint(
-            semester=3, checkpoint_dir=self.checkpoint_dir / "semester_3"
-        )
+                # 4. Save Checkpoint
+                ckpt_path = self.save_checkpoint(
+                    semester=3, checkpoint_dir=self.checkpoint_dir / "semester_3"
+                )
+
+                emitter.record_concept_acquired("relational_transfer")
 
         return SemesterReport(
             semester_index=3,

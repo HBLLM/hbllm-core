@@ -6,12 +6,18 @@ and belief transition event summaries across cohorts for Milestone A23.
 
 from __future__ import annotations
 
+import contextlib
 import random
 import statistics
-from collections import Counter
+import threading
+import time
+from collections import Counter, defaultdict, deque
+from collections.abc import Generator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
-from .cohorts import CohortDiscoveryResult
+if TYPE_CHECKING:
+    from .cohorts import CohortDiscoveryResult
 
 
 @dataclass
@@ -184,3 +190,137 @@ class DevelopmentalMetricsTracker:
             )
 
         return "\n".join(blocks)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Real-Time Developmental Telemetry Emitter & Observability Bridge
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class DevelopmentalTelemetryEmitter:
+    """Thread-safe telemetry emitter and observability bridge for developmental learning.
+
+    Maintains in-memory counts, distributions, and recent events, and automatically
+    bridges metrics to hbllm.network.metrics.MetricsCollector when available.
+    """
+
+    _instance: DevelopmentalTelemetryEmitter | None = None
+    _lock = threading.Lock()
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counters: dict[str, int] = defaultdict(int)
+        self._gauges: dict[str, float] = defaultdict(float)
+        self._latencies: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=500))
+        self._events: deque[dict[str, Any]] = deque(maxlen=200)
+
+    @classmethod
+    def get_instance(cls) -> DevelopmentalTelemetryEmitter:
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        with cls._lock:
+            cls._instance = None
+
+    def _get_core_collector(self) -> Any:
+        try:
+            from hbllm.network.metrics import MetricsCollector
+
+            return MetricsCollector.get_instance()
+        except Exception:
+            return None
+
+    def record_intervention(self, action_type: str, result: str = "success") -> None:
+        """Record an active intervention trial."""
+        with self._lock:
+            self._counters[f"intervention:{action_type}:{result}"] += 1
+            self._events.append(
+                {
+                    "type": "intervention",
+                    "action": action_type,
+                    "result": result,
+                    "timestamp": time.time(),
+                }
+            )
+        collector = self._get_core_collector()
+        if collector and hasattr(collector, "record_developmental_intervention"):
+            collector.record_developmental_intervention(action_type=action_type, result=result)
+
+    def record_hypothesis_event(self, outcome: str) -> None:
+        """Record hypothesis generation, falsification, or confirmation."""
+        with self._lock:
+            self._counters[f"hypothesis:{outcome}"] += 1
+            self._events.append(
+                {
+                    "type": "hypothesis",
+                    "outcome": outcome,
+                    "timestamp": time.time(),
+                }
+            )
+        collector = self._get_core_collector()
+        if collector and hasattr(collector, "record_developmental_hypothesis"):
+            collector.record_developmental_hypothesis(outcome=outcome)
+
+    def record_concept_acquired(self, domain: str) -> None:
+        """Record schema/concept acquisition."""
+        with self._lock:
+            self._counters[f"concept:{domain}"] += 1
+            self._events.append(
+                {
+                    "type": "concept",
+                    "domain": domain,
+                    "timestamp": time.time(),
+                }
+            )
+        collector = self._get_core_collector()
+        if collector and hasattr(collector, "record_developmental_concept"):
+            collector.record_developmental_concept(domain=domain)
+
+    def record_entropy(self, system: str, entropy_val: float) -> None:
+        """Record belief or affordance entropy level."""
+        with self._lock:
+            self._gauges[f"entropy:{system}"] = float(entropy_val)
+        collector = self._get_core_collector()
+        if collector and hasattr(collector, "set_developmental_entropy"):
+            collector.set_developmental_entropy(system=system, entropy_val=entropy_val)
+
+    def record_latency(self, stage: str, duration_seconds: float) -> None:
+        """Record execution duration of a developmental phase."""
+        with self._lock:
+            self._latencies[stage].append(duration_seconds)
+        collector = self._get_core_collector()
+        if collector and hasattr(collector, "observe_developmental_duration"):
+            collector.observe_developmental_duration(stage=stage, duration_seconds=duration_seconds)
+
+    @contextlib.contextmanager
+    def measure_latency(self, stage: str) -> Generator[None, None, None]:
+        """Context manager to measure and record developmental latency."""
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            duration = time.monotonic() - start
+            self.record_latency(stage, duration)
+
+    def get_telemetry_snapshot(self) -> dict[str, Any]:
+        """Return a structured dictionary snapshot of current telemetry."""
+        with self._lock:
+            return {
+                "counters": dict(self._counters),
+                "gauges": dict(self._gauges),
+                "latencies": {
+                    stage: {
+                        "count": len(samples),
+                        "avg": round(sum(samples) / len(samples), 6) if samples else 0.0,
+                        "min": round(min(samples), 6) if samples else 0.0,
+                        "max": round(max(samples), 6) if samples else 0.0,
+                    }
+                    for stage, samples in self._latencies.items()
+                },
+                "recent_events_count": len(self._events),
+            }

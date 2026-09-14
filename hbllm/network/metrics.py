@@ -74,6 +74,12 @@ class MetricsCollector:
         self._snn_potentials: Any = None
         self._snn_spikes_total: Any = None
         self._info: Any = None
+        # Developmental Learning Metrics (initialized in _init_prometheus)
+        self._dev_learning_duration: Any = None
+        self._dev_hypotheses_total: Any = None
+        self._dev_concepts_total: Any = None
+        self._dev_interventions_total: Any = None
+        self._dev_entropy: Any = None
 
         if HAS_PROMETHEUS:
             self._init_prometheus()
@@ -147,6 +153,32 @@ class MetricsCollector:
             "hbllm_snn_spikes_total",
             "Total SNN spikes fired by neuron",
             ["neuron_id"],
+        )
+        self._dev_learning_duration = Histogram(
+            "hbllm_developmental_learning_duration_seconds",
+            "Developmental learning stage execution latency",
+            ["stage"],
+            buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+        )
+        self._dev_hypotheses_total = Counter(
+            "hbllm_developmental_hypotheses_total",
+            "Total developmental causal hypotheses generated, falsified, or confirmed",
+            ["outcome"],
+        )
+        self._dev_concepts_total = Counter(
+            "hbllm_developmental_concepts_total",
+            "Total developmental concepts acquired by domain",
+            ["domain"],
+        )
+        self._dev_interventions_total = Counter(
+            "hbllm_developmental_interventions_total",
+            "Total developmental interventions executed",
+            ["action_type", "result"],
+        )
+        self._dev_entropy = Gauge(
+            "hbllm_developmental_entropy",
+            "Current entropy of developmental belief distributions",
+            ["system"],
         )
         self._info = Info(
             "hbllm_build",
@@ -301,6 +333,58 @@ class MetricsCollector:
         finally:
             duration = time.monotonic() - start
             self.observe_duration(stage, duration)
+
+    # ─── Developmental Learning Metrics API ───────────────────────────────
+
+    def record_developmental_intervention(self, action_type: str, result: str = "success") -> None:
+        """Record an active developmental intervention."""
+        if HAS_PROMETHEUS and self._dev_interventions_total:
+            self._dev_interventions_total.labels(action_type=action_type, result=result).inc()
+        else:
+            with self._mem_lock:
+                self._mem_counters[f"dev_intervention:{action_type}:{result}"] += 1
+
+    def record_developmental_hypothesis(self, outcome: str) -> None:
+        """Record hypothesis formulation, falsification, or confirmation."""
+        if HAS_PROMETHEUS and self._dev_hypotheses_total:
+            self._dev_hypotheses_total.labels(outcome=outcome).inc()
+        else:
+            with self._mem_lock:
+                self._mem_counters[f"dev_hypothesis:{outcome}"] += 1
+
+    def record_developmental_concept(self, domain: str) -> None:
+        """Record schema/concept acquisition."""
+        if HAS_PROMETHEUS and self._dev_concepts_total:
+            self._dev_concepts_total.labels(domain=domain).inc()
+        else:
+            with self._mem_lock:
+                self._mem_counters[f"dev_concept:{domain}"] += 1
+
+    def set_developmental_entropy(self, system: str, entropy_val: float) -> None:
+        """Set belief entropy level."""
+        if HAS_PROMETHEUS and self._dev_entropy:
+            self._dev_entropy.labels(system=system).set(entropy_val)
+        else:
+            with self._mem_lock:
+                self._mem_gauges[f"dev_entropy:{system}"] = float(entropy_val)
+
+    def observe_developmental_duration(self, stage: str, duration_seconds: float) -> None:
+        """Record latency of a developmental processing phase."""
+        if HAS_PROMETHEUS and self._dev_learning_duration:
+            self._dev_learning_duration.labels(stage=stage).observe(duration_seconds)
+        else:
+            with self._mem_lock:
+                self._mem_histograms[f"dev_duration:{stage}"].append(duration_seconds)
+
+    @contextlib.contextmanager
+    def measure_developmental_latency(self, stage: str) -> Generator[None, None, None]:
+        """Context manager to measure and record developmental stage latency."""
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            duration = time.monotonic() - start
+            self.observe_developmental_duration(stage, duration)
 
     def get_metrics_text(self) -> str:
         """Generate Prometheus-format metrics text."""

@@ -35,7 +35,11 @@ from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
 from .metacognition import MetacognitiveEngine
-from .metrics import DevelopmentalMetricsTracker
+from .metrics import (
+    CohortStatisticalSummary,
+    DevelopmentalMetricsTracker,
+    DevelopmentalTelemetryEmitter,
+)
 from .perception import (
     DevelopmentalPerceptionAdapter,
     SemanticLeakageViolationError,
@@ -141,7 +145,9 @@ __all__ = [
     "CurriculumStageId",
     "CurriculumStageSpec",
     "DevelopmentalActionAdapter",
+    "CohortStatisticalSummary",
     "DevelopmentalMetricsTracker",
+    "DevelopmentalTelemetryEmitter",
     "DevelopmentalPerceptionAdapter",
     "DevelopmentalProfile",
     "EpistemicCuriosityEngine",

@@ -4,13 +4,14 @@ Implements the active hypothesis generation, interventional probing,
 falsification, and causal rule induction cognitive loop under confounding.
 """
 
-from __future__ import annotations
-
+import contextlib
 import logging
+import math
 from typing import Any
 
 from .blank_brain import BlankBrainSubstrate
 from .environment import BabyWorldEnvironment
+from .metrics import DevelopmentalTelemetryEmitter
 from .perception import DevelopmentalPerceptionAdapter
 from .types import (
     BabyActionType,
@@ -20,6 +21,15 @@ from .types import (
     SensoryObservation,
     Vector2D,
 )
+
+try:
+    from hbllm.observability import trace_span
+except Exception:
+
+    @contextlib.contextmanager  # type: ignore[no-redef]
+    def trace_span(name: str, attributes: dict[str, Any] | None = None, **kwargs: Any):
+        yield None
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +52,17 @@ class InterventionalCausalDiscoveryEngine:
         self.belief_history: list[BeliefTransitionEvent] = []
         self.interventions_count: int = 0
         self.confirmed_causal_rules: list[dict[str, Any]] = []
+
+    def _compute_hypothesis_entropy(self) -> float:
+        """Compute Shannon entropy across active non-falsified hypotheses."""
+        active_confs = [
+            h.confidence for h in self.hypotheses if not h.falsified and h.confidence > 0.0
+        ]
+        total = sum(active_confs)
+        if not active_confs or total <= 0.0:
+            return 0.0
+        probs = [c / total for c in active_confs]
+        return -sum(p * math.log2(p) for p in probs if p > 0.0)
 
     def observe_and_generate_hypotheses(
         self,
@@ -205,7 +226,9 @@ class InterventionalCausalDiscoveryEngine:
                 ),
             ]
 
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
         for h in self.hypotheses:
+            emitter.record_hypothesis_event("generated")
             self._record_belief_event(
                 event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
                 hypothesis=h,
@@ -213,6 +236,15 @@ class InterventionalCausalDiscoveryEngine:
                 post_conf=h.confidence,
                 details={"formulated_rule": h.describe()},
             )
+
+        entropy = self._compute_hypothesis_entropy()
+        emitter.record_entropy("causal_beliefs", entropy)
+        logger.info(
+            "Causal hypotheses formulated: %d generated (entropy=%.4f)",
+            len(self.hypotheses),
+            entropy,
+            extra={"hypotheses_count": len(self.hypotheses), "entropy": entropy},
+        )
 
         return self.hypotheses
 
@@ -314,46 +346,70 @@ class InterventionalCausalDiscoveryEngine:
         action: BabyActionType = BabyActionType.PUSH,
     ) -> tuple[bool, dict[str, Any]]:
         """Execute a controlled interventional trial do(action, target_id)."""
-        self.interventions_count += 1
-        prior_state_idx = self.env.save_state()
+        action_name = (action.value if hasattr(action, "value") else str(action)).lower()
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
 
-        # Position agent adjacent to target object for physical interaction
-        pre_obs = self.env.get_sensory_observation()
-        target_percept = next((p for p in pre_obs.vision if p["percept_id"] == target_id), None)
-        if target_percept:
-            pos_x, pos_y = target_percept["spatial_coordinates"]
-            self.env.agent_position = Vector2D(pos_x - 0.2, pos_y)
+        with trace_span(
+            "developmental.causal_discovery.probe",
+            attributes={"target_id": target_id, "action": action_name},
+        ):
+            with emitter.measure_latency("intervention"):
+                self.interventions_count += 1
+                prior_state_idx = self.env.save_state()
 
-        # Step physical environment with probe action
-        obs, reward, done, consequences = self.env.step(action=action, target_id=target_id)
-        did_move = consequences.get("moved", False)
+                # Position agent adjacent to target object for physical interaction
+                pre_obs = self.env.get_sensory_observation()
+                target_percept = next(
+                    (p for p in pre_obs.vision if p["percept_id"] == target_id), None
+                )
+                if target_percept:
+                    pos_x, pos_y = target_percept["spatial_coordinates"]
+                    self.env.agent_position = Vector2D(pos_x - 0.2, pos_y)
 
-        probe_result = {
-            "target_id": target_id,
-            "target_color": target_percept["color"] if target_percept else "",
-            "target_shape": target_percept["shape"] if target_percept else "",
-            "color": target_percept["color"] if target_percept else "",
-            "shape": target_percept["shape"] if target_percept else "",
-            "texture": target_percept.get("texture", "smooth") if target_percept else "smooth",
-            "mass_sensation": float(target_percept["mass_sensation"]) if target_percept else 0.0,
-            "surface_friction": float(target_percept.get("surface_friction", 1.0))
-            if target_percept
-            else 1.0,
-            "static_threshold": float(target_percept.get("static_threshold", 0.0))
-            if target_percept
-            else 0.0,
-            "clearance_diameter": float(target_percept.get("clearance_diameter", 0.4))
-            if target_percept
-            else 0.4,
-            "did_move": did_move,
-            "displacement": consequences.get("displacement", 0.0),
-        }
+                # Step physical environment with probe action
+                obs, reward, done, consequences = self.env.step(action=action, target_id=target_id)
+                did_move = consequences.get("moved", False)
 
-        # Update beliefs based on interventional evidence
-        self._update_hypotheses_from_evidence(probe_result)
+                probe_result = {
+                    "target_id": target_id,
+                    "target_color": target_percept["color"] if target_percept else "",
+                    "target_shape": target_percept["shape"] if target_percept else "",
+                    "color": target_percept["color"] if target_percept else "",
+                    "shape": target_percept["shape"] if target_percept else "",
+                    "texture": target_percept.get("texture", "smooth")
+                    if target_percept
+                    else "smooth",
+                    "mass_sensation": float(target_percept["mass_sensation"])
+                    if target_percept
+                    else 0.0,
+                    "surface_friction": float(target_percept.get("surface_friction", 1.0))
+                    if target_percept
+                    else 1.0,
+                    "static_threshold": float(target_percept.get("static_threshold", 0.0))
+                    if target_percept
+                    else 0.0,
+                    "clearance_diameter": float(target_percept.get("clearance_diameter", 0.4))
+                    if target_percept
+                    else 0.4,
+                    "did_move": did_move,
+                    "displacement": consequences.get("displacement", 0.0),
+                }
 
-        # Restore world state so subsequent probes start from standardized conditions
-        self.env.restore_state(prior_state_idx)
+                # Update beliefs based on interventional evidence
+                self._update_hypotheses_from_evidence(probe_result)
+
+                # Restore world state so subsequent probes start from standardized conditions
+                self.env.restore_state(prior_state_idx)
+
+            res_tag = "moved" if did_move else "static"
+            emitter.record_intervention(action_type=action_name, result=res_tag)
+            logger.info(
+                "Intervention probe executed on '%s' (action=%s => %s)",
+                target_id,
+                action_name,
+                res_tag,
+                extra={"target_id": target_id, "action": action_name, "result": res_tag},
+            )
 
         return did_move, probe_result
 
@@ -381,6 +437,14 @@ class InterventionalCausalDiscoveryEngine:
                     post_conf=0.0,
                     details={"counterexample": probe_result},
                 )
+                emitter = DevelopmentalTelemetryEmitter.get_instance()
+                emitter.record_hypothesis_event("falsified")
+                logger.info(
+                    "Hypothesis falsified: %s (variable=%s)",
+                    h.hypothesis_id,
+                    h.variable,
+                    extra={"hypothesis_id": h.hypothesis_id, "variable": h.variable},
+                )
             else:
                 # Evidence consistent with hypothesis
                 h.supporting_episodes.append(probe_result["target_id"])
@@ -405,6 +469,10 @@ class InterventionalCausalDiscoveryEngine:
                     )
                     self._induce_causal_rule_into_substrate(h)
 
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
+        entropy = self._compute_hypothesis_entropy()
+        emitter.record_entropy("causal_beliefs", entropy)
+
     def _induce_causal_rule_into_substrate(self, confirmed_hyp: CausalHypothesis) -> None:
         """Synthesize confirmed hypothesis into a generalized HCIR causal rule."""
         rule = {
@@ -428,6 +496,18 @@ class InterventionalCausalDiscoveryEngine:
             prior_conf=confirmed_hyp.confidence,
             post_conf=1.0,
             details={"generalized_rule": rule},
+        )
+
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
+        emitter.record_hypothesis_event("confirmed")
+        emitter.record_concept_acquired("causal_rule")
+        logger.info(
+            "Causal rule induced into substrate: %s %s %s => %s",
+            confirmed_hyp.variable,
+            confirmed_hyp.operator,
+            confirmed_hyp.value,
+            confirmed_hyp.consequence,
+            extra={"rule": rule},
         )
 
     def evaluate_generalization(
