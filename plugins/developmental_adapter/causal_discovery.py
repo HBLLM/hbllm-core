@@ -113,16 +113,29 @@ class InterventionalCausalDiscoveryEngine:
                     )
                 elif isinstance(sample_val, (int, float)):
                     # Continuous numeric variable (e.g. mass_sensation, surface_friction)
-                    pos_nums = [
-                        float(ep["features"][feat])
-                        for ep in positive_episodes
-                        if feat in ep.get("features", {})
-                    ]
-                    neg_nums = [
-                        float(ep["features"][feat])
-                        for ep in negative_episodes
-                        if feat in ep.get("features", {})
-                    ]
+                    import math
+
+                    pos_nums = []
+                    for ep in positive_episodes:
+                        val = ep.get("features", {}).get(feat)
+                        if val is not None:
+                            try:
+                                fval = float(val)
+                                if math.isfinite(fval):
+                                    pos_nums.append(fval)
+                            except (ValueError, TypeError):
+                                pass
+
+                    neg_nums = []
+                    for ep in negative_episodes:
+                        val = ep.get("features", {}).get(feat)
+                        if val is not None:
+                            try:
+                                fval = float(val)
+                                if math.isfinite(fval):
+                                    neg_nums.append(fval)
+                            except (ValueError, TypeError):
+                                pass
 
                     if pos_nums and neg_nums:
                         mean_pos = sum(pos_nums) / len(pos_nums)
@@ -213,14 +226,19 @@ class InterventionalCausalDiscoveryEngine:
             return str(val) == str(h.value)
         elif h.operator == "!=":
             return str(val) != str(h.value)
-        elif h.operator == "<":
-            return float(val) < float(h.value)
-        elif h.operator == "<=":
-            return float(val) <= float(h.value)
-        elif h.operator == ">":
-            return float(val) > float(h.value)
-        elif h.operator == ">=":
-            return float(val) >= float(h.value)
+        try:
+            fval = float(val)
+            fthresh = float(h.value)
+            if h.operator == "<":
+                return fval < fthresh
+            elif h.operator == "<=":
+                return fval <= fthresh
+            elif h.operator == ">":
+                return fval > fthresh
+            elif h.operator == ">=":
+                return fval >= fthresh
+        except (ValueError, TypeError):
+            return False
         return False
 
     def select_active_intervention(
@@ -237,7 +255,17 @@ class InterventionalCausalDiscoveryEngine:
         """
         active_hyps = [h for h in active_hypotheses if not h.falsified]
         if not active_hyps:
-            active_hyps = self.hypotheses
+            active_hyps = [h for h in self.hypotheses if not h.falsified] or self.hypotheses
+
+        if not active_hyps:
+            default_hyp = CausalHypothesis(
+                action=BabyActionType.PUSH,
+                variable="none",
+                operator="==",
+                value="none",
+                consequence="NONE",
+            )
+            return available_entity_ids[0] if available_entity_ids else "", default_hyp
 
         best_candidate: str | None = None
         max_discriminant_score: float = -999.0
@@ -468,7 +496,7 @@ class InterventionalCausalDiscoveryEngine:
 
             eval_records.append(
                 {
-                    "id": obj_info["id"],
+                    "id": obj_info.get("id", f"eval_obj_{len(eval_records) + 1}"),
                     "color": obj_info.get("color"),
                     "shape": obj_info.get("shape"),
                     "mass": actual_mass,

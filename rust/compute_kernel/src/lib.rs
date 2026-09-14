@@ -918,4 +918,72 @@ mod tests {
         // group 1: w[2]=1*2=2, w[3]=1*2=2 → contrib = 2+2 = 4
         assert!((sum - 6.0).abs() < f32::EPSILON, "sum={}", sum);
     }
+
+    #[test]
+    fn test_dequantize_vectorized_parity() {
+        // 32 packed bytes → 64 weights. group_size = 32 (2 groups).
+        let packed: Vec<u8> = (0..32)
+            .map(|i| ((i % 16) | (((i + 3) % 16) << 4)) as u8)
+            .collect();
+        let scale = vec![0.25f32, 0.5f32];
+        let bias = vec![-1.0f32, 2.0f32];
+        let mut scalar_out = vec![0.0f32; 64];
+        let mut vec_out = vec![0.0f32; 64];
+
+        UniversalEngine::dequantize_row_scalar(&packed, &mut scalar_out, &scale, &bias, 32);
+
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            UniversalEngine::dequantize_row_x86(&packed, &mut vec_out, &scale, &bias, 32);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            UniversalEngine::dequantize_row_neon(&packed, &mut vec_out, &scale, &bias, 32);
+        }
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            UniversalEngine::dequantize_row_scalar(&packed, &mut vec_out, &scale, &bias, 32);
+        }
+
+        for (i, (s, v)) in scalar_out.iter().zip(vec_out.iter()).enumerate() {
+            assert!(
+                (s - v).abs() < 1e-4,
+                "Dequantize mismatch at idx {}: scalar={}, vec={}",
+                i,
+                s,
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn test_gemv_vectorized_parity() {
+        // 32 packed bytes → 64 weights. group_size = 32.
+        let packed: Vec<u8> = (0..32)
+            .map(|i| ((i % 16) | (((i + 5) % 16) << 4)) as u8)
+            .collect();
+        let scale = vec![0.125f32, 0.375f32];
+        let bias = vec![0.5f32, -0.5f32];
+        let x: Vec<f32> = (0..64).map(|i| (i as f32) * 0.1 - 3.2).collect();
+
+        let scalar_sum = UniversalEngine::gemv_row_scalar(&x, &packed, &scale, &bias, 32);
+
+        #[cfg(target_arch = "x86_64")]
+        let vec_sum = unsafe { UniversalEngine::gemv_row_x86(&x, &packed, &scale, &bias, 32) };
+
+        #[cfg(target_arch = "aarch64")]
+        let vec_sum = unsafe { UniversalEngine::gemv_row_neon(&x, &packed, &scale, &bias, 32) };
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let vec_sum = UniversalEngine::gemv_row_scalar(&x, &packed, &scale, &bias, 32);
+
+        assert!(
+            (scalar_sum - vec_sum).abs() < 1e-3,
+            "GEMV sum mismatch: scalar={}, vec={}",
+            scalar_sum,
+            vec_sum
+        );
+    }
 }
