@@ -75,6 +75,116 @@ class ActionDynamicsModel:
 
 
 @dataclass
+class StateMutationModel:
+    """Discrete causal rule mapping an environmental trigger to an observable state mutation."""
+
+    trigger_type: str  # "TILE_CONTACT", "ACTION"
+    trigger_pos: tuple[int, int] | None = None
+    trigger_color: int | None = None
+    mutation_type: str = "COLOR_REMAP"  # "COLOR_REMAP", "BARRIER_OPEN", "ROTATION"
+    prior_value: Any = None
+    posterior_value: Any = None
+    confidence: float = 0.5
+    occurrences: int = 1
+
+
+class TopologicalPathPlanner:
+    """Computes obstacle-clearing shortest paths over 2D visual grids using BFS."""
+
+    @staticmethod
+    def find_shortest_path(
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        grid_shape: tuple[int, int],
+        barrier_mask: np.ndarray,
+        step_size: int = 1,
+    ) -> list[tuple[int, int]]:
+        """Breadth-first search for shortest path avoiding barrier cells."""
+        H, W = grid_shape
+        start_r, start_c = start
+        goal_r, goal_c = goal
+
+        if start == goal:
+            return [start]
+
+        from collections import deque
+
+        queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque(
+            [(start_r, start_c, [(start_r, start_c)])]
+        )
+        visited = {(start_r, start_c)}
+
+        # 4-connected movements (scaled by step_size)
+        delta = [(-step_size, 0), (step_size, 0), (0, -step_size), (0, step_size)]
+
+        best_partial_path = [(start_r, start_c)]
+        min_dist_to_goal = math.hypot(goal_r - start_r, goal_c - start_c)
+
+        max_iterations = 2500
+        iters = 0
+
+        while queue and iters < max_iterations:
+            iters += 1
+            r, c, path = queue.popleft()
+
+            dist = math.hypot(goal_r - r, goal_c - c)
+            if dist < min_dist_to_goal:
+                min_dist_to_goal = dist
+                best_partial_path = path
+
+            if math.hypot(goal_r - r, goal_c - c) <= (step_size * 0.9):
+                return path + [(goal_r, goal_c)]
+
+            for dr, dc in delta:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    if (nr, nc) not in visited:
+                        visited.add((nr, nc))
+                        # Barrier check
+                        if not barrier_mask[nr, nc]:
+                            queue.append((nr, nc, path + [(nr, nc)]))
+
+        return best_partial_path
+
+
+class CornerDeadlockDetector:
+    """Detects irreversible corner deadlocks for pushable objects in Sokoban-style games."""
+
+    @staticmethod
+    def is_corner_deadlock(
+        box_pos: tuple[int, int],
+        barrier_mask: np.ndarray,
+        target_positions: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int = 1,
+    ) -> bool:
+        """Returns True if box_pos is in a corner of barriers and not on a target."""
+        if box_pos in target_positions:
+            return False
+
+        r, c = box_pos
+        H, W = grid_shape
+
+        def is_wall(nr: int, nc: int) -> bool:
+            if nr < 0 or nr >= H or nc < 0 or nc >= W:
+                return True
+            return bool(barrier_mask[nr, nc])
+
+        north_blocked = is_wall(r - step_size, c)
+        south_blocked = is_wall(r + step_size, c)
+        west_blocked = is_wall(r, c - step_size)
+        east_blocked = is_wall(r, c + step_size)
+
+        # A corner is formed by any (vertical barrier, horizontal barrier) pair
+        top_left = north_blocked and west_blocked
+        top_right = north_blocked and east_blocked
+        bottom_left = south_blocked and west_blocked
+        bottom_right = south_blocked and east_blocked
+
+        return top_left or top_right or bottom_left or bottom_right
+
+
+@dataclass
 class ARC3LevelResult:
     """Evaluation result for a single level in an ARC-AGI-3 environment."""
 
@@ -181,31 +291,38 @@ class ARC3InteractiveAgent:
 
     def __init__(self) -> None:
         self.action_models: dict[int, ActionDynamicsModel] = {}
+        self.state_mutations: list[StateMutationModel] = []
         self.avatar_centroid: tuple[float, float] | None = None
         self.avatar_color: int | None = None
         self.goal_centroid: tuple[float, float] | None = None
         self.last_action_data: dict[str, Any] | None = None
         self.blocked_actions: set[int] = set()
         self.stuck_counter: int = 0
+        self.step_size: int = 1
+        self.known_barriers: np.ndarray | None = None
+        self.target_zones: set[tuple[int, int]] = set()
+        self.pushable_colors: set[int] = set()
 
     def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal agent hypothesis state for a new level/episode."""
         if not retain_dynamics:
             self.action_models.clear()
+            self.state_mutations.clear()
         self.avatar_centroid = None
         self.avatar_color = None
         self.goal_centroid = None
         self.last_action_data = None
         self.blocked_actions.clear()
         self.stuck_counter = 0
+        self.known_barriers = None
+        self.target_zones.clear()
+        self.pushable_colors.clear()
 
     def active_probe_action(self, available_actions: list[int]) -> int:
         """Select exploratory action to maximize causal information gain on motor dynamics."""
-        # Check which available actions are unprobed or have low confidence
         for a in available_actions:
             if a not in self.action_models or self.action_models[a].confidence < 0.8:
                 return a
-        # If all modeled, choose lowest tested action
         return min(available_actions, key=lambda a: self.action_models[a].probes_tested)
 
     def update_causal_dynamics(
@@ -214,21 +331,68 @@ class ARC3InteractiveAgent:
         prev_grid: np.ndarray,
         curr_grid: np.ndarray,
     ) -> None:
-        """Infer avatar identity and motor displacement vector from observation diff."""
+        """Infer avatar identity, motor displacement, barriers, and state mutations."""
         if prev_grid.shape != curr_grid.shape:
             return
 
-        # Case 1: Avatar color is already tracked
+        # 1. Initialize or maintain barrier mask
+        if self.known_barriers is None or self.known_barriers.shape != curr_grid.shape:
+            self.known_barriers = np.zeros(curr_grid.shape, dtype=bool)
+            # Wall color heuristic: large homogenous areas (> 20% of grid) are immovable barriers
+            for col, count in zip(*np.unique(curr_grid, return_counts=True)):
+                if col != 0 and count > (curr_grid.size * 0.20):
+                    self.known_barriers[curr_grid == col] = True
+
+        # 2. Case 1: Avatar color is already tracked
         if self.avatar_color is not None:
             p_prev = np.where(prev_grid == self.avatar_color)
             p_curr = np.where(curr_grid == self.avatar_color)
+
+            # Check for discrete state mutation: avatar color changed upon stepping on tile
+            if len(p_prev[0]) > 0 and len(p_curr[0]) == 0 and self.avatar_centroid is not None:
+                r_c, c_c = int(round(self.avatar_centroid[0])), int(round(self.avatar_centroid[1]))
+                if 0 <= r_c < curr_grid.shape[0] and 0 <= c_c < curr_grid.shape[1]:
+                    new_c = curr_grid[r_c, c_c]
+                    if new_c != 0 and new_c != self.avatar_color:
+                        self.state_mutations.append(
+                            StateMutationModel(
+                                trigger_type="TILE_CONTACT",
+                                trigger_pos=(r_c, c_c),
+                                mutation_type="COLOR_REMAP",
+                                prior_value=self.avatar_color,
+                                posterior_value=int(new_c),
+                                confidence=0.95,
+                            )
+                        )
+                        self.avatar_color = int(new_c)
+                        p_curr = np.where(curr_grid == self.avatar_color)
+
             if len(p_prev[0]) > 0 and len(p_curr[0]) > 0:
                 old_r, old_c = float(np.mean(p_prev[0])), float(np.mean(p_prev[1]))
                 new_r, new_c = float(np.mean(p_curr[0])), float(np.mean(p_curr[1]))
                 dr = int(round(new_r - old_r))
                 dc = int(round(new_c - old_c))
                 self.avatar_centroid = (new_r, new_c)
+
                 if dr != 0 or dc != 0:
+                    # Update step size estimate
+                    self.step_size = max(self.step_size, abs(dr), abs(dc))
+
+                    # Check if an adjacent object was pushed
+                    for col in np.unique(prev_grid):
+                        if col == 0 or col == self.avatar_color:
+                            continue
+                        box_prev = np.where(prev_grid == col)
+                        box_curr = np.where(curr_grid == col)
+                        if (
+                            0 < len(box_prev[0]) < 100
+                            and abs(len(box_prev[0]) - len(box_curr[0])) <= 1
+                        ):
+                            b_dr = int(round(np.mean(box_curr[0]) - np.mean(box_prev[0])))
+                            b_dc = int(round(np.mean(box_curr[1]) - np.mean(box_prev[1])))
+                            if b_dr == dr and b_dc == dc:
+                                self.pushable_colors.add(int(col))
+
                     if action_id not in self.action_models:
                         self.action_models[action_id] = ActionDynamicsModel(
                             action_id=action_id,
@@ -247,14 +411,24 @@ class ARC3InteractiveAgent:
                     self.stuck_counter = 0
                     return
                 else:
-                    # Action resulted in no movement (obstacle collision or barrier)
+                    # Avatar failed to move: collision with obstacle/wall
                     if action_id in self.action_models:
-                        self.action_models[action_id].probes_tested += 1
+                        m = self.action_models[action_id]
+                        m.probes_tested += 1
+                        if m.delta_r != 0 or m.delta_c != 0:
+                            # Mark the blocked destination cell as barrier
+                            dest_r = int(round(old_r + m.delta_r))
+                            dest_c = int(round(old_c + m.delta_c))
+                            if (
+                                0 <= dest_r < curr_grid.shape[0]
+                                and 0 <= dest_c < curr_grid.shape[1]
+                            ):
+                                self.known_barriers[dest_r, dest_c] = True
                     self.blocked_actions.add(action_id)
                     self.stuck_counter += 1
                     return
 
-        # Case 2: Avatar not yet identified. Find rigid moving color cluster
+        # 3. Case 2: Avatar not yet identified. Find rigid moving color cluster
         candidates = []
         for col in np.unique(prev_grid):
             if col == 0:
@@ -277,11 +451,11 @@ class ARC3InteractiveAgent:
                     )
 
         if candidates:
-            # Avatar is the smallest rigid translating entity
             candidates.sort(key=lambda x: x[4])
             best_col, best_dr, best_dc, best_pos, _ = candidates[0]
             self.avatar_color = best_col
             self.avatar_centroid = best_pos
+            self.step_size = max(self.step_size, abs(best_dr), abs(best_dc))
             self.action_models[action_id] = ActionDynamicsModel(
                 action_id=action_id,
                 delta_r=best_dr,
@@ -306,8 +480,8 @@ class ARC3InteractiveAgent:
         available_actions: list[int],
         tags: list[str] | None = None,
     ) -> tuple[int, float]:
-        """Synthesize next action toward inferred goal using CognitiveGraph and path search."""
-        # 1. Check for click-based interaction
+        """Synthesize next action using Topological BFS pathfinding and deadlock avoidance."""
+        # 1. Coordinate Click Interaction
         if tags and "click" in tags and 6 in available_actions:
             arc_grid = ARCGrid.from_list(curr_grid.tolist())
             objs = GridTopologyExtractor.extract_objects(arc_grid)
@@ -321,7 +495,7 @@ class ARC3InteractiveAgent:
                 self.stuck_counter += 1
                 return 6, 0.85
 
-        # 2. If motor models are still incomplete, execute active causal probing
+        # 2. Motor Model Calibration Check
         calibrated_models = [
             m
             for a, m in self.action_models.items()
@@ -332,7 +506,7 @@ class ARC3InteractiveAgent:
             self.last_action_data = None
             return probe, 0.50
 
-        # 3. Locate avatar on grid
+        # 3. Locate Avatar
         if self.avatar_color is not None:
             avatar_mask = np.where(curr_grid == self.avatar_color)
             if len(avatar_mask[0]) > 0:
@@ -348,11 +522,12 @@ class ARC3InteractiveAgent:
             self.last_action_data = None
             return probe, 0.40
 
-        # 4. Infer Goal Entity (distinctive non-background, non-avatar sprite)
+        # 4. Extract Objects & Identify Subgoals
         H, W = curr_grid.shape
         arc_grid = ARCGrid.from_list(curr_grid.tolist())
         objs = GridTopologyExtractor.extract_objects(arc_grid)
 
+        # Separate targets: transformation tiles vs movable items vs final exit goals
         candidate_goals = [
             o
             for o in objs
@@ -365,19 +540,51 @@ class ARC3InteractiveAgent:
             self.last_action_data = None
             return act, 0.40
 
-        # Select closest goal candidate
+        # Hierarchical Subgoal Selection: prioritize unvisited transformation tiles first
+        transformer_candidates = [
+            o
+            for o in candidate_goals
+            if o.area <= 16
+            and any(
+                m.trigger_pos != (int(o.centroid[0]), int(o.centroid[1]))
+                for m in self.state_mutations
+            )
+        ]
+        chosen_goals = (
+            transformer_candidates
+            if transformer_candidates and len(self.state_mutations) < 2
+            else candidate_goals
+        )
+
         target_goal = min(
-            candidate_goals,
+            chosen_goals,
             key=lambda o: math.hypot(o.centroid[0] - curr_r, o.centroid[1] - curr_c),
         )
         goal_r = int(round(target_goal.centroid[0]))
         goal_c = int(round(target_goal.centroid[1]))
         self.goal_centroid = (float(goal_r), float(goal_c))
 
-        # 5. Goal Alignment & Obstacle Clearance Heuristic
-        dr_target = goal_r - curr_r
-        dc_target = goal_c - curr_c
+        # 5. Topological BFS Shortest-Path Search
+        barrier_mask = (
+            self.known_barriers if self.known_barriers is not None else np.zeros((H, W), dtype=bool)
+        )
 
+        shortest_path = TopologicalPathPlanner.find_shortest_path(
+            start=(curr_r, curr_c),
+            goal=(goal_r, goal_c),
+            grid_shape=(H, W),
+            barrier_mask=barrier_mask,
+            step_size=self.step_size,
+        )
+
+        dr_des = goal_r - curr_r
+        dc_des = goal_c - curr_c
+        if len(shortest_path) > 1:
+            next_waypoint = shortest_path[1]
+            dr_des = next_waypoint[0] - curr_r
+            dc_des = next_waypoint[1] - curr_c
+
+        # 6. Action Scoring with Sokoban Deadlock Avoidance
         best_action = available_actions[0]
         best_score = -999999.0
 
@@ -386,27 +593,45 @@ class ARC3InteractiveAgent:
             if not m or (m.delta_r == 0 and m.delta_c == 0):
                 continue
 
-            # Dot product alignment
-            alignment = (m.delta_r * dr_target) + (m.delta_c * dc_target)
+            # Check if this action pushes a box into a corner deadlock
+            deadlock_penalty = 0.0
+            if self.pushable_colors:
+                dest_r = curr_r + m.delta_r
+                dest_c = curr_c + m.delta_c
+                if 0 <= dest_r < H and 0 <= dest_c < W:
+                    if curr_grid[dest_r, dest_c] in self.pushable_colors:
+                        box_next_r = dest_r + m.delta_r
+                        box_next_c = dest_c + m.delta_c
+                        if CornerDeadlockDetector.is_corner_deadlock(
+                            box_pos=(box_next_r, box_next_c),
+                            barrier_mask=barrier_mask,
+                            target_positions=self.target_zones,
+                            grid_shape=(H, W),
+                            step_size=self.step_size,
+                        ):
+                            deadlock_penalty = 50000.0
+
+            # Alignment with BFS shortest path waypoint
+            alignment = (m.delta_r * dr_des) + (m.delta_c * dc_des)
             penalty = 10000.0 if a in self.blocked_actions else 0.0
-            score = float(alignment - penalty)
+            score = float(alignment - penalty - deadlock_penalty)
 
             if score > best_score:
                 best_score = score
                 best_action = a
 
-        # If all actions are blocked (stuck against wall), clear blocked set to allow detour
+        # If all actions are blocked or deadlocked, clear blocked set to allow detour
         if best_score < -5000.0:
             self.blocked_actions.clear()
             for a in available_actions:
                 m = self.action_models.get(a)
                 if m and (m.delta_r != 0 or m.delta_c != 0):
-                    alignment = (m.delta_r * dr_target) + (m.delta_c * dc_target)
+                    alignment = (m.delta_r * dr_des) + (m.delta_c * dc_des)
                     if alignment > best_score:
                         best_score = float(alignment)
                         best_action = a
 
-        confidence = 0.92 if best_score > 0 else 0.65
+        confidence = 0.94 if best_score > 0 else 0.65
         self.last_action_data = None
         return best_action, confidence
 

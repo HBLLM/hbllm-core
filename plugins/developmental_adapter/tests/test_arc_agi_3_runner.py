@@ -10,6 +10,8 @@ from plugins.developmental_adapter.arc_agi_3_runner import (
     ARC3EnvironmentResult,
     ARC3InteractiveAgent,
     ARC3LevelResult,
+    CornerDeadlockDetector,
+    TopologicalPathPlanner,
 )
 
 
@@ -121,3 +123,79 @@ def test_arc3_benchmark_report_markdown() -> None:
     assert "`ls20`" in md
     assert "100.0%" in md
     assert "110.0%" in md
+
+
+def test_topological_bfs_shortest_path() -> None:
+    """Verify BFS navigates around a U-shaped barrier instead of getting stuck."""
+    barrier_mask = np.zeros((8, 8), dtype=bool)
+    # U-shaped barrier between start (4, 4) and goal (2, 4)
+    # Wall on row 3 columns 3, 4, 5 and row 4 columns 3 and 5
+    barrier_mask[3, 3:6] = True
+    barrier_mask[4, 3] = True
+    barrier_mask[4, 5] = True
+
+    path = TopologicalPathPlanner.find_shortest_path(
+        start=(4, 4),
+        goal=(2, 4),
+        grid_shape=(8, 8),
+        barrier_mask=barrier_mask,
+        step_size=1,
+    )
+    assert len(path) > 1
+    # First step must not walk straight UP into barrier (3, 4)
+    assert path[1] != (3, 4)
+    # Must exit downward or sideways avoiding barrier
+    assert not barrier_mask[path[1][0], path[1][1]]
+    assert path[-1] == (2, 4)
+
+
+def test_sokoban_deadlock_detection() -> None:
+    """Verify corner deadlock detector flags unmovable box positions against walls."""
+    barrier_mask = np.zeros((8, 8), dtype=bool)
+    # Top wall and left wall
+    barrier_mask[0, :] = True
+    barrier_mask[:, 0] = True
+
+    # Position (1, 1) is adjacent to wall (0, 1) and wall (1, 0) -> corner deadlock
+    is_deadlock = CornerDeadlockDetector.is_corner_deadlock(
+        box_pos=(1, 1),
+        barrier_mask=barrier_mask,
+        target_positions=set(),
+        grid_shape=(8, 8),
+        step_size=1,
+    )
+    assert is_deadlock is True
+
+    # If (1, 1) is a designated target, it's not a deadlock
+    not_deadlock = CornerDeadlockDetector.is_corner_deadlock(
+        box_pos=(1, 1),
+        barrier_mask=barrier_mask,
+        target_positions={(1, 1)},
+        grid_shape=(8, 8),
+        step_size=1,
+    )
+    assert not_deadlock is False
+
+
+def test_state_mutation_induction() -> None:
+    """Verify agent induces discrete state mutation when avatar color changes on tile."""
+    agent = ARC3InteractiveAgent()
+    agent.avatar_color = 3
+    agent.avatar_centroid = (4.0, 4.0)
+
+    # Grid 0: Avatar is color 3 at (4, 4)
+    g0 = np.zeros((8, 8), dtype=int)
+    g0[4, 4] = 3
+
+    # Grid 1: Stepping on transformer tile at (4, 4) mutates avatar color to 7
+    g1 = np.zeros((8, 8), dtype=int)
+    g1[4, 4] = 7
+
+    agent.update_causal_dynamics(action_id=1, prev_grid=g0, curr_grid=g1)
+
+    assert len(agent.state_mutations) == 1
+    mutation = agent.state_mutations[0]
+    assert mutation.mutation_type == "COLOR_REMAP"
+    assert mutation.prior_value == 3
+    assert mutation.posterior_value == 7
+    assert agent.avatar_color == 7
