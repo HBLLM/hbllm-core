@@ -73,6 +73,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to export the final Knowledge Acquisition Report (defaults to <checkpoint-dir>/knowledge_report.md).",
     )
     parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=25,
+        help="Interval of books between full named chapter checkpoint saves (defaults to 25).",
+    )
+    parser.add_argument(
         "--student-name",
         type=str,
         default="Baby HBLLM (Gutenberg Scholar)",
@@ -113,7 +119,23 @@ def main() -> int:
         [d for d in args.checkpoint_dir.iterdir() if d.is_dir() and "gutenberg_" in d.name],
         key=lambda p: p.stat().st_mtime,
     )
+    tracker_state_file = args.checkpoint_dir / "tracker_state.json"
+    latest_ckpt_dir = args.checkpoint_dir / "latest_checkpoint"
     processed_bids = set()
+
+    # Discover processed books from tracker state if present
+    if tracker_state_file.exists():
+        tracker = KnowledgeGainTracker.load_state(tracker_state_file)
+        for s in tracker.snapshots:
+            if getattr(s, "last_book_id", 0) > 0:
+                processed_bids.add(s.last_book_id)
+        logger.info(
+            f"Loaded existing knowledge tracker state with {len(tracker.snapshots)} historical snapshots "
+            f"({len(processed_bids)} unique book IDs)."
+        )
+    else:
+        tracker = KnowledgeGainTracker()
+
     for d in existing_ckpts:
         m = re.search(r"gutenberg_(\d+)", d.name)
         if m:
@@ -127,14 +149,19 @@ def main() -> int:
         seed=args.seed,
     )
 
-    if existing_ckpts and processed_bids:
-        latest_ckpt = existing_ckpts[-1]
+    resume_ckpt = None
+    if latest_ckpt_dir.exists() and (latest_ckpt_dir / "checkpoint_meta.json").exists():
+        resume_ckpt = latest_ckpt_dir
+    elif existing_ckpts:
+        resume_ckpt = existing_ckpts[-1]
+
+    if resume_ckpt and processed_bids:
         logger.info(
             f"Detected {len(processed_bids)} previously completed books. "
-            f"Resuming student state from latest checkpoint: {latest_ckpt.name}..."
+            f"Resuming student state from checkpoint: {resume_ckpt.name}..."
         )
         trainer = ContinuousTextbookSchoolTrainer.resume_from_checkpoint(
-            checkpoint_dir=latest_ckpt,
+            checkpoint_dir=resume_ckpt,
             config=cfg,
         )
         # Filter out already processed books
@@ -152,21 +179,24 @@ def main() -> int:
     print("=" * 70 + "\n")
 
     streamer = GutenbergCorpusStreamer(cache_dir=args.cache_dir)
-    tracker_state_file = args.checkpoint_dir / "tracker_state.json"
-    if tracker_state_file.exists() and existing_ckpts:
-        tracker = KnowledgeGainTracker.load_state(tracker_state_file)
-        logger.info(
-            f"Loaded existing knowledge tracker state with {len(tracker.snapshots)} historical snapshots."
-        )
-    else:
-        tracker = KnowledgeGainTracker()
+    total_books_target = len(processed_bids) + len(books)
 
     for idx, book_meta in enumerate(books, start=len(processed_bids) + 1):
         logger.info(f"\n>>> STREAMING BOOK {idx}: #{book_meta.book_id} — {book_meta.title} <<<")
         try:
             raw_text = streamer.fetch_book_text(book_meta)
             chapter = next(streamer.stream_curriculum_chapters([book_meta]))
-            trainer.train(chapters=[chapter])
+
+            save_named = (
+                args.checkpoint_interval <= 1
+                or idx % args.checkpoint_interval == 0
+                or idx == total_books_target
+            )
+            trainer.train(
+                chapters=[chapter],
+                checkpoint_name=f"chapter_1_{chapter.chapter_id}",
+                save_named_checkpoint=save_named,
+            )
 
             snap = tracker.record_progress(trainer, book_meta, len(raw_text))
             tracker.save_state(tracker_state_file)

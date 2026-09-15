@@ -570,6 +570,8 @@ class ContinuousTextbookSchoolTrainer:
         self,
         max_chapters: int | None = None,
         chapters: list[Any] | None = None,
+        checkpoint_name: str | None = None,
+        save_named_checkpoint: bool = True,
     ) -> ContinuousTextbookSchoolSummary:
         """Run continuous textbook training loop across all configured curriculum chapters."""
         from .curriculum_fetcher import CurriculumFetcher
@@ -667,8 +669,14 @@ class ContinuousTextbookSchoolTrainer:
                             )
 
                         # Step F: Cognitive Checkpoint Persistence
-                        ckpt_dir = self.checkpoint_dir / f"chapter_{ch_idx}_{chapter.chapter_id}"
-                        ckpt_path = self.save_chapter_checkpoint(ch_idx, chapter, ckpt_dir)
+                        latest_dir = self.checkpoint_dir / "latest_checkpoint"
+                        if save_named_checkpoint:
+                            name = checkpoint_name or f"chapter_{ch_idx}_{chapter.chapter_id}"
+                            ckpt_dir = self.checkpoint_dir / name
+                            ckpt_path = self.save_chapter_checkpoint(ch_idx, chapter, ckpt_dir)
+                            self.save_chapter_checkpoint(ch_idx, chapter, latest_dir)
+                        else:
+                            ckpt_path = self.save_chapter_checkpoint(ch_idx, chapter, latest_dir)
 
                         # Step G: Telemetry Emission
                         emitter.record_concept_acquired(chapter.chapter_id)

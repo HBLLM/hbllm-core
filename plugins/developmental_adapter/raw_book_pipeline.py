@@ -280,25 +280,94 @@ class AutomatedCurriculumCompiler:
         )
         return chapter
 
+    STOPWORDS: set[str] = {
+        "they",
+        "them",
+        "their",
+        "theirs",
+        "these",
+        "this",
+        "that",
+        "those",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "whoever",
+        "whatever",
+        "whichever",
+        "there",
+        "here",
+        "where",
+        "when",
+        "while",
+        "then",
+        "thus",
+        "someone",
+        "anyone",
+        "everyone",
+        "nobody",
+        "somebody",
+        "everybody",
+        "nothing",
+        "everything",
+        "something",
+        "anything",
+        "each",
+        "both",
+        "either",
+        "neither",
+        "some",
+        "any",
+        "all",
+        "none",
+        "more",
+        "most",
+        "such",
+        "other",
+        "another",
+        "same",
+        "certain",
+        "chapter",
+        "section",
+        "part",
+        "volume",
+        "page",
+        "table",
+        "figure",
+        "gutenberg",
+        "ebook",
+        "project",
+        "edition",
+        "author",
+        "title",
+    }
+
     @classmethod
     def _extract_glossary(cls, text: str, domain: str) -> dict[str, str]:
-        """Extract explicit definitions or salient domain terms from text."""
+        """Extract explicit definitions or salient domain terms across the entire book."""
         glossary: dict[str, str] = {}
         domain_terms = cls.DOMAIN_VOCABULARY_MAP.get(
             domain.lower(), cls.DOMAIN_VOCABULARY_MAP["physics"]
         )
 
-        # Scan for explicit definitional sentences: "X is a Y..."
+        # Scan 100% of the complete, unabridged book for explicit definitional sentences
         pattern = re.compile(
             r"\b([A-Za-z\-]{3,20})\s+(?:is|are|means|denotes|refers to)\s+([^.\n]{15,120})\.",
             re.IGNORECASE,
         )
-        matches = pattern.findall(text[:40000])  # Inspect up to first 40K chars
+        matches = pattern.findall(text)
         for term, definition in matches:
             t_clean = term.strip().lower()
-            if len(t_clean) > 3 and t_clean not in glossary:
+            if (
+                len(t_clean) > 2
+                and t_clean.isalpha()
+                and t_clean not in cls.STOPWORDS
+                and t_clean not in glossary
+            ):
                 glossary[t_clean] = definition.strip()
-                if len(glossary) >= 6:
+                if len(glossary) >= 20:  # Richer conceptual vocabulary from full book
                     break
 
         # Complement with domain vocabulary present in the text

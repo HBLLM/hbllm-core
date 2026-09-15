@@ -356,6 +356,153 @@ class TextbookCurriculumCurator:
         self.sim_compiler = TextbookSimulationCompiler()
         self.analogy_compiler = TextbookAnalogyCompiler()
 
+    CONTAINER_WORDS: set[str] = {
+        "container",
+        "box",
+        "vessel",
+        "basket",
+        "hopper",
+        "chamber",
+        "tray",
+        "enclosure",
+        "jar",
+        "cup",
+    }
+    TOOL_WORDS: set[str] = {
+        "tool",
+        "stick",
+        "lever",
+        "rod",
+        "handle",
+        "arm",
+        "probe",
+        "fulcrum",
+        "pivot",
+        "wedge",
+        "pulley",
+        "hammer",
+    }
+    OBJECT_WORDS: set[str] = {
+        "ball",
+        "block",
+        "sphere",
+        "cylinder",
+        "target",
+        "mass",
+        "particle",
+        "atom",
+        "molecule",
+        "body",
+        "object",
+        "wheel",
+        "magnet",
+        "mirror",
+        "prism",
+        "lens",
+        "star",
+        "planet",
+        "moon",
+        "cell",
+        "organism",
+        "plant",
+        "animal",
+        "species",
+        "crystal",
+        "fluid",
+        "solid",
+        "gas",
+        "liquid",
+        "ray",
+        "beam",
+        "wave",
+        "charge",
+        "field",
+        "engine",
+        "acid",
+        "wax",
+        "candle",
+        "matter",
+        "lead",
+        "iron",
+        "copper",
+        "substance",
+        "solution",
+        "tissue",
+        "nucleus",
+        "core",
+        "orbit",
+    }
+    ACTION_VERBS: set[str] = {
+        "push",
+        "pull",
+        "move",
+        "lift",
+        "drop",
+        "rotate",
+        "place",
+        "grasp",
+        "accelerate",
+        "attract",
+        "repel",
+        "flow",
+        "transfer",
+        "conduct",
+        "diffuse",
+        "react",
+        "press",
+        "release",
+        "hold",
+        "slide",
+        "roll",
+        "stop",
+        "combust",
+        "ignite",
+        "absorb",
+        "emit",
+        "radiate",
+        "deflect",
+        "displace",
+        "expand",
+        "contract",
+        "heat",
+        "cool",
+        "melt",
+        "freeze",
+        "vaporize",
+        "condense",
+        "refract",
+        "reflect",
+    }
+    PREPOSITIONS: set[str] = {
+        "inside",
+        "in",
+        "on",
+        "above",
+        "under",
+        "below",
+        "near",
+        "between",
+        "against",
+        "through",
+        "into",
+        "within",
+        "outside",
+        "upon",
+        "behind",
+        "across",
+    }
+    NOUN_SUFFIXES: tuple[str, ...] = (
+        "tion",
+        "ment",
+        "ence",
+        "ance",
+        "ity",
+        "ism",
+        "ist",
+        "er",
+        "or",
+    )
+
     def teach_chapter(
         self,
         student: StudentProfile | Any,
@@ -369,33 +516,79 @@ class TextbookCurriculumCurator:
         if def_sec:
             glossary = def_sec.structured_payload.get("glossary", {})
             for term, explanation in glossary.items():
-                # Formulate paired demonstrations for lexical categories
                 context = {"concept": term, "explanation": explanation}
-                if "container" in term or "box" in term:
+                term_clean = term.strip().lower()
+
+                if any(w in term_clean for w in self.CONTAINER_WORDS):
                     context["entity_type"] = BabyObjectType.BOX
-                elif "tool" in term or "stick" in term or "lever" in term:
+                elif any(w in term_clean for w in self.TOOL_WORDS):
                     context["entity_type"] = BabyObjectType.TOOL
-                elif "fulcrum" in term or "pivot" in term:
-                    context["entity_type"] = BabyObjectType.SURFACE
-                elif "pull" in term:
-                    context["action"] = BabyActionType.PULL
-                elif "push" in term:
-                    context["action"] = BabyActionType.PUSH
-                elif "advantage" in term:
-                    context["property"] = "mechanical_advantage"
+                elif term_clean in self.OBJECT_WORDS or any(
+                    term_clean.endswith(sfx) for sfx in self.NOUN_SUFFIXES
+                ):
+                    context["entity_type"] = BabyObjectType.BLOCK
+                elif (
+                    term_clean in self.ACTION_VERBS
+                    or term_clean.endswith("ing")
+                    or term_clean.endswith("ed")
+                ):
+                    if "pull" in term_clean:
+                        context["action"] = BabyActionType.PULL
+                    else:
+                        context["action"] = BabyActionType.PUSH
+                elif term_clean in self.PREPOSITIONS:
+                    if "near" in term_clean or "between" in term_clean or "against" in term_clean:
+                        context["relation"] = BabyRelationType.NEAR
+                    else:
+                        context["relation"] = BabyRelationType.INSIDE
                 else:
-                    context["property"] = term
+                    context["property"] = term_clean
+
                 student.grounding_engine.observe_paired_demonstration(term, context)
             results["glossary_count"] = len(glossary)
             results["sections_processed"] += 1
 
-        # 2. Process Worked Problems -> BabyWorld Simulation
+        # 2. Process Worked Problems -> BabyWorld Simulation & Active Causal Discovery
         prob_sec = chapter.get_section(TextbookSectionType.WORKED_PROBLEM)
         if prob_sec:
             puzzle = self.sim_compiler.compile_puzzle(prob_sec)
             sim_eval = self.sim_compiler.verify_student_solution(student, puzzle)
             results["simulation_puzzle"] = sim_eval
             results["sections_processed"] += 1
+
+            # Step 2b: Active Causal Invariance Induction
+            if hasattr(student, "causal_engine") and student.causal_engine:
+                if len(student.substrate.causal_rules) < 10:
+                    try:
+                        obs = student.env.get_sensory_observation()
+                        demos = student.env.generate_observational_demonstrations()
+                        student.causal_engine.observe_and_generate_hypotheses(
+                            obs, episodes_data=demos
+                        )
+                        cand_ids = list(student.env.objects.keys())
+                        if cand_ids:
+                            for _ in range(2):
+                                active_hyps = [
+                                    h for h in student.causal_engine.hypotheses if not h.falsified
+                                ]
+                                if not active_hyps:
+                                    break
+                                target_id, hyp = student.causal_engine.select_active_intervention(
+                                    cand_ids, active_hyps
+                                )
+                                student.causal_engine.execute_interventional_probe(
+                                    target_id, action=hyp.action
+                                )
+                    except Exception as e:
+                        logger.debug(f"Causal discovery interventional probe skipped: {e}")
+
+            # Step 2c: Active Tool & Shape Affordance Discovery
+            if hasattr(student, "affordance_engine") and student.affordance_engine:
+                if len(student.substrate.affordances) < 5:
+                    try:
+                        student.affordance_engine.discover_affordances(max_interventions=3)
+                    except Exception as e:
+                        logger.debug(f"Affordance discovery probe skipped: {e}")
 
         # 3. Process Analogy Schemas -> A20 Structure Mapping
         analogy_sec = chapter.get_section(TextbookSectionType.ANALOGY_SCHEMA)

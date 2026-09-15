@@ -62,6 +62,7 @@ class KnowledgeGainSnapshot:
     mean_backward_transfer: float
     domain_counts: dict[str, int]
     last_book_title: str
+    last_book_id: int = 0
 
 
 class GutenbergIndexManager:
@@ -226,6 +227,26 @@ class GutenbergIndexManager:
                 return dom
         return "general_science"
 
+    @classmethod
+    def refine_domain_from_text(cls, text: str, initial_domain: str = "general_science") -> str:
+        """Refine domain classification using term frequencies across the actual book text."""
+        if initial_domain != "general_science":
+            return initial_domain
+
+        sample = text[:50000].lower()
+        scores: dict[str, int] = {}
+        for dom, keywords in cls.DOMAIN_PATTERNS.items():
+            score = sum(sample.count(k) for k in keywords)
+            if score > 0:
+                scores[dom] = score
+
+        if scores:
+            best_domain, max_score = max(scores.items(), key=lambda item: item[1])
+            if max_score >= 5:
+                return best_domain
+
+        return "general_science"
+
     @staticmethod
     def _get_offline_sample_index() -> str:
         return """
@@ -286,6 +307,7 @@ class GutenbergCorpusStreamer:
         """Iteratively stream compiled TextbookChapters from the Gutenberg metadata list."""
         for meta in books:
             raw_text = self.fetch_book_text(meta)
+            meta.domain = GutenbergIndexManager.refine_domain_from_text(raw_text, meta.domain)
             item = BookCurriculumItem(
                 item_id=f"gutenberg_{meta.book_id}",
                 source_type=BookSourceType.GUTENBERG,
@@ -347,6 +369,7 @@ class KnowledgeGainTracker:
             mean_backward_transfer=bwt,
             domain_counts=dict(self.domain_distribution),
             last_book_title=current_book.title,
+            last_book_id=current_book.book_id,
         )
         self.snapshots.append(snapshot)
         return snapshot
