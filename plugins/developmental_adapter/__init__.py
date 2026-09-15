@@ -32,6 +32,11 @@ from .cross_transfer import CrossTransferEngine
 from .curiosity import EpistemicCuriosityEngine
 from .curriculum import CURRICULUM_SPECS, CurriculumStageId, CurriculumStageSpec
 from .dictionary_store import DictionaryEntry, LanguageDictionary, SemanticRole
+from .downstream_benchmarks import (
+    BenchmarkTaskResult,
+    DownstreamBenchmarkReport,
+    DownstreamBenchmarkRunner,
+)
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -41,12 +46,14 @@ from .metrics import (
     DevelopmentalMetricsTracker,
     DevelopmentalTelemetryEmitter,
 )
+from .multilingual import MultilingualLexiconRegistry, SupportedLanguage
 from .perception import (
     DevelopmentalPerceptionAdapter,
     SemanticLeakageViolationError,
 )
 from .school import CognitiveSchool, GraduationTranscript
 from .spatial_containment import SpatialContainmentEngine
+from .taxonomy import TaxonNode, TaxonomyHierarchyEngine
 from .teacher import (
     GradeAssessment,
     GradeLevel,
@@ -131,6 +138,7 @@ __all__ = [
     "BaseDevelopmentalCohort",
     "BeliefTransitionEvent",
     "BeliefTransitionType",
+    "BenchmarkTaskResult",
     "BlankBrainSubstrate",
     "CURRICULUM_SPECS",
     "CausalHypothesis",
@@ -147,8 +155,12 @@ __all__ = [
     "CurriculumStageSpec",
     "DevelopmentalActionAdapter",
     "DictionaryEntry",
+    "DownstreamBenchmarkReport",
+    "DownstreamBenchmarkRunner",
     "LanguageDictionary",
+    "MultilingualLexiconRegistry",
     "SemanticRole",
+    "SupportedLanguage",
     "CohortStatisticalSummary",
     "DevelopmentalMetricsTracker",
     "DevelopmentalTelemetryEmitter",
@@ -182,6 +194,8 @@ __all__ = [
     "SpatialContainmentEngine",
     "SpatialRelationFact",
     "StudentProfile",
+    "TaxonNode",
+    "TaxonomyHierarchyEngine",
     "ToolLearningEngine",
     "Vector2D",
     "create_blank_brain_substrate",

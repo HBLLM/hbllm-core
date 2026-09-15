@@ -44,16 +44,26 @@ class DictionaryEntry:
     category: LexicalCategory
     definition: str
     semantic_role: str = ""  # SemanticRole value
+    parent_concept: str | None = None
+    inherited_affordances: set[str] = field(default_factory=set)
     translations: dict[str, str] = field(default_factory=dict)
     confidence: float = 0.95
 
     @property
     def is_container(self) -> bool:
-        return self.semantic_role == "CONTAINER"
+        return (
+            self.semantic_role == "CONTAINER"
+            or "CONTAINER" in self.inherited_affordances
+            or "HOLDS_INSIDE" in self.inherited_affordances
+        )
 
     @property
     def is_tool(self) -> bool:
-        return self.semantic_role == "TOOL"
+        return (
+            self.semantic_role == "TOOL"
+            or "TOOL" in self.inherited_affordances
+            or "EXTENDS_REACH" in self.inherited_affordances
+        )
 
 
 class LanguageDictionary:
@@ -66,6 +76,9 @@ class LanguageDictionary:
     _INSTANCE: LanguageDictionary | None = None
 
     def __init__(self) -> None:
+        from .taxonomy import TaxonomyHierarchyEngine
+
+        self.taxonomy = TaxonomyHierarchyEngine.get_instance()
         self.entries: dict[str, DictionaryEntry] = {}
         self._load_foundational_lexicon()
 
@@ -83,6 +96,7 @@ class LanguageDictionary:
         definition: str,
         semantic_role: str = "",
         translations: dict[str, str] | None = None,
+        parent_concept: str | None = None,
     ) -> DictionaryEntry:
         """Register or update an authoritative dictionary entry."""
         w_clean = word.strip().lower()
@@ -96,14 +110,29 @@ class LanguageDictionary:
         elif semantic_role is None:
             semantic_role = ""
 
+        # Taxonomy linking and affordance inheritance
+        if parent_concept:
+            self.taxonomy.register_concept(name=w_clean, parent_concept=parent_concept)
+        taxon_node = self.taxonomy.induce_is_a_relation(w_clean, definition)
+        inherited_affords = self.taxonomy.resolve_inherited_affordances(w_clean)
+
         if not semantic_role:
-            semantic_role = self._infer_semantic_role(w_clean, category, definition)
+            if "CONTAINER" in inherited_affords or "HOLDS_INSIDE" in inherited_affords:
+                semantic_role = "CONTAINER"
+            elif "TOOL" in inherited_affords or "EXTENDS_REACH" in inherited_affords:
+                semantic_role = "TOOL"
+            elif "ROLLABLE" in inherited_affords:
+                semantic_role = "BALL"
+            else:
+                semantic_role = self._infer_semantic_role(w_clean, category, definition)
 
         entry = DictionaryEntry(
             word=w_clean,
             category=category,
             definition=definition.strip(),
             semantic_role=semantic_role,
+            parent_concept=taxon_node.parent_concept if taxon_node else parent_concept,
+            inherited_affordances=inherited_affords,
             translations=translations or {},
             confidence=0.98,
         )
