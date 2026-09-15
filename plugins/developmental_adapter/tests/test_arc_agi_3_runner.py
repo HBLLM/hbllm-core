@@ -199,3 +199,67 @@ def test_state_mutation_induction() -> None:
     assert mutation.prior_value == 3
     assert mutation.posterior_value == 7
     assert agent.avatar_color == 7
+
+
+def test_arc3_agent_lift_to_hcir() -> None:
+    """Verify ARC3InteractiveAgent lifts visual grids into native HCIR graphs."""
+    from hbllm.hcir.graph import HCIRNodeType
+
+    agent = ARC3InteractiveAgent()
+    agent.avatar_color = 3
+    agent.avatar_centroid = (4.0, 4.0)
+    agent.pushable_colors.add(8)
+    agent.action_models[1] = ActionDynamicsModel(
+        action_id=1, delta_r=-1, delta_c=0, confidence=0.95
+    )
+
+    grid = np.zeros((8, 8), dtype=int)
+    grid[4, 4] = 3
+    grid[3, 4] = 8  # Pushable box above avatar
+    grid[1, 4] = 2  # Goal above
+
+    ws, goal_node, candidate_actions = agent.lift_to_hcir(grid, chosen_goal=(1, 4))
+
+    assert goal_node.id == "goal_arc3"
+    assert goal_node.properties["target_position"] == (1, 4)
+
+    entities = ws.graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)
+    entity_ids = [e.id for e in entities]
+    assert "avatar" in entity_ids
+    assert "goal_primary" in entity_ids
+    assert "box_3_4" in entity_ids
+
+    assert len(candidate_actions) == 1
+    assert candidate_actions[0].properties["action_id"] == 1
+    assert candidate_actions[0].properties["delta_r"] == -1
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_arc3_agent_counterfactual_planning() -> None:
+    """Verify ARC3InteractiveAgent plans actions using core CounterfactualPlanner."""
+    agent = ARC3InteractiveAgent()
+    agent.avatar_color = 3
+    agent.avatar_centroid = (4.0, 4.0)
+    agent.goal_centroid = (1.0, 4.0)
+
+    agent.action_models[1] = ActionDynamicsModel(
+        action_id=1, delta_r=-1, delta_c=0, confidence=0.95
+    )
+    agent.action_models[2] = ActionDynamicsModel(action_id=2, delta_r=1, delta_c=0, confidence=0.95)
+    agent.action_models[3] = ActionDynamicsModel(
+        action_id=3, delta_r=0, delta_c=-1, confidence=0.95
+    )
+    agent.action_models[4] = ActionDynamicsModel(action_id=4, delta_r=0, delta_c=1, confidence=0.95)
+
+    grid = np.zeros((8, 8), dtype=int)
+    grid[4, 4] = 3
+    grid[1, 4] = 2  # Goal above
+
+    best_act, score = await agent.plan_next_action_counterfactual(
+        grid, available_actions=[1, 2, 3, 4]
+    )
+    assert best_act == 1
+    assert score > 0.0

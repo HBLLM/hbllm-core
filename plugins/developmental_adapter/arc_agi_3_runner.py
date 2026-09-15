@@ -22,6 +22,15 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
+from hbllm.hcir.graph import ActionNode, GoalNode, PhysicalEntityNode, WorldVariableNode
+from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
+from hbllm.hcir.kernel.services import KernelServices
+from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.world.predictors.physics import PhysicsPredictor
+
 from .arc_agi_runner import ARCGrid, GridTopologyExtractor
 
 logger = logging.getLogger(__name__)
@@ -89,7 +98,7 @@ class StateMutationModel:
 
 
 class TopologicalPathPlanner:
-    """Computes obstacle-clearing shortest paths over 2D visual grids using BFS."""
+    """Computes obstacle-clearing shortest paths over 2D visual grids using core HCIR PhysicsPredictor."""
 
     @staticmethod
     def find_shortest_path(
@@ -99,56 +108,19 @@ class TopologicalPathPlanner:
         barrier_mask: np.ndarray,
         step_size: int = 1,
     ) -> list[tuple[int, int]]:
-        """Breadth-first search for shortest path avoiding barrier cells."""
-        H, W = grid_shape
-        start_r, start_c = start
-        goal_r, goal_c = goal
-
-        if start == goal:
-            return [start]
-
-        from collections import deque
-
-        queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque(
-            [(start_r, start_c, [(start_r, start_c)])]
+        """Breadth-first search for shortest path avoiding barrier cells via native HCIR PhysicsPredictor."""
+        barrier_cells = set(zip(*np.where(barrier_mask)))
+        return PhysicsPredictor.compute_geodesic_path(
+            start=start,
+            goal=goal,
+            barrier_cells=barrier_cells,
+            grid_shape=grid_shape,
+            step_size=step_size,
         )
-        visited = {(start_r, start_c)}
-
-        # 4-connected movements (scaled by step_size)
-        delta = [(-step_size, 0), (step_size, 0), (0, -step_size), (0, step_size)]
-
-        best_partial_path = [(start_r, start_c)]
-        min_dist_to_goal = math.hypot(goal_r - start_r, goal_c - start_c)
-
-        max_iterations = 2500
-        iters = 0
-
-        while queue and iters < max_iterations:
-            iters += 1
-            r, c, path = queue.popleft()
-
-            dist = math.hypot(goal_r - r, goal_c - c)
-            if dist < min_dist_to_goal:
-                min_dist_to_goal = dist
-                best_partial_path = path
-
-            if math.hypot(goal_r - r, goal_c - c) <= (step_size * 0.9):
-                return path + [(goal_r, goal_c)]
-
-            for dr, dc in delta:
-                nr, nc = r + dr, c + dc
-                if 0 <= nr < H and 0 <= nc < W:
-                    if (nr, nc) not in visited:
-                        visited.add((nr, nc))
-                        # Barrier check
-                        if not barrier_mask[nr, nc]:
-                            queue.append((nr, nc, path + [(nr, nc)]))
-
-        return best_partial_path
 
 
 class CornerDeadlockDetector:
-    """Detects irreversible corner deadlocks for pushable objects in Sokoban-style games."""
+    """Detects irreversible corner deadlocks for pushable objects via core HCIR PhysicsPredictor."""
 
     @staticmethod
     def is_corner_deadlock(
@@ -159,29 +131,14 @@ class CornerDeadlockDetector:
         step_size: int = 1,
     ) -> bool:
         """Returns True if box_pos is in a corner of barriers and not on a target."""
-        if box_pos in target_positions:
-            return False
-
-        r, c = box_pos
-        H, W = grid_shape
-
-        def is_wall(nr: int, nc: int) -> bool:
-            if nr < 0 or nr >= H or nc < 0 or nc >= W:
-                return True
-            return bool(barrier_mask[nr, nc])
-
-        north_blocked = is_wall(r - step_size, c)
-        south_blocked = is_wall(r + step_size, c)
-        west_blocked = is_wall(r, c - step_size)
-        east_blocked = is_wall(r, c + step_size)
-
-        # A corner is formed by any (vertical barrier, horizontal barrier) pair
-        top_left = north_blocked and west_blocked
-        top_right = north_blocked and east_blocked
-        bottom_left = south_blocked and west_blocked
-        bottom_right = south_blocked and east_blocked
-
-        return top_left or top_right or bottom_left or bottom_right
+        barrier_cells = set(zip(*np.where(barrier_mask)))
+        return PhysicsPredictor.is_corner_deadlock(
+            box_pos=box_pos,
+            barrier_cells=barrier_cells,
+            target_positions=target_positions,
+            grid_shape=grid_shape,
+            step_size=step_size,
+        )
 
 
 @dataclass
@@ -474,13 +431,167 @@ class ARC3InteractiveAgent:
                 self.action_models[action_id].probes_tested += 1
             self.blocked_actions.add(action_id)
 
+    def lift_to_hcir(
+        self,
+        curr_grid: np.ndarray,
+        chosen_goal: tuple[int, int] | None = None,
+    ) -> tuple[HCIRWorkspaceState, GoalNode, list[ActionNode]]:
+        """Lift 2D visual sensory observation into native HCIR CognitiveGraph & Workspace."""
+        ws = HCIRWorkspaceState()
+        H, W = curr_grid.shape
+
+        # 1. Controllable Avatar PhysicalEntityNode
+        if self.avatar_centroid is not None:
+            ar, ac = int(round(self.avatar_centroid[0])), int(round(self.avatar_centroid[1]))
+            ws.upsert_node(
+                PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    entity_type="agent",
+                    status="active",
+                    properties={
+                        "position": (ar, ac),
+                        "color": int(self.avatar_color) if self.avatar_color is not None else -1,
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                )
+            )
+
+        # 2. Pushable blocks / Movable Objects
+        for p_col in self.pushable_colors:
+            pts = np.where(curr_grid == p_col)
+            for r, c in zip(pts[0], pts[1]):
+                box_id = f"box_{r}_{c}"
+                ws.upsert_node(
+                    PhysicalEntityNode(
+                        id=box_id,
+                        entity_name="pushable_block",
+                        entity_type="movable_object",
+                        status="active",
+                        properties={
+                            "position": (int(r), int(c)),
+                            "color": int(p_col),
+                            "movable": True,
+                            "passable": False,
+                            "affordances": ["PUSHABLE"],
+                        },
+                    )
+                )
+
+        # 3. Target Goal Zones
+        goal_node = GoalNode(id="goal_arc3", description="Reach target location or deliver object")
+        if chosen_goal is not None:
+            gr, gc = chosen_goal
+            goal_node.properties = {"target_position": (gr, gc), "target_entity": "goal_primary"}
+            ws.upsert_node(
+                PhysicalEntityNode(
+                    id="goal_primary",
+                    entity_name="goal_zone",
+                    entity_type="target_zone",
+                    status="active",
+                    properties={
+                        "position": (gr, gc),
+                        "is_goal": True,
+                        "movable": False,
+                        "passable": True,
+                    },
+                )
+            )
+        ws.upsert_node(goal_node)
+
+        # 4. Barriers & Environment Variables
+        barrier_cells: list[tuple[int, int]] = []
+        if self.known_barriers is not None:
+            b_coords = np.where(self.known_barriers)
+            barrier_cells = [(int(r), int(c)) for r, c in zip(b_coords[0], b_coords[1])]
+
+        target_positions = list(self.target_zones)
+        if chosen_goal is not None and chosen_goal not in target_positions:
+            target_positions.append(chosen_goal)
+
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_grid_shape",
+                variable_name="grid_shape",
+                value=[H, W],
+            )
+        )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_barrier_cells",
+                variable_name="barrier_cells",
+                value=barrier_cells,
+            )
+        )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_target_positions",
+                variable_name="target_positions",
+                value=target_positions,
+            )
+        )
+
+        # 5. Build candidate ActionNodes from calibrated motor models
+        candidate_actions: list[ActionNode] = []
+        for a_id, model in self.action_models.items():
+            if model.confidence >= 0.8 and (model.delta_r != 0 or model.delta_c != 0):
+                act_node = ActionNode(
+                    id=f"act_{a_id}",
+                    intent=f"MOVE_A{a_id}",
+                    properties={
+                        "action_id": a_id,
+                        "delta_r": model.delta_r,
+                        "delta_c": model.delta_c,
+                        "grid_shape": [H, W],
+                        "barrier_cells": barrier_cells,
+                        "target_positions": target_positions,
+                    },
+                )
+                candidate_actions.append(act_node)
+
+        return ws, goal_node, candidate_actions
+
+    async def plan_next_action_counterfactual(
+        self,
+        curr_grid: np.ndarray,
+        available_actions: list[int],
+    ) -> tuple[int, float]:
+        """Synthesize next action via native HCIR CounterfactualPlanner branch evaluation."""
+        if not available_actions:
+            return 0, 0.0
+
+        target_pos = (
+            (int(round(self.goal_centroid[0])), int(round(self.goal_centroid[1])))
+            if self.goal_centroid
+            else None
+        )
+        ws, goal_node, candidate_actions = self.lift_to_hcir(curr_grid, target_pos)
+        valid_candidates = [
+            a for a in candidate_actions if a.properties.get("action_id") in available_actions
+        ]
+        if not valid_candidates:
+            return available_actions[0], 0.50
+
+        services = KernelServices(
+            workspace=ws,
+            transaction_manager=TransactionManager(ws),
+            capability_resolver=CapabilityResolver(),
+            scheduler=KernelInstructionScheduler(),
+        )
+        planner = CounterfactualPlanner(ws, services)
+        best_plan = await planner.evaluate_and_select(goal_node, valid_candidates)
+        best_a = best_plan.action.properties.get("action_id", available_actions[0])
+        return best_a, float(best_plan.utility_score)
+
     def plan_next_action(
         self,
         curr_grid: np.ndarray,
         available_actions: list[int],
         tags: list[str] | None = None,
     ) -> tuple[int, float]:
-        """Synthesize next action using Topological BFS pathfinding and deadlock avoidance."""
+        """Synthesize next action using native HCIR scene lifting, physics simulation and path planning."""
         # 1. Coordinate Click Interaction
         if tags and "click" in tags and 6 in available_actions:
             arc_grid = ARCGrid.from_list(curr_grid.tolist())
@@ -564,16 +675,18 @@ class ARC3InteractiveAgent:
         goal_c = int(round(target_goal.centroid[1]))
         self.goal_centroid = (float(goal_r), float(goal_c))
 
-        # 5. Topological BFS Shortest-Path Search
-        barrier_mask = (
-            self.known_barriers if self.known_barriers is not None else np.zeros((H, W), dtype=bool)
-        )
+        # 5. Native HCIR Scene Lifting & Topological Geodesic Search
+        _ws, _goal_node, _candidates = self.lift_to_hcir(curr_grid, (goal_r, goal_c))
 
-        shortest_path = TopologicalPathPlanner.find_shortest_path(
+        barrier_cells: set[tuple[int, int]] = set()
+        if self.known_barriers is not None:
+            barrier_cells = set(zip(*np.where(self.known_barriers)))
+
+        shortest_path = PhysicsPredictor.compute_geodesic_path(
             start=(curr_r, curr_c),
             goal=(goal_r, goal_c),
+            barrier_cells=barrier_cells,
             grid_shape=(H, W),
-            barrier_mask=barrier_mask,
             step_size=self.step_size,
         )
 
@@ -584,7 +697,7 @@ class ARC3InteractiveAgent:
             dr_des = next_waypoint[0] - curr_r
             dc_des = next_waypoint[1] - curr_c
 
-        # 6. Action Scoring with Sokoban Deadlock Avoidance
+        # 6. Action Scoring with Native HCIR Physics Deadlock Avoidance
         best_action = available_actions[0]
         best_score = -999999.0
 
@@ -593,7 +706,7 @@ class ARC3InteractiveAgent:
             if not m or (m.delta_r == 0 and m.delta_c == 0):
                 continue
 
-            # Check if this action pushes a box into a corner deadlock
+            # Check if this action pushes a box into a corner deadlock via HCIR PhysicsPredictor
             deadlock_penalty = 0.0
             if self.pushable_colors:
                 dest_r = curr_r + m.delta_r
@@ -602,9 +715,9 @@ class ARC3InteractiveAgent:
                     if curr_grid[dest_r, dest_c] in self.pushable_colors:
                         box_next_r = dest_r + m.delta_r
                         box_next_c = dest_c + m.delta_c
-                        if CornerDeadlockDetector.is_corner_deadlock(
+                        if PhysicsPredictor.is_corner_deadlock(
                             box_pos=(box_next_r, box_next_c),
-                            barrier_mask=barrier_mask,
+                            barrier_cells=barrier_cells,
                             target_positions=self.target_zones,
                             grid_shape=(H, W),
                             step_size=self.step_size,

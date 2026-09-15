@@ -122,11 +122,42 @@ class CounterfactualPlanner:
             )
 
             # 5. Compute utility score
-            utility_score = (
+            base_utility = (
                 prediction.uncertainty.confidence
                 * (1.0 if res.success else 0.0)
                 * (1.0 / (1.0 + action.estimated_cost * 0.01))
             )
+
+            # Evaluate spatial physics outcome if available
+            pred_props = getattr(prediction, "properties", {}) or {}
+            predicted_state = pred_props.get("predicted_state") or {}
+            spatial_outcome = (
+                predicted_state.get("spatial_outcome")
+                if isinstance(predicted_state, dict)
+                else None
+            )
+
+            if spatial_outcome and isinstance(spatial_outcome, dict):
+                deadlock = spatial_outcome.get("deadlock", False)
+                collision = spatial_outcome.get("collision", False)
+                progress = spatial_outcome.get("progress", 0.0)
+                goal_reached = spatial_outcome.get("goal_reached", False)
+
+                if deadlock:
+                    # Contradiction: fatal deadlock drops utility
+                    utility_score = 0.001
+                elif collision:
+                    # Collision penalty
+                    utility_score = base_utility * 0.25
+                elif goal_reached:
+                    # Maximum utility for goal completion
+                    utility_score = base_utility + 10.0
+                else:
+                    # Progress towards goal improves utility
+                    progress_boost = max(-0.5, min(2.0, progress * 0.5))
+                    utility_score = base_utility + progress_boost
+            else:
+                utility_score = base_utility
 
             results.append(
                 CandidatePlanResult(

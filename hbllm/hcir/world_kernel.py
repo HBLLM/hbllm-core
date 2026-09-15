@@ -31,6 +31,7 @@ from hbllm.hcir.world.verification_gate import VerificationGate
 from hbllm.hcir.world.world_belief import WorldBeliefGraph
 from hbllm.hcir.world.world_causal import WorldCausalGraph
 from hbllm.hcir.world.world_state_interpreter import WorldStateInterpreter
+from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,16 @@ class WorldKernel:
 
         return summary
 
+    def sync_from_workspace(self) -> None:
+        """Sync variables and physical entities from workspace graph into digital twin."""
+        for node in self._workspace.graph.nodes_by_type(HCIRNodeType.WORLD_VARIABLE):
+            if isinstance(node, WorldVariableNode):
+                self.digital_twin.sync_sensor_telemetry(node.variable_name, node.value)
+        for node in self._workspace.graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+            if isinstance(node, PhysicalEntityNode):
+                entity = self.digital_twin.register_entity(node.id, node.entity_name, node.status)
+                entity.telemetry = dict(node.properties)
+
     def predict(
         self,
         action: ActionNode,
@@ -93,7 +104,18 @@ class WorldKernel:
         tenant_id: str = "default",
     ) -> PredictionNode:
         """Forward state transition: state + action -> predicted_outcome."""
+        self.sync_from_workspace()
         snapshot = self.digital_twin.create_snapshot()
+        if getattr(action, "properties", None):
+            updated_vars = dict(snapshot.variables)
+            updated_vars.update(action.properties)
+            snapshot = WorldStateSnapshot(
+                world_id=snapshot.world_id,
+                timestamp=snapshot.timestamp,
+                variables=updated_vars,
+                entity_states=snapshot.entity_states,
+            )
+
         ensemble_pred = self.predictive_reality.predict(snapshot, action.intent, time_horizon_ms)
 
         node_id = f"pred_{uuid.uuid4().hex[:8]}"
@@ -107,6 +129,7 @@ class WorldKernel:
             provenance=Provenance(created_by=author),
             scope=Scope(tenant_id=tenant_id),
             tags=["prediction", "world_kernel", action.intent],
+            properties={"predicted_state": ensemble_pred.predicted_state},
         )
 
         self._workspace.upsert_node(pred_node, author=author)
