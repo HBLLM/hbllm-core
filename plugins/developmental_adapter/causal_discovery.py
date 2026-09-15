@@ -475,6 +475,38 @@ class InterventionalCausalDiscoveryEngine:
 
     def _induce_causal_rule_into_substrate(self, confirmed_hyp: CausalHypothesis) -> None:
         """Synthesize confirmed hypothesis into a generalized HCIR causal rule."""
+        # Check if identical invariant already registered in substrate to prevent duplicates
+        for existing in self.substrate.causal_rules:
+            if (
+                existing.get("action") == confirmed_hyp.action.value
+                and existing.get("consequence") == confirmed_hyp.consequence
+                and existing.get("precondition", {}).get("property") == confirmed_hyp.variable
+                and existing.get("precondition", {}).get("operator") == confirmed_hyp.operator
+                and existing.get("precondition", {}).get("value") == confirmed_hyp.value
+            ):
+                add_count = max(1, len(confirmed_hyp.supporting_episodes))
+                existing["empirical_support_count"] = (
+                    existing.get("empirical_support_count", 1) + add_count
+                )
+                existing["confidence"] = min(
+                    1.0, max(existing.get("confidence", 0.5), confirmed_hyp.confidence)
+                )
+                for cr in self.confirmed_causal_rules:
+                    if cr.get("rule_id") == existing.get("rule_id"):
+                        cr["empirical_support_count"] = existing["empirical_support_count"]
+                        cr["confidence"] = existing["confidence"]
+                        break
+                logger.info(
+                    "Causal rule reinforced in substrate: %s %s %s => %s (empirical support: %d)",
+                    confirmed_hyp.variable,
+                    confirmed_hyp.operator,
+                    confirmed_hyp.value,
+                    confirmed_hyp.consequence,
+                    existing["empirical_support_count"],
+                    extra={"rule": existing},
+                )
+                return
+
         rule = {
             "rule_id": f"causal_rule_{len(self.confirmed_causal_rules) + 1}",
             "action": confirmed_hyp.action.value,

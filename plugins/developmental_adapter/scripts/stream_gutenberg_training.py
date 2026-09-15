@@ -181,37 +181,40 @@ def main() -> int:
     streamer = GutenbergCorpusStreamer(cache_dir=args.cache_dir)
     total_books_target = len(processed_bids) + len(books)
 
-    for idx, book_meta in enumerate(books, start=len(processed_bids) + 1):
-        logger.info(f"\n>>> STREAMING BOOK {idx}: #{book_meta.book_id} — {book_meta.title} <<<")
-        try:
-            raw_text = streamer.fetch_book_text(book_meta)
-            chapter = next(streamer.stream_curriculum_chapters([book_meta]))
+    try:
+        for idx, book_meta in enumerate(books, start=len(processed_bids) + 1):
+            logger.info(f"\n>>> STREAMING BOOK {idx}: #{book_meta.book_id} — {book_meta.title} <<<")
+            try:
+                raw_text = streamer.fetch_book_text(book_meta)
+                chapter = next(streamer.stream_curriculum_chapters([book_meta]))
 
-            save_named = (
-                args.checkpoint_interval <= 1
-                or idx % args.checkpoint_interval == 0
-                or idx == total_books_target
-            )
-            trainer.train(
-                chapters=[chapter],
-                checkpoint_name=f"chapter_1_{chapter.chapter_id}",
-                save_named_checkpoint=save_named,
-            )
+                save_named = (
+                    args.checkpoint_interval <= 1
+                    or idx % args.checkpoint_interval == 0
+                    or idx == total_books_target
+                )
+                trainer.train(
+                    chapters=[chapter],
+                    checkpoint_name=f"chapter_1_{chapter.chapter_id}",
+                    save_named_checkpoint=save_named,
+                )
 
-            snap = tracker.record_progress(trainer, book_meta, len(raw_text))
-            tracker.save_state(tracker_state_file)
-            logger.info(
-                f"Knowledge State after Book #{idx}: "
-                f"Vocab: {snap.vocabulary_size} words | "
-                f"Accuracy: {snap.mean_examination_accuracy * 100:.1f}% | "
-                f"Brier: {snap.mean_brier_score:.4f} | "
-                f"BWT: {snap.mean_backward_transfer:.4f}"
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to process Book #{idx} (#{book_meta.book_id} — {book_meta.title}): {e}. "
-                f"Skipping to next book..."
-            )
+                snap = tracker.record_progress(trainer, book_meta, len(raw_text))
+                tracker.save_state(tracker_state_file)
+                logger.info(
+                    f"Knowledge State after Book #{idx}: "
+                    f"Vocab: {snap.vocabulary_size} words | "
+                    f"Accuracy: {snap.mean_examination_accuracy * 100:.1f}% | "
+                    f"Brier: {snap.mean_brier_score:.4f} | "
+                    f"BWT: {snap.mean_backward_transfer:.4f}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to process Book #{idx} (#{book_meta.book_id} — {book_meta.title}): {e}. "
+                    f"Skipping to next book..."
+                )
+    finally:
+        streamer.close()
 
     # 4. Generate Knowledge Acquisition Report
     report = tracker.render_knowledge_report()

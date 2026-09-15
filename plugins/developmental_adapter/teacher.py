@@ -707,6 +707,7 @@ class PedagogicalTeacher:
         self,
         student: StudentProfile,
         chapter: Any,
+        vocab_probes: int = 1,
     ) -> GradeAssessment:
         """Administer an un-mocked Socratic examination based directly on a textbook chapter."""
         from .textbook_curriculum import TextbookCurriculumCurator, TextbookParser
@@ -715,7 +716,7 @@ class PedagogicalTeacher:
             chapter = TextbookParser.parse_markdown(chapter)
 
         curator = TextbookCurriculumCurator()
-        q_results = curator.conduct_chapter_examination(student, chapter)
+        q_results = curator.conduct_chapter_examination(student, chapter, vocab_probes=vocab_probes)
 
         correct = sum(1 for q in q_results if q.is_correct)
         acc_val = round(correct / len(q_results), 4) if q_results else 0.0

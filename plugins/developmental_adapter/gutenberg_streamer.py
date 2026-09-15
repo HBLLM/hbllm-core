@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
+import threading
+import time
 import urllib.request
 from collections.abc import Generator
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from .raw_book_pipeline import (
     AutomatedCurriculumCompiler,
@@ -264,12 +268,113 @@ Relativity: The Special and General Theory, by Albert Einstein 30155
         """
 
 
+class BackgroundGutenbergPrefetcher:
+    """Asynchronous background pre-fetcher that downloads upcoming books ahead of training.
+
+    Operates a worker thread with an input queue of GutenbergBookMetadata items.
+    Caches downloads to disk so that by the time the trainer finishes book N,
+    book N+1 and N+2 are already present on disk, dropping network latency to zero.
+    Enforces a polite 0.5s rate limit between Gutenberg HTTP requests.
+    """
+
+    def __init__(self, cache_dir: Path | str | None = None, max_queue_size: int = 30) -> None:
+        self.cache_dir = Path(cache_dir or CACHE_DIR)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.queue: queue.Queue[GutenbergBookMetadata | None] = queue.Queue(maxsize=max_queue_size)
+        self._stop_event = threading.Event()
+        self._worker_thread: threading.Thread | None = None
+        self._submitted_ids: set[int] = set()
+
+    def start(self) -> None:
+        """Start the background pre-fetcher thread."""
+        if self._worker_thread is not None and self._worker_thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._worker_thread = threading.Thread(
+            target=self._run, daemon=True, name="GutenbergPrefetcher"
+        )
+        self._worker_thread.start()
+
+    def submit(self, book_meta: GutenbergBookMetadata) -> None:
+        """Submit a book to the prefetch queue (non-blocking if full, skips duplicates)."""
+        if book_meta.book_id in self._submitted_ids:
+            return
+        book_cache_file = self.cache_dir / f"book_{book_meta.book_id}.txt"
+        if book_cache_file.exists() and book_cache_file.stat().st_size > 1000:
+            self._submitted_ids.add(book_meta.book_id)
+            return
+
+        try:
+            self.queue.put_nowait(book_meta)
+            self._submitted_ids.add(book_meta.book_id)
+        except queue.Full:
+            pass
+
+    def stop(self) -> None:
+        """Stop the background worker thread."""
+        self._stop_event.set()
+        try:
+            self.queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                item = self.queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            if item is None or self._stop_event.is_set():
+                break
+
+            book_cache_file = self.cache_dir / f"book_{item.book_id}.txt"
+            if book_cache_file.exists() and book_cache_file.stat().st_size > 1000:
+                self.queue.task_done()
+                continue
+
+            try:
+                raw_text = RawBookDownloader.download_gutenberg(item.book_id)
+                if raw_text and len(raw_text) > 100:
+                    with open(book_cache_file, "w", encoding="utf-8") as f:
+                        f.write(raw_text)
+                    logger.debug(
+                        "Prefetched book #%d (%s) into disk cache.", item.book_id, item.title
+                    )
+                time.sleep(0.5)
+            except Exception as e:
+                logger.debug("Prefetch failed for book #%d: %s", item.book_id, e)
+            finally:
+                self.queue.task_done()
+
+
 class GutenbergCorpusStreamer:
     """Streams and downloads books, caching locally to prevent redundant bandwidth."""
 
-    def __init__(self, cache_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        cache_dir: Path | str | None = None,
+        enable_prefetch: bool = True,
+    ) -> None:
         self.cache_dir = Path(cache_dir or CACHE_DIR)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.prefetcher: BackgroundGutenbergPrefetcher | None = None
+        if enable_prefetch:
+            self.prefetcher = BackgroundGutenbergPrefetcher(cache_dir=self.cache_dir)
+            self.prefetcher.start()
+
+    def close(self) -> None:
+        """Stop background prefetch worker thread."""
+        if self.prefetcher:
+            self.prefetcher.stop()
+
+    def __enter__(self) -> GutenbergCorpusStreamer:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
 
     def fetch_book_text(self, metadata: GutenbergBookMetadata) -> str:
         """Fetch book text from disk cache or download from Gutenberg."""
@@ -305,6 +410,10 @@ class GutenbergCorpusStreamer:
         books: list[GutenbergBookMetadata],
     ) -> Generator[TextbookChapter, None, None]:
         """Iteratively stream compiled TextbookChapters from the Gutenberg metadata list."""
+        if self.prefetcher:
+            for b in books:
+                self.prefetcher.submit(b)
+
         for meta in books:
             raw_text = self.fetch_book_text(meta)
             meta.domain = GutenbergIndexManager.refine_domain_from_text(raw_text, meta.domain)

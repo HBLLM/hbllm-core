@@ -42,7 +42,7 @@ class AffordanceDiscoveryEngine:
         self.interventions_count: int = 0
 
     def observe_and_generate_hypotheses(self) -> list[AffordanceHypothesis]:
-        """Formulate initial candidate affordance hypotheses across observed shapes.
+        """Formulate candidate affordance hypotheses across observed shapes.
 
         Scientific Invariant: Generates hypotheses across all actions and observed shapes
         without knowing in advance which shapes afford which actions.
@@ -56,9 +56,11 @@ class AffordanceDiscoveryEngine:
             (BabyActionType.GRASP, "GRASPABLE"),
         ]
 
-        self.hypotheses = []
+        existing_pairs = {(h.entity_shape, h.action) for h in self.hypotheses}
         for shape in shapes:
             for action, label in actions_to_test:
+                if (shape, action) in existing_pairs:
+                    continue
                 hyp = AffordanceHypothesis(
                     action=action,
                     entity_shape=shape,
@@ -66,6 +68,7 @@ class AffordanceDiscoveryEngine:
                     confidence=0.5,
                 )
                 self.hypotheses.append(hyp)
+                existing_pairs.add((shape, action))
                 self._record_event(
                     event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
                     hyp=hyp,
@@ -80,16 +83,16 @@ class AffordanceDiscoveryEngine:
         max_interventions: int = 25,
     ) -> dict[str, list[str]]:
         """Run active interventional loop to falsify or confirm candidate affordances."""
-        if not self.hypotheses:
-            self.observe_and_generate_hypotheses()
+        self.observe_and_generate_hypotheses()
 
         obs = self.env.get_sensory_observation()
         shape_to_entities: dict[str, list[str]] = {}
         for p in obs.vision:
             shape_to_entities.setdefault(p["shape"], []).append(p["percept_id"])
 
+        interventions_this_run = 0
         for hyp in list(self.hypotheses):
-            if self.interventions_count >= max_interventions:
+            if interventions_this_run >= max_interventions:
                 break
             if hyp.falsified or hyp.confirmed:
                 continue
@@ -100,6 +103,7 @@ class AffordanceDiscoveryEngine:
                 continue
 
             target_id = candidate_ids[0]
+            interventions_this_run += 1
             self.interventions_count += 1
             prior_state = self.env.save_state()
 
@@ -126,13 +130,13 @@ class AffordanceDiscoveryEngine:
                     prior_conf=prior_conf,
                     post_conf=1.0,
                 )
-                # Register confirmed affordance in substrate
-                self.confirmed_affordances.setdefault(hyp.entity_shape, []).append(
-                    hyp.affordance_label
-                )
-                self.substrate.affordances.setdefault(hyp.entity_shape, []).append(
-                    hyp.affordance_label
-                )
+                # Register confirmed affordance in substrate (prevent duplicates)
+                aff_list = self.confirmed_affordances.setdefault(hyp.entity_shape, [])
+                if hyp.affordance_label not in aff_list:
+                    aff_list.append(hyp.affordance_label)
+                sub_list = self.substrate.affordances.setdefault(hyp.entity_shape, [])
+                if hyp.affordance_label not in sub_list:
+                    sub_list.append(hyp.affordance_label)
             else:
                 # Falsified by empirical counterexample
                 hyp.falsified = True

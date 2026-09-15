@@ -383,6 +383,14 @@ class AutomatedCurriculumCompiler:
             glossary["box"] = "Rigid physical enclosure providing boundary containment for objects."
         if "stick" not in glossary:
             glossary["stick"] = "Rigid tool extension used to extend manipulator interaction reach."
+        if "ball" not in glossary:
+            glossary["ball"] = (
+                "Spherical physical object capable of rolling across smooth surfaces."
+            )
+        if "block" not in glossary:
+            glossary["block"] = (
+                "Prismatic physical entity capable of sliding under horizontal forces."
+            )
 
         return glossary
 
@@ -394,22 +402,30 @@ class AutomatedCurriculumCompiler:
     ) -> TextbookSection:
         """Synthesize an executable BabyWorld simulation puzzle based on text mechanics."""
         text_low = text.lower()
-        if "push" in text_low or "frictio" in text_low or "charge" in text_low:
-            instruction = "push red ball inside box"
+        if "lever" in text_low or "machin" in text_low or "tool" in text_low:
+            instruction = "use stick to pull red block inside box"
             color = "red"
+            target_shape = "block"
+        elif "push" in text_low or "frictio" in text_low or "charge" in text_low:
+            instruction = "push red block inside box"
+            color = "red"
+            target_shape = "block"
         elif (
             "optic" in text_low or "light" in text_low or "prism" in text_low or "wave" in text_low
         ):
             instruction = "push blue ball inside box"
             color = "blue"
+            target_shape = "ball"
         else:
             instruction = "pull green ball inside box"
             color = "green"
+            target_shape = "ball"
 
+        subject_id = f"target_{color}_{target_shape}"
         raw_sec_text = (
             f"## 2. Worked Problem: Guided Sensorimotor Manipulation in {item.title}\n"
             f"* Instruction: `{instruction}`\n"
-            f"* Physical Scenario: Target {color} ball located at (1.2, 0.4). Reach tool at (0.3, 0.1). Box at (0.0, 0.6).\n"
+            f"* Physical Scenario: Target {color} {target_shape} located at (1.2, 0.4). Reach tool at (0.3, 0.1). Box at (0.0, 0.6).\n"
             f"* Mechanics Execution: Execute coordinated motor plan to deposit mass inside container.\n"
         )
         return TextbookSection(
@@ -420,7 +436,8 @@ class AutomatedCurriculumCompiler:
             structured_payload={
                 "instruction": instruction,
                 "goal_relation": "INSIDE",
-                "subject_id": f"target_{color}_ball",
+                "subject_id": subject_id,
+                "subject_shape": target_shape,
                 "target_id": "storage_box",
                 "tool_id": "reach_stick",
             },

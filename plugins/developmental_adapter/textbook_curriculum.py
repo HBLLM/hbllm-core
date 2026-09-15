@@ -223,16 +223,19 @@ class TextbookSimulationCompiler:
         elif "yellow" in inst_low:
             target_color = "yellow"
 
-        ball_id = f"target_{target_color}_ball"
+        is_block = "block" in inst_low or payload.get("subject_shape") == "block"
+        subject_shape = BabyObjectType.BLOCK if is_block else BabyObjectType.BALL
+        subject_id = f"target_{target_color}_{'block' if is_block else 'ball'}"
 
         # Create physical entities described in the textbook problem
-        target_ball = BabyObjectState(
-            id=ball_id,
-            object_type=BabyObjectType.BALL,
+        target_entity = BabyObjectState(
+            id=subject_id,
+            object_type=subject_shape,
             color=target_color,
             mass=0.5,
             position=Vector2D(1.2, 0.4),  # Distant / out of direct arm reach
             size=Vector2D(0.2, 0.2),
+            rollable=(subject_shape == BabyObjectType.BALL),
         )
 
         reach_stick = BabyObjectState(
@@ -242,6 +245,8 @@ class TextbookSimulationCompiler:
             mass=1.0,
             position=Vector2D(0.3, 0.1),  # Within reach of agent
             size=Vector2D(0.8, 0.1),  # Elongated tool
+            is_tool=True,
+            tool_length=0.8,
         )
 
         storage_box = BabyObjectState(
@@ -252,17 +257,40 @@ class TextbookSimulationCompiler:
             position=Vector2D(0.0, 0.6),  # Container
             size=Vector2D(0.5, 0.5),
             is_open=True,
+            is_container=True,
         )
 
         objects = {
-            ball_id: target_ball,
+            subject_id: target_entity,
             "reach_stick": reach_stick,
             "storage_box": storage_box,
         }
 
+        # Include ambient counterpart object so sensory observation includes both balls and blocks
+        if is_block:
+            objects["ambient_ball"] = BabyObjectState(
+                id="ambient_ball",
+                object_type=BabyObjectType.BALL,
+                color="green",
+                mass=0.5,
+                position=Vector2D(0.8, 0.8),
+                size=Vector2D(0.2, 0.2),
+                rollable=True,
+            )
+        else:
+            objects["ambient_block"] = BabyObjectState(
+                id="ambient_block",
+                object_type=BabyObjectType.BLOCK,
+                color="red",
+                mass=0.5,
+                position=Vector2D(0.8, 0.8),
+                size=Vector2D(0.2, 0.2),
+                rollable=False,
+            )
+
         goal = PredicateGoal(
             predicate=BabyRelationType.INSIDE,
-            subject_id=ball_id,
+            subject_id=subject_id,
             target_id="storage_box",
         )
 
@@ -491,6 +519,35 @@ class TextbookCurriculumCurator:
         "behind",
         "across",
     }
+    ING_NOUNS: set[str] = {
+        "morning",
+        "evening",
+        "thing",
+        "something",
+        "anything",
+        "nothing",
+        "everything",
+        "spring",
+        "wing",
+        "ring",
+        "king",
+        "building",
+        "ceiling",
+        "lightning",
+        "string",
+        "meaning",
+        "feeling",
+        "painting",
+        "drawing",
+        "clothing",
+        "offspring",
+        "pudding",
+        "sibling",
+        "shilling",
+        "darling",
+        "being",
+        "living",
+    }
     NOUN_SUFFIXES: tuple[str, ...] = (
         "tion",
         "ment",
@@ -523,13 +580,15 @@ class TextbookCurriculumCurator:
                     context["entity_type"] = BabyObjectType.BOX
                 elif any(w in term_clean for w in self.TOOL_WORDS):
                     context["entity_type"] = BabyObjectType.TOOL
-                elif term_clean in self.OBJECT_WORDS or any(
-                    term_clean.endswith(sfx) for sfx in self.NOUN_SUFFIXES
+                elif (
+                    term_clean in self.OBJECT_WORDS
+                    or term_clean in self.ING_NOUNS
+                    or any(term_clean.endswith(sfx) for sfx in self.NOUN_SUFFIXES)
                 ):
                     context["entity_type"] = BabyObjectType.BLOCK
                 elif (
                     term_clean in self.ACTION_VERBS
-                    or term_clean.endswith("ing")
+                    or (term_clean.endswith("ing") and term_clean not in self.ING_NOUNS)
                     or term_clean.endswith("ed")
                 ):
                     if "pull" in term_clean:
@@ -607,28 +666,47 @@ class TextbookCurriculumCurator:
         self,
         student: StudentProfile | Any,
         chapter: TextbookChapter,
+        vocab_probes: int = 1,
     ) -> list[ExamQuestionResult]:
         """Administer an un-mocked Socratic examination based directly on textbook contents."""
         q_results: list[ExamQuestionResult] = []
 
-        # Question 1: Vocabulary Recall from Chapter Definitions
+        # Question 1: Multi-term Vocabulary Recall from Chapter Definitions
         def_sec = chapter.get_section(TextbookSectionType.DEFINITIONS)
         if def_sec:
-            sample_term = next(iter(def_sec.structured_payload.get("glossary", {})), "box")
-            entry = student.grounding_engine.lexicon.get(sample_term)
-            is_corr = entry is not None
-            conf = entry.confidence if entry else 0.20
-            brier = (conf - 1.0) ** 2 if is_corr else conf**2
-            q_results.append(
-                ExamQuestionResult(
-                    question_text=f"Textbook Glossary Recall: Define '{sample_term}'",
-                    student_response=f"Symbol({entry.grounded_symbol})" if entry else "None",
-                    ground_truth=f"Symbol({sample_term})",
-                    is_correct=is_corr,
-                    confidence=round(conf, 3),
-                    brier_error=round(brier, 4),
+            glossary = def_sec.structured_payload.get("glossary", {})
+            glossary_terms = list(glossary.keys())
+            if not glossary_terms:
+                glossary_terms = ["box"]
+
+            if vocab_probes <= 1:
+                probe_indices = [0]
+            else:
+                probe_indices = [0]
+                if len(glossary_terms) > 2:
+                    probe_indices.append(len(glossary_terms) // 2)
+                if len(glossary_terms) > 1:
+                    probe_indices.append(len(glossary_terms) - 1)
+                probe_indices = probe_indices[:vocab_probes]
+
+            unique_indices = list(dict.fromkeys(probe_indices))
+
+            for p_idx in unique_indices:
+                sample_term = glossary_terms[p_idx]
+                entry = student.grounding_engine.lexicon.get(sample_term)
+                is_corr = entry is not None
+                conf = entry.confidence if entry else 0.20
+                brier = (conf - 1.0) ** 2 if is_corr else conf**2
+                q_results.append(
+                    ExamQuestionResult(
+                        question_text=f"Textbook Glossary Recall: Define '{sample_term}'",
+                        student_response=f"Symbol({entry.grounded_symbol})" if entry else "None",
+                        ground_truth=f"Symbol({sample_term})",
+                        is_correct=is_corr,
+                        confidence=round(conf, 3),
+                        brier_error=round(brier, 4),
+                    )
                 )
-            )
 
         # Question 2: Physical Problem Solving via Simulation Execution
         prob_sec = chapter.get_section(TextbookSectionType.WORKED_PROBLEM)
@@ -673,7 +751,7 @@ class TextbookCurriculumCurator:
         has_trick = (
             exam_sec.structured_payload.get("has_trick_question", True) if exam_sec else True
         )
-        if has_trick:
+        if has_trick and hasattr(student, "metacognitive_engine") and student.metacognitive_engine:
             mystery_goal = PredicateGoal(
                 predicate="LEVITATE", subject_id="unobserved_quantum_particle"
             )
