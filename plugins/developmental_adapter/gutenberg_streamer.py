@@ -338,7 +338,7 @@ class KnowledgeGainTracker:
         bwt = round(sum(r.backward_transfer for r in history) / len(history), 4) if history else 0.0
 
         snapshot = KnowledgeGainSnapshot(
-            books_processed=len(history),
+            books_processed=len(self.snapshots) + 1,
             total_raw_characters=self.total_chars_processed,
             vocabulary_size=len(lexicon),
             lexicon_breakdown=pos_counts,
@@ -359,7 +359,7 @@ class KnowledgeGainTracker:
         latest = self.snapshots[-1]
         lines = [
             "# Project Gutenberg Cognitive Knowledge Acquisition Report",
-            f"**Total Books Ingested**: {latest.books_processed}",
+            f"**Total Books Ingested**: {len(self.snapshots)}",
             f"**Raw Characters Processed**: {latest.total_raw_characters:,}",
             f"**Total Grounded Vocabulary**: {latest.vocabulary_size} terms",
             f"**Overall Examination Accuracy**: {latest.mean_examination_accuracy * 100:.2f}%",
