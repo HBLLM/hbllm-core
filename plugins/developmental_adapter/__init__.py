@@ -13,6 +13,12 @@ from typing import Any
 from .a20_transfer_bridge import A20RelationalTransferBridge
 from .action import DevelopmentalActionAdapter
 from .affordance_discovery import AffordanceDiscoveryEngine
+from .arc_agi_3_runner import (
+    ActionDynamicsModel,
+    ARC3BenchmarkReport,
+    ARC3BenchmarkRunner,
+    ARC3InteractiveAgent,
+)
 from .arc_agi_runner import (
     ARCBenchmarkReport,
     ARCGrid,
@@ -151,10 +157,14 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 __all__ = [
     "A20RelationalTransferBridge",
+    "ARC3BenchmarkReport",
+    "ARC3BenchmarkRunner",
+    "ARC3InteractiveAgent",
     "ARCBenchmarkReport",
     "ARCGrid",
     "ARCRelationalSolver",
     "ARCTaskResult",
+    "ActionDynamicsModel",
     "ActiveDevelopmentalHCIRCohort",
     "AffordanceDiscoveryEngine",
     "AffordanceHypothesis",
