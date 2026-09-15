@@ -180,13 +180,13 @@ class AutomatedCurriculumCompiler:
         glossary = cls._extract_glossary(raw_text, item.domain)
 
         # 2. Automatic Worked Problem & Simulation Puzzle Synthesis
-        worked_sec = cls._synthesize_worked_problem(raw_text, item)
+        worked_sec = cls._synthesize_worked_problem(raw_text, item, glossary=glossary)
 
         # 3. Automatic Relational Analogy Synthesis
-        analogy_sec = cls._synthesize_analogy(raw_text, item)
+        analogy_sec = cls._synthesize_analogy(raw_text, item, glossary=glossary)
 
         # 4. Automatic Epistemic Defense & Socratic Challenge
-        exam_sec = cls._synthesize_exam_challenge(raw_text, item)
+        exam_sec = cls._synthesize_exam_challenge(raw_text, item, glossary=glossary)
 
         # Build Definitions Section
         def_sec = TextbookSection(
@@ -325,27 +325,51 @@ class AutomatedCurriculumCompiler:
         cls,
         text: str,
         item: BookCurriculumItem,
+        glossary: dict[str, str] | None = None,
     ) -> TextbookSection:
-        """Synthesize an executable BabyWorld simulation puzzle based on text mechanics."""
+        """Synthesize an executable BabyWorld simulation puzzle dynamically based on text mechanics."""
         text_low = text.lower()
-        if "lever" in text_low or "machin" in text_low or "tool" in text_low:
-            instruction = "use stick to pull red block inside box"
-            color = "red"
+        dictionary = LanguageDictionary.get_instance()
+        words_in_text = set(re.findall(r"\b[a-z]{3,15}\b", text_low))
+
+        # Check for tools mentioned in text or glossary
+        has_tool = any(
+            t in words_in_text or "lever" in text_low or "tool" in text_low or "stick" in text_low
+            for t in ("stick", "tool", "lever", "rod", "bar", "handle", "prybar")
+        )
+
+        # Dynamic entity and shape selection from vocabulary
+        target_shape = "ball"
+        for w in words_in_text:
+            entry = dictionary.lookup(w)
+            if entry and (entry.semantic_role == "BLOCK" or "BLOCK" in entry.inherited_affordances):
+                if w in ("block", "cube", "brick", "matter", "lead", "iron", "candle", "prism"):
+                    target_shape = "block"
+                    break
+        if "block" in text_low or "frictio" in text_low or "mass" in text_low:
             target_shape = "block"
+
+        # Color extraction from text
+        color = "green"
+        for c in ("red", "blue", "yellow", "green"):
+            if re.search(rf"\b{c}\b", text_low):
+                color = c
+                break
+        if color == "green":
+            if "optic" in text_low or "light" in text_low or "prism" in text_low:
+                color = "blue"
+            elif has_tool or "push" in text_low or "frictio" in text_low or "charge" in text_low:
+                color = "red"
+
+        # Action selection
+        if has_tool:
+            instruction = f"use stick to pull {color} {target_shape} inside box"
         elif "push" in text_low or "frictio" in text_low or "charge" in text_low:
-            instruction = "push red block inside box"
-            color = "red"
-            target_shape = "block"
-        elif (
-            "optic" in text_low or "light" in text_low or "prism" in text_low or "wave" in text_low
-        ):
-            instruction = "push blue ball inside box"
-            color = "blue"
-            target_shape = "ball"
+            instruction = f"push {color} {target_shape} inside box"
+        elif "optic" in text_low or "light" in text_low or "wave" in text_low:
+            instruction = f"push {color} {target_shape} inside box"
         else:
-            instruction = "pull green ball inside box"
-            color = "green"
-            target_shape = "ball"
+            instruction = f"pull {color} {target_shape} inside box"
 
         subject_id = f"target_{color}_{target_shape}"
         raw_sec_text = (
@@ -374,28 +398,58 @@ class AutomatedCurriculumCompiler:
         cls,
         text: str,
         item: BookCurriculumItem,
+        glossary: dict[str, str] | None = None,
     ) -> TextbookSection:
-        """Synthesize a cross-domain relational analogy structure."""
-        domain_analogy_map = {
-            "physics": (
-                "Tabletop Lever / Sliding Mass",
-                "Industrial Freight Arrestor & Hydraulic Crane",
-            ),
-            "chemistry": ("Tabletop Reactive Reactant", "Industrial Chemical Fractionation Tower"),
-            "biology": ("Cellular Membrane Vesicle", "Municipal Fluid Water Tower"),
-            "optics": ("Tabletop Glass Prism", "Astronomical Echelle Spectrograph"),
-            "thermodynamics": (
-                "Tabletop Insulated Calorimeter",
-                "Industrial Cryogenic Liquid Helium Storage",
-            ),
-            "astronomy": (
-                "Tabletop Tethered Central Rotation",
-                "Keplerian Interplanetary Planetary Orbits",
-            ),
-        }
-        source_domain, target_domain = domain_analogy_map.get(
-            item.domain.lower(), ("Tabletop Container System", "Industrial Heavy Process Machinery")
-        )
+        """Synthesize a cross-domain relational analogy structure directly from text or domain concepts."""
+        source_domain = ""
+        target_domain = ""
+
+        # 1. Search for natural language analogy cues in text
+        analogy_patterns = [
+            r"\b([A-Za-z\s]{4,30})\s+(?:is like|acts like|functions like|is analogous to|resembles)\s+([A-Za-z\s]{4,35})\b",
+            r"\banalogy between\s+([A-Za-z\s]{4,25})\s+and\s+([A-Za-z\s]{4,30})\b",
+        ]
+        for pat in analogy_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                s_cand = m.group(1).strip()
+                t_cand = m.group(2).strip()
+                if len(s_cand) > 3 and len(t_cand) > 3:
+                    source_domain = s_cand.title()
+                    target_domain = t_cand.title()
+                    break
+
+        # 2. Dynamic concept synthesis from glossary/domain if no explicit analogy sentence
+        if not source_domain or not target_domain:
+            terms = [k for k in (glossary or {}) if k not in ("box", "stick", "ball", "block")]
+            salient = terms[0].title() if terms else item.domain.title()
+
+            domain_analogy_map = {
+                "physics": (
+                    "Tabletop Lever / Sliding Mass",
+                    "Industrial Freight Arrestor & Hydraulic Crane",
+                ),
+                "chemistry": (
+                    "Tabletop Reactive Reactant",
+                    "Industrial Chemical Fractionation Tower",
+                ),
+                "biology": ("Cellular Membrane Vesicle", "Municipal Fluid Water Tower"),
+                "optics": ("Tabletop Glass Prism", "Astronomical Echelle Spectrograph"),
+                "thermodynamics": (
+                    "Tabletop Insulated Calorimeter",
+                    "Industrial Cryogenic Liquid Helium Storage",
+                ),
+                "astronomy": (
+                    "Tabletop Tethered Central Rotation",
+                    "Keplerian Interplanetary Planetary Orbits",
+                ),
+            }
+            default_src, default_tgt = domain_analogy_map.get(
+                item.domain.lower(),
+                (f"Tabletop {salient} System", f"Industrial {item.domain.title()} Machinery"),
+            )
+            source_domain = default_src
+            target_domain = default_tgt
 
         raw_analogy = (
             f"## 3. Relational Analogy: {source_domain} to {target_domain}\n"
@@ -421,11 +475,14 @@ class AutomatedCurriculumCompiler:
         cls,
         text: str,
         item: BookCurriculumItem,
+        glossary: dict[str, str] | None = None,
     ) -> TextbookSection:
         """Synthesize an interactive Socratic examination with epistemic defense."""
+        terms = [k for k in (glossary or {}) if k not in ("box", "stick", "ball", "block")]
+        topic = f" ({terms[0]})" if terms else ""
         raw_exam = (
             f"## 4. Review & Challenge Exercises for {item.title}\n"
-            f"* Challenge Question 1: How do governing conservation laws constrain physical change in this system?\n"
+            f"* Challenge Question 1: How do governing conservation laws constrain physical change{topic} in this system?\n"
             f"* Conceptual Trick Question: Consider an unobserved hypothetical entity with zero empirical evidence.\n"
             f"* Epistemic Defense Mandate: High epistemic uncertainty mandates that the agent ABSTAIN from guessing.\n"
         )

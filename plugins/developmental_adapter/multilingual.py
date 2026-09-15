@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from .types import (
@@ -106,234 +107,79 @@ class MultilingualLexiconRegistry:
         ],
     }
 
-    # Multilingual token mappings into core physical/relational invariants
-    CONTAINER_TOKENS: dict[str, SupportedLanguage] = {
-        # English
-        "box": SupportedLanguage.ENGLISH,
-        "container": SupportedLanguage.ENGLISH,
-        "vessel": SupportedLanguage.ENGLISH,
-        "crate": SupportedLanguage.ENGLISH,
-        "bin": SupportedLanguage.ENGLISH,
-        "chest": SupportedLanguage.ENGLISH,
-        "crucible": SupportedLanguage.ENGLISH,
-        # French
-        "boîte": SupportedLanguage.FRENCH,
-        "boite": SupportedLanguage.FRENCH,
-        "récipient": SupportedLanguage.FRENCH,
-        "recipient": SupportedLanguage.FRENCH,
-        "vaisseau": SupportedLanguage.FRENCH,
-        "caisse": SupportedLanguage.FRENCH,
-        "coffre": SupportedLanguage.FRENCH,
-        "creuset": SupportedLanguage.FRENCH,
-        # Spanish
-        "caja": SupportedLanguage.SPANISH,
-        "recipiente": SupportedLanguage.SPANISH,
-        "vaso": SupportedLanguage.SPANISH,
-        "arca": SupportedLanguage.SPANISH,
-        "cofre": SupportedLanguage.SPANISH,
-        "crisol": SupportedLanguage.SPANISH,
-        # German
-        "kasten": SupportedLanguage.GERMAN,
-        "schachtel": SupportedLanguage.GERMAN,
-        "behälter": SupportedLanguage.GERMAN,
-        "behalter": SupportedLanguage.GERMAN,
-        "gefäß": SupportedLanguage.GERMAN,
-        "gefaess": SupportedLanguage.GERMAN,
-        "kiste": SupportedLanguage.GERMAN,
-        "tiegel": SupportedLanguage.GERMAN,
-    }
+    # Multilingual token mappings into core physical/relational invariants (dynamically loaded)
+    CONTAINER_TOKENS: dict[str, SupportedLanguage] = {}
+    TOOL_TOKENS: dict[str, SupportedLanguage] = {}
+    BALL_TOKENS: dict[str, SupportedLanguage] = {}
+    BLOCK_TOKENS: dict[str, SupportedLanguage] = {}
+    ACTION_TOKENS: dict[str, tuple[BabyActionType, SupportedLanguage]] = {}
+    RELATION_TOKENS: dict[str, tuple[BabyRelationType, SupportedLanguage]] = {}
+    COLOR_TOKENS: dict[str, tuple[str, SupportedLanguage]] = {}
 
-    TOOL_TOKENS: dict[str, SupportedLanguage] = {
-        # English
-        "stick": SupportedLanguage.ENGLISH,
-        "tool": SupportedLanguage.ENGLISH,
-        "lever": SupportedLanguage.ENGLISH,
-        "rod": SupportedLanguage.ENGLISH,
-        "bar": SupportedLanguage.ENGLISH,
-        "prybar": SupportedLanguage.ENGLISH,
-        # French
-        "bâton": SupportedLanguage.FRENCH,
-        "baton": SupportedLanguage.FRENCH,
-        "outil": SupportedLanguage.FRENCH,
-        "levier": SupportedLanguage.FRENCH,
-        "tige": SupportedLanguage.FRENCH,
-        "barre": SupportedLanguage.FRENCH,
-        "pince": SupportedLanguage.FRENCH,
-        # Spanish
-        "palo": SupportedLanguage.SPANISH,
-        "herramienta": SupportedLanguage.SPANISH,
-        "palanca": SupportedLanguage.SPANISH,
-        "vara": SupportedLanguage.SPANISH,
-        "barra": SupportedLanguage.SPANISH,
-        "pinzas": SupportedLanguage.SPANISH,
-        # German
-        "stock": SupportedLanguage.GERMAN,
-        "werkzeug": SupportedLanguage.GERMAN,
-        "hebel": SupportedLanguage.GERMAN,
-        "stab": SupportedLanguage.GERMAN,
-        "stange": SupportedLanguage.GERMAN,
-        "zange": SupportedLanguage.GERMAN,
-    }
+    @classmethod
+    def load_translation_file(cls, tsv_path: Path | str | None = None) -> int:
+        """Load multilingual translation tokens dynamically from a curriculum data file."""
+        if tsv_path is None:
+            tsv_path = Path(__file__).parent / "curriculum_data" / "multilingual_lexicon.tsv"
+        else:
+            tsv_path = Path(tsv_path)
 
-    BALL_TOKENS: dict[str, SupportedLanguage] = {
-        # English
-        "ball": SupportedLanguage.ENGLISH,
-        "sphere": SupportedLanguage.ENGLISH,
-        "marble": SupportedLanguage.ENGLISH,
-        "globe": SupportedLanguage.ENGLISH,
-        # French
-        "balle": SupportedLanguage.FRENCH,
-        "sphère": SupportedLanguage.FRENCH,
-        "bille": SupportedLanguage.FRENCH,
-        # Spanish
-        "pelota": SupportedLanguage.SPANISH,
-        "esfera": SupportedLanguage.SPANISH,
-        "bola": SupportedLanguage.SPANISH,
-        "canica": SupportedLanguage.SPANISH,
-        # German
-        "kugel": SupportedLanguage.GERMAN,
-        "sphäre": SupportedLanguage.GERMAN,
-        "murmel": SupportedLanguage.GERMAN,
-    }
+        if not tsv_path.exists():
+            logger.warning(f"Translation file not found at: {tsv_path}")
+            return 0
 
-    BLOCK_TOKENS: dict[str, SupportedLanguage] = {
-        # English
-        "block": SupportedLanguage.ENGLISH,
-        "cube": SupportedLanguage.ENGLISH,
-        "brick": SupportedLanguage.ENGLISH,
-        "stone": SupportedLanguage.ENGLISH,
-        # French
-        "bloc": SupportedLanguage.FRENCH,
-        "brique": SupportedLanguage.FRENCH,
-        "pierre": SupportedLanguage.FRENCH,
-        # Spanish
-        "bloque": SupportedLanguage.SPANISH,
-        "cubo": SupportedLanguage.SPANISH,
-        "ladrillo": SupportedLanguage.SPANISH,
-        "piedra": SupportedLanguage.SPANISH,
-        # German
-        "klotz": SupportedLanguage.GERMAN,
-        "würfel": SupportedLanguage.GERMAN,
-        "wuerfel": SupportedLanguage.GERMAN,
-        "stein": SupportedLanguage.GERMAN,
-    }
+        count = 0
+        try:
+            with open(tsv_path, encoding="utf-8") as f:
+                lines = f.read().strip().splitlines()
+            if not lines:
+                return 0
 
-    ACTION_TOKENS: dict[str, tuple[BabyActionType, SupportedLanguage]] = {
-        # PULL
-        "pull": (BabyActionType.PULL, SupportedLanguage.ENGLISH),
-        "drag": (BabyActionType.PULL, SupportedLanguage.ENGLISH),
-        "haul": (BabyActionType.PULL, SupportedLanguage.ENGLISH),
-        "tirer": (BabyActionType.PULL, SupportedLanguage.FRENCH),
-        "traîner": (BabyActionType.PULL, SupportedLanguage.FRENCH),
-        "trainer": (BabyActionType.PULL, SupportedLanguage.FRENCH),
-        "tirar": (BabyActionType.PULL, SupportedLanguage.SPANISH),
-        "jalar": (BabyActionType.PULL, SupportedLanguage.SPANISH),
-        "arrastrar": (BabyActionType.PULL, SupportedLanguage.SPANISH),
-        "ziehen": (BabyActionType.PULL, SupportedLanguage.GERMAN),
-        "schleppen": (BabyActionType.PULL, SupportedLanguage.GERMAN),
-        # PUSH
-        "push": (BabyActionType.PUSH, SupportedLanguage.ENGLISH),
-        "shove": (BabyActionType.PUSH, SupportedLanguage.ENGLISH),
-        "press": (BabyActionType.PUSH, SupportedLanguage.ENGLISH),
-        "pousser": (BabyActionType.PUSH, SupportedLanguage.FRENCH),
-        "presser": (BabyActionType.PUSH, SupportedLanguage.FRENCH),
-        "empujar": (BabyActionType.PUSH, SupportedLanguage.SPANISH),
-        "presionar": (BabyActionType.PUSH, SupportedLanguage.SPANISH),
-        "drücken": (BabyActionType.PUSH, SupportedLanguage.GERMAN),
-        "druecken": (BabyActionType.PUSH, SupportedLanguage.GERMAN),
-        "schieben": (BabyActionType.PUSH, SupportedLanguage.GERMAN),
-        # ROLL
-        "roll": (BabyActionType.ROLL, SupportedLanguage.ENGLISH),
-        "rouler": (BabyActionType.ROLL, SupportedLanguage.FRENCH),
-        "rodar": (BabyActionType.ROLL, SupportedLanguage.SPANISH),
-        "rollen": (BabyActionType.ROLL, SupportedLanguage.GERMAN),
-        # GRASP
-        "grasp": (BabyActionType.GRASP, SupportedLanguage.ENGLISH),
-        "hold": (BabyActionType.GRASP, SupportedLanguage.ENGLISH),
-        "saisir": (BabyActionType.GRASP, SupportedLanguage.FRENCH),
-        "tenir": (BabyActionType.GRASP, SupportedLanguage.FRENCH),
-        "agarrar": (BabyActionType.GRASP, SupportedLanguage.SPANISH),
-        "sujetar": (BabyActionType.GRASP, SupportedLanguage.SPANISH),
-        "greifen": (BabyActionType.GRASP, SupportedLanguage.GERMAN),
-        "halten": (BabyActionType.GRASP, SupportedLanguage.GERMAN),
-    }
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 5:
+                    continue
+                token = parts[0].strip().lower()
+                lang_code = parts[1].strip().lower()
+                category = parts[2].strip().upper()
+                role = parts[3].strip().upper()
+                canonical = parts[4].strip().lower()
 
-    RELATION_TOKENS: dict[str, tuple[BabyRelationType, SupportedLanguage]] = {
-        # INSIDE
-        "inside": (BabyRelationType.INSIDE, SupportedLanguage.ENGLISH),
-        "in": (BabyRelationType.INSIDE, SupportedLanguage.ENGLISH),
-        "within": (BabyRelationType.INSIDE, SupportedLanguage.ENGLISH),
-        "dans": (BabyRelationType.INSIDE, SupportedLanguage.FRENCH),
-        "dedans": (BabyRelationType.INSIDE, SupportedLanguage.FRENCH),
-        "en": (BabyRelationType.INSIDE, SupportedLanguage.SPANISH),
-        "dentro": (BabyRelationType.INSIDE, SupportedLanguage.SPANISH),
-        "drinnen": (BabyRelationType.INSIDE, SupportedLanguage.GERMAN),
-        "innerhalb": (BabyRelationType.INSIDE, SupportedLanguage.GERMAN),
-        # NEAR
-        "near": (BabyRelationType.NEAR, SupportedLanguage.ENGLISH),
-        "beside": (BabyRelationType.NEAR, SupportedLanguage.ENGLISH),
-        "près": (BabyRelationType.NEAR, SupportedLanguage.FRENCH),
-        "pres": (BabyRelationType.NEAR, SupportedLanguage.FRENCH),
-        "cerca": (BabyRelationType.NEAR, SupportedLanguage.SPANISH),
-        "junto": (BabyRelationType.NEAR, SupportedLanguage.SPANISH),
-        "nah": (BabyRelationType.NEAR, SupportedLanguage.GERMAN),
-        "nahe": (BabyRelationType.NEAR, SupportedLanguage.GERMAN),
-        "neben": (BabyRelationType.NEAR, SupportedLanguage.GERMAN),
-    }
+                try:
+                    lang = SupportedLanguage(lang_code)
+                except ValueError:
+                    continue
 
-    COLOR_TOKENS: dict[str, tuple[str, SupportedLanguage]] = {
-        # Red
-        "red": ("red", SupportedLanguage.ENGLISH),
-        "rouge": ("red", SupportedLanguage.FRENCH),
-        "rouges": ("red", SupportedLanguage.FRENCH),
-        "rojo": ("red", SupportedLanguage.SPANISH),
-        "roja": ("red", SupportedLanguage.SPANISH),
-        "rojos": ("red", SupportedLanguage.SPANISH),
-        "rojas": ("red", SupportedLanguage.SPANISH),
-        "rot": ("red", SupportedLanguage.GERMAN),
-        "rote": ("red", SupportedLanguage.GERMAN),
-        "roten": ("red", SupportedLanguage.GERMAN),
-        "rotes": ("red", SupportedLanguage.GERMAN),
-        # Green
-        "green": ("green", SupportedLanguage.ENGLISH),
-        "vert": ("green", SupportedLanguage.FRENCH),
-        "verte": ("green", SupportedLanguage.FRENCH),
-        "verts": ("green", SupportedLanguage.FRENCH),
-        "vertes": ("green", SupportedLanguage.FRENCH),
-        "verde": ("green", SupportedLanguage.SPANISH),
-        "verdes": ("green", SupportedLanguage.SPANISH),
-        "grün": ("green", SupportedLanguage.GERMAN),
-        "grüne": ("green", SupportedLanguage.GERMAN),
-        "grünen": ("green", SupportedLanguage.GERMAN),
-        "grünes": ("green", SupportedLanguage.GERMAN),
-        "gruen": ("green", SupportedLanguage.GERMAN),
-        "gruene": ("green", SupportedLanguage.GERMAN),
-        "gruenen": ("green", SupportedLanguage.GERMAN),
-        # Blue
-        "blue": ("blue", SupportedLanguage.ENGLISH),
-        "bleu": ("blue", SupportedLanguage.FRENCH),
-        "bleue": ("blue", SupportedLanguage.FRENCH),
-        "bleus": ("blue", SupportedLanguage.FRENCH),
-        "bleues": ("blue", SupportedLanguage.FRENCH),
-        "azul": ("blue", SupportedLanguage.SPANISH),
-        "azules": ("blue", SupportedLanguage.SPANISH),
-        "blau": ("blue", SupportedLanguage.GERMAN),
-        "blaue": ("blue", SupportedLanguage.GERMAN),
-        "blauen": ("blue", SupportedLanguage.GERMAN),
-        "blaues": ("blue", SupportedLanguage.GERMAN),
-        # Yellow
-        "yellow": ("yellow", SupportedLanguage.ENGLISH),
-        "jaune": ("yellow", SupportedLanguage.FRENCH),
-        "jaunes": ("yellow", SupportedLanguage.FRENCH),
-        "amarillo": ("yellow", SupportedLanguage.SPANISH),
-        "amarilla": ("yellow", SupportedLanguage.SPANISH),
-        "amarillos": ("yellow", SupportedLanguage.SPANISH),
-        "amarillas": ("yellow", SupportedLanguage.SPANISH),
-        "gelb": ("yellow", SupportedLanguage.GERMAN),
-        "gelbe": ("yellow", SupportedLanguage.GERMAN),
-        "gelben": ("yellow", SupportedLanguage.GERMAN),
-        "gelbes": ("yellow", SupportedLanguage.GERMAN),
-    }
+                if role == "CONTAINER":
+                    cls.CONTAINER_TOKENS[token] = lang
+                elif role == "TOOL":
+                    cls.TOOL_TOKENS[token] = lang
+                elif role == "BALL":
+                    cls.BALL_TOKENS[token] = lang
+                elif role == "BLOCK":
+                    cls.BLOCK_TOKENS[token] = lang
+                elif category == "VERB":
+                    try:
+                        act_type = BabyActionType(canonical)
+                    except ValueError:
+                        act_type = getattr(BabyActionType, role, BabyActionType.PUSH)
+                    cls.ACTION_TOKENS[token] = (act_type, lang)
+                elif category == "PREPOSITION":
+                    try:
+                        rel_type = BabyRelationType(canonical)
+                    except ValueError:
+                        rel_type = getattr(BabyRelationType, role, BabyRelationType.INSIDE)
+                    cls.RELATION_TOKENS[token] = (rel_type, lang)
+                elif category == "ADJECTIVE":
+                    cls.COLOR_TOKENS[token] = (canonical, lang)
+
+                count += 1
+        except Exception as e:
+            logger.warning(f"Error loading multilingual lexicon from {tsv_path}: {e}")
+
+        return count
 
     @classmethod
     def detect_language(cls, text: str) -> SupportedLanguage:
@@ -461,3 +307,7 @@ class MultilingualLexiconRegistry:
             "target_relation": target_relation,
             "needs_tool": needs_tool,
         }
+
+
+# Bootstrap multilingual token tables dynamically from curriculum data file
+MultilingualLexiconRegistry.load_translation_file()

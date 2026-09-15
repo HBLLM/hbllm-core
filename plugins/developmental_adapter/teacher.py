@@ -11,6 +11,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
@@ -93,27 +94,81 @@ class PedagogicalTeacher:
         self.rng = random.Random(seed)
         self.dictionary = LanguageDictionary.get_instance()
 
+    @classmethod
+    def load_kindergarten_primer(
+        cls, primer_path: Path | str | None = None
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Load kindergarten ostensive naming lesson pairs dynamically from a primer data file."""
+        if primer_path is None:
+            primer_path = Path(__file__).parent / "curriculum_data" / "kindergarten_primer.tsv"
+        else:
+            primer_path = Path(primer_path)
+
+        lessons: list[tuple[str, dict[str, Any]]] = []
+        if primer_path.exists():
+            try:
+                with open(primer_path, encoding="utf-8") as f:
+                    lines = f.read().strip().splitlines()
+                for line in lines[1:]:
+                    if not line.strip():
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) >= 3:
+                        utt = parts[0].strip()
+                        ctype = parts[1].strip()
+                        cval = parts[2].strip()
+
+                        if ctype == "color":
+                            context = {"color": cval}
+                        elif ctype == "entity_type":
+                            try:
+                                context = {"entity_type": BabyObjectType(cval)}
+                            except ValueError:
+                                context = {"entity_type": cval}
+                        elif ctype == "action":
+                            try:
+                                context = {"action": BabyActionType(cval)}
+                            except ValueError:
+                                context = {"action": cval}
+                        elif ctype == "relation":
+                            try:
+                                context = {"relation": BabyRelationType(cval)}
+                            except ValueError:
+                                context = {"relation": cval}
+                        else:
+                            context = {ctype: cval}
+                        lessons.append((utt, context))
+            except Exception as e:
+                logger.warning(f"Failed to load kindergarten primer from {primer_path}: {e}")
+
+        if not lessons:
+            # Fallback if primer file is absent
+            lessons = [
+                ("red", {"color": "red"}),
+                ("blue", {"color": "blue"}),
+                ("green", {"color": "green"}),
+                ("ball", {"entity_type": BabyObjectType.BALL}),
+                ("block", {"entity_type": BabyObjectType.BLOCK}),
+                ("box", {"entity_type": BabyObjectType.BOX}),
+                ("tool", {"entity_type": BabyObjectType.TOOL}),
+                ("stick", {"entity_type": BabyObjectType.TOOL}),
+                ("push", {"action": BabyActionType.PUSH}),
+                ("pull", {"action": BabyActionType.PULL}),
+                ("inside", {"relation": BabyRelationType.INSIDE}),
+            ]
+        return lessons
+
     # ─────────────────────────────────────────────────────────────────────────
     # GRADE 1: KINDERGARTEN (Lexical & Perceptual Grounding)
     # ─────────────────────────────────────────────────────────────────────────
-    def conduct_kindergarten(self, student: StudentProfile) -> GradeAssessment:
+    def conduct_kindergarten(
+        self, student: StudentProfile, primer_file: Path | str | None = None
+    ) -> GradeAssessment:
         """Teach grounded lexicon via ostensive naming and administer comprehension exam."""
         logger.info(f"[{self.name}] Beginning Kindergarten instruction.")
 
         # Step 1: Paired Demonstrations (Ostensive Naming with Joint Attention)
-        lessons: list[tuple[str, dict[str, Any]]] = [
-            ("red", {"color": "red"}),
-            ("blue", {"color": "blue"}),
-            ("green", {"color": "green"}),
-            ("ball", {"entity_type": BabyObjectType.BALL}),
-            ("block", {"entity_type": BabyObjectType.BLOCK}),
-            ("box", {"entity_type": BabyObjectType.BOX}),
-            ("tool", {"entity_type": BabyObjectType.TOOL}),
-            ("stick", {"entity_type": BabyObjectType.TOOL}),
-            ("push", {"action": BabyActionType.PUSH}),
-            ("pull", {"action": BabyActionType.PULL}),
-            ("inside", {"relation": BabyRelationType.INSIDE}),
-        ]
+        lessons = self.load_kindergarten_primer(primer_file)
 
         # Present lessons repeatedly to establish cross-situational co-occurrence
         for utterance, context in lessons * 3:

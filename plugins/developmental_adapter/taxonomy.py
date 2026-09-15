@@ -192,12 +192,22 @@ class TaxonomyHierarchyEngine:
         n_clean = name.strip().lower()
         p_clean = parent_concept.strip().lower() if parent_concept else None
 
+        existing = self.nodes.get(n_clean)
+        affords = (
+            direct_affordances
+            if direct_affordances is not None
+            else (set(existing.direct_affordances) if existing else set())
+        )
+        props = dict(existing.canonical_properties) if existing else {}
+        if properties:
+            props.update(properties)
+
         node = TaxonNode(
             name=n_clean,
-            parent_concept=p_clean,
-            level=level,
-            direct_affordances=direct_affordances or set(),
-            canonical_properties=properties or {},
+            parent_concept=p_clean if p_clean else (existing.parent_concept if existing else None),
+            level=level if level > 1 else (existing.level if existing else level),
+            direct_affordances=affords,
+            canonical_properties=props,
             confidence=confidence,
         )
 

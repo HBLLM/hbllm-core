@@ -138,17 +138,36 @@ class CompositionalLanguageEngine:
         target_noun = nouns[index].grounded_symbol if index < len(nouns) else None
         target_adj = adjectives[index].grounded_symbol if index < len(adjectives) else None
 
+        # Check if target_noun is a container concept via LanguageDictionary
+        is_container_concept = False
+        if target_noun:
+            from .dictionary_store import LanguageDictionary
+
+            dict_entry = LanguageDictionary.get_instance().lookup(target_noun)
+            if dict_entry and dict_entry.is_container:
+                is_container_concept = True
+
+        # Determine dynamic mass thresholds from active objects
+        masses = [o.mass for o in self.env.objects.values() if hasattr(o, "mass")]
+        if len(masses) >= 2 and max(masses) > min(masses):
+            heavy_thresh = sum(masses) / len(masses)
+            light_thresh = (min(masses) + heavy_thresh) / 2.0
+        else:
+            heavy_thresh = 5.0
+            light_thresh = 2.5
+
         for oid, obj in self.env.objects.items():
             type_match = (
                 target_noun is None
                 or obj.object_type.value == target_noun
+                or (is_container_concept and obj.is_container)
                 or (target_noun == "box" and obj.is_container)
             )
             adj_match = (
                 target_adj is None
                 or obj.color == target_adj
-                or (target_adj == "heavy" and obj.mass >= 5.0)
-                or (target_adj == "light" and obj.mass <= 2.5)
+                or (target_adj == "heavy" and (obj.mass >= heavy_thresh or obj.mass >= 5.0))
+                or (target_adj == "light" and (obj.mass <= light_thresh or obj.mass <= 2.5))
             )
             if type_match and adj_match:
                 return oid
@@ -156,7 +175,9 @@ class CompositionalLanguageEngine:
         # Partial match on noun only
         if target_noun:
             for oid, obj in self.env.objects.items():
-                if obj.object_type.value == target_noun:
+                if obj.object_type.value == target_noun or (
+                    is_container_concept and obj.is_container
+                ):
                     return oid
 
         return None
