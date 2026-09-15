@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .dictionary_store import LanguageDictionary
 from .textbook_curriculum import (
     TextbookChapter,
     TextbookSection,
@@ -166,75 +167,6 @@ class RawBookDownloader:
 class AutomatedCurriculumCompiler:
     """Analyzes raw book text and compiles structured in-memory TextbookChapter instances."""
 
-    # Lexicon categories and candidate terms
-    DOMAIN_VOCABULARY_MAP: dict[str, list[str]] = {
-        "physics": [
-            "force",
-            "mass",
-            "motion",
-            "inertia",
-            "friction",
-            "lever",
-            "stick",
-            "box",
-            "pull",
-            "push",
-        ],
-        "chemistry": [
-            "atom",
-            "molecule",
-            "reaction",
-            "combustion",
-            "heat",
-            "solution",
-            "stick",
-            "box",
-            "pull",
-        ],
-        "biology": [
-            "cell",
-            "membrane",
-            "osmosis",
-            "turgor",
-            "solute",
-            "diffusion",
-            "stick",
-            "box",
-            "pull",
-        ],
-        "optics": [
-            "light",
-            "refraction",
-            "lens",
-            "prism",
-            "dispersion",
-            "focus",
-            "stick",
-            "box",
-            "push",
-        ],
-        "thermodynamics": [
-            "heat",
-            "temperature",
-            "conduction",
-            "insulation",
-            "equilibrium",
-            "stick",
-            "box",
-            "pull",
-        ],
-        "astronomy": [
-            "gravity",
-            "orbit",
-            "satellite",
-            "velocity",
-            "trajectory",
-            "stick",
-            "box",
-            "pull",
-        ],
-    }
-
     @classmethod
     def compile_chapter(
         cls,
@@ -346,13 +278,11 @@ class AutomatedCurriculumCompiler:
 
     @classmethod
     def _extract_glossary(cls, text: str, domain: str) -> dict[str, str]:
-        """Extract explicit definitions or salient domain terms across the entire book."""
+        """Extract explicit definitions or salient domain terms across the entire book using LanguageDictionary."""
         glossary: dict[str, str] = {}
-        domain_terms = cls.DOMAIN_VOCABULARY_MAP.get(
-            domain.lower(), cls.DOMAIN_VOCABULARY_MAP["physics"]
-        )
+        dictionary = LanguageDictionary.get_instance()
 
-        # Scan 100% of the complete, unabridged book for explicit definitional sentences
+        # 1. Scan 100% of the complete, unabridged book for explicit definitional sentences
         pattern = re.compile(
             r"\b([A-Za-z\-]{3,20})\s+(?:is|are|means|denotes|refers to)\s+([^.\n]{15,120})\.",
             re.IGNORECASE,
@@ -370,27 +300,23 @@ class AutomatedCurriculumCompiler:
                 if len(glossary) >= 20:  # Richer conceptual vocabulary from full book
                     break
 
-        # Complement with domain vocabulary present in the text
+        # 2. Complement with dictionary terms occurring in this book text
         text_lower = text.lower()
-        for term in domain_terms:
-            if term not in glossary and term in text_lower:
-                glossary[term] = (
-                    f"Key operational concept of {domain}: physical {term} governing system dynamics."
-                )
+        if len(glossary) < 20:
+            words_in_text = set(re.findall(r"\b[a-z]{3,15}\b", text_lower))
+            for word, entry in dictionary.entries.items():
+                if word in words_in_text and word not in glossary and word not in cls.STOPWORDS:
+                    glossary[word] = entry.definition
+                    if len(glossary) >= 20:
+                        break
 
-        # Guarantee foundational grounding anchors
-        if "box" not in glossary:
-            glossary["box"] = "Rigid physical enclosure providing boundary containment for objects."
-        if "stick" not in glossary:
-            glossary["stick"] = "Rigid tool extension used to extend manipulator interaction reach."
-        if "ball" not in glossary:
-            glossary["ball"] = (
-                "Spherical physical object capable of rolling across smooth surfaces."
-            )
-        if "block" not in glossary:
-            glossary["block"] = (
-                "Prismatic physical entity capable of sliding under horizontal forces."
-            )
+        # 3. Guarantee foundational physical grounding anchors directly from LanguageDictionary
+        for anchor in ("box", "stick", "ball", "block"):
+            if anchor not in glossary:
+                entry = dictionary.lookup(anchor)
+                glossary[anchor] = (
+                    entry.definition if entry else f"Foundational physical {anchor} entity."
+                )
 
         return glossary
 

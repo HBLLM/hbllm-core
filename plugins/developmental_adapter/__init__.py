@@ -31,6 +31,7 @@ from .continual_development import ContinualDevelopmentEngine
 from .cross_transfer import CrossTransferEngine
 from .curiosity import EpistemicCuriosityEngine
 from .curriculum import CURRICULUM_SPECS, CurriculumStageId, CurriculumStageSpec
+from .dictionary_store import DictionaryEntry, LanguageDictionary, SemanticRole
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -145,6 +146,9 @@ __all__ = [
     "CurriculumStageId",
     "CurriculumStageSpec",
     "DevelopmentalActionAdapter",
+    "DictionaryEntry",
+    "LanguageDictionary",
+    "SemanticRole",
     "CohortStatisticalSummary",
     "DevelopmentalMetricsTracker",
     "DevelopmentalTelemetryEmitter",

@@ -18,12 +18,14 @@ from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
 
 if TYPE_CHECKING:
     from .teacher import StudentProfile
+from .dictionary_store import LanguageDictionary
 from .types import (
     BabyActionType,
     BabyObjectState,
     BabyObjectType,
     BabyRelationType,
     ExamQuestionResult,
+    LexicalCategory,
     PredicateGoal,
     Vector2D,
 )
@@ -379,186 +381,11 @@ class TextbookAnalogyCompiler:
 class TextbookCurriculumCurator:
     """High-level curriculum curator that teaches and evaluates students using textbooks."""
 
-    def __init__(self) -> None:
+    def __init__(self, dictionary: LanguageDictionary | None = None) -> None:
         self.parser = TextbookParser()
         self.sim_compiler = TextbookSimulationCompiler()
         self.analogy_compiler = TextbookAnalogyCompiler()
-
-    CONTAINER_WORDS: set[str] = {
-        "container",
-        "box",
-        "vessel",
-        "basket",
-        "hopper",
-        "chamber",
-        "tray",
-        "enclosure",
-        "jar",
-        "cup",
-    }
-    TOOL_WORDS: set[str] = {
-        "tool",
-        "stick",
-        "lever",
-        "rod",
-        "handle",
-        "arm",
-        "probe",
-        "fulcrum",
-        "pivot",
-        "wedge",
-        "pulley",
-        "hammer",
-    }
-    OBJECT_WORDS: set[str] = {
-        "ball",
-        "block",
-        "sphere",
-        "cylinder",
-        "target",
-        "mass",
-        "particle",
-        "atom",
-        "molecule",
-        "body",
-        "object",
-        "wheel",
-        "magnet",
-        "mirror",
-        "prism",
-        "lens",
-        "star",
-        "planet",
-        "moon",
-        "cell",
-        "organism",
-        "plant",
-        "animal",
-        "species",
-        "crystal",
-        "fluid",
-        "solid",
-        "gas",
-        "liquid",
-        "ray",
-        "beam",
-        "wave",
-        "charge",
-        "field",
-        "engine",
-        "acid",
-        "wax",
-        "candle",
-        "matter",
-        "lead",
-        "iron",
-        "copper",
-        "substance",
-        "solution",
-        "tissue",
-        "nucleus",
-        "core",
-        "orbit",
-    }
-    ACTION_VERBS: set[str] = {
-        "push",
-        "pull",
-        "move",
-        "lift",
-        "drop",
-        "rotate",
-        "place",
-        "grasp",
-        "accelerate",
-        "attract",
-        "repel",
-        "flow",
-        "transfer",
-        "conduct",
-        "diffuse",
-        "react",
-        "press",
-        "release",
-        "hold",
-        "slide",
-        "roll",
-        "stop",
-        "combust",
-        "ignite",
-        "absorb",
-        "emit",
-        "radiate",
-        "deflect",
-        "displace",
-        "expand",
-        "contract",
-        "heat",
-        "cool",
-        "melt",
-        "freeze",
-        "vaporize",
-        "condense",
-        "refract",
-        "reflect",
-    }
-    PREPOSITIONS: set[str] = {
-        "inside",
-        "in",
-        "on",
-        "above",
-        "under",
-        "below",
-        "near",
-        "between",
-        "against",
-        "through",
-        "into",
-        "within",
-        "outside",
-        "upon",
-        "behind",
-        "across",
-    }
-    ING_NOUNS: set[str] = {
-        "morning",
-        "evening",
-        "thing",
-        "something",
-        "anything",
-        "nothing",
-        "everything",
-        "spring",
-        "wing",
-        "ring",
-        "king",
-        "building",
-        "ceiling",
-        "lightning",
-        "string",
-        "meaning",
-        "feeling",
-        "painting",
-        "drawing",
-        "clothing",
-        "offspring",
-        "pudding",
-        "sibling",
-        "shilling",
-        "darling",
-        "being",
-        "living",
-    }
-    NOUN_SUFFIXES: tuple[str, ...] = (
-        "tion",
-        "ment",
-        "ence",
-        "ance",
-        "ity",
-        "ism",
-        "ist",
-        "er",
-        "or",
-    )
+        self.dictionary = dictionary or LanguageDictionary.get_instance()
 
     def teach_chapter(
         self,
@@ -576,35 +403,73 @@ class TextbookCurriculumCurator:
                 context = {"concept": term, "explanation": explanation}
                 term_clean = term.strip().lower()
 
-                if any(w in term_clean for w in self.CONTAINER_WORDS):
-                    context["entity_type"] = BabyObjectType.BOX
-                elif any(w in term_clean for w in self.TOOL_WORDS):
-                    context["entity_type"] = BabyObjectType.TOOL
-                elif (
-                    term_clean in self.OBJECT_WORDS
-                    or term_clean in self.ING_NOUNS
-                    or any(term_clean.endswith(sfx) for sfx in self.NOUN_SUFFIXES)
-                ):
-                    context["entity_type"] = BabyObjectType.BLOCK
-                elif (
-                    term_clean in self.ACTION_VERBS
-                    or (term_clean.endswith("ing") and term_clean not in self.ING_NOUNS)
-                    or term_clean.endswith("ed")
-                ):
-                    if "pull" in term_clean:
-                        context["action"] = BabyActionType.PULL
-                    else:
-                        context["action"] = BabyActionType.PUSH
-                elif term_clean in self.PREPOSITIONS:
-                    if "near" in term_clean or "between" in term_clean or "against" in term_clean:
-                        context["relation"] = BabyRelationType.NEAR
-                    else:
-                        context["relation"] = BabyRelationType.INSIDE
+                # Autonomous lexical lookup via authoritative Language Dictionary
+                entry = self.dictionary.lookup(term_clean)
+                if entry is not None:
+                    if entry.category == LexicalCategory.NOUN:
+                        if entry.is_container:
+                            context["entity_type"] = BabyObjectType.BOX
+                        elif entry.is_tool:
+                            context["entity_type"] = BabyObjectType.TOOL
+                        elif entry.semantic_role == "BALL":
+                            context["entity_type"] = BabyObjectType.BALL
+                        else:
+                            context["entity_type"] = BabyObjectType.BLOCK
+                    elif entry.category == LexicalCategory.VERB:
+                        if entry.semantic_role == "PULL":
+                            context["action"] = BabyActionType.PULL
+                        elif entry.semantic_role == "ROLL":
+                            context["action"] = BabyActionType.ROLL
+                        elif entry.semantic_role == "GRASP":
+                            context["action"] = BabyActionType.GRASP
+                        else:
+                            context["action"] = BabyActionType.PUSH
+                    elif entry.category == LexicalCategory.PREPOSITION:
+                        if entry.semantic_role == "NEAR":
+                            context["relation"] = BabyRelationType.NEAR
+                        else:
+                            context["relation"] = BabyRelationType.INSIDE
+                    elif entry.category == LexicalCategory.ADJECTIVE:
+                        context["property"] = term_clean
                 else:
-                    context["property"] = term_clean
+                    # Autonomous registration for novel terms based on definitional semantics
+                    inferred_entry = self.dictionary.register_entry(
+                        word=term_clean,
+                        category=(
+                            "noun"
+                            if any(
+                                k in explanation.lower()
+                                for k in (
+                                    "substance",
+                                    "matter",
+                                    "object",
+                                    "body",
+                                    "entity",
+                                    "organism",
+                                    "device",
+                                    "structure",
+                                    "element",
+                                    "material",
+                                )
+                            )
+                            else "adjective"
+                        ),
+                        definition=explanation,
+                    )
+                    if inferred_entry.category == LexicalCategory.NOUN:
+                        context["entity_type"] = (
+                            BabyObjectType.BOX
+                            if inferred_entry.is_container
+                            else BabyObjectType.TOOL
+                            if inferred_entry.is_tool
+                            else BabyObjectType.BLOCK
+                        )
+                    else:
+                        context["property"] = term_clean
 
                 student.grounding_engine.observe_paired_demonstration(term, context)
             results["glossary_count"] = len(glossary)
+            results["grounded_concepts"] = list(glossary.keys())
             results["sections_processed"] += 1
 
         # 2. Process Worked Problems -> BabyWorld Simulation & Active Causal Discovery

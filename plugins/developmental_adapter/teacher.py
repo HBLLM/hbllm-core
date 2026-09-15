@@ -22,6 +22,7 @@ from .causal_discovery import InterventionalCausalDiscoveryEngine
 from .cohorts import generate_test_suites
 from .compositional_language import CompositionalLanguageEngine
 from .continual_development import ContinualDevelopmentEngine
+from .dictionary_store import LanguageDictionary
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -90,6 +91,7 @@ class PedagogicalTeacher:
     def __init__(self, name: str = "Dr. Maria Vygotsky", seed: int = 42) -> None:
         self.name = name
         self.rng = random.Random(seed)
+        self.dictionary = LanguageDictionary.get_instance()
 
     # ─────────────────────────────────────────────────────────────────────────
     # GRADE 1: KINDERGARTEN (Lexical & Perceptual Grounding)
@@ -698,7 +700,7 @@ class PedagogicalTeacher:
         if isinstance(chapter, str):
             chapter = TextbookParser.parse_markdown(chapter)
 
-        curator = TextbookCurriculumCurator()
+        curator = TextbookCurriculumCurator(dictionary=self.dictionary)
         res = curator.teach_chapter(student, chapter)
         logger.info(f"[{self.name}] Taught from textbook chapter '{chapter.title}': {res}")
         return res
@@ -715,7 +717,7 @@ class PedagogicalTeacher:
         if isinstance(chapter, str):
             chapter = TextbookParser.parse_markdown(chapter)
 
-        curator = TextbookCurriculumCurator()
+        curator = TextbookCurriculumCurator(dictionary=self.dictionary)
         q_results = curator.conduct_chapter_examination(student, chapter, vocab_probes=vocab_probes)
 
         correct = sum(1 for q in q_results if q.is_correct)
