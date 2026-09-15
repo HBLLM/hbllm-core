@@ -13,6 +13,14 @@ from typing import Any
 from .a20_transfer_bridge import A20RelationalTransferBridge
 from .action import DevelopmentalActionAdapter
 from .affordance_discovery import AffordanceDiscoveryEngine
+from .arc_agi_runner import (
+    ARCBenchmarkReport,
+    ARCGrid,
+    ARCRelationalSolver,
+    ARCTaskResult,
+    GridObject,
+    GridTopologyExtractor,
+)
 from .benchmark import run_a23_5_benchmark
 from .blank_brain import BlankBrainSubstrate, create_blank_brain_substrate
 from .causal_discovery import InterventionalCausalDiscoveryEngine
@@ -31,6 +39,13 @@ from .continual_development import ContinualDevelopmentEngine
 from .cross_transfer import CrossTransferEngine
 from .curiosity import EpistemicCuriosityEngine
 from .curriculum import CURRICULUM_SPECS, CurriculumStageId, CurriculumStageSpec
+from .diagram_grounding import (
+    CrossModalVerificationReport,
+    CrossModalVerifier,
+    DiagramPrimitive,
+    DiagramPrimitiveType,
+    ScientificDiagramParser,
+)
 from .dictionary_store import DictionaryEntry, LanguageDictionary, SemanticRole
 from .downstream_benchmarks import (
     BenchmarkTaskResult,
@@ -52,6 +67,15 @@ from .perception import (
     SemanticLeakageViolationError,
 )
 from .school import CognitiveSchool, GraduationTranscript
+from .self_directed_learner import (
+    EpistemicKnowledgeGap,
+    InformationGainReport,
+    KnowledgeGapDetector,
+    KnowledgeGapType,
+    SelfDirectedReadingEngine,
+    SelfDirectedReadingPlan,
+    binary_entropy,
+)
 from .spatial_containment import SpatialContainmentEngine
 from .taxonomy import TaxonNode, TaxonomyHierarchyEngine
 from .teacher import (
@@ -127,6 +151,10 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 __all__ = [
     "A20RelationalTransferBridge",
+    "ARCBenchmarkReport",
+    "ARCGrid",
+    "ARCRelationalSolver",
+    "ARCTaskResult",
     "ActiveDevelopmentalHCIRCohort",
     "AffordanceDiscoveryEngine",
     "AffordanceHypothesis",
@@ -149,16 +177,30 @@ __all__ = [
     "ConceptAbstractionEngine",
     "ConceptCluster",
     "ContinualDevelopmentEngine",
+    "CrossModalVerificationReport",
+    "CrossModalVerifier",
     "CrossTransferEngine",
     "CrossTransferEvaluation",
     "CurriculumStageId",
     "CurriculumStageSpec",
     "DevelopmentalActionAdapter",
+    "DiagramPrimitive",
+    "DiagramPrimitiveType",
     "DictionaryEntry",
     "DownstreamBenchmarkReport",
     "DownstreamBenchmarkRunner",
+    "EpistemicKnowledgeGap",
+    "GridObject",
+    "GridTopologyExtractor",
+    "InformationGainReport",
+    "KnowledgeGapDetector",
+    "KnowledgeGapType",
     "LanguageDictionary",
     "MultilingualLexiconRegistry",
+    "ScientificDiagramParser",
+    "SelfDirectedReadingEngine",
+    "SelfDirectedReadingPlan",
+    "binary_entropy",
     "SemanticRole",
     "SupportedLanguage",
     "CohortStatisticalSummary",
