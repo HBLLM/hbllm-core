@@ -6,11 +6,20 @@ the three-layer Blank-Brain cognitive profile, and causal hypotheses.
 
 from __future__ import annotations
 
-import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from hbllm.hcir.world.causal_discovery import (
+    BeliefTransitionEvent as BeliefTransitionEvent,
+)
+from hbllm.hcir.world.causal_discovery import (
+    BeliefTransitionType as BeliefTransitionType,
+)
+from hbllm.hcir.world.causal_discovery import (
+    CausalHypothesis as BaseCausalHypothesis,
+)
 
 
 class BabyObjectType(str, Enum):
@@ -159,68 +168,11 @@ class DevelopmentalProfile:
         )
 
 
-class BeliefTransitionType(str, Enum):
-    """Immutable event types for event-sourced developmental belief logging."""
-
-    HYPOTHESIS_CREATED = "hypothesis_created"
-    HYPOTHESIS_TESTED = "hypothesis_tested"
-    HYPOTHESIS_FALSIFIED = "hypothesis_falsified"
-    HYPOTHESIS_CONFIRMED = "hypothesis_confirmed"
-    CONFIDENCE_CHANGED = "confidence_changed"
-    RULE_GENERALIZED = "rule_generalized"
-    RULE_REVISED = "rule_revised"
-    AFFORDANCE_DISCOVERED = "affordance_discovered"
-    SPATIAL_SCHEMA_INDUCED = "spatial_schema_induced"
-    TOOL_COMPOSED = "tool_composed"
-    GOAL_SYNTHESIZED = "goal_synthesized"
-    PLAN_EXECUTED = "plan_executed"
-    PLAN_REPLANNED = "plan_replanned"
-    CURIOSITY_EXPLORATION = "curiosity_exploration"
-    CONCEPT_INDUCED = "concept_induced"
-    LEXICON_GROUNDED = "lexicon_grounded"
-    COMPOSITION_PARSED = "composition_parsed"
-    MEMORY_CONSOLIDATED = "memory_consolidated"
-    METACOGNITION_CALIBRATED = "metacognition_calibrated"
-    CROSS_WORLD_TRANSFERRED = "cross_world_transferred"
-    CROSS_DOMAIN_TRANSFERRED = "cross_domain_transferred"
-
-
 @dataclass
-class BeliefTransitionEvent:
-    """An immutable record of a developmental belief transition."""
-
-    event_id: str = field(default_factory=lambda: f"bte_{uuid.uuid4().hex[:8]}")
-    event_type: BeliefTransitionType = BeliefTransitionType.HYPOTHESIS_CREATED
-    step_index: int = 0
-    hypothesis_id: str = ""
-    variable: str = ""  # e.g. "color", "mass", "shape"
-    condition: str = ""  # e.g. "color == 'red'", "mass < 5.0"
-    prior_confidence: float = 0.0
-    posterior_confidence: float = 0.0
-    is_falsified: bool = False
-    evidence: dict[str, Any] = field(default_factory=dict)
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass
-class CausalHypothesis:
+class CausalHypothesis(BaseCausalHypothesis):
     """State tracker for candidate causal relationships."""
 
-    hypothesis_id: str = field(default_factory=lambda: f"hyp_{uuid.uuid4().hex[:6]}")
     action: BabyActionType = BabyActionType.PUSH
-    variable: str = "color"  # Candidate variable being tested
-    operator: str = "=="
-    value: Any = "red"
-    consequence: str = "MOVES"
-    confidence: float = 0.5  # Prior belief
-    interventions_tested: int = 0
-    falsified: bool = False
-    confirmed: bool = False
-    supporting_episodes: list[str] = field(default_factory=list)
-    counterexamples: list[str] = field(default_factory=list)
-
-    def describe(self) -> str:
-        return f"{self.action.value}(x) ∧ ({self.variable} {self.operator} {self.value}) => {self.consequence}"
 
 
 @dataclass

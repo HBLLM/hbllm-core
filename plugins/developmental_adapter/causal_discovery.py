@@ -9,6 +9,8 @@ import logging
 import math
 from typing import Any
 
+from hbllm.hcir.world.causal_discovery import BaseCausalDiscoveryEngine
+
 from .blank_brain import BlankBrainSubstrate
 from .environment import BabyWorldEnvironment
 from .metrics import DevelopmentalTelemetryEmitter
@@ -34,7 +36,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 
-class InterventionalCausalDiscoveryEngine:
+class InterventionalCausalDiscoveryEngine(BaseCausalDiscoveryEngine):
     """Discovers true causal physical laws through active contrastive intervention."""
 
     def __init__(
@@ -43,15 +45,10 @@ class InterventionalCausalDiscoveryEngine:
         perception: DevelopmentalPerceptionAdapter,
         environment: BabyWorldEnvironment,
     ) -> None:
+        super().__init__()
         self.substrate = substrate
         self.perception = perception
         self.env = environment
-
-        # Active belief & hypothesis registries
-        self.hypotheses: list[CausalHypothesis] = []
-        self.belief_history: list[BeliefTransitionEvent] = []
-        self.interventions_count: int = 0
-        self.confirmed_causal_rules: list[dict[str, Any]] = []
 
     def _compute_hypothesis_entropy(self) -> float:
         """Compute Shannon entropy across active non-falsified hypotheses."""
@@ -299,46 +296,21 @@ class InterventionalCausalDiscoveryEngine:
             )
             return available_entity_ids[0] if available_entity_ids else "", default_hyp
 
-        best_candidate: str | None = None
-        max_discriminant_score: float = -999.0
-        targeted_hyp: CausalHypothesis = active_hyps[0]
-
         # Query perceptual observation map
         obs = self.env.get_sensory_observation()
         percept_map = {p["percept_id"]: p for p in obs.vision}
 
-        for ent_id in available_entity_ids:
-            percept = percept_map.get(ent_id)
-            if not percept:
-                continue
+        ranked = self.rank_interventional_candidates(
+            candidate_ids=available_entity_ids,
+            active_hypotheses=active_hyps,
+            feature_map=percept_map,
+        )
 
-            # Compute predictions across all active hypotheses generically
-            predictions = [self._predict_hypothesis(h, percept) for h in active_hyps]
+        best_candidate = (
+            ranked[0][0] if ranked else (available_entity_ids[0] if available_entity_ids else "")
+        )
 
-            # Disagreement score: count pairs of hypotheses with conflicting predictions
-            disagreements = 0
-            for i in range(len(predictions)):
-                for j in range(i + 1, len(predictions)):
-                    if predictions[i] != predictions[j]:
-                        disagreements += 1
-
-            # Novelty bonus: penalize entities already tested to encourage exploration
-            times_tested = sum(
-                1
-                for h in active_hyps
-                if ent_id in h.supporting_episodes or ent_id in h.counterexamples
-            )
-            score = float(disagreements) - 0.5 * float(times_tested)
-
-            if score > max_discriminant_score:
-                max_discriminant_score = score
-                best_candidate = ent_id
-                targeted_hyp = active_hyps[0]
-
-        if not best_candidate and available_entity_ids:
-            best_candidate = available_entity_ids[0]
-
-        return best_candidate or "", targeted_hyp
+        return best_candidate or "", active_hyps[0]
 
     def execute_interventional_probe(
         self,
@@ -415,121 +387,43 @@ class InterventionalCausalDiscoveryEngine:
 
     def _update_hypotheses_from_evidence(self, probe_result: dict[str, Any]) -> None:
         """Update posterior confidences and falsify invalidated hypotheses."""
-        did_move = probe_result["did_move"]
-
-        for h in self.hypotheses:
-            if h.falsified:
-                continue
-
-            prior_conf = h.confidence
-            predicted_move = self._predict_hypothesis(h, probe_result)
-            h.interventions_tested += 1
-
-            if predicted_move != did_move:
-                # Prediction Error / Counterexample: Strict Falsification!
-                h.falsified = True
-                h.confidence = 0.0
-                h.counterexamples.append(probe_result["target_id"])
-                self._record_belief_event(
-                    event_type=BeliefTransitionType.HYPOTHESIS_FALSIFIED,
-                    hypothesis=h,
-                    prior_conf=prior_conf,
-                    post_conf=0.0,
-                    details={"counterexample": probe_result},
-                )
-                emitter = DevelopmentalTelemetryEmitter.get_instance()
-                emitter.record_hypothesis_event("falsified")
-                logger.info(
-                    "Hypothesis falsified: %s (variable=%s)",
-                    h.hypothesis_id,
-                    h.variable,
-                    extra={"hypothesis_id": h.hypothesis_id, "variable": h.variable},
-                )
-            else:
-                # Evidence consistent with hypothesis
-                h.supporting_episodes.append(probe_result["target_id"])
-                # Bayesian belief update
-                h.confidence = min(1.0, h.confidence + 0.25)
-                self._record_belief_event(
-                    event_type=BeliefTransitionType.CONFIDENCE_CHANGED,
-                    hypothesis=h,
-                    prior_conf=prior_conf,
-                    post_conf=h.confidence,
-                    details={"supporting_evidence": probe_result},
-                )
-
-                if h.confidence >= 0.95 and not h.confirmed:
-                    h.confirmed = True
-                    self._record_belief_event(
-                        event_type=BeliefTransitionType.HYPOTHESIS_CONFIRMED,
-                        hypothesis=h,
-                        prior_conf=prior_conf,
-                        post_conf=h.confidence,
-                        details={"confirmed_causal_law": h.describe()},
-                    )
-                    self._induce_causal_rule_into_substrate(h)
-
+        events = self.update_hypotheses_from_evidence(
+            hypotheses=self.hypotheses,
+            probe_result=probe_result,
+            step_index=self.interventions_count,
+        )
         emitter = DevelopmentalTelemetryEmitter.get_instance()
+        for ev in events:
+            self.belief_history.append(ev)
+            if ev.event_type == BeliefTransitionType.HYPOTHESIS_FALSIFIED:
+                emitter.record_hypothesis_event("falsified")
+            elif ev.event_type == BeliefTransitionType.HYPOTHESIS_CONFIRMED:
+                hyp = next(
+                    (h for h in self.hypotheses if h.hypothesis_id == ev.hypothesis_id), None
+                )
+                if hyp is not None:
+                    self._induce_causal_rule_into_substrate(hyp)
+
         entropy = self._compute_hypothesis_entropy()
         emitter.record_entropy("causal_beliefs", entropy)
 
     def _induce_causal_rule_into_substrate(self, confirmed_hyp: CausalHypothesis) -> None:
         """Synthesize confirmed hypothesis into a generalized HCIR causal rule."""
-        # Check if identical invariant already registered in substrate to prevent duplicates
-        for existing in self.substrate.causal_rules:
-            if (
-                existing.get("action") == confirmed_hyp.action.value
-                and existing.get("consequence") == confirmed_hyp.consequence
-                and existing.get("precondition", {}).get("property") == confirmed_hyp.variable
-                and existing.get("precondition", {}).get("operator") == confirmed_hyp.operator
-                and existing.get("precondition", {}).get("value") == confirmed_hyp.value
-            ):
-                add_count = max(1, len(confirmed_hyp.supporting_episodes))
-                existing["empirical_support_count"] = (
-                    existing.get("empirical_support_count", 1) + add_count
-                )
-                existing["confidence"] = min(
-                    1.0, max(existing.get("confidence", 0.5), confirmed_hyp.confidence)
-                )
-                for cr in self.confirmed_causal_rules:
-                    if cr.get("rule_id") == existing.get("rule_id"):
-                        cr["empirical_support_count"] = existing["empirical_support_count"]
-                        cr["confidence"] = existing["confidence"]
-                        break
-                logger.info(
-                    "Causal rule reinforced in substrate: %s %s %s => %s (empirical support: %d)",
-                    confirmed_hyp.variable,
-                    confirmed_hyp.operator,
-                    confirmed_hyp.value,
-                    confirmed_hyp.consequence,
-                    existing["empirical_support_count"],
-                    extra={"rule": existing},
-                )
-                return
-
-        rule = {
-            "rule_id": f"causal_rule_{len(self.confirmed_causal_rules) + 1}",
-            "action": confirmed_hyp.action.value,
-            "precondition": {
-                "property": confirmed_hyp.variable,
-                "operator": confirmed_hyp.operator,
-                "value": confirmed_hyp.value,
-            },
-            "consequence": confirmed_hyp.consequence,
-            "confidence": confirmed_hyp.confidence,
-            "empirical_support_count": len(confirmed_hyp.supporting_episodes),
-        }
-        self.confirmed_causal_rules.append(rule)
-        self.substrate.causal_rules.append(rule)
-
-        self._record_belief_event(
-            event_type=BeliefTransitionType.RULE_GENERALIZED,
-            hypothesis=confirmed_hyp,
-            prior_conf=confirmed_hyp.confidence,
-            post_conf=1.0,
-            details={"generalized_rule": rule},
+        rule, ev = self.induce_causal_rule(
+            confirmed_hyp=confirmed_hyp,
+            rule_store=self.substrate.causal_rules,
+            step_index=self.interventions_count,
         )
+        if not any(r.get("rule_id") == rule.get("rule_id") for r in self.confirmed_causal_rules):
+            self.confirmed_causal_rules.append(rule)
+        else:
+            for cr in self.confirmed_causal_rules:
+                if cr.get("rule_id") == rule.get("rule_id"):
+                    cr["empirical_support_count"] = rule["empirical_support_count"]
+                    cr["confidence"] = rule["confidence"]
+                    break
 
+        self.belief_history.append(ev)
         emitter = DevelopmentalTelemetryEmitter.get_instance()
         emitter.record_hypothesis_event("confirmed")
         emitter.record_concept_acquired("causal_rule")
@@ -547,80 +441,10 @@ class InterventionalCausalDiscoveryEngine:
         test_objects: list[dict[str, Any]],
     ) -> tuple[float, list[dict[str, Any]]]:
         """Test acquired causal rules against held-out entities or worlds (Levels 2 & 3)."""
-        if not self.confirmed_causal_rules:
-            return 0.0, []
-
-        # Prioritize confirmed physical causal rule if available
-        phys_rules = [
-            r
-            for r in self.confirmed_causal_rules
-            if r["precondition"]["property"]
-            in ("surface_friction", "mass_sensation", "static_threshold", "clearance_diameter")
-        ]
-        rule = phys_rules[0] if phys_rules else self.confirmed_causal_rules[0]
-        prop_key = rule["precondition"]["property"]
-        threshold = float(rule["precondition"]["value"])
-        operator = rule["precondition"]["operator"]
-
-        eval_records = []
-        correct = 0
-
-        for obj_info in test_objects:
-            actual_mass = float(obj_info.get("mass", 5.0))
-            actual_friction = float(obj_info.get("surface_friction", 1.0))
-            actual_static = float(obj_info.get("static_threshold", 0.0))
-            actual_clearance = float(obj_info.get("clearance_diameter", 0.4))
-
-            if prop_key == "surface_friction":
-                feat_val = actual_friction
-            elif prop_key == "mass_sensation":
-                feat_val = actual_mass
-            elif prop_key == "static_threshold":
-                feat_val = actual_static
-            elif prop_key == "clearance_diameter":
-                feat_val = actual_clearance
-            else:
-                feat_val = obj_info.get(prop_key, "")
-
-            if operator == "<":
-                predicted_moves = float(feat_val) < threshold
-            elif operator == "<=":
-                predicted_moves = float(feat_val) <= threshold
-            elif operator == ">":
-                predicted_moves = float(feat_val) > threshold
-            elif operator == ">=":
-                predicted_moves = float(feat_val) >= threshold
-            elif operator == "==":
-                predicted_moves = str(feat_val) == str(threshold)
-            else:
-                predicted_moves = False
-
-            # Ground truth physical outcome:
-            if prop_key == "clearance_diameter":
-                actual_moves = actual_clearance <= 0.5
-            else:
-                effective_resistance = max(actual_mass * actual_friction, actual_static)
-                actual_moves = 5.0 > effective_resistance
-
-            is_correct = predicted_moves == actual_moves
-            if is_correct:
-                correct += 1
-
-            eval_records.append(
-                {
-                    "id": obj_info.get("id", f"eval_obj_{len(eval_records) + 1}"),
-                    "color": obj_info.get("color"),
-                    "shape": obj_info.get("shape"),
-                    "mass": actual_mass,
-                    "surface_friction": actual_friction,
-                    "predicted_moves": predicted_moves,
-                    "actual_moves": actual_moves,
-                    "is_correct": is_correct,
-                }
-            )
-
-        accuracy = round(correct / len(test_objects), 4) if test_objects else 0.0
-        return accuracy, eval_records
+        return self.test_generalization(
+            test_objects=test_objects,
+            confirmed_rules=self.confirmed_causal_rules,
+        )
 
     def _record_belief_event(
         self,
