@@ -28,6 +28,7 @@ from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
@@ -259,12 +260,24 @@ class ARC3InteractiveAgent:
         self.known_barriers: np.ndarray | None = None
         self.target_zones: set[tuple[int, int]] = set()
         self.pushable_colors: set[int] = set()
+        self.decomposer: HierarchicalGoalDecomposer = HierarchicalGoalDecomposer()
+        self.workspace: HCIRWorkspaceState = HCIRWorkspaceState()
+        self.visited_positions: list[tuple[int, int]] = []
+        self.holding_item: bool = False
+        self.walkable_colors: set[int] = set()
+        self.primary_goal_node: GoalNode | None = None
+        self.active_goal_node: GoalNode | None = None
+        self.target_zone_bounds: tuple[int, int, int, int] | None = None
+        self.delivered_positions: set[tuple[int, int]] = set()
+        self.carried_offset: tuple[float, float] = (0.0, 0.0)
+        self.current_facing: tuple[int, int] = (0, 0)
 
     def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal agent hypothesis state for a new level/episode."""
         if not retain_dynamics:
             self.action_models.clear()
             self.state_mutations.clear()
+            self.step_size = 1
         self.avatar_centroid = None
         self.avatar_color = None
         self.goal_centroid = None
@@ -274,6 +287,17 @@ class ARC3InteractiveAgent:
         self.known_barriers = None
         self.target_zones.clear()
         self.pushable_colors.clear()
+        self.decomposer = HierarchicalGoalDecomposer()
+        self.workspace = HCIRWorkspaceState()
+        self.visited_positions.clear()
+        self.holding_item = False
+        self.walkable_colors.clear()
+        self.primary_goal_node = None
+        self.active_goal_node = None
+        self.target_zone_bounds = None
+        self.delivered_positions.clear()
+        self.carried_offset = (0.0, 0.0)
+        self.current_facing = (0, 0)
 
     def active_probe_action(self, available_actions: list[int]) -> int:
         """Select exploratory action to maximize causal information gain on motor dynamics."""
@@ -281,6 +305,34 @@ class ARC3InteractiveAgent:
             if a not in self.action_models or self.action_models[a].confidence < 0.8:
                 return a
         return min(available_actions, key=lambda a: self.action_models[a].probes_tested)
+
+    def _on_subgoal_resolved(self, subgoal_id: str) -> None:
+        """Handle subgoal resolution: update HCIR, clear local gate barriers, and reset transient blocks."""
+        self.decomposer.resolve_subgoal(self.workspace, subgoal_id)
+        self.blocked_actions.clear()
+        self.visited_positions.clear()
+        self.stuck_counter = 0
+        if self.known_barriers is not None:
+            H, W = self.known_barriers.shape
+            # Clear barriers around primary goal (e.g. unlocked exit)
+            if self.primary_goal_node:
+                t_pos = self.primary_goal_node.properties.get("target_position")
+                if t_pos:
+                    tr, tc = int(round(t_pos[0])), int(round(t_pos[1]))
+                    rad = max(2, int(self.step_size * 2.5))
+                    r_min, r_max = max(0, tr - rad), min(H, tr + rad + 1)
+                    c_min, c_max = max(0, tc - rad), min(W, tc + rad + 1)
+                    self.known_barriers[r_min:r_max, c_min:c_max] = False
+            # Clear barriers around resolved subgoal position (e.g. collected item)
+            node = self.workspace.graph.get_node(subgoal_id)
+            if isinstance(node, GoalNode):
+                s_pos = node.properties.get("target_position")
+                if s_pos:
+                    sr, sc = int(round(s_pos[0])), int(round(s_pos[1]))
+                    rad = max(2, int(self.step_size * 2.0))
+                    r_min, r_max = max(0, sr - rad), min(H, sr + rad + 1)
+                    c_min, c_max = max(0, sc - rad), min(W, sc + rad + 1)
+                    self.known_barriers[r_min:r_max, c_min:c_max] = False
 
     def update_causal_dynamics(
         self,
@@ -295,10 +347,6 @@ class ARC3InteractiveAgent:
         # 1. Initialize or maintain barrier mask
         if self.known_barriers is None or self.known_barriers.shape != curr_grid.shape:
             self.known_barriers = np.zeros(curr_grid.shape, dtype=bool)
-            # Wall color heuristic: large homogenous areas (> 20% of grid) are immovable barriers
-            for col, count in zip(*np.unique(curr_grid, return_counts=True)):
-                if col != 0 and count > (curr_grid.size * 0.20):
-                    self.known_barriers[curr_grid == col] = True
 
         # 2. Case 1: Avatar color is already tracked
         if self.avatar_color is not None:
@@ -323,6 +371,10 @@ class ARC3InteractiveAgent:
                         )
                         self.avatar_color = int(new_c)
                         p_curr = np.where(curr_grid == self.avatar_color)
+                        if self.active_goal_node and not getattr(
+                            self.active_goal_node, "resolved", False
+                        ):
+                            self._on_subgoal_resolved(self.active_goal_node.id)
 
             if len(p_prev[0]) > 0 and len(p_curr[0]) > 0:
                 old_r, old_c = float(np.mean(p_prev[0])), float(np.mean(p_prev[1]))
@@ -330,10 +382,33 @@ class ARC3InteractiveAgent:
                 dr = int(round(new_r - old_r))
                 dc = int(round(new_c - old_c))
                 self.avatar_centroid = (new_r, new_c)
+                self.visited_positions.append((int(round(new_r)), int(round(new_c))))
+                if len(self.visited_positions) > 30:
+                    self.visited_positions.pop(0)
+
+                # Track walkable colors that appear where avatar was
+                for c in np.unique(curr_grid[p_prev]):
+                    if c != self.avatar_color and c != 0:
+                        self.walkable_colors.add(int(c))
+
+                # Check if active subgoal is completed by reaching position
+                if (
+                    self.active_goal_node
+                    and self.primary_goal_node
+                    and self.active_goal_node.id != self.primary_goal_node.id
+                    and not getattr(self.active_goal_node, "resolved", False)
+                ):
+                    if HierarchicalGoalDecomposer.check_subgoal_completion(
+                        self.active_goal_node,
+                        (int(round(new_r)), int(round(new_c))),
+                        tolerance=self.step_size * 1.2,
+                    ):
+                        self._on_subgoal_resolved(self.active_goal_node.id)
 
                 if dr != 0 or dc != 0:
-                    # Update step size estimate
+                    # Update step size estimate and facing orientation
                     self.step_size = max(self.step_size, abs(dr), abs(dc))
+                    self.current_facing = (int(np.sign(dr)), int(np.sign(dc)))
 
                     # Check if an adjacent object was pushed
                     for col in np.unique(prev_grid):
@@ -343,6 +418,7 @@ class ARC3InteractiveAgent:
                         box_curr = np.where(curr_grid == col)
                         if (
                             0 < len(box_prev[0]) < 100
+                            and 0 < len(box_curr[0]) < 100
                             and abs(len(box_prev[0]) - len(box_curr[0])) <= 1
                         ):
                             b_dr = int(round(np.mean(box_curr[0]) - np.mean(box_prev[0])))
@@ -364,23 +440,62 @@ class ARC3InteractiveAgent:
                         m.delta_c = dc
                         m.confidence = min(0.99, m.confidence + 0.1)
                         m.probes_tested += 1
-                    self.blocked_actions.discard(action_id)
+                    self.blocked_actions.clear()
                     self.stuck_counter = 0
                     return
                 else:
-                    # Avatar failed to move: collision with obstacle/wall
+                    # Avatar failed to move: collision with obstacle/wall, or interaction action
                     if action_id in self.action_models:
                         m = self.action_models[action_id]
                         m.probes_tested += 1
                         if m.delta_r != 0 or m.delta_c != 0:
-                            # Mark the blocked destination cell as barrier
+                            # Mark the blocked destination cell as barrier with step footprint
                             dest_r = int(round(old_r + m.delta_r))
                             dest_c = int(round(old_c + m.delta_c))
-                            if (
-                                0 <= dest_r < curr_grid.shape[0]
-                                and 0 <= dest_c < curr_grid.shape[1]
-                            ):
-                                self.known_barriers[dest_r, dest_c] = True
+                            half_w = max(0, (self.step_size - 1) // 2)
+                            H, W = curr_grid.shape
+                            for b_dr in range(-half_w, half_w + 1):
+                                for b_dc in range(-half_w, half_w + 1):
+                                    br, bc = dest_r + b_dr, dest_c + b_dc
+                                    if 0 <= br < H and 0 <= bc < W:
+                                        self.known_barriers[br, bc] = True
+
+                            # If collides with an immovable wall color, mark that whole color as a barrier
+                            if 0 <= dest_r < H and 0 <= dest_c < W:
+                                obs_col = int(curr_grid[dest_r, dest_c])
+                                if (
+                                    obs_col not in self.walkable_colors
+                                    and obs_col != self.avatar_color
+                                    and obs_col != 0
+                                ):
+                                    if np.count_nonzero(curr_grid == obs_col) > max(
+                                        150, int(curr_grid.size * 0.05)
+                                    ):
+                                        self.known_barriers[curr_grid == obs_col] = True
+
+                            # If this blocked collision is near the primary exit, mark exit obstructed
+                            if self.primary_goal_node:
+                                t_pos = self.primary_goal_node.properties.get("target_position")
+                                if (
+                                    t_pos
+                                    and math.hypot(t_pos[0] - dest_r, t_pos[1] - dest_c)
+                                    <= self.step_size * 2.0
+                                ):
+                                    tr, tc = int(round(t_pos[0])), int(round(t_pos[1]))
+                                    for b_dr in range(-half_w, half_w + 1):
+                                        for b_dc in range(-half_w, half_w + 1):
+                                            br, bc = tr + b_dr, tc + b_dc
+                                            if 0 <= br < H and 0 <= bc < W:
+                                                self.known_barriers[br, bc] = True
+                    else:
+                        # Unmoving action with no prior direction is an interaction action (confidence 0.85)
+                        self.action_models[action_id] = ActionDynamicsModel(
+                            action_id=action_id,
+                            delta_r=0,
+                            delta_c=0,
+                            confidence=0.85,
+                            probes_tested=1,
+                        )
                     self.blocked_actions.add(action_id)
                     self.stuck_counter += 1
                     return
@@ -581,7 +696,7 @@ class ARC3InteractiveAgent:
             scheduler=KernelInstructionScheduler(),
         )
         planner = CounterfactualPlanner(ws, services)
-        best_plan = await planner.evaluate_and_select(goal_node, valid_candidates)
+        best_plan = await planner.evaluate_and_select(goal_node, valid_candidates, horizon=2)
         best_a = best_plan.action.properties.get("action_id", available_actions[0])
         return best_a, float(best_plan.utility_score)
 
@@ -592,8 +707,13 @@ class ARC3InteractiveAgent:
         tags: list[str] | None = None,
     ) -> tuple[int, float]:
         """Synthesize next action using native HCIR scene lifting, physics simulation and path planning."""
-        # 1. Coordinate Click Interaction
-        if tags and "click" in tags and 6 in available_actions:
+        # 1. Coordinate Click Interaction (Pure Click and Hybrid Targeting)
+        has_click = bool(
+            tags and any("click" in str(t).lower() for t in tags) and 6 in available_actions
+        )
+        is_pure_click = bool(has_click and not any(a in available_actions for a in [1, 2, 3, 4]))
+
+        if is_pure_click:
             arc_grid = ARCGrid.from_list(curr_grid.tolist())
             objs = GridTopologyExtractor.extract_objects(arc_grid)
             clickable = [o for o in objs if o.color != 0 and o.area < curr_grid.size * 0.25]
@@ -604,6 +724,23 @@ class ARC3InteractiveAgent:
                     "y": int(round(target.centroid[0])),
                 }
                 self.stuck_counter += 1
+                return 6, 0.85
+
+        if has_click and not is_pure_click and self.stuck_counter >= 3:
+            arc_grid = ARCGrid.from_list(curr_grid.tolist())
+            objs = GridTopologyExtractor.extract_objects(arc_grid)
+            clickable = [
+                o
+                for o in objs
+                if o.color != 0 and o.color != self.avatar_color and o.area < curr_grid.size * 0.15
+            ]
+            if clickable:
+                target = clickable[self.stuck_counter % len(clickable)]
+                self.last_action_data = {
+                    "x": int(round(target.centroid[1])),
+                    "y": int(round(target.centroid[0])),
+                }
+                self.stuck_counter = 0
                 return 6, 0.85
 
         # 2. Motor Model Calibration Check
@@ -633,16 +770,21 @@ class ARC3InteractiveAgent:
             self.last_action_data = None
             return probe, 0.40
 
-        # 4. Extract Objects & Identify Subgoals
+        # 4. Extract Objects & Decompose Hierarchical Subgoals
         H, W = curr_grid.shape
         arc_grid = ARCGrid.from_list(curr_grid.tolist())
         objs = GridTopologyExtractor.extract_objects(arc_grid)
 
-        # Separate targets: transformation tiles vs movable items vs final exit goals
         candidate_goals = [
             o
             for o in objs
-            if o.color != self.avatar_color and o.color != 0 and o.area < (H * W * 0.4)
+            if o.color != self.avatar_color
+            and o.color != 0
+            and o.color not in self.walkable_colors
+            and np.count_nonzero(curr_grid == o.color) < (curr_grid.size * 0.30)
+            and (H <= 20 or (2 <= o.centroid[0] < (H - 3) and 2 <= o.centroid[1] < (W - 3)))
+            and not (H > 30 and o.centroid[0] > (H - 14) and o.centroid[1] < 15)
+            and not (H > 30 and o.centroid[0] > (H - 14) and o.centroid[1] > (W - 15))
         ]
 
         if not candidate_goals:
@@ -651,36 +793,189 @@ class ARC3InteractiveAgent:
             self.last_action_data = None
             return act, 0.40
 
-        # Hierarchical Subgoal Selection: prioritize unvisited transformation tiles first
-        transformer_candidates = [
+        barrier_cells: set[tuple[int, int]] = set()
+        if self.known_barriers is not None:
+            barrier_cells = set(zip(*np.where(self.known_barriers)))
+
+        # Identify primary destination: distinct target zone (color 2 / enclosed zone) or furthest target/exit
+        target_zones = [
             o
             for o in candidate_goals
-            if o.area <= 16
-            and any(
-                m.trigger_pos != (int(o.centroid[0]), int(o.centroid[1]))
-                for m in self.state_mutations
-            )
+            if o.color == 2 or (getattr(o, "is_frame", False) and o.area > 15)
         ]
-        chosen_goals = (
-            transformer_candidates
-            if transformer_candidates and len(self.state_mutations) < 2
-            else candidate_goals
-        )
+        if target_zones:
+            if self.target_zone_bounds is None:
+                tz_min_r = min(o.min_r for o in target_zones)
+                tz_max_r = max(o.max_r for o in target_zones)
+                tz_min_c = min(o.min_c for o in target_zones)
+                tz_max_c = max(o.max_c for o in target_zones)
+                self.target_zone_bounds = (tz_min_r, tz_max_r, tz_min_c, tz_max_c)
 
-        target_goal = min(
-            chosen_goals,
-            key=lambda o: math.hypot(o.centroid[0] - curr_r, o.centroid[1] - curr_c),
-        )
-        goal_r = int(round(target_goal.centroid[0]))
-        goal_c = int(round(target_goal.centroid[1]))
+            closest_tz = min(
+                target_zones,
+                key=lambda o: math.hypot(o.centroid[0] - curr_r, o.centroid[1] - curr_c),
+            )
+            target_pos = (int(round(closest_tz.centroid[0])), int(round(closest_tz.centroid[1])))
+            self.primary_goal_node = GoalNode(
+                id="g_primary_exit",
+                description="Reach exit or deliver to target zone",
+                properties={"target_position": target_pos},
+            )
+        elif self.primary_goal_node is None:
+            furthest_target = max(
+                candidate_goals,
+                key=lambda o: math.hypot(o.centroid[0] - curr_r, o.centroid[1] - curr_c),
+            )
+            target_pos = (
+                int(round(furthest_target.centroid[0])),
+                int(round(furthest_target.centroid[1])),
+            )
+            self.primary_goal_node = GoalNode(
+                id="g_primary_exit",
+                description="Reach exit or deliver to target zone",
+                properties={"target_position": target_pos},
+            )
+        else:
+            t_prop = self.primary_goal_node.properties.get("target_position")
+            target_pos = (int(t_prop[0]), int(t_prop[1])) if t_prop else (curr_r, curr_c)
+
+        tz_bounds = self.target_zone_bounds
+
+        def is_in_zone(o) -> bool:
+            if tz_bounds:
+                return (tz_bounds[0] - 1) <= o.centroid[0] <= (tz_bounds[1] + 1) and (
+                    tz_bounds[2] - 1
+                ) <= o.centroid[1] <= (tz_bounds[3] + 1)
+            return math.hypot(o.centroid[0] - target_pos[0], o.centroid[1] - target_pos[1]) <= max(
+                2.0, self.step_size * 2.2
+            )
+
+        candidate_items = [o for o in candidate_goals if not is_in_zone(o)]
+        affordance_type = "INTERACTION" if 5 in available_actions else "CONTACT"
+        candidate_subgoals = [
+            {
+                "id": f"sub_{o.color}_{int(o.centroid[0])}_{int(o.centroid[1])}",
+                "position": (int(round(o.centroid[0])), int(round(o.centroid[1]))),
+                "color": int(o.color),
+                "area": o.area,
+                "affordance": affordance_type,
+                "description": f"Prerequisite element color={o.color} at ({int(o.centroid[0])}, {int(o.centroid[1])})",
+            }
+            for o in candidate_items
+        ]
+
+        # Item holding / delivery state machine
+        if self.holding_item:
+            offset = getattr(self, "carried_offset", (0.0, 0.0))
+            item_r = curr_r + offset[0]
+            item_c = curr_c + offset[1]
+
+            # Find open delivery slot in target zone bounds
+            open_target = None
+            if tz_bounds:
+                tz_min_r, tz_max_r, tz_min_c, tz_max_c = tz_bounds
+                slots = []
+                for sr in range(tz_min_r, tz_max_r + 1, max(1, self.step_size)):
+                    for sc in range(tz_min_c, tz_max_c + 1, max(1, self.step_size)):
+                        if not any(
+                            math.hypot(sr - dr, sc - dc) < self.step_size * 0.7
+                            for dr, dc in self.delivered_positions
+                        ):
+                            slots.append((sr, sc))
+                if slots:
+                    open_target = min(slots, key=lambda s: math.hypot(s[0] - item_r, s[1] - item_c))
+                else:
+                    open_target = ((tz_min_r + tz_max_r) // 2, (tz_min_c + tz_max_c) // 2)
+            else:
+                open_target = target_pos
+
+            in_delivery_zone = False
+            if tz_bounds:
+                tz_min_r, tz_max_r, tz_min_c, tz_max_c = tz_bounds
+                in_bounds = (tz_min_r <= item_r <= tz_max_r + 1) and (
+                    tz_min_c <= item_c <= tz_max_c + 1
+                )
+                not_overlapping = not any(
+                    math.hypot(item_r - dr, item_c - dc) < self.step_size * 0.7
+                    for dr, dc in self.delivered_positions
+                )
+                in_delivery_zone = in_bounds and not_overlapping
+            else:
+                deliv_r = int(round(open_target[0] - offset[0]))
+                deliv_c = int(round(open_target[1] - offset[1]))
+                in_delivery_zone = math.hypot(deliv_r - curr_r, deliv_c - curr_c) <= max(
+                    1.5, self.step_size * 0.6
+                )
+
+            if in_delivery_zone and 5 in available_actions:
+                self.holding_item = False
+                self.delivered_positions.add((int(round(item_r)), int(round(item_c))))
+                self.carried_offset = (0.0, 0.0)
+                self.blocked_actions.clear()
+                self.visited_positions.clear()
+                self.last_action_data = None
+                return 5, 0.99
+
+            deliv_r = int(round(open_target[0] - offset[0]))
+            deliv_c = int(round(open_target[1] - offset[1]))
+            goal_r, goal_c = deliv_r, deliv_c
+        else:
+            unobserved_mask = None
+            if self.avatar_centroid is not None and np.count_nonzero(curr_grid == 0) > (
+                curr_grid.size * 0.4
+            ):
+                r_grid, c_grid = np.ogrid[:H, :W]
+                dist_from_av = np.hypot(r_grid - curr_r, c_grid - curr_c)
+                unobserved_mask = (curr_grid == 0) & (dist_from_av > max(5.0, self.step_size * 2.0))
+
+            force_subgoals = bool(5 in available_actions and candidate_subgoals)
+            self.active_goal_node = self.decomposer.decompose_goal(
+                workspace=self.workspace,
+                primary_goal=self.primary_goal_node,
+                avatar_pos=(curr_r, curr_c),
+                barrier_cells=barrier_cells,
+                grid_shape=(H, W),
+                candidate_subgoals=candidate_subgoals,
+                step_size=self.step_size,
+                force_subgoals=force_subgoals,
+                unobserved_mask=unobserved_mask,
+            )
+            t_pos = self.active_goal_node.properties.get("target_position", target_pos)
+            goal_r, goal_c = int(t_pos[0]), int(t_pos[1])
+
+            # Check if orthogonally adjacent to prerequisite item with affordance
+            dr_diff = abs(goal_r - curr_r)
+            dc_diff = abs(goal_c - curr_c)
+            is_ortho = (
+                dr_diff <= max(1.5, self.step_size * 0.4)
+                and dc_diff <= max(2.0, self.step_size + 1.5)
+            ) or (
+                dc_diff <= max(1.5, self.step_size * 0.4)
+                and dr_diff <= max(2.0, self.step_size + 1.5)
+            )
+            if is_ortho and self.active_goal_node.id != self.primary_goal_node.id:
+                dr_dir = int(np.sign(goal_r - curr_r))
+                dc_dir = int(np.sign(goal_c - curr_c))
+                facing = getattr(self, "current_facing", (0, 0))
+                if (dr_dir != 0 or dc_dir != 0) and facing != (dr_dir, dc_dir):
+                    for a in available_actions:
+                        if a in self.action_models:
+                            m = self.action_models[a]
+                            if np.sign(m.delta_r) == dr_dir and np.sign(m.delta_c) == dc_dir:
+                                self.current_facing = (dr_dir, dc_dir)
+                                return a, 0.98
+
+                if 5 in available_actions:
+                    self.holding_item = True
+                    self.carried_offset = (goal_r - curr_r, goal_c - curr_c)
+                    self._on_subgoal_resolved(self.active_goal_node.id)
+                    self.last_action_data = None
+                    return 5, 0.99
+
         self.goal_centroid = (float(goal_r), float(goal_c))
 
         # 5. Native HCIR Scene Lifting & Topological Geodesic Search
         _ws, _goal_node, _candidates = self.lift_to_hcir(curr_grid, (goal_r, goal_c))
-
-        barrier_cells: set[tuple[int, int]] = set()
-        if self.known_barriers is not None:
-            barrier_cells = set(zip(*np.where(self.known_barriers)))
 
         shortest_path = PhysicsPredictor.compute_geodesic_path(
             start=(curr_r, curr_c),
@@ -697,7 +992,7 @@ class ARC3InteractiveAgent:
             dr_des = next_waypoint[0] - curr_r
             dc_des = next_waypoint[1] - curr_c
 
-        # 6. Action Scoring with Native HCIR Physics Deadlock Avoidance
+        # 6. Action Scoring with Native HCIR Physics Deadlock Avoidance & Loop Prevention
         best_action = available_actions[0]
         best_score = -999999.0
 
@@ -727,7 +1022,28 @@ class ARC3InteractiveAgent:
             # Alignment with BFS shortest path waypoint
             alignment = (m.delta_r * dr_des) + (m.delta_c * dc_des)
             penalty = 10000.0 if a in self.blocked_actions else 0.0
-            score = float(alignment - penalty - deadlock_penalty)
+
+            # Oscillation penalty: penalize stepping into cells visited recently (exempt if following geodesic path)
+            dest_r = curr_r + m.delta_r
+            dest_c = curr_c + m.delta_c
+            recents = self.visited_positions[-8:]
+            is_geodesic_step = (
+                (dr_des != 0 or dc_des != 0)
+                and np.sign(m.delta_r) == np.sign(dr_des)
+                and np.sign(m.delta_c) == np.sign(dc_des)
+            )
+            loop_penalty = (
+                0.0
+                if is_geodesic_step
+                else sum(
+                    35.0
+                    for vr, vc in recents
+                    if math.hypot(dest_r - vr, dest_c - vc) < self.step_size * 0.9
+                )
+            )
+            barrier_penalty = 20000.0 if (dest_r, dest_c) in barrier_cells else 0.0
+
+            score = float(alignment - penalty - deadlock_penalty - loop_penalty - barrier_penalty)
 
             if score > best_score:
                 best_score = score
@@ -779,7 +1095,7 @@ class ARC3BenchmarkRunner:
             tags = list(env.info.tags)
 
         total_levels = getattr(frame_data, "win_levels", 1) or 1
-        if max_levels is not None:
+        if max_levels is not None and max_levels > 0:
             total_levels = min(total_levels, max_levels)
 
         level_results: list[ARC3LevelResult] = []
@@ -918,8 +1234,10 @@ class ARC3BenchmarkRunner:
         arc = Arcade()
         env_infos = arc.get_environments() if hasattr(arc, "get_environments") else []
         all_ids = [e.game_id.split("-")[0] for e in env_infos] if env_infos else ["ls20", "su15"]
-
-        target_ids = game_ids or all_ids[:3]  # Evaluate on first 3 games by default
+        if game_ids and "all" in game_ids:
+            target_ids = all_ids
+        else:
+            target_ids = game_ids or all_ids[:3]  # Evaluate on first 3 games by default
 
         start_time = time.time()
         env_results: list[ARC3EnvironmentResult] = []

@@ -84,3 +84,4 @@ test_*_output.txt
 .envrc
 scratch/audit_grades_real.py
 /environment_files
+/plugins/developmental_adapter/reports

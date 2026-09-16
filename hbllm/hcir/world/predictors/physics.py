@@ -344,6 +344,128 @@ class PhysicsPredictor:
         return is_corner
 
     @classmethod
+    def is_line_deadlock(
+        cls,
+        box_pos: tuple[int, int],
+        barrier_cells: set[tuple[int, int]],
+        target_positions: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int = 1,
+    ) -> bool:
+        """Checks if a pushable entity is pressed against a continuous flat wall without targets.
+
+        If a block is against a continuous wall, it can only be pushed parallel to that wall.
+        If there is no target along that continuous wall segment, and the ends of the segment
+        are blocked by barriers/corners, the block is in an irreversible line deadlock.
+        """
+        if box_pos in target_positions:
+            return False
+
+        H, W = grid_shape
+        br, bc = box_pos
+
+        walls: list[tuple[tuple[int, int], list[tuple[int, int]]]] = [
+            ((-step_size, 0), [(0, -step_size), (0, step_size)]),
+            ((step_size, 0), [(0, -step_size), (0, step_size)]),
+            ((0, -step_size), [(-step_size, 0), (step_size, 0)]),
+            ((0, step_size), [(-step_size, 0), (step_size, 0)]),
+        ]
+
+        for wall_delta, move_deltas in walls:
+            wr, wc = br + wall_delta[0], bc + wall_delta[1]
+            if (wr, wc) in barrier_cells or wr < 0 or wr >= H or wc < 0 or wc >= W:
+                d1, d2 = move_deltas[0], move_deltas[1]
+                targets_along_wall = False
+
+                curr_r, curr_c = br, bc
+                blocked_d1 = False
+                for _ in range(max(H, W)):
+                    curr_r += d1[0]
+                    curr_c += d1[1]
+                    if (curr_r, curr_c) in barrier_cells or not (
+                        0 <= curr_r < H and 0 <= curr_c < W
+                    ):
+                        blocked_d1 = True
+                        break
+                    adj_wall = (curr_r + wall_delta[0], curr_c + wall_delta[1])
+                    if adj_wall not in barrier_cells and (
+                        0 <= adj_wall[0] < H and 0 <= adj_wall[1] < W
+                    ):
+                        break
+                    if (curr_r, curr_c) in target_positions:
+                        targets_along_wall = True
+                        break
+
+                curr_r, curr_c = br, bc
+                blocked_d2 = False
+                for _ in range(max(H, W)):
+                    curr_r += d2[0]
+                    curr_c += d2[1]
+                    if (curr_r, curr_c) in barrier_cells or not (
+                        0 <= curr_r < H and 0 <= curr_c < W
+                    ):
+                        blocked_d2 = True
+                        break
+                    adj_wall = (curr_r + wall_delta[0], curr_c + wall_delta[1])
+                    if adj_wall not in barrier_cells and (
+                        0 <= adj_wall[0] < H and 0 <= adj_wall[1] < W
+                    ):
+                        break
+                    if (curr_r, curr_c) in target_positions:
+                        targets_along_wall = True
+                        break
+
+                if blocked_d1 and blocked_d2 and not targets_along_wall:
+                    return True
+
+        return False
+
+    @classmethod
+    def simulate_joint_displacement(
+        cls,
+        avatar_pos: tuple[int, int],
+        action_delta: tuple[int, int],
+        movable_entities: dict[str, tuple[int, int]],
+        barrier_cells: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+    ) -> tuple[tuple[int, int], dict[str, tuple[int, int]], bool]:
+        """Simulate joint displacement of avatar and pushable entities.
+
+        Returns (new_avatar_pos, new_entity_positions, is_blocked).
+        Handles multi-body cascade pushes (e.g. pushing box A which pushes box B, or blocked by barrier).
+        """
+        H, W = grid_shape
+        dr, dc = action_delta
+        new_avatar_pos = (avatar_pos[0] + dr, avatar_pos[1] + dc)
+
+        if not (0 <= new_avatar_pos[0] < H and 0 <= new_avatar_pos[1] < W):
+            return avatar_pos, movable_entities, True
+
+        if new_avatar_pos in barrier_cells:
+            return avatar_pos, movable_entities, True
+
+        pos_to_id = {pos: eid for eid, pos in movable_entities.items()}
+        if new_avatar_pos not in pos_to_id:
+            return new_avatar_pos, movable_entities, False
+
+        chain: list[str] = []
+        curr_pos = new_avatar_pos
+        while curr_pos in pos_to_id:
+            chain.append(pos_to_id[curr_pos])
+            curr_pos = (curr_pos[0] + dr, curr_pos[1] + dc)
+            if not (0 <= curr_pos[0] < H and 0 <= curr_pos[1] < W):
+                return avatar_pos, movable_entities, True
+            if curr_pos in barrier_cells:
+                return avatar_pos, movable_entities, True
+
+        updated_entities = dict(movable_entities)
+        for eid in chain:
+            old_r, old_c = updated_entities[eid]
+            updated_entities[eid] = (old_r + dr, old_c + dc)
+
+        return new_avatar_pos, updated_entities, False
+
+    @classmethod
     def compute_geodesic_path(
         cls,
         start: tuple[int, int],
@@ -359,6 +481,9 @@ class PhysicsPredictor:
 
         if start == goal:
             return [start]
+
+        if (goal_r, goal_c) in barrier_cells:
+            return []
 
         queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque(
             [(start_r, start_c, [(start_r, start_c)])]
@@ -381,7 +506,8 @@ class PhysicsPredictor:
                 best_partial_path = path
 
             if math.hypot(goal_r - r, goal_c - c) <= (step_size * 0.9):
-                return path + [(goal_r, goal_c)]
+                if (goal_r, goal_c) not in barrier_cells:
+                    return path + [(goal_r, goal_c)]
 
             for dr, dc in delta:
                 nr, nc = r + dr, c + dc

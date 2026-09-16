@@ -48,8 +48,13 @@ def main() -> None:
     duration = time.time() - start
 
     md = report.format_markdown()
-    Path(args.output_report).write_text(md, encoding="utf-8")
-    Path(args.output_json).write_text(json.dumps(report.raw_scorecard, indent=2), encoding="utf-8")
+    p_report = Path(args.output_report)
+    p_report.parent.mkdir(parents=True, exist_ok=True)
+    p_report.write_text(md, encoding="utf-8")
+
+    p_json = Path(args.output_json)
+    p_json.parent.mkdir(parents=True, exist_ok=True)
+    p_json.write_text(json.dumps(report.raw_scorecard, indent=2), encoding="utf-8")
 
     logger.info(f"Benchmark completed in {duration:.2f}s!")
     logger.info(f"Completion Rate: {report.overall_completion_rate * 100:.1f}%")

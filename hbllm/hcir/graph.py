@@ -545,6 +545,15 @@ class PredictionErrorNode(HCIRNode):
 # ── Execution Nodes ──────────────────────────────────────────────────────
 
 
+class ActionModality(StrEnum):
+    """Effector modality of an action."""
+
+    LOCOMOTION = "locomotion"
+    MANIPULATION = "manipulation"
+    TARGETING = "targeting"
+    COGNITIVE = "cognitive"
+
+
 class ActionNode(HCIRNode):
     """A declarative action, independent of specific tools/plugins.
 
@@ -555,6 +564,7 @@ class ActionNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.ACTION
     category: CognitiveCategory = CognitiveCategory.EXECUTION
     intent: str = ""
+    modality: ActionModality = ActionModality.COGNITIVE
     requirements: list[str] = Field(default_factory=list)
     produces: list[str] = Field(default_factory=list)
     estimated_cost: CostMetric = 0
