@@ -22,6 +22,9 @@ from hbllm.hcir.world.causal_discovery import (
 from hbllm.hcir.world.causal_discovery import (
     CausalHypothesis as BaseCausalHypothesis,
 )
+from hbllm.hcir.world.spatial_containment import (
+    SpatialRelationFact as BaseSpatialRelationFact,
+)
 
 
 class BabyObjectType(str, Enum):
@@ -185,14 +188,10 @@ class AffordanceHypothesis(BaseAffordanceHypothesis):
 
 
 @dataclass
-class SpatialRelationFact:
+class SpatialRelationFact(BaseSpatialRelationFact):
     """Structured spatial fact induced from continuous geometric perception (Stage D2)."""
 
-    relation: BabyRelationType
-    subject_id: str
-    object_id: str
-    confidence: float = 1.0
-    evidence: dict[str, Any] = field(default_factory=dict)
+    relation: BabyRelationType = BabyRelationType.ON
 
 
 @dataclass
