@@ -10,20 +10,23 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from hbllm.hcir.world.affordance_discovery import (
+    AffordanceHypothesis,
+    BaseAffordanceDiscoveryEngine,
+)
+
 from .blank_brain import BlankBrainSubstrate
 from .environment import BabyWorldEnvironment
 from .perception import DevelopmentalPerceptionAdapter
 from .types import (
-    AffordanceHypothesis,
     BabyActionType,
-    BeliefTransitionEvent,
     BeliefTransitionType,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class AffordanceDiscoveryEngine:
+class AffordanceDiscoveryEngine(BaseAffordanceDiscoveryEngine):
     """Discovers grounded functional affordances through active sensorimotor probing."""
 
     def __init__(
@@ -32,14 +35,10 @@ class AffordanceDiscoveryEngine:
         perception: DevelopmentalPerceptionAdapter,
         env: BabyWorldEnvironment,
     ) -> None:
+        super().__init__()
         self.substrate = substrate
         self.perception = perception
         self.env = env
-
-        self.hypotheses: list[AffordanceHypothesis] = []
-        self.confirmed_affordances: dict[str, list[str]] = {}  # shape -> list of affordances
-        self.belief_history: list[BeliefTransitionEvent] = []
-        self.interventions_count: int = 0
 
     def observe_and_generate_hypotheses(self) -> list[AffordanceHypothesis]:
         """Formulate candidate affordance hypotheses across observed shapes.
@@ -56,27 +55,7 @@ class AffordanceDiscoveryEngine:
             (BabyActionType.GRASP, "GRASPABLE"),
         ]
 
-        existing_pairs = {(h.entity_shape, h.action) for h in self.hypotheses}
-        for shape in shapes:
-            for action, label in actions_to_test:
-                if (shape, action) in existing_pairs:
-                    continue
-                hyp = AffordanceHypothesis(
-                    action=action,
-                    entity_shape=shape,
-                    affordance_label=label,
-                    confidence=0.5,
-                )
-                self.hypotheses.append(hyp)
-                existing_pairs.add((shape, action))
-                self._record_event(
-                    event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
-                    hyp=hyp,
-                    prior_conf=0.0,
-                    post_conf=0.5,
-                )
-
-        return self.hypotheses
+        return self.generate_hypotheses(shapes, actions_to_test)
 
     def discover_affordances(
         self,
@@ -109,8 +88,6 @@ class AffordanceDiscoveryEngine:
 
             # Execute test action
             _, _, _, consequences = self.env.step(hyp.action, target_id=target_id)
-            hyp.interventions_tested += 1
-            prior_conf = hyp.confidence
 
             success = False
             if hyp.action == BabyActionType.ROLL:
@@ -120,34 +97,13 @@ class AffordanceDiscoveryEngine:
             elif hyp.action == BabyActionType.GRASP:
                 success = consequences.get("grasped", False)
 
-            if success:
-                hyp.confirmed = True
-                hyp.confidence = 1.0
-                hyp.supporting_episodes.append(target_id)
-                self._record_event(
-                    event_type=BeliefTransitionType.HYPOTHESIS_CONFIRMED,
-                    hyp=hyp,
-                    prior_conf=prior_conf,
-                    post_conf=1.0,
-                )
-                # Register confirmed affordance in substrate (prevent duplicates)
-                aff_list = self.confirmed_affordances.setdefault(hyp.entity_shape, [])
-                if hyp.affordance_label not in aff_list:
-                    aff_list.append(hyp.affordance_label)
-                sub_list = self.substrate.affordances.setdefault(hyp.entity_shape, [])
-                if hyp.affordance_label not in sub_list:
-                    sub_list.append(hyp.affordance_label)
-            else:
-                # Falsified by empirical counterexample
-                hyp.falsified = True
-                hyp.confidence = 0.0
-                hyp.counterexamples.append(target_id)
-                self._record_event(
-                    event_type=BeliefTransitionType.HYPOTHESIS_FALSIFIED,
-                    hyp=hyp,
-                    prior_conf=prior_conf,
-                    post_conf=0.0,
-                )
+            self.update_affordance_from_evidence(
+                hypothesis=hyp,
+                success=success,
+                target_id=target_id,
+                step_index=self.interventions_count,
+                target_store=self.substrate.affordances,
+            )
 
             self.env.restore_state(prior_state)
 
@@ -158,39 +114,10 @@ class AffordanceDiscoveryEngine:
         held_out_entities: list[dict[str, Any]],
     ) -> tuple[float, list[dict[str, Any]]]:
         """Test acquired affordance transfer on held-out unseen shapes/objects."""
-        if not self.confirmed_affordances:
-            return 0.0, []
-
-        correct = 0
-        total = 0
-        eval_records: list[dict[str, Any]] = []
-
-        for entity in held_out_entities:
-            shape = entity.get("shape", "")
-            base_shape = entity.get("base_shape", shape)
-            expected_affordances = set(entity.get("ground_truth_affordances", []))
-
-            # Retrieve predicted affordances based on acquired shape schema
-            predicted_affordances = set(self.confirmed_affordances.get(base_shape, []))
-
-            # Check precision & recall match
-            is_match = predicted_affordances == expected_affordances
-            if is_match:
-                correct += 1
-            total += 1
-
-            eval_records.append(
-                {
-                    "entity_id": entity.get("id"),
-                    "shape": shape,
-                    "predicted_affordances": sorted(list(predicted_affordances)),
-                    "expected_affordances": sorted(list(expected_affordances)),
-                    "correct": is_match,
-                }
-            )
-
-        accuracy = correct / total if total > 0 else 0.0
-        return accuracy, eval_records
+        return self.test_novel_entity_transfer(
+            held_out_entities=held_out_entities,
+            confirmed_affordances=self.confirmed_affordances,
+        )
 
     def _record_event(
         self,
@@ -199,15 +126,10 @@ class AffordanceDiscoveryEngine:
         prior_conf: float,
         post_conf: float,
     ) -> None:
-        self.belief_history.append(
-            BeliefTransitionEvent(
-                event_type=event_type,
-                step_index=self.interventions_count,
-                hypothesis_id=hyp.hypothesis_id,
-                variable=hyp.entity_shape,
-                condition=hyp.describe(),
-                prior_confidence=prior_conf,
-                posterior_confidence=post_conf,
-                is_falsified=hyp.falsified,
-            )
+        self._record_belief_event(
+            event_type=event_type,
+            hyp=hyp,
+            prior_conf=prior_conf,
+            post_conf=post_conf,
+            step_index=self.interventions_count,
         )

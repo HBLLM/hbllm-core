@@ -6,11 +6,13 @@ the three-layer Blank-Brain cognitive profile, and causal hypotheses.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from hbllm.hcir.world.affordance_discovery import (
+    AffordanceHypothesis as BaseAffordanceHypothesis,
+)
 from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent as BeliefTransitionEvent,
 )
@@ -176,22 +178,10 @@ class CausalHypothesis(BaseCausalHypothesis):
 
 
 @dataclass
-class AffordanceHypothesis:
+class AffordanceHypothesis(BaseAffordanceHypothesis):
     """Hypothesis for object-action functional affordance (Stage D4)."""
 
-    hypothesis_id: str = field(default_factory=lambda: f"aff_{uuid.uuid4().hex[:6]}")
     action: BabyActionType = BabyActionType.ROLL
-    entity_shape: str = "ball"
-    affordance_label: str = "ROLLABLE"
-    confidence: float = 0.5
-    interventions_tested: int = 0
-    falsified: bool = False
-    confirmed: bool = False
-    supporting_episodes: list[str] = field(default_factory=list)
-    counterexamples: list[str] = field(default_factory=list)
-
-    def describe(self) -> str:
-        return f"AFFORDS({self.entity_shape}, {self.action.value}) => {self.affordance_label}"
 
 
 @dataclass
