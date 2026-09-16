@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from plugins.developmental_adapter.diagram_grounding import (
@@ -40,7 +42,7 @@ def test_diagram_primitive_containment_and_distance() -> None:
 
 def test_scientific_diagram_parser_to_cognitive_graph() -> None:
     """Verify lifting primitives to CognitiveGraph with ENCLOSES, SUPPORTS, and DIVIDES edges."""
-    elements = [
+    elements: list[dict[str, Any]] = [
         {
             "id": "container_1",
             "type": "container_box",

@@ -210,14 +210,14 @@ def test_ing_nouns_classification_as_blocks() -> None:
     curator = TextbookCurriculumCurator()
 
     # Mock student with grounding engine
+    from plugins.developmental_adapter.environment import BabyWorldEnvironment
     from plugins.developmental_adapter.language_grounding import LanguageGroundingEngine
-    from plugins.developmental_adapter.perception import DevelopmentalPerceptionAdapter
 
     class DummyStudent:
         def __init__(self) -> None:
             self.substrate = student_substrate
             self.grounding_engine = LanguageGroundingEngine(
-                student_substrate, DevelopmentalPerceptionAdapter()
+                student_substrate, BabyWorldEnvironment()
             )
 
     student = DummyStudent()
@@ -276,8 +276,8 @@ def test_multi_shape_puzzle_compilation() -> None:
 def test_multi_term_socratic_probing() -> None:
     """Verify that vocab_probes parameter enables multi-term Socratic probing across glossary."""
     from plugins.developmental_adapter.blank_brain import create_blank_brain_substrate
+    from plugins.developmental_adapter.environment import BabyWorldEnvironment
     from plugins.developmental_adapter.language_grounding import LanguageGroundingEngine
-    from plugins.developmental_adapter.perception import DevelopmentalPerceptionAdapter
     from plugins.developmental_adapter.textbook_curriculum import (
         TextbookChapter,
         TextbookCurriculumCurator,
@@ -286,7 +286,7 @@ def test_multi_term_socratic_probing() -> None:
     )
 
     substrate = create_blank_brain_substrate()
-    engine = LanguageGroundingEngine(substrate, DevelopmentalPerceptionAdapter())
+    engine = LanguageGroundingEngine(substrate, BabyWorldEnvironment())
 
     class DummyStudent:
         def __init__(self) -> None:
