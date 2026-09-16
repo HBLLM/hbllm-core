@@ -171,7 +171,11 @@ filterwarnings = [
 python_version = "3.11"
 ignore_missing_imports = true
 explicit_package_bases = true
-exclude = ["plugins/(?!developmental_adapter)"]
+exclude = [
+    "^plugins/(?!developmental_adapter)",
+    "^experiments/",
+    "^scratch/",
+]
 disable_error_code = [
     "assignment", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 
