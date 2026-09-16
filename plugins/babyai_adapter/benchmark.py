@@ -402,7 +402,12 @@ def run_benchmark_suite(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run rigorous BabyAI benchmark evaluation.")
     parser.add_argument(
-        "--episodes", type=int, default=100, help="Number of episodes per tier (default: 100)"
+        "--episodes",
+        "--episodes-per-tier",
+        type=int,
+        default=100,
+        dest="episodes",
+        help="Number of episodes per tier (default: 100)",
     )
     parser.add_argument(
         "--seed-start", type=int, default=1, help="Starting seed integer (default: 1)"

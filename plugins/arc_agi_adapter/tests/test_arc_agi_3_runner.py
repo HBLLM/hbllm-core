@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from plugins.developmental_adapter.arc_agi_3_runner import (
+from plugins.arc_agi_adapter.arc_agi_3_runner import (
     ActionDynamicsModel,
     ARC3BenchmarkReport,
     ARC3EnvironmentResult,

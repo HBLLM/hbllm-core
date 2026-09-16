@@ -174,6 +174,12 @@ def main() -> None:
         help="Run against upstream native gym_sokoban package",
     )
     parser.add_argument(
+        "--standalone",
+        action="store_true",
+        default=False,
+        help="Run against standalone fast procedural generator without gym dependency",
+    )
+    parser.add_argument(
         "--require-native",
         action="store_true",
         default=False,
@@ -181,13 +187,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    prefer_native = False if args.standalone else args.prefer_native
     print(
-        f"\n{'=' * 85}\nRunning Sokoban Multi-Tier Benchmark (5 Tiers, Native={args.prefer_native})\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Sokoban Multi-Tier Benchmark (5 Tiers, Native={prefer_native})\n{'=' * 85}"
     )
     data = run_sokoban_benchmark(
         episodes_per_tier=args.episodes_per_tier,
         seed=args.seed,
-        prefer_native=args.prefer_native,
+        prefer_native=prefer_native,
         require_native=args.require_native,
     )
     print(

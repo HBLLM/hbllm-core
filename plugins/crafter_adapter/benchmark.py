@@ -280,14 +280,30 @@ def main() -> None:
         "--prefer-native",
         "--native",
         action="store_true",
-        help="Run against upstream native crafter package",
+        default=True,
+        help="Run against upstream native crafter package (default: True)",
+    )
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        default=False,
+        help="Run against standalone procedural simulator without external dependencies",
+    )
+    parser.add_argument(
+        "--require-native",
+        action="store_true",
+        default=False,
+        help="Strictly require upstream native crafter package, failing if unavailable",
     )
     args = parser.parse_args()
+
+    prefer_native = False if args.standalone else args.prefer_native
+    require_native = args.require_native or prefer_native
 
     cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(
-        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native={args.prefer_native})\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native={prefer_native})\n{'=' * 85}"
     )
 
     for cohort in cohorts_to_run:
@@ -295,7 +311,8 @@ def main() -> None:
             cohort,
             episodes_per_target=args.episodes_per_target,
             base_seed=args.seed,
-            prefer_native=args.prefer_native,
+            prefer_native=prefer_native,
+            require_native=require_native,
         )
         print(
             f"\n--- Cohort: {data['cohort'].upper()} (Crafter Score: {data['crafter_score']}%) ---"

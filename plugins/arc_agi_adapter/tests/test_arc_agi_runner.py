@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from plugins.developmental_adapter.arc_agi_runner import (
+from plugins.arc_agi_adapter.arc_agi_runner import (
     ARCBenchmarkReport,
     ARCGrid,
     ARCRelationalSolver,

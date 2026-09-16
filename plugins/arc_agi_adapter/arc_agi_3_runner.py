@@ -255,6 +255,7 @@ class ARC3InteractiveAgent:
         self.goal_centroid: tuple[float, float] | None = None
         self.last_action_data: dict[str, Any] | None = None
         self.blocked_actions: set[int] = set()
+        self.available_actions: list[int] = []
         self.stuck_counter: int = 0
         self.step_size: int = 1
         self.known_barriers: np.ndarray | None = None
@@ -283,6 +284,7 @@ class ARC3InteractiveAgent:
         self.goal_centroid = None
         self.last_action_data = None
         self.blocked_actions.clear()
+        self.available_actions.clear()
         self.stuck_counter = 0
         self.known_barriers = None
         self.target_zones.clear()
@@ -301,10 +303,13 @@ class ARC3InteractiveAgent:
 
     def active_probe_action(self, available_actions: list[int]) -> int:
         """Select exploratory action to maximize causal information gain on motor dynamics."""
-        for a in available_actions:
-            if a not in self.action_models or self.action_models[a].confidence < 0.8:
-                return a
-        return min(available_actions, key=lambda a: self.action_models[a].probes_tested)
+        def probe_priority(a: int) -> tuple[int, float]:
+            if a not in self.action_models:
+                return (0, 0.0)
+            m = self.action_models[a]
+            return (m.probes_tested, m.confidence)
+
+        return min(available_actions, key=probe_priority)
 
     def _on_subgoal_resolved(self, subgoal_id: str) -> None:
         """Handle subgoal resolution: update HCIR, clear local gate barriers, and reset transient blocks."""
@@ -342,6 +347,10 @@ class ARC3InteractiveAgent:
     ) -> None:
         """Infer avatar identity, motor displacement, barriers, and state mutations."""
         if prev_grid.shape != curr_grid.shape:
+            return
+
+        # Pure click environments have no translating avatar
+        if action_id == 6 and not any(a in [1, 2, 3, 4] for a in self.available_actions):
             return
 
         # 1. Initialize or maintain barrier mask
@@ -707,6 +716,7 @@ class ARC3InteractiveAgent:
         tags: list[str] | None = None,
     ) -> tuple[int, float]:
         """Synthesize next action using native HCIR scene lifting, physics simulation and path planning."""
+        self.available_actions = list(available_actions)
         # 1. Coordinate Click Interaction (Pure Click and Hybrid Targeting)
         has_click = bool(
             tags and any("click" in str(t).lower() for t in tags) and 6 in available_actions
@@ -749,7 +759,8 @@ class ARC3InteractiveAgent:
             for a, m in self.action_models.items()
             if a in available_actions and m.confidence >= 0.8 and (m.delta_r != 0 or m.delta_c != 0)
         ]
-        if len(calibrated_models) < min(4, len(available_actions)):
+        directional_avail = [a for a in available_actions if a in [1, 2, 3, 4]]
+        if len(calibrated_models) < min(4, len(directional_avail)):
             probe = self.active_probe_action(available_actions)
             self.last_action_data = None
             return probe, 0.50
@@ -1026,22 +1037,33 @@ class ARC3InteractiveAgent:
             # Oscillation penalty: penalize stepping into cells visited recently (exempt if following geodesic path)
             dest_r = curr_r + m.delta_r
             dest_c = curr_c + m.delta_c
+            dest_ir = int(round(dest_r))
+            dest_ic = int(round(dest_c))
+
             recents = self.visited_positions[-8:]
             is_geodesic_step = (
                 (dr_des != 0 or dc_des != 0)
                 and np.sign(m.delta_r) == np.sign(dr_des)
                 and np.sign(m.delta_c) == np.sign(dc_des)
             )
+            # Immediate 2-step bounce penalty (stepping back to position from 2 steps ago)
+            is_2step_bounce = (
+                len(self.visited_positions) >= 2
+                and math.hypot(dest_r - self.visited_positions[-2][0], dest_c - self.visited_positions[-2][1]) < self.step_size * 0.7
+            )
+            bounce_penalty = 800.0 if is_2step_bounce else 0.0
+
             loop_penalty = (
-                0.0
+                bounce_penalty
                 if is_geodesic_step
-                else sum(
+                else bounce_penalty + sum(
                     35.0
                     for vr, vc in recents
                     if math.hypot(dest_r - vr, dest_c - vc) < self.step_size * 0.9
                 )
             )
-            barrier_penalty = 20000.0 if (dest_r, dest_c) in barrier_cells else 0.0
+
+            barrier_penalty = 20000.0 if (dest_ir, dest_ic) in barrier_cells else 0.0
 
             score = float(alignment - penalty - deadlock_penalty - loop_penalty - barrier_penalty)
 
@@ -1175,7 +1197,7 @@ class ARC3BenchmarkRunner:
             total_actions += lvl_actions
             total_baseline += baseline
 
-            eff = baseline / lvl_actions if lvl_actions > 0 else 0.0
+            eff = (baseline / lvl_actions) if completed and lvl_actions > 0 else 0.0
             mean_conf = sum(lvl_confidences) / len(lvl_confidences) if lvl_confidences else 0.5
             target_out = 1.0 if completed else 0.0
             brier = (mean_conf - target_out) ** 2

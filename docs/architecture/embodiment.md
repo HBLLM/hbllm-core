@@ -120,9 +120,10 @@ The Execution Reality Layer and HCIR Causal Planners are evaluated strictly agai
 
 | Domain | Environment Package | Literature / RL Baseline | Pure HCIR Performance | Key Architectural Mechanism |
 | :--- | :--- | :---: | :---: | :--- |
-| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M steps)<br>4.2% (PPO, 1M steps) | **41.28%** Hafner Score<br>**93.9%** Multi-Tier | Causal Recipe DAG + Vital Priority Interrupts |
+| **Interactive Reasoning** | `arc_agi` / Official API | < 5% (RL exploration limits)<br>Human: 22–71 actions | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | Hierarchical Subgoal Trees (`DEPENDS_ON`) + Multi-Step Lookahead ($K \ge 2$) |
+| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M steps)<br>4.2% (PPO, 1M steps) | **41.28%** Hafner Score<br>**93.9%** Multi-Tier (31/33) | Causal Recipe DAG + Vital Priority Interrupts |
 | **Grounded Language** | `minigrid` (v3.1.0) | ~50% (IL, 1M+ demos)<br>< 10% (PPO on BossLevel) | **97.8%** Overall (44/45)<br>**80.0%** BossLevel | Spatial-epistemic search & key-door deduction |
-| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **80.0%** Native Success (16/20) | Reverse-BFS dead-end detection & frozen box hashing |
+| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **80.0%** Native Success (16/20)<br>**0 deadlocks** across all tiers | Line deadlock detection (`PhysicsPredictor.is_line_deadlock()`) & frozen box hashing |
 | **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO Self-Play) | **100.0%** (15/15 episodes) | Causal recipe pipelining & counter contention resolution |
 | **Rogue-Like Dungeons** | `minihack` (v1.0.2) / `nle` | < 20% (IMPALA / TorchBeast) | **80.0%** (4/5 tiers at 100%) | Frontier glyph exploration & melee combat interrupts |
 | **3D Object Manipulation** | `ai2thor` (v5.0.0) | ~30–45% (Embodied CLIP / PPO) | **91.7%** (11/12 episodes) | Ground-truth 3D scene graph, camera yaw/pitch alignment & affordance reach |

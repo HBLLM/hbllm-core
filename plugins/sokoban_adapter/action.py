@@ -15,6 +15,7 @@ from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
 from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
 from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.graph import ActionNode, CognitiveGraph
+from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
 from .perception import SokobanPerceptionAdapter
 from .predicates import register_sokoban_predicates
@@ -188,6 +189,15 @@ class SokobanActionAdapter:
                     new_boxes.add((nnr, nnc))
 
                     if self._is_2x2_deadlock((nnr, nnc), walls, new_boxes, targets):
+                        continue
+
+                    if PhysicsPredictor.is_line_deadlock(
+                        box_pos=(nnr, nnc),
+                        barrier_cells=walls,
+                        target_positions=targets,
+                        grid_shape=(height, width),
+                        step_size=1,
+                    ):
                         continue
 
                     frozen_new_boxes = frozenset(new_boxes)

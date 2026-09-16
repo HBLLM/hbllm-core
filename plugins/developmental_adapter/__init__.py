@@ -10,16 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .a20_transfer_bridge import A20RelationalTransferBridge
-from .action import DevelopmentalActionAdapter
-from .affordance_discovery import AffordanceDiscoveryEngine
-from .arc_agi_3_runner import (
+# Backward-compatibility re-exports (canonical home: plugins.arc_agi_adapter)
+from plugins.arc_agi_adapter import (
     ActionDynamicsModel,
     ARC3BenchmarkReport,
     ARC3BenchmarkRunner,
     ARC3InteractiveAgent,
-)
-from .arc_agi_runner import (
     ARCBenchmarkReport,
     ARCGrid,
     ARCRelationalSolver,
@@ -27,6 +23,10 @@ from .arc_agi_runner import (
     GridObject,
     GridTopologyExtractor,
 )
+
+from .a20_transfer_bridge import A20RelationalTransferBridge
+from .action import DevelopmentalActionAdapter
+from .affordance_discovery import AffordanceDiscoveryEngine
 from .benchmark import run_a23_5_benchmark
 from .blank_brain import BlankBrainSubstrate, create_blank_brain_substrate
 from .causal_discovery import InterventionalCausalDiscoveryEngine
