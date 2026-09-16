@@ -272,6 +272,13 @@ class ARC3InteractiveAgent:
         self.delivered_positions: set[tuple[int, int]] = set()
         self.carried_offset: tuple[float, float] = (0.0, 0.0)
         self.current_facing: tuple[int, int] = (0, 0)
+        # Pure Click (Action 6) Affordance Discovery & Cycle State
+        self.click_active_controls: list[tuple[int, int]] = []
+        self.click_inert_targets: set[tuple[int, int]] = set()
+        self.click_visited_states: set[bytes] = set()
+        self.click_candidate_targets: list[tuple[int, int]] = []
+        self.last_click_target: tuple[int, int] | None = None
+        self.click_step_counter: int = 0
 
     def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal agent hypothesis state for a new level/episode."""
@@ -300,9 +307,16 @@ class ARC3InteractiveAgent:
         self.delivered_positions.clear()
         self.carried_offset = (0.0, 0.0)
         self.current_facing = (0, 0)
+        self.click_active_controls.clear()
+        self.click_inert_targets.clear()
+        self.click_visited_states.clear()
+        self.click_candidate_targets.clear()
+        self.last_click_target = None
+        self.click_step_counter = 0
 
     def active_probe_action(self, available_actions: list[int]) -> int:
         """Select exploratory action to maximize causal information gain on motor dynamics."""
+
         def probe_priority(a: int) -> tuple[int, float]:
             if a not in self.action_models:
                 return (0, 0.0)
@@ -351,6 +365,13 @@ class ARC3InteractiveAgent:
 
         # Pure click environments have no translating avatar
         if action_id == 6 and not any(a in [1, 2, 3, 4] for a in self.available_actions):
+            if self.last_click_target is not None:
+                changed = not np.array_equal(prev_grid, curr_grid)
+                if changed:
+                    if self.last_click_target not in self.click_active_controls:
+                        self.click_active_controls.append(self.last_click_target)
+                else:
+                    self.click_inert_targets.add(self.last_click_target)
             return
 
         # 1. Initialize or maintain barrier mask
@@ -709,6 +730,81 @@ class ARC3InteractiveAgent:
         best_a = best_plan.action.properties.get("action_id", available_actions[0])
         return best_a, float(best_plan.utility_score)
 
+    def _plan_pure_click_action(
+        self,
+        curr_grid: np.ndarray,
+    ) -> tuple[int, float]:
+        """Synthesize coordinate click action for pure-click environments using causal affordance search."""
+        H, W = curr_grid.shape
+        h = curr_grid.tobytes()
+        is_revisit = h in self.click_visited_states
+        self.click_visited_states.add(h)
+
+        # 1. Extract foreground candidates if candidate queue is empty
+        if not self.click_candidate_targets:
+            bg_color = int(np.bincount(curr_grid.flatten()).argmax())
+            border_pixels = np.concatenate(
+                [curr_grid[0, :], curr_grid[-1, :], curr_grid[:, 0], curr_grid[:, -1]]
+            )
+            border_color = int(np.bincount(border_pixels).argmax())
+
+            arc_grid = ARCGrid.from_list(curr_grid.tolist())
+            objs = GridTopologyExtractor.extract_objects(arc_grid, background_color=bg_color)
+
+            # Filter valid interactive candidates
+            max_area = int(H * W * 0.25)
+            valid_objs = [
+                o
+                for o in objs
+                if o.color != border_color
+                and 2 <= o.area <= max_area
+                and not (o.min_r == 0 and o.max_r == 0)
+                and not (o.min_r == H - 1 and o.max_r == H - 1)
+                and not (o.min_c == 0 and o.max_c == 0)
+                and not (o.min_c == W - 1 and o.max_c == W - 1)
+            ]
+
+            # Prioritize: larger area first, rarer colors first (distinct control buttons over repeated tiles)
+            color_counts = {c: int(np.sum(curr_grid == c)) for c in np.unique(curr_grid)}
+            sorted_objs = sorted(
+                valid_objs, key=lambda o: (-o.area, color_counts.get(o.color, 9999))
+            )
+
+            for o in sorted_objs:
+                cx = int(round(o.centroid[1]))
+                cy = int(round(o.centroid[0]))
+                cx = max(0, min(W - 1, cx))
+                cy = max(0, min(H - 1, cy))
+                if (cx, cy) not in self.click_inert_targets and (
+                    cx,
+                    cy,
+                ) not in self.click_candidate_targets:
+                    self.click_candidate_targets.append((cx, cy))
+
+        # 2. Decision Logic
+        target_coord: tuple[int, int] | None = None
+        if self.click_active_controls:
+            # If current state was revisited (loop detected), rotate active controls or probe next candidate
+            if is_revisit:
+                if self.click_candidate_targets:
+                    target_coord = self.click_candidate_targets.pop(0)
+                elif len(self.click_active_controls) > 1:
+                    self.click_active_controls.append(self.click_active_controls.pop(0))
+                    target_coord = self.click_active_controls[0]
+            if target_coord is None:
+                target_coord = self.click_active_controls[0]
+        elif self.click_candidate_targets:
+            target_coord = self.click_candidate_targets.pop(0)
+
+        # Fallback if candidates exhausted
+        if target_coord is None:
+            target_coord = (W // 2, H // 2)
+
+        self.last_click_target = target_coord
+        self.last_action_data = {"x": target_coord[0], "y": target_coord[1]}
+        self.click_step_counter += 1
+        return 6, 0.85
+
     def plan_next_action(
         self,
         curr_grid: np.ndarray,
@@ -717,24 +813,16 @@ class ARC3InteractiveAgent:
     ) -> tuple[int, float]:
         """Synthesize next action using native HCIR scene lifting, physics simulation and path planning."""
         self.available_actions = list(available_actions)
-        # 1. Coordinate Click Interaction (Pure Click and Hybrid Targeting)
+        # 1. Coordinate Click Interaction (Pure Click Isolation)
+        is_pure_click = bool(
+            6 in available_actions and not any(a in available_actions for a in [1, 2, 3, 4])
+        )
+        if is_pure_click:
+            return self._plan_pure_click_action(curr_grid)
+
         has_click = bool(
             tags and any("click" in str(t).lower() for t in tags) and 6 in available_actions
         )
-        is_pure_click = bool(has_click and not any(a in available_actions for a in [1, 2, 3, 4]))
-
-        if is_pure_click:
-            arc_grid = ARCGrid.from_list(curr_grid.tolist())
-            objs = GridTopologyExtractor.extract_objects(arc_grid)
-            clickable = [o for o in objs if o.color != 0 and o.area < curr_grid.size * 0.25]
-            if clickable:
-                target = clickable[self.stuck_counter % len(clickable)]
-                self.last_action_data = {
-                    "x": int(round(target.centroid[1])),
-                    "y": int(round(target.centroid[0])),
-                }
-                self.stuck_counter += 1
-                return 6, 0.85
 
         if has_click and not is_pure_click and self.stuck_counter >= 3:
             arc_grid = ARCGrid.from_list(curr_grid.tolist())
@@ -1049,14 +1137,18 @@ class ARC3InteractiveAgent:
             # Immediate 2-step bounce penalty (stepping back to position from 2 steps ago)
             is_2step_bounce = (
                 len(self.visited_positions) >= 2
-                and math.hypot(dest_r - self.visited_positions[-2][0], dest_c - self.visited_positions[-2][1]) < self.step_size * 0.7
+                and math.hypot(
+                    dest_r - self.visited_positions[-2][0], dest_c - self.visited_positions[-2][1]
+                )
+                < self.step_size * 0.7
             )
             bounce_penalty = 800.0 if is_2step_bounce else 0.0
 
             loop_penalty = (
                 bounce_penalty
                 if is_geodesic_step
-                else bounce_penalty + sum(
+                else bounce_penalty
+                + sum(
                     35.0
                     for vr, vc in recents
                     if math.hypot(dest_r - vr, dest_c - vc) < self.step_size * 0.9

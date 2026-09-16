@@ -263,3 +263,36 @@ async def test_arc3_agent_counterfactual_planning() -> None:
     )
     assert best_act == 1
     assert score > 0.0
+
+
+def test_arc3_regression_gate_wa30_and_ls20() -> None:
+    """Automated Regression Gate: Enforce wa30 == 44 actions and ls20 == 31 actions.
+
+    Any architectural modification or adapter extension that causes action drift
+    or failure on these verified Category 1 environments MUST fail the test suite.
+
+    Note on Baseline Updates:
+    Hard assertions (== 44, == 31) guard against unintentional code contamination
+    (e.g., cross-environment logic leaks). If the underlying upstream arc_agi package
+    itself is updated and shifts engine/environment dynamics, this baseline must be
+    re-verified and updated deliberately with recorded justification, rather than
+    silently masking unintentional regressions.
+    """
+    from arc_agi import Arcade
+
+    from plugins.arc_agi_adapter.arc_agi_3_runner import ARC3BenchmarkRunner
+
+    arcade_client = Arcade()
+    runner = ARC3BenchmarkRunner(max_steps_per_level=100)
+
+    res_wa30 = runner.run_environment(arcade_client, "wa30", max_levels=1)
+    assert res_wa30.levels_completed == 1, f"wa30 failed: completed {res_wa30.levels_completed}/1"
+    assert res_wa30.level_results[0].actions_taken == 44, (
+        f"wa30 action count drifted from 44 to {res_wa30.level_results[0].actions_taken}"
+    )
+
+    res_ls20 = runner.run_environment(arcade_client, "ls20", max_levels=1)
+    assert res_ls20.levels_completed == 1, f"ls20 failed: completed {res_ls20.levels_completed}/1"
+    assert res_ls20.level_results[0].actions_taken == 31, (
+        f"ls20 action count drifted from 31 to {res_ls20.level_results[0].actions_taken}"
+    )
