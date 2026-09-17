@@ -397,9 +397,12 @@ class EmbodiedCausalOperator:
                     matched = True
                     break
                 p_pred, p_args = parse_condition(p_clean)
-                if p_pred and p_pred == t_pred and p_args and t_args and p_args[0] == t_args[0]:
-                    matched = True
-                    break
+                if p_pred and p_pred == t_pred and p_args and t_args:
+                    if len(p_args) == len(t_args) and all(
+                        p_a == t_a for p_a, t_a in zip(p_args, t_args)
+                    ):
+                        matched = True
+                        break
             if matched:
                 producing_actions.append(act)
 

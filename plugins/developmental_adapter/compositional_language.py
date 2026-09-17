@@ -117,8 +117,68 @@ class CompositionalLanguageEngine:
 
         return goal
 
+    @staticmethod
+    def split_compound_clauses(instruction: str) -> list[str]:
+        """Split a compound instruction into sequential sub-clauses."""
+        import re
+
+        norm = instruction.strip()
+        clauses = re.split(
+            r"\s+(?:and\s+then|then|and)\s+|;\s*|,\s*(?:then\s+)?",
+            norm,
+            flags=re.IGNORECASE,
+        )
+        return [c.strip() for c in clauses if c.strip()]
+
+    def parse_compound_instruction(self, instruction: str) -> list[PredicateGoal]:
+        """Parse compound multi-clause instruction into ordered sequence of PredicateGoals."""
+        clauses = self.split_compound_clauses(instruction)
+        goals: list[PredicateGoal] = []
+        for clause in clauses:
+            g = self.parse_instruction_to_goal(clause)
+            if g is not None:
+                goals.append(g)
+        return goals
+
+    def execute_compound_instruction(self, instruction: str) -> list[PlanExecutionResult]:
+        """Execute each clause sequentially in the active environment."""
+        goals = self.parse_compound_instruction(instruction)
+        results: list[PlanExecutionResult] = []
+        for goal in goals:
+            res = self.planner.execute_with_replanning(goal)
+            results.append(res)
+            if not res.success:
+                logger.info(f"Compound step {goal} failed, stopping execution chain.")
+                break
+        return results
+
     def execute_instruction(self, instruction: str) -> PlanExecutionResult:
         """Parse natural language instruction and execute zero-shot plan."""
+        clauses = self.split_compound_clauses(instruction)
+        if len(clauses) > 1:
+            compound_results = self.execute_compound_instruction(instruction)
+            if not compound_results:
+                return PlanExecutionResult(
+                    goal=PredicateGoal(predicate="UNKNOWN", subject_id=""),
+                    steps=[],
+                    success=False,
+                    replan_count=0,
+                    wasted_actions=0,
+                )
+            all_steps = []
+            total_replans = sum(r.replan_count for r in compound_results)
+            total_wasted = sum(r.wasted_actions for r in compound_results)
+            all_success = all(r.success for r in compound_results)
+            for r in compound_results:
+                all_steps.extend(r.steps)
+            return PlanExecutionResult(
+                goal=compound_results[-1].goal,
+                steps=all_steps,
+                success=all_success,
+                replan_count=total_replans,
+                wasted_actions=total_wasted,
+            )
+
         goal = self.parse_instruction_to_goal(instruction)
         if not goal:
             return PlanExecutionResult(

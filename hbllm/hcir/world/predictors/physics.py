@@ -318,8 +318,8 @@ class PhysicsPredictor:
     def is_corner_deadlock(
         cls,
         box_pos: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        target_positions: set[tuple[int, int]],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
+        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]],
         grid_shape: tuple[int, int],
         step_size: int = 1,
     ) -> bool:
@@ -347,8 +347,8 @@ class PhysicsPredictor:
     def is_line_deadlock(
         cls,
         box_pos: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        target_positions: set[tuple[int, int]],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
+        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]],
         grid_shape: tuple[int, int],
         step_size: int = 1,
     ) -> bool:
@@ -426,7 +426,7 @@ class PhysicsPredictor:
         avatar_pos: tuple[int, int],
         action_delta: tuple[int, int],
         movable_entities: dict[str, tuple[int, int]],
-        barrier_cells: set[tuple[int, int]],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
         grid_shape: tuple[int, int],
     ) -> tuple[tuple[int, int], dict[str, tuple[int, int]], bool]:
         """Simulate joint displacement of avatar and pushable entities.
@@ -470,7 +470,7 @@ class PhysicsPredictor:
         cls,
         start: tuple[int, int],
         goal: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
         grid_shape: tuple[int, int],
         step_size: int = 1,
     ) -> list[tuple[int, int]]:

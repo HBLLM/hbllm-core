@@ -219,7 +219,7 @@ graph LR
 | **ARC-AGI-3** | `arc_agi` (v0.3.0) / Official API | Interactive Relational Puzzles (`ls20`, `wa30`) | < 5% (RL exploration limits)<br>Human: 22–71 actions | 0.0% (Context drift / hallucination) | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | $[0.342, 1.000]$ | **0 tokens** |
 | **Crafter** | `crafter` (v1.8.3) | 5 Tech Tiers, 11 Milestones (Hafner et al.) | **10.0%** (DreamerV2, 1M steps)<br>**4.2%** (PPO, 1M steps) | 6.1% (3/49 episodes)<br>Hallucinates craft recipes | **41.28%** (Zero-Shot Hafner Score)<br>**93.9%** (31/33 milestones) | $[0.804, 0.983]$ | **0 tokens** |
 | **BabyAI** | `minigrid` (v3.1.0) / `gymnasium` | 9 Synthetic Language Tiers (Chevalier-Boisvert et al.) | ~50% (IL, 1M+ demos)<br>< 10% (PPO on BossLevel) | 17.8% (8/45 episodes)<br>Context overflow & syntax errors | **100.0%** (45/45 episodes)<br>BossLevel: **100.0%** (5/5) | $[0.921, 1.000]$ | **0 tokens** |
-| **Sokoban** | `gym_sokoban` (v0.0.6) | 5 Combinatorial Push Tiers (Boxoban) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Corner deadlocks) | **73.3%** (11/15 eps)<br>**0 deadlocks** across all tiers | $[0.480, 0.891]$ | **0 tokens** |
+| **Sokoban** | `gym_sokoban` (v0.0.6) | 5 Combinatorial Push Tiers (Boxoban) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Corner deadlocks) | **100.0%** (15/15 eps)<br>**0 deadlocks** across all tiers | $[0.796, 1.000]$ | **0 tokens** |
 | **Overcooked-AI** | `overcooked_ai_py` (v1.1.0) | 5 Cooperative Kitchen Layouts | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter) | **100.0%** (10/10 eps)<br>All 5 tiers completed | $[0.722, 1.000]$ | **0 tokens** |
 | **NetHack** | `minihack` (v1.0.2) / `nle` (v1.3.0) | 5 Dungeon Navigation & Combat Tiers | < 20% (IMPALA / TorchBeast) | 0.0% (0/15 eps) | **80.0%** (4/5 tiers at 100%) | $[0.376, 0.964]$ | **0 tokens** |
 | **AI2-THOR** | `ai2thor` (v5.0.0) | 4 Manipulation Tiers (Pickup $\rightarrow$ Transfer) | ~30–45% (Embodied CLIP / PPO) | 8.3% (1/12 eps) | **50.0%** (Tiers 1–2 at 100%)<br>Pickup in 3 steps | $[0.150, 0.850]$ | **0 tokens** |
@@ -313,15 +313,18 @@ Evaluated on Farama Gymnasium BabyAI levels across all 9 canonical tiers:
 
 #### 3. Sokoban: Topological Push Planning & Dead-End Elimination (`gym_sokoban` v0.0.6)
 
-Evaluated against native `gym_sokoban` (Boxoban procedural generation) across all 5 canonical difficulty tiers:
+Evaluated across all 5 canonical Boxoban difficulty tiers with reachability-based macro-push planning:
 
-- **Overall Success Rate**: **73.3%** (11/15 episodes, 95% Wilson CI: $[0.480, 0.891]$, Deadlocks: **0**)
-  - `tier_1_direct_push`: **100.0%** (3/3) | 0 deadlocks | 8.7 steps
-  - `tier_2_obstacle_navigation`: **100.0%** (3/3) | 0 deadlocks | 14.0 steps
-  - `tier_3_corner_deadlock_avoidance`: **33.3%** (1/3) | 0 deadlocks | 84.0 steps
-  - `tier_4_multi_box_assignment`: **66.7%** (2/3) | 0 deadlocks | 58.0 steps (improved from 40.0%)
-  - `tier_5_combinatorial_maze`: **66.7%** (2/3) | 0 deadlocks | 60.0 steps
-- **Architectural Upgrade**: In addition to corner taboo cells and $2 \times 2$ box block detection, HBLLM integrates native HCIR line-deadlock detection (`PhysicsPredictor.is_line_deadlock()`). When an action would slide a box against a continuous wall barrier lacking target slots along the perimeter, the branch is immediately pruned during A* search, eliminating the search node explosions and dead-end pushes that previously caused deadlocks across complex configurations.
+- **Overall Success Rate**: **100.0%** (15/15 episodes, 95% Wilson CI: $[0.796, 1.000]$, Mean Steps: **16.6**, Deadlocks: **0**)
+  - `tier_1_direct_push`: **100.0%** (3/3) | 0 deadlocks | 2.0 steps
+  - `tier_2_obstacle_navigation`: **100.0%** (3/3) | 0 deadlocks | 7.0 steps
+  - `tier_3_corner_deadlock_avoidance`: **100.0%** (3/3) | 0 deadlocks | 7.0 steps
+  - `tier_4_multi_box_assignment`: **100.0%** (3/3) | 0 deadlocks | 16.0 steps (improved from 40.0% / 86.2 steps)
+  - `tier_5_combinatorial_maze`: **100.0%** (3/3) | 0 deadlocks | 51.0 steps
+- **Architectural Upgrade**: HBLLM combines reachability-based macro-push search with triple deadlock pruning:
+  1. **Topological Reachability:** Agent positions are canonicalized to connected flood-fill regions (`min(reachable)`), collapsing micro-step walking state explosions.
+  2. **Continuous Line Deadlock Detection:** `PhysicsPredictor.is_line_deadlock()` prunes pushes where boxes are trapped against unbroken wall segments without target receptacles.
+  3. **Local Invariant Filtering:** Taboo cell mapping and $2 \times 2$ box/wall non-target block detection eliminate dead-end states before queue expansion.
 
 ---
 

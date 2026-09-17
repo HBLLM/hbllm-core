@@ -35,6 +35,25 @@ def test_is_line_deadlock_detection() -> None:
     )
     assert not_deadlocked is False
 
+    # Verify frozenset compatibility
+    frozen_deadlocked = PhysicsPredictor.is_line_deadlock(
+        box_pos=(1, 5),
+        barrier_cells=frozenset(barrier_cells),
+        target_positions=frozenset(target_positions),
+        grid_shape=grid_shape,
+        step_size=1,
+    )
+    assert frozen_deadlocked is True
+
+    frozen_corner = PhysicsPredictor.is_corner_deadlock(
+        box_pos=(1, 1),
+        barrier_cells=frozenset({(0, 1), (1, 0)}),
+        target_positions=frozenset(target_positions),
+        grid_shape=grid_shape,
+        step_size=1,
+    )
+    assert frozen_corner is True
+
 
 def test_simulate_joint_displacement_cascade() -> None:
     """Verify that simulate_joint_displacement handles multi-body pushing chains and barrier blockage."""

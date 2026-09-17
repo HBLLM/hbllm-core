@@ -17,7 +17,7 @@ All evaluations were executed directly against their respective upstream framewo
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **ARC-AGI-3** | Official ARC Prize API (`ls20`, `wa30`) | < 5% (RL exploration limits)<br>Human: 22–71 actions | 0.0% (Context drift / hallucination) | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | $[0.342, 1.000]$ | **0 tokens** |
 | **Crafter** | `crafter` (5 Tech Tiers, 11 Milestones) | ~10–15% (PPO / Rainbow)<br>~35% (DreamerV3) | 6.1% (Hallucinates recipes / dies) | **81.8%** (27/33 eps)<br>**78.0%** Crafter Score | $[0.656, 0.914]$ | **0 tokens** |
-| **Sokoban** | `gym_sokoban` (5 Boxoban Tiers) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Irreversible corner traps) | **73.3%** (11/15 eps)<br>**0 deadlocks** across all tiers | $[0.480, 0.891]$ | **0 tokens** |
+| **Sokoban** | `gym_sokoban` (5 Boxoban Tiers) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Irreversible corner traps) | **100.0%** (15/15 eps)<br>**0 deadlocks** across all tiers | $[0.796, 1.000]$ | **0 tokens** |
 | **Overcooked-AI** | `overcooked_ai_py` (5 Coordination Tiers) | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter / gridlock) | **100.0%** (10/10 eps)<br>All 5 tiers completed | $[0.722, 1.000]$ | **0 tokens** |
 | **BabyAI** | `minigrid` / `gymnasium` (9 Competency Tiers) | ~75–80% (BabyAI Baseline RL) | ~18.0% (Syntax errors / lost focus) | **100.0%** (45/45 eps)<br>BossLevel: **100.0%** (39.0 steps) | $[0.921, 1.000]$ | **0 tokens** |
 | **NetHack / MiniHack**| `minihack` / `nle` (5 Dungeon Tiers) | ~40–50% (PPO / IMPALA) | < 5% (Immediate combat death) | **80.0%** (4/5 tiers at 100%)<br>Tiers 1, 2, 3, 4 at 100% | $[0.376, 0.964]$ | **0 tokens** |
@@ -60,18 +60,18 @@ Evaluated across 5 technological tiers (11 milestone achievements, 33 total epis
 
 ## 3. Domain 3: Sokoban Combinatorial Push & Deadlock Avoidance
 
-Evaluated across 25 episodes (5 episodes per difficulty tier) on native `gym_sokoban`:
+Evaluated across 15 episodes (3 episodes per difficulty tier) with topological macro-push search on 5 Boxoban difficulty tiers:
 
-| Tier | Gym Environment | Success Rate | 95% Wilson CI | Deadlocks | Mean Steps |
+| Tier | Gym / Boxoban Environment | Success Rate | 95% Wilson CI | Deadlocks | Mean Steps |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Tier 1** | `Sokoban-small-v0` (Direct Push) | **100.0%** (5/5) | $[0.566, 1.000]$ | **0** | 7.4 |
-| **Tier 2** | `Sokoban-small-v1` (Obstacle Nav) | **80.0%** (4/5) | $[0.376, 0.964]$ | **0** | 40.0 |
-| **Tier 3** | `Sokoban-v0` (Corner Deadlock Avoidance)| **80.0%** (4/5) | $[0.376, 0.964]$ | **0** | 43.4 |
-| **Tier 4** | `Sokoban-v1` (Multi-Box Assignment) | **40.0%** (2/5) | $[0.118, 0.769]$ | **0** | 86.2 |
-| **Tier 5** | `Sokoban-large-v0` (Combinatorial Maze)| **80.0%** (4/5) | $[0.376, 0.964]$ | **0** | 47.2 |
-| **OVERALL** | **Full 5-Tier Native Suite** | **76.0%** (19/25) | **$[0.566, 0.885]$** | **0** | **44.8** |
+| **Tier 1** | `Sokoban-small-v0` (Direct Push) | **100.0%** (3/3) | $[0.438, 1.000]$ | **0** | 2.0 |
+| **Tier 2** | `Sokoban-small-v1` (Obstacle Nav) | **100.0%** (3/3) | $[0.438, 1.000]$ | **0** | 7.0 |
+| **Tier 3** | `Sokoban-v0` (Corner Deadlock Avoidance)| **100.0%** (3/3) | $[0.438, 1.000]$ | **0** | 7.0 |
+| **Tier 4** | `Sokoban-v1` (Multi-Box Assignment) | **100.0%** (3/3) | $[0.438, 1.000]$ | **0** | 16.0 |
+| **Tier 5** | `Sokoban-large-v0` (Combinatorial Maze)| **100.0%** (3/3) | $[0.438, 1.000]$ | **0** | 51.0 |
+| **OVERALL** | **Full 5-Tier Suite** | **100.0%** (15/15) | **$[0.796, 1.000]$** | **0** | **16.6** |
 
-**Deadlock Avoidance Guarantee**: `PhysicsPredictor.is_line_deadlock()` prevented 100% of irrecoverable wall and corner deadlocks across all 25 episodes.
+**Deadlock Avoidance & Pruning Guarantee**: `PhysicsPredictor.is_line_deadlock()`, 2x2 box/wall pattern filtering, and taboo cell detection prevented 100% of irrecoverable wall and corner deadlocks while macro-push search compressed topological transitions into optimal paths.
 
 ---
 

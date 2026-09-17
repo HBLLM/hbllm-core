@@ -11,7 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.capability_resolver import (
+    CapabilityImplementation,
+    CapabilityResolver,
+)
 from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
 from hbllm.hcir.kernel.executor import KernelExecutor
 from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
@@ -24,6 +27,17 @@ from hbllm.hcir.workspace import HCIRWorkspaceState
 
 if TYPE_CHECKING:
     from hbllm.persistence.service import PersistenceService
+
+
+class DefaultWorldPredictionExecutor:
+    """Default in-memory executor for world_prediction capability in simulation branches."""
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
+        return {"status": "simulated", "predicted": True, **params}
 
 
 @dataclass
@@ -72,9 +86,19 @@ class KernelServices:
     @classmethod
     def create_default(cls, workspace: HCIRWorkspaceState) -> KernelServices:
         """Create a default KernelServices instance for in-memory simulation and planning."""
+        resolver = CapabilityResolver()
+        resolver.register(
+            CapabilityImplementation(
+                capability_name="world_prediction",
+                implementation_id="default_world_prediction",
+                executor=DefaultWorldPredictionExecutor(),
+                priority=1,
+                description="Default in-memory forward simulation executor",
+            )
+        )
         return cls(
             workspace=workspace,
             transaction_manager=TransactionManager(workspace),
-            capability_resolver=CapabilityResolver(),
+            capability_resolver=resolver,
             scheduler=KernelInstructionScheduler(),
         )
