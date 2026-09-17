@@ -637,6 +637,10 @@ class CounterfactualPlanner:
         elif modality == ActionModality.TARGETING and action.properties.get("target_in_range"):
             base_utility += 1.2
 
+        # Macro-action efficiency bonus
+        if getattr(action, "properties", {}).get("is_macro"):
+            base_utility += 1.0
+
         # Causal condition alignment bonus
         if goal is not None and getattr(action, "produces", None):
             goal_desc = getattr(goal, "description", "")

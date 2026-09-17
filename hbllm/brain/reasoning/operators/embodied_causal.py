@@ -343,6 +343,12 @@ class EmbodiedCausalOperator:
                 "requirements": selected_action.requirements,
                 "produces": selected_action.produces,
                 "unsatisfied_conditions": unsatisfied_conditions,
+                "is_macro": getattr(selected_action, "sub_actions", None) is not None,
+                "macro_current_action": (
+                    selected_action.current_action.intent
+                    if getattr(selected_action, "current_action", None) is not None
+                    else selected_action.intent
+                ),
             },
             confidence=0.95,
             evidence_refs=[selected_action.id],
@@ -376,7 +382,11 @@ class EmbodiedCausalOperator:
             return False, None
 
         props = action.properties if hasattr(action, "properties") else {}
-        explicit_negates = set(props.get("negates", []) + props.get("deletes", []))
+        explicit_negates = set(
+            props.get("negates", [])
+            + props.get("deletes", [])
+            + list(getattr(action, "composite_negates", []))
+        )
 
         for inv in protected_invariants:
             if inv in explicit_negates:
