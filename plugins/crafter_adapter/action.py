@@ -100,9 +100,15 @@ class CrafterActionAdapter:
                 produces=["has(table)", "near(crafting_table)"],
             ),
             ActionNode(
+                id="act_approach_table",
+                intent="approach_crafting_table",
+                requirements=["has(table)"],
+                produces=["near(crafting_table)"],
+            ),
+            ActionNode(
                 id="act_make_wood_pickaxe",
                 intent="make_wood_pickaxe",
-                requirements=["near(crafting_table)", "has(wood, 1)"],
+                requirements=["has(wood, 1)", "near(crafting_table)"],
                 produces=["has(wood_pickaxe)"],
             ),
             ActionNode(
@@ -114,7 +120,7 @@ class CrafterActionAdapter:
             ActionNode(
                 id="act_make_stone_pickaxe",
                 intent="make_stone_pickaxe",
-                requirements=["near(crafting_table)", "has(wood, 1)", "has(stone, 1)"],
+                requirements=["has(wood, 1)", "has(stone, 1)", "near(crafting_table)"],
                 produces=["has(stone_pickaxe)"],
             ),
             ActionNode(
@@ -122,6 +128,12 @@ class CrafterActionAdapter:
                 intent="place_furnace",
                 requirements=["has(stone, 4)"],
                 produces=["has(furnace)", "near(furnace)"],
+            ),
+            ActionNode(
+                id="act_approach_furnace",
+                intent="approach_furnace",
+                requirements=["has(furnace)"],
+                produces=["near(furnace)"],
             ),
             ActionNode(
                 id="act_collect_coal",
@@ -139,9 +151,9 @@ class CrafterActionAdapter:
                 id="act_make_iron_pickaxe",
                 intent="make_iron_pickaxe",
                 requirements=[
-                    "has(iron, 1)",
-                    "has(coal, 1)",
                     "has(wood, 1)",
+                    "has(coal, 1)",
+                    "has(iron, 1)",
                     "near(crafting_table)",
                     "near(furnace)",
                 ],
@@ -173,12 +185,6 @@ class CrafterActionAdapter:
                 produces=["near(cow)"],
             ),
             ActionNode(
-                id="act_approach_table",
-                intent="approach_crafting_table",
-                requirements=[],
-                produces=["near(crafting_table)"],
-            ),
-            ActionNode(
                 id="act_approach_stone",
                 intent="approach_stone",
                 requirements=[],
@@ -195,12 +201,6 @@ class CrafterActionAdapter:
                 intent="approach_iron",
                 requirements=[],
                 produces=["near(iron)"],
-            ),
-            ActionNode(
-                id="act_approach_furnace",
-                intent="approach_furnace",
-                requirements=[],
-                produces=["near(furnace)"],
             ),
             ActionNode(
                 id="act_approach_diamond",
@@ -271,15 +271,23 @@ class CrafterActionAdapter:
         if intent == "place_table":
             tx = obs.player_pos[0] + obs.player_facing[0]
             ty = obs.player_pos[1] + obs.player_facing[1]
-            if 0 <= tx < len(obs.semantic_grid[0]) and 0 <= ty < len(obs.semantic_grid):
-                if obs.semantic_grid[ty][tx] in (
-                    CrafterObject.GRASS,
-                    CrafterObject.PATH,
-                    CrafterObject.SAND,
-                ):
-                    self.table_pos = (tx, ty)
-                    return CrafterAction.PLACE_TABLE
-            return CrafterAction.MOVE_LEFT
+            height = len(obs.semantic_grid)
+            width = len(obs.semantic_grid[0]) if height > 0 else 0
+            passable = (CrafterObject.GRASS, CrafterObject.PATH, CrafterObject.SAND)
+            if 0 <= tx < width and 0 <= ty < height and obs.semantic_grid[ty][tx] in passable:
+                self.table_pos = (tx, ty)
+                return CrafterAction.PLACE_TABLE
+            px, py = obs.player_pos
+            for act, (dx, dy) in (
+                (CrafterAction.MOVE_LEFT, (-1, 0)),
+                (CrafterAction.MOVE_RIGHT, (1, 0)),
+                (CrafterAction.MOVE_UP, (0, -1)),
+                (CrafterAction.MOVE_DOWN, (0, 1)),
+            ):
+                nx, ny = px + dx, py + dy
+                if 0 <= nx < width and 0 <= ny < height and obs.semantic_grid[ny][nx] in passable:
+                    return act
+            return self._explore_passable(obs)
 
         if intent == "make_wood_pickaxe":
             if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
@@ -302,23 +310,52 @@ class CrafterActionAdapter:
 
         # 5. Furnace & Metallurgy
         if intent == "place_furnace":
-            if self.table_pos is not None and not self._is_near(
-                obs, CrafterObject.CRAFTING_TABLE, radius=1
+            if self.table_pos is None:
+                t_pos = self.perception.find_nearest_object(obs, CrafterObject.CRAFTING_TABLE)
+                if t_pos:
+                    self.table_pos = t_pos
+
+            if self.table_pos is not None:
+                tx, ty = self.table_pos
+                px, py = obs.player_pos
+                if abs(px - tx) > 1 or abs(py - ty) > 1:
+                    act = self._navigate_and_interact(
+                        obs, CrafterObject.CRAFTING_TABLE, face_only=True
+                    )
+                    if act:
+                        return act
+
+            px, py = obs.player_pos
+            height = len(obs.semantic_grid)
+            width = len(obs.semantic_grid[0]) if height > 0 else 0
+            passable = (CrafterObject.GRASS, CrafterObject.PATH, CrafterObject.SAND)
+
+            fx = px + obs.player_facing[0]
+            fy = py + obs.player_facing[1]
+            if (
+                0 <= fx < width
+                and 0 <= fy < height
+                and obs.semantic_grid[fy][fx] in passable
+                and (self.table_pos is None or (fx, fy) != self.table_pos)
             ):
-                act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
-                if act:
-                    return act
-            fx = obs.player_pos[0] + obs.player_facing[0]
-            fy = obs.player_pos[1] + obs.player_facing[1]
-            if 0 <= fx < len(obs.semantic_grid[0]) and 0 <= fy < len(obs.semantic_grid):
-                if obs.semantic_grid[fy][fx] in (
-                    CrafterObject.GRASS,
-                    CrafterObject.PATH,
-                    CrafterObject.SAND,
+                self.furnace_pos = (fx, fy)
+                return CrafterAction.PLACE_FURNACE
+
+            for act, (dx, dy) in (
+                (CrafterAction.MOVE_LEFT, (-1, 0)),
+                (CrafterAction.MOVE_RIGHT, (1, 0)),
+                (CrafterAction.MOVE_UP, (0, -1)),
+                (CrafterAction.MOVE_DOWN, (0, 1)),
+            ):
+                nx, ny = px + dx, py + dy
+                if (
+                    0 <= nx < width
+                    and 0 <= ny < height
+                    and obs.semantic_grid[ny][nx] in passable
+                    and (self.table_pos is None or (nx, ny) != self.table_pos)
                 ):
-                    self.furnace_pos = (fx, fy)
-                    return CrafterAction.PLACE_FURNACE
-            return CrafterAction.MOVE_LEFT
+                    return act
+            return self._explore_passable(obs)
 
         if intent in ("collect_coal", "approach_coal"):
             act = self._navigate_and_interact(obs, CrafterObject.COAL)
@@ -451,6 +488,12 @@ class CrafterActionAdapter:
         ):
             target_pos = self.furnace_pos
 
+        if target_pos is not None:
+            if target_type == CrafterObject.CRAFTING_TABLE and self.table_pos is None:
+                self.table_pos = target_pos
+            elif target_type == CrafterObject.FURNACE and self.furnace_pos is None:
+                self.furnace_pos = target_pos
+
         if target_pos is None:
             return None
 
@@ -560,6 +603,15 @@ class CrafterActionAdapter:
         obj_b: CrafterObject,
     ) -> CrafterAction | None:
         """Find a passable tile within Chebyshev radius 1 of both objects and step toward it."""
+        if self.table_pos is None:
+            t_pos = self.perception.find_nearest_object(obs, CrafterObject.CRAFTING_TABLE)
+            if t_pos:
+                self.table_pos = t_pos
+        if self.furnace_pos is None:
+            f_pos = self.perception.find_nearest_object(obs, CrafterObject.FURNACE)
+            if f_pos:
+                self.furnace_pos = f_pos
+
         pos_a = self.table_pos if obj_a == CrafterObject.CRAFTING_TABLE else self.furnace_pos
         pos_b = self.furnace_pos if obj_b == CrafterObject.FURNACE else self.table_pos
         if pos_a is None or pos_b is None:

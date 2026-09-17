@@ -158,6 +158,28 @@ class CrafterPerceptionAdapter:
 
         px, py = obs.player_pos
 
+        # Build achievements list with physical object aliases
+        achs_list = [a.value for a in obs.achievements]
+        if CrafterAchievement.PLACE_TABLE in obs.achievements or any(
+            CrafterObject.CRAFTING_TABLE in row for row in obs.semantic_grid
+        ):
+            if "table" not in achs_list:
+                achs_list.extend(["table", "crafting_table"])
+        if CrafterAchievement.PLACE_FURNACE in obs.achievements or any(
+            CrafterObject.FURNACE in row for row in obs.semantic_grid
+        ):
+            if "furnace" not in achs_list:
+                achs_list.append("furnace")
+        if CrafterAchievement.MAKE_WOOD_PICKAXE in obs.achievements:
+            if "wood_pickaxe" not in achs_list:
+                achs_list.append("wood_pickaxe")
+        if CrafterAchievement.MAKE_STONE_PICKAXE in obs.achievements:
+            if "stone_pickaxe" not in achs_list:
+                achs_list.append("stone_pickaxe")
+        if CrafterAchievement.MAKE_IRON_PICKAXE in obs.achievements:
+            if "iron_pickaxe" not in achs_list:
+                achs_list.append("iron_pickaxe")
+
         # Update Agent Node
         agent_node = PhysicalEntityNode(
             id="agent",
@@ -167,12 +189,13 @@ class CrafterPerceptionAdapter:
                 "x": px,
                 "y": py,
                 "facing": obs.player_facing,
+                "reach_distance": 1.6,
                 "health": obs.vitals.health,
                 "food": obs.vitals.food,
                 "drink": obs.vitals.drink,
                 "energy": obs.vitals.energy,
                 "inventory": obs.inventory.to_dict(),
-                "achievements": [a.value for a in obs.achievements],
+                "achievements": achs_list,
                 "step_count": obs.step_count,
             },
             entity_lifecycle=EntityLifecycle.TRACKED,
@@ -277,13 +300,13 @@ class CrafterPerceptionAdapter:
         target_conditions: list[str] = []
 
         # 1. Vital Survival Interrupts
-        if obs.vitals.energy <= 2:
+        if obs.vitals.energy <= 1:
             target_conditions.append("vitals_safe(energy, 9)")
             ach = CrafterAchievement.WAKE_UP
-        elif obs.vitals.drink <= 4:
+        elif obs.vitals.drink <= 1:
             target_conditions.append("vitals_safe(drink, 5)")
             ach = CrafterAchievement.COLLECT_DRINK
-        elif obs.vitals.food <= 4:
+        elif obs.vitals.food <= 1:
             target_conditions.append("vitals_safe(food, 5)")
             ach = CrafterAchievement.EAT_COW
         else:

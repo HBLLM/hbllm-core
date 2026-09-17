@@ -155,11 +155,13 @@ class NativeNetHackWrapper:
             # Find closed door near player
             px, py = self.player_pos
             dir_name = "E"
+            door_coord = None
             for (dx, dy), name in dir_to_name.items():
                 nx, ny = px + dx, py + dy
                 if 0 <= ny < len(self.known_glyphs) and 0 <= nx < len(self.known_glyphs[0]):
                     if self.known_glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
                         dir_name = name
+                        door_coord = (nx, ny)
                         break
 
             if act_enum == NetHackAction.OPEN_DOOR and "OPEN" in self._action_name_to_idx:
@@ -185,6 +187,11 @@ class NativeNetHackWrapper:
                 act_idx = self._action_name_to_idx.get(dir_name, 0)
                 raw_obs, reward, terminated, trunc_env, info = self._env_step(act_idx)
                 truncated = trunc_env or (self.step_count >= self.max_steps)
+
+            if door_coord is not None:
+                dx_c, dy_c = door_coord
+                if 0 <= dy_c < len(self.known_glyphs) and 0 <= dx_c < len(self.known_glyphs[0]):
+                    self.known_glyphs[dy_c][dx_c] = int(NetHackGlyph.DOOR_OPEN)
 
         else:
             name_map = {
@@ -272,7 +279,13 @@ class NativeNetHackWrapper:
                             self.known_glyphs[r][c] = int(NetHackGlyph.MONSTER)
                             self.known_chars[r][c] = chr(ch)
                         elif ch in (ord("|"), ord("-")):
-                            self.known_glyphs[r][c] = int(NetHackGlyph.WALL)
+                            if self.known_glyphs[r][c] in (
+                                int(NetHackGlyph.DOOR_CLOSED),
+                                int(NetHackGlyph.DOOR_OPEN),
+                            ):
+                                self.known_glyphs[r][c] = int(NetHackGlyph.DOOR_OPEN)
+                            else:
+                                self.known_glyphs[r][c] = int(NetHackGlyph.WALL)
                             self.known_chars[r][c] = chr(ch)
 
             if "message" in raw_obs:

@@ -182,14 +182,22 @@ def run_crafter_benchmark(
                 total_reward = 0.0
 
                 max_steps = (
-                    100
+                    150
                     if target
                     in (
                         CrafterAchievement.MAKE_IRON_PICKAXE,
                         CrafterAchievement.PLACE_FURNACE,
                         CrafterAchievement.COLLECT_IRON,
                     )
-                    else (70 if target == CrafterAchievement.SURVIVE else 50)
+                    else (
+                        100
+                        if target
+                        in (
+                            CrafterAchievement.MAKE_STONE_PICKAXE,
+                            CrafterAchievement.COLLECT_COAL,
+                        )
+                        else (70 if target == CrafterAchievement.SURVIVE else 50)
+                    )
                 )
 
                 while not done and obs.step_count < max_steps:
