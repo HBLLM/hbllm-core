@@ -394,7 +394,9 @@ class MasterReproducibilityRunner:
             "domains": self.results,
         }
         target_file = self.output_dir / filename
-        target_file.write_text(json.dumps(meta, indent=2))
+        target_file.write_text(
+            json.dumps(meta, indent=2, default=lambda o: getattr(o, "__dict__", str(o)))
+        )
         print(f" [JSON EXPORT] Successfully written to: {target_file}")
         return target_file
 

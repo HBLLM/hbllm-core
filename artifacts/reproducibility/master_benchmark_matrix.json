@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-17T21:36:45.311786",
+  "timestamp": "2026-09-17T22:01:34.210773",
   "quick_mode": true,
   "python_version": "3.12.14 (main, Aug 12 2026, 13:57:54) [Clang 17.0.0 (clang-1700.6.4.2)]",
   "token_cost_total": 0,
@@ -35,30 +35,308 @@
             "steps": 3,
             "success": true,
             "reward": 1.0,
-            "elapsed_ms": 6763.428583974019
+            "elapsed_ms": 32173.695857985877
           },
           {
             "seed": 5200,
             "steps": 9,
             "success": true,
             "reward": 1.0,
-            "elapsed_ms": 22255.54387102602
+            "elapsed_ms": 19473.558889993
           },
           {
             "seed": 5300,
             "steps": 8,
             "success": true,
             "reward": 1.0,
-            "elapsed_ms": 17935.429299017414
+            "elapsed_ms": 57497.20393901225
           },
           {
             "seed": 5400,
             "steps": 16,
             "success": true,
             "reward": 1.0,
-            "elapsed_ms": 24616.81114399107
+            "elapsed_ms": 20300.73614703724
           }
         ]
+      }
+    },
+    "crafter": {
+      "domain": "Crafter (Hafner)",
+      "simulator": "Native crafter (Unconstrained)",
+      "literature_baseline": "10.0% (DreamerV2) / ~50.5% (Human)",
+      "llm_baseline": "6.1% (Hallucinates recipes)",
+      "episodes": 1,
+      "score": 41.4,
+      "tier_success_rate": 1.0,
+      "ci_95": [
+        0.741,
+        1.0
+      ],
+      "metric_name": "Logarithmic Crafter Score",
+      "token_cost": 0,
+      "dollar_cost": 0.0,
+      "raw_data": {
+        "hafner": {
+          "episodes": 1,
+          "crafter_score": 41.42,
+          "mean_steps": 196.0,
+          "mean_reward": 10.1,
+          "achievement_rates": {
+            "collect_wood": 100.0,
+            "place_table": 100.0,
+            "eat_cow": 0.0,
+            "collect_sapling": 0.0,
+            "collect_drink": 100.0,
+            "make_wood_pickaxe": 100.0,
+            "make_wood_sword": 100.0,
+            "place_plant": 0.0,
+            "defeat_zombie": 100.0,
+            "collect_stone": 100.0,
+            "place_stone": 0.0,
+            "eat_plant": 0.0,
+            "defeat_skeleton": 0.0,
+            "make_stone_pickaxe": 100.0,
+            "make_stone_sword": 100.0,
+            "place_furnace": 0.0,
+            "collect_coal": 100.0,
+            "collect_iron": 100.0,
+            "make_iron_pickaxe": 0.0,
+            "make_iron_sword": 0.0,
+            "collect_diamond": 0.0,
+            "wake_up": 0.0
+          },
+          "results": [
+            {
+              "seed": 1000,
+              "steps": 196,
+              "reward": 10.100000000000003,
+              "achievements": "{'collect_coal', 'collect_iron', 'make_stone_pickaxe', 'survive', 'place_table', 'make_wood_pickaxe', 'collect_drink', 'collect_stone', 'collect_wood', 'make_wood_sword', 'make_stone_sword', 'defeat_zombie'}",
+              "elapsed_ms": 16096.077596012037
+            }
+          ]
+        },
+        "multi_tier": {
+          "cohort": "pure-hcir",
+          "episodes": 11,
+          "total_episodes": 11,
+          "success_rate": 1.0,
+          "overall_success_rate": 1.0,
+          "ci_95": [
+            0.741,
+            1.0
+          ],
+          "overall_ci_95": [
+            0.741,
+            1.0
+          ],
+          "crafter_score": 100.0,
+          "tier_summaries": {
+            "Tier 1: Gathering": {
+              "success_rate": 1.0,
+              "ci_95": [
+                0.439,
+                1.0
+              ],
+              "mean_steps": 7.0,
+              "episodes": 3
+            },
+            "Tier 2: Basic Tools": {
+              "success_rate": 1.0,
+              "ci_95": [
+                0.342,
+                1.0
+              ],
+              "mean_steps": 15.0,
+              "episodes": 2
+            },
+            "Tier 3: Stone Age": {
+              "success_rate": 1.0,
+              "ci_95": [
+                0.439,
+                1.0
+              ],
+              "mean_steps": 25.3,
+              "episodes": 3
+            },
+            "Tier 4: Metallurgy": {
+              "success_rate": 1.0,
+              "ci_95": [
+                0.342,
+                1.0
+              ],
+              "mean_steps": 89.0,
+              "episodes": 2
+            },
+            "Tier 5: Apex Endurance": {
+              "success_rate": 1.0,
+              "ci_95": [
+                0.207,
+                1.0
+              ],
+              "mean_steps": 50.0,
+              "episodes": 1
+            }
+          },
+          "results": [
+            {
+              "seed": 1000,
+              "tier": "Tier 1: Gathering",
+              "target": "collect_wood",
+              "steps": 4,
+              "reward": 1.0,
+              "achievements": [
+                "collect_wood"
+              ],
+              "success": true,
+              "elapsed_ms": 184.56275801872835
+            },
+            {
+              "seed": 1001,
+              "tier": "Tier 1: Gathering",
+              "target": "collect_drink",
+              "steps": 9,
+              "reward": 1.0,
+              "achievements": [
+                "collect_drink"
+              ],
+              "success": true,
+              "elapsed_ms": 617.9970370139927
+            },
+            {
+              "seed": 1002,
+              "tier": "Tier 1: Gathering",
+              "target": "eat_cow",
+              "steps": 8,
+              "reward": 1.0,
+              "achievements": [
+                "eat_cow"
+              ],
+              "success": true,
+              "elapsed_ms": 802.3276890162379
+            },
+            {
+              "seed": 1003,
+              "tier": "Tier 2: Basic Tools",
+              "target": "place_table",
+              "steps": 11,
+              "reward": 2.0,
+              "achievements": [
+                "place_table",
+                "collect_wood"
+              ],
+              "success": true,
+              "elapsed_ms": 1322.7697769762017
+            },
+            {
+              "seed": 1004,
+              "tier": "Tier 2: Basic Tools",
+              "target": "make_wood_pickaxe",
+              "steps": 19,
+              "reward": 3.0,
+              "achievements": [
+                "place_table",
+                "make_wood_pickaxe",
+                "collect_wood"
+              ],
+              "success": true,
+              "elapsed_ms": 1175.7365330122411
+            },
+            {
+              "seed": 1005,
+              "tier": "Tier 3: Stone Age",
+              "target": "collect_stone",
+              "steps": 30,
+              "reward": 4.0,
+              "achievements": [
+                "collect_stone",
+                "place_table",
+                "make_wood_pickaxe",
+                "collect_wood"
+              ],
+              "success": true,
+              "elapsed_ms": 1348.8254979602061
+            },
+            {
+              "seed": 1006,
+              "tier": "Tier 3: Stone Age",
+              "target": "make_stone_pickaxe",
+              "steps": 23,
+              "reward": 5.0,
+              "achievements": [
+                "collect_stone",
+                "make_stone_pickaxe",
+                "collect_wood",
+                "place_table",
+                "make_wood_pickaxe"
+              ],
+              "success": true,
+              "elapsed_ms": 1308.8902609888464
+            },
+            {
+              "seed": 1007,
+              "tier": "Tier 3: Stone Age",
+              "target": "collect_coal",
+              "steps": 23,
+              "reward": 4.0,
+              "achievements": [
+                "collect_coal",
+                "place_table",
+                "make_wood_pickaxe",
+                "collect_wood"
+              ],
+              "success": true,
+              "elapsed_ms": 1642.534265993163
+            },
+            {
+              "seed": 1008,
+              "tier": "Tier 4: Metallurgy",
+              "target": "collect_iron",
+              "steps": 129,
+              "reward": 6.0,
+              "achievements": [
+                "collect_iron",
+                "collect_stone",
+                "make_stone_pickaxe",
+                "collect_wood",
+                "survive",
+                "place_table",
+                "make_wood_pickaxe"
+              ],
+              "success": true,
+              "elapsed_ms": 6272.766885987949
+            },
+            {
+              "seed": 1009,
+              "tier": "Tier 4: Metallurgy",
+              "target": "place_furnace",
+              "steps": 49,
+              "reward": 5.0,
+              "achievements": [
+                "collect_stone",
+                "collect_wood",
+                "place_table",
+                "make_wood_pickaxe",
+                "place_furnace"
+              ],
+              "success": true,
+              "elapsed_ms": 4642.010864976328
+            },
+            {
+              "seed": 1010,
+              "tier": "Tier 5: Apex Endurance",
+              "target": "survive",
+              "steps": 50,
+              "reward": 0.9000000000000001,
+              "achievements": [
+                "defeat_zombie",
+                "survive"
+              ],
+              "success": true,
+              "elapsed_ms": 3343.8354289974086
+            }
+          ]
+        }
       }
     },
     "safety_gym": {
@@ -98,7 +376,7 @@
             "goal_reached": true,
             "zero_violation": true,
             "cumulative_cost": 0.0,
-            "elapsed_ms": 127.79038003645837
+            "elapsed_ms": 149.0021919598803
           },
           {
             "seed": 2200,
@@ -106,7 +384,7 @@
             "goal_reached": true,
             "zero_violation": true,
             "cumulative_cost": 0.0,
-            "elapsed_ms": 516.5747629944235
+            "elapsed_ms": 557.0646720007062
           },
           {
             "seed": 2300,
@@ -114,7 +392,7 @@
             "goal_reached": true,
             "zero_violation": true,
             "cumulative_cost": 0.0,
-            "elapsed_ms": 921.1908979923464
+            "elapsed_ms": 1442.3401019885205
           },
           {
             "seed": 2400,
@@ -122,10 +400,473 @@
             "goal_reached": true,
             "zero_violation": true,
             "cumulative_cost": 0.0,
-            "elapsed_ms": 438.2039959891699
+            "elapsed_ms": 873.7157660070807
           }
         ]
       }
+    },
+    "alfworld": {
+      "domain": "ALFWorld",
+      "simulator": "alfworld TextWorld Engine",
+      "literature_baseline": "35-45% (BUTLER / ReAct)",
+      "llm_baseline": "12.5% (Syntax errors)",
+      "episodes": 6,
+      "success_rate": 1.0,
+      "ci_95": [
+        0.61,
+        1.0
+      ],
+      "mean_steps": 9.7,
+      "metric_name": "Success Rate",
+      "token_cost": 0,
+      "dollar_cost": 0.0,
+      "raw_data": {
+        "cohort": "pure-hcir",
+        "episodes": 6,
+        "total_episodes": 6,
+        "success_rate": 1.0,
+        "overall_success_rate": 1.0,
+        "ci_95": [
+          0.61,
+          1.0
+        ],
+        "overall_ci_95": [
+          0.61,
+          1.0
+        ],
+        "mean_steps": 9.7,
+        "overall_mean_steps": 9.7,
+        "tier_summaries": {
+          "Tier 1: Pick & Place": {
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 10.0,
+            "episodes": 1
+          },
+          "Tier 2: Examine in Light": {
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 6.0,
+            "episodes": 1
+          },
+          "Tier 3: Clean & Place": {
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 16.0,
+            "episodes": 1
+          },
+          "Tier 4: Heat & Place": {
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 7.0,
+            "episodes": 1
+          },
+          "Tier 5: Cool & Place": {
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 7.0,
+            "episodes": 1
+          },
+          "Tier 6: Pick Two & Place": {
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 12.0,
+            "episodes": 1
+          }
+        },
+        "results": [
+          {
+            "seed": 3000,
+            "tier": "Tier 1: Pick & Place",
+            "task_type": "pick_and_place",
+            "steps": 10,
+            "success": true,
+            "reward": 1.0,
+            "elapsed_ms": 9690.843394957483
+          },
+          {
+            "seed": 3001,
+            "tier": "Tier 2: Examine in Light",
+            "task_type": "examine_in_light",
+            "steps": 6,
+            "success": true,
+            "reward": 1.0,
+            "elapsed_ms": 7116.323260997888
+          },
+          {
+            "seed": 3002,
+            "tier": "Tier 3: Clean & Place",
+            "task_type": "clean_and_place",
+            "steps": 16,
+            "success": true,
+            "reward": 1.0,
+            "elapsed_ms": 14735.16992200166
+          },
+          {
+            "seed": 3003,
+            "tier": "Tier 4: Heat & Place",
+            "task_type": "heat_and_place",
+            "steps": 7,
+            "success": true,
+            "reward": 1.0,
+            "elapsed_ms": 3368.9479699824005
+          },
+          {
+            "seed": 3004,
+            "tier": "Tier 5: Cool & Place",
+            "task_type": "cool_and_place",
+            "steps": 7,
+            "success": true,
+            "reward": 1.0,
+            "elapsed_ms": 4584.021317015868
+          },
+          {
+            "seed": 3005,
+            "tier": "Tier 6: Pick Two & Place",
+            "task_type": "pick_two_and_place",
+            "steps": 12,
+            "success": true,
+            "reward": 1.0,
+            "elapsed_ms": 8247.426587971859
+          }
+        ]
+      }
+    },
+    "nethack": {
+      "domain": "NetHack / MiniHack",
+      "simulator": "minihack / nle Substrate",
+      "literature_baseline": "40-50% (PPO / IMPALA)",
+      "llm_baseline": "< 5% (Combat death)",
+      "episodes": 5,
+      "success_rate": 1.0,
+      "ci_95": [
+        0.566,
+        1.0
+      ],
+      "mean_steps": 13.8,
+      "metric_name": "Success Rate",
+      "token_cost": 0,
+      "dollar_cost": 0.0,
+      "raw_data": {
+        "cohort": "pure-hcir",
+        "episodes": 5,
+        "total_episodes": 5,
+        "success_rate": 1.0,
+        "overall_success_rate": 1.0,
+        "ci_95": [
+          0.566,
+          1.0
+        ],
+        "overall_ci_95": [
+          0.566,
+          1.0
+        ],
+        "mean_steps": 13.8,
+        "overall_mean_steps": 13.8,
+        "mean_gold": 0.0,
+        "tier_summaries": {
+          "Tier 1: Room Navigation": {
+            "tier": 1,
+            "episodes": 1,
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 4.0,
+            "mean_gold": 0.0
+          },
+          "Tier 2: Corridor Fog Exploration": {
+            "tier": 2,
+            "episodes": 1,
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 14.0,
+            "mean_gold": 0.0
+          },
+          "Tier 3: Closed Door Navigation": {
+            "tier": 3,
+            "episodes": 1,
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 26.0,
+            "mean_gold": 0.0
+          },
+          "Tier 4: Monster Combat": {
+            "tier": 4,
+            "episodes": 1,
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 1.0,
+            "mean_gold": 0.0
+          },
+          "Tier 5: Full Dungeon Descent": {
+            "tier": 5,
+            "episodes": 1,
+            "success_rate": 1.0,
+            "ci_95": [
+              0.207,
+              1.0
+            ],
+            "mean_steps": 24.0,
+            "mean_gold": 0.0
+          }
+        },
+        "results": [
+          {
+            "seed": 4100,
+            "steps": 4,
+            "success": true,
+            "dungeon_level": 2,
+            "hp_remaining": 0,
+            "gold": 0,
+            "elapsed_ms": 50.20944197895005
+          },
+          {
+            "seed": 4200,
+            "steps": 14,
+            "success": true,
+            "dungeon_level": 2,
+            "hp_remaining": 0,
+            "gold": 0,
+            "elapsed_ms": 227.33595001045614
+          },
+          {
+            "seed": 4300,
+            "steps": 26,
+            "success": true,
+            "dungeon_level": 2,
+            "hp_remaining": 0,
+            "gold": 0,
+            "elapsed_ms": 481.38559504877776
+          },
+          {
+            "seed": 4400,
+            "steps": 1,
+            "success": true,
+            "dungeon_level": 2,
+            "hp_remaining": 0,
+            "gold": 0,
+            "elapsed_ms": 19.726640020962805
+          },
+          {
+            "seed": 4500,
+            "steps": 24,
+            "success": true,
+            "dungeon_level": 2,
+            "hp_remaining": 0,
+            "gold": 0,
+            "elapsed_ms": 792.1316109714098
+          }
+        ]
+      }
+    },
+    "babyai": {
+      "domain": "BabyAI",
+      "simulator": "minigrid / gymnasium",
+      "literature_baseline": "75-80% (BabyAI RL Baseline)",
+      "llm_baseline": "~18.0% (Context drift)",
+      "episodes": 9,
+      "success_rate": 1.0,
+      "ci_95": [
+        0.701,
+        1.0
+      ],
+      "mean_steps": 29.0,
+      "metric_name": "Success Rate",
+      "token_cost": 0,
+      "dollar_cost": 0.0,
+      "raw_data": [
+        {
+          "tier_id": "Tier 1a: GoTo",
+          "env_name": "BabyAI-GoToObj-v0",
+          "description": "Single-room navigation to specific target with distractors",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 10.0,
+          "std_steps": 0.0,
+          "median_steps": 10.0,
+          "mean_reward": 0.8594,
+          "std_reward": 0.0,
+          "mean_duration_ms": 54.5661,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 1b: Pickup",
+          "env_name": "BabyAI-PickupDist-v0",
+          "description": "Single-room object pickup with distractor items",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 16.0,
+          "std_steps": 0.0,
+          "median_steps": 16.0,
+          "mean_reward": 0.7061,
+          "std_reward": 0.0,
+          "mean_duration_ms": 41.8476,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 2: Doors",
+          "env_name": "BabyAI-OpenRedDoor-v0",
+          "description": "Spatial navigation across partitioned room via closed door",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 9.0,
+          "std_steps": 0.0,
+          "median_steps": 9.0,
+          "mean_reward": 0.838,
+          "std_reward": 0.0,
+          "mean_duration_ms": 27.2867,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 3: Unlock",
+          "env_name": "BabyAI-UnlockLocal-v0",
+          "description": "Prerequisite key retrieval and locked door opening",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 15.0,
+          "std_steps": 0.0,
+          "median_steps": 15.0,
+          "mean_reward": 0.9766,
+          "std_reward": 0.0,
+          "mean_duration_ms": 63.1902,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 4: PutNext",
+          "env_name": "BabyAI-PutNextLocal-v0",
+          "description": "Relational spatial goal placement (item next to landmark)",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 18.0,
+          "std_steps": 0.0,
+          "median_steps": 18.0,
+          "mean_reward": 0.8734,
+          "std_reward": 0.0,
+          "mean_duration_ms": 91.8287,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 5: Unblock",
+          "env_name": "BabyAI-BlockedUnlockPickup-v0",
+          "description": "Causal obstacle unblocking detour + key fetch + locked door",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 42.0,
+          "std_steps": 0.0,
+          "median_steps": 42.0,
+          "mean_reward": 0.9344,
+          "std_reward": 0.0,
+          "mean_duration_ms": 118.7807,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 6: Sequence",
+          "env_name": "BabyAI-GoToSeqS5R2-v0",
+          "description": "Sequential multi-subgoal instructions across partitioned spaces",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 27.0,
+          "std_steps": 0.0,
+          "median_steps": 27.0,
+          "mean_reward": 0.757,
+          "std_reward": 0.0,
+          "mean_duration_ms": 73.1025,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Tier 7: Synthesis",
+          "env_name": "BabyAI-SynthS5R2-v0",
+          "description": "Full compositional synthesis combining doors, keys, and objects",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 39.0,
+          "std_steps": 0.0,
+          "median_steps": 39.0,
+          "mean_reward": 0.766,
+          "std_reward": 0.0,
+          "mean_duration_ms": 121.031,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        },
+        {
+          "tier_id": "Apex: BossLevel",
+          "env_name": "BabyAI-BossLevel-v0",
+          "description": "Full-horizon compound missions across multi-room mazes",
+          "n_episodes": 1,
+          "n_successes": 1,
+          "success_rate": 1.0,
+          "ci_95_low": 0.2065,
+          "ci_95_high": 1.0,
+          "mean_steps": 85.0,
+          "std_steps": 0.0,
+          "median_steps": 85.0,
+          "mean_reward": 0.9668,
+          "std_reward": 0.0,
+          "mean_duration_ms": 588.6228,
+          "total_llm_tokens": 0,
+          "failure_reasons": {}
+        }
+      ]
     },
     "sokoban": {
       "domain": "Sokoban",
@@ -138,7 +879,7 @@
         0.566,
         1.0
       ],
-      "mean_steps": 31.6,
+      "mean_steps": 42.2,
       "metric_name": "Success Rate (0 Deadlocks)",
       "token_cost": 0,
       "dollar_cost": 0.0,
@@ -154,7 +895,7 @@
               0.207,
               1.0
             ],
-            "mean_steps": 27.0,
+            "mean_steps": 9.0,
             "deadlock_count": 0
           },
           "tier_2_obstacle_navigation": {
@@ -166,7 +907,7 @@
               0.207,
               1.0
             ],
-            "mean_steps": 24.0,
+            "mean_steps": 14.0,
             "deadlock_count": 0
           },
           "tier_3_corner_deadlock_avoidance": {
@@ -178,7 +919,7 @@
               0.207,
               1.0
             ],
-            "mean_steps": 42.0,
+            "mean_steps": 44.0,
             "deadlock_count": 0
           },
           "tier_4_multi_box_assignment": {
@@ -190,7 +931,7 @@
               0.207,
               1.0
             ],
-            "mean_steps": 33.0,
+            "mean_steps": 90.0,
             "deadlock_count": 0
           },
           "tier_5_combinatorial_maze": {
@@ -202,7 +943,7 @@
               0.207,
               1.0
             ],
-            "mean_steps": 32.0,
+            "mean_steps": 54.0,
             "deadlock_count": 0
           }
         },
@@ -213,7 +954,7 @@
           0.566,
           1.0
         ],
-        "overall_mean_steps": 31.6
+        "overall_mean_steps": 42.2
       }
     },
     "overcooked": {
@@ -303,6 +1044,25 @@
           1.0
         ],
         "overall_mean_steps": 59.0
+      }
+    },
+    "arc_agi_3": {
+      "domain": "ARC-AGI-3",
+      "simulator": "Official ARC Prize 3 Engine",
+      "literature_baseline": "< 5% (RL exploration limits)",
+      "llm_baseline": "0.0% (Hallucination)",
+      "episodes": 4,
+      "success_rate": 0.75,
+      "ci_95": [
+        0.301,
+        0.954
+      ],
+      "mean_efficiency": 117.5,
+      "metric_name": "Level Completion Rate",
+      "token_cost": 0,
+      "dollar_cost": 0.0,
+      "raw_data": {
+        "markdown": "# Official ARC-AGI-3 Interactive Reasoning Benchmark Report\n**Evaluation Date**: 2026-09-17 22:01:34\n**Overall Level Completion Rate**: **3/4 (75.0%)**\n**Mean Fluid Action Efficiency**: **117.5%** (vs Human Baseline)\n**Mean Epistemic Brier Uncertainty**: **0.2201**\n**Total Actions Executed**: 194 across 2 environment(s)\n**Total Evaluation Time**: 9.29s\n\n## 1. Environment Performance Breakdown\n| Environment | Levels Completed | Win Rate | Actions Taken | Human Baseline | Efficiency | Brier Error |\n|---|---|---|---|---|---|---|\n| `wa30` | 2/2 | 100.0% | 95 | 190 | **199.5%** | 0.0105 |\n| `ls20` | 1/2 | 50.0% | 99 | 145 | **35.5%** | 0.4297 |\n\n## 2. Level-by-Level Trace & Causal Dynamics\n### Environment: `wa30`\n| Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |\n|---|---|---|---|---|---|---|\n| Level 1 | **PASSED** | 36 | 71 | 197.2% | 0.0173 | `A1:(-4,+0), A2:(+4,+0), A3:(+0,-3), A4:(+0,+4), A5:(+0,+0)` |\n| Level 2 | **PASSED** | 59 | 119 | 201.7% | 0.0037 | `A1:(-4,+0), A2:(+4,+0), A3:(+0,-4), A4:(+0,+4), A5:(+0,+0)` |\n\n### Environment: `ls20`\n| Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |\n|---|---|---|---|---|---|---|\n| Level 1 | **PASSED** | 31 | 22 | 71.0% | 0.0133 | `A1:(-5,+0), A2:(+5,+0), A3:(+0,-5), A4:(+0,+5)` |\n| Level 2 | **ACTIVE** | 68 | 123 | 0.0% | 0.8461 | `A1:(-5,+0), A2:(+5,+0), A3:(+0,-5), A4:(+0,+5)` |\n"
       }
     }
   }
