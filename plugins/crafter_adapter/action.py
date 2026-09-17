@@ -160,6 +160,42 @@ class CrafterActionAdapter:
                 produces=["has(iron_pickaxe)"],
             ),
             ActionNode(
+                id="act_make_wood_sword",
+                intent="make_wood_sword",
+                requirements=["has(wood, 1)", "near(crafting_table)"],
+                produces=["has(wood_sword)"],
+            ),
+            ActionNode(
+                id="act_make_stone_sword",
+                intent="make_stone_sword",
+                requirements=["has(wood, 1)", "has(stone, 1)", "near(crafting_table)"],
+                produces=["has(stone_sword)"],
+            ),
+            ActionNode(
+                id="act_make_iron_sword",
+                intent="make_iron_sword",
+                requirements=[
+                    "has(wood, 1)",
+                    "has(coal, 1)",
+                    "has(iron, 1)",
+                    "near(crafting_table)",
+                    "near(furnace)",
+                ],
+                produces=["has(iron_sword)"],
+            ),
+            ActionNode(
+                id="act_place_stone",
+                intent="place_stone",
+                requirements=["has(stone, 1)"],
+                produces=["has(place_stone)"],
+            ),
+            ActionNode(
+                id="act_place_plant",
+                intent="place_plant",
+                requirements=["has(sapling, 1)"],
+                produces=["has(place_plant)"],
+            ),
+            ActionNode(
                 id="act_collect_diamond",
                 intent="collect_diamond",
                 requirements=["has(iron_pickaxe)", "near(diamond)"],
@@ -372,6 +408,34 @@ class CrafterActionAdapter:
             if act:
                 return act
             return CrafterAction.MAKE_IRON_PICKAXE
+
+        if intent == "make_wood_sword":
+            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
+                act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
+                if act:
+                    return act
+            return CrafterAction.MAKE_WOOD_SWORD
+
+        if intent == "make_stone_sword":
+            if not self._is_near(obs, CrafterObject.CRAFTING_TABLE, radius=1):
+                act = self._navigate_and_interact(obs, CrafterObject.CRAFTING_TABLE, face_only=True)
+                if act:
+                    return act
+            return CrafterAction.MAKE_STONE_SWORD
+
+        if intent == "make_iron_sword":
+            act = self._navigate_to_overlap(
+                obs, CrafterObject.CRAFTING_TABLE, CrafterObject.FURNACE
+            )
+            if act:
+                return act
+            return CrafterAction.MAKE_IRON_SWORD
+
+        if intent == "place_stone":
+            return CrafterAction.PLACE_STONE
+
+        if intent == "place_plant":
+            return CrafterAction.PLACE_PLANT
 
         if intent in ("collect_diamond", "approach_diamond"):
             act = self._navigate_and_interact(obs, CrafterObject.DIAMOND)

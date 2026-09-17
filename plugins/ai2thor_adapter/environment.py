@@ -92,38 +92,64 @@ class NativeAI2ThorWrapper:
 
         seed_offset = self.seed or 0
 
-        target_obj = pickupable[seed_offset % len(pickupable)].objectId if pickupable else "Apple"
-        valid_receptacles = [r for r in receptacles if r.objectId != target_obj]
-        target_rec = (
-            valid_receptacles[(seed_offset + 1) % len(valid_receptacles)].objectId
-            if valid_receptacles
-            else "CounterTop"
-        )
+        target_obj_meta = pickupable[seed_offset % len(pickupable)] if pickupable else None
+        target_obj = target_obj_meta.objectId if target_obj_meta else "Apple"
 
         if self.tier == 1:
+            target_obj = (
+                pickupable[seed_offset % len(pickupable)].objectId if pickupable else "Apple"
+            )
             return AI2ThorGoal(
                 target_object_id=target_obj,
                 target_receptacle_id=None,
                 raw_instruction=f"Pick up {target_obj}",
             )
         elif self.tier == 2:
-            rec_id = openable[seed_offset % len(openable)].objectId if openable else target_rec
+            rec_id = openable[seed_offset % len(openable)].objectId if openable else "Cabinet"
             return AI2ThorGoal(
                 target_object_id=None,
                 target_receptacle_id=rec_id,
                 raw_instruction=f"Open {rec_id}",
             )
         elif self.tier == 3:
+            # Tier 3: Surface Relocation onto valid receptacle
+            valid_receptacles = [r for r in receptacles if r.objectId != target_obj]
+            rec_id = (
+                valid_receptacles[(seed_offset + 1) % len(valid_receptacles)].objectId
+                if valid_receptacles
+                else "CounterTop"
+            )
             return AI2ThorGoal(
                 target_object_id=target_obj,
-                target_receptacle_id=target_rec,
-                raw_instruction=f"Put {target_obj} on {target_rec}",
+                target_receptacle_id=rec_id,
+                raw_instruction=f"Put {target_obj} on {rec_id}",
             )
         else:
+            # Tier 4: Container Transfer into enclosed openable containers (Cabinet, Fridge, Microwave, Drawer)
+            containers = [r for r in receptacles if r.isOpenable]
+            container = containers[seed_offset % len(containers)] if containers else None
+            rec_id = container.objectId if container else "Cabinet"
+            c_type = container.objectType if container else "Cabinet"
+            if c_type == "Drawer":
+                valid_objs = [o for o in pickupable if o.objectType not in ("Pan", "Pot", "Kettle")]
+            elif c_type == "Microwave":
+                valid_objs = [
+                    o
+                    for o in pickupable
+                    if o.objectType
+                    in ("Bowl", "Plate", "Mug", "Cup", "Egg", "Potato", "Apple", "Bread")
+                ]
+            else:
+                valid_objs = pickupable
+            target_obj = (
+                valid_objs[seed_offset % len(valid_objs)].objectId
+                if valid_objs
+                else (pickupable[0].objectId if pickupable else "Apple")
+            )
             return AI2ThorGoal(
                 target_object_id=target_obj,
-                target_receptacle_id=target_rec,
-                raw_instruction=f"Put {target_obj} in {target_rec}",
+                target_receptacle_id=rec_id,
+                raw_instruction=f"Put {target_obj} in {rec_id}",
             )
 
     def reset(self, seed: int | None = None) -> tuple[AI2ThorObservation, dict[str, Any]]:

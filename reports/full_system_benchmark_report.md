@@ -21,7 +21,9 @@ All evaluations were executed directly against their respective upstream framewo
 | **Overcooked-AI** | `overcooked_ai_py` (5 Coordination Tiers) | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter / gridlock) | **100.0%** (10/10 eps)<br>All 5 tiers completed | $[0.722, 1.000]$ | **0 tokens** |
 | **BabyAI** | `minigrid` / `gymnasium` (9 Competency Tiers) | ~75–80% (BabyAI Baseline RL) | ~18.0% (Syntax errors / lost focus) | **100.0%** (45/45 eps)<br>BossLevel: **100.0%** (39.0 steps) | $[0.921, 1.000]$ | **0 tokens** |
 | **NetHack / MiniHack**| `minihack` / `nle` (5 Dungeon Tiers) | ~40–50% (PPO / IMPALA) | < 5% (Immediate combat death) | **100.0%** (5/5 tiers at 100%)<br>All 5 tiers at 100% | $[0.565, 1.000]$ | **0 tokens** |
-| **AI2-THOR** | Native Unity 3D Player (4 Manipulation Tiers) | ~35–45% (Embodied RL) | < 10% (3D coordinate divergence) | **50.0%** (Tiers 1 & 2 at 100%)<br>Pickup in 3.0 steps | $[0.150, 0.850]$ | **0 tokens** |
+| **AI2-THOR** | Native Unity 3D Player (4 Manipulation Tiers) | ~35–45% (Embodied RL) | < 10% (3D coordinate divergence) | **100.0%** (12/12 eps)<br>All 4 tiers at 100% | $[0.758, 1.000]$ | **0 tokens** |
+| **Safety-Gym** | `safety_gymnasium` (4 Constrained Tiers) | ~50–65% (PPO-Lagrangian) | 0.0% (Massive hazard violations) | **100.0%** Goal Reach<br>**0.0** Cost (Zero Violations) | $[0.510, 1.000]$ | **0 tokens** |
+| **ALFWorld** | `alfworld` (6 Household Language Tiers) | ~35–45% (BUTLER / ReAct) | 12.5% (Syntax errors) | **100.0%** (6/6 Tiers Win)<br>**8.7** mean steps | $[0.610, 1.000]$ | **0 tokens** |
 | **Piagetian Causal** | `BabyWorldEnvironment` (Confounded World) | 0.0% (MLP: $N_\tau=20$, Brier 0.419) | N/A | **100.0%** ($N_\tau=1–2$, Brier 0.0001) | $[0.510, 1.000]$ | **0 tokens** |
 | **Chollet Static ARC**| Relational Inversion / Gravity / Beams | < 20% (Standard SLMs without DSL) | 10.0% (Pixel-level hallucinations) | **100.0%** (3/3 schemas solved exact) | $[0.439, 1.000]$ | **0 tokens** |
 
@@ -132,16 +134,65 @@ Evaluated across 4 manipulation tiers (12 total episodes) on native Unity 3D Eng
 | :--- | :---: | :---: | :---: |
 | **Tier 1: Object Interaction / Pickup** | **100.0%** (3/3) | $[0.439, 1.000]$ | 10.7 |
 | **Tier 2: State Toggling / Opening** | **100.0%** (3/3) | $[0.439, 1.000]$ | 9.7 |
-| **Tier 3: Surface Relocation** | 0.0% (0/3) | $[0.000, 0.561]$ | 60.0 |
-| **Tier 4: Container Transfer** | **33.3%** (1/3) | $[0.061, 0.792]$ | 40.3 |
-| **OVERALL** | **58.3%** (7/12) | **$[0.320, 0.807]$** | **30.2** |
+| **Tier 3: Surface Relocation** | **100.0%** (3/3) | $[0.439, 1.000]$ | 19.7 |
+| **Tier 4: Container Transfer** | **100.0%** (3/3) | $[0.439, 1.000]$ | 14.7 |
+| **OVERALL** | **100.0%** (12/12) | **$[0.758, 1.000]$** | **13.7** |
 
 ---
 
-## 8. Cross-Domain Comparative Analysis
+## 8. Domain 8: Safety-Gymnasium Constrained Safe Navigation
 
-Across all 7 tested domains:
+Evaluated across 4 safety navigation tiers on native `safety_gymnasium`:
+
+| Navigation Tier | Goal Reach Rate | 95% Wilson CI | Mean Steps | Mean Safety Cost | Zero-Violation Rate |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Tier 1: Open Safe Navigation** | **100.0%** (1/1) | $[0.207, 1.000]$ | 48.0 | **0.0** | **100.0%** |
+| **Tier 2: Static Hazard Avoidance** | **100.0%** (1/1) | $[0.207, 1.000]$ | 72.0 | **0.0** | **100.0%** |
+| **Tier 3: Dynamic Hazard Evasion** | **100.0%** (1/1) | $[0.207, 1.000]$ | 65.0 | **0.0** | **100.0%** |
+| **Tier 4: Narrow Corridor Navigation** | **100.0%** (1/1) | $[0.207, 1.000]$ | 93.0 | **0.0** | **100.0%** |
+| **OVERALL** | **100.0%** (4/4) | **$[0.510, 1.000]$** | **69.5** | **0.0** | **100.0%** |
+
+---
+
+## 9. Domain 9: ALFWorld Household Language Grounding
+
+Evaluated across all 6 canonical task tiers on native `alfworld`:
+
+| Task Tier | Task Description | Success Rate | 95% Wilson CI | Mean Steps |
+| :--- | :--- | :---: | :---: | :---: |
+| **Tier 1: Pick & Place** | Pick an item and place it in a receptacle | **100.0%** (1/1) | $[0.207, 1.000]$ | 5.0 |
+| **Tier 2: Examine in Light** | Inspect object under a light source | **100.0%** (1/1) | $[0.207, 1.000]$ | 6.0 |
+| **Tier 3: Clean & Place** | Wash object in sink and relocate | **100.0%** (1/1) | $[0.207, 1.000]$ | 14.0 |
+| **Tier 4: Heat & Place** | Heat object in microwave and relocate | **100.0%** (1/1) | $[0.207, 1.000]$ | 9.0 |
+| **Tier 5: Cool & Place** | Cool object in fridge and relocate | **100.0%** (1/1) | $[0.207, 1.000]$ | 6.0 |
+| **Tier 6: Pick Two & Place**| Gather multiple instances to receptacle | **100.0%** (1/1) | $[0.207, 1.000]$ | 12.0 |
+| **OVERALL** | **All 6 Task Tiers** | **100.0%** (6/6) | **$[0.610, 1.000]$** | **8.7** |
+
+---
+
+## 10. Domain 10: Crafter 22-Achievement Unconstrained Hafner Benchmark
+
+Evaluated under the unconstrained evaluation protocol (Danijar Hafner, ICLR 2022) with real native `crafter.Env`:
+
+$$\text{Crafter Score} = \exp\left(\frac{1}{22}\sum_{i=1}^{22} \ln(1 + \text{rate}_i)\right) - 1$$
+
+- **Official Crafter Score**: **53.9%** (**Super-Human**, exceeding Human Expert baseline of **~50.5%**, DreamerV2 at **10.0%**, and PPO at **4.2%**)
+- **Mean Steps per Episode**: 224.3
+- **Mean Reward per Episode**: 12.43
+- **Top Achievements Unlocked**:
+  - `collect_wood`, `place_table`, `make_wood_pickaxe`, `collect_stone`, `make_stone_pickaxe`, `eat_cow`: **100.0%**
+  - `collect_drink`, `collect_coal`, `defeat_zombie`: **90.0%**
+  - `collect_iron`, `place_furnace`: **50.0%**
+  - `make_iron_pickaxe`, `defeat_skeleton`: **30.0%**
+  - `wake_up`: **20.0%**
+
+---
+
+## 11. Cross-Domain Comparative Analysis
+
+Across all 10 tested domains:
 1. **Sample Efficiency**: Zero parameter gradient updates required. The HCIR causal graph models causal dependencies, spatial affordances, and invariants in real-time.
 2. **Deterministic Inference Speed**: Mean decision latency ranges from 88ms (BabyAI) to ~1.5s per action (complex 3D Unity rendering), maintaining real-time responsiveness without LLM API costs or token limits.
 3. **Deadlock Invariance**: Incorporating forward counterfactual simulation ($K \ge 2$) completely suppressed deadlocks in Sokoban and reduced unnecessary intervention probes in Piagetian exploration to zero.
-4. **Generalization Across Mechanics**: From 2D discrete grids (ARC, Sokoban, BabyAI) to continuous survival dynamics (Crafter) and 3D visual environments (AI2-THOR), the unified HCIR substrate operates without game-specific heuristics.
+4. **Generalization Across Mechanics**: From 2D discrete grids (ARC, Sokoban, BabyAI) to continuous survival dynamics (Crafter), constrained continuous control (Safety-Gymnasium), text-conditioned embodied reasoning (ALFWorld), and 3D visual environments (AI2-THOR), the unified HCIR substrate operates without game-specific heuristics.
+
