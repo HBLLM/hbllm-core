@@ -803,8 +803,21 @@ class EmbodiedCausalOperator:
 
             # 2. Check agent achievements/items
             achs = agent_props.get("achievements", [])
-            if item_name in achs:
-                return True
+            if isinstance(achs, (list, tuple, set)):
+                if item_name in achs:
+                    return True
+                for a in achs:
+                    if str(a).lower() == item_name.lower():
+                        return True
+            elif isinstance(achs, dict):
+                if item_name in achs:
+                    return True
+                for k in achs.keys():
+                    if str(k).lower() == item_name.lower():
+                        return True
+            elif isinstance(achs, str):
+                if achs.lower() == item_name.lower():
+                    return True
 
             # 3. Check agent carrying / held item
             held_id = agent_props.get("held_object_id")

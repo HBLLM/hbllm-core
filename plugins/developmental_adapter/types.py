@@ -20,7 +20,7 @@ from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionType as BeliefTransitionType,
 )
 from hbllm.hcir.world.causal_discovery import (
-    CausalHypothesis as BaseCausalHypothesis,
+    CausalHypothesis as CausalHypothesis,
 )
 from hbllm.hcir.world.spatial_containment import (
     SpatialRelationFact as BaseSpatialRelationFact,
@@ -171,13 +171,6 @@ class DevelopmentalProfile:
             and len(self.procedural_skills) == 0
             and len(self.lexical_mapping) == 0
         )
-
-
-@dataclass
-class CausalHypothesis(BaseCausalHypothesis):
-    """State tracker for candidate causal relationships."""
-
-    action: BabyActionType = BabyActionType.PUSH
 
 
 @dataclass

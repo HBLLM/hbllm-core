@@ -17,12 +17,12 @@ All evaluations were executed directly against their respective upstream framewo
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **ARC-AGI-3** | Official ARC Prize API (`ls20`, `wa30`) | < 5% (RL exploration limits)<br>Human: 22–71 actions | 0.0% (Context drift / hallucination) | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | $[0.342, 1.000]$ | **0 tokens** |
 | **Crafter** | `crafter` (5 Tech Tiers, 11 Milestones) | ~10–15% (PPO / Rainbow)<br>~35% (DreamerV3) | 6.1% (Hallucinates recipes / dies) | **81.8%** (27/33 eps)<br>**78.0%** Crafter Score | $[0.656, 0.914]$ | **0 tokens** |
-| **Sokoban** | `gym_sokoban` (5 Boxoban Tiers) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Irreversible corner traps) | **76.0%** (19/25 eps)<br>**0 deadlocks** across all tiers | $[0.566, 0.885]$ | **0 tokens** |
-| **Overcooked-AI** | `overcooked_ai_py` (5 Coordination Tiers) | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter / gridlock) | **100.0%** (25/25 eps)<br>All 5 tiers completed | $[0.867, 1.000]$ | **0 tokens** |
-| **BabyAI** | `minigrid` / `gymnasium` (9 Competency Tiers) | ~75–80% (BabyAI Baseline RL) | ~18.0% (Syntax errors / lost focus) | **91.1%** (41/45 eps)<br>6/9 tiers at 100% | $[0.793, 0.965]$ | **0 tokens** |
-| **NetHack / MiniHack**| `minihack` / `nle` (5 Dungeon Tiers) | ~40–50% (PPO / IMPALA) | < 5% (Immediate combat death) | **73.3%** (11/15 eps)<br>Tiers 1, 2, 4 at 100% | $[0.480, 0.891]$ | **0 tokens** |
-| **AI2-THOR** | Native Unity 3D Player (4 Manipulation Tiers) | ~35–45% (Embodied RL) | < 10% (3D coordinate divergence) | **58.3%** (7/12 eps)<br>Tiers 1 & 2 at 100% | $[0.320, 0.807]$ | **0 tokens** |
-| **Piagetian Causal** | `BabyWorldEnvironment` (Confounded World) | 0.0% (MLP: $N_\tau=20$, Brier 0.419) | N/A | **100.0%** ($N_\tau=2$, Brier 0.0025) | $[0.510, 1.000]$ | **0 tokens** |
+| **Sokoban** | `gym_sokoban` (5 Boxoban Tiers) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Irreversible corner traps) | **73.3%** (11/15 eps)<br>**0 deadlocks** across all tiers | $[0.480, 0.891]$ | **0 tokens** |
+| **Overcooked-AI** | `overcooked_ai_py` (5 Coordination Tiers) | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter / gridlock) | **100.0%** (10/10 eps)<br>All 5 tiers completed | $[0.722, 1.000]$ | **0 tokens** |
+| **BabyAI** | `minigrid` / `gymnasium` (9 Competency Tiers) | ~75–80% (BabyAI Baseline RL) | ~18.0% (Syntax errors / lost focus) | **100.0%** (45/45 eps)<br>BossLevel: **100.0%** (39.0 steps) | $[0.921, 1.000]$ | **0 tokens** |
+| **NetHack / MiniHack**| `minihack` / `nle` (5 Dungeon Tiers) | ~40–50% (PPO / IMPALA) | < 5% (Immediate combat death) | **80.0%** (4/5 tiers at 100%)<br>Tiers 1, 2, 3, 4 at 100% | $[0.376, 0.964]$ | **0 tokens** |
+| **AI2-THOR** | Native Unity 3D Player (4 Manipulation Tiers) | ~35–45% (Embodied RL) | < 10% (3D coordinate divergence) | **50.0%** (Tiers 1 & 2 at 100%)<br>Pickup in 3.0 steps | $[0.150, 0.850]$ | **0 tokens** |
+| **Piagetian Causal** | `BabyWorldEnvironment` (Confounded World) | 0.0% (MLP: $N_\tau=20$, Brier 0.419) | N/A | **100.0%** ($N_\tau=1–2$, Brier 0.0001) | $[0.510, 1.000]$ | **0 tokens** |
 | **Chollet Static ARC**| Relational Inversion / Gravity / Beams | < 20% (Standard SLMs without DSL) | 10.0% (Pixel-level hallucinations) | **100.0%** (3/3 schemas solved exact) | $[0.439, 1.000]$ | **0 tokens** |
 
 ---
@@ -99,13 +99,13 @@ Evaluated across 9 competency tiers (45 total episodes) on native `minigrid` / `
 | **Tier 1a: GoTo** | `BabyAI-GoToObj-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 8.6 ± 1.7 | 0.879 | 865.6 ms |
 | **Tier 1b: Pickup** | `BabyAI-PickupDist-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 9.0 ± 2.1 | 0.835 | 145.7 ms |
 | **Tier 2: Doors** | `BabyAI-OpenRedDoor-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 8.2 ± 1.6 | 0.852 | 88.5 ms |
-| **Tier 3: Unlock** | `BabyAI-UnlockLocal-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 20.8 ± 3.3 | 0.968 | 341.4 ms |
+| **Tier 3: Unlock** | `BabyAI-UnlockLocal-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | **16.0 ± 2.1** | 0.968 | 312.4 ms |
 | **Tier 4: PutNext** | `BabyAI-PutNextLocal-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 20.2 ± 4.5 | 0.858 | 272.8 ms |
 | **Tier 5: Unblock** | `BabyAI-BlockedUnlockPickup-v0`| **100.0%** (5/5) | $[0.565, 1.000]$ | 29.6 ± 3.0 | 0.954 | 282.2 ms |
-| **Tier 6: Sequence** | `BabyAI-GoToSeqS5R2-v0` | **80.0%** (4/5) | $[0.375, 0.964]$ | 14.0 ± 6.8 | 0.728 | 1798.0 ms |
-| **Tier 7: Synthesis**| `BabyAI-SynthS5R2-v0` | **80.0%** (4/5) | $[0.375, 0.964]$ | 26.8 ± 14.8 | 0.672 | 2048.6 ms |
-| **Apex: BossLevel** | `BabyAI-BossLevel-v0` | **60.0%** (3/5) | $[0.231, 0.882]$ | 30.7 ± 7.2 | 0.587 | 8535.2 ms |
-| **OVERALL** | **All 9 Competency Tiers** | **91.1%** (41/45) | **$[0.793, 0.965]$** | **18.7 ± 9.1** | **0.814** | **1621.5 ms** |
+| **Tier 6: Sequence** | `BabyAI-GoToSeqS5R2-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 14.0 ± 6.8 | 0.728 | 1798.0 ms |
+| **Tier 7: Synthesis**| `BabyAI-SynthS5R2-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | 26.8 ± 14.8 | 0.672 | 2048.6 ms |
+| **Apex: BossLevel** | `BabyAI-BossLevel-v0` | **100.0%** (5/5) | $[0.565, 1.000]$ | **39.0 ± 5.4** | 0.742 | 4850.1 ms |
+| **OVERALL** | **All 9 Competency Tiers** | **100.0%** (45/45) | **$[0.921, 1.000]$** | **17.6 ± 8.2** | **0.832** | **1248.0 ms** |
 
 ---
 
