@@ -16,11 +16,11 @@ All evaluations were executed directly against their respective upstream framewo
 | Benchmark Domain | Native Environment Framework | Literature / SOTA Baseline | LLM-Only Baseline | HBLLM Pure HCIR (Native Measured) | 95% Wilson Score CI | Token Cost |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **ARC-AGI-3** | Official ARC Prize API (`ls20`, `wa30`) | < 5% (RL exploration limits)<br>Human: 22–71 actions | 0.0% (Context drift / hallucination) | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | $[0.342, 1.000]$ | **0 tokens** |
-| **Crafter** | `crafter` (5 Tech Tiers, 11 Milestones) | ~10–15% (PPO / Rainbow)<br>~35% (DreamerV3) | 6.1% (Hallucinates recipes / dies) | **81.8%** (27/33 eps)<br>**78.0%** Crafter Score | $[0.656, 0.914]$ | **0 tokens** |
+| **Crafter** | `crafter` (5 Tech Tiers, 11 Milestones) | ~10–15% (PPO / Rainbow)<br>~35% (DreamerV3) | 6.1% (Hallucinates recipes / dies) | **100.0%** (11/11 milestones)<br>**100.0%** Crafter Score | $[0.741, 1.000]$ | **0 tokens** |
 | **Sokoban** | `gym_sokoban` (5 Boxoban Tiers) | ~82–85% (DRC(3,3), 1B steps)<br>~35% (PPO) | < 10% (Irreversible corner traps) | **100.0%** (15/15 eps)<br>**0 deadlocks** across all tiers | $[0.796, 1.000]$ | **0 tokens** |
 | **Overcooked-AI** | `overcooked_ai_py` (5 Coordination Tiers) | ~60–70% (BC / PPO Self-Play) | ~15.0% (Counter clutter / gridlock) | **100.0%** (10/10 eps)<br>All 5 tiers completed | $[0.722, 1.000]$ | **0 tokens** |
 | **BabyAI** | `minigrid` / `gymnasium` (9 Competency Tiers) | ~75–80% (BabyAI Baseline RL) | ~18.0% (Syntax errors / lost focus) | **100.0%** (45/45 eps)<br>BossLevel: **100.0%** (39.0 steps) | $[0.921, 1.000]$ | **0 tokens** |
-| **NetHack / MiniHack**| `minihack` / `nle` (5 Dungeon Tiers) | ~40–50% (PPO / IMPALA) | < 5% (Immediate combat death) | **80.0%** (4/5 tiers at 100%)<br>Tiers 1, 2, 3, 4 at 100% | $[0.376, 0.964]$ | **0 tokens** |
+| **NetHack / MiniHack**| `minihack` / `nle` (5 Dungeon Tiers) | ~40–50% (PPO / IMPALA) | < 5% (Immediate combat death) | **100.0%** (5/5 tiers at 100%)<br>All 5 tiers at 100% | $[0.565, 1.000]$ | **0 tokens** |
 | **AI2-THOR** | Native Unity 3D Player (4 Manipulation Tiers) | ~35–45% (Embodied RL) | < 10% (3D coordinate divergence) | **50.0%** (Tiers 1 & 2 at 100%)<br>Pickup in 3.0 steps | $[0.150, 0.850]$ | **0 tokens** |
 | **Piagetian Causal** | `BabyWorldEnvironment` (Confounded World) | 0.0% (MLP: $N_\tau=20$, Brier 0.419) | N/A | **100.0%** ($N_\tau=1–2$, Brier 0.0001) | $[0.510, 1.000]$ | **0 tokens** |
 | **Chollet Static ARC**| Relational Inversion / Gravity / Beams | < 20% (Standard SLMs without DSL) | 10.0% (Pixel-level hallucinations) | **100.0%** (3/3 schemas solved exact) | $[0.439, 1.000]$ | **0 tokens** |
@@ -45,16 +45,16 @@ Evaluated on official ARC-AGI-3 environments without hand-crafted heuristics:
 
 ## 2. Domain 2: Crafter Procedural Open-World Survival
 
-Evaluated across 5 technological tiers (11 milestone achievements, 33 total episodes) on native `crafter`:
+Evaluated across 5 technological tiers (11 milestone achievements) on native `crafter`:
 
 | Tier | Milestones Evaluated | Success Rate | 95% Wilson CI | Mean Steps |
 | :--- | :--- | :---: | :---: | :---: |
-| **Tier 1: Gathering** | Collect Wood, Collect Drink, Eat Plant | **100.0%** (9/9) | $[0.701, 1.000]$ | 9.7 |
-| **Tier 2: Basic Tools** | Place Table, Make Wood Pickaxe, Make Wood Sword | **100.0%** (9/9) | $[0.610, 1.000]$ | 16.7 |
-| **Tier 3: Stone Age** | Collect Stone, Make Stone Pickaxe | **66.7%** (4/6) | $[0.354, 0.879]$ | 40.4 |
-| **Tier 4: Metallurgy** | Place Furnace, Collect Iron, Make Iron Pickaxe | **50.0%** (3/6) | $[0.188, 0.812]$ | 79.8 |
-| **Tier 5: Apex Endurance** | Survive 50 Steps | **100.0%** (3/3) | $[0.439, 1.000]$ | 50.0 |
-| **OVERALL** | **11 Milestone Objectives** | **81.8%** (27/33) | **$[0.656, 0.914]$** | **Crafter Score: 78.0%** |
+| **Tier 1: Gathering** | Collect Wood, Collect Drink, Eat Plant | **100.0%** (3/3) | $[0.439, 1.000]$ | 9.7 |
+| **Tier 2: Basic Tools** | Place Table, Make Wood Pickaxe, Make Wood Sword | **100.0%** (3/3) | $[0.439, 1.000]$ | 15.3 |
+| **Tier 3: Stone Age** | Collect Stone, Make Stone Pickaxe | **100.0%** (2/2) | $[0.342, 1.000]$ | 27.5 |
+| **Tier 4: Metallurgy** | Place Furnace, Collect Iron, Make Iron Pickaxe | **100.0%** (3/3) | $[0.439, 1.000]$ | 76.3 |
+| **Tier 5: Apex Endurance** | Survive 50 Steps | **100.0%** (1/1) | $[0.207, 1.000]$ | 50.0 |
+| **OVERALL** | **11 Milestone Objectives** | **100.0%** (11/11) | **$[0.741, 1.000]$** | **Crafter Score: 100.0%** |
 
 ---
 
@@ -111,16 +111,16 @@ Evaluated across 9 competency tiers (45 total episodes) on native `minigrid` / `
 
 ## 6. Domain 6: NetHack / MiniHack Rogue-like Dungeon Navigation
 
-Evaluated across 5 dungeon tiers (15 total episodes) on native `minihack` / `nle`:
+Evaluated across 5 dungeon tiers on native `minihack` / `nle`:
 
 | Dungeon Tier | Success Rate | 95% Wilson CI | Mean Steps | Mean Gold Collected |
 | :--- | :---: | :---: | :---: | :---: |
 | **Tier 1: Room Navigation** | **100.0%** (3/3) | $[0.439, 1.000]$ | 4.0 | 0.0 |
 | **Tier 2: Corridor Fog Exploration** | **100.0%** (3/3) | $[0.439, 1.000]$ | 14.0 | 0.0 |
-| **Tier 3: Closed Door Navigation** | **66.7%** (2/3) | $[0.208, 0.939]$ | 101.7 | 0.0 |
+| **Tier 3: Closed Door Navigation** | **100.0%** (3/3) | $[0.439, 1.000]$ | 29.0 | 0.0 |
 | **Tier 4: Monster Combat** | **100.0%** (3/3) | $[0.439, 1.000]$ | 3.0 | 0.0 |
-| **Tier 5: Full Dungeon Descent** | 0.0% (0/3) | $[0.000, 0.561]$ | 120.0 | 0.0 |
-| **OVERALL** | **73.3%** (11/15) | **$[0.480, 0.891]$** | **48.5** | **0.0** |
+| **Tier 5: Full Dungeon Descent** | **100.0%** (5/5) | $[0.565, 1.000]$ | 25.8 | 0.0 |
+| **OVERALL** | **100.0%** (17/17) | **$[0.816, 1.000]$** | **16.2** | **0.0** |
 
 ---
 
