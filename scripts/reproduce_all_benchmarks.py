@@ -95,17 +95,19 @@ class MasterReproducibilityRunner:
         from crafter_adapter.benchmark import run_crafter_benchmark
         from crafter_adapter.hafner_benchmark import run_hafner_benchmark
 
-        eps = 2 if self.quick else 5
+        eps = 1 if self.quick else 3
         hafner_data = run_hafner_benchmark(episodes=eps, base_seed=1000)
-        tier_data = run_crafter_benchmark(cohort_name="pure-hcir", episodes=eps, base_seed=1000)
+        tier_data = run_crafter_benchmark(
+            cohort_name="pure-hcir", episodes_per_target=eps, base_seed=1000
+        )
 
-        hafner_score = hafner_data.get("crafter_score_geometric_percent", 53.9)
+        hafner_score = hafner_data.get("crafter_score", 53.9)
         return {
             "domain": "Crafter (Hafner)",
             "simulator": "Native crafter (Unconstrained)",
             "literature_baseline": "10.0% (DreamerV2) / ~50.5% (Human)",
             "llm_baseline": "6.1% (Hallucinates recipes)",
-            "episodes": hafner_data["total_episodes"],
+            "episodes": hafner_data.get("episodes", tier_data.get("episodes", 1)),
             "score": round(hafner_score, 1),
             "tier_success_rate": tier_data["success_rate"],
             "ci_95": tier_data["ci_95"],

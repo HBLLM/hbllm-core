@@ -295,6 +295,8 @@ class CrafterPerceptionAdapter:
     def ingest_goal(self, goal: CrafterGoal | None, obs: CrafterObservation) -> GoalNode:
         """Translate CrafterGoal (or progressive tech-tree roadmap) into an active GoalNode."""
         target_conditions: list[str] = []
+        achs = obs.achievements
+        inv = obs.inventory
 
         # 1. Vital Survival Interrupts
         if obs.vitals.energy <= 1:
@@ -310,8 +312,6 @@ class CrafterPerceptionAdapter:
             ach = goal.target_achievement if goal else None
             if ach is None:
                 # Comprehensive progressive roadmap for unconstrained Hafner benchmark
-                achs = obs.achievements
-                inv = obs.inventory
                 if CrafterAchievement.COLLECT_WOOD not in achs or (
                     inv.wood < 2 and CrafterAchievement.PLACE_TABLE not in achs
                 ):

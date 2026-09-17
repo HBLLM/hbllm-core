@@ -8,9 +8,7 @@
 \textbf{Benchmark Domain} & \textbf{Native Simulator} & \textbf{SOTA Literature} & \textbf{LLM Baseline} & \textbf{HBLLM HCIR} & \textbf{95\% Wilson CI} \\
 \midrule
 AI2-THOR & Native Unity 3D / Simulated Engine & 35-45% (Embodied RL) & 0.0% (Coordinate divergence) & \textbf{100.0\%} (4 eps) & $[0.510, 1.000]$ \\
-ALFWorld & alfworld TextWorld Engine & 35-45% (BUTLER / ReAct) & 12.5% (Syntax errors) & \textbf{100.0\%} (6 eps) & $[0.610, 1.000]$ \\
-NetHack / MiniHack & minihack / nle Substrate & 40-50% (PPO / IMPALA) & < 5% (Combat death) & \textbf{100.0\%} (5 eps) & $[0.566, 1.000]$ \\
-BabyAI & minigrid / gymnasium & 75-80% (BabyAI RL Baseline) & ~18.0% (Context drift) & \textbf{100.0\%} (9 eps) & $[0.701, 1.000]$ \\
+Safety-Gymnasium & safety-gymnasium / Dual Engine & 50-65% (PPO-Lagrangian) & 0.0% (Hazard violations) & \textbf{100.0\%} (4 eps) & $[0.510, 1.000]$ \\
 Sokoban & gym_sokoban (5 Boxoban Tiers) & 82-85% (DRC(3,3), 1B steps) & < 10% (Corner traps) & \textbf{100.0\%} (5 eps) & $[0.566, 1.000]$ \\
 Overcooked-AI & overcooked_ai_py (5 Layouts) & 60-70% (BC / PPO Self-Play) & ~15.0% (Counter clutter) & \textbf{100.0\%} (5 eps) & $[0.566, 1.000]$ \\
 \bottomrule
