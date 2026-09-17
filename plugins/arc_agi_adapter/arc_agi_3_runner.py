@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
+from hbllm.hcir.counterfactual_planner import CounterfactualPlanner, MCTSConfig
 from hbllm.hcir.graph import (
     ActionNode,
     BeliefNode,
@@ -38,6 +38,7 @@ from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
 from hbllm.hcir.types import UncertaintyVector
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.workspace_tiers import InterruptionCheckpoint
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 from hbllm.hcir.world_kernel import WorldKernel
 
@@ -289,6 +290,8 @@ class ARC3InteractiveAgent:
         self.click_candidate_targets: list[tuple[int, int]] = []
         self.last_click_target: tuple[int, int] | None = None
         self.click_step_counter: int = 0
+        self.interruption_stack: list[InterruptionCheckpoint] = []
+        self.level_transition_pending: bool = False
 
     def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal agent hypothesis state for a new level/episode."""
@@ -296,8 +299,9 @@ class ARC3InteractiveAgent:
             self.action_models.clear()
             self.state_mutations.clear()
             self.step_size = 1
+            self.avatar_color = None
+        self.level_transition_pending = retain_dynamics
         self.avatar_centroid = None
-        self.avatar_color = None
         self.goal_centroid = None
         self.last_action_data = None
         self.blocked_actions.clear()
@@ -308,6 +312,7 @@ class ARC3InteractiveAgent:
         self.pushable_colors.clear()
         self.decomposer = HierarchicalGoalDecomposer()
         self.workspace = HCIRWorkspaceState()
+        self.interruption_stack.clear()
         if not retain_dynamics:
             self.world_kernel = WorldKernel(self.workspace)
         else:
@@ -337,6 +342,9 @@ class ARC3InteractiveAgent:
 
     def active_probe_action(self, available_actions: list[int]) -> int:
         """Select exploratory action to maximize causal information gain on motor dynamics."""
+        # Prioritize directional movement actions (1..4) over interactions (5..7)
+        dirs = [a for a in available_actions if a in (1, 2, 3, 4)]
+        pool = dirs if dirs else available_actions
 
         def probe_priority(a: int) -> tuple[int, float]:
             if a not in self.action_models:
@@ -344,7 +352,7 @@ class ARC3InteractiveAgent:
             m = self.action_models[a]
             return (m.probes_tested, m.confidence)
 
-        return min(available_actions, key=probe_priority)
+        return min(pool, key=probe_priority)
 
     def _on_subgoal_resolved(self, subgoal_id: str) -> None:
         """Handle subgoal resolution: update HCIR, clear local gate barriers, and reset transient blocks."""
@@ -384,15 +392,37 @@ class ARC3InteractiveAgent:
         if prev_grid.shape != curr_grid.shape:
             return
 
-        # Pure click environments have no translating avatar
-        if action_id == 6 and not any(a in [1, 2, 3, 4] for a in self.available_actions):
-            if self.last_click_target is not None:
-                changed = not np.array_equal(prev_grid, curr_grid)
-                if changed:
-                    if self.last_click_target not in self.click_active_controls:
-                        self.click_active_controls.append(self.last_click_target)
-                else:
-                    self.click_inert_targets.add(self.last_click_target)
+        # 0. Inter-level transition: do not diff across level boundary
+        if getattr(self, "level_transition_pending", False):
+            self.level_transition_pending = False
+            if self.avatar_color is not None:
+                p_curr = np.where(curr_grid == self.avatar_color)
+                if len(p_curr[0]) > 0:
+                    self.avatar_centroid = (float(np.mean(p_curr[0])), float(np.mean(p_curr[1])))
+            return
+
+        # Actions 5, 6, 7 are non-translating interaction actions (delta_r=0, delta_c=0)
+        if action_id in (5, 6, 7):
+            if action_id not in self.action_models:
+                self.action_models[action_id] = ActionDynamicsModel(
+                    action_id=action_id, delta_r=0, delta_c=0, confidence=0.99, probes_tested=1
+                )
+            else:
+                m = self.action_models[action_id]
+                m.delta_r = 0
+                m.delta_c = 0
+                m.confidence = 0.99
+                m.probes_tested += 1
+
+            # Pure click environments have no translating avatar
+            if action_id == 6 and not any(a in [1, 2, 3, 4] for a in self.available_actions):
+                if self.last_click_target is not None:
+                    changed = not np.array_equal(prev_grid, curr_grid)
+                    if changed:
+                        if self.last_click_target not in self.click_active_controls:
+                            self.click_active_controls.append(self.last_click_target)
+                    else:
+                        self.click_inert_targets.add(self.last_click_target)
             return
 
         # 1. Initialize or maintain barrier mask
@@ -409,7 +439,13 @@ class ARC3InteractiveAgent:
                 r_c, c_c = int(round(self.avatar_centroid[0])), int(round(self.avatar_centroid[1]))
                 if 0 <= r_c < curr_grid.shape[0] and 0 <= c_c < curr_grid.shape[1]:
                     new_c = curr_grid[r_c, c_c]
-                    if new_c != 0 and new_c != self.avatar_color:
+                    new_c_count = int(np.count_nonzero(curr_grid == new_c))
+                    if (
+                        new_c != 0
+                        and new_c != self.avatar_color
+                        and new_c_count <= max(25, int(curr_grid.size * 0.15))
+                        and len(np.unique(curr_grid)) > 1
+                    ):
                         self.state_mutations.append(
                             StateMutationModel(
                                 trigger_type="TILE_CONTACT",
@@ -427,11 +463,33 @@ class ARC3InteractiveAgent:
                         ):
                             self._on_subgoal_resolved(self.active_goal_node.id)
 
+            if len(p_prev[0]) == 0 and len(p_curr[0]) > 0:
+                # Avatar reappeared after flash/hazard/respawn
+                self.avatar_centroid = (float(np.mean(p_curr[0])), float(np.mean(p_curr[1])))
+                return
+
             if len(p_prev[0]) > 0 and len(p_curr[0]) > 0:
                 old_r, old_c = float(np.mean(p_prev[0])), float(np.mean(p_prev[1]))
                 new_r, new_c = float(np.mean(p_curr[0])), float(np.mean(p_curr[1]))
                 dr = int(round(new_r - old_r))
                 dc = int(round(new_c - old_c))
+
+                # Motor Invariant Sanity Check:
+                # If this action is already calibrated with high confidence (>= 0.9),
+                # any observed displacement that deviates significantly from the expected motor model
+                # indicates a respawn, teleport, or environmental artifact, NOT a valid motor update.
+                if (
+                    action_id in self.action_models
+                    and self.action_models[action_id].confidence >= 0.9
+                ):
+                    expected = self.action_models[action_id]
+                    if (dr != 0 or dc != 0) and (
+                        abs(dr - expected.delta_r) > 2 or abs(dc - expected.delta_c) > 2
+                    ):
+                        # Spurious displacement / teleport: update centroid but do not corrupt motor dynamics
+                        self.avatar_centroid = (new_r, new_c)
+                        return
+
                 self.avatar_centroid = (new_r, new_c)
                 self.visited_positions.append((int(round(new_r)), int(round(new_c))))
                 if len(self.visited_positions) > 30:
@@ -801,7 +859,9 @@ class ARC3InteractiveAgent:
             scheduler=KernelInstructionScheduler(),
         )
         planner = CounterfactualPlanner(ws, services)
-        best_plan = await planner.evaluate_and_select(goal_node, valid_candidates, horizon=2)
+        best_plan = await planner.evaluate_and_select(
+            goal_node, valid_candidates, horizon=2, mcts_config=MCTSConfig(causal_pruning=True)
+        )
         best_a = best_plan.action.properties.get("action_id", available_actions[0])
         return best_a, float(best_plan.utility_score)
 
@@ -972,11 +1032,19 @@ class ARC3InteractiveAgent:
             barrier_cells = set(zip(*np.where(self.known_barriers)))
 
         # Identify primary destination: distinct target zone (color 2 / enclosed zone) or furthest target/exit
-        target_zones = [
-            o
-            for o in candidate_goals
-            if o.color == 2 or (getattr(o, "is_frame", False) and o.area > 15)
-        ]
+        target_zones = [o for o in candidate_goals if o.color == 2]
+        if not target_zones:
+            target_zones = [
+                o
+                for o in candidate_goals
+                if (getattr(o, "is_frame", False) and o.area > 20)
+                or (
+                    20 <= o.area <= 120
+                    and (o.max_r - o.min_r >= 4)
+                    and (o.max_c - o.min_c >= 4)
+                    and o.color not in (self.avatar_color, 12)
+                )
+            ]
         if target_zones:
             if self.target_zone_bounds is None:
                 tz_min_r = min(o.min_r for o in target_zones)
@@ -1015,16 +1083,31 @@ class ARC3InteractiveAgent:
 
         tz_bounds = self.target_zone_bounds
 
-        def is_in_zone(o) -> bool:
+        def is_in_zone(o: Any) -> bool:
             if tz_bounds:
-                return (tz_bounds[0] - 1) <= o.centroid[0] <= (tz_bounds[1] + 1) and (
-                    tz_bounds[2] - 1
-                ) <= o.centroid[1] <= (tz_bounds[3] + 1)
-            return math.hypot(o.centroid[0] - target_pos[0], o.centroid[1] - target_pos[1]) <= max(
-                2.0, self.step_size * 2.2
+                return bool(
+                    (tz_bounds[0] - 1) <= o.centroid[0] <= (tz_bounds[1] + 1)
+                    and (tz_bounds[2] - 1) <= o.centroid[1] <= (tz_bounds[3] + 1)
+                )
+            return bool(
+                math.hypot(o.centroid[0] - target_pos[0], o.centroid[1] - target_pos[1])
+                <= max(2.0, self.step_size * 2.2)
             )
 
-        candidate_items = [o for o in candidate_goals if not is_in_zone(o)]
+        # Filter candidate items: prioritize free uncarried items over ally-carried items (color 5)
+        uncarried_items = [
+            o
+            for o in candidate_goals
+            if not is_in_zone(o) and o.color not in (self.avatar_color, 12, 5)
+        ]
+        if uncarried_items:
+            candidate_items = uncarried_items
+        else:
+            candidate_items = [
+                o
+                for o in candidate_goals
+                if not is_in_zone(o) and o.color not in (self.avatar_color, 12)
+            ]
         affordance_type = "INTERACTION" if 5 in available_actions else "CONTACT"
         candidate_subgoals = [
             {
@@ -1041,6 +1124,11 @@ class ARC3InteractiveAgent:
         # Item holding / delivery state machine
         if self.holding_item:
             offset = getattr(self, "carried_offset", (0.0, 0.0))
+            max_off = max(1.0, float(self.step_size * 1.5))
+            offset = (
+                float(np.clip(offset[0], -max_off, max_off)),
+                float(np.clip(offset[1], -max_off, max_off)),
+            )
             item_r = curr_r + offset[0]
             item_c = curr_c + offset[1]
 
@@ -1051,12 +1139,26 @@ class ARC3InteractiveAgent:
                 slots = []
                 for sr in range(tz_min_r, tz_max_r + 1, max(1, self.step_size)):
                     for sc in range(tz_min_c, tz_max_c + 1, max(1, self.step_size)):
-                        if not any(
-                            math.hypot(sr - dr, sc - dc) < self.step_size * 0.7
-                            for dr, dc in self.delivered_positions
-                        ):
-                            slots.append((sr, sc))
-                if slots:
+                        slots.append((sr, sc))
+
+                def is_slot_occupied(sr: int, sc: int) -> bool:
+                    for dr, dc in self.delivered_positions:
+                        if math.hypot(sr - dr, sc - dc) < self.step_size * 0.8:
+                            return True
+                    if 0 <= sr < H and 0 <= sc < W:
+                        patch = curr_grid[
+                            max(0, sr - 1) : min(H, sr + 2), max(0, sc - 1) : min(W, sc + 2)
+                        ]
+                        if np.any(np.isin(patch, [4, 9, 5])):
+                            return True
+                    return False
+
+                unoccupied_slots = [s for s in slots if not is_slot_occupied(s[0], s[1])]
+                if unoccupied_slots:
+                    open_target = min(
+                        unoccupied_slots, key=lambda s: math.hypot(s[0] - item_r, s[1] - item_c)
+                    )
+                elif slots:
                     open_target = min(slots, key=lambda s: math.hypot(s[0] - item_r, s[1] - item_c))
                 else:
                     open_target = ((tz_min_r + tz_max_r) // 2, (tz_min_c + tz_max_c) // 2)
@@ -1066,14 +1168,9 @@ class ARC3InteractiveAgent:
             in_delivery_zone = False
             if tz_bounds:
                 tz_min_r, tz_max_r, tz_min_c, tz_max_c = tz_bounds
-                in_bounds = (tz_min_r <= item_r <= tz_max_r + 1) and (
-                    tz_min_c <= item_c <= tz_max_c + 1
+                in_delivery_zone = (tz_min_r - 0.5 <= item_r <= tz_max_r + 0.5) and (
+                    tz_min_c - 0.5 <= item_c <= tz_max_c + 0.5
                 )
-                not_overlapping = not any(
-                    math.hypot(item_r - dr, item_c - dc) < self.step_size * 0.7
-                    for dr, dc in self.delivered_positions
-                )
-                in_delivery_zone = in_bounds and not_overlapping
             else:
                 deliv_r = int(round(open_target[0] - offset[0]))
                 deliv_c = int(round(open_target[1] - offset[1]))
@@ -1090,8 +1187,8 @@ class ARC3InteractiveAgent:
                 self.last_action_data = None
                 return 5, 0.99
 
-            deliv_r = int(round(open_target[0] - offset[0]))
-            deliv_c = int(round(open_target[1] - offset[1]))
+            deliv_r = max(0, min(H - 1, int(round(open_target[0] - offset[0]))))
+            deliv_c = max(0, min(W - 1, int(round(open_target[1] - offset[1]))))
             goal_r, goal_c = deliv_r, deliv_c
         else:
             unobserved_mask = None
@@ -1134,14 +1231,19 @@ class ARC3InteractiveAgent:
                 if (dr_dir != 0 or dc_dir != 0) and facing != (dr_dir, dc_dir):
                     for a in available_actions:
                         if a in self.action_models:
-                            m = self.action_models[a]
-                            if np.sign(m.delta_r) == dr_dir and np.sign(m.delta_c) == dc_dir:
+                            facing_m = self.action_models[a]
+                            if (
+                                np.sign(facing_m.delta_r) == dr_dir
+                                and np.sign(facing_m.delta_c) == dc_dir
+                            ):
                                 self.current_facing = (dr_dir, dc_dir)
                                 return a, 0.98
 
                 if 5 in available_actions:
                     self.holding_item = True
-                    self.carried_offset = (goal_r - curr_r, goal_c - curr_c)
+                    dr_off = float(np.clip(goal_r - curr_r, -self.step_size, self.step_size))
+                    dc_off = float(np.clip(goal_c - curr_c, -self.step_size, self.step_size))
+                    self.carried_offset = (dr_off, dc_off)
                     self._on_subgoal_resolved(self.active_goal_node.id)
                     self.last_action_data = None
                     return 5, 0.99
@@ -1240,6 +1342,22 @@ class ARC3InteractiveAgent:
 
         # If all actions are blocked or deadlocked, clear blocked set to allow detour
         if best_score < -5000.0:
+            if self.active_goal_node:
+                self.interruption_stack.append(
+                    InterruptionCheckpoint(
+                        parent_goal_id=self.active_goal_node.id,
+                        parent_frame_id="frame_active",
+                        interrupt_goal_id="goal_detour",
+                        interrupt_frame_id="frame_detour",
+                        in_flight_action=f"ACTION{best_action}",
+                        step_index=self.stuck_counter,
+                        context_data={
+                            "reason": f"arc3_detour_barrier_{self.stuck_counter}",
+                            "avatar_pos": (curr_r, curr_c),
+                            "holding_item": self.holding_item,
+                        },
+                    )
+                )
             self.blocked_actions.clear()
             for a in available_actions:
                 m = self.action_models.get(a)
@@ -1360,6 +1478,15 @@ class ARC3BenchmarkRunner:
 
             if completed:
                 levels_completed += 1
+                if lvl_idx + 1 < total_levels:
+                    # Advance environment to render the fresh frame of the new level
+                    try:
+                        advance_act = getattr(ARCGameAction, "ACTION5", ARCGameAction.ACTION1)
+                        fresh_frame = env.step(advance_act)
+                        if fresh_frame and fresh_frame.frame:
+                            frame_data = fresh_frame
+                    except Exception as e:
+                        logger.debug(f"Level transition frame advance: {e}")
 
             total_actions += lvl_actions
             total_baseline += baseline
