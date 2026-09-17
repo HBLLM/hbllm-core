@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+from collections import deque
 from typing import Any
 
 from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
@@ -109,9 +110,9 @@ class SokobanActionAdapter:
     ) -> set[tuple[int, int]]:
         """Compute flood-fill reachable cells for player."""
         visited = {start}
-        queue = [start]
+        queue: deque[tuple[int, int]] = deque([start])
         while queue:
-            r, c = queue.pop(0)
+            r, c = queue.popleft()
             for _, dr, dc in DIRECTION_DELTAS:
                 nr, nc = r + dr, c + dc
                 if (nr, nc) not in walls and (nr, nc) not in boxes and (nr, nc) not in visited:
@@ -132,9 +133,9 @@ class SokobanActionAdapter:
         visited: dict[tuple[int, int], tuple[tuple[int, int] | None, SokobanAction | None]] = {
             start: (None, None)
         }
-        queue = [start]
+        queue: deque[tuple[int, int]] = deque([start])
         while queue:
-            curr = queue.pop(0)
+            curr = queue.popleft()
             if curr == target:
                 break
             cr, cc = curr
@@ -185,8 +186,13 @@ class SokobanActionAdapter:
                 h += min(abs(br - tr) + abs(bc - tc) for tr, tc in targets) * 3
             unsolved = [b for b in curr_boxes if b not in targets]
             if unsolved and curr_reachable:
+                sample_pts = (
+                    curr_reachable
+                    if len(curr_reachable) <= 8
+                    else [min(curr_reachable), max(curr_reachable)]
+                )
                 h += min(
-                    abs(pr - br) + abs(pc - bc) for pr, pc in curr_reachable for br, bc in unsolved
+                    abs(pr - br) + abs(pc - bc) for pr, pc in sample_pts for br, bc in unsolved
                 )
             return h
 
@@ -209,7 +215,7 @@ class SokobanActionAdapter:
         ] = [(h0, 0, counter, start_state, [])]
         visited = {start_state}
 
-        max_nodes = 4000
+        max_nodes = 2500
         nodes = 0
         best_macro_path: list[
             tuple[tuple[int, int], tuple[int, int], SokobanAction, tuple[int, int]]
