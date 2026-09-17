@@ -1,5 +1,4 @@
-"""
-Counterfactual Planner — predictive simulation & candidate branch evaluation.
+"""Counterfactual Planner — predictive simulation & candidate branch evaluation.
 
 Implements the counterfactual planning loop:
 
@@ -7,7 +6,7 @@ Implements the counterfactual planning loop:
       ↓
     Generate Candidate Plans / Actions
       ↓
-    FORK Simulation Branch per candidate
+    FORK Simulation Branch per candidate (or MCTS Tree)
       ↓
     Simulate Candidate Execution & Forward Prediction
       ↓
@@ -18,13 +17,15 @@ Implements the counterfactual planning loop:
     ROLLBACK / Drop discarded simulation branches
 
 This transforms planning from static search into executable predictive simulation.
+Supports both greedy multi-step beam search and Monte Carlo Tree Search (MCTS) with UCT selection.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
@@ -47,6 +48,54 @@ class CandidatePlanResult:
     branch_name: str
     receipt: ExecutionReceipt
     utility_score: float
+
+
+@dataclass
+class MCTSConfig:
+    """Configuration options for Monte Carlo Tree Search in CounterfactualPlanner."""
+
+    exploration_constant: float = 1.414  # UCT exploration coefficient (c)
+    max_simulations: int = 16  # Total MCTS expansion and rollout iterations
+    max_depth: int = 3  # Maximum tree depth per rollout trajectory
+    discount_factor: float = 0.85  # Discount factor for future expected utilities
+    enable_subgoals: bool = True  # Prioritize goal-directed candidate actions
+
+
+@dataclass
+class MCTSNode:
+    """A search tree node in the HCIR counterfactual simulation tree."""
+
+    node_id: str
+    state_branch: str
+    action: ActionNode | None = None
+    parent: MCTSNode | None = None
+    children: list[MCTSNode] = field(default_factory=list)
+    unexpanded_actions: list[ActionNode] = field(default_factory=list)
+    visit_count: int = 0
+    total_value: float = 0.0
+    depth: int = 0
+    is_terminal: bool = False
+    step_utility: float = 0.0
+    receipt: ExecutionReceipt | None = None
+
+    def average_value(self) -> float:
+        """Q(s, a): expected utility of this node."""
+        if self.visit_count == 0:
+            return 0.0
+        return self.total_value / self.visit_count
+
+    def uct_score(self, parent_visits: int, exploration_constant: float) -> float:
+        """Compute Upper Confidence Bound for Trees (UCT)."""
+        if self.visit_count == 0:
+            return float("inf")
+        exploitation = self.average_value()
+        exploration = exploration_constant * math.sqrt(
+            math.log(max(1, parent_visits)) / self.visit_count
+        )
+        return exploitation + exploration
+
+    def is_fully_expanded(self) -> bool:
+        return len(self.unexpanded_actions) == 0
 
 
 class CounterfactualPlanner:
@@ -81,13 +130,24 @@ class CounterfactualPlanner:
         horizon: int = 1,
         beam_width: int = 2,
         author: str = "counterfactual_planner",
+        use_mcts: bool = False,
+        mcts_config: MCTSConfig | None = None,
     ) -> CandidatePlanResult:
         """Run counterfactual simulation for candidate actions and merge the best branch.
 
-        Supports single-step and multi-step (horizon > 1) beam search mental rollout.
+        Supports single-step, multi-step (horizon > 1) beam search, or Monte Carlo Tree Search (use_mcts=True).
         """
         if not candidate_actions:
             raise ValueError("Candidate actions list cannot be empty")
+
+        if use_mcts:
+            cfg = mcts_config or MCTSConfig(max_depth=max(1, horizon))
+            return await self.mcts_evaluate_and_select(
+                goal=goal,
+                candidate_actions=candidate_actions,
+                config=cfg,
+                author=author,
+            )
 
         results: list[CandidatePlanResult] = []
 
@@ -192,6 +252,167 @@ class CounterfactualPlanner:
 
         return best_candidate
 
+    async def mcts_evaluate_and_select(
+        self,
+        goal: GoalNode,
+        candidate_actions: list[ActionNode],
+        config: MCTSConfig | None = None,
+        author: str = "counterfactual_planner",
+    ) -> CandidatePlanResult:
+        """Evaluate candidate actions using Monte Carlo Tree Search over simulation branches."""
+        if not candidate_actions:
+            raise ValueError("Candidate actions list cannot be empty")
+
+        cfg = config or MCTSConfig()
+        root_branch = f"mcts_root_{uuid.uuid4().hex[:6]}"
+        self._workspace.fork_branch(root_branch)
+        all_created_branches: list[str] = [root_branch]
+
+        root = MCTSNode(
+            node_id="root",
+            state_branch=root_branch,
+            unexpanded_actions=list(candidate_actions),
+            depth=0,
+        )
+
+        for _ in range(cfg.max_simulations):
+            # 1. Selection
+            curr = root
+            while curr.is_fully_expanded() and curr.children and not curr.is_terminal:
+                curr = max(
+                    curr.children,
+                    key=lambda c: c.uct_score(curr.visit_count, cfg.exploration_constant),
+                )
+
+            # 2. Expansion
+            if not curr.is_terminal and curr.unexpanded_actions:
+                action = curr.unexpanded_actions.pop(0)
+                child_branch = f"{curr.state_branch}_c{len(curr.children)}_{uuid.uuid4().hex[:4]}"
+                self._workspace.fork_branch(child_branch)
+                all_created_branches.append(child_branch)
+
+                sim_node_data = {
+                    **action.model_dump(),
+                    "id": f"{action.id}_{uuid.uuid4().hex[:6]}",
+                }
+                stream = InstructionStream(
+                    author=author,
+                    description=f"MCTS simulate: {action.intent}",
+                    instructions=[
+                        Instruction(
+                            opcode=Opcode.ASSERT,
+                            params={"node_data": sim_node_data, "author": author},
+                        ),
+                        Instruction(
+                            opcode=Opcode.EXECUTE,
+                            params={
+                                "capability": "world_prediction",
+                                "params": {"action": action.intent, "branch": child_branch},
+                            },
+                        ),
+                    ],
+                )
+
+                res, receipt = await self._interpreter.execute_with_receipt(
+                    stream, process_id=f"proc_{child_branch}", thread_id=f"thr_{child_branch}"
+                )
+
+                prediction = self._world_kernel.predict(
+                    action=action,
+                    confidence=0.85 if res.success else 0.2,
+                    author=author,
+                )
+                step_utility = self._compute_action_utility(action, prediction, res.success)
+
+                # Check if outcome is terminal
+                pred_props = getattr(prediction, "properties", {}) or {}
+                predicted_state = pred_props.get("predicted_state") or {}
+                spatial_outcome = (
+                    predicted_state.get("spatial_outcome")
+                    if isinstance(predicted_state, dict)
+                    else None
+                )
+                is_deadlock = step_utility <= 0.005 or (
+                    isinstance(spatial_outcome, dict) and spatial_outcome.get("deadlock", False)
+                )
+                goal_reached = isinstance(spatial_outcome, dict) and spatial_outcome.get(
+                    "goal_reached", False
+                )
+                is_terminal = is_deadlock or goal_reached or ((curr.depth + 1) >= cfg.max_depth)
+
+                child_node = MCTSNode(
+                    node_id=f"mcts_{uuid.uuid4().hex[:6]}",
+                    state_branch=child_branch,
+                    action=action,
+                    parent=curr,
+                    unexpanded_actions=list(candidate_actions) if not is_terminal else [],
+                    depth=curr.depth + 1,
+                    is_terminal=is_terminal,
+                    step_utility=step_utility,
+                    receipt=receipt,
+                )
+                curr.children.append(child_node)
+                leaf = child_node
+            else:
+                leaf = curr
+
+            # 3. Rollout / Evaluation
+            if leaf.is_terminal or leaf.depth >= cfg.max_depth:
+                rollout_val = leaf.step_utility
+            else:
+                rollout_val = leaf.step_utility
+                curr_discount = cfg.discount_factor
+                for _ in range(leaf.depth + 1, cfg.max_depth + 1):
+                    best_next = -999.0
+                    for cand in candidate_actions:
+                        next_p = self._world_kernel.predict(
+                            action=cand, confidence=0.85, author=author
+                        )
+                        u = self._compute_action_utility(cand, next_p, True)
+                        if u > best_next:
+                            best_next = u
+                    if best_next <= 0.005:
+                        rollout_val = 0.001
+                        break
+                    rollout_val += curr_discount * best_next
+                    curr_discount *= cfg.discount_factor
+
+            # 4. Backpropagation
+            b_node: MCTSNode | None = leaf
+            val = rollout_val
+            while b_node is not None:
+                b_node.visit_count += 1
+                b_node.total_value += val
+                val *= cfg.discount_factor
+                b_node = b_node.parent
+
+        if not root.children:
+            raise ValueError("MCTS could not expand any candidate action")
+
+        best_child = max(root.children, key=lambda c: (c.average_value(), c.visit_count))
+        logger.info(
+            "MCTS planner selected candidate '%s' (visits=%d, avg_q=%.3f, branch '%s')",
+            best_child.action.intent if best_child.action else "unknown",
+            best_child.visit_count,
+            best_child.average_value(),
+            best_child.state_branch,
+        )
+
+        # Merge best branch and clean up all other simulation branches
+        self._workspace.merge_branch(best_child.state_branch)
+        for b in all_created_branches:
+            if b != best_child.state_branch:
+                self._workspace.drop_branch(b)
+
+        assert best_child.action is not None
+        return CandidatePlanResult(
+            candidate_id=best_child.action.id,
+            action=best_child.action,
+            branch_name=best_child.state_branch,
+            receipt=best_child.receipt or ExecutionReceipt(author=author, success=True),
+            utility_score=best_child.average_value(),
+        )
+
     async def evaluate_multimodal_plan(
         self,
         goal: GoalNode,
@@ -200,6 +421,8 @@ class CounterfactualPlanner:
         horizon: int = 1,
         beam_width: int = 2,
         author: str = "counterfactual_planner",
+        use_mcts: bool = False,
+        mcts_config: MCTSConfig | None = None,
     ) -> CandidatePlanResult:
         """Evaluate actions across multiple effector modalities (LOCOMOTION, MANIPULATION, TARGETING).
 
@@ -235,6 +458,8 @@ class CounterfactualPlanner:
             horizon=horizon,
             beam_width=beam_width,
             author=author,
+            use_mcts=use_mcts,
+            mcts_config=mcts_config,
         )
 
     @staticmethod
@@ -258,6 +483,10 @@ class CounterfactualPlanner:
         spatial_outcome = (
             predicted_state.get("spatial_outcome") if isinstance(predicted_state, dict) else None
         )
+        if spatial_outcome is None and getattr(action, "properties", None):
+            act_pred_state = action.properties.get("predicted_state", {})
+            if isinstance(act_pred_state, dict):
+                spatial_outcome = act_pred_state.get("spatial_outcome")
 
         if spatial_outcome and isinstance(spatial_outcome, dict):
             deadlock = spatial_outcome.get("deadlock", False)
